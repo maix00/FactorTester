@@ -27,6 +27,7 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.field_help import field_flag, field_type_label, render_settings_help
 from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
+from tools.cli.modules.backtest.audit_formatters import delta_tables as delta_table_formatter
 from tools.cli.modules.backtest.audit_formatters import events as events_formatter
 from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatter
 from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
@@ -2665,12 +2666,12 @@ def _print_lifecycle_notice_change(prefix: str, field_name: str, changes: list[d
     return True
 
 
-_ORDER_DELTA_FIELD_NAMES = {"raw_deltas", "sized_deltas", "deltas"}
+_ORDER_DELTA_FIELD_NAMES = delta_table_formatter.ORDER_DELTA_FIELD_NAMES
 
 
 def _print_delta_mapping_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
     short_name = field_name.rsplit(".", 1)[-1]
-    if short_name not in _ORDER_DELTA_FIELD_NAMES or not values:
+    if not delta_table_formatter.is_delta_field(field_name) or not values:
         return False
     rows: list[tuple[str, str, str, str, str]] = []
     for entry in values:
@@ -2686,7 +2687,7 @@ def _print_delta_mapping_value_table(prefix: str, field_name: str, values: list[
 
 def _print_delta_mapping_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
     short_name = field_name.rsplit(".", 1)[-1]
-    if short_name not in _ORDER_DELTA_FIELD_NAMES or not changes:
+    if not delta_table_formatter.is_delta_field(field_name) or not changes:
         return False
     rows: list[tuple[str, str, str, str, str]] = []
     for change in changes:
@@ -2705,100 +2706,40 @@ def _print_delta_mapping_change_table(prefix: str, field_name: str, changes: lis
 
 
 def _audit_delta_mapping(value: Any) -> dict[str, Any] | None:
-    normalized = _audit_normalized_value(value)
-    if normalized in (None, ""):
-        return {}
-    if not isinstance(normalized, dict):
-        return None
-    result: dict[str, Any] = {}
-    for product, quantity in normalized.items():
-        if isinstance(quantity, (dict, list, tuple)):
-            return None
-        result[str(product)] = quantity
-    return result
+    return delta_table_formatter.delta_mapping(value, normalize=_audit_normalized_value)
 
 
 def _audit_delta_routes(entry: dict[str, Any]) -> list[tuple[str, str, str]]:
-    strategy = entry.get("strategy")
-    if strategy not in (None, ""):
-        strategy_text = str(strategy)
-        mapped_routes = _audit_strategy_ledger_routes.get(strategy_text)
-        if mapped_routes:
-            return [(ledger, cash_pool, strategy_text) for ledger, cash_pool in mapped_routes]
-        return [("?", "?", strategy_text)]
-    strategies = entry.get("strategies")
-    if isinstance(strategies, list) and strategies:
-        strategy_values = [str(item) for item in strategies if item not in (None, "")]
-    else:
-        strategy_values = []
-    ledger = entry.get("ledger")
-    cash_pool = entry.get("cash_pool")
-    if ledger not in (None, "") or cash_pool not in (None, ""):
-        return [(str(ledger or "?"), str(cash_pool or "?"), ", ".join(strategy_values) or "无")]
-    if strategy_values:
-        routes: list[tuple[str, str, str]] = []
-        for strategy_text in strategy_values:
-            mapped_routes = _audit_strategy_ledger_routes.get(strategy_text)
-            if mapped_routes:
-                routes.extend((ledger_id, cash_pool, strategy_text) for ledger_id, cash_pool in mapped_routes)
-            else:
-                routes.append(("?", "?", strategy_text))
-        return routes
-    return [("[共享]", "[共享]", "无")]
+    return delta_table_formatter.delta_routes(
+        entry,
+        strategy_ledger_routes=_audit_strategy_ledger_routes,
+    )
 
 
 def _audit_delta_value_rows(routes: list[tuple[str, str, str]], mapping: dict[str, Any]) -> list[tuple[str, str, str, str, str]]:
-    rows: list[tuple[str, str, str, str, str]] = []
-    zero_count = 0
-    for product, value in sorted(mapping.items()):
-        if _audit_is_zero_value(value):
-            zero_count += 1
-            continue
-        for ledger, cash_pool, strategies in routes:
-            rows.append((ledger, cash_pool, strategies, product, _audit_scalar_cell(value)))
-    if zero_count:
-        for ledger, cash_pool, strategies in routes:
-            rows.append((ledger, cash_pool, strategies, f"其余 {zero_count} 个产品", "0"))
-    if not rows:
-        for ledger, cash_pool, strategies in routes:
-            rows.append((ledger, cash_pool, strategies, "全部产品", "0"))
-    return rows
+    return delta_table_formatter.delta_value_rows(
+        routes,
+        mapping,
+        scalar_cell=_audit_scalar_cell,
+    )
 
 
 def _audit_delta_change_rows(routes: list[tuple[str, str, str]], before: dict[str, Any], after: dict[str, Any]) -> list[tuple[str, str, str, str, str]]:
-    rows: list[tuple[str, str, str, str, str]] = []
-    zero_change_count = 0
-    missing = object()
-    for product in sorted(set(before) | set(after)):
-        before_value = before.get(product, missing)
-        after_value = after.get(product, missing)
-        if before_value == after_value:
-            continue
-        before_text = "null" if before_value is missing else _audit_scalar_cell(before_value)
-        after_text = "null" if after_value is missing else _audit_scalar_cell(after_value)
-        if _audit_is_zero_text(after_text) and before_text in {"null", "0"}:
-            zero_change_count += 1
-            continue
-        for ledger, cash_pool, strategies in routes:
-            rows.append((ledger, cash_pool, strategies, product, _audit_change_cell(before_text, after_text)))
-    if zero_change_count:
-        for ledger, cash_pool, strategies in routes:
-            rows.append((ledger, cash_pool, strategies, f"其余 {zero_change_count} 个产品", _audit_change_cell("null", "0")))
-    return rows
+    return delta_table_formatter.delta_change_rows(
+        routes,
+        before,
+        after,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _audit_is_zero_value(value: Any) -> bool:
-    try:
-        return float(value) == 0.0
-    except (TypeError, ValueError):
-        return str(value).strip() in {"0", "0.0"}
+    return delta_table_formatter.is_zero_value(value)
 
 
 def _audit_is_zero_text(value: str) -> bool:
-    try:
-        return float(value) == 0.0
-    except (TypeError, ValueError):
-        return value.strip() in {"0", "0.0"}
+    return delta_table_formatter.is_zero_text(value)
 
 
 def _dedupe_audit_list(values: list[Any]) -> list[Any]:
