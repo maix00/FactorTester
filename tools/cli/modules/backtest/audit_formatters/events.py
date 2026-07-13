@@ -13,6 +13,88 @@ TableCellIsComplex = Callable[[Any], bool]
 SelectSamplePart = Callable[[dict[str, Any], Any], Any]
 
 
+def strategy_routes(data: Mapping[str, Any]) -> dict[str, tuple[tuple[str, str], ...]]:
+    routes: dict[str, list[tuple[str, str]]] = {}
+    ledgers = data.get("ledgers_before") or data.get("ledgers_after") or []
+    if not isinstance(ledgers, list):
+        return {}
+    for ledger in ledgers:
+        if not isinstance(ledger, Mapping):
+            continue
+        ledger_id = str(ledger.get("ledger") or "?")
+        cash_pool = str(ledger.get("cash_pool") or "?")
+        strategies = ledger.get("strategies")
+        if not isinstance(strategies, list):
+            continue
+        for strategy in strategies:
+            strategy_text = str(strategy or "").strip()
+            if not strategy_text:
+                continue
+            route = (ledger_id, cash_pool)
+            if route not in routes.setdefault(strategy_text, []):
+                routes[strategy_text].append(route)
+    return {strategy: tuple(route_list) for strategy, route_list in routes.items()}
+
+
+def event_product_filter(data: Mapping[str, Any]) -> tuple[str, ...]:
+    values: list[Any] = []
+    current_event = data.get("current_event")
+    if isinstance(current_event, Mapping):
+        subjects = current_event.get("subjects")
+        if isinstance(subjects, list):
+            for subject in subjects:
+                if not isinstance(subject, Mapping):
+                    continue
+                for key in ("subject", "product", "contract", "instrument", "contract_product"):
+                    values.append(subject.get(key))
+                payload = subject.get("payload")
+                if isinstance(payload, Mapping):
+                    values.extend(payload_product_values(payload))
+    for collection_name in ("event_payloads", "event_payload_changes"):
+        collection = data.get(collection_name)
+        if isinstance(collection, list):
+            for item in collection:
+                if isinstance(item, Mapping):
+                    values.extend(payload_product_values(item))
+                    payload = item.get("payload")
+                    if isinstance(payload, Mapping):
+                        values.extend(payload_product_values(payload))
+    return tuple(dict.fromkeys(key for value in values for key in product_filter_keys(value)))
+
+
+def payload_product_values(payload: Mapping[str, Any]) -> list[Any]:
+    values = []
+    for key in ("subject", "product", "contract", "instrument", "contract_product", "uid"):
+        values.append(payload.get(key))
+    order = payload.get("order")
+    if isinstance(order, Mapping):
+        values.extend(payload_product_values(order))
+    return values
+
+
+def product_filter_keys(value: Any) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    keys = [text]
+    if "|" in text:
+        parts = text.split("|")
+        if len(parts) >= 4:
+            exchange = parts[0].upper()
+            root = parts[2].upper()
+            suffix = {
+                "CZCE": "CZC",
+                "DCE": "DCE",
+                "GFEX": "GFE",
+                "GFE": "GFE",
+                "SHFE": "SHF",
+                "INE": "INE",
+                "CFFEX": "CFE",
+            }.get(exchange, exchange)
+            keys.append(f"{root}.{suffix}")
+    return keys
+
+
 def event_draft_table_text(
     value: Any,
     *,

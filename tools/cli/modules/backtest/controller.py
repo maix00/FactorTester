@@ -68,85 +68,19 @@ def _audit_step_event_context(data: dict[str, Any]):
 
 
 def _audit_strategy_routes(data: dict[str, Any]) -> dict[str, tuple[tuple[str, str], ...]]:
-    routes: dict[str, list[tuple[str, str]]] = {}
-    ledgers = data.get("ledgers_before") or data.get("ledgers_after") or []
-    if not isinstance(ledgers, list):
-        return {}
-    for ledger in ledgers:
-        if not isinstance(ledger, dict):
-            continue
-        ledger_id = str(ledger.get("ledger") or "?")
-        cash_pool = str(ledger.get("cash_pool") or "?")
-        strategies = ledger.get("strategies")
-        if not isinstance(strategies, list):
-            continue
-        for strategy in strategies:
-            strategy_text = str(strategy or "").strip()
-            if not strategy_text:
-                continue
-            route = (ledger_id, cash_pool)
-            if route not in routes.setdefault(strategy_text, []):
-                routes[strategy_text].append(route)
-    return {strategy: tuple(route_list) for strategy, route_list in routes.items()}
+    return events_formatter.strategy_routes(data)
 
 
 def _audit_event_product_filter(data: dict[str, Any]) -> tuple[str, ...]:
-    values: list[Any] = []
-    current_event = data.get("current_event")
-    if isinstance(current_event, dict):
-        subjects = current_event.get("subjects")
-        if isinstance(subjects, list):
-            for subject in subjects:
-                if not isinstance(subject, dict):
-                    continue
-                for key in ("subject", "product", "contract", "instrument", "contract_product"):
-                    values.append(subject.get(key))
-                payload = subject.get("payload")
-                if isinstance(payload, dict):
-                    values.extend(_audit_payload_product_values(payload))
-    for collection_name in ("event_payloads", "event_payload_changes"):
-        collection = data.get(collection_name)
-        if isinstance(collection, list):
-            for item in collection:
-                if isinstance(item, dict):
-                    values.extend(_audit_payload_product_values(item))
-                    payload = item.get("payload")
-                    if isinstance(payload, dict):
-                        values.extend(_audit_payload_product_values(payload))
-    return tuple(dict.fromkeys(key for value in values for key in _audit_product_filter_keys(value)))
+    return events_formatter.event_product_filter(data)
 
 
 def _audit_payload_product_values(payload: dict[str, Any]) -> list[Any]:
-    values = []
-    for key in ("subject", "product", "contract", "instrument", "contract_product", "uid"):
-        values.append(payload.get(key))
-    order = payload.get("order")
-    if isinstance(order, dict):
-        values.extend(_audit_payload_product_values(order))
-    return values
+    return events_formatter.payload_product_values(payload)
 
 
 def _audit_product_filter_keys(value: Any) -> list[str]:
-    text = str(value or "").strip()
-    if not text:
-        return []
-    keys = [text]
-    if "|" in text:
-        parts = text.split("|")
-        if len(parts) >= 4:
-            exchange = parts[0].upper()
-            root = parts[2].upper()
-            suffix = {
-                "CZCE": "CZC",
-                "DCE": "DCE",
-                "GFEX": "GFE",
-                "GFE": "GFE",
-                "SHFE": "SHF",
-                "INE": "INE",
-                "CFFEX": "CFE",
-            }.get(exchange, exchange)
-            keys.append(f"{root}.{suffix}")
-    return keys
+    return events_formatter.product_filter_keys(value)
 
 
 def _pad_audit_cell(value: object, width: int) -> str:
