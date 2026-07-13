@@ -68,8 +68,10 @@ class MarginModule(ExecutableModule):
     margin_excess: ClassVar[FieldRef[float]] = FieldRef("margin_excess")
     margin_liquidation_orders: ClassVar[FieldRef[Any]] = FieldRef("margin_liquidation_orders")
 
-    _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="LedgerModule")
+    _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="CashPoolModule")
     _ledger_positions_ref: ClassVar[FieldRef[Any]] = FieldRef("positions", owner="LedgerModule")
+    _cash_reserve_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_ratio", owner="StrategyBookModule")
+    _cash_reserve_major_ref: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_major", owner="StrategyBookModule")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "margin_mode": FieldDefinition(
@@ -150,11 +152,13 @@ class MarginModule(ExecutableModule):
             fixed_margin_ratio,
             margin_call_mode,
             liquidation_target_buffer,
+            _cash_reserve_ratio_ref,
+            _cash_reserve_major_ref,
             FieldRef("current_prices", owner="MarketDataModule"),
             FieldRef("current_market_snapshot", owner="MarketDataModule"),
             FieldRef("current_historical_fields", owner="MarketDataModule"),
         ),
-        outputs=(margin_requirement, margin_reserved, margin_deficit, margin_excess),
+        outputs=(_ledger_cash_ref, _ledger_positions_ref, margin_requirement, margin_reserved, margin_deficit, margin_excess),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,
         order=60,
@@ -163,7 +167,18 @@ class MarginModule(ExecutableModule):
     )
     handle_margin_liquidation_notice: ClassVar[Flow] = Flow(
         "handle_margin_liquidation_notice",
-        inputs=(_ledger_cash_ref, _ledger_positions_ref, margin_deficit),
+        inputs=(
+            _ledger_cash_ref,
+            _ledger_positions_ref,
+            margin_mode,
+            fixed_margin_ratio,
+            margin_call_mode,
+            liquidation_target_buffer,
+            FieldRef("current_prices", owner="MarketDataModule"),
+            FieldRef("current_market_snapshot", owner="MarketDataModule"),
+            FieldRef("current_historical_fields", owner="MarketDataModule"),
+            margin_deficit,
+        ),
         outputs=(margin_liquidation_orders,),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.TRADE_INTENT,

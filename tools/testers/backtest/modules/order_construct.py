@@ -30,7 +30,7 @@ from tools.testers.backtest.modules.strategy_book import (
 )
 from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetStrategyModule, TargetWeightIntent
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
-from tools.testers.backtest.modules.trading_rule import _resolve_use_int_position
+from tools.testers.backtest.modules.trading_rule import TradingRuleModule, _resolve_use_int_position
 
 _TARGET_WEIGHTS_REF: FieldRef[Any] = TargetStrategyModule.target_weights
 
@@ -74,7 +74,7 @@ class OrderConstructModule(ExecutableModule):
     )
     round_order_quantity: ClassVar[Flow] = Flow(
         "round_order_quantity",
-        inputs=(raw_deltas, MarketDataModule.lot_sizes, quantity_rounding_policy),
+        inputs=(raw_deltas, MarketDataModule.lot_sizes, quantity_rounding_policy, TradingRuleModule.use_int_position),
         outputs=(sized_deltas, deltas),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,

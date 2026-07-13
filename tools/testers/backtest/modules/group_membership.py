@@ -42,7 +42,7 @@ from tools.testers.backtest.modules.market_data import (
 )
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
-from tools.testers.backtest.modules.engine import bar_price_visibility_timestamp
+from tools.testers.backtest.modules.engine import EngineModule, bar_price_visibility_timestamp
 from tools.testers.backtest.modules.strategy_book import (
     StrategyIntentPolicy,
     strategy_book_store_for,
@@ -143,6 +143,14 @@ class GroupMembershipModule(TargetStrategyModule):
         inputs=(
             FactorSignalModule.signal_value, split_count, group_index,
             MarketDataModule.current_historical_fields,
+            MarketDataModule.current_prices,
+            MarketDataModule.current_tradable_status,
+            position_policy,
+            rebalance_trigger,
+            allocation_policy,
+            volatility_lookback,
+            volatility_warmup,
+            product_mask_names,
         ),
         outputs=(target_weights, TargetStrategyModule.trade_intent),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
@@ -151,7 +159,17 @@ class GroupMembershipModule(TargetStrategyModule):
     )
     schedule_order_execution: ClassVar[Flow] = Flow(
         "schedule_order_execution",
-        inputs=(OrderConstructModule.orders,), outputs=(dispatched_order_events,),
+        inputs=(
+            OrderConstructModule.orders,
+            execution_timing,
+            execution_delay_bars,
+            OrderExecutionModule.execution_price_basis,
+            EngineModule.engine_mode,
+            EngineModule.bar_open_visibility_delay,
+            MarketDataModule.required_frequency,
+            MarketDataModule.price_tables,
+        ),
+        outputs=(dispatched_order_events,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=40,
         after=(OrderConstructModule.construct_orders,),
         description="登记订单执行事件",

@@ -17,7 +17,7 @@ class RiskMetricsModule(ExecutableModule):
     label: ClassVar[str] = "风险指标"
 
     compute_risk_metrics: ClassVar[Flow] = Flow(
-        "compute_risk_metrics", inputs=(), outputs=(),
+        "compute_risk_metrics", inputs=(RunWindowModule.evaluation_split,), outputs=(),
         phase=Phase.POST_REPLAY, order=20,
         description="计算风险指标",
         compute=lambda state, ctx: _compute_risk_metrics(state, ctx),

@@ -39,7 +39,7 @@ class LongShortCompositionModule(TargetStrategyModule):
 
     compose_long_short_target: ClassVar[Flow] = Flow(
         "compose_long_short_target",
-        inputs=(long_leg_strategy_ids, short_leg_strategy_ids, _TARGET_WEIGHTS_REF),
+        inputs=(strategy_kind, long_leg_strategy_ids, short_leg_strategy_ids, _TARGET_WEIGHTS_REF),
         outputs=(_TARGET_WEIGHTS_REF, TargetStrategyModule.trade_intent, long_short_diagnostics),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,

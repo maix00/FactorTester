@@ -146,7 +146,27 @@ class FactorSignalModule(ExecutableModule):
     }
 
     signal_live: ClassVar[Flow] = Flow(
-        "signal_live", inputs=(), outputs=(),
+        "signal_live",
+        inputs=(
+            FactorModule.factor,
+            calendar_frequency,
+            signal_freq,
+            basepoint,
+            daily_basepoint,
+            end_session_skip,
+            end_session_gap,
+            RunWindowModule.start_date,
+            RunWindowModule.end_date,
+            RunWindowModule.start_time,
+            RunWindowModule.end_time,
+            RunWindowModule.timezone,
+            RunWindowModule.time_precision,
+            warmup_mode,
+            warmup_window,
+            MarketDataModule.required_frequency,
+            MarketDataModule.causal_valuation_table,
+        ),
+        outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
         description="登记实时因子信号",
         compute=lambda state, ctx: _schedule_signal_live_timestamps(state, ctx),
@@ -157,6 +177,25 @@ class FactorSignalModule(ExecutableModule):
         inputs=(
             FactorModule.factor,
             ProductSelectionModule.products,
+            ProductSelectionModule.product_path_selection,
+            calendar_frequency,
+            signal_freq,
+            basepoint,
+            daily_basepoint,
+            end_session_skip,
+            end_session_gap,
+            RunWindowModule.start_date,
+            RunWindowModule.end_date,
+            RunWindowModule.start_time,
+            RunWindowModule.end_time,
+            RunWindowModule.timezone,
+            RunWindowModule.time_precision,
+            warmup_mode,
+            warmup_window,
+            MarketDataModule.data_source_mode,
+            MarketDataModule.data_source,
+            MarketDataModule.freq_mode,
+            MarketDataModule.freq_fixed,
             MarketDataModule.required_data_source,
             MarketDataModule.required_frequency,
         ),
@@ -168,7 +207,7 @@ class FactorSignalModule(ExecutableModule):
     )
 
     signal_live_on_event: ClassVar[Flow] = Flow(
-        "signal_live", inputs=(FactorModule.factor,), outputs=(signal_value,),
+        "signal_live", inputs=(FactorModule.factor, live_factor_state), outputs=(signal_value,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取实时因子信号",
         compute=lambda state, ctx: _evaluate_signal_live(state, ctx),
@@ -185,7 +224,7 @@ class FactorSignalModule(ExecutableModule):
         compute=lambda state, ctx: _observe_signal_live_bar(state, ctx),
     )
     signal_precomputed_on_event: ClassVar[Flow] = Flow(
-        "signal_precomputed", inputs=(), outputs=(signal_value,),
+        "signal_precomputed", inputs=(signal_value,), outputs=(signal_value,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取预计算信号",
         compute=lambda state, ctx: _evaluate_signal_precomputed(state, ctx),

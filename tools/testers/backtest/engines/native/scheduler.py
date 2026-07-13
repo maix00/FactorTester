@@ -607,6 +607,7 @@ class FlowContext:
         self._audit_contract = audit_contract
         self._enforce_contract = enforce_contract
         self._active_flow: ResolvedFlow | None = None
+        self._contract_audit_token = object()
         self._contract_violations: list[dict[str, Any]] = []
         self._warned_contract_violations: set[tuple[str, str, str]] = set()
 
@@ -636,6 +637,14 @@ class FlowContext:
 
     def contract_violations(self) -> tuple[dict[str, Any], ...]:
         return tuple(self._contract_violations)
+
+    def contract_audit_token(self) -> object:
+        return self._contract_audit_token
+
+    def record_external_contract_read(self, ref: "FieldRef", token: object) -> None:
+        if token is not self._contract_audit_token:
+            raise SchedulerError("invalid flow-contract audit token")
+        self._record_contract_access("read", ref)
 
     def _record_contract_access(self, access: str, ref: "FieldRef") -> None:
         if not self._audit_contract and not self._enforce_contract:
@@ -1220,6 +1229,24 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         for change in _audit_record_changes(outputs_before.get(output["field"], []), output["values"]):
             output_changes.append({"field": output["field"], **change})
     ledger_changes = _audit_ledger_changes(before.get("ledgers_before", []), ledgers_after)
+    declared_outputs = {ref.qualified_name for ref in f.outputs}
+    ledger_contract_violations = [
+        {
+            "flow": _flow_qualified_name(f),
+            "phase": f.phase.value,
+            "event_kind": f.event_kind.name if f.event_kind is not None else "",
+            "access": "write",
+            "field": change.get("field"),
+        }
+        for change in ledger_changes
+        if change.get("field") not in declared_outputs
+    ]
+    if ledger_contract_violations and ctx._enforce_contract:
+        first = ledger_contract_violations[0]
+        raise SchedulerError(
+            f"flow {_flow_qualified_name(f)!r} performed undeclared write "
+            f"of field {first.get('field')!r}"
+        )
     event_payloads_after = _audit_event_payloads(state, ctx, strategies, ledgers_after)
     event_payload_changes = _audit_event_payload_changes(
         before.get("event_payloads", []), event_payloads_after,
@@ -1241,7 +1268,10 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         "event_payloads": before.get("event_payloads", []),
         "event_payloads_after": event_payloads_after,
         "event_payload_changes": event_payload_changes,
-        "input_contract_violations": list(ctx.contract_violations())[before.get("contract_violation_count", 0):],
+        "input_contract_violations": [
+            *list(ctx.contract_violations())[before.get("contract_violation_count", 0):],
+            *ledger_contract_violations,
+        ],
     })
 
 
@@ -1561,9 +1591,18 @@ def _run_with_guards(
 
 def _compute_flow(flow: ResolvedFlow, state: "BacktestRunState", ctx: FlowContext) -> None:
     ctx.enter_flow(flow)
+    enter_audit = getattr(state, "enter_flow_contract_audit", None)
+    restore_audit = getattr(state, "restore_flow_contract_audit", None)
+    previous_audit = (
+        enter_audit(ctx, ctx.contract_audit_token())
+        if callable(enter_audit) and (ctx._audit_contract or ctx._enforce_contract)
+        else None
+    )
     try:
         flow.compute(state, ctx)
     finally:
+        if callable(restore_audit) and (ctx._audit_contract or ctx._enforce_contract):
+            restore_audit(previous_audit)
         ctx.exit_flow()
 
 

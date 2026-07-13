@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 import warnings
 
 from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
+from tools.testers.backtest.engines.native.fields import FieldRef
 from tools.testers.backtest.engines.native.ledger import Ledger, LedgerState, ledger_identity
 
 if TYPE_CHECKING:
@@ -44,6 +45,7 @@ class BacktestRunState:
 
         self._initializing = True
         self._audit_dynamic_writes = False
+        self._flow_contract_audit: tuple[Any, object] | None = None
         self._warned_dynamic_writes: set[str] = set()
         self.ledgers: dict[Ledger, LedgerState] = _normalize_ledger_states(ledgers)
         self.ledger_configs: dict[Ledger, LedgerConfig] = {}
@@ -125,17 +127,35 @@ class BacktestRunState:
         return LedgerState(strategy=strategy, base_currency=base_currency, ledger=ledger)
 
     def config_for(self, strategy: "Strategy") -> StrategyConfig:
-        return self.strategy_configs[strategy]
+        config = self.strategy_configs[strategy]
+        audit = getattr(self, "_flow_contract_audit", None)
+        if audit is None:
+            return config
+        ctx, token = audit
+        return _AuditedStrategyConfig(config, ctx, token)  # type: ignore[return-value]
 
     def ledger_config_for(self, ledger: str | Ledger | LedgerState) -> LedgerConfig:
         if isinstance(ledger, LedgerState):
             ledger_key = ledger.ledger
         else:
             ledger_key = ledger_identity(ledger)
-        return self.ledger_configs.get(ledger_key, LedgerConfig())
+        config = self.ledger_configs.get(ledger_key, LedgerConfig())
+        audit = getattr(self, "_flow_contract_audit", None)
+        if audit is None:
+            return config
+        ctx, token = audit
+        return _AuditedLedgerConfig(config, ctx, token)  # type: ignore[return-value]
 
     def enable_dynamic_write_audit(self, enabled: bool = True) -> None:
         self._audit_dynamic_writes = enabled
+
+    def enter_flow_contract_audit(self, ctx: Any, token: object) -> tuple[Any, object] | None:
+        previous = getattr(self, "_flow_contract_audit", None)
+        object.__setattr__(self, "_flow_contract_audit", (ctx, token))
+        return previous
+
+    def restore_flow_contract_audit(self, previous: tuple[Any, object] | None) -> None:
+        object.__setattr__(self, "_flow_contract_audit", previous)
 
     def __setattr__(self, name: str, value: Any) -> None:
         object.__setattr__(self, name, value)
@@ -168,3 +188,60 @@ def _normalize_ledger_states(raw: Mapping[str | Ledger, LedgerState] | None) -> 
             state.ledger = ledger
         result[ledger] = state
     return result
+
+
+class _AuditedStrategyConfig:
+    """Read-only StrategyConfig proxy used during flow-contract audits.
+
+    FlowContext already audits ctx.get()/ctx.get_for().  Many module helpers
+    read configuration directly with state.config_for(strategy).get(FieldRef),
+    so those reads must be routed into the same declaration check.
+    """
+
+    def __init__(self, config: StrategyConfig, ctx: Any, token: object) -> None:
+        object.__setattr__(self, "_config", config)
+        object.__setattr__(self, "_ctx", ctx)
+        object.__setattr__(self, "_token", token)
+
+    def get(self, ref: FieldRef, default: Any = None) -> Any:
+        if isinstance(ref, FieldRef):
+            self._ctx.record_external_contract_read(ref, self._token)
+        return self._config.get(ref, default)
+
+    def uses_flow(self, flow_name: str) -> bool:
+        return self._config.uses_flow(flow_name)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._config, name)
+
+
+_LEDGER_CONFIG_FIELD_REFS: dict[str, FieldRef[Any]] = {
+    "fee_mode": FieldRef("fee_mode", owner="FeeModule"),
+    "transaction_fee_source": FieldRef("transaction_fee_source", owner="FeeModule"),
+    "fixed_fee_rate": FieldRef("fixed_fee_rate", owner="FeeModule"),
+    "margin_mode": FieldRef("margin_mode", owner="MarginModule"),
+    "fixed_margin_ratio": FieldRef("fixed_margin_ratio", owner="MarginModule"),
+    "margin_call_mode": FieldRef("margin_call_mode", owner="MarginModule"),
+    "liquidation_target_buffer": FieldRef("liquidation_target_buffer", owner="MarginModule"),
+    "accounting_mode": FieldRef("accounting_mode", owner="TradingRuleModule"),
+    "daily_mark_to_market_enabled": FieldRef("daily_mark_to_market_enabled", owner="TradingRuleModule"),
+    "cost_basis_method": FieldRef("cost_basis_method", owner="TradingRuleModule"),
+    "use_int_position": FieldRef("use_int_position", owner="TradingRuleModule"),
+    "cash_reserve_ratio": FieldRef("cash_reserve_ratio", owner="StrategyBookModule"),
+    "cash_reserve_major": FieldRef("cash_reserve_major", owner="StrategyBookModule"),
+}
+
+
+class _AuditedLedgerConfig:
+    """Read-only LedgerConfig proxy that audits direct ledger-level inputs."""
+
+    def __init__(self, config: LedgerConfig, ctx: Any, token: object) -> None:
+        object.__setattr__(self, "_config", config)
+        object.__setattr__(self, "_ctx", ctx)
+        object.__setattr__(self, "_token", token)
+
+    def __getattr__(self, name: str) -> Any:
+        ref = _LEDGER_CONFIG_FIELD_REFS.get(name)
+        if ref is not None:
+            self._ctx.record_external_contract_read(ref, self._token)
+        return getattr(self._config, name)

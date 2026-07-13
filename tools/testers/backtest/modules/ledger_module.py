@@ -55,14 +55,18 @@ class LedgerModule(ExecutableModule):
     _fixed_fee_rate_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_fee_rate", owner="FeeModule")
     _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
     _fixed_margin_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_margin_ratio", owner="MarginModule")
+    _margin_reserved_ref: ClassVar[FieldRef[float]] = FieldRef("margin_reserved", owner="MarginModule")
+    _margin_deficit_ref: ClassVar[FieldRef[float]] = FieldRef("margin_deficit", owner="MarginModule")
+    _margin_excess_ref: ClassVar[FieldRef[float]] = FieldRef("margin_excess", owner="MarginModule")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {}
 
     initialize_ledgers: ClassVar[Flow] = Flow(
         "initialize_ledgers",
         inputs=(EngineModule.engine_mode, TradingRuleModule.accounting_mode, TradingRuleModule.cost_basis_method,
-                 TradingRuleModule.use_int_position, MinorUnitModule.use_minor_units, ProductSelectionModule.products,
-                 StrategyBookModule.strategy_book_mode),
+                 TradingRuleModule.daily_mark_to_market_enabled, TradingRuleModule.use_int_position,
+                 MinorUnitModule.use_minor_units, initial_capital_major, base_currency,
+                 ProductSelectionModule.products, StrategyBookModule.strategy_book_mode, _margin_mode_ref),
         outputs=(cash, positions),
         phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
         description="初始化交易账本",
@@ -87,7 +91,7 @@ class LedgerModule(ExecutableModule):
             _margin_mode_ref,
             _fixed_margin_ratio_ref,
         ),
-        outputs=(positions, cash),
+        outputs=(positions, cash, _margin_reserved_ref, _margin_deficit_ref, _margin_excess_ref),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
         description="成交落账",
         compute=lambda state, ctx: _apply_order_fill(state, ctx),

@@ -221,8 +221,17 @@ class MarketDataModule(ExecutableModule):
     required_factor_columns: ClassVar[FieldRef[Any]] = FieldRef("required_factor_columns")
 
     _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
+    _fixed_fee_rate_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_fee_rate", owner="FeeModule")
     _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
+    _fixed_margin_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_margin_ratio", owner="MarginModule")
     _accounting_mode_ref: ClassVar[FieldRef[str]] = FieldRef("accounting_mode", owner="TradingRuleModule")
+    _cost_basis_method_ref: ClassVar[FieldRef[str]] = FieldRef("cost_basis_method", owner="TradingRuleModule")
+    _daily_mark_to_market_enabled_ref: ClassVar[FieldRef[bool]] = FieldRef("daily_mark_to_market_enabled", owner="TradingRuleModule")
+    _transaction_fee_source_ref: ClassVar[FieldRef[str]] = FieldRef("transaction_fee_source", owner="FeeModule")
+    _warmup_mode_ref: ClassVar[FieldRef[str]] = FieldRef("warmup_mode", owner="FactorSignalModule")
+    _warmup_window_ref: ClassVar[FieldRef[Any]] = FieldRef("warmup_window", owner="FactorSignalModule")
+    _execution_price_basis_ref: ClassVar[FieldRef[str]] = FieldRef("execution_price_basis", owner="OrderExecutionModule")
+    _allocation_policy_ref: ClassVar[FieldRef[str]] = FieldRef("allocation_policy", owner="GroupMembershipModule")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "raw_prices": FieldDefinition(public=False),
@@ -324,7 +333,26 @@ class MarketDataModule(ExecutableModule):
     )
     load_raw_market_data: ClassVar[Flow] = Flow(
         "load_raw_market_data",
-        inputs=(EngineModule.engine_mode, TermStructureExpandModule.contract_metadata),
+        inputs=(
+            EngineModule.engine_mode,
+            ProductSelectionModule.products,
+            required_data_source,
+            required_frequency,
+            required_factor_columns,
+            FactorModule.factor,
+            _warmup_mode_ref,
+            _warmup_window_ref,
+            _fee_mode_ref,
+            _fixed_fee_rate_ref,
+            _margin_mode_ref,
+            _fixed_margin_ratio_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
+            _transaction_fee_source_ref,
+            _allocation_policy_ref,
+            TermStructureExpandModule.contract_metadata,
+        ),
         outputs=(
             raw_prices, price_tables, lot_sizes, margin_ratio, settlement_price, volume, historical_field_provider,
         ),
@@ -347,7 +375,20 @@ class MarketDataModule(ExecutableModule):
     )
     initialize_field_state: ClassVar[Flow] = Flow(
         "initialize_field_state",
-        inputs=(raw_prices, trading_day_resolver),
+        inputs=(
+            raw_prices,
+            trading_day_resolver,
+            historical_field_policy,
+            EngineModule.engine_mode,
+            _fee_mode_ref,
+            _fixed_fee_rate_ref,
+            _margin_mode_ref,
+            _fixed_margin_ratio_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
+            _allocation_policy_ref,
+        ),
         outputs=(historical_field_policy, field_state_baseline, field_change_events),
         phase=Phase.PRE_REPLAY, order=44, after=(build_trading_day_resolver,),
         description="初始化字段状态缓存",
@@ -370,7 +411,7 @@ class MarketDataModule(ExecutableModule):
 
     lookup_market_snapshot: ClassVar[FlowDefinition] = FlowDefinition(
         "lookup_market_snapshot",
-        inputs=(),
+        inputs=(_execution_price_basis_ref, price_tables),
         outputs=(
             current_prices,
             current_market_snapshot,
@@ -411,7 +452,17 @@ class MarketDataModule(ExecutableModule):
     )
     lookup_historical_fields: ClassVar[FlowDefinition] = FlowDefinition(
         "lookup_historical_fields",
-        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
+        inputs=(
+            EngineModule.engine_mode,
+            _fee_mode_ref,
+            _fixed_fee_rate_ref,
+            _margin_mode_ref,
+            _fixed_margin_ratio_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
+            CustomProductModule.custom_product_fields,
+        ),
         outputs=(current_historical_fields,),
         description="读取交易规则字段",
         input_materialization=True,
