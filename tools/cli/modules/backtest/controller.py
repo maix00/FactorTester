@@ -899,76 +899,43 @@ _ORDER_DELTA_FIELD_NAMES = delta_table_formatter.ORDER_DELTA_FIELD_NAMES
 
 
 def _print_delta_mapping_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    short_name = field_name.rsplit(".", 1)[-1]
-    if not delta_table_formatter.is_delta_field(field_name) or not values:
+    result = delta_table_formatter.delta_value_table(
+        field_name,
+        values,
+        display_field_value=_display_field_value,
+        normalize=_audit_normalized_value,
+        strategy_ledger_routes=_audit_strategy_ledger_routes,
+        scalar_cell=_audit_scalar_cell,
+    )
+    if result is None:
         return False
-    rows: list[tuple[str, str, str, str, str]] = []
-    for entry in values:
-        mapping = _audit_delta_mapping(_display_field_value(field_name, entry.get("value")))
-        if mapping is None:
-            return False
-        rows.extend(_audit_delta_value_rows(_audit_delta_routes(entry), mapping))
+    headers, rows = result
     click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", "product", short_name), rows, indent=f"{prefix}  "):
+    for line in _audit_table_lines(headers, rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
 
 
 def _print_delta_mapping_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    short_name = field_name.rsplit(".", 1)[-1]
-    if not delta_table_formatter.is_delta_field(field_name) or not changes:
+    result = delta_table_formatter.delta_change_table(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        normalize=_audit_normalized_value,
+        strategy_ledger_routes=_audit_strategy_ledger_routes,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+    )
+    if result is None:
         return False
-    rows: list[tuple[str, str, str, str, str]] = []
-    for change in changes:
-        before_mapping = _audit_delta_mapping(_display_field_value(field_name, change.get("before")))
-        after_mapping = _audit_delta_mapping(_display_field_value(field_name, change.get("after")))
-        if before_mapping is None or after_mapping is None:
-            return False
-        rows.extend(_audit_delta_change_rows(_audit_delta_routes(change), before_mapping, after_mapping))
+    headers, rows = result
     if not rows:
         click.echo(f"{prefix}（无变化）")
         return True
     click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", "product", short_name), rows, indent=f"{prefix}  "):
+    for line in _audit_table_lines(headers, rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
-
-
-def _audit_delta_mapping(value: Any) -> dict[str, Any] | None:
-    return delta_table_formatter.delta_mapping(value, normalize=_audit_normalized_value)
-
-
-def _audit_delta_routes(entry: dict[str, Any]) -> list[tuple[str, str, str]]:
-    return delta_table_formatter.delta_routes(
-        entry,
-        strategy_ledger_routes=_audit_strategy_ledger_routes,
-    )
-
-
-def _audit_delta_value_rows(routes: list[tuple[str, str, str]], mapping: dict[str, Any]) -> list[tuple[str, str, str, str, str]]:
-    return delta_table_formatter.delta_value_rows(
-        routes,
-        mapping,
-        scalar_cell=_audit_scalar_cell,
-    )
-
-
-def _audit_delta_change_rows(routes: list[tuple[str, str, str]], before: dict[str, Any], after: dict[str, Any]) -> list[tuple[str, str, str, str, str]]:
-    return delta_table_formatter.delta_change_rows(
-        routes,
-        before,
-        after,
-        scalar_cell=_audit_scalar_cell,
-        change_cell=_audit_change_cell,
-    )
-
-
-def _audit_is_zero_value(value: Any) -> bool:
-    return delta_table_formatter.is_zero_value(value)
-
-
-def _audit_is_zero_text(value: str) -> bool:
-    return delta_table_formatter.is_zero_text(value)
 
 
 def _dedupe_audit_list(values: list[Any]) -> list[Any]:

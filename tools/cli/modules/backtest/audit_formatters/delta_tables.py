@@ -11,6 +11,10 @@ from tools.cli.modules.backtest.audit_formatters import scope_tables
 Normalize = Callable[[Any], Any]
 ScalarCell = Callable[[Any], str]
 ChangeCell = Callable[[Any, Any], str]
+DisplayFieldValue = Callable[[str, Any], Any]
+
+
+DeltaTable = tuple[tuple[str, ...], list[tuple[str, str, str, str, str]]]
 
 ORDER_DELTA_FIELD_NAMES = {"raw_deltas", "sized_deltas", "deltas"}
 
@@ -117,6 +121,60 @@ def delta_change_rows(
         for ledger, cash_pool, strategies in routes:
             rows.append((ledger, cash_pool, strategies, f"其余 {zero_change_count} 个产品", change_cell("null", "0")))
     return rows
+
+
+def delta_value_table(
+    field_name: str,
+    values: list[dict[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    normalize: Normalize,
+    strategy_ledger_routes: Mapping[str, tuple[tuple[str, str], ...]],
+    scalar_cell: ScalarCell,
+) -> DeltaTable | None:
+    short_name = field_name.rsplit(".", 1)[-1]
+    if not is_delta_field(field_name) or not values:
+        return None
+    rows: list[tuple[str, str, str, str, str]] = []
+    for entry in values:
+        mapping = delta_mapping(display_field_value(field_name, entry.get("value")), normalize=normalize)
+        if mapping is None:
+            return None
+        rows.extend(delta_value_rows(
+            delta_routes(entry, strategy_ledger_routes=strategy_ledger_routes),
+            mapping,
+            scalar_cell=scalar_cell,
+        ))
+    return ("ledger", "cash pool", "strategies", "product", short_name), rows
+
+
+def delta_change_table(
+    field_name: str,
+    changes: list[dict[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    normalize: Normalize,
+    strategy_ledger_routes: Mapping[str, tuple[tuple[str, str], ...]],
+    scalar_cell: ScalarCell,
+    change_cell: ChangeCell,
+) -> DeltaTable | None:
+    short_name = field_name.rsplit(".", 1)[-1]
+    if not is_delta_field(field_name) or not changes:
+        return None
+    rows: list[tuple[str, str, str, str, str]] = []
+    for change in changes:
+        before_mapping = delta_mapping(display_field_value(field_name, change.get("before")), normalize=normalize)
+        after_mapping = delta_mapping(display_field_value(field_name, change.get("after")), normalize=normalize)
+        if before_mapping is None or after_mapping is None:
+            return None
+        rows.extend(delta_change_rows(
+            delta_routes(change, strategy_ledger_routes=strategy_ledger_routes),
+            before_mapping,
+            after_mapping,
+            scalar_cell=scalar_cell,
+            change_cell=change_cell,
+        ))
+    return ("ledger", "cash pool", "strategies", "product", short_name), rows
 
 
 def is_zero_value(value: Any) -> bool:
