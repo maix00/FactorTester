@@ -4704,41 +4704,13 @@ def _arg_value(args: tuple[str, ...], flag: str) -> str:
 
 
 def _print_backtest_result_hints() -> None:
-    click.echo("结果查看:")
-    click.echo("  factortester backtest results summary")
-    click.echo("  factortester backtest results equity")
-    click.echo("  factortester backtest results attribution --group-name <策略名> --by product")
-    click.echo("  factortester backtest results detail --group-name <策略名>")
-    click.echo("  factortester backtest results ranking")
-    click.echo("  factortester backtest results snapshot --index 1")
-    click.echo("  factortester backtest results order-flow --group-name <策略名> --show fee")
+    for line in config_view_formatter.RESULT_HINT_LINES:
+        click.echo(line)
 
 
 def _print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict[str, Any]]) -> None:
-    click.echo("策略信息:")
-    for index, group in enumerate(groups, start=1):
-        name = group.get("name") or group.get("id") or f"group-{index}"
-        split_count = group.get("split_count", group.get("splitCount"))
-        group_index = group.get("group_index", group.get("groupIndex"))
-        factor = group.get("factor", group.get("factorAlias")) or "（未设置）"
-        product_path = selection_label(group.get("product_path_selection")) or "（未设置）"
-        pieces = [str(name)]
-        if split_count is not None:
-            pieces.append(f"分组数={split_count}")
-        if group_index is not None:
-            pieces.append(f"分组序号={group_index}")
-        pieces.append(f"产品路径={product_path}")
-        pieces.append(f"因子={factor}")
-        if group.get("parent_id") or group.get("parentId"):
-            pieces.append(f"派生自={group.get('parent_id') or group.get('parentId')}")
-        click.echo("  " + " · ".join(pieces))
-    for index, config in enumerate(ls_configs, start=1):
-        long_group = config.get("long_group") or {}
-        short_group = config.get("short_group") or {}
-        long_label = long_group.get("name") or long_group.get("id") or config.get("long_group_id") or config.get("longGroupId") or "?"
-        short_label = short_group.get("name") or short_group.get("id") or config.get("short_group_id") or config.get("shortGroupId") or "?"
-        name = config.get("name") or f"ls-{index}"
-        click.echo(f"  {name} · Long-Short · 多头={long_label} · 空头={short_label}")
+    for line in config_view_formatter.run_strategy_info_lines(groups, ls_configs):
+        click.echo(line)
 
 
 def _equity_curve_live_enabled(state, *, client=None) -> bool:
@@ -4758,21 +4730,8 @@ def _truthy(value: Any) -> bool:
 
 
 def _print_run_event(event_name: str, data: Any) -> None:
-    if isinstance(data, dict):
-        if event_name == "runtime_info":
-            row_type = data.get("type") or data.get("status") or "运行信息"
-            detail = data.get("detail") or data.get("message") or data
-            click.echo(f"[运行信息] {row_type}: {detail}")
-            return
-        if event_name in {"complete", "done"}:
-            click.echo("回测完成")
-            return
-        label = data.get("label") or data.get("message") or data.get("phase") or data.get("status")
-        if label:
-            click.echo(f"[{event_name}] {label}")
-            return
-    elif data:
-        click.echo(f"[{event_name}] {data}")
+    for line in config_view_formatter.run_event_lines(event_name, data):
+        click.echo(line)
 
 
 def _stores_for_backtest(state, client=None) -> tuple[FieldStore, FieldStore]:

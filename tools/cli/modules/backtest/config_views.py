@@ -49,6 +49,17 @@ LEDGER_CONFIG_HELP_LINES = (
     "  其他字段可用 --field value 或 field=value 透传，但后端会按 LedgerConfig 校验/忽略未知 metadata。",
 )
 
+RESULT_HINT_LINES = (
+    "结果查看:",
+    "  factortester backtest results summary",
+    "  factortester backtest results equity",
+    "  factortester backtest results attribution --group-name <策略名> --by product",
+    "  factortester backtest results detail --group-name <策略名>",
+    "  factortester backtest results ranking",
+    "  factortester backtest results snapshot --index 1",
+    "  factortester backtest results order-flow --group-name <策略名> --show fee",
+)
+
 
 def template_help_lines(factor_family: str | None) -> list[str]:
     current = factor_family or "（未选择）"
@@ -194,3 +205,48 @@ def group_detail_lines(group: dict[str, Any]) -> list[str]:
     lines.append(f"产品路径: {selection_label(group.get('product_path_selection'))}")
     lines.append(f"因子: {factor}")
     return lines
+
+
+def run_strategy_info_lines(groups: list[dict[str, Any]], ls_configs: list[dict[str, Any]]) -> list[str]:
+    lines = ["策略信息:"]
+    for index, group in enumerate(groups, start=1):
+        name = group.get("name") or group.get("id") or f"group-{index}"
+        split_count = group.get("split_count", group.get("splitCount"))
+        group_index = group.get("group_index", group.get("groupIndex"))
+        factor = group.get("factor", group.get("factorAlias")) or "（未设置）"
+        product_path = selection_label(group.get("product_path_selection")) or "（未设置）"
+        pieces = [str(name)]
+        if split_count is not None:
+            pieces.append(f"分组数={split_count}")
+        if group_index is not None:
+            pieces.append(f"分组序号={group_index}")
+        pieces.append(f"产品路径={product_path}")
+        pieces.append(f"因子={factor}")
+        if group.get("parent_id") or group.get("parentId"):
+            pieces.append(f"派生自={group.get('parent_id') or group.get('parentId')}")
+        lines.append("  " + " · ".join(pieces))
+    for index, config in enumerate(ls_configs, start=1):
+        long_group = config.get("long_group") or {}
+        short_group = config.get("short_group") or {}
+        long_label = long_group.get("name") or long_group.get("id") or config.get("long_group_id") or config.get("longGroupId") or "?"
+        short_label = short_group.get("name") or short_group.get("id") or config.get("short_group_id") or config.get("shortGroupId") or "?"
+        name = config.get("name") or f"ls-{index}"
+        lines.append(f"  {name} · Long-Short · 多头={long_label} · 空头={short_label}")
+    return lines
+
+
+def run_event_lines(event_name: str, data: Any) -> list[str]:
+    if isinstance(data, dict):
+        if event_name == "runtime_info":
+            row_type = data.get("type") or data.get("status") or "运行信息"
+            detail = data.get("detail") or data.get("message") or data
+            return [f"[运行信息] {row_type}: {detail}"]
+        if event_name in {"complete", "done"}:
+            return ["回测完成"]
+        label = data.get("label") or data.get("message") or data.get("phase") or data.get("status")
+        if label:
+            return [f"[{event_name}] {label}"]
+        return []
+    if data:
+        return [f"[{event_name}] {data}"]
+    return []
