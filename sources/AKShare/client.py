@@ -14,7 +14,7 @@ shapes for callers that already depend on this package:
   same daily-snapshot shape as SHFE/INE.
 
 This module caches the raw response so repeated runs do not hit the network
-again. Field normalization lives in ``lifecycle.py``.
+again. Field normalization and storage live in ``sources.ContractLifecycle``.
 """
 from __future__ import annotations
 

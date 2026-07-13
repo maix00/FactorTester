@@ -30,7 +30,7 @@ def fetch_contract_info(*, timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS) ->
     """Fetch current DCE futures contract lifecycle through the official portal.
 
     Returns an AKShare-compatible frame with Chinese column names consumed by
-    ``sources.AKShare.lifecycle.normalize_dce``.  The source provenance is
+    ``sources.ContractLifecycle.lifecycle.normalize_dce``.  The source provenance is
     carried in ``DataFrame.attrs["source_function"]``.
     """
 

@@ -459,7 +459,7 @@ def test_akshare_lifecycle_duplicate_contract_prefers_local_product_exchange():
 def test_akshare_lifecycle_specs_include_local_store_source_metadata(monkeypatch):
     term_structure._akshare_lifecycle_specs_by_instrument.cache_clear()
     monkeypatch.setattr(term_structure, "_local_cnfutures_product_exchange_by_code", lambda: {"EC": "INE"})
-    monkeypatch.setattr("sources.AKShare.lifecycle.read_contract_lifecycle", lambda: pd.DataFrame([{
+    monkeypatch.setattr("sources.ContractLifecycle.lifecycle.read_contract_lifecycle", lambda: pd.DataFrame([{
         "exchange": "INE",
         "product_code": "EC",
         "contract_code": "EC2602",
@@ -484,7 +484,7 @@ def test_akshare_lifecycle_specs_include_local_store_source_metadata(monkeypatch
 def test_lifecycle_specs_label_dce_official_portal_source(monkeypatch):
     term_structure._akshare_lifecycle_specs_by_instrument.cache_clear()
     monkeypatch.setattr(term_structure, "_local_cnfutures_product_exchange_by_code", lambda: {"P": "DCE"})
-    monkeypatch.setattr("sources.AKShare.lifecycle.read_contract_lifecycle", lambda: pd.DataFrame([{
+    monkeypatch.setattr("sources.ContractLifecycle.lifecycle.read_contract_lifecycle", lambda: pd.DataFrame([{
         "exchange": "DCE",
         "product_code": "P",
         "contract_code": "P2601",
@@ -506,7 +506,7 @@ def test_lifecycle_specs_label_dce_official_portal_source(monkeypatch):
 def test_lifecycle_specs_label_local_dayk_coverage_source(monkeypatch):
     term_structure._akshare_lifecycle_specs_by_instrument.cache_clear()
     monkeypatch.setattr(term_structure, "_local_cnfutures_product_exchange_by_code", lambda: {"M": "DCE"})
-    monkeypatch.setattr("sources.AKShare.lifecycle.read_contract_lifecycle", lambda: pd.DataFrame([{
+    monkeypatch.setattr("sources.ContractLifecycle.lifecycle.read_contract_lifecycle", lambda: pd.DataFrame([{
         "exchange": "DCE",
         "product_code": "M",
         "contract_code": "M2409",
@@ -528,7 +528,7 @@ def test_lifecycle_specs_label_local_dayk_coverage_source(monkeypatch):
 def test_lifecycle_specs_label_rule_calendar_derived_source(monkeypatch):
     term_structure._akshare_lifecycle_specs_by_instrument.cache_clear()
     monkeypatch.setattr(term_structure, "_local_cnfutures_product_exchange_by_code", lambda: {"M": "DCE"})
-    monkeypatch.setattr("sources.AKShare.lifecycle.read_contract_lifecycle", lambda: pd.DataFrame([{
+    monkeypatch.setattr("sources.ContractLifecycle.lifecycle.read_contract_lifecycle", lambda: pd.DataFrame([{
         "exchange": "DCE",
         "product_code": "M",
         "contract_code": "M2409",
@@ -620,7 +620,7 @@ def test_akshare_live_lookup_is_attempted_once_per_exchange_and_persists(monkeyp
             "last_delivery_date": "2024-11-19",
         }]
 
-    monkeypatch.setattr("sources.AKShare.lifecycle.fetch_and_store_live", fake_fetch_and_store_live)
+    monkeypatch.setattr("sources.ContractLifecycle.lifecycle.fetch_and_store_live", fake_fetch_and_store_live)
 
     first = term_structure._akshare_live_lookup("GFEX", "SI2411")
     second = term_structure._akshare_live_lookup("GFEX", "SI2411")
@@ -660,7 +660,7 @@ def test_with_authoritative_lifecycle_fields_falls_back_to_akshare_live_lookup(m
             "last_delivery_date": "2024-11-19",
         }]
 
-    monkeypatch.setattr("sources.AKShare.lifecycle.fetch_and_store_live", fake_fetch_and_store_live)
+    monkeypatch.setattr("sources.ContractLifecycle.lifecycle.fetch_and_store_live", fake_fetch_and_store_live)
 
     row = term_structure._with_authoritative_lifecycle_fields({
         "product": "SI.GFE",

@@ -1,8 +1,9 @@
 """Unified contract-lifecycle schema, normalization, and storage.
 
 Six CN futures exchanges each publish contract base info with different field
-names (see ``client.py``). This module maps all six shapes onto one schema
-and stores them in ``src_akshare_contract_lifecycle``, keyed by
+names through provider adapters such as ``sources.AKShare.client`` and
+``sources.DCE.portal``. This module maps those shapes onto one schema and
+stores them in ``src_contract_lifecycle``, keyed by
 ``(exchange, contract_code)``.
 
 Because a contract's list/last-trading/delivery dates are fixed at listing
@@ -26,7 +27,8 @@ from scripts.data_dir import CACHE_DB_PATH
 from sources.OpenCTP.client import normalise_instrument_code
 from tools.data.sqlite.db import connect_sqlite
 
-CONTRACT_LIFECYCLE_TABLE = "src_akshare_contract_lifecycle"
+CONTRACT_LIFECYCLE_TABLE = "src_contract_lifecycle"
+_LEGACY_CONTRACT_LIFECYCLE_TABLE = "src_akshare_contract_lifecycle"
 
 DATE_PARAM_EXCHANGES = ("SHFE", "INE", "CZCE", "CFFEX")
 ONE_SHOT_EXCHANGES = ("DCE", "GFEX")
@@ -63,6 +65,15 @@ def _source_function(df: pd.DataFrame, default: str) -> str:
 
 
 def ensure_schema(conn) -> None:
+    existing_tables = {
+        str(row["name"])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?)",
+            (CONTRACT_LIFECYCLE_TABLE, _LEGACY_CONTRACT_LIFECYCLE_TABLE),
+        ).fetchall()
+    }
+    if _LEGACY_CONTRACT_LIFECYCLE_TABLE in existing_tables and CONTRACT_LIFECYCLE_TABLE not in existing_tables:
+        conn.execute(f"ALTER TABLE {_LEGACY_CONTRACT_LIFECYCLE_TABLE} RENAME TO {CONTRACT_LIFECYCLE_TABLE}")
     conn.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {CONTRACT_LIFECYCLE_TABLE} (

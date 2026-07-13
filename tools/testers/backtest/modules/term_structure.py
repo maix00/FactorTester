@@ -597,7 +597,7 @@ def _openctp_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
 @lru_cache(maxsize=1)
 def _akshare_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
     try:
-        from sources.AKShare.lifecycle import read_contract_lifecycle
+        from sources.ContractLifecycle.lifecycle import read_contract_lifecycle
         from sources.OpenCTP.client import normalise_instrument_code
     except Exception:
         return {}
@@ -680,7 +680,7 @@ def _local_cnfutures_product_exchange_by_code() -> dict[str, str]:
 
 # Local product/contract names are suffixed with these short exchange codes
 # (see sources.LocalCNFutures.product_catalog._EXCHANGE_TO_SECTOR_CODE), not
-# the AKShare exchange codes used by src_akshare_contract_lifecycle.
+# the exchange codes used by the unified contract-lifecycle store.
 _LOCAL_EXCHANGE_SUFFIX_TO_AKSHARE = {
     "DCE": "DCE",
     "CZC": "CZCE",
@@ -727,7 +727,7 @@ def _akshare_live_lookup(exchange: str, key: str) -> dict[str, Any] | None:
         return _akshare_live_cache.get(key)
     _akshare_live_attempted.add(exchange)
     try:
-        from sources.AKShare.lifecycle import fetch_and_store_live
+        from sources.ContractLifecycle.lifecycle import fetch_and_store_live
         from sources.OpenCTP.client import normalise_instrument_code
     except Exception:
         return None

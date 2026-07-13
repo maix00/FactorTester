@@ -13,7 +13,7 @@ ingests; it fills local daily-bar coverage and avoids treating right-censored
 data cutoffs as last trading days.
 
 Usage:
-    PYTHONPATH=. python sources/AKShare/scripts/fetch_contract_lifecycle.py \\
+    PYTHONPATH=. python sources/ContractLifecycle/scripts/fetch_contract_lifecycle.py \\
         --exchange ALL --start-date 20150101 --end-date 20260701 --step-days 30
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from sources.AKShare import client
-from sources.AKShare.lifecycle import (
+from sources.ContractLifecycle.lifecycle import (
     ALL_EXCHANGES,
     DATE_PARAM_EXCHANGES,
     ONE_SHOT_EXCHANGES,

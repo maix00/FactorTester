@@ -36,7 +36,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.data_dir import CACHE_DB_PATH
 from sources.AKShare import client
-from sources.AKShare.lifecycle import CONTRACT_LIFECYCLE_TABLE, ensure_schema, normalize_contract_info, upsert_contract_lifecycle
+from sources.ContractLifecycle.lifecycle import CONTRACT_LIFECYCLE_TABLE, ensure_schema, normalize_contract_info, upsert_contract_lifecycle
 from sources.LocalCNFutures import SOURCE_DATA_DIR
 from sources.OpenCTP.client import normalise_instrument_code
 from tools.data.sqlite.db import connect_sqlite

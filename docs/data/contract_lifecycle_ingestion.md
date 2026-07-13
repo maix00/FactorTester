@@ -37,7 +37,7 @@ DCE portal findings:
 Run:
 
 ```bash
-PYTHONPATH=. python sources/AKShare/scripts/backfill_contract_lifecycle_from_local_dayk.py \
+PYTHONPATH=. python sources/ContractLifecycle/scripts/backfill_contract_lifecycle_from_local_dayk.py \
   --start-date 2024-01-01
 ```
 
@@ -118,7 +118,7 @@ official/external exact lifecycle rows.
 Run:
 
 ```bash
-PYTHONPATH=. python sources/AKShare/scripts/audit_contract_lifecycle_coverage.py \
+PYTHONPATH=. python sources/ContractLifecycle/scripts/audit_contract_lifecycle_coverage.py \
   --start-date 2024-01-01 --strict
 ```
 
@@ -130,13 +130,13 @@ cross-validation.
 Optional precise-field backfills:
 
 ```bash
-PYTHONPATH=. python sources/AKShare/scripts/backfill_missing_lifecycle_fields.py \
+PYTHONPATH=. python sources/ContractLifecycle/scripts/backfill_missing_lifecycle_fields.py \
   --source cffex-official
-PYTHONPATH=. python sources/AKShare/scripts/backfill_missing_lifecycle_fields.py \
+PYTHONPATH=. python sources/ContractLifecycle/scripts/backfill_missing_lifecycle_fields.py \
   --source tushare --exchange DCE --exchange GFEX
-PYTHONPATH=. python sources/AKShare/scripts/backfill_missing_lifecycle_fields.py \
+PYTHONPATH=. python sources/ContractLifecycle/scripts/backfill_missing_lifecycle_fields.py \
   --derive-rule-calendar --exchange DCE --exchange GFEX
-PYTHONPATH=. python sources/AKShare/scripts/backfill_lifecycle_last_trading_from_local_dayk.py
+PYTHONPATH=. python sources/ContractLifecycle/scripts/backfill_lifecycle_last_trading_from_local_dayk.py
 ```
 
 The CFFEX path uses official trading-parameter XML and can fill missing

@@ -6,9 +6,9 @@ import pandas as pd
 import pytest
 
 from sources.AKShare import client
-from sources.AKShare import lifecycle as lc
-from sources.AKShare.scripts import backfill_missing_lifecycle_fields as missing_lifecycle
-from sources.AKShare.scripts.backfill_contract_lifecycle_from_local_dayk import lifecycle_rows_from_dayk
+from sources.ContractLifecycle import lifecycle as lc
+from sources.ContractLifecycle.scripts import backfill_missing_lifecycle_fields as missing_lifecycle
+from sources.ContractLifecycle.scripts.backfill_contract_lifecycle_from_local_dayk import lifecycle_rows_from_dayk
 from sources.DCE import portal as dce_portal
 
 
