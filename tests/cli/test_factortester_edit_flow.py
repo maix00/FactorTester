@@ -291,6 +291,30 @@ def test_step_audit_product_change_table_wraps_list_inside_cell() -> None:
     assert not any("\x1b[103m    " in line for line in lines)
 
 
+def test_step_audit_product_output_keeps_common_strategy_list_on_one_line(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((132, 20)))
+    strategies = "A1, A1:1, A1a, A2, A3, A4, A5, LS A1/A5"
+    products = [
+        "AP.CZC", "CJ.CZC", "EC.INE", "ER.CZC", "FB.DCE", "JD.DCE",
+        "LC.GFE", "LG.DCE", "LH.DCE", "ME.CZC", "PD.GFE", "PK.CZC",
+        "PS.GFE", "PT.GFE", "RO.CZC", "SF.CZC", "SI.GFE", "SM.CZC",
+        "TC.CZC", "UR.CZC", "WR.SHF", "WS.CZC", "WT.CZC",
+    ]
+    after = _audit_scalar_sequence_text(products, width=56)
+
+    lines = _audit_table_lines(
+        ("strategies", "products"),
+        [(strategies, _audit_change_cell("null", after))],
+        indent="    ",
+        allow_transpose=False,
+    )
+    plain_lines = [_strip_ansi(line) for line in lines]
+
+    assert any(strategies in line and "null -> [AP.CZC" in line for line in plain_lines)
+    assert not any(line.strip() == "LS A1/A5" for line in plain_lines)
+    assert any("LC.GFE" in line for line in plain_lines)
+
+
 def test_step_audit_inlines_small_complex_cell_in_table() -> None:
     lines = _audit_table_lines(
         ("strategy", "payload"),

@@ -4457,7 +4457,7 @@ def _audit_capped_column_width(header: str, width: int) -> int:
     if header_key in {"ledger", "cash pool", "ledgers", "cash pools"}:
         return max(header_width, min(width, 28))
     if header_key in {"strategies", "strategy"}:
-        return max(header_width, min(width, 32))
+        return max(header_width, min(width, 48))
     if header_key in {"order_id"}:
         return max(header_width, min(width, 48))
     return max(header_width, min(width, 72))
