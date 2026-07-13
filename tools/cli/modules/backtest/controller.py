@@ -435,8 +435,7 @@ def group(
       factortester group --add --group-name A1 --help
     """
     state = load_state()
-    if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
-        enter_backtest_state(state, scope=BACKTEST_SPACE)
+    _ensure_active_backtest_scope(state)
     changed = group_command_handlers.handle_group_command(
         state,
         tuple(ctx.args),
@@ -464,8 +463,7 @@ def group(
 def long_short(ctx: click.Context) -> None:
     """管理 Long-Short 策略草稿。"""
     state = load_state()
-    if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
-        enter_backtest_state(state, scope=BACKTEST_SPACE)
+    _ensure_active_backtest_scope(state)
     changed = long_short_command_handlers.handle_long_short_command(
         state,
         tuple(ctx.args),
