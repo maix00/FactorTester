@@ -77,8 +77,16 @@ class TradingRuleModule(ExecutableModule):
     use_int_position: ClassVar[FieldRef[bool]] = FieldRef("use_int_position")
     daily_mark_to_market_events: ClassVar[FieldRef[Any]] = FieldRef("daily_mark_to_market_events")
 
-    _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="LedgerModule")
+    _cash_pool_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="CashPoolModule")
     _ledger_positions_ref: ClassVar[FieldRef[Any]] = FieldRef("positions", owner="LedgerModule")
+    _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
+    _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
+    _margin_call_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_call_mode", owner="MarginModule")
+    _margin_deficit_ref: ClassVar[FieldRef[float]] = FieldRef("margin_deficit", owner="MarginModule")
+    _margin_liquidation_orders_ref: ClassVar[FieldRef[Any]] = FieldRef(
+        "margin_liquidation_orders",
+        owner="MarginModule",
+    )
     _current_market_snapshot_ref: ClassVar[FieldRef[Any]] = FieldRef(
         "current_market_snapshot", owner="MarketDataModule",
     )
@@ -136,11 +144,24 @@ class TradingRuleModule(ExecutableModule):
     apply_daily_mark_to_market: ClassVar[Flow] = Flow(
         "apply_daily_mark_to_market",
         inputs=(
-            _ledger_cash_ref, _ledger_positions_ref,
+            _cash_pool_cash_ref,
+            _ledger_positions_ref,
             _current_market_snapshot_ref,
             _current_historical_fields_ref,
+            accounting_mode,
+            daily_mark_to_market_enabled,
+            cost_basis_method,
+            _fee_mode_ref,
+            _margin_mode_ref,
+            _margin_call_mode_ref,
+            _margin_deficit_ref,
         ),
-        outputs=(_ledger_cash_ref, _ledger_positions_ref),
+        outputs=(
+            _cash_pool_cash_ref,
+            _ledger_positions_ref,
+            _margin_deficit_ref,
+            _margin_liquidation_orders_ref,
+        ),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,
         order=50,

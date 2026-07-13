@@ -3008,7 +3008,7 @@ def _print_combined_cash_pool_scalar_value_table(prefix: str, records: list[dict
         tuple([cash_pool, ledgers, strategies, *[value_map[(cash_pool, ledgers, strategies)] for value_map in value_maps]])
         for cash_pool, ledgers, strategies in route_keys[0]
     ]
-    click.echo(f"{prefix}cash pool 总表: {_audit_combined_field_label(records)}", color=True)
+    _print_combined_field_label_lines(prefix, records)
     for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
@@ -3110,7 +3110,7 @@ def _print_strategy_record_value_table(prefix: str, field_name: str, values: lis
         tuple([", ".join(bucket["strategies"]), *bucket["values"]])
         for bucket in grouped.values()
     ]
-    click.echo(f"{prefix}合并策略字段: {_audit_combined_single_field_label(field_name)}", color=True)
+    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
     for line in _audit_table_lines(("strategies", *headers), rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
@@ -3133,49 +3133,88 @@ def _audit_scope_column_label(scope: str) -> str:
     return scope or "value"
 
 
-def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[str, str, dict[str, str]] | None:
+_AUDIT_MISSING = object()
+
+
+def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[list[str], dict[str, tuple[Any, ...]]] | None:
     field_name = str(record.get("field") or "")
     values = record.get("values") or []
-    if not _audit_is_strategy_entries(values):
+    if not values or any(str(entry.get("scope") or "") in {"ledger", "ledger_config"} for entry in values):
         return None
-    scopes = {str(entry.get("scope") or "") for entry in values}
-    if len(scopes) != 1:
+    strategy_entries = [
+        entry for entry in values
+        if str(entry.get("scope") or "") in {"strategy_config", "strategy_context"} and entry.get("strategy")
+    ]
+    if not strategy_entries:
         return None
-    by_strategy: dict[str, str] = {}
-    for entry in values:
-        value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
-        if value_text is None:
+    scope_order = ["context", "strategy_context", "strategy_config"]
+    present_scopes = [
+        scope for scope in scope_order
+        if any(str(entry.get("scope") or "") == scope for entry in values)
+    ]
+    if not present_scopes:
+        return None
+    short_name = field_name.rsplit(".", 1)[-1]
+    columns = [short_name] if len(present_scopes) == 1 else [
+        f"{short_name}.{_audit_scope_suffix(scope)}" for scope in present_scopes
+    ]
+    shared_values = [entry.get("value") for entry in values if str(entry.get("scope") or "") == "context"]
+    shared_value: Any = shared_values[-1] if shared_values else _AUDIT_MISSING
+    by_strategy_scope: dict[tuple[str, str], Any] = {}
+    for entry in strategy_entries:
+        key = (str(entry.get("strategy") or "?"), str(entry.get("scope") or ""))
+        value = entry.get("value")
+        if key in by_strategy_scope and _audit_display_key(by_strategy_scope[key]) != _audit_display_key(value):
             return None
-        strategy = str(entry.get("strategy") or "?")
-        if strategy in by_strategy and by_strategy[strategy] != value_text:
-            return None
-        by_strategy[strategy] = value_text
+        by_strategy_scope[key] = value
+    strategies = sorted(dict.fromkeys(str(entry.get("strategy") or "?") for entry in strategy_entries))
+    by_strategy: dict[str, tuple[Any, ...]] = {}
+    for strategy in strategies:
+        row_values: list[Any] = []
+        for scope in present_scopes:
+            value = shared_value if scope == "context" else by_strategy_scope.get((strategy, scope), _AUDIT_MISSING)
+            row_values.append("" if value is _AUDIT_MISSING else _audit_strategy_table_cell(field_name, value))
+        by_strategy[strategy] = tuple(row_values)
     if not by_strategy:
         return None
-    return field_name.rsplit(".", 1)[-1], next(iter(scopes)), by_strategy
+    return columns, by_strategy
+
+
+def _audit_scope_suffix(scope: str) -> str:
+    if scope == "context":
+        return "shared"
+    if scope == "strategy_context":
+        return "context"
+    if scope == "strategy_config":
+        return "config"
+    return scope or "value"
 
 
 def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
     tables = [_strategy_scalar_record_table(record) for record in records]
     if any(table is None for table in tables) or not tables:
         return False
-    scopes = {table[1] for table in tables if table is not None}
-    if len(scopes) != 1:
-        return False
-    strategy_keys = [tuple(sorted(table[2])) for table in tables if table is not None]
+    strategy_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
     if not strategy_keys or any(keys != strategy_keys[0] for keys in strategy_keys[1:]):
         return False
-    field_columns = [table[0] for table in tables if table is not None]
-    value_maps = [table[2] for table in tables if table is not None]
-    grouped_rows: dict[tuple[str, ...], list[str]] = {}
-    for strategy in strategy_keys[0]:
-        row_values = tuple(value_map[strategy] for value_map in value_maps)
-        grouped_rows.setdefault(row_values, []).append(strategy)
-    rows = [
-        tuple([", ".join(strategies), *row_values])
-        for row_values, strategies in grouped_rows.items()
+    field_columns = [
+        column
+        for table in tables
+        if table is not None
+        for column in table[0]
     ]
-    click.echo(f"{prefix}合并策略字段: {_audit_combined_field_label(records)}", color=True)
+    value_maps = [table[1] for table in tables if table is not None]
+    grouped_rows: dict[tuple[str, ...], dict[str, Any]] = {}
+    for strategy in strategy_keys[0]:
+        row_values = tuple(value for value_map in value_maps for value in value_map[strategy])
+        row_key = tuple(_audit_display_key(value) for value in row_values)
+        bucket = grouped_rows.setdefault(row_key, {"strategies": [], "values": row_values})
+        bucket["strategies"].append(strategy)
+    rows = [
+        tuple([", ".join(bucket["strategies"]), *bucket["values"]])
+        for bucket in grouped_rows.values()
+    ]
+    _print_combined_field_label_lines(prefix, records)
     for line in _audit_table_lines(("strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
@@ -3314,7 +3353,7 @@ def _print_combined_ledger_scalar_value_table(prefix: str, records: list[dict[st
         tuple([ledger, cash_pool, strategies, *[value_map[(ledger, cash_pool, strategies)] for value_map in value_maps]])
         for ledger, cash_pool, strategies in route_keys[0]
     ]
-    click.echo(f"{prefix}合并账本字段: {_audit_combined_field_label(records)}", color=True)
+    _print_combined_field_label_lines(prefix, records)
     for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
@@ -3322,6 +3361,16 @@ def _print_combined_ledger_scalar_value_table(prefix: str, records: list[dict[st
 
 def _audit_combined_field_label(records: list[dict[str, Any]]) -> str:
     return "；".join(_audit_combined_single_field_label(str(record.get("field") or "")) for record in records)
+
+
+def _print_combined_field_label_lines(prefix: str, records: list[dict[str, Any]]) -> None:
+    for record in records:
+        click.echo(f"{prefix}{_audit_combined_single_field_label(str(record.get('field') or ''))}", color=True)
+
+
+def _print_combined_change_field_label_lines(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> None:
+    for field_name, _ in records:
+        click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
 
 
 def _audit_combined_single_field_label(qualified_name: str) -> str:
@@ -3370,26 +3419,56 @@ def _print_cash_pool_scalar_change_table(prefix: str, field_name: str, changes: 
         )
         for (cash_pool, before_text, after_text), entries in grouped.items()
     ]
-    click.echo(f"{prefix}cash pool 总表: {_audit_field_label(field_name)}")
+    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
     for line in _audit_table_lines(("cash pool", "ledgers", "strategies", field_name.rsplit(".", 1)[-1]), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
 
 
-def _strategy_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[str, str, dict[str, str]] | None:
-    if not _audit_is_strategy_entries(changes):
+def _strategy_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[list[str], dict[str, tuple[str, ...]]] | None:
+    if not changes or any(str(change.get("scope") or "") in {"ledger", "ledger_config"} for change in changes):
         return None
-    scopes = {str(change.get("scope") or "") for change in changes}
-    if len(scopes) != 1:
+    strategy_changes = [
+        change for change in changes
+        if str(change.get("scope") or "") in {"strategy_config", "strategy_context"} and change.get("strategy")
+    ]
+    if not strategy_changes:
         return None
-    by_strategy: dict[str, str] = {}
-    for change in changes:
+    scope_order = ["context", "strategy_context", "strategy_config"]
+    present_scopes = [
+        scope for scope in scope_order
+        if any(str(change.get("scope") or "") == scope for change in changes)
+    ]
+    if not present_scopes:
+        return None
+    short_name = field_name.rsplit(".", 1)[-1]
+    columns = [short_name] if len(present_scopes) == 1 else [
+        f"{short_name}.{_audit_scope_suffix(scope)}" for scope in present_scopes
+    ]
+    shared_changes = [change for change in changes if str(change.get("scope") or "") == "context"]
+    shared_change: dict[str, Any] | None = shared_changes[-1] if shared_changes else None
+    by_strategy_scope: dict[tuple[str, str], str] = {}
+    for change in strategy_changes:
         before_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("before")))
         after_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("after")))
         if before_text is None or after_text is None:
             return None
-        by_strategy[str(change.get("strategy") or "?")] = _audit_change_cell(before_text, after_text)
-    return field_name.rsplit(".", 1)[-1], next(iter(scopes)), by_strategy
+        by_strategy_scope[(str(change.get("strategy") or "?"), str(change.get("scope") or ""))] = _audit_change_cell(before_text, after_text)
+    shared_text = ""
+    if shared_change is not None:
+        before_text = _audit_ledger_scalar_text(_display_field_value(field_name, shared_change.get("before")))
+        after_text = _audit_ledger_scalar_text(_display_field_value(field_name, shared_change.get("after")))
+        if before_text is None or after_text is None:
+            return None
+        shared_text = _audit_change_cell(before_text, after_text)
+    strategies = sorted(dict.fromkeys(str(change.get("strategy") or "?") for change in strategy_changes))
+    by_strategy: dict[str, tuple[str, ...]] = {}
+    for strategy in strategies:
+        row_values: list[str] = []
+        for scope in present_scopes:
+            row_values.append(shared_text if scope == "context" else by_strategy_scope.get((strategy, scope), ""))
+        by_strategy[strategy] = tuple(row_values)
+    return columns, by_strategy
 
 
 def _ledger_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
@@ -3432,18 +3511,22 @@ def _print_combined_strategy_scalar_change_table(prefix: str, records: list[tupl
     tables = [_strategy_scalar_change_record_table(field_name, changes) for field_name, changes in records]
     if any(table is None for table in tables) or not tables:
         return False
-    scopes = {table[1] for table in tables if table is not None}
-    strategy_keys = [tuple(sorted(table[2])) for table in tables if table is not None]
-    if len(scopes) != 1 or not strategy_keys or any(keys != strategy_keys[0] for keys in strategy_keys[1:]):
+    strategy_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
+    if not strategy_keys or any(keys != strategy_keys[0] for keys in strategy_keys[1:]):
         return False
-    field_columns = [table[0] for table in tables if table is not None]
-    value_maps = [table[2] for table in tables if table is not None]
+    field_columns = [
+        column
+        for table in tables
+        if table is not None
+        for column in table[0]
+    ]
+    value_maps = [table[1] for table in tables if table is not None]
     grouped_rows: dict[tuple[str, ...], list[str]] = {}
     for strategy in strategy_keys[0]:
-        row_values = tuple(value_map[strategy] for value_map in value_maps)
+        row_values = tuple(value for value_map in value_maps for value in value_map[strategy])
         grouped_rows.setdefault(row_values, []).append(strategy)
     rows = [tuple([", ".join(strategies), *row_values]) for row_values, strategies in grouped_rows.items()]
-    click.echo(f"{prefix}合并策略字段: {_audit_combined_change_field_label(records)}", color=True)
+    _print_combined_change_field_label_lines(prefix, records)
     for line in _audit_table_lines(("strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
@@ -3462,7 +3545,7 @@ def _print_combined_ledger_scalar_change_table(prefix: str, records: list[tuple[
         tuple([ledger, cash_pool, strategies, *[value_map[(ledger, cash_pool, strategies)] for value_map in value_maps]])
         for ledger, cash_pool, strategies in route_keys[0]
     ]
-    click.echo(f"{prefix}合并账本字段: {_audit_combined_change_field_label(records)}", color=True)
+    _print_combined_change_field_label_lines(prefix, records)
     for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
@@ -3481,7 +3564,7 @@ def _print_combined_cash_pool_scalar_change_table(prefix: str, records: list[tup
         tuple([cash_pool, ledgers, strategies, *[value_map[(cash_pool, ledgers, strategies)] for value_map in value_maps]])
         for cash_pool, ledgers, strategies in route_keys[0]
     ]
-    click.echo(f"{prefix}cash pool 总表: {_audit_combined_change_field_label(records)}", color=True)
+    _print_combined_change_field_label_lines(prefix, records)
     for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
@@ -4827,14 +4910,14 @@ def _print_audit_fields(
         field_name = str(record.get("field") or "")
         values = record.get("values") or []
         if not values:
-            click.echo(f"  {_audit_field_label(field_name)}:")
+            click.echo(f"  {_audit_combined_single_field_label(field_name)}:", color=True)
             click.echo("    （当前无值）")
             index += 1
             continue
         if _print_strategy_record_value_table("    ", field_name, values):
             index += 1
             continue
-        click.echo(f"  {_audit_field_label(field_name)}:")
+        click.echo(f"  {_audit_combined_single_field_label(field_name)}:", color=True)
         if _print_ledger_scalar_value_table("    ", field_name, values):
             index += 1
             continue
@@ -4858,7 +4941,7 @@ def _print_audit_fields(
 
 def _combined_scalar_routes(table: tuple[Any, ...], *, strategy: bool) -> tuple[Any, ...]:
     if strategy:
-        return (table[1], tuple(sorted(table[2])))
+        return tuple(sorted(table[1]))
     return tuple(sorted(table[1]))
 
 
@@ -4907,7 +4990,7 @@ def _print_audit_changes(
         if current_table is not None and combined_printer is not None and combined_printer("  ", combined):
             index += len(combined)
             continue
-        click.echo(f"  {_audit_field_label(field_name)}:")
+        click.echo(f"  {_audit_combined_single_field_label(field_name)}:", color=True)
         if _print_lifecycle_notice_change("    ", field_name, field_changes):
             index += 1
             continue

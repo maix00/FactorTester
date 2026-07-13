@@ -141,6 +141,32 @@ def test_ledger_auto_daily_mark_to_market_ignores_ui_default_false():
     ) is True
 
 
+def test_apply_daily_mark_to_market_declares_real_ledger_and_cash_pool_dependencies():
+    flow = TradingRuleModule.apply_daily_mark_to_market
+
+    assert {ref.qualified_name for ref in flow.inputs} >= {
+        "CashPoolModule.cash",
+        "LedgerModule.positions",
+        "MarketDataModule.current_market_snapshot",
+        "MarketDataModule.current_historical_fields",
+        "TradingRuleModule.accounting_mode",
+        "TradingRuleModule.daily_mark_to_market_enabled",
+        "TradingRuleModule.cost_basis_method",
+        "FeeModule.fee_mode",
+        "MarginModule.margin_mode",
+        "MarginModule.margin_call_mode",
+        "MarginModule.margin_deficit",
+    }
+    assert {ref.qualified_name for ref in flow.outputs} >= {
+        "CashPoolModule.cash",
+        "LedgerModule.positions",
+        "MarginModule.margin_deficit",
+        "MarginModule.margin_liquidation_orders",
+    }
+    assert "LedgerModule.cash" not in {ref.qualified_name for ref in flow.inputs}
+    assert "LedgerModule.cash" not in {ref.qualified_name for ref in flow.outputs}
+
+
 def test_ledger_custom_daily_mark_to_market_respects_explicit_switch():
     product = _product()
 
