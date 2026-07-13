@@ -167,6 +167,7 @@ from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest import config_state as config_state_helpers
 from tools.cli.modules.backtest import config_commands as config_command_handlers
 from tools.cli.modules.backtest import compare_commands as compare_command_handlers
+from tools.cli.modules.backtest import group_commands as group_command_handlers
 from tools.cli.modules.backtest import long_short_commands as long_short_command_handlers
 from tools.cli.modules.backtest import template_commands as template_command_handlers
 from tools.cli.modules.backtest import template_state as template_state_helpers
@@ -446,58 +447,25 @@ def group(
     state = load_state()
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
         enter_backtest_state(state, scope=BACKTEST_SPACE)
-    args = tuple(ctx.args)
-    show_help = config_arg_helpers.has_context_help(args)
-    verbose = "--verbose" in args
-    args = tuple(arg for arg in args if arg != "--verbose")
-    help_target = config_arg_helpers.context_help_target(args)
-    clean_args = config_arg_helpers.strip_context_help(args)
-    if config_arg_helpers.is_list_action(clean_args):
-        _print_group_list(state)
-        return
-    action = config_arg_helpers.group_action(clean_args)
-    selector_args, setting_args = config_arg_helpers.split_selector_and_local_setting_args(config_arg_helpers.strip_group_action_args(clean_args), selector_roots=_ADD_GROUP_SELECTOR_ROOTS)
-    group_settings = config_arg_helpers.parse_raw_settings(tuple(setting_args)) if setting_args else {}
-    if show_help and help_target and not help_target.has_value:
-        _print_group_field_help(state, help_target.option, batch="--batch" in clean_args)
-        return
-    if show_help:
-        _validate_settings_dict(state, group_settings)
-        if action == "add" and "--batch" in clean_args:
-            _print_group_batch_help()
-        else:
-            _print_backtest_settings_help(state, values=group_settings)
-        return
-    if action == "add":
-        selectors_list = _parse_group_add_selectors(tuple(selector_args), batch="--batch" in clean_args)
-        for selectors in selectors_list:
-            _append_group(state, selectors=selectors, extra_values=group_settings)
-        click.echo(f"新增分组: {len(selectors_list)}")
-        for group_item in state.backtest_groups[-len(selectors_list):]:
-            _print_group(group_item)
-    elif action == "edit":
-        groups = _selected_groups(state, clean_args)
-        selectors = parse_add_group_selectors(config_arg_helpers.remove_group_name_args(tuple(selector_args)))
-        for group_item in groups:
-            _edit_group(state, group_item, selectors=selectors, extra_values=group_settings)
-        click.echo(f"已修改分组: {len(groups)}")
-        for group_item in groups:
-            _print_group(group_item)
-    elif action in {"derive", "copy"}:
-        created = _derive_or_copy_groups(state, clean_args, selectors_args=tuple(selector_args), extra_values=group_settings, derived=action == "derive")
-        click.echo(f"新增{'派生' if action == 'derive' else '复制'}分组: {len(created)}")
-        for group_item in created:
-            _print_group(group_item)
-    elif action == "describe":
-        for group_item in _selected_groups(state, clean_args):
-            _print_group(group_item)
-    elif action == "run":
-        _run_backtest(state, groups=_selected_groups(state, clean_args, default_all=True), verbose=verbose)
-    else:
-        raise click.ClickException("group 需要明确动作：list、--add、--edit、--describe 或 --run")
-    save_state(state)
-    if action == "add":
-        click.echo("下一步: 这些参数会进入 backtest/group-test 的配置草稿；运行接口接好后可直接提交。")
+    changed = group_command_handlers.handle_group_command(
+        state,
+        tuple(ctx.args),
+        selector_roots=_ADD_GROUP_SELECTOR_ROOTS,
+        print_group_list=_print_group_list,
+        print_group_field_help=_print_group_field_help,
+        print_group_batch_help=_print_group_batch_help,
+        validate_settings=_validate_settings_dict,
+        print_settings_help=_print_backtest_settings_help,
+        parse_group_add_selectors=_parse_group_add_selectors,
+        append_group=_append_group,
+        selected_groups=_selected_groups,
+        edit_group=_edit_group,
+        derive_or_copy_groups=_derive_or_copy_groups,
+        print_group=_print_group,
+        run_backtest=_run_backtest,
+    )
+    if changed:
+        save_state(state)
 
 
 @backtest.command("long-short", context_settings=SELECTOR_HELP_CONTEXT)
