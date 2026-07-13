@@ -1092,6 +1092,87 @@ def _audit_event_payloads(
     return payloads
 
 
+def _audit_current_event_batch(
+    state: "BacktestRunState",
+    ctx: FlowContext,
+) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for strategy in sorted(ctx._drafts_by_strategy, key=lambda item: _strategy_alias(state, item)):
+        for draft in ctx._drafts_by_strategy.get(strategy, ()):
+            rows.append(_audit_event_subject_row(
+                state,
+                draft,
+                strategy=_strategy_alias(state, strategy),
+                ledger="",
+            ))
+    for ledger, drafts in sorted(ctx._drafts_by_ledger.items(), key=lambda item: str(item[0])):
+        for draft in drafts:
+            rows.append(_audit_event_subject_row(state, draft, strategy="", ledger=str(ledger)))
+    return {
+        "timestamp": str(ctx.timestamp) if ctx.timestamp is not None else "",
+        "event_kind": ctx.event_kind.name if ctx.event_kind is not None else "",
+        "batch_count": len(rows),
+        "subjects": rows,
+    }
+
+
+def _audit_event_subject_row(
+    state: "BacktestRunState",
+    draft: EventDraft,
+    *,
+    strategy: str,
+    ledger: str,
+) -> dict[str, Any]:
+    payload = _audit_event_subject_payload(draft.payload)
+    subject = (
+        payload.get("instrument")
+        or payload.get("product")
+        or payload.get("contract_product")
+        or payload.get("contract")
+        or payload.get("ledger_id")
+        or _audit_value(draft.index_key)
+        or ""
+    )
+    action = (
+        payload.get("notice_type")
+        or payload.get("kind")
+        or payload.get("status")
+        or payload.get("reason")
+        or ""
+    )
+    return {
+        "timestamp": str(draft.timestamp),
+        "event_kind": draft.kind.name,
+        "strategy": strategy,
+        "ledger": ledger,
+        "subject": _audit_value(subject),
+        "action": _audit_value(action),
+        "order_id": _audit_value(payload.get("order_id") if isinstance(payload, dict) else ""),
+    }
+
+
+def _audit_event_subject_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        try:
+            result = to_dict()
+            if isinstance(result, dict):
+                return result
+        except (TypeError, ValueError):
+            pass
+    result: dict[str, Any] = {}
+    for key in ("instrument", "product", "contract_product", "contract", "ledger_id", "notice_type", "kind", "status", "reason", "order_id"):
+        if hasattr(value, key):
+            result[key] = getattr(value, key)
+    fields = getattr(value, "fields", None)
+    if isinstance(fields, dict):
+        for key in ("instrument", "product", "contract_product", "contract", "ledger_id", "notice_type", "kind", "status", "reason", "order_id"):
+            result.setdefault(key, fields.get(key))
+    return result
+
+
 def _audit_event_payload_changes(
     before: list[dict[str, Any]], after: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -1206,6 +1287,7 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
     ledger_snapshots = _audit_ledgers(state, applicable, all_active_ledgers or ctx.active_ledgers)
     return {
         "timestamp": str(timestamp) if timestamp is not None else "",
+        "current_event": _audit_current_event_batch(state, ctx),
         "inputs": _audit_field_records(
             state, ctx, f.inputs, applicable, ledger_snapshots, include_strategy_config=True,
         ),
@@ -1277,6 +1359,8 @@ def _step_after_flow(f, state, ctx, step_callback, before):
     step_callback({
         "phase": "step",
         "timestamp": before.get("timestamp", ""),
+        "event_kind": f.event_kind.name if f.event_kind is not None else "",
+        "current_event": before.get("current_event", {}),
         "flow_name": f.effective_description or "",
         "flow_id": f.name or "",
         "flow_phase": f.phase.value,

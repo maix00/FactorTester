@@ -290,6 +290,10 @@ def test_make_dispatcher_ledger_events_activate_exact_registered_strategies():
     assert seen == [frozenset({s1, s2})]
     assert [item["strategy"] for item in step_records[0]["strategies"]] == ["A", "B"]
     assert [item["ledger"] for item in step_records[0]["ledgers_before"]] == ["shared-book"]
+    assert step_records[0]["event_kind"] == "LEDGER"
+    assert step_records[0]["current_event"]["event_kind"] == "LEDGER"
+    assert step_records[0]["current_event"]["batch_count"] == 1
+    assert step_records[0]["current_event"]["subjects"][0]["ledger"] == "shared-book"
     assert "C" not in {item["strategy"] for item in step_records[0]["strategies"]}
     assert "other-book" not in {item["ledger"] for item in step_records[0]["ledgers_before"]}
 

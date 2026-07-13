@@ -21,6 +21,7 @@ from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
     _StepNavigator,
+    _audit_change_cell,
     _audit_table_lines,
     _audit_text,
     _handle_step_event,
@@ -115,6 +116,14 @@ def test_step_audit_changes_follow_backend_display_order(capsys) -> None:
     assert positions == sorted(positions)
 
 
+def test_step_audit_change_cell_uses_distinct_highlight() -> None:
+    cell = _audit_change_cell("100", "90")
+
+    assert "\x1b[30m" in cell
+    assert "\x1b[43m" in cell
+    assert "100 -> 90" in cell
+
+
 def test_step_audit_groups_identical_changes_inline_without_before_after_sections(capsys) -> None:
     changes = [
         {
@@ -151,8 +160,8 @@ def test_step_audit_groups_identical_changes_inline_without_before_after_section
     assert "L2" in out
     assert "P2" in out
     assert "A2" in out
-    assert "before" in out
-    assert "after" in out
+    assert "change" in out
+    assert "100 -> 90" in out
     assert "100" in out
     assert "90" in out
     assert "修改前" not in out
@@ -336,8 +345,8 @@ def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
     assert "private:L8" in out
     assert "pool-8" in out
     assert "A8" in out
-    assert "before" in out
-    assert "after" in out
+    assert "change" in out
+    assert "null -> 0.0" in out
     assert out.count("null") == 8
     assert out.count("0") >= 8
 
@@ -384,8 +393,8 @@ def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
     assert out.count("pool-1") == 3
     assert "ledger/cash pool/strategy 路由同上" not in out
     assert "value" in out
-    assert "before" in out
-    assert "after" in out
+    assert "change" in out
+    assert "null -> 100" in out
     assert "Auto" in out
     assert "100" in out
 
@@ -596,6 +605,46 @@ def test_step_audit_renders_event_drafts_as_table() -> None:
     assert "明细 1 (details):" in text
     assert "extra" in text
     assert '"extra"' not in text
+
+
+def test_step_event_payload_change_renders_order_diff_table(capsys) -> None:
+    before = [{
+        "timestamp": "2026-01-05 09:02:00+08:00",
+        "strategy": "A1",
+        "instrument": "CZCE|F|SM|2603",
+        "intent_quantity": 438,
+        "quantity": 438,
+        "status": "scheduled",
+        "reject_reason": "",
+        "order_id": "A1-1",
+        "fields": {
+            "price_timestamp": "2026-01-05 09:03:00+08:00",
+            "execution_price_basis": "open",
+            "effective_price": 5910,
+        },
+    }]
+    after = [{
+        **before[0],
+        "fields": {
+            **before[0]["fields"],
+            "fee_open_quantity": 438,
+            "fee_close_quantity": 0,
+            "fee_cost": 258858,
+        },
+    }]
+
+    _print_event_payload_changes([
+        {"scope": "strategy", "strategy": "A1", "before": before, "after": after},
+    ])
+
+    out = capsys.readouterr().out
+    assert "订单变化表 rows=1" in out
+    assert "effective_price" in out
+    assert "fee_open_quantity" in out
+    assert "null -> 438" in out
+    assert "null -> 258858" in out
+    assert "before =" not in out
+    assert "after =" not in out
 
 
 def test_step_audit_renders_lifecycle_notices_as_single_table() -> None:
@@ -1257,6 +1306,17 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
             "flow_phase": "pre_replay",
             "flow_id": "resolve_run_window",
             "flow_name": "解析运行时间窗口",
+            "timestamp": "2026-01-05 09:02:00+08:00",
+            "current_event": {
+                "event_kind": "ORDER",
+                "batch_count": 1,
+                "subjects": [{
+                    "strategy": "A1",
+                    "subject": "CZCE|F|SM|2603",
+                    "action": "scheduled",
+                    "order_id": "A1-1",
+                }],
+            },
             "description": "",
             "strategies": [],
             "ledgers_before": [],
@@ -1272,7 +1332,11 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
     )
 
     out = capsys.readouterr().out
-    assert "\x1b[37m\x1b[41m\x1b[1m━━ FLOW PRE_REPLAY" in out
+    assert "\x1b[37m\x1b[41m\x1b[1m┏" in out
+    assert "FLOW PRE_REPLAY" in out
+    assert "timestamp: 2026-01-05 09:02:00+08:00" in out
+    assert "event: kind=ORDER; batch_count=1" in out
+    assert "event_subjects: A1:CZCE|F|SM|2603/scheduled" in out
     assert "\x1b[0m" in out
     assert posted == [("/step_continue", {"run_token": "run-token", "action": "continue"})]
 

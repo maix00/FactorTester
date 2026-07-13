@@ -12,6 +12,7 @@ import io
 import json
 import ast
 import math
+import re
 import shutil
 import textwrap
 from dataclasses import dataclass
@@ -32,6 +33,25 @@ from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fie
 from tools.testers.backtest.engines.native.flow import phase_label
 # Module-level mapping from group ID to short alias, populated at run time
 _short_alias_map: dict[str, str] = {}
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(value: object) -> str:
+    return _ANSI_ESCAPE_RE.sub("", str(value))
+
+
+def _audit_display_width(value: object) -> int:
+    return display_width(_strip_ansi(value))
+
+
+def _pad_audit_cell(value: object, width: int) -> str:
+    text = str(value)
+    return text + " " * max(width - _audit_display_width(text), 0)
+
+
+def _audit_change_cell(before: Any, after: Any) -> str:
+    return click.style(f"{before} -> {after}", fg="black", bg="yellow")
 
 # Field metadata comes from the executable-module registry, not a hand-picked
 # controller list. Adding a registered backtest module automatically makes its
@@ -2429,6 +2449,127 @@ def _audit_order_table_lines(value: list[dict[str, Any]], *, indent: str = "") -
     )
 
 
+def _audit_order_record_key(item: dict[str, Any], fallback_index: int) -> str:
+    order_id = item.get("order_id")
+    if order_id not in (None, ""):
+        return str(order_id)
+    return "|".join(str(part) for part in (
+        item.get("timestamp") or "",
+        item.get("strategy") or "",
+        item.get("instrument") or "",
+        fallback_index,
+    ))
+
+
+def _audit_order_field_values(item: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        return {}
+    fields = item.get("fields")
+    return dict(fields) if isinstance(fields, dict) else {}
+
+
+def _audit_order_field_change_cell(before: Any, after: Any) -> str:
+    before_text = _audit_scalar_cell(before)
+    after_text = _audit_scalar_cell(after)
+    if before_text == after_text:
+        return after_text
+    return _audit_change_cell(before_text, after_text)
+
+
+def _audit_order_diff_text(before: Any, after: Any) -> str | None:
+    before_list = [] if before is None else before
+    after_list = [] if after is None else after
+    if not isinstance(before_list, list) or not isinstance(after_list, list):
+        return None
+    if before_list and not _audit_is_order_list(before_list):
+        return None
+    if after_list and not _audit_is_order_list(after_list):
+        return None
+    if not before_list and not after_list:
+        return "（无订单变化）"
+
+    before_by_key = {_audit_order_record_key(item, index): item for index, item in enumerate(before_list) if isinstance(item, dict)}
+    after_by_key = {_audit_order_record_key(item, index): item for index, item in enumerate(after_list) if isinstance(item, dict)}
+    keys = [key for key in after_by_key]
+    keys.extend(key for key in before_by_key if key not in after_by_key)
+
+    base_columns = [
+        "timestamp", "strategy", "instrument", "intent_quantity", "quantity",
+        "status", "reject_reason", "order_id",
+    ]
+    field_columns: list[str] = []
+    preferred_fields = [
+        "price_timestamp",
+        "execution_price_basis",
+        "effective_price",
+        "fee_open_quantity",
+        "fee_close_quantity",
+        "fee_close_today_quantity",
+        "fee_close_yesterday_quantity",
+        "fee_close_today",
+        "fee_cost",
+        "margin_required",
+        "available_cash",
+        "cash_required",
+        "max_quantity",
+    ]
+    field_seen: set[str] = set()
+    for key in keys:
+        before_fields = _audit_order_field_values(before_by_key.get(key))
+        after_fields = _audit_order_field_values(after_by_key.get(key))
+        for field in preferred_fields:
+            if field in before_fields or field in after_fields:
+                field_seen.add(field)
+        for field in sorted(set(before_fields) | set(after_fields)):
+            if field not in field_seen:
+                field_seen.add(field)
+    field_columns = [field for field in preferred_fields if field in field_seen]
+    field_columns.extend(sorted(field_seen - set(field_columns)))
+
+    rows: list[tuple[Any, ...]] = []
+    for key in keys:
+        before_item = before_by_key.get(key)
+        after_item = after_by_key.get(key)
+        display_item = after_item or before_item or {}
+        before_fields = _audit_order_field_values(before_item)
+        after_fields = _audit_order_field_values(after_item)
+        if before_item is None:
+            operation = "新增"
+        elif after_item is None:
+            operation = "删除"
+        else:
+            operation = "修改"
+        row: list[Any] = [operation]
+        for column in base_columns:
+            before_value = before_item.get(column) if isinstance(before_item, dict) else None
+            after_value = after_item.get(column) if isinstance(after_item, dict) else None
+            display_value = display_item.get(column) if isinstance(display_item, dict) else None
+            if operation == "新增":
+                row.append(_audit_scalar_cell(after_value))
+            elif operation == "删除":
+                row.append(_audit_scalar_cell(before_value))
+            elif before_value != after_value:
+                row.append(_audit_order_field_change_cell(before_value, after_value))
+            else:
+                row.append(_audit_scalar_cell(display_value))
+        for field in field_columns:
+            if operation == "新增":
+                row.append(_audit_scalar_cell(after_fields.get(field)))
+            elif operation == "删除":
+                row.append(_audit_scalar_cell(before_fields.get(field)))
+            else:
+                row.append(_audit_order_field_change_cell(before_fields.get(field), after_fields.get(field)))
+        rows.append(tuple(row))
+
+    if not rows:
+        return "（无订单变化）"
+    lines = [
+        f"订单变化表 rows={len(rows)}（未截断；字段变化以黄色 before -> after 标识）"
+    ]
+    lines.extend(_audit_table_lines(("op", *base_columns, *field_columns), rows))
+    return "\n".join(lines)
+
+
 def _audit_trade_intent_text(value: dict[str, Any]) -> str:
     if value.get("type") == "TargetWeightIntent":
         rows = _audit_weight_rows(value.get("weights"))
@@ -2780,10 +2921,10 @@ def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: l
         label = "策略配置" if scope == "strategy_config" else "策略上下文"
         grouped.setdefault((label, before_text, after_text), []).append(str(change.get("strategy") or "?"))
     rows = [
-        (", ".join(sorted(dict.fromkeys(strategies))), label, before_text, after_text)
+        (", ".join(sorted(dict.fromkeys(strategies))), label, _audit_change_cell(before_text, after_text))
         for (label, before_text, after_text), strategies in grouped.items()
     ]
-    for line in _audit_table_lines(("strategy", "source", "before", "after"), sorted(rows), indent=prefix):
+    for line in _audit_table_lines(("strategy", "source", "change"), sorted(rows), indent=prefix):
         click.echo(line)
     return True
 
@@ -2806,15 +2947,14 @@ def _print_ledger_scalar_change_table(prefix: str, field_name: str, changes: lis
                 cash_pool,
                 _audit_join_entry_values(entries, "ledger"),
                 _audit_join_entry_strategies(entries),
-                before_text,
-                after_text,
+                _audit_change_cell(before_text, after_text),
             )
             for (cash_pool, before_text, after_text), entries in grouped.items()
         ]
-        for line in _audit_table_lines(("cash pool", "ledgers", "strategies", "before", "after"), sorted(rows), indent=prefix):
+        for line in _audit_table_lines(("cash pool", "ledgers", "strategies", "change"), sorted(rows), indent=prefix):
             click.echo(line)
         return True
-    rows: list[tuple[str, str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str]] = []
     for change in changes:
         before = _display_field_value(field_name, change.get("before"))
         after = _display_field_value(field_name, change.get("after"))
@@ -2826,10 +2966,9 @@ def _print_ledger_scalar_change_table(prefix: str, field_name: str, changes: lis
             str(change.get("ledger") or "?"),
             str(change.get("cash_pool") or "?"),
             ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无",
-            before_text,
-            after_text,
+            _audit_change_cell(before_text, after_text),
         ))
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", "before", "after"), sorted(rows), indent=prefix):
+    for line in _audit_table_lines(("ledger", "cash pool", "strategies", "change"), sorted(rows), indent=prefix):
         click.echo(line)
     return True
 
@@ -2919,7 +3058,7 @@ def _audit_table_lines(
                 scalar_row.append(str(cell))
         scalar_rows.append(scalar_row)
     widths = [
-        max(display_width(header_list[column]), *(display_width(row[column]) for row in scalar_rows))
+        max(_audit_display_width(header_list[column]), *(_audit_display_width(row[column]) for row in scalar_rows))
         for column in range(len(header_list))
     ]
     transposed = _audit_transposed_table_lines(header_list, scalar_rows, widths, indent=indent)
@@ -2963,6 +3102,8 @@ def _audit_transposed_table_lines(
     *,
     indent: str = "",
 ) -> list[str] | None:
+    if header_list and header_list[0] == "op":
+        return None
     if len(header_list) <= 8 or len(scalar_rows) > 3:
         return None
     key_count = _audit_table_key_column_count(header_list)
@@ -2982,7 +3123,7 @@ def _audit_transposed_table_lines(
     ]
     transposed_headers = ["column", *row_headers]
     transposed_widths = [
-        max(display_width(transposed_headers[column]), *(display_width(str(row[column])) for row in transposed_rows))
+        max(_audit_display_width(transposed_headers[column]), *(_audit_display_width(str(row[column])) for row in transposed_rows))
         for column in range(len(transposed_headers))
     ]
     key_label = " + ".join(header_list[:key_count])
@@ -3006,10 +3147,10 @@ def _audit_table_block_lines(
     indent: str = "",
 ) -> list[str]:
     lines = [
-        indent + "  ".join(pad_display(header_list[column], widths[column]) for column in columns).rstrip()
+        indent + "  ".join(_pad_audit_cell(header_list[column], widths[column]) for column in columns).rstrip()
     ]
     for row in scalar_rows:
-        lines.append(indent + "  ".join(pad_display(row[column], widths[column]) for column in columns).rstrip())
+        lines.append(indent + "  ".join(_pad_audit_cell(row[column], widths[column]) for column in columns).rstrip())
     return lines
 
 
@@ -3247,7 +3388,7 @@ def _audit_historical_field_state_diff_text(before: Any, after: Any) -> str | No
             before_value = before_row.get(field)
             after_value = after_row.get(field)
             if before_value != after_value:
-                changed_values.append(f"{_audit_scalar_cell(before_value)} -> {_audit_scalar_cell(after_value)}")
+                changed_values.append(_audit_change_cell(_audit_scalar_cell(before_value), _audit_scalar_cell(after_value)))
             else:
                 changed_values.append("")
         if any(changed_values):
@@ -3387,7 +3528,7 @@ def _audit_position_diff_values(
     for column in ("quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count"):
         before_value = _audit_position_scalar(before_payload or {}, column)
         after_value = _audit_position_scalar(after_payload or {}, column)
-        cells.append("" if before_value == after_value else f"{before_value} -> {after_value}")
+        cells.append("" if before_value == after_value else _audit_change_cell(before_value, after_value))
     return (*cells, _audit_lot_change_summary(before_payload, after_payload))
 
 
@@ -3404,8 +3545,8 @@ def _audit_lot_change_summary(before_payload: dict[str, Any] | None, after_paylo
         changed = _audit_changed_lot_count(before_sequence, after_sequence)
         if changed == 0:
             return ""
-        return f"{before_count} -> {after_count}; changed lots {changed}"
-    return f"{before_count} -> {after_count}"
+        return f"{_audit_change_cell(before_count, after_count)}; changed lots {changed}"
+    return _audit_change_cell(before_count, after_count)
 
 
 def _audit_lot_sequence(value: Any) -> list[Any] | None:
@@ -3654,7 +3795,7 @@ def _print_key_value_line(prefix: str, label: str, value: str) -> None:
     line_prefix = f"{prefix}{label} = "
     _print_wrapped_line(
         f"{line_prefix}{value}",
-        continuation_indent=" " * display_width(line_prefix),
+        continuation_indent=" " * _audit_display_width(line_prefix),
     )
 
 
@@ -3668,7 +3809,7 @@ def _print_audit_block_line(prefix: str, line: str) -> None:
 
 def _print_wrapped_line(line: str, *, continuation_indent: str) -> None:
     width = max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
-    if len(line) <= width:
+    if _audit_display_width(line) <= width:
         click.echo(line)
         return
     wrapped = textwrap.wrap(
@@ -3845,6 +3986,12 @@ def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list
 
 
 def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
+    order_diff_text = _audit_order_diff_text(before, after)
+    if order_diff_text is not None:
+        click.echo(f"{prefix}{label}:")
+        for line in order_diff_text.splitlines() or [""]:
+            _print_audit_block_line(f"{prefix}  ", line)
+        return
     positions_diff_text = _audit_positions_diff_text(before, after)
     if positions_diff_text is not None:
         click.echo(f"{prefix}{label}:")
@@ -3865,7 +4012,7 @@ def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) ->
     before_lines = _audit_text(before).splitlines() or [""]
     after_lines = _audit_text(after).splitlines() or [""]
     if len(before_lines) == 1 and len(after_lines) == 1:
-        _print_key_value_line(prefix, label, f"{before_lines[0]} -> {after_lines[0]}")
+        _print_key_value_line(prefix, label, _audit_change_cell(before_lines[0], after_lines[0]))
         return
     click.echo(f"{prefix}{label}:")
     click.echo(f"{prefix}  before =")
@@ -4087,6 +4234,51 @@ def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
         )
 
 
+def _current_event_subject_summary(current_event: dict[str, Any]) -> str:
+    subjects = current_event.get("subjects")
+    if not isinstance(subjects, list) or not subjects:
+        return "无事件主体"
+    parts: list[str] = []
+    for item in subjects[:5]:
+        if not isinstance(item, dict):
+            continue
+        strategy = item.get("strategy") or ""
+        ledger = item.get("ledger") or ""
+        subject = item.get("subject") or ""
+        action = item.get("action") or ""
+        order_id = item.get("order_id") or ""
+        owner = strategy or ledger or "共享"
+        detail = str(subject or action or order_id or "?")
+        if action and action != subject:
+            detail = f"{detail}/{action}" if detail else str(action)
+        parts.append(f"{owner}:{detail}")
+    remaining = len(subjects) - len(parts)
+    if remaining > 0:
+        parts.append(f"...另 {remaining} 条")
+    return "；".join(parts) if parts else "无事件主体"
+
+
+def _print_step_badge_box(data: dict[str, Any], phase_text: str, flow_id: str, flow_name: str, timestamp_text: str) -> None:
+    current_event = data.get("current_event")
+    if not isinstance(current_event, dict):
+        current_event = {}
+    event_kind = str(current_event.get("event_kind") or data.get("event_kind") or "")
+    batch_count = current_event.get("batch_count")
+    lines = [
+        f"FLOW {phase_text} · {flow_id} ({flow_name})",
+        f"timestamp: {timestamp_text or '-'}",
+    ]
+    if event_kind or batch_count not in (None, ""):
+        lines.append(f"event: kind={event_kind or '-'}; batch_count={batch_count if batch_count not in (None, '') else '-'}")
+        lines.append(f"event_subjects: {_current_event_subject_summary(current_event)}")
+    max_width = max(_audit_display_width(line) for line in lines)
+    border = "━" * (max_width + 2)
+    click.secho(f"┏{border}┓", fg="white", bg="red", bold=True, color=True)
+    for line in lines:
+        click.secho(f"┃ {_pad_audit_cell(line, max_width)} ┃", fg="white", bg="red", bold=True, color=True)
+    click.secho(f"┗{border}┛", fg="white", bg="red", bold=True, color=True)
+
+
 def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
     _print_step_section("字段声明审计")
     if not violations:
@@ -4180,15 +4372,8 @@ def _handle_step_event(
     flow_id = str(data.get("flow_id") or "")
     phase_text = f"{flow_phase.upper()} ({phase_label(flow_phase)})"
     timestamp_text = str(data.get("timestamp") or "")
-    timestamp_suffix = f" @ {timestamp_text}" if timestamp_text else ""
     click.echo("")
-    click.secho(
-        f"━━ FLOW {phase_text} · {flow_id} ({flow_name}){timestamp_suffix} ━━",
-        fg="white",
-        bg="red",
-        bold=True,
-        color=True,
-    )
+    _print_step_badge_box(data, phase_text, flow_id, flow_name, timestamp_text)
     description = str(data.get("description") or "")
     if description:
         click.echo(f"说明: {description}")
