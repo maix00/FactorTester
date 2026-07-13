@@ -590,7 +590,7 @@ def _akshare_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
             "last_trade_date": spec.get("last_trading_date"),
             "notice_date": spec.get("delivery_notice_date"),
             "delivery_date": spec.get("last_delivery_date"),
-            "lifecycle_source": f"AKShare {exchange} contract lifecycle",
+            "lifecycle_source": _contract_lifecycle_source_label(exchange, spec.get("source_function"), live=False),
         }
         product_code = str(spec.get("product_code") or "").upper()
         _select_akshare_lifecycle_spec(out, key, candidate, product_code, product_exchange)
@@ -704,7 +704,7 @@ def _akshare_live_lookup(exchange: str, key: str) -> dict[str, Any] | None:
         if not code:
             continue
         _akshare_live_cache[code] = {
-            "lifecycle_source_type": "live_akshare_then_local_db",
+            "lifecycle_source_type": "live_official_or_akshare_then_local_db",
             "lifecycle_exchange": exchange,
             "lifecycle_source_function": live_row.get("source_function") or f"fetch_and_store_live:{exchange}",
             "lifecycle_source_query_date": live_row.get("source_query_date"),
@@ -713,9 +713,30 @@ def _akshare_live_lookup(exchange: str, key: str) -> dict[str, Any] | None:
             "last_trade_date": live_row.get("last_trading_date"),
             "notice_date": live_row.get("delivery_notice_date"),
             "delivery_date": live_row.get("last_delivery_date"),
-            "lifecycle_source": f"AKShare {exchange} live lookup",
+            "lifecycle_source": _contract_lifecycle_source_label(
+                exchange,
+                live_row.get("source_function") or f"fetch_and_store_live:{exchange}",
+                live=True,
+            ),
         }
     return _akshare_live_cache.get(key)
+
+
+def _contract_lifecycle_source_label(exchange: str, source_function: Any, *, live: bool) -> str:
+    exchange_text = str(exchange or "").upper() or "unknown"
+    source_text = str(source_function or "")
+    suffix = " live lookup" if live else " contract lifecycle"
+    if source_text == "official_dce_portal_contract_info":
+        return f"DCE official portal{suffix}"
+    if source_text.startswith("official_contract_info_"):
+        return f"{exchange_text} official exchange endpoint{suffix}"
+    if source_text == "official_dce_portal_new_contract_info":
+        return f"DCE official portal new-contract listing{suffix}"
+    if source_text == "local_cnfutures_dayk_coverage":
+        return f"LocalCNFutures daily bars coverage{suffix}"
+    if source_text.startswith("futures_contract_info_"):
+        return f"AKShare {exchange_text}{suffix}"
+    return f"{exchange_text} contract lifecycle source={source_text or 'unknown'}"
 
 
 def _with_authoritative_lifecycle_fields(row: dict[str, Any]) -> dict[str, Any]:

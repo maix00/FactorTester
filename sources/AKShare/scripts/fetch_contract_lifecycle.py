@@ -1,23 +1,16 @@
-"""Fetch CN futures contract lifecycle (list/last-trading/delivery dates) via AKShare.
+"""Fetch CN futures contract lifecycle (list/last-trading/delivery dates).
 
-DCE and GFEX take no date argument and are fetched in one call, but that call
-only returns a recent rolling window (roughly the last year) of contracts,
-not full history back to each exchange's inception — there is no known way
-to get older delisted contracts out of these two endpoints. SHFE/INE/CZCE/
-CFFEX expose a daily snapshot of contracts listed as of a queried trading
-day, so this script polls a handful of historical dates (``--step-days``
-apart) to discover contracts. A contract already on file is never re-fetched
-into the store: known contract codes are tracked in memory across the whole
-run and checked against ``known_contract_codes`` before each date's rows are
-written, so repeat runs against the same date range do no redundant writes.
+DCE is fetched from the official DCE portal in a browser context. GFEX takes
+no date argument. SHFE/INE/CZCE/CFFEX expose daily snapshots, so this script
+polls historical dates (``--step-days`` apart) to discover contracts. A
+contract already on file is never re-fetched into the store: known contract
+codes are tracked in memory across the whole run and checked against
+``known_contract_codes`` before each date's rows are written.
 
-DCE additionally sits behind a WAF that rejects akshare's plain request
-outright (412), even from a real headless-browser session. As a manual
-escape hatch, set ``GTHT_DCE_COOKIE`` to a cookie string copied from a real
-logged-in browser tab (DevTools → Network → any dce.com.cn request → Copy as
-cURL, or Application → Cookies) before running this script; see
-``sources/AKShare/client.py`` for details. The cookie is short-lived and this
-is not a substitute for a real fix.
+For 2024+ historical gaps, run
+``backfill_contract_lifecycle_from_local_dayk.py`` after official/portal
+ingests; it fills local daily-bar coverage and avoids treating right-censored
+data cutoffs as last trading days.
 
 Usage:
     PYTHONPATH=. python sources/AKShare/scripts/fetch_contract_lifecycle.py \\

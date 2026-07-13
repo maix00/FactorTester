@@ -1,25 +1,27 @@
-"""AKShare exchange contract-info HTTP client, with a raw-response cache.
+"""Exchange contract-info lifecycle client, with a raw-response cache.
 
-Each exchange publishes its own "contract base info" feed and ``akshare``
-wraps them as one function per exchange (see ``akshare.futures_derivative``):
+Each exchange publishes its own "contract base info" feed.  This module uses
+direct official endpoints where practical and keeps AKShare-compatible fallback
+shapes for callers that already depend on this package:
 
 - ``futures_contract_info_shfe(date)`` / ``futures_contract_info_ine(date)``:
   a daily snapshot of contracts listed as of ``date`` (YYYYMMDD). Building
   full history requires querying several historical trading days.
-- ``futures_contract_info_dce()`` / ``futures_contract_info_gfex()``: no date
-  argument, one call returns the exchange's entire contract history.
+- DCE is fetched from the official portal in a browser context; the old
+  AKShare DCE endpoint is not used.
+- GFEX takes no date argument and returns the exchange's contract history.
 - ``futures_contract_info_czce(date)`` / ``futures_contract_info_cffex(date)``:
   same daily-snapshot shape as SHFE/INE.
 
-This module only wraps those calls and caches the raw response so repeated
-runs (e.g. re-polling the same historical date) do not hit the network again.
-Field normalization lives in ``lifecycle.py``.
+This module caches the raw response so repeated runs do not hit the network
+again. Field normalization lives in ``lifecycle.py``.
 """
 from __future__ import annotations
 
 import json
 import os
 import time
+import xml.etree.ElementTree as ET
 from typing import Any
 
 import pandas as pd
@@ -29,18 +31,12 @@ from tools.data.sqlite.db import connect_sqlite
 
 RESPONSES_TABLE = "src_akshare_responses"
 
-# DCE's WAF blocks akshare's plain requests.post() outright (412, even from a
-# real headless-browser session — see AGENT session notes on this branch).
-# As a manual escape hatch, a cookie string copied from a real logged-in
-# browser tab (DevTools → Network → any dce.com.cn request → Copy as cURL, or
-# Application → Cookies) can be supplied via this env var; the cookie is
-# short-lived and this is not a substitute for a real fix.
-_DCE_COOKIE_ENV = "GTHT_DCE_COOKIE"
 _DCE_USER_AGENT_ENV = "GTHT_DCE_USER_AGENT"
 _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
 )
+_REQUEST_TIMEOUT = (3, 8)
 
 
 def _connect_cache(db_path: str | None = None):
@@ -67,7 +63,9 @@ def _read_cache(source_function: str, query_key: str, *, db_path: str | None = N
         ).fetchone()
     if row is None:
         return None
-    return pd.DataFrame(json.loads(row["data_json"]))
+    df = pd.DataFrame(json.loads(row["data_json"]))
+    df.attrs["source_function"] = source_function
+    return df
 
 
 def _write_cache(source_function: str, query_key: str, df: pd.DataFrame, *, db_path: str | None = None) -> None:
@@ -97,95 +95,183 @@ def _fetch(source_function: str, query_key: str, *, refresh: bool, db_path: str 
         if cached is not None:
             return cached
     df = call()
+    df.attrs["source_function"] = source_function
     _write_cache(source_function, query_key, df, db_path=db_path)
     return df
+
+
+def _fetch_first_available(
+    candidates: list[tuple[str, str, Any]],
+    *,
+    refresh: bool,
+    db_path: str | None,
+) -> pd.DataFrame:
+    """Fetch from the preferred official feed, then compatible fallbacks."""
+    if not refresh:
+        for source_function, query_key, _call in candidates:
+            cached = _read_cache(source_function, query_key, db_path=db_path)
+            if cached is not None:
+                return cached
+    errors: list[str] = []
+    for source_function, query_key, call in candidates:
+        try:
+            df = call()
+        except Exception as exc:
+            errors.append(f"{source_function}: {type(exc).__name__}: {exc}")
+            continue
+        df.attrs["source_function"] = source_function
+        _write_cache(source_function, query_key, df, db_path=db_path)
+        return df
+    raise RuntimeError("all contract lifecycle sources failed: " + "; ".join(errors))
+
+
+def _default_headers() -> dict[str, str]:
+    return {
+        "User-Agent": os.environ.get(_DCE_USER_AGENT_ENV) or _DEFAULT_USER_AGENT,
+        "Accept": "application/json, text/plain, */*",
+    }
+
+
+def _official_contract_info_shfe_like(exchange: str, date: str) -> pd.DataFrame:
+    import requests
+
+    base_url = {
+        "SHFE": "https://www.shfe.com.cn/data/busiparamdata/future/ContractBaseInfo{date}.dat",
+        "INE": "https://www.ine.cn/data/busiparamdata/future/ContractBaseInfo{date}.dat",
+    }[exchange]
+    response = requests.get(base_url.format(date=date), headers=_default_headers(), timeout=_REQUEST_TIMEOUT)
+    response.raise_for_status()
+    payload = response.json()
+    rows = payload.get("o_curinstrument") or payload.get("o_cursor") or payload.get("data") or []
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return pd.DataFrame(columns=["合约代码", "上市日", "到期日", "开始交割日", "最后交割日", "挂牌基准价"])
+    return frame.rename(columns={
+        "INSTRUMENTID": "合约代码",
+        "PRODUCTID": "产品代码",
+        "STARTDELIVDATE": "开始交割日",
+        "ENDDELIVDATE": "最后交割日",
+        "EXPIREDATE": "到期日",
+        "OPENDATE": "上市日",
+        "BASISPRICE": "挂牌基准价",
+    })
+
+
+def _official_contract_info_czce(date: str) -> pd.DataFrame:
+    import requests
+
+    year = str(date)[:4]
+    url = f"http://www.czce.com.cn/cn/DFSStaticFiles/Future/{year}/{date}/FutureDataReferenceData.xml"
+    response = requests.get(url, headers=_default_headers(), timeout=_REQUEST_TIMEOUT)
+    response.raise_for_status()
+    text = response.content.decode(response.encoding or "utf-8", errors="replace").replace("&nbsp;", " ")
+    root = ET.fromstring(text)
+    rows: list[dict[str, Any]] = []
+    for contract in root.findall(".//Contract"):
+        row = {child.tag: (child.text or "").strip() for child in list(contract)}
+        if row:
+            rows.append(row)
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return pd.DataFrame(columns=["合约代码", "产品代码", "第一交易日", "交割通知日", "最后交割日"])
+    return frame.rename(columns={
+        "contractId": "合约代码",
+        "productId": "产品代码",
+        "firstTradingDay": "第一交易日",
+        "lastTradingDay": "最后交易日待国家公布2025年节假日安排后进行调整",
+        "deliveryNoticeDay": "交割通知日",
+        "lastDeliveryDay": "最后交割日",
+    })
+
+
+def _official_contract_info_cffex(date: str) -> pd.DataFrame:
+    import requests
+
+    url = f"http://www.cffex.com.cn/sj/jycs/{date[:6]}/{date[6:]}/index.xml"
+    response = requests.get(url, headers=_default_headers(), timeout=_REQUEST_TIMEOUT)
+    response.raise_for_status()
+    text = response.content.decode(response.encoding or "utf-8", errors="replace").replace("&nbsp;", " ")
+    root = ET.fromstring(text)
+    rows: list[dict[str, Any]] = []
+    for contract in root.findall(".//contract"):
+        row = {child.tag: (child.text or "").strip() for child in list(contract)}
+        if row:
+            rows.append(row)
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return pd.DataFrame(columns=["查询交易日", "品种", "合约代码", "挂盘基准价", "上市日", "最后交易日"])
+    frame = frame.rename(columns={
+        "instrumentid": "合约代码",
+        "productid": "品种",
+        "basisprice": "挂盘基准价",
+        "opendate": "上市日",
+        "expiredate": "最后交易日",
+    })
+    frame["查询交易日"] = date
+    return frame
 
 
 def fetch_contract_info_shfe(date: str, *, refresh: bool = False, db_path: str | None = None) -> pd.DataFrame:
     import akshare as ak
 
-    return _fetch(
-        "futures_contract_info_shfe", date, refresh=refresh, db_path=db_path,
-        call=lambda: ak.futures_contract_info_shfe(date=date),
+    return _fetch_first_available(
+        [
+            ("official_contract_info_shfe", date, lambda: _official_contract_info_shfe_like("SHFE", date)),
+            ("futures_contract_info_shfe", date, lambda: ak.futures_contract_info_shfe(date=date)),
+        ],
+        refresh=refresh,
+        db_path=db_path,
     )
 
 
 def fetch_contract_info_ine(date: str, *, refresh: bool = False, db_path: str | None = None) -> pd.DataFrame:
     import akshare as ak
 
-    return _fetch(
-        "futures_contract_info_ine", date, refresh=refresh, db_path=db_path,
-        call=lambda: ak.futures_contract_info_ine(date=date),
+    return _fetch_first_available(
+        [
+            ("official_contract_info_ine", date, lambda: _official_contract_info_shfe_like("INE", date)),
+            ("futures_contract_info_ine", date, lambda: ak.futures_contract_info_ine(date=date)),
+        ],
+        refresh=refresh,
+        db_path=db_path,
     )
 
 
-def _fetch_contract_info_dce_with_cookie(cookie: str) -> pd.DataFrame:
-    """Reimplements akshare's futures_contract_info_dce() with a manual Cookie
-    header, since akshare's own call takes no headers/session argument and
-    DCE's WAF rejects the plain request outright."""
-    import requests
-
-    url = "http://www.dce.com.cn/dcereport/publicweb/tradepara/contractInfo"
-    payload = {"lang": "zh", "tradeType": "1", "varietyId": "all"}
-    headers = {
-        "User-Agent": os.environ.get(_DCE_USER_AGENT_ENV) or _DEFAULT_USER_AGENT,
-        "Accept": "application/json, text/plain, */*",
-        "Content-Type": "application/json",
-        "Referer": "http://www.dce.com.cn/dalianshangpin/ywfw/ywcs/jycs/hyxxcx/index.html",
-        "Cookie": cookie,
-    }
-    response = requests.post(url, json=payload, headers=headers, timeout=20)
-    response.raise_for_status()
-    data_json = response.json()
-    df = pd.DataFrame(data_json["data"])
-    df = df.rename(columns={
-        "contractId": "合约",
-        "variety": "品种名称",
-        "varietyOrder": "品种代码",
-        "unit": "交易单位",
-        "tick": "最小变动价位",
-        "startTradeDate": "开始交易日",
-        "endTradeDate": "最后交易日",
-        "endDeliveryDate": "最后交割日",
-    })
-    df = df[["品种名称", "合约", "交易单位", "最小变动价位", "开始交易日", "最后交易日", "最后交割日"]]
-    df["交易单位"] = pd.to_numeric(df["交易单位"], errors="coerce")
-    df["最小变动价位"] = pd.to_numeric(df["最小变动价位"], errors="coerce")
-    for column in ("开始交易日", "最后交易日", "最后交割日"):
-        df[column] = pd.to_datetime(df[column], format="%Y%m%d", errors="coerce").dt.date
-    return df
-
-
 def fetch_contract_info_dce(*, refresh: bool = False, db_path: str | None = None) -> pd.DataFrame:
-    cookie = os.environ.get(_DCE_COOKIE_ENV)
-    if cookie:
-        return _fetch(
-            "futures_contract_info_dce", "all", refresh=refresh, db_path=db_path,
-            call=lambda: _fetch_contract_info_dce_with_cookie(cookie),
-        )
-    import akshare as ak
+    from sources.DCE.portal import fetch_contract_info
 
     return _fetch(
-        "futures_contract_info_dce", "all", refresh=refresh, db_path=db_path,
-        call=lambda: ak.futures_contract_info_dce(),
+        "official_dce_portal_contract_info",
+        "all",
+        refresh=refresh,
+        db_path=db_path,
+        call=fetch_contract_info,
     )
 
 
 def fetch_contract_info_czce(date: str, *, refresh: bool = False, db_path: str | None = None) -> pd.DataFrame:
     import akshare as ak
 
-    return _fetch(
-        "futures_contract_info_czce", date, refresh=refresh, db_path=db_path,
-        call=lambda: ak.futures_contract_info_czce(date=date),
+    return _fetch_first_available(
+        [
+            ("official_contract_info_czce", date, lambda: _official_contract_info_czce(date)),
+            ("futures_contract_info_czce", date, lambda: ak.futures_contract_info_czce(date=date)),
+        ],
+        refresh=refresh,
+        db_path=db_path,
     )
 
 
 def fetch_contract_info_cffex(date: str, *, refresh: bool = False, db_path: str | None = None) -> pd.DataFrame:
     import akshare as ak
 
-    return _fetch(
-        "futures_contract_info_cffex", date, refresh=refresh, db_path=db_path,
-        call=lambda: ak.futures_contract_info_cffex(date=date),
+    return _fetch_first_available(
+        [
+            ("official_contract_info_cffex", date, lambda: _official_contract_info_cffex(date)),
+            ("futures_contract_info_cffex", date, lambda: ak.futures_contract_info_cffex(date=date)),
+        ],
+        refresh=refresh,
+        db_path=db_path,
     )
 
 

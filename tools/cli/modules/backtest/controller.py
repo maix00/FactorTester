@@ -2815,16 +2815,98 @@ def _audit_table_lines(
         max(display_width(header_list[column]), *(display_width(row[column]) for row in scalar_rows))
         for column in range(len(header_list))
     ]
-    lines = [
-        indent + "  ".join(pad_display(header, widths[index]) for index, header in enumerate(header_list)).rstrip()
-    ]
-    for row in scalar_rows:
-        lines.append(indent + "  ".join(pad_display(cell, widths[index]) for index, cell in enumerate(row)).rstrip())
+    column_groups = _audit_table_column_groups(header_list, scalar_rows, widths, indent=indent)
+    if len(column_groups) > 1:
+        lines: list[str] = []
+        for group_index, columns in enumerate(column_groups, start=1):
+            if lines:
+                lines.append("")
+            visible_headers = [header_list[column] for column in columns]
+            non_key_headers = visible_headers[_audit_table_key_column_count(header_list):]
+            if non_key_headers:
+                lines.append(f"{indent}columns {group_index}/{len(column_groups)}: {', '.join(non_key_headers)}")
+            else:
+                lines.append(f"{indent}columns {group_index}/{len(column_groups)}")
+            lines.extend(_audit_table_block_lines(header_list, scalar_rows, widths, columns, indent=indent))
+        for index, header, value in details:
+            lines.append(f"{indent}明细 {index} ({header}):")
+            for line in _audit_text(value).splitlines() or [""]:
+                lines.append(f"{indent}  {line}")
+        return lines
+    lines = _audit_table_block_lines(header_list, scalar_rows, widths, column_groups[0], indent=indent)
     for index, header, value in details:
         lines.append(f"{indent}明细 {index} ({header}):")
         for line in _audit_text(value).splitlines() or [""]:
             lines.append(f"{indent}  {line}")
     return lines
+
+
+def _audit_table_block_lines(
+    header_list: list[str],
+    scalar_rows: list[list[str]],
+    widths: list[int],
+    columns: list[int],
+    *,
+    indent: str = "",
+) -> list[str]:
+    lines = [
+        indent + "  ".join(pad_display(header_list[column], widths[column]) for column in columns).rstrip()
+    ]
+    for row in scalar_rows:
+        lines.append(indent + "  ".join(pad_display(row[column], widths[column]) for column in columns).rstrip())
+    return lines
+
+
+def _audit_table_column_groups(
+    header_list: list[str],
+    scalar_rows: list[list[str]],
+    widths: list[int],
+    *,
+    indent: str = "",
+) -> list[list[int]]:
+    if not header_list:
+        return [[]]
+    max_width = max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
+    full_width = len(indent) + sum(widths) + max(len(widths) - 1, 0) * 2
+    if full_width <= max_width:
+        return [list(range(len(header_list)))]
+    key_count = _audit_table_key_column_count(header_list)
+    key_columns = list(range(min(key_count, len(header_list))))
+    value_columns = list(range(len(key_columns), len(header_list)))
+    if not value_columns:
+        return [key_columns]
+    key_width = sum(widths[column] for column in key_columns) + max(len(key_columns), 0) * 2
+    available = max(20, max_width - len(indent) - key_width)
+    groups: list[list[int]] = []
+    current: list[int] = []
+    current_width = 0
+    for column in value_columns:
+        addition = widths[column] + (2 if current else 0)
+        if current and current_width + addition > available:
+            groups.append([*key_columns, *current])
+            current = [column]
+            current_width = widths[column]
+        else:
+            current.append(column)
+            current_width += addition
+    if current:
+        groups.append([*key_columns, *current])
+    return groups or [list(range(len(header_list)))]
+
+
+def _audit_table_key_column_count(header_list: list[str]) -> int:
+    if not header_list:
+        return 0
+    key_headers = {
+        "key", "product", "strategy", "ledger", "cash pool", "notice_time",
+        "timestamp", "index", "event", "order_id",
+    }
+    first = header_list[0]
+    if first in {"notice_time", "timestamp"} and len(header_list) > 1 and header_list[1] in {"strategy", "event"}:
+        return 2
+    if first == "ledger" and len(header_list) > 1 and header_list[1] == "cash pool":
+        return 2
+    return 1 if first in key_headers else 1
 
 
 def _audit_table_cell_is_complex(value: Any) -> bool:

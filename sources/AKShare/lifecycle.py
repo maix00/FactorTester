@@ -54,6 +54,13 @@ _COLUMNS = (
 _CZCE_LAST_TRADING_DAY_COLUMN = "最后交易日待国家公布2025年节假日安排后进行调整"
 
 
+def _source_function(df: pd.DataFrame, default: str) -> str:
+    value = df.attrs.get("source_function")
+    if value not in (None, ""):
+        return str(value)
+    return default
+
+
 def ensure_schema(conn) -> None:
     conn.execute(
         f"""
@@ -166,14 +173,25 @@ def _normalize_shfe_like(df: pd.DataFrame, *, exchange: str, source_function: st
 
 
 def normalize_shfe(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
-    return _normalize_shfe_like(df, exchange="SHFE", source_function="futures_contract_info_shfe", query_date=query_date)
+    return _normalize_shfe_like(
+        df,
+        exchange="SHFE",
+        source_function=_source_function(df, "futures_contract_info_shfe"),
+        query_date=query_date,
+    )
 
 
 def normalize_ine(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
-    return _normalize_shfe_like(df, exchange="INE", source_function="futures_contract_info_ine", query_date=query_date)
+    return _normalize_shfe_like(
+        df,
+        exchange="INE",
+        source_function=_source_function(df, "futures_contract_info_ine"),
+        query_date=query_date,
+    )
 
 
 def normalize_dce(df: pd.DataFrame) -> list[dict[str, Any]]:
+    source_function = _source_function(df, "futures_contract_info_dce")
     rows = []
     for _, row in df.iterrows():
         raw = row.to_dict()
@@ -185,7 +203,7 @@ def normalize_dce(df: pd.DataFrame) -> list[dict[str, Any]]:
             last_trading_date=_col(row, "最后交易日"),
             last_delivery_date=_col(row, "最后交割日"),
             source_query_date=None,
-            source_function="futures_contract_info_dce",
+            source_function=source_function,
             raw_row=raw,
         )
         if item is not None:
@@ -194,6 +212,7 @@ def normalize_dce(df: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 def normalize_gfex(df: pd.DataFrame) -> list[dict[str, Any]]:
+    source_function = _source_function(df, "futures_contract_info_gfex")
     rows = []
     for _, row in df.iterrows():
         raw = row.to_dict()
@@ -205,7 +224,7 @@ def normalize_gfex(df: pd.DataFrame) -> list[dict[str, Any]]:
             last_trading_date=_col(row, "最后交易日"),
             last_delivery_date=_col(row, "最后交割日"),
             source_query_date=None,
-            source_function="futures_contract_info_gfex",
+            source_function=source_function,
             raw_row=raw,
         )
         if item is not None:
@@ -214,6 +233,7 @@ def normalize_gfex(df: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 def normalize_czce(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
+    source_function = _source_function(df, "futures_contract_info_czce")
     rows = []
     for _, row in df.iterrows():
         raw = row.to_dict()
@@ -226,7 +246,7 @@ def normalize_czce(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
             delivery_notice_date=_col(row, "交割通知日"),
             last_delivery_date=_col(row, "最后交割日"),
             source_query_date=query_date,
-            source_function="futures_contract_info_czce",
+            source_function=source_function,
             raw_row=raw,
         )
         if item is not None:
@@ -235,6 +255,7 @@ def normalize_czce(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
 
 
 def normalize_cffex(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
+    source_function = _source_function(df, "futures_contract_info_cffex")
     rows = []
     for _, row in df.iterrows():
         raw = row.to_dict()
@@ -246,7 +267,7 @@ def normalize_cffex(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
             last_trading_date=_col(row, "最后交易日"),
             listing_base_price=_col(row, "挂盘基准价"),
             source_query_date=query_date,
-            source_function="futures_contract_info_cffex",
+            source_function=source_function,
             raw_row=raw,
         )
         if item is not None:

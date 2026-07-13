@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import datetime
-from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
 from sources.AKShare import client
 from sources.AKShare import lifecycle as lc
+from sources.AKShare.scripts.backfill_contract_lifecycle_from_local_dayk import lifecycle_rows_from_dayk
+from sources.DCE import portal as dce_portal
 
 
 def test_normalize_shfe_maps_expiry_as_last_trading_date():
@@ -192,25 +193,15 @@ def test_read_contract_lifecycle_filters_by_product_and_contract(tmp_path):
     assert by_contract.iloc[0]["contract_code"] == "SI2411"
 
 
-def test_dce_cookie_fetch_matches_akshare_column_shape():
-    fake_response = MagicMock()
-    fake_response.raise_for_status = lambda: None
-    fake_response.json = lambda: {"data": [{
-        "contractId": "m2601", "variety": "豆粕", "varietyOrder": "M", "unit": "10",
+def test_dce_portal_frame_matches_lifecycle_column_shape():
+    df = dce_portal._contract_info_frame([{
+        "contractId": "m2601", "variety": "豆粕", "varietyOrder": "m", "unit": "10",
         "tick": "1.0", "startTradeDate": "20250915", "endTradeDate": "20261113",
         "endDeliveryDate": "20261117",
-    }]}
-    captured: dict = {}
+    }])
+    df.attrs["source_function"] = "official_dce_portal_contract_info"
 
-    def fake_post(url, json=None, headers=None, timeout=None):
-        captured["headers"] = headers
-        return fake_response
-
-    with patch("requests.post", side_effect=fake_post):
-        df = client._fetch_contract_info_dce_with_cookie("hNUS9DnJtejwS=abc; hNUS9DnJtejwT=def")
-
-    assert captured["headers"]["Cookie"] == "hNUS9DnJtejwS=abc; hNUS9DnJtejwT=def"
-    assert list(df.columns) == ["品种名称", "合约", "交易单位", "最小变动价位", "开始交易日", "最后交易日", "最后交割日"]
+    assert list(df.columns) == ["品种名称", "品种代码", "合约", "交易单位", "最小变动价位", "开始交易日", "最后交易日", "最后交割日"]
 
     rows = lc.normalize_dce(df)
     assert rows == [{
@@ -224,23 +215,86 @@ def test_dce_cookie_fetch_matches_akshare_column_shape():
         "last_delivery_date": "2026-11-17",
         "listing_base_price": None,
         "source_query_date": None,
-        "source_function": "futures_contract_info_dce",
+        "source_function": "official_dce_portal_contract_info",
         "raw_json": rows[0]["raw_json"],
         "fetched_at": rows[0]["fetched_at"],
     }]
 
 
-def test_fetch_contract_info_dce_uses_cookie_when_env_set(monkeypatch, tmp_path):
-    monkeypatch.setenv(client._DCE_COOKIE_ENV, "hNUS9DnJtejwS=abc")
-    calls = []
-    monkeypatch.setattr(
-        client, "_fetch_contract_info_dce_with_cookie",
-        lambda cookie: calls.append(cookie) or pd.DataFrame(columns=[
-            "品种名称", "合约", "交易单位", "最小变动价位", "开始交易日", "最后交易日", "最后交割日",
-        ]),
-    )
+def test_fetch_contract_info_dce_uses_official_portal(monkeypatch, tmp_path):
+    calls = 0
+
+    def fake_fetch_contract_info():
+        nonlocal calls
+        calls += 1
+        df = pd.DataFrame(columns=["品种名称", "品种代码", "合约", "交易单位", "最小变动价位", "开始交易日", "最后交易日", "最后交割日"])
+        df.attrs["source_function"] = "official_dce_portal_contract_info"
+        return df
+
+    monkeypatch.setattr("sources.DCE.portal.fetch_contract_info", fake_fetch_contract_info)
     db_path = str(tmp_path / "cache.sqlite")
 
     client.fetch_contract_info_dce(db_path=db_path)
 
-    assert calls == ["hNUS9DnJtejwS=abc"]
+    assert calls == 1
+
+
+def test_dce_new_contract_info_normalizes_query_date(monkeypatch):
+    monkeypatch.setattr(
+        dce_portal,
+        "_post_publicweb",
+        lambda endpoint, payload, timeout_seconds: [{
+            "contractId": "l2607F",
+            "variety": "聚乙烯月均价",
+            "varietyOrder": "l-F",
+            "startTradeDate": "20260105",
+            "refPriceUnit": "6499元/吨",
+            "noRiseLimit": "6%",
+            "noFallLimit": "6%",
+        }],
+    )
+
+    df = dce_portal.fetch_new_contract_info("20260102")
+
+    assert df.attrs["source_function"] == "official_dce_portal_new_contract_info"
+    assert df.attrs["source_query_date"] == "20260102"
+    assert df.iloc[0]["合约"] == "l2607F"
+    assert str(df.iloc[0]["开始交易日"]) == "2026-01-05"
+
+
+def test_local_dayk_backfill_does_not_treat_data_cutoff_as_last_trade(tmp_path):
+    path = tmp_path / "dayk.parquet"
+    dayk = pd.DataFrame([
+        {
+            "exchange_id": "DCE",
+            "product_id": "M",
+            "instrument_id": "M2409",
+            "unique_instrument_id": "DCE|F|M|2409",
+            "trading_day": pd.Timestamp("2024-09-12"),
+            "close_price": 3000.0,
+        },
+        {
+            "exchange_id": "DCE",
+            "product_id": "M",
+            "instrument_id": "M2409",
+            "unique_instrument_id": "DCE|F|M|2409",
+            "trading_day": pd.Timestamp("2024-09-13"),
+            "close_price": 3001.0,
+        },
+        {
+            "exchange_id": "DCE",
+            "product_id": "M",
+            "instrument_id": "M2609",
+            "unique_instrument_id": "DCE|F|M|2609",
+            "trading_day": pd.Timestamp("2026-07-03"),
+            "close_price": 3100.0,
+        },
+    ])
+    dayk.to_parquet(path)
+
+    rows = lifecycle_rows_from_dayk(path, start_date="2024-01-01")
+    by_contract = {row["contract_code"]: row for row in rows}
+
+    assert by_contract["M2409"]["last_trading_date"] == "2024-09-13"
+    assert by_contract["M2609"]["last_trading_date"] is None
+    assert '"right_censored": true' in by_contract["M2609"]["raw_json"]
