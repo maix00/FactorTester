@@ -30,6 +30,7 @@ from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatt
 from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
 from tools.cli.modules.backtest.audit_formatters import orders as orders_formatter
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
+from tools.cli.modules.backtest.audit_formatters import samples as samples_formatter
 from tools.cli.modules.backtest.audit_formatters import strategy as strategy_formatter
 from tools.cli.modules.backtest.audit_formatters import table_render as table_render_formatter
 from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_intent_formatter
@@ -116,54 +117,27 @@ def _audit_scalar_sequence_text(value: list[Any] | tuple[Any, ...], *, width: in
     return value_text_formatter.scalar_sequence_text(value, width=width)
 
 
-@dataclass(frozen=True)
-class _AuditSamplePart:
-    name: str
-    value: Any
+_AuditSamplePart = samples_formatter.AuditSamplePart
 
 
 def _audit_select_sample_part(sample: dict[str, Any], predicate) -> _AuditSamplePart | None:
-    """Pick one representative sample block; prefer head, fall back to tail."""
-    for name in ("head", "tail"):
-        value = sample.get(name)
-        if predicate(value):
-            return _AuditSamplePart(name=name, value=value)
-    return None
+    return samples_formatter.select_sample_part(sample, predicate)
 
 
 def _audit_sample_note_lines(sample: dict[str, Any], selected_name: str) -> list[str]:
-    other_name = "tail" if selected_name == "head" else "head"
-    if other_name in sample:
-        return [f"sample = 仅显示 {selected_name}；{other_name} 已省略"]
-    return []
+    return samples_formatter.sample_note_lines(sample, selected_name)
 
 
 def _audit_single_sample_sequence(items: list[Any]) -> tuple[list[Any], list[str]]:
-    if len(items) <= 1:
-        return items, []
-    return items[:1], [f"sample.rows = 仅显示 1/{len(items)} 行；其余 sample 行已省略"]
+    return samples_formatter.single_sample_sequence(items)
 
 
 def _audit_single_sample_frame(frame: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    indexes = frame.get("index")
-    rows = frame.get("rows")
-    if not isinstance(indexes, list) or not isinstance(rows, list) or len(rows) <= 1:
-        return frame, []
-    clipped = dict(frame)
-    clipped["index"] = indexes[:1]
-    clipped["rows"] = rows[:1]
-    return clipped, [f"sample.rows = 仅显示 1/{len(rows)} 行；其余 sample 行已省略"]
+    return samples_formatter.single_sample_frame(frame)
 
 
 def _audit_single_sample_series(series: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    indexes = series.get("index")
-    values = series.get("values")
-    if not isinstance(indexes, list) or not isinstance(values, list) or len(values) <= 1:
-        return series, []
-    clipped = dict(series)
-    clipped["index"] = indexes[:1]
-    clipped["values"] = values[:1]
-    return clipped, [f"sample.rows = 仅显示 1/{len(values)} 行；其余 sample 行已省略"]
+    return samples_formatter.single_sample_series(series)
 
 # Field metadata comes from the executable-module registry, not a hand-picked
 # controller list. Adding a registered backtest module automatically makes its
