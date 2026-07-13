@@ -296,21 +296,16 @@ def local_settings(ctx: click.Context) -> None:
     """配置回测 local-settings。"""
     state = load_state()
     _ensure_active_backtest_scope(state)
-    args = tuple(ctx.args)
-    if not args or args[0] in {"show", "list", "ls"}:
-        _print_backtest_local_settings(state)
-        return
-    show_help = config_arg_helpers.has_context_help(args)
-    setting_args = config_arg_helpers.strip_context_help(args)
-    if setting_args:
-        _apply_raw_local_settings(state, setting_args)
-    if show_help:
-        _validate_registered_local_settings(state)
-        _print_backtest_settings_help(state)
-        return
-    save_state(state)
-    click.echo("已更新 local-settings")
-    _print_backtest_local_settings(state, validate=False)
+    changed = config_command_handlers.handle_local_settings_command(
+        state,
+        tuple(ctx.args),
+        apply_raw_settings=_apply_raw_local_settings,
+        validate_registered_settings=_validate_registered_local_settings,
+        print_settings_help=_print_backtest_settings_help,
+        print_local_settings=_print_backtest_local_settings,
+    )
+    if changed:
+        save_state(state)
 
 
 @backtest.command("compare", context_settings=SELECTOR_HELP_CONTEXT)

@@ -13,6 +13,9 @@ from tools.cli.modules.backtest import config_views as config_view_formatter
 
 
 ArgValue = Callable[[tuple[str, ...], str], str]
+StateAction = Callable[[Any], None]
+ApplyRawSettings = Callable[[Any, tuple[str, ...]], None]
+PrintLocalSettings = Callable[..., None]
 
 
 def handle_strategy_book_command(state, args: tuple[str, ...], *, arg_value: ArgValue) -> bool:
@@ -35,6 +38,31 @@ def handle_strategy_book_command(state, args: tuple[str, ...], *, arg_value: Arg
         print_strategy_book(state)
         return True
     raise click.ClickException("strategy-book 支持: show, simple, ledger, cash-pool")
+
+
+def handle_local_settings_command(
+    state,
+    args: tuple[str, ...],
+    *,
+    apply_raw_settings: ApplyRawSettings,
+    validate_registered_settings: StateAction,
+    print_settings_help: StateAction,
+    print_local_settings: PrintLocalSettings,
+) -> bool:
+    if not args or args[0] in {"show", "list", "ls"}:
+        print_local_settings(state)
+        return False
+    show_help = config_arg_helpers.has_context_help(args)
+    setting_args = config_arg_helpers.strip_context_help(args)
+    if setting_args:
+        apply_raw_settings(state, setting_args)
+    if show_help:
+        validate_registered_settings(state)
+        print_settings_help(state)
+        return False
+    click.echo("已更新 local-settings")
+    print_local_settings(state, validate=False)
+    return True
 
 
 def handle_ledger_config_command(state, args: tuple[str, ...], *, arg_value: ArgValue) -> bool:
