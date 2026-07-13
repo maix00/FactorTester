@@ -43,7 +43,8 @@ SOURCE_FIELD_POLICY: dict[str, dict[str, Any]] = {
         "source": "SHFE official ContractBaseInfo daily snapshot",
         "fields": {
             "list_date": "official OPENDATE",
-            "last_trading_date": "official EXPIREDATE",
+            "expiry_date": "official EXPIREDATE",
+            "last_trading_date": "not provided by ContractBaseInfo; may be repaired from local dayk",
             "delivery_start_date": "official STARTDELIVDATE",
             "last_delivery_date": "official ENDDELIVDATE",
             "listing_base_price": "official BASISPRICE",
@@ -53,7 +54,8 @@ SOURCE_FIELD_POLICY: dict[str, dict[str, Any]] = {
         "source": "INE official ContractBaseInfo daily snapshot",
         "fields": {
             "list_date": "official OPENDATE",
-            "last_trading_date": "official EXPIREDATE",
+            "expiry_date": "official EXPIREDATE",
+            "last_trading_date": "not provided by ContractBaseInfo; may be repaired from local dayk",
             "delivery_start_date": "official STARTDELIVDATE",
             "last_delivery_date": "official ENDDELIVDATE",
             "listing_base_price": "official BASISPRICE",
@@ -105,11 +107,23 @@ SOURCE_FIELD_POLICY: dict[str, dict[str, Any]] = {
             "Each raw_json includes product rule source_notice_id/source_url and calendar provenance."
         ),
     },
+    "exchange_contract_info_local_dayk_last_trade": {
+        "source": "Exchange contract-info row plus LocalCNFutures last finite daily bar",
+        "fields": {
+            "expiry_date": "exchange contract-info EXPIREDATE/到期日 when available",
+            "last_trading_date": "LocalCNFutures daily bars last finite close",
+            "delivery_start_date": "exchange contract-info STARTDELIVDATE/开始交割日 when available",
+            "last_delivery_date": "exchange contract-info ENDDELIVDATE/最后交割日 when available",
+            "listing_base_price": "exchange contract-info BASISPRICE/挂牌基准价 when available",
+        },
+        "note": "Used when SHFE/INE contract-info exposes expiry date but no exact last-trading-day column.",
+    },
     "futures_contract_info_shfe": {
         "source": "AKShare-compatible SHFE contract-info response",
         "fields": {
             "list_date": "上市日",
-            "last_trading_date": "到期日",
+            "expiry_date": "到期日",
+            "last_trading_date": "not provided by this feed; may be repaired from local dayk",
             "delivery_start_date": "开始交割日",
             "last_delivery_date": "最后交割日",
             "listing_base_price": "挂牌基准价",
@@ -119,7 +133,8 @@ SOURCE_FIELD_POLICY: dict[str, dict[str, Any]] = {
         "source": "AKShare-compatible INE contract-info response",
         "fields": {
             "list_date": "上市日",
-            "last_trading_date": "到期日",
+            "expiry_date": "到期日",
+            "last_trading_date": "not provided by this feed; may be repaired from local dayk",
             "delivery_start_date": "开始交割日",
             "last_delivery_date": "最后交割日",
             "listing_base_price": "挂牌基准价",
@@ -179,7 +194,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strict-cross-check",
         action="store_true",
-        help="Also exit non-zero when non-censored local dayk last-trading cross-checks mismatch",
+        help=(
+            "Also exit non-zero when local dayk ends before lifecycle.last_trading_date. "
+            "Local dayk bars after an official last-trading date are reported but not fatal."
+        ),
     )
     parser.add_argument(
         "--strict-non-last-fields",
@@ -202,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_human_report(report)
     if args.strict and (report["missing_count"] or report["required_field_missing_count"]):
         return 1
-    if args.strict_cross_check and report["last_trading_dayk_cross_check"]["mismatch_count"]:
+    if args.strict_cross_check and report["last_trading_dayk_cross_check"]["local_before_lifecycle_count"]:
         return 1
     if args.strict_non_last_fields and report["non_last_required_field_audit"]["missing_count"]:
         return 1
@@ -317,7 +335,10 @@ def _required_field_missing(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _field_completeness(frame: pd.DataFrame) -> dict[str, dict[str, int]]:
-    fields = ["list_date", "last_trading_date", "delivery_start_date", "delivery_notice_date", "last_delivery_date", "listing_base_price"]
+    fields = [
+        "list_date", "expiry_date", "last_trading_date", "delivery_start_date",
+        "delivery_notice_date", "last_delivery_date", "listing_base_price",
+    ]
     result: dict[str, dict[str, int]] = {}
     for exchange, group in frame.groupby("exchange", dropna=False):
         result[str(exchange)] = {field: int(group[field].notna().sum()) if field in group.columns else 0 for field in fields}
@@ -343,10 +364,14 @@ def _last_trading_dayk_cross_check(lifecycle: pd.DataFrame, expected: pd.DataFra
             "compared_count": 0,
             "matched_count": 0,
             "mismatch_count": 0,
+            "local_after_lifecycle_count": 0,
+            "local_before_lifecycle_count": 0,
             "skipped_right_censored": 0,
             "mismatch_by_exchange": {},
             "mismatch_by_source": {},
             "mismatch_samples": [],
+            "local_after_lifecycle_samples": [],
+            "local_before_lifecycle_samples": [],
         }
     expected_cols = [
         "key", "first_local_day", "last_local_day", "exchange_data_cutoff", "right_censored_by_dayk",
@@ -356,21 +381,49 @@ def _last_trading_dayk_cross_check(lifecycle: pd.DataFrame, expected: pd.DataFra
     merged = merged[merged["last_trading_date"].notna()].copy()
     merged["last_trading_day"] = _parse_mixed_date_series(merged["last_trading_date"])
     merged["last_local_day"] = _parse_mixed_date_series(merged["last_local_day"])
+    merged["exchange_data_cutoff"] = _parse_mixed_date_series(merged["exchange_data_cutoff"])
     merged["right_censored_by_dayk"] = merged["right_censored_by_dayk"].fillna(True)
-    comparable = merged[~merged["right_censored_by_dayk"] & merged["last_trading_day"].notna() & merged["last_local_day"].notna()].copy()
+    lifecycle_after_cutoff = merged[
+        merged["last_trading_day"].notna()
+        & merged["exchange_data_cutoff"].notna()
+        & (merged["last_trading_day"] > merged["exchange_data_cutoff"])
+    ].copy()
+    comparable = merged[
+        ~merged["right_censored_by_dayk"]
+        & merged["last_trading_day"].notna()
+        & merged["last_local_day"].notna()
+        & ~merged["key"].isin(set(lifecycle_after_cutoff["key"]))
+    ].copy()
     mismatches = comparable[comparable["last_trading_day"] != comparable["last_local_day"]].copy()
+    local_after = comparable[comparable["last_local_day"] > comparable["last_trading_day"]].copy()
+    local_before = comparable[comparable["last_local_day"] < comparable["last_trading_day"]].copy()
     return {
         "basis": (
-            "Compare lifecycle.last_trading_date with LocalCNFutures last finite-close daily bar "
-            "only when local dayk is not right-censored. Right-censored contracts are reported as skipped."
+            "Compare lifecycle.last_trading_date with LocalCNFutures last finite-close daily bar only when "
+            "local dayk is not right-censored. A later local bar is reported as post-last-trading local "
+            "coverage because some sources keep settlement/delivery residual rows after the official last "
+            "trading date. Rows whose lifecycle last-trading date is beyond the exchange local-data cutoff "
+            "are skipped as still future relative to local coverage. Strict mode only fails when local dayk "
+            "ends before lifecycle.last_trading_date after these skips."
         ),
         "compared_count": int(len(comparable)),
         "matched_count": int(len(comparable) - len(mismatches)),
         "mismatch_count": int(len(mismatches)),
+        "local_after_lifecycle_count": int(len(local_after)),
+        "local_before_lifecycle_count": int(len(local_before)),
         "skipped_right_censored": int(merged["right_censored_by_dayk"].sum()),
+        "skipped_lifecycle_after_cutoff": int(len(lifecycle_after_cutoff)),
         "mismatch_by_exchange": _counts(mismatches, "exchange"),
         "mismatch_by_source": _counts(mismatches, "source_function"),
         "mismatch_samples": _sample_records(mismatches, sample_limit),
+        "local_after_lifecycle_by_exchange": _counts(local_after, "exchange"),
+        "local_after_lifecycle_by_source": _counts(local_after, "source_function"),
+        "local_after_lifecycle_samples": _sample_records(local_after, sample_limit),
+        "local_before_lifecycle_by_exchange": _counts(local_before, "exchange"),
+        "local_before_lifecycle_by_source": _counts(local_before, "source_function"),
+        "local_before_lifecycle_samples": _sample_records(local_before, sample_limit),
+        "lifecycle_after_cutoff_by_exchange": _counts(lifecycle_after_cutoff, "exchange"),
+        "lifecycle_after_cutoff_samples": _sample_records(lifecycle_after_cutoff, sample_limit),
     }
 
 

@@ -3,6 +3,15 @@
 This store records contract-level lifecycle fields for replay and CLI audit.
 It does not use announcement text as lifecycle evidence.
 
+`expiry_date` and `last_trading_date` are deliberately separate:
+
+- `expiry_date` is the contract-info expiry/maturity date such as
+  SHFE/INE `EXPIREDATE` / `到期日`.
+- `last_trading_date` is the actual last trading day used by replay lifecycle
+  logic. When an exchange feed does not publish this field separately,
+  LocalCNFutures daily bars can provide the last finite trading day, with the
+  original expiry date preserved in `expiry_date` and `raw_json`.
+
 ## Exchange official / portal ingests
 
 - SHFE / INE / CZCE / CFFEX: prefer direct exchange contract-info endpoints;
@@ -56,8 +65,9 @@ The lifecycle table keeps source provenance in `source_function`; the audit
 script prints the field policy for every source present in the table.
 
 - Official contract-info sources populate exact exchange-published fields:
-  - SHFE/INE: `OPENDATE`, `EXPIREDATE`, `STARTDELIVDATE`, `ENDDELIVDATE`,
-    `BASISPRICE`.
+  - SHFE/INE: `OPENDATE`, `EXPIREDATE` (stored as `expiry_date`),
+    `STARTDELIVDATE`, `ENDDELIVDATE`, `BASISPRICE`. These feeds do not expose
+    a distinct last-trading-day column in this path.
   - CZCE: `firstTradingDay`, `lastTradingDay`, `deliveryNoticeDay`,
     `lastDeliveryDay`.
   - CFFEX: `opendate`, `expiredate`, `basisprice`.
@@ -75,6 +85,11 @@ script prints the field policy for every source present in the table.
     right-censored.
   - delivery fields are intentionally left empty unless an official/portal
     lifecycle row supplies them.
+- `exchange_contract_info_local_dayk_last_trade` is a mixed-source repair for
+  SHFE/INE rows where contract-info `EXPIREDATE` / `到期日` is later than the
+  last finite LocalCNFutures daily bar. It keeps `expiry_date` from
+  contract-info, sets `last_trading_date` from LocalCNFutures, and stores the
+  original value in `raw_json._last_trading_date_repair`.
 
 LocalCNFutures daily-bar upstreams are:
 
@@ -121,6 +136,7 @@ PYTHONPATH=. python sources/AKShare/scripts/backfill_missing_lifecycle_fields.py
   --source tushare --exchange DCE --exchange GFEX
 PYTHONPATH=. python sources/AKShare/scripts/backfill_missing_lifecycle_fields.py \
   --derive-rule-calendar --exchange DCE --exchange GFEX
+PYTHONPATH=. python sources/AKShare/scripts/backfill_lifecycle_last_trading_from_local_dayk.py
 ```
 
 The CFFEX path uses official trading-parameter XML and can fill missing
@@ -130,3 +146,8 @@ nothing. The rule-calendar path fills DCE/GFEX `last_delivery_date` as a
 derived field when exact official/portal history is unavailable; it refuses to
 write rows without a product rule/listing source or without three later local
 exchange trading days.
+
+The `backfill_lifecycle_last_trading_from_local_dayk.py` repair is not a
+delivery-date derivation. It only separates expiry date from actual last
+trading day for SHFE/INE contract-info rows whose expiry date is not a local
+trading day.

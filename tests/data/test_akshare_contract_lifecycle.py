@@ -12,7 +12,7 @@ from sources.AKShare.scripts.backfill_contract_lifecycle_from_local_dayk import 
 from sources.DCE import portal as dce_portal
 
 
-def test_normalize_shfe_maps_expiry_as_last_trading_date():
+def test_normalize_shfe_keeps_expiry_date_separate_from_last_trading_date():
     df = pd.DataFrame([{
         "合约代码": "cu2409",
         "上市日": datetime.date(2023, 9, 15),
@@ -29,7 +29,8 @@ def test_normalize_shfe_maps_expiry_as_last_trading_date():
     assert row["product_code"] == "CU"
     assert row["contract_code"] == "CU2409"
     assert row["list_date"] == "2023-09-15"
-    assert row["last_trading_date"] == "2024-09-17"
+    assert row["expiry_date"] == "2024-09-17"
+    assert row["last_trading_date"] is None
     assert row["delivery_start_date"] == "2024-09-13"
     assert row["last_delivery_date"] == "2024-09-17"
     assert row["listing_base_price"] == 68960.0
@@ -53,6 +54,7 @@ def test_normalize_dce_has_no_delivery_start_or_base_price():
     assert row["product_code"] == "M"
     assert row["contract_code"] == "M2409"
     assert row["list_date"] == "2023-09-15"
+    assert row["expiry_date"] is None
     assert row["last_trading_date"] == "2024-09-13"
     assert row["last_delivery_date"] == "2024-09-17"
     assert row["delivery_start_date"] is None
@@ -76,6 +78,7 @@ def test_normalize_czce_reads_the_holiday_caveat_column():
     assert row["contract_code"] == "SR409"
     assert row["product_code"] == "SR"
     assert row["list_date"] == "2023-10-16"
+    assert row["expiry_date"] is None
     assert row["last_trading_date"] == "2024-09-09"
     assert row["delivery_notice_date"] == "2024-09-11"
     assert row["last_delivery_date"] == "2024-09-12"
@@ -97,6 +100,7 @@ def test_normalize_cffex_has_no_delivery_date():
     assert row["exchange"] == "CFFEX"
     assert row["product_code"] == "IF"
     assert row["list_date"] == "2010-04-16"
+    assert row["expiry_date"] is None
     assert row["last_trading_date"] == "2024-03-15"
     assert row["listing_base_price"] == 3400.0
     assert row["last_delivery_date"] is None
@@ -251,6 +255,7 @@ def test_dce_portal_frame_matches_lifecycle_column_shape():
         "product_code": "M",
         "contract_code": "M2601",
         "list_date": "2025-09-15",
+        "expiry_date": None,
         "last_trading_date": "2026-11-13",
         "delivery_start_date": None,
         "delivery_notice_date": None,

@@ -603,6 +603,8 @@ def _akshare_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
             "delivery_date": spec.get("last_delivery_date"),
             "lifecycle_source": _contract_lifecycle_source_label(exchange, spec.get("source_function"), live=False),
         }
+        if spec.get("expiry_date") not in (None, ""):
+            candidate["expire_date"] = spec.get("expiry_date")
         product_code = str(spec.get("product_code") or "").upper()
         _select_akshare_lifecycle_spec(out, key, candidate, product_code, product_exchange)
     return out
@@ -730,6 +732,8 @@ def _akshare_live_lookup(exchange: str, key: str) -> dict[str, Any] | None:
                 live=True,
             ),
         }
+        if live_row.get("expiry_date") not in (None, ""):
+            _akshare_live_cache[code]["expire_date"] = live_row.get("expiry_date")
     return _akshare_live_cache.get(key)
 
 
@@ -747,6 +751,8 @@ def _contract_lifecycle_source_label(exchange: str, source_function: Any, *, liv
         return f"LocalCNFutures daily bars coverage{suffix}"
     if source_text == "exchange_rule_dayk_calendar_derived":
         return f"{exchange_text} product rule + trading calendar derived{suffix}"
+    if source_text == "exchange_contract_info_local_dayk_last_trade":
+        return f"{exchange_text} contract-info expiry + LocalCNFutures last-trade{suffix}"
     if source_text.startswith("futures_contract_info_"):
         return f"AKShare {exchange_text}{suffix}"
     return f"{exchange_text} contract lifecycle source={source_text or 'unknown'}"

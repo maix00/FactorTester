@@ -37,6 +37,7 @@ _COLUMNS = (
     "product_code",
     "contract_code",
     "list_date",
+    "expiry_date",
     "last_trading_date",
     "delivery_start_date",
     "delivery_notice_date",
@@ -69,6 +70,7 @@ def ensure_schema(conn) -> None:
             product_code TEXT,
             contract_code TEXT NOT NULL,
             list_date TEXT,
+            expiry_date TEXT,
             last_trading_date TEXT,
             delivery_start_date TEXT,
             delivery_notice_date TEXT,
@@ -86,6 +88,12 @@ def ensure_schema(conn) -> None:
         f"CREATE INDEX IF NOT EXISTS idx_{CONTRACT_LIFECYCLE_TABLE}_product "
         f"ON {CONTRACT_LIFECYCLE_TABLE}(exchange, product_code)"
     )
+    existing = {
+        str(row["name"])
+        for row in conn.execute(f"PRAGMA table_info({CONTRACT_LIFECYCLE_TABLE})").fetchall()
+    }
+    if "expiry_date" not in existing:
+        conn.execute(f"ALTER TABLE {CONTRACT_LIFECYCLE_TABLE} ADD COLUMN expiry_date TEXT")
 
 
 def _col(row: pd.Series, name: str) -> Any:
@@ -121,7 +129,8 @@ def _base_row(
     raw_contract_code: Any,
     product_code: Any,
     list_date: Any,
-    last_trading_date: Any,
+    last_trading_date: Any = None,
+    expiry_date: Any = None,
     delivery_start_date: Any = None,
     delivery_notice_date: Any = None,
     last_delivery_date: Any = None,
@@ -138,6 +147,7 @@ def _base_row(
         "product_code": (str(product_code).strip().upper() if product_code not in (None, "") else _product_code(contract_code)),
         "contract_code": contract_code,
         "list_date": _to_iso(list_date),
+        "expiry_date": _to_iso(expiry_date),
         "last_trading_date": _to_iso(last_trading_date),
         "delivery_start_date": _to_iso(delivery_start_date),
         "delivery_notice_date": _to_iso(delivery_notice_date),
@@ -159,7 +169,8 @@ def _normalize_shfe_like(df: pd.DataFrame, *, exchange: str, source_function: st
             raw_contract_code=_col(row, "合约代码"),
             product_code=None,
             list_date=_col(row, "上市日"),
-            last_trading_date=_col(row, "到期日"),
+            expiry_date=_col(row, "到期日"),
+            last_trading_date=_col(row, "最后交易日"),
             delivery_start_date=_col(row, "开始交割日"),
             last_delivery_date=_col(row, "最后交割日"),
             listing_base_price=_col(row, "挂牌基准价"),
@@ -330,7 +341,7 @@ def upsert_contract_lifecycle(
         ensure_schema(conn)
         before = conn.total_changes
         for row in rows:
-            conn.execute(sql, tuple(row[col] for col in _COLUMNS))
+            conn.execute(sql, tuple(row.get(col) for col in _COLUMNS))
         applied = conn.total_changes - before
     return {"inserted": applied, "skipped_existing": len(rows) - applied}
 
@@ -397,7 +408,7 @@ def read_contract_lifecycle(
         params.append(normalise_instrument_code(contract_code))
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     sql = (
-        f"SELECT exchange, product_code, contract_code, list_date, last_trading_date, "
+        f"SELECT exchange, product_code, contract_code, list_date, expiry_date, last_trading_date, "
         f"delivery_start_date, delivery_notice_date, last_delivery_date, listing_base_price, "
         f"source_query_date, source_function, fetched_at "
         f"FROM {CONTRACT_LIFECYCLE_TABLE}{where} ORDER BY exchange, contract_code"
