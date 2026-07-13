@@ -13,6 +13,8 @@ DisplayKey = Callable[[Any], str]
 ValueIsEmpty = Callable[[Any], bool]
 ScalarRecordCandidate = tuple[tuple[Any, ...] | None, Any, bool]
 ItemKey = Callable[[Any], Any]
+FieldSortKey = Callable[[str], tuple[Any, ...]]
+ItemPredicate = Callable[[Any], bool]
 
 
 def combined_single_field_label(qualified_name: str) -> str:
@@ -96,6 +98,35 @@ def collect_following_by_key(
             indexes.append(lookahead)
         lookahead += 1
     return matches, indexes
+
+
+def sorted_field_records(records: list[dict[str, Any]], *, sort_key: FieldSortKey) -> list[dict[str, Any]]:
+    return sorted(records, key=lambda item: sort_key(str(item.get("field") or "")))
+
+
+def sorted_field_change_items(
+    changes: list[dict[str, Any]],
+    *,
+    sort_key: FieldSortKey,
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    by_field: dict[str, list[dict[str, Any]]] = {}
+    for change in changes:
+        by_field.setdefault(str(change.get("field") or ""), []).append(change)
+    return sorted(by_field.items(), key=lambda item: sort_key(item[0]))
+
+
+def collect_contiguous(
+    items: list[Any],
+    *,
+    start: int,
+    predicate: ItemPredicate,
+) -> tuple[list[Any], int]:
+    collected: list[Any] = []
+    index = start
+    while index < len(items) and predicate(items[index]):
+        collected.append(items[index])
+        index += 1
+    return collected, index
 
 
 def field_change_buckets(

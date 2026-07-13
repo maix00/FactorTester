@@ -2122,7 +2122,7 @@ def _print_audit_fields(
     if not records:
         click.echo(f"  {empty_message}")
         return
-    sorted_records = sorted(records, key=lambda item: _audit_field_sort_key(str(item.get("field") or "")))
+    sorted_records = audit_printer_helpers.sorted_field_records(records, sort_key=_audit_field_sort_key)
     consumed_indexes: set[int] = set()
     index = 0
     while index < len(sorted_records):
@@ -2133,13 +2133,13 @@ def _print_audit_fields(
         field_name = str(record.get("field") or "")
         values = record.get("values") or []
         if _is_market_data_sample_field(field_name):
-            combined = [record]
-            lookahead = index + 1
-            while lookahead < len(sorted_records) and _is_market_data_sample_field(str(sorted_records[lookahead].get("field") or "")):
-                combined.append(sorted_records[lookahead])
-                lookahead += 1
+            combined, next_index = audit_printer_helpers.collect_contiguous(
+                sorted_records,
+                start=index,
+                predicate=lambda item: _is_market_data_sample_field(str(item.get("field") or "")),
+            )
             if _print_market_data_sample_value_table("    ", combined):
-                index += len(combined)
+                index = next_index
                 continue
         if _print_delta_mapping_value_table("    ", field_name, values):
             index += 1
@@ -2233,10 +2233,7 @@ def _print_audit_changes(
     if not changes:
         click.echo("  （无变化）")
         return
-    by_field: dict[str, list[dict[str, Any]]] = {}
-    for change in changes:
-        by_field.setdefault(str(change.get("field") or ""), []).append(change)
-    sorted_items = sorted(by_field.items(), key=lambda item: _audit_field_sort_key(item[0]))
+    sorted_items = audit_printer_helpers.sorted_field_change_items(changes, sort_key=_audit_field_sort_key)
     consumed_indexes: set[int] = set()
     index = 0
     while index < len(sorted_items):
@@ -2245,13 +2242,13 @@ def _print_audit_changes(
             continue
         field_name, field_changes = sorted_items[index]
         if _is_market_data_sample_field(field_name):
-            combined_market = [(field_name, field_changes)]
-            lookahead = index + 1
-            while lookahead < len(sorted_items) and _is_market_data_sample_field(sorted_items[lookahead][0]):
-                combined_market.append(sorted_items[lookahead])
-                lookahead += 1
+            combined_market, next_index = audit_printer_helpers.collect_contiguous(
+                sorted_items,
+                start=index,
+                predicate=lambda item: _is_market_data_sample_field(item[0]),
+            )
             if _print_market_data_sample_change_table("  ", combined_market):
-                index += len(combined_market)
+                index = next_index
                 continue
         if _print_delta_mapping_change_table("    ", field_name, field_changes):
             index += 1
