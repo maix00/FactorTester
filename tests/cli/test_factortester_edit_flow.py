@@ -709,6 +709,31 @@ def test_step_audit_displays_backend_null_dmtm_ledger_config_verbatim(capsys) ->
     assert "null" in out
 
 
+def test_step_audit_prefers_ledger_total_over_empty_strategy_defaults(capsys) -> None:
+    values = [
+        {"scope": "strategy_config", "strategy": "A1", "value": None},
+        {"scope": "strategy_config", "strategy": "A2", "value": None},
+        {"scope": "ledger", "ledger": "L1", "cash_pool": "P1", "strategies": ["A1"], "value": 0.0},
+        {"scope": "ledger", "ledger": "L2", "cash_pool": "P2", "strategies": ["A2"], "value": 0.0},
+    ]
+
+    _print_audit_fields("输入字段", [{
+        "field": "MarginModule.margin_deficit",
+        "values": values,
+    }])
+
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
+    assert "margin_deficit [MarginModule.margin_deficit]" in plain
+    assert "策略配置" not in plain
+    assert "合并 " not in plain
+    assert "ledger" in plain
+    assert "cash pool" in plain
+    assert "L1" in plain
+    assert "L2" in plain
+    assert "0.0" in plain
+
+
 def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
     route_state: set[tuple[tuple[str, str, str], ...]] = set()
     values = [

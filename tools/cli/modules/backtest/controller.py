@@ -4779,6 +4779,47 @@ def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list
     return list(groups.values())
 
 
+def _drop_empty_non_ledger_entries_when_ledger_values_exist(
+    field_name: str,
+    values: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Prefer ledger/cash-pool total tables over repeated empty strategy defaults.
+
+    Some snapshots include a field's ledger value plus redundant strategy/config
+    defaults such as ``null``.  Printing both creates the old noisy
+    ``策略配置 ... = null`` block before the useful ledger table.  Keep non-ledger
+    entries only when they carry non-empty information.
+    """
+    if not any(str(entry.get("scope") or "") in {"ledger", "ledger_config"} for entry in values):
+        return values
+    compacted: list[dict[str, Any]] = []
+    for entry in values:
+        scope = str(entry.get("scope") or "")
+        if scope in {"ledger", "ledger_config"}:
+            compacted.append(entry)
+            continue
+        display_value = _display_field_value(field_name, entry.get("value"))
+        if _audit_value_is_empty(display_value):
+            continue
+        compacted.append(entry)
+    return compacted or values
+
+
+def _audit_value_is_empty(value: Any) -> bool:
+    if value is None:
+        return True
+    normalized = _audit_normalized_value(value)
+    if normalized is None:
+        return True
+    if normalized == "":
+        return True
+    if isinstance(normalized, (list, tuple, dict, set)) and len(normalized) == 0:
+        return True
+    if isinstance(normalized, str) and normalized.strip().lower() in {"null", "none", "[]", "{}"}:
+        return True
+    return False
+
+
 def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
     order_diff_text = _audit_order_diff_text(before, after)
     if order_diff_text is not None:
@@ -4909,6 +4950,7 @@ def _print_audit_fields(
             continue
         field_name = str(record.get("field") or "")
         values = record.get("values") or []
+        values = _drop_empty_non_ledger_entries_when_ledger_values_exist(field_name, values)
         if not values:
             click.echo(f"  {_audit_combined_single_field_label(field_name)}:", color=True)
             click.echo("    （当前无值）")
