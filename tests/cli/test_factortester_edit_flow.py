@@ -837,7 +837,16 @@ def test_step_audit_splits_wide_combined_ledger_fields_by_terminal_width(capsys,
     assert "margin_mode" in out
     assert "cost_basis_method" in out
     assert "columns 1/" in out
-    assert max(len(_strip_ansi(line)) for line in out.splitlines()) <= 120
+    plain = _strip_ansi(out)
+    split_headers = [
+        line.strip()
+        for line in plain.splitlines()
+        if line.strip().startswith("ledger")
+    ]
+    assert split_headers
+    assert any("margin_mode" in line for line in split_headers)
+    assert all("cash pool" not in line and "strategies" not in line for line in split_headers)
+    assert max(len(_strip_ansi(line)) for line in out.splitlines()) <= 132
 
 
 def test_step_audit_displays_backend_null_dmtm_ledger_config_verbatim(capsys) -> None:
@@ -2048,7 +2057,8 @@ def test_step_audit_formats_contract_metadata_as_compact_table() -> None:
     assert "contract_product" not in text
 
 
-def test_step_audit_formats_price_tables_as_basis_summary() -> None:
+def test_step_audit_formats_price_tables_as_basis_summary(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((72, 20)))
     text = _audit_text({
         "type": "PriceTablesSummary",
         "columns": ["basis", "shape", "index", "columns"],
@@ -2082,35 +2092,141 @@ def test_step_audit_formats_price_tables_as_basis_summary() -> None:
                 "shape": [25, 2],
                 "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
                 "columns": ["RB.SHF", "AG.SHF"],
+                "sample": {
+                    "head": {
+                        "columns": ["RB.SHF", "AG.SHF"],
+                        "index": ["2026-01-01 09:00:00"],
+                        "rows": [[1.5, 2.5]],
+                    },
+                    "tail": {
+                        "columns": ["RB.SHF", "AG.SHF"],
+                        "index": ["2026-01-01 09:24:00"],
+                        "rows": [[3.5, 4.5]],
+                    },
+                },
             },
         ],
     })
 
-    assert "价格字段" in text
-    assert "价格字段元信息:" in text
-    assert "basis" in text
-    assert "shape" in text
-    assert "index" in text
-    assert "timestamp" in text
-    assert "close" in text
-    assert "25 x 2" in text
-    assert "start  2026-01-01 09:00:00" in text
-    assert "end    2026-01-01 09:24:00" in text
-    assert '["RB.SHF", "AG.SHF"]' in text
     assert "价格字段 sample（行索引=field/product，列=首尾 sample 时间）:" in text
-    assert "field  product  2026-01-01 09:00:00" in text
+    assert "价格字段元信息:" not in text
+    assert ".sample =" not in text
+    assert "columns 1/" not in text
+    assert "close" in text
+    assert re.search(r"field\s+product\s+2026-01-01 09:00:00", text)
     assert "2026-01-01 09:24:00" in text
-    assert "close  AG.SHF   2" in text
+    assert re.search(r"close\s+AG\.SHF\s+2(?:\\.0)?\s+4(?:\\.0)?", text)
     assert "4" in text
-    assert "close  RB.SHF   1" in text
+    assert re.search(r"close\s+RB\.SHF\s+1(?:\\.0)?\s+3(?:\\.0)?", text)
     assert "3" in text
     assert "sample.head:" not in text
-    assert "2026-01-01 09:00:00" in text
-    assert "open        25 x 5000" in text
-    assert "5000 columns; sample shows 4 columns" in text
-    assert "settlement  25 x 2" in text
-    assert "日级结算字段" in text
+    assert "25 x 2" not in text
+    assert "5000 columns; sample shows 4 columns" not in text
+    assert "日级结算字段" not in text
     assert '"rows"' not in text
+
+
+def test_step_audit_combines_market_data_samples_into_one_table(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((132, 20)))
+    frame_sample = {
+        "type": "DataFrame",
+        "sample": {
+            "head": {
+                "columns": ["AP.CZC", "CJ.CZC", "PK.CZC", "SM.CZC"],
+                "index": [["2026-01-05", "09:01"]],
+                "rows": [[1, 2, 3, 4]],
+            },
+            "tail": {
+                "columns": ["AP.CZC", "CJ.CZC", "PK.CZC", "SM.CZC"],
+                "index": [["2026-01-30", "15:00"]],
+                "rows": [[11, 12, 13, 14]],
+            },
+        },
+    }
+    price_tables = {
+        "type": "PriceTablesSummary",
+        "rows": [
+            {"basis": "close", "sample": frame_sample["sample"]},
+            {"basis": "open", "sample": frame_sample["sample"]},
+        ],
+    }
+    _print_audit_fields("输入字段", [
+        {"field": "MarketDataModule.price_tables", "values": [{"scope": "context", "value": price_tables}]},
+        {"field": "MarketDataModule.raw_prices", "values": [{"scope": "context", "value": frame_sample}]},
+        {"field": "MarketDataModule.settlement_price", "values": [{"scope": "context", "value": {"AP.CZC": 1, "CJ.CZC": 2, "PK.CZC": 3, "SM.CZC": 4}}]},
+        {"field": "MarketDataModule.volume", "values": [{"scope": "context", "value": {"AP.CZC": 100, "CJ.CZC": 200, "PK.CZC": 300, "SM.CZC": 400}}]},
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "市场数据 sample 总表（每个价格字段最多 3 个产品）" in plain
+    assert plain.count("field") == 1
+    assert "price_tables.close" in plain
+    assert "price_tables.open" in plain
+    assert "raw_prices" in plain
+    assert "settlement_price" in plain
+    assert "volume" in plain
+    assert "AP.CZC" in plain
+    assert "CJ.CZC" in plain
+    assert "PK.CZC" in plain
+    assert "SM.CZC" not in plain
+    assert "价格字段元信息:" not in plain
+
+
+def test_step_audit_keeps_field_product_index_when_market_sample_table_splits(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((72, 20)))
+    frame_sample = {
+        "type": "DataFrame",
+        "sample": {
+            "head": {
+                "columns": ["AP.CZC", "CJ.CZC", "PK.CZC"],
+                "index": [["2026-01-05 00:00:00", "2026-01-05 09:01:00+08:00"]],
+                "rows": [[1, 2, 3]],
+            },
+            "tail": {
+                "columns": ["AP.CZC", "CJ.CZC", "PK.CZC"],
+                "index": [["2026-01-30 00:00:00", "2026-01-30 15:00:00+08:00"]],
+                "rows": [[11, 12, 13]],
+            },
+        },
+    }
+
+    _print_audit_fields("输入字段", [
+        {"field": "MarketDataModule.raw_prices", "values": [{"scope": "context", "value": frame_sample}]},
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    split_headers = [
+        line.strip()
+        for line in plain.splitlines()
+        if line.strip().startswith("field")
+    ]
+    assert len(split_headers) > 1
+    assert all(header.startswith("field       product") for header in split_headers)
+
+
+def test_step_audit_combines_market_data_sample_changes(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((132, 20)))
+    after = {
+        "type": "DataFrame",
+        "sample": {
+            "head": {"columns": ["AP.CZC", "CJ.CZC", "PK.CZC"], "index": ["2026-01-05 09:01"], "rows": [[1, 2, 3]]},
+            "tail": {"columns": ["AP.CZC", "CJ.CZC", "PK.CZC"], "index": ["2026-01-30 15:00"], "rows": [[11, 12, 13]]},
+        },
+    }
+
+    _print_audit_changes("声明输出的变化", [
+        {"field": "MarketDataModule.raw_prices", "before": None, "after": after},
+        {"field": "MarketDataModule.volume", "before": None, "after": {"AP.CZC": 100, "CJ.CZC": 200, "PK.CZC": 300, "SM.CZC": 400}},
+    ])
+
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
+    assert "市场数据 sample 总表（每个价格字段最多 3 个产品）" in plain
+    assert "raw_prices" in plain
+    assert "volume" in plain
+    assert "null -> 1" in plain
+    assert "null -> 100" in plain
+    assert "SM.CZC" not in plain
 
 
 def test_step_audit_formats_series_payloads_as_tables() -> None:

@@ -3750,6 +3750,157 @@ def _audit_combined_single_field_label(qualified_name: str) -> str:
     return click.style(f"{qualified_name.rsplit('.', 1)[-1]} [{qualified_name}]", bold=True)
 
 
+_MARKET_DATA_SAMPLE_FIELDS = {"price_tables", "raw_prices", "settlement_price", "volume"}
+_MARKET_DATA_SAMPLE_PRODUCT_LIMIT = 3
+
+
+def _is_market_data_sample_field(field_name: str) -> bool:
+    if not field_name.startswith("MarketDataModule."):
+        return False
+    return field_name.rsplit(".", 1)[-1] in _MARKET_DATA_SAMPLE_FIELDS
+
+
+def _print_market_data_sample_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
+    rows, time_columns = _market_data_sample_rows_from_value_records(records)
+    if not rows or not time_columns:
+        return False
+    _print_combined_field_label_lines(prefix, records)
+    click.echo(f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:")
+    for line in _audit_table_lines(("field", "product", *time_columns), rows, indent=f"{prefix}  ", allow_transpose=False):
+        click.echo(line)
+    return True
+
+
+def _print_market_data_sample_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
+    rows, time_columns = _market_data_sample_rows_from_change_records(records)
+    if not rows or not time_columns:
+        return False
+    _print_combined_change_field_label_lines(prefix, records)
+    click.echo(f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:")
+    for line in _audit_table_lines(("field", "product", *time_columns), rows, indent=f"{prefix}  ", allow_transpose=False):
+        click.echo(line)
+    return True
+
+
+def _market_data_sample_rows_from_value_records(records: list[dict[str, Any]]) -> tuple[list[tuple[Any, ...]], list[str]]:
+    samples: list[tuple[str, str, dict[str, str]]] = []
+    time_columns: list[str] = []
+    for record in records:
+        field_name = str(record.get("field") or "")
+        for entry in record.get("values") or []:
+            value = _display_field_value(field_name, entry.get("value"))
+            for field_label, product, values_by_time in _market_data_sample_cells(field_name, value):
+                samples.append((field_label, product, values_by_time))
+                for time_label in values_by_time:
+                    if time_label not in time_columns:
+                        time_columns.append(time_label)
+    return _market_data_sample_rows(samples, time_columns), time_columns
+
+
+def _market_data_sample_rows_from_change_records(records: list[tuple[str, list[dict[str, Any]]]]) -> tuple[list[tuple[Any, ...]], list[str]]:
+    samples: list[tuple[str, str, dict[str, str]]] = []
+    time_columns: list[str] = []
+    for field_name, changes in records:
+        for change in changes:
+            before = _display_field_value(field_name, change.get("before"))
+            after = _display_field_value(field_name, change.get("after"))
+            before_cells = {
+                (field_label, product): values_by_time
+                for field_label, product, values_by_time in _market_data_sample_cells(field_name, before)
+            }
+            for field_label, product, after_by_time in _market_data_sample_cells(field_name, after):
+                before_by_time = before_cells.get((field_label, product), {})
+                changed_by_time = {
+                    time_label: _audit_change_cell(before_by_time.get(time_label, "null"), after_value)
+                    for time_label, after_value in after_by_time.items()
+                }
+                samples.append((field_label, product, changed_by_time))
+                for time_label in changed_by_time:
+                    if time_label not in time_columns:
+                        time_columns.append(time_label)
+    return _market_data_sample_rows(samples, time_columns), time_columns
+
+
+def _market_data_sample_rows(samples: list[tuple[str, str, dict[str, str]]], time_columns: list[str]) -> list[tuple[Any, ...]]:
+    return [
+        tuple([field_label, product, *[values_by_time.get(time_label, "") for time_label in time_columns]])
+        for field_label, product, values_by_time in samples
+    ]
+
+
+def _market_data_sample_cells(field_name: str, value: Any) -> list[tuple[str, str, dict[str, str]]]:
+    normalized = _audit_normalized_value(value)
+    if not isinstance(normalized, dict):
+        return []
+    short_name = field_name.rsplit(".", 1)[-1]
+    if normalized.get("type") == "PriceTablesSummary":
+        return _market_data_price_tables_sample_cells(normalized)
+    if normalized.get("type") == "DataFrame":
+        return _market_data_frame_sample_cells(short_name, normalized)
+    if normalized.get("type") == "Series":
+        return _market_data_series_sample_cells(short_name, normalized)
+    if normalized and all(not isinstance(item, (dict, list, tuple)) for item in normalized.values()):
+        return [
+            (short_name, str(product), {"value": _audit_scalar_cell(scalar_value)})
+            for product, scalar_value in list(sorted(normalized.items()))[:_MARKET_DATA_SAMPLE_PRODUCT_LIMIT]
+        ]
+    return []
+
+
+def _market_data_price_tables_sample_cells(value: dict[str, Any]) -> list[tuple[str, str, dict[str, str]]]:
+    rows = value.get("rows")
+    if not isinstance(rows, list):
+        return []
+    cells: list[tuple[str, str, dict[str, str]]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        basis = str(row.get("basis") or "")
+        cells.extend(_market_data_frame_sample_cells(f"price_tables.{basis}", row))
+    return cells
+
+
+def _market_data_frame_sample_cells(field_label: str, value: dict[str, Any]) -> list[tuple[str, str, dict[str, str]]]:
+    sample = value.get("sample")
+    frames = _audit_price_sample_edge_frames(sample) if isinstance(sample, dict) else [("value", value)]
+    if not frames:
+        return []
+    selected_products: list[str] = []
+    per_product: dict[str, dict[str, str]] = {}
+    for _sample_name, part in frames:
+        columns = [str(column) for column in (part.get("columns") or [])]
+        if not selected_products:
+            selected_products = columns[:_MARKET_DATA_SAMPLE_PRODUCT_LIMIT]
+        indexes = part.get("index")
+        rows = part.get("rows")
+        if not isinstance(indexes, list) or not isinstance(rows, list):
+            continue
+        for index_item, row_values in zip(indexes, rows, strict=False):
+            if not isinstance(row_values, list):
+                continue
+            time_label = _audit_sample_time_label(_audit_index_parts(index_item))
+            for column_index, product in enumerate(columns):
+                if product not in selected_products or column_index >= len(row_values):
+                    continue
+                per_product.setdefault(product, {})[time_label] = _audit_scalar_cell(row_values[column_index])
+    return [(field_label, product, per_product.get(product, {})) for product in selected_products if per_product.get(product)]
+
+
+def _market_data_series_sample_cells(field_label: str, value: dict[str, Any]) -> list[tuple[str, str, dict[str, str]]]:
+    sample = value.get("sample")
+    if isinstance(sample, dict):
+        selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
+        value = selected.value if selected is not None else value
+    indexes = value.get("index")
+    values = value.get("values")
+    if not isinstance(indexes, list) or not isinstance(values, list):
+        return []
+    return [
+        (field_label, _audit_index_cell(product), {"value": _audit_scalar_cell(scalar_value)})
+        for product, scalar_value in list(zip(indexes, values, strict=False))[:_MARKET_DATA_SAMPLE_PRODUCT_LIMIT]
+    ]
+
+
 def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
     if not _audit_is_strategy_entries(changes):
         return False
@@ -4118,7 +4269,7 @@ def _audit_table_lines(
             if lines:
                 lines.append("")
             visible_headers = [header_list[column] for column in columns]
-            non_key_headers = visible_headers[_audit_table_key_column_count(header_list):]
+            non_key_headers = visible_headers[_audit_table_group_key_column_count(header_list, columns):]
             if non_key_headers:
                 lines.append(f"{indent}columns {group_index}/{len(column_groups)}: {', '.join(non_key_headers)}")
             else:
@@ -4234,7 +4385,7 @@ def _audit_transposed_table_lines(
             if group_index > 1 or key_detail_lines:
                 lines.append("")
             visible_headers = [transposed_headers[column] for column in columns]
-            non_key_headers = visible_headers[_audit_table_key_column_count(transposed_headers):]
+            non_key_headers = visible_headers[_audit_table_group_key_column_count(transposed_headers, columns):]
             lines.append(f"{indent}columns {group_index}/{len(column_groups)}: {', '.join(non_key_headers)}")
         lines.extend(_audit_wrapped_table_block_lines(
             transposed_headers,
@@ -4344,8 +4495,9 @@ def _audit_table_column_groups(
     if full_width <= max_width:
         return [list(range(len(header_list)))]
     key_count = _audit_table_key_column_count(header_list)
-    key_columns = list(range(min(key_count, len(header_list))))
-    value_columns = list(range(len(key_columns), len(header_list)))
+    split_key_count = _audit_table_split_key_column_count(header_list, key_count)
+    key_columns = list(range(min(split_key_count, len(header_list))))
+    value_columns = list(range(min(key_count, len(header_list)), len(header_list)))
     if not value_columns:
         return [key_columns]
     key_width = sum(widths[column] for column in key_columns) + max(len(key_columns), 0) * 2
@@ -4375,6 +4527,8 @@ def _audit_table_key_column_count(header_list: list[str]) -> int:
         "timestamp", "index", "event", "order_id",
     }
     first = header_list[0]
+    if first == "field" and len(header_list) > 1 and header_list[1] == "product":
+        return 2
     if first in {"notice_time", "timestamp"} and len(header_list) > 1 and header_list[1] in {"strategy", "event"}:
         return 2
     if first == "ledger" and len(header_list) > 1 and header_list[1] == "cash pool":
@@ -4384,6 +4538,30 @@ def _audit_table_key_column_count(header_list: list[str]) -> int:
             return 3
         return 2
     return 1 if first in key_headers else 1
+
+
+def _audit_table_split_key_column_count(header_list: list[str], key_count: int | None = None) -> int:
+    """Repeated index columns used only after a wide table is split.
+
+    The unsplit table still shows the full semantic index.  Split tables repeat
+    only the compact row identity so ledger/strategy totals do not waste every
+    sub-table on cash-pool/strategy/product context columns.
+    """
+    if not header_list:
+        return 0
+    first = header_list[0]
+    if first in {"ledger", "strategy", "strategies"}:
+        return 1
+    return key_count if key_count is not None else _audit_table_key_column_count(header_list)
+
+
+def _audit_table_group_key_column_count(header_list: list[str], columns: list[int]) -> int:
+    split_key_count = _audit_table_split_key_column_count(header_list)
+    count = 0
+    for expected_column in range(min(split_key_count, len(header_list))):
+        if count < len(columns) and columns[count] == expected_column:
+            count += 1
+    return count
 
 
 def _audit_table_cell_is_complex(value: Any) -> bool:
@@ -4406,7 +4584,6 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
     rows = value.get("rows")
     if not isinstance(rows, list):
         return "price_tables: (no rows)"
-    meta_records: list[dict[str, Any]] = []
     sample_rows: list[tuple[Any, ...]] = []
     sample_columns: list[str] = []
     lines: list[str] = []
@@ -4414,35 +4591,10 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
         if not isinstance(row, dict):
             continue
         basis = str(row.get("basis") or "")
-        shape = row.get("shape")
-        if isinstance(shape, list | tuple) and len(shape) == 2:
-            shape_text = f"{shape[0]} x {shape[1]}"
-        else:
-            shape_text = str(shape or "")
-        index_value = row.get("index")
-        if isinstance(index_value, dict) and {"start", "end"} <= set(index_value):
-            index_start_parts = _audit_index_parts(index_value.get("start"))
-            index_end_parts = _audit_index_parts(index_value.get("end"))
-        else:
-            index_start_parts = _audit_index_parts(index_value)
-            index_end_parts = [""]
-        note = ""
-        if basis in {"settlement", "pre_settlement"}:
-            note = "日级结算字段；本地分钟表按 trading_day 重复携带，结算 flow 只应在日终通知时使用"
-        meta_records.append({
-            "basis": basis,
-            "shape": shape_text,
-            "index_start": index_start_parts,
-            "index_end": index_end_parts,
-            "columns": _audit_columns_summary(row.get("columns")),
-            "note": note,
-        })
         sample = row.get("sample")
         if isinstance(sample, dict):
             selected_frames = _audit_price_sample_edge_frames(sample)
             if selected_frames:
-                if "head" in sample and "tail" in sample:
-                    lines.append(f"{basis}.sample = 仅显示最早一条和最晚一条")
                 for _sample_name, part in selected_frames:
                     part_columns = [str(column) for column in (part.get("columns") or [])]
                     for column in part_columns:
@@ -4460,28 +4612,7 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
                             _audit_index_parts(index_item),
                             value_map,
                         ))
-    if not meta_records:
-        return "price_tables: (empty)"
-    lines.append("价格字段元信息:")
-    meta_rows: list[tuple[Any, ...]] = []
-    for record in meta_records:
-        for endpoint, timestamps in (("start", record["index_start"]), ("end", record["index_end"])):
-            for timestamp in timestamps:
-                meta_rows.append((
-                    record["basis"],
-                    record["shape"],
-                    endpoint,
-                    timestamp,
-                    record["columns"],
-                    record["note"],
-                ))
-    lines.extend(_audit_table_lines(
-        ("basis", "shape", "index", "timestamp", "columns", "note"),
-        meta_rows,
-        indent="  ",
-    ))
     if sample_rows and sample_columns:
-        lines.append("")
         sample_times: list[str] = []
         grouped_values: dict[tuple[str, str], dict[str, str]] = {}
         for basis, _sample_name, sample_index, value_map in sample_rows:
@@ -4501,7 +4632,7 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
             indent="  ",
             allow_transpose=False,
         ))
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else "price_tables: (no sample)"
 
 
 def _audit_index_cell(value: Any) -> str:
@@ -5528,6 +5659,15 @@ def _print_audit_fields(
         record = sorted_records[index]
         field_name = str(record.get("field") or "")
         values = record.get("values") or []
+        if _is_market_data_sample_field(field_name):
+            combined = [record]
+            lookahead = index + 1
+            while lookahead < len(sorted_records) and _is_market_data_sample_field(str(sorted_records[lookahead].get("field") or "")):
+                combined.append(sorted_records[lookahead])
+                lookahead += 1
+            if _print_market_data_sample_value_table("    ", combined):
+                index += len(combined)
+                continue
         if _print_delta_mapping_value_table("    ", field_name, values):
             index += 1
             continue
@@ -5611,6 +5751,15 @@ def _print_audit_changes(
     index = 0
     while index < len(sorted_items):
         field_name, field_changes = sorted_items[index]
+        if _is_market_data_sample_field(field_name):
+            combined_market = [(field_name, field_changes)]
+            lookahead = index + 1
+            while lookahead < len(sorted_items) and _is_market_data_sample_field(sorted_items[lookahead][0]):
+                combined_market.append(sorted_items[lookahead])
+                lookahead += 1
+            if _print_market_data_sample_change_table("  ", combined_market):
+                index += len(combined_market)
+                continue
         if _print_delta_mapping_change_table("    ", field_name, field_changes):
             index += 1
             continue
@@ -5813,7 +5962,7 @@ def _current_event_subject_summary(current_event: dict[str, Any]) -> str:
 
 
 def _audit_max_width() -> int:
-    return max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
+    return max(40, min(shutil.get_terminal_size((132, 20)).columns, 132))
 
 
 def _wrap_audit_text(text: str, *, width: int, subsequent_indent: str = "") -> list[str]:
