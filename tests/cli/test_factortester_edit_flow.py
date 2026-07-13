@@ -849,6 +849,67 @@ def test_step_audit_splits_wide_combined_ledger_fields_by_terminal_width(capsys,
     assert max(len(_strip_ansi(line)) for line in out.splitlines()) <= 132
 
 
+def test_step_audit_combines_strategy_and_ledger_tables_across_interleaved_sort_order(capsys, monkeypatch) -> None:
+    order = {
+        "FactorSignalModule.warmup_mode": (1, 0, ""),
+        "FeeModule.fee_mode": (2, 0, ""),
+        "FactorModule.factor": (3, 0, ""),
+        "MarginModule.margin_mode": (4, 0, ""),
+        "GroupMembershipModule.allocation_policy": (5, 0, ""),
+    }
+    monkeypatch.setattr(
+        "tools.cli.modules.backtest.controller._audit_field_sort_key",
+        lambda field: order.get(field, (99, 0, field)),
+    )
+    strategy_values = [
+        {"scope": "strategy_config", "strategy": "A1", "value": "same"},
+        {"scope": "strategy_config", "strategy": "A2", "value": "same"},
+    ]
+    ledger_values = [
+        {"scope": "ledger_config", "ledger": "L1", "cash_pool": "P1", "strategies": ["A1"], "value": "same"},
+        {"scope": "ledger_config", "ledger": "L2", "cash_pool": "P2", "strategies": ["A2"], "value": "same"},
+    ]
+
+    _print_audit_fields("输入字段", [
+        {"field": "FactorSignalModule.warmup_mode", "values": strategy_values},
+        {"field": "FeeModule.fee_mode", "values": ledger_values},
+        {"field": "FactorModule.factor", "values": [{**entry, "value": "$USER:F"} for entry in strategy_values]},
+        {"field": "MarginModule.margin_mode", "values": ledger_values},
+        {"field": "GroupMembershipModule.allocation_policy", "values": [{**entry, "value": "rank"} for entry in strategy_values]},
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    strategy_headers = [line for line in plain.splitlines() if line.strip().startswith("strategies")]
+    ledger_headers = [line for line in plain.splitlines() if line.strip().startswith("ledger")]
+    assert len(strategy_headers) == 1
+    assert "warmup_mode" in strategy_headers[0]
+    assert "factor" in strategy_headers[0]
+    assert "allocation_policy" in strategy_headers[0]
+    assert len(ledger_headers) == 1
+    assert "fee_mode" in ledger_headers[0]
+    assert "margin_mode" in ledger_headers[0]
+
+
+def test_step_audit_transposes_after_combining_strategy_total_table(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((72, 20)))
+    records = [
+        {
+            "field": f"ExampleModule.strategy_field_{index}",
+            "values": [
+                {"scope": "strategy_config", "strategy": "A1", "value": f"value-{index}"},
+            ],
+        }
+        for index in range(8)
+    ]
+
+    _print_audit_fields("输入字段", records)
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert plain.count("strategy_field_") >= 8
+    assert "表格已转置" in plain
+    assert "原列数 9" in plain
+
+
 def test_step_audit_displays_backend_null_dmtm_ledger_config_verbatim(capsys) -> None:
     values = [
         {

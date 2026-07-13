@@ -5654,8 +5654,12 @@ def _print_audit_fields(
         click.echo(f"  {empty_message}")
         return
     sorted_records = sorted(records, key=lambda item: _audit_field_sort_key(str(item.get("field") or "")))
+    consumed_indexes: set[int] = set()
     index = 0
     while index < len(sorted_records):
+        if index in consumed_indexes:
+            index += 1
+            continue
         record = sorted_records[index]
         field_name = str(record.get("field") or "")
         values = record.get("values") or []
@@ -5671,31 +5675,26 @@ def _print_audit_fields(
         if _print_delta_mapping_value_table("    ", field_name, values):
             index += 1
             continue
-        combined = [record]
-        current_table = _cash_pool_scalar_record_table(record)
-        combined_printer = _print_combined_cash_pool_scalar_value_table
-        if current_table is None:
-            current_table = _strategy_scalar_record_table(record)
-            combined_printer = _print_combined_strategy_scalar_value_table
-        if current_table is None:
-            current_table = _ledger_scalar_record_table(record)
-            combined_printer = _print_combined_ledger_scalar_value_table
+        current_table, combined_printer, current_routes = _scalar_value_record_group(record)
         if current_table is not None:
-            current_routes = _combined_scalar_routes(current_table, strategy=combined_printer is _print_combined_strategy_scalar_value_table)
+            combined = [record]
+            combined_indexes: list[int] = []
             lookahead = index + 1
             while lookahead < len(sorted_records):
-                if combined_printer is _print_combined_cash_pool_scalar_value_table:
-                    next_table = _cash_pool_scalar_record_table(sorted_records[lookahead])
-                elif combined_printer is _print_combined_strategy_scalar_value_table:
-                    next_table = _strategy_scalar_record_table(sorted_records[lookahead])
-                else:
-                    next_table = _ledger_scalar_record_table(sorted_records[lookahead])
-                if next_table is None or _combined_scalar_routes(next_table, strategy=combined_printer is _print_combined_strategy_scalar_value_table) != current_routes:
-                    break
-                combined.append(sorted_records[lookahead])
+                if lookahead in consumed_indexes:
+                    lookahead += 1
+                    continue
+                next_table, next_printer, next_routes = _scalar_value_record_group(sorted_records[lookahead])
+                if next_table is not None and next_printer is combined_printer and next_routes == current_routes:
+                    combined.append(sorted_records[lookahead])
+                    combined_indexes.append(lookahead)
                 lookahead += 1
-        if current_table is not None and combined_printer("    ", combined):
-            index += len(combined)
+            if combined_printer("    ", combined):
+                consumed_indexes.update(combined_indexes)
+                index += 1
+                continue
+        if current_table is not None:
+            index += 1
             continue
         values = _drop_empty_non_ledger_entries_when_ledger_values_exist(field_name, values)
         if not values:
@@ -5734,6 +5733,35 @@ def _combined_scalar_routes(table: tuple[Any, ...], *, strategy: bool) -> tuple[
     return tuple(sorted(table[1]))
 
 
+def _scalar_value_record_group(record: dict[str, Any]) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
+    table = _cash_pool_scalar_record_table(record)
+    if table is not None:
+        return table, _print_combined_cash_pool_scalar_value_table, _combined_scalar_routes(table, strategy=False)
+    table = _strategy_scalar_record_table(record)
+    if table is not None:
+        return table, _print_combined_strategy_scalar_value_table, _combined_scalar_routes(table, strategy=True)
+    table = _ledger_scalar_record_table(record)
+    if table is not None:
+        return table, _print_combined_ledger_scalar_value_table, _combined_scalar_routes(table, strategy=False)
+    return None, None, None
+
+
+def _scalar_change_record_group(
+    field_name: str,
+    field_changes: list[dict[str, Any]],
+) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
+    table = _cash_pool_scalar_change_record_table(field_name, field_changes)
+    if table is not None:
+        return table, _print_combined_cash_pool_scalar_change_table, _combined_scalar_routes(table, strategy=False)
+    table = _strategy_scalar_change_record_table(field_name, field_changes)
+    if table is not None:
+        return table, _print_combined_strategy_scalar_change_table, _combined_scalar_routes(table, strategy=True)
+    table = _ledger_scalar_change_record_table(field_name, field_changes)
+    if table is not None:
+        return table, _print_combined_ledger_scalar_change_table, _combined_scalar_routes(table, strategy=False)
+    return None, None, None
+
+
 def _print_audit_changes(
     title: str,
     changes: list[dict[str, Any]],
@@ -5748,8 +5776,12 @@ def _print_audit_changes(
     for change in changes:
         by_field.setdefault(str(change.get("field") or ""), []).append(change)
     sorted_items = sorted(by_field.items(), key=lambda item: _audit_field_sort_key(item[0]))
+    consumed_indexes: set[int] = set()
     index = 0
     while index < len(sorted_items):
+        if index in consumed_indexes:
+            index += 1
+            continue
         field_name, field_changes = sorted_items[index]
         if _is_market_data_sample_field(field_name):
             combined_market = [(field_name, field_changes)]
@@ -5763,33 +5795,27 @@ def _print_audit_changes(
         if _print_delta_mapping_change_table("    ", field_name, field_changes):
             index += 1
             continue
-        combined = [(field_name, field_changes)]
-        combined_printer = None
-        current_table: tuple[Any, ...] | None = _cash_pool_scalar_change_record_table(field_name, field_changes)
-        combined_printer = _print_combined_cash_pool_scalar_change_table
-        if current_table is None:
-            current_table = _strategy_scalar_change_record_table(field_name, field_changes)
-            combined_printer = _print_combined_strategy_scalar_change_table
-        if current_table is None:
-            current_table = _ledger_scalar_change_record_table(field_name, field_changes)
-            combined_printer = _print_combined_ledger_scalar_change_table
+        current_table, combined_printer, current_routes = _scalar_change_record_group(field_name, field_changes)
         if current_table is not None:
-            current_routes = _combined_scalar_routes(current_table, strategy=combined_printer is _print_combined_strategy_scalar_change_table)
+            combined = [(field_name, field_changes)]
+            combined_indexes: list[int] = []
             lookahead = index + 1
             while lookahead < len(sorted_items):
+                if lookahead in consumed_indexes:
+                    lookahead += 1
+                    continue
                 next_field, next_changes = sorted_items[lookahead]
-                if combined_printer is _print_combined_cash_pool_scalar_change_table:
-                    next_table = _cash_pool_scalar_change_record_table(next_field, next_changes)
-                elif combined_printer is _print_combined_strategy_scalar_change_table:
-                    next_table = _strategy_scalar_change_record_table(next_field, next_changes)
-                else:
-                    next_table = _ledger_scalar_change_record_table(next_field, next_changes)
-                if next_table is None or _combined_scalar_routes(next_table, strategy=combined_printer is _print_combined_strategy_scalar_change_table) != current_routes:
-                    break
-                combined.append((next_field, next_changes))
+                next_table, next_printer, next_routes = _scalar_change_record_group(next_field, next_changes)
+                if next_table is not None and next_printer is combined_printer and next_routes == current_routes:
+                    combined.append((next_field, next_changes))
+                    combined_indexes.append(lookahead)
                 lookahead += 1
-        if current_table is not None and combined_printer is not None and combined_printer("  ", combined):
-            index += len(combined)
+            if combined_printer("  ", combined):
+                consumed_indexes.update(combined_indexes)
+                index += 1
+                continue
+        if current_table is not None:
+            index += 1
             continue
         click.echo(f"  {_audit_combined_single_field_label(field_name)}:", color=True)
         if _print_lifecycle_notice_change("    ", field_name, field_changes):
@@ -6134,8 +6160,6 @@ def _handle_step_event(
             route_state=route_state,
         )
         _print_audit_changes("声明输出的变化", output_changes, route_state=route_state)
-        _print_event_payload_changes(list(data.get("event_payload_changes") or []))
-        _print_audit_changes("账本与现金池变化", list(data.get("ledger_changes") or []), route_state=route_state)
         _print_contract_audit(list(data.get("input_contract_violations") or []))
 
     click.echo("")
