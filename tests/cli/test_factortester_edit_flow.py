@@ -1075,34 +1075,67 @@ def test_step_audit_keeps_raw_deltas_in_ledger_table(capsys, monkeypatch) -> Non
     assert "账本 private:L1" not in out
 
 
-def test_step_audit_keeps_raw_deltas_in_strategy_product_table(capsys) -> None:
-    _print_audit_changes("声明输出的变化", [
-        {
-            "field": "OrderConstructModule.raw_deltas",
-            "scope": "strategy_context",
-            "strategy": "A1",
-            "before": None,
-            "after": {"CJ.CZC": 2.5, "SF.CZC": 0, "SM.CZC": -1.5},
-        },
-        {
-            "field": "OrderConstructModule.raw_deltas",
-            "scope": "strategy_context",
-            "strategy": "A2",
-            "before": None,
-            "after": {"CJ.CZC": 0, "SF.CZC": 0},
-        },
-    ])
+def test_step_audit_maps_strategy_raw_deltas_to_ledger_product_table(capsys) -> None:
+    with _audit_step_event_context({
+        "ledgers_before": [
+            {"ledger": "private:L1", "cash_pool": "private:P1", "strategies": ["A1"]},
+            {"ledger": "private:L2", "cash_pool": "private:P2", "strategies": ["A2"]},
+        ]
+    }):
+        _print_audit_changes("声明输出的变化", [
+            {
+                "field": "OrderConstructModule.raw_deltas",
+                "scope": "strategy_context",
+                "strategy": "A1",
+                "before": None,
+                "after": {"CJ.CZC": 2.5, "SF.CZC": 0, "SM.CZC": -1.5},
+            },
+            {
+                "field": "OrderConstructModule.raw_deltas",
+                "scope": "strategy_context",
+                "strategy": "A2",
+                "before": None,
+                "after": {"CJ.CZC": 0, "SF.CZC": 0},
+            },
+        ])
 
     out = capsys.readouterr().out
     assert "raw_deltas [OrderConstructModule.raw_deltas]" in out
-    assert "owner" in out
+    assert "ledger" in out
+    assert "cash pool" in out
+    assert "strategies" in out
     assert "product" in out
+    assert "private:L1" in out
+    assert "private:P1" in out
     assert "A1" in out
     assert "CJ.CZC" in out
     assert "SM.CZC" in out
     assert "其余 1 个产品" in out
     assert "其余 2 个产品" in out
     assert "[明细" not in out
+
+
+def test_step_audit_maps_strategy_deltas_to_same_ledger_product_table(capsys) -> None:
+    with _audit_step_event_context({
+        "ledgers_before": [
+            {"ledger": "private:L1", "cash_pool": "private:P1", "strategies": ["A1"]},
+        ]
+    }):
+        _print_audit_changes("声明输出的变化", [{
+            "field": "OrderConstructModule.deltas",
+            "scope": "strategy_context",
+            "strategy": "A1",
+            "before": None,
+            "after": {"CJ.CZC": 2, "SF.CZC": 0},
+        }])
+
+    out = capsys.readouterr().out
+    assert "deltas [OrderConstructModule.deltas]" in out
+    assert "private:L1" in out
+    assert "private:P1" in out
+    assert "A1" in out
+    assert "CJ.CZC" in out
+    assert "其余 1 个产品" in out
 
 
 def test_step_audit_reuses_identical_detail_refs() -> None:
