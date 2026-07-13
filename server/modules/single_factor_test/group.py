@@ -1953,16 +1953,45 @@ def _product_list_from_group_payload(group: dict) -> list[str] | None:
     return None
 
 
+_AUTO_INFERRED_LEDGER_DEFAULTS = {
+    "cost_basis_method": "WeightAverage",
+    "daily_mark_to_market_enabled": False,
+}
+
+
+def _strip_implicit_auto_ledger_defaults(
+    settings: dict[str, Any],
+    *,
+    local_settings: dict[str, Any],
+    group_payload: dict[str, Any],
+) -> None:
+    """Do not pass UI display defaults as explicit ledger config in auto/exact.
+
+    Native accounting infers these fields from historical trading-rule rows.
+    `resolve_group_settings` returns a complete value map, so without this
+    bridge cleanup an unedited UI default such as cost_basis_method=WeightAverage
+    would mask the intended FIFO/DMTM inference in step-mode audit output.
+    """
+    engine_mode = str(settings.get("engine_mode") or "auto").lower()
+    if engine_mode not in {"auto", "exact"}:
+        return
+    for key, default in _AUTO_INFERRED_LEDGER_DEFAULTS.items():
+        if key in local_settings or key in group_payload:
+            continue
+        if settings.get(key) == default:
+            settings.pop(key, None)
+
+
 def _resolve_group_strategy_settings(
     g: dict,
     *,
     resolved_backtest_settings: dict[str, dict[str, Any]],
     fallback_group_settings: dict[str, Any],
     page_uuid: str,
-    username: str,
     data: dict,
     page_factors_dict: dict,
     selection_cache: dict[str, Any],
+    username: str = "",
 ) -> dict[str, Any]:
     """Per-group bridge from the existing flat-settings resolution
     (resolve_group_settings, scalar values only) to the resolved_settings
@@ -1972,6 +2001,12 @@ def _resolve_group_strategy_settings(
 
     group_id = str(g.get('id') or '')
     group_settings = dict(resolved_backtest_settings.get(group_id) or fallback_group_settings)
+    local_settings = _payload_local_settings(data)
+    _strip_implicit_auto_ledger_defaults(
+        group_settings,
+        local_settings=local_settings,
+        group_payload=g,
+    )
 
     raw_split_count = g.get('splitCount')
     if raw_split_count is None:
@@ -2033,6 +2068,7 @@ def _resolve_long_short_strategy_settings(
     resolved_backtest_settings: dict[str, dict[str, Any]],
     source_settings_by_alias: dict[str, dict[str, Any]],
     fallback_group_settings: dict[str, Any],
+    local_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a peer long-short strategy from source strategy ids.
 
@@ -2070,6 +2106,11 @@ def _resolve_long_short_strategy_settings(
     settings["display_name"] = str(config.get("shortAlias") or config.get("name") or strategy_id)
     settings["long_leg_strategy_ids"] = long_legs
     settings["short_leg_strategy_ids"] = short_legs
+    _strip_implicit_auto_ledger_defaults(
+        settings,
+        local_settings=local_settings or {},
+        group_payload=config,
+    )
     return settings
 
 
@@ -3206,6 +3247,7 @@ def run_group_test_stream():
                     resolved_backtest_settings=resolved_backtest_settings,
                     source_settings_by_alias=resolved_settings_by_alias,
                     fallback_group_settings=fallback_group_settings,
+                    local_settings=local_settings,
                 )
             group_owner.extend(_build_long_short_owner_rows(
                 normalized_ls_configs, source_owner_by_id=group_owner_by_id))

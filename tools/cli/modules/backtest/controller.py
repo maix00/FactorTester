@@ -53,6 +53,56 @@ def _pad_audit_cell(value: object, width: int) -> str:
 def _audit_change_cell(before: Any, after: Any) -> str:
     return click.style(f"{before} -> {after}", fg="black", bg="yellow")
 
+
+@dataclass(frozen=True)
+class _AuditSamplePart:
+    name: str
+    value: Any
+
+
+def _audit_select_sample_part(sample: dict[str, Any], predicate) -> _AuditSamplePart | None:
+    """Pick one representative sample block; prefer head, fall back to tail."""
+    for name in ("head", "tail"):
+        value = sample.get(name)
+        if predicate(value):
+            return _AuditSamplePart(name=name, value=value)
+    return None
+
+
+def _audit_sample_note_lines(sample: dict[str, Any], selected_name: str) -> list[str]:
+    other_name = "tail" if selected_name == "head" else "head"
+    if other_name in sample:
+        return [f"sample = 仅显示 {selected_name}；{other_name} 已省略"]
+    return []
+
+
+def _audit_single_sample_sequence(items: list[Any]) -> tuple[list[Any], list[str]]:
+    if len(items) <= 1:
+        return items, []
+    return items[:1], [f"sample.rows = 仅显示 1/{len(items)} 行；其余 sample 行已省略"]
+
+
+def _audit_single_sample_frame(frame: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    indexes = frame.get("index")
+    rows = frame.get("rows")
+    if not isinstance(indexes, list) or not isinstance(rows, list) or len(rows) <= 1:
+        return frame, []
+    clipped = dict(frame)
+    clipped["index"] = indexes[:1]
+    clipped["rows"] = rows[:1]
+    return clipped, [f"sample.rows = 仅显示 1/{len(rows)} 行；其余 sample 行已省略"]
+
+
+def _audit_single_sample_series(series: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    indexes = series.get("index")
+    values = series.get("values")
+    if not isinstance(indexes, list) or not isinstance(values, list) or len(values) <= 1:
+        return series, []
+    clipped = dict(series)
+    clipped["index"] = indexes[:1]
+    clipped["values"] = values[:1]
+    return clipped, [f"sample.rows = 仅显示 1/{len(values)} 行；其余 sample 行已省略"]
+
 # Field metadata comes from the executable-module registry, not a hand-picked
 # controller list. Adding a registered backtest module automatically makes its
 # labels and chip ordering available to this renderer.
@@ -2179,21 +2229,19 @@ def _audit_event_draft_sample_table_text(value: dict[str, Any]) -> str | None:
     sample = value.get("sample")
     if not isinstance(sample, dict):
         return None
-    parts: list[tuple[str, list[dict[str, Any]]]] = []
-    for name in ("head", "tail"):
-        items = sample.get(name)
-        if isinstance(items, list) and items and _audit_is_event_draft_list(items):
-            parts.append((name, items))
-    if not parts:
+    selected = _audit_select_sample_part(sample, lambda items: isinstance(items, list) and items and _audit_is_event_draft_list(items))
+    if selected is None:
         return None
     length = value.get("length")
     header = f"事件草稿列表 length={length}" if length is not None else "事件草稿列表"
     if value.get("truncated"):
         header = f"{header} truncated=True"
     lines = [header]
-    for name, items in parts:
-        lines.append(f"sample.{name}:")
-        lines.extend(_audit_event_draft_table_lines(items, indent="  "))
+    lines.extend(_audit_sample_note_lines(sample, selected.name))
+    items, row_notes = _audit_single_sample_sequence(selected.value)
+    lines.extend(row_notes)
+    lines.append(f"sample.{selected.name}:")
+    lines.extend(_audit_event_draft_table_lines(items, indent="  "))
     return "\n".join(lines)
 
 
@@ -2340,11 +2388,13 @@ def _audit_trading_day_resolver_text(value: dict[str, Any]) -> str:
             lines.append(f"trading_days = {count} days; {start} → {end}")
     sample = value.get("sample")
     if isinstance(sample, dict):
-        for name in ("head", "tail"):
-            part = sample.get(name)
-            if isinstance(part, dict):
-                lines.append(f"sample.{name}:")
-                lines.extend(_audit_dataframe_table_lines(part, indent="  "))
+        selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
+        if selected is not None:
+            lines.extend(_audit_sample_note_lines(sample, selected.name))
+            part, row_notes = _audit_single_sample_frame(selected.value)
+            lines.extend(row_notes)
+            lines.append(f"sample.{selected.name}:")
+            lines.extend(_audit_dataframe_table_lines(part, indent="  "))
     return "\n".join(lines)
 
 
@@ -2400,21 +2450,19 @@ def _audit_order_sample_table_text(value: dict[str, Any]) -> str | None:
     sample = value.get("sample")
     if not isinstance(sample, dict):
         return None
-    parts: list[tuple[str, list[dict[str, Any]]]] = []
-    for name in ("head", "tail"):
-        items = sample.get(name)
-        if isinstance(items, list) and items and _audit_is_order_list(items):
-            parts.append((name, items))
-    if not parts:
+    selected = _audit_select_sample_part(sample, lambda items: isinstance(items, list) and items and _audit_is_order_list(items))
+    if selected is None:
         return None
     length = value.get("length")
     header = f"订单列表 length={length}" if length is not None else "订单列表"
     if value.get("truncated"):
         header = f"{header} truncated=True"
     lines = [header]
-    for name, items in parts:
-        lines.append(f"sample.{name}:")
-        lines.extend(_audit_order_table_lines(items, indent="  "))
+    lines.extend(_audit_sample_note_lines(sample, selected.name))
+    items, row_notes = _audit_single_sample_sequence(selected.value)
+    lines.extend(row_notes)
+    lines.append(f"sample.{selected.name}:")
+    lines.extend(_audit_order_table_lines(items, indent="  "))
     return "\n".join(lines)
 
 
@@ -2778,12 +2826,35 @@ def _dedupe_audit_list(values: list[Any]) -> list[Any]:
 
 
 def _audit_ledger_scalar_text(value: Any) -> str | None:
+    bracket_list_text = _audit_bracket_scalar_list_text(value)
+    if bracket_list_text is not None:
+        return bracket_list_text
+    normalized = _audit_normalized_value(value)
+    if isinstance(normalized, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in normalized):
+        return "[" + _audit_product_list_cell([str(item) for item in normalized]) + "]"
     lines = _audit_text(value).splitlines() or [""]
     if len(lines) != 1:
         return None
-    if _audit_table_cell_is_complex(_audit_normalized_value(value)):
+    if _audit_table_cell_is_complex(normalized):
         return None
     return lines[0]
+
+
+def _audit_bracket_scalar_list_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not (text.startswith("[") and text.endswith("]")):
+        return None
+    body = text[1:-1].strip()
+    if not body:
+        return "[]"
+    if any(mark in body for mark in ("{", "}", "\n")):
+        return None
+    items = [item.strip().strip("'\"") for item in body.split(",") if item.strip()]
+    if not items:
+        return None
+    return "[" + _audit_product_list_cell(items) + "]"
 
 
 def _audit_is_ledger_entries(entries: list[dict[str, Any]]) -> bool:
@@ -2797,7 +2868,9 @@ def _audit_is_strategy_entries(entries: list[dict[str, Any]]) -> bool:
     if not entries:
         return False
     scopes = {str(entry.get("scope") or "") for entry in entries}
-    return bool(scopes) and scopes <= {"strategy_context", "strategy_config"}
+    if not (bool(scopes) and scopes <= {"strategy_context", "strategy_config"}):
+        return False
+    return all(entry.get("strategy") not in (None, "") for entry in entries)
 
 
 def _audit_is_cash_field(field_name: str) -> bool:
@@ -2864,15 +2937,13 @@ def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[
 def _print_strategy_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
     if not _audit_is_strategy_entries(values):
         return False
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str]] = []
     for entry in values:
         value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
         if value_text is None:
             return False
-        scope = str(entry.get("scope") or "")
-        label = "策略配置" if scope == "strategy_config" else "策略上下文"
-        rows.append((str(entry.get("strategy") or "?"), label, value_text))
-    for line in _audit_table_lines(("strategy", "source", "value"), sorted(rows), indent=prefix):
+        rows.append((str(entry.get("strategy") or "?"), value_text))
+    for line in _audit_table_lines(("strategy", "value"), sorted(rows), indent=prefix):
         click.echo(line)
     return True
 
@@ -2906,10 +2977,92 @@ def _print_ledger_grouped_changes(prefix: str, field_name: str, changes: list[di
     return True
 
 
+def _print_positions_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    if field_name != "LedgerModule.positions" and field_name.rsplit(".", 1)[-1] != "positions":
+        return False
+    if not _audit_is_ledger_entries(changes):
+        return False
+    rows: list[tuple[Any, ...]] = []
+    for change in changes:
+        before = _display_field_value(field_name, change.get("before"))
+        after = _display_field_value(field_name, change.get("after"))
+        position_rows = _audit_positions_diff_rows(before, after)
+        if position_rows is None:
+            return False
+        strategies = ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无"
+        for row in position_rows:
+            rows.append((
+                str(change.get("ledger") or "?"),
+                str(change.get("cash_pool") or "?"),
+                strategies,
+                *row,
+            ))
+    if not rows:
+        click.echo(f"{prefix}（无变化）")
+        return True
+    base_headers = ("ledger", "cash pool", "strategies", "products")
+    value_headers = ("quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count", "lot changes")
+    kept_value_indexes = [
+        index
+        for index, header in enumerate(value_headers)
+        if header != "lot changes" and any(row[len(base_headers) + index] not in ("", "null -> null") for row in rows)
+    ]
+    if any(row[-1] for row in rows):
+        kept_value_indexes.append(len(value_headers) - 1)
+    headers = (*base_headers, *[value_headers[index] for index in kept_value_indexes])
+    compact_rows = [
+        tuple([*row[:len(base_headers)], *[row[len(base_headers) + index] for index in kept_value_indexes]])
+        for row in rows
+    ]
+    for line in _audit_table_lines(headers, sorted(compact_rows), indent=prefix):
+        click.echo(line)
+    return True
+
+
+def _ledger_scalar_record_table(record: dict[str, Any]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
+    field_name = str(record.get("field") or "")
+    values = record.get("values") or []
+    if _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(values):
+        return None
+    rows: dict[tuple[str, str, str], str] = {}
+    for entry in values:
+        value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
+        if value_text is None:
+            return None
+        route = (
+            str(entry.get("ledger") or "?"),
+            str(entry.get("cash_pool") or "?"),
+            ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无",
+        )
+        rows[route] = value_text
+    if not rows:
+        return None
+    return field_name.rsplit(".", 1)[-1], rows
+
+
+def _print_combined_ledger_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
+    tables = [_ledger_scalar_record_table(record) for record in records]
+    if any(table is None for table in tables) or len(tables) < 2:
+        return False
+    route_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
+    if not route_keys or any(keys != route_keys[0] for keys in route_keys[1:]):
+        return False
+    field_columns = [table[0] for table in tables if table is not None]
+    value_maps = [table[1] for table in tables if table is not None]
+    rows = [
+        tuple([ledger, cash_pool, strategies, *[value_map[(ledger, cash_pool, strategies)] for value_map in value_maps]])
+        for ledger, cash_pool, strategies in route_keys[0]
+    ]
+    click.echo(f"{prefix}合并账本字段:")
+    for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+        click.echo(line)
+    return True
+
+
 def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
     if not _audit_is_strategy_entries(changes):
         return False
-    grouped: dict[tuple[str, str, str], list[str]] = {}
+    grouped: dict[tuple[str, str], list[str]] = {}
     for change in changes:
         before = _display_field_value(field_name, change.get("before"))
         after = _display_field_value(field_name, change.get("after"))
@@ -2917,14 +3070,12 @@ def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: l
         after_text = _audit_ledger_scalar_text(after)
         if before_text is None or after_text is None:
             return False
-        scope = str(change.get("scope") or "")
-        label = "策略配置" if scope == "strategy_config" else "策略上下文"
-        grouped.setdefault((label, before_text, after_text), []).append(str(change.get("strategy") or "?"))
+        grouped.setdefault((before_text, after_text), []).append(str(change.get("strategy") or "?"))
     rows = [
-        (", ".join(sorted(dict.fromkeys(strategies))), label, _audit_change_cell(before_text, after_text))
-        for (label, before_text, after_text), strategies in grouped.items()
+        (", ".join(sorted(dict.fromkeys(strategies))), _audit_change_cell(before_text, after_text))
+        for (before_text, after_text), strategies in grouped.items()
     ]
-    for line in _audit_table_lines(("strategy", "source", "change"), sorted(rows), indent=prefix):
+    for line in _audit_table_lines(("strategy", "change"), sorted(rows), indent=prefix):
         click.echo(line)
     return True
 
@@ -3104,23 +3255,45 @@ def _audit_transposed_table_lines(
 ) -> list[str] | None:
     if header_list and header_list[0] == "op":
         return None
-    if len(header_list) <= 8 or len(scalar_rows) > 3:
-        return None
     key_count = _audit_table_key_column_count(header_list)
+    value_column_count = max(len(header_list) - 1, 0)
+    should_transpose_dense = (
+        key_count <= 2
+        and len(header_list) >= 5
+        and (
+            (len(scalar_rows) <= 3 and value_column_count >= len(scalar_rows) + 3)
+            or (len(header_list) > 16 and value_column_count > max(len(scalar_rows), 1))
+        )
+    )
+    if not should_transpose_dense and (len(header_list) <= 8 or len(scalar_rows) > 3):
+        return None
     if key_count < 1 or key_count > 2:
         return None
-    max_width = max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
+    max_width = _audit_max_width()
     full_width = len(indent) + sum(widths) + max(len(widths) - 1, 0) * 2
-    if full_width <= max_width:
-        return None
     row_headers = [
         " | ".join(row[column] for column in range(key_count)).strip()
         for row in scalar_rows
     ]
-    transposed_rows = [
-        tuple([header_list[column], *[row[column] for row in scalar_rows]])
-        for column in range(key_count, len(header_list))
-    ]
+    if full_width <= max_width and not should_transpose_dense:
+        return None
+    key_detail_lines: list[str] = []
+    if any(_audit_display_width(header) > 48 for header in row_headers):
+        row_labels = [f"行{index}" for index in range(1, len(row_headers) + 1)]
+        key_detail_rows = [
+            tuple([row_labels[index], *[scalar_rows[index][column] for column in range(key_count)]])
+            for index in range(len(scalar_rows))
+        ]
+        key_detail_lines = [f"{indent}行标明细:"]
+        key_detail_lines.extend(_audit_table_lines(("row", *header_list[:key_count]), key_detail_rows, indent=f"{indent}  "))
+        row_headers = row_labels
+    transposed_rows = []
+    for column in range(key_count, len(header_list)):
+        values = [row[column] for row in scalar_rows]
+        if len(values) > 1 and len(set(values)) == 1 and values[0] not in ("", "null"):
+            transposed_rows.append(tuple([header_list[column], f"全部相同: {values[0]}", *[""] * (len(values) - 1)]))
+        else:
+            transposed_rows.append(tuple([header_list[column], *values]))
     transposed_headers = ["column", *row_headers]
     transposed_widths = [
         max(_audit_display_width(transposed_headers[column]), *(_audit_display_width(str(row[column])) for row in transposed_rows))
@@ -3128,6 +3301,7 @@ def _audit_transposed_table_lines(
     ]
     key_label = " + ".join(header_list[:key_count])
     lines = [f"{indent}（表格已转置：原列数 {len(header_list)}，原行数 {len(scalar_rows)}，行标={key_label}）"]
+    lines.extend(key_detail_lines)
     lines.extend(_audit_table_block_lines(
         transposed_headers,
         [[str(item) for item in row] for row in transposed_rows],
@@ -3163,7 +3337,13 @@ def _audit_table_column_groups(
 ) -> list[list[int]]:
     if not header_list:
         return [[]]
-    max_width = max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
+    # Prefer one logical table for one field.  Width-based column splitting is a
+    # last resort for genuinely wide tables; modest ledger/strategy tables are
+    # easier to audit when all value fields stay together even if the terminal
+    # wraps a little.
+    if len(header_list) <= 24:
+        return [list(range(len(header_list)))]
+    max_width = _audit_max_width()
     full_width = len(indent) + sum(widths) + max(len(widths) - 1, 0) * 2
     if full_width <= max_width:
         return [list(range(len(header_list)))]
@@ -3202,6 +3382,10 @@ def _audit_table_key_column_count(header_list: list[str]) -> int:
     if first in {"notice_time", "timestamp"} and len(header_list) > 1 and header_list[1] in {"strategy", "event"}:
         return 2
     if first == "ledger" and len(header_list) > 1 and header_list[1] == "cash pool":
+        if len(header_list) > 3 and header_list[2] == "strategies" and header_list[3] in {"products", "product"}:
+            return 4
+        if len(header_list) > 2 and header_list[2] == "strategies":
+            return 3
         return 2
     return 1 if first in key_headers else 1
 
@@ -3244,11 +3428,13 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
             lines.append("  note    = 日级结算字段；本地分钟表按 trading_day 重复携带，结算 flow 只应在日终通知时使用")
         sample = row.get("sample")
         if isinstance(sample, dict):
-            for name in ("head", "tail"):
-                part = sample.get(name)
-                if isinstance(part, dict):
-                    lines.append(f"  sample.{name}:")
-                    lines.extend(_audit_dataframe_table_lines(part, indent="    "))
+            selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
+            if selected is not None:
+                lines.extend(f"  {line}" for line in _audit_sample_note_lines(sample, selected.name))
+                part, row_notes = _audit_single_sample_frame(selected.value)
+                lines.extend(f"  {line}" for line in row_notes)
+                lines.append(f"  sample.{selected.name}:")
+                lines.extend(_audit_dataframe_table_lines(part, indent="    "))
     if not lines:
         return "price_tables: (empty)"
     return "\n".join(lines)
@@ -3465,17 +3651,19 @@ def _audit_grouped_position_rows(positions: dict[str, dict[str, Any]]) -> list[t
         grouped.setdefault(values, []).append(product)
         row_values[values] = values
     rows: list[tuple[Any, ...]] = []
+    all_products = sorted(positions)
     for values, products in sorted(grouped.items(), key=lambda item: item[1][0]):
-        rows.append((_audit_product_list_cell(products), *row_values[values]))
+        rows.append((_audit_product_list_cell(products, all_products=all_products), *row_values[values]))
     return rows
 
 
-def _audit_product_list_cell(products: list[str]) -> str:
-    if len(products) <= 24:
+def _audit_product_list_cell(products: list[str], *, all_products: list[str] | None = None) -> str:
+    if all_products and len(products) > 1 and set(products) == set(all_products):
+        return "全部产品"
+    if len(products) <= 6:
         return ", ".join(products)
-    head = ", ".join(products[:12])
-    tail = ", ".join(products[-3:])
-    return f"{head}, ... , {tail}（共 {len(products)} 个）"
+    head = ", ".join(products[:3])
+    return f"{head}, ..."
 
 
 def _audit_position_scalar(payload: dict[str, Any], column: str) -> str:
@@ -3488,27 +3676,9 @@ def _audit_position_scalar(payload: dict[str, Any], column: str) -> str:
 
 
 def _audit_positions_diff_text(before: Any, after: Any) -> str | None:
-    before_is_positions = isinstance(before, dict) and before.get("type") == "PositionsTable"
-    after_is_positions = isinstance(after, dict) and after.get("type") == "PositionsTable"
-    if not (before_is_positions or after_is_positions):
+    rows = _audit_positions_diff_rows(before, after)
+    if rows is None:
         return None
-    before_positions = _audit_normalized_positions(before)
-    after_positions = _audit_normalized_positions(after)
-    if before_positions is None or after_positions is None:
-        return None
-    products = sorted(set(before_positions) | set(after_positions))
-    grouped: dict[tuple[str, ...], list[str]] = {}
-    for product in products:
-        before_payload = before_positions.get(product)
-        after_payload = after_positions.get(product)
-        if before_payload == after_payload:
-            continue
-        row = _audit_position_diff_values(before_payload, after_payload)
-        grouped.setdefault(row, []).append(product)
-    rows = [
-        (_audit_product_list_cell(products), *values)
-        for values, products in sorted(grouped.items(), key=lambda item: item[1][0])
-    ]
     if not rows:
         return "（无变化）"
     headers: tuple[str, ...]
@@ -3518,6 +3688,31 @@ def _audit_positions_diff_text(before: Any, after: Any) -> str | None:
     else:
         headers = ("products", "quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count", "lot changes")
     return "\n".join(_audit_table_lines(headers, rows))
+
+
+def _audit_positions_diff_rows(before: Any, after: Any) -> list[tuple[str, ...]] | None:
+    before_is_positions = isinstance(before, dict) and before.get("type") == "PositionsTable"
+    after_is_positions = isinstance(after, dict) and after.get("type") == "PositionsTable"
+    if not (before_is_positions or after_is_positions):
+        return None
+    before_positions = _audit_normalized_positions(before)
+    after_positions = _audit_normalized_positions(after)
+    if before_positions is None or after_positions is None:
+        return None
+    all_products = sorted(set(before_positions) | set(after_positions))
+    grouped: dict[tuple[str, ...], list[str]] = {}
+    for product in all_products:
+        before_payload = before_positions.get(product)
+        after_payload = after_positions.get(product)
+        if before_payload == after_payload:
+            continue
+        row = _audit_position_diff_values(before_payload, after_payload)
+        grouped.setdefault(row, []).append(product)
+    rows = [
+        (_audit_product_list_cell(group_products, all_products=all_products), *values)
+        for values, group_products in sorted(grouped.items(), key=lambda item: item[1][0])
+    ]
+    return rows
 
 
 def _audit_position_diff_values(
@@ -3613,11 +3808,13 @@ def _audit_dataframe_text(value: dict[str, Any]) -> str:
 
     if isinstance(value.get("sample"), dict):
         sample = value["sample"]
-        for name in ("head", "tail"):
-            part = sample.get(name)
-            if isinstance(part, dict):
-                lines.append(f"sample.{name}:")
-                lines.extend(_audit_dataframe_table_lines(part, indent="  "))
+        selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
+        if selected is not None:
+            lines.extend(_audit_sample_note_lines(sample, selected.name))
+            part, row_notes = _audit_single_sample_frame(selected.value)
+            lines.extend(row_notes)
+            lines.append(f"sample.{selected.name}:")
+            lines.extend(_audit_dataframe_table_lines(part, indent="  "))
     else:
         lines.extend(_audit_dataframe_table_lines(value, indent="  "))
     return "\n".join(lines)
@@ -3655,11 +3852,13 @@ def _audit_series_text(value: dict[str, Any]) -> str:
     lines = [header]
     if isinstance(value.get("sample"), dict):
         sample = value["sample"]
-        for name in ("head", "tail"):
-            part = sample.get(name)
-            if isinstance(part, dict):
-                lines.append(f"sample.{name}:")
-                lines.extend(_audit_series_table_lines(part, indent="  "))
+        selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
+        if selected is not None:
+            lines.extend(_audit_sample_note_lines(sample, selected.name))
+            part, row_notes = _audit_single_sample_series(selected.value)
+            lines.extend(row_notes)
+            lines.append(f"sample.{selected.name}:")
+            lines.extend(_audit_series_table_lines(part, indent="  "))
     else:
         lines.extend(_audit_series_table_lines(value, indent="  "))
     return "\n".join(lines)
@@ -3761,6 +3960,8 @@ def _display_field_value(qualified_name: str, value: Any) -> Any:
         return "auto（自动选择）"
     if qualified_name.rsplit(".", 1)[-1] == "cash":
         return _audit_cash_summary(value)
+    if isinstance(value, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in value):
+        return "[" + _audit_product_list_cell([str(item) for item in value]) + "]"
     offset = _field_display_offsets.get(qualified_name, _field_display_offsets.get(qualified_name.rsplit(".", 1)[-1], 0))
     if offset and isinstance(value, (int, float)) and not isinstance(value, bool):
         return value + offset
@@ -3808,17 +4009,11 @@ def _print_audit_block_line(prefix: str, line: str) -> None:
 
 
 def _print_wrapped_line(line: str, *, continuation_indent: str) -> None:
-    width = max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
+    width = _audit_max_width()
     if _audit_display_width(line) <= width:
         click.echo(line)
         return
-    wrapped = textwrap.wrap(
-        line,
-        width=width,
-        subsequent_indent=continuation_indent,
-        break_long_words=True,
-        break_on_hyphens=False,
-    )
+    wrapped = _wrap_audit_text(line, width=width, subsequent_indent=continuation_indent)
     if not wrapped:
         click.echo(line)
         return
@@ -3853,9 +4048,15 @@ def _audit_repeated_owner_groups(value: Any) -> list[tuple[str, Any]]:
     if len(groups) >= len(items):
         return []
     return [
-        (f"{_audit_group_key_label(bucket['keys'])} {', '.join(sorted(bucket['keys']))}", bucket["value"])
+        (f"{_audit_group_key_label(bucket['keys'])} {_audit_group_keys_text(sorted(bucket['keys']))}", bucket["value"])
         for bucket in groups.values()
     ]
+
+
+def _audit_group_keys_text(keys: list[str]) -> str:
+    if not keys:
+        return "无"
+    return _audit_product_list_cell(keys)
 
 
 def _audit_group_key_label(keys: list[str]) -> str:
@@ -4071,16 +4272,36 @@ def _print_audit_fields(
     if not records:
         click.echo(f"  {empty_message}")
         return
-    for record in sorted(records, key=lambda item: _audit_field_sort_key(str(item.get("field") or ""))):
+    sorted_records = sorted(records, key=lambda item: _audit_field_sort_key(str(item.get("field") or "")))
+    index = 0
+    while index < len(sorted_records):
+        record = sorted_records[index]
+        combined = [record]
+        current_table = _ledger_scalar_record_table(record)
+        if current_table is not None:
+            current_routes = tuple(sorted(current_table[1]))
+            lookahead = index + 1
+            while lookahead < len(sorted_records):
+                next_table = _ledger_scalar_record_table(sorted_records[lookahead])
+                if next_table is None or tuple(sorted(next_table[1])) != current_routes:
+                    break
+                combined.append(sorted_records[lookahead])
+                lookahead += 1
+        if len(combined) >= 2 and _print_combined_ledger_scalar_value_table("    ", combined):
+            index += len(combined)
+            continue
         click.echo(f"  {_audit_field_label(str(record.get('field') or ''))}:")
         values = record.get("values") or []
         if not values:
             click.echo("    （当前无值）")
+            index += 1
             continue
         field_name = str(record.get("field") or "")
         if _print_ledger_scalar_value_table("    ", field_name, values):
+            index += 1
             continue
         if _print_ledger_grouped_values("    ", field_name, values):
+            index += 1
             continue
         buckets = _audit_grouped_values(field_name, values)
         for bucket in buckets:
@@ -4091,6 +4312,7 @@ def _print_audit_fields(
                 _print_audit_value("      ", "value", bucket["value"])
             else:
                 _print_audit_value("    ", label, bucket["value"])
+        index += 1
         
 
 def _print_audit_changes(
@@ -4113,6 +4335,8 @@ def _print_audit_changes(
         if _print_weight_change_tables("    ", field_name, field_changes):
             continue
         if _print_strategy_scalar_change_table("    ", field_name, field_changes):
+            continue
+        if _print_positions_change_table("    ", field_name, field_changes):
             continue
         if _print_ledger_scalar_change_table("    ", field_name, field_changes):
             continue
@@ -4239,7 +4463,7 @@ def _current_event_subject_summary(current_event: dict[str, Any]) -> str:
     if not isinstance(subjects, list) or not subjects:
         return "无事件主体"
     parts: list[str] = []
-    for item in subjects[:5]:
+    for item in subjects[:3]:
         if not isinstance(item, dict):
             continue
         strategy = item.get("strategy") or ""
@@ -4258,6 +4482,23 @@ def _current_event_subject_summary(current_event: dict[str, Any]) -> str:
     return "；".join(parts) if parts else "无事件主体"
 
 
+def _audit_max_width() -> int:
+    return max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
+
+
+def _wrap_audit_text(text: str, *, width: int, subsequent_indent: str = "") -> list[str]:
+    if _audit_display_width(text) <= width:
+        return [text]
+    wrapped = textwrap.wrap(
+        text,
+        width=width,
+        subsequent_indent=subsequent_indent,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    return wrapped or [text]
+
+
 def _print_step_badge_box(data: dict[str, Any], phase_text: str, flow_id: str, flow_name: str, timestamp_text: str) -> None:
     current_event = data.get("current_event")
     if not isinstance(current_event, dict):
@@ -4271,11 +4512,20 @@ def _print_step_badge_box(data: dict[str, Any], phase_text: str, flow_id: str, f
     if event_kind or batch_count not in (None, ""):
         lines.append(f"event: kind={event_kind or '-'}; batch_count={batch_count if batch_count not in (None, '') else '-'}")
         lines.append(f"event_subjects: {_current_event_subject_summary(current_event)}")
-    max_width = max(_audit_display_width(line) for line in lines)
-    border = "━" * (max_width + 2)
-    click.secho(f"┏{border}┓", fg="white", bg="red", bold=True, color=True)
+    max_width = _audit_max_width() - 4
+    display_lines: list[str] = []
     for line in lines:
-        click.secho(f"┃ {_pad_audit_cell(line, max_width)} ┃", fg="white", bg="red", bold=True, color=True)
+        if ": " in line:
+            key, _value = line.split(": ", 1)
+            continuation = " " * (len(key) + 2)
+        else:
+            continuation = ""
+        display_lines.extend(_wrap_audit_text(line, width=max_width, subsequent_indent=continuation))
+    box_width = min(max_width, max(_audit_display_width(line) for line in display_lines))
+    border = "━" * (box_width + 2)
+    click.secho(f"┏{border}┓", fg="white", bg="red", bold=True, color=True)
+    for line in display_lines:
+        click.secho(f"┃ {_pad_audit_cell(line, box_width)} ┃", fg="white", bg="red", bold=True, color=True)
     click.secho(f"┗{border}┛", fg="white", bg="red", bold=True, color=True)
 
 

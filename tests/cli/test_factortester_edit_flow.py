@@ -169,6 +169,24 @@ def test_step_audit_groups_identical_changes_inline_without_before_after_section
     assert "[跨账本]" not in out
 
 
+def test_step_audit_compacts_long_scalar_list_changes(capsys) -> None:
+    contracts = "[" + ", ".join(f"C{i}.EX" for i in range(12)) + "]"
+
+    _print_audit_changes("声明输出的变化", [{
+        "field": "TermStructureExpandModule.expanded_contracts",
+        "scope": "strategy_context",
+        "strategy": "A1",
+        "before": None,
+        "after": contracts,
+    }])
+
+    out = capsys.readouterr().out
+    assert "共 12 个" not in out
+    assert "C0.EX, C1.EX, C2.EX, ..." in out
+    assert "C3.EX" not in out
+    assert "null -> [C0.EX" in out
+
+
 def test_step_audit_groups_cash_by_cash_pool_with_bound_ledgers(capsys) -> None:
     changes = [
         {
@@ -231,8 +249,17 @@ def test_step_audit_groups_complex_ledger_fields_by_ledger(capsys) -> None:
     out = capsys.readouterr().out
     assert "合并 2 个账本" not in out
     assert "ledger/cash pool/strategy 路由同上" not in out
-    assert "账本 L1 | 现金池 P1 | 策略 A1" in out
-    assert "账本 L2 | 现金池 P2 | 策略 A2" in out
+    assert "ledger" in out
+    assert "cash pool" in out
+    assert "strategies" in out
+    assert "products" in out
+    assert "L1" in out
+    assert "P1" in out
+    assert "A1" in out
+    assert "L2" in out
+    assert "P2" in out
+    assert "A2" in out
+    assert "RB.SHF" in out
     assert "quantity" in out
     assert "average_cost" in out
 
@@ -315,9 +342,50 @@ def test_step_audit_positions_diff_groups_identical_initialization(capsys) -> No
 
     out = capsys.readouterr().out
     assert "products" in out
-    assert "AP.CZC, CJ.CZC" in out
+    assert "全部产品" in out
     assert out.count("null -> 0") == 3
     assert "lot changes" not in out
+
+
+def test_step_audit_positions_changes_render_as_one_ledger_product_table(capsys) -> None:
+    changes = [
+        {
+            "field": "LedgerModule.positions",
+            "scope": "ledger",
+            "ledger": "private:L1",
+            "cash_pool": "pool-1",
+            "strategies": ["A1"],
+            "before": None,
+            "after": {
+                "AP.CZC": {"quantity": 0, "average_cost": 0.0, "lots": []},
+                "CJ.CZC": {"quantity": 0, "average_cost": 0.0, "lots": []},
+            },
+        },
+        {
+            "field": "LedgerModule.positions",
+            "scope": "ledger",
+            "ledger": "private:L2",
+            "cash_pool": "pool-2",
+            "strategies": ["A2"],
+            "before": None,
+            "after": {
+                "RB.SHF": {"quantity": 1, "average_cost": 0.0, "lots": []},
+            },
+        },
+    ]
+
+    _print_audit_changes("账本与现金池变化", changes)
+
+    out = capsys.readouterr().out
+    assert out.count("positions [LedgerModule.positions]") == 1
+    assert "账本 private:L1" not in out
+    assert "ledger" in out
+    assert "cash pool" in out
+    assert "products" in out
+    assert "全部产品" in out
+    assert "RB.SHF" in out
+    assert out.count("private:L1") == 1
+    assert out.count("private:L2") == 1
 
 
 def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
@@ -349,6 +417,68 @@ def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
     assert "null -> 0.0" in out
     assert out.count("null") == 8
     assert out.count("0") >= 8
+
+
+def test_step_audit_combines_repeated_ledger_scalar_input_fields(capsys) -> None:
+    values = [
+        {
+            "scope": "ledger_config",
+            "ledger": f"private:L{index}",
+            "cash_pool": f"pool-{index}",
+            "strategies": [f"A{index}"],
+            "value": value,
+        }
+        for index, value in ((1, "Auto"), (2, "Auto"))
+    ]
+
+    _print_audit_fields("输入字段", [
+        {"field": "TradingRuleModule.accounting_mode", "values": values},
+        {"field": "TradingRuleModule.use_int_position", "values": [
+            {**entry, "value": False}
+            for entry in values
+        ]},
+    ])
+
+    out = capsys.readouterr().out
+    assert "合并账本字段" in out
+    assert "accounting_mode" in out
+    assert "use_int_position" in out
+    assert out.count("ledger") == 1
+    assert out.count("private:L1") == 1
+    assert out.count("private:L2") == 1
+
+
+def test_step_audit_keeps_moderate_combined_ledger_fields_in_one_table(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((72, 20)))
+    values = [
+        {
+            "scope": "ledger_config",
+            "ledger": f"private:ledger_with_long_name_{index}",
+            "cash_pool": f"private:cash_pool_with_long_name_{index}",
+            "strategies": [f"A{index}"],
+            "value": "auto",
+        }
+        for index in range(1, 3)
+    ]
+
+    _print_audit_fields("输入字段", [
+        {"field": "TradingRuleModule.margin_mode", "values": values},
+        {"field": "TradingRuleModule.accounting_mode", "values": [{**entry, "value": "Auto"} for entry in values]},
+        {"field": "TradingRuleModule.fee_mode", "values": [{**entry, "value": "auto"} for entry in values]},
+        {"field": "TradingRuleModule.fixed_fee_rate", "values": [{**entry, "value": 0.0} for entry in values]},
+        {"field": "TradingRuleModule.transaction_fee_source", "values": [{**entry, "value": "fixed"} for entry in values]},
+        {"field": "TradingRuleModule.fixed_margin_ratio", "values": [{**entry, "value": 1.0} for entry in values]},
+        {"field": "TradingRuleModule.margin_ratio_source", "values": [{**entry, "value": "fixed"} for entry in values]},
+        {"field": "TradingRuleModule.use_int_position", "values": [{**entry, "value": False} for entry in values]},
+        {"field": "TradingRuleModule.daily_mark_to_market_enabled", "values": [{**entry, "value": False} for entry in values]},
+        {"field": "TradingRuleModule.cost_basis_method", "values": [{**entry, "value": "FIFO"} for entry in values]},
+    ])
+
+    out = capsys.readouterr().out
+    assert "合并账本字段" in out
+    assert "margin_mode" in out
+    assert "cost_basis_method" in out
+    assert "columns 1/" not in out
 
 
 def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
@@ -783,6 +913,15 @@ def test_step_audit_renders_sampled_event_drafts_as_table() -> None:
                     "ledger": "private:L1",
                     "payload": {"kind": "margin_check", "ledger_id": "private:L1"},
                     "index_key": None,
+                },
+                {
+                    "type": "EventDraft",
+                    "kind": "ledger",
+                    "timestamp": "2026-01-01 09:02:00",
+                    "strategy": "",
+                    "ledger": "private:L2",
+                    "payload": {"kind": "second_margin_check", "ledger_id": "private:L2"},
+                    "index_key": None,
                 }
             ],
             "tail": [
@@ -800,9 +939,13 @@ def test_step_audit_renders_sampled_event_drafts_as_table() -> None:
     })
 
     assert "事件草稿列表 length=300 truncated=True" in text
+    assert "sample = 仅显示 head；tail 已省略" in text
+    assert "sample.rows = 仅显示 1/2 行；其余 sample 行已省略" in text
     assert "sample.head:" in text
-    assert "sample.tail:" in text
+    assert "sample.tail:" not in text
     assert "margin_check" in text
+    assert "second_margin_check" not in text
+    assert "15:00:00" not in text
     assert '"payload"' not in text
     assert "明细" not in text
 
@@ -954,6 +1097,25 @@ def test_step_audit_identical_strategy_context_values_are_merged_with_strategy_l
     assert "策略上下文 A1, A2" in out
 
 
+def test_step_audit_compacts_long_strategy_input_lists_without_source_column(capsys) -> None:
+    products = [f"P{index}.EX" for index in range(12)]
+
+    _print_audit_fields("输入字段", [{
+        "field": "ProductSelectionModule.products",
+        "values": [
+            {"scope": "strategy_context", "strategy": "A1", "value": products},
+            {"scope": "strategy_context", "strategy": "A2", "value": products},
+        ],
+    }])
+
+    out = capsys.readouterr().out
+    assert "source" not in out
+    assert "策略上下文 A1, A2 =" in out
+    assert "P0.EX, P1.EX, P2.EX, ..." in out
+    assert "共 12 个" not in out
+    assert "P3.EX" not in out
+
+
 def test_step_audit_formats_python_literal_strings_as_json() -> None:
     text = _audit_text("{'id': 'pg_bc7963105fe8', 'selected_paths': ['Product/Futures/CNFutures/日夜盘/日盘']}")
 
@@ -986,10 +1148,39 @@ def test_step_audit_formats_dataframe_payloads_as_tables() -> None:
     assert "index.end   = 2026-01-01 09:24:00" in text
     assert "truncated   = True" in text
     assert 'columns     = ["RB.SHF", "AG.SHF"]' in text
+    assert "sample.rows = 仅显示 1/2 行；其余 sample 行已省略" in text
     assert "sample.head:" in text
     assert "RB.SHF" in text
-    assert "2026-01-01 09:01:00" in text
+    assert "2026-01-01 09:01:00" not in text
     assert '"rows"' not in text
+
+
+def test_step_audit_formats_only_one_dataframe_sample_when_head_and_tail_exist() -> None:
+    text = _audit_text({
+        "type": "DataFrame",
+        "shape": [100, 2],
+        "columns": ["RB.SHF", "AG.SHF"],
+        "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 14:59:00"},
+        "sample": {
+            "head": {
+                "columns": ["RB.SHF", "AG.SHF"],
+                "index": ["2026-01-01 09:00:00"],
+                "rows": [[1.0, 3.0]],
+            },
+            "tail": {
+                "columns": ["RB.SHF", "AG.SHF"],
+                "index": ["2026-01-01 15:00:00"],
+                "rows": [[2.0, 4.0]],
+            },
+        },
+        "truncated": True,
+    })
+
+    assert "sample = 仅显示 head；tail 已省略" in text
+    assert "sample.head:" in text
+    assert "sample.tail:" not in text
+    assert "2026-01-01 09:00:00" in text
+    assert "2026-01-01 15:00:00" not in text
 
 
 def test_step_audit_formats_wide_dataframe_columns_as_counts() -> None:
@@ -1062,6 +1253,54 @@ def test_step_audit_transposes_wide_two_key_tables(monkeypatch) -> None:
     assert "2026-01-28 15:00:00+08:00 | A5" in text
     assert "lifecycle_source_function" in text
     assert "columns 1/" not in text
+
+
+def test_step_audit_transposes_positions_after_grouping_when_columns_dominate() -> None:
+    text = _audit_text({
+        "type": "PositionsTable",
+        "positions": {
+            "P1.EX": {
+                "quantity": 0,
+                "average_cost": 0.0,
+                "settlement_price": None,
+                "margin_reserved": None,
+                "lots_count": 0,
+            },
+            "P2.EX": {
+                "quantity": 0,
+                "average_cost": 0.0,
+                "settlement_price": None,
+                "margin_reserved": None,
+                "lots_count": 0,
+            },
+        },
+    })
+
+    assert "表格已转置" in text
+    assert "原列数 6，原行数 1" in text
+    assert "quantity" in text
+    assert "全部相同" not in text
+
+
+def test_step_audit_transposed_tables_split_long_row_labels(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((90, 20)))
+
+    long_strategy = "bg_mpv90jxe_1:35b39e39e72e4b0e96f43a313b29ea9e"
+    lines = _audit_table_lines(
+        ("timestamp", "strategy", "instrument", "qty", "status", "order_id", "effective_price", "fee_cost", "reason"),
+        [
+            ("2026-01-05 09:01:00.000001+08:00", long_strategy, "A", "1", "scheduled", "O1", "10", "1", ""),
+            ("2026-01-05 09:01:00.000001+08:00", long_strategy, "B", "2", "scheduled", "O2", "20", "2", ""),
+            ("2026-01-05 09:01:00.000001+08:00", long_strategy, "C", "3", "scheduled", "O3", "30", "3", ""),
+        ],
+    )
+
+    text = "\n".join(lines)
+    assert "表格已转置" in text
+    assert "行标明细" in text
+    assert "行1" in text
+    assert long_strategy in text
+    assert f"column         2026-01-05 09:01:00.000001+08:00 | {long_strategy}" not in text
 
 
 def test_step_audit_formats_contract_metadata_as_compact_table() -> None:
@@ -1145,9 +1384,10 @@ def test_step_audit_formats_series_payloads_as_tables() -> None:
 
     assert text.startswith("pd.Series name='close' length=25 index=2026-01-01")
     assert "truncated=True" in text
+    assert "sample.rows = 仅显示 1/2 行；其余 sample 行已省略" in text
     assert "sample.head:" in text
     assert "value" in text
-    assert "2026-01-02" in text
+    assert "2026-01-02" not in text
     assert '"values"' not in text
 
 
