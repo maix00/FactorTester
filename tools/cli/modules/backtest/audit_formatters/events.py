@@ -11,6 +11,44 @@ TableLines = Callable[..., list[str]]
 AuditText = Callable[[Any], str]
 TableCellIsComplex = Callable[[Any], bool]
 SelectSamplePart = Callable[[dict[str, Any], Any], Any]
+DedupeValues = Callable[[list[Any]], list[Any]]
+
+
+def lifecycle_notice_change_diff(
+    field_name: str,
+    changes: list[dict[str, Any]],
+    *,
+    display_field_value: Callable[[str, Any], Any],
+    dedupe: DedupeValues,
+) -> tuple[str, Any, Any] | None:
+    short_name = field_name.rsplit(".", 1)[-1]
+    if short_name not in {"force_close_notices", "rollover_notices"}:
+        return None
+    context_changes = [change for change in changes if str(change.get("scope") or "") == "context"]
+    selected = context_changes[:1] or changes
+    label = "合并事件草稿（所有 active strategies）"
+    if len(selected) == 1:
+        change = selected[0]
+        return (
+            label,
+            display_field_value(field_name, change.get("before")),
+            display_field_value(field_name, change.get("after")),
+        )
+
+    before_items: list[Any] = []
+    after_items: list[Any] = []
+    for change in selected:
+        before = change.get("before")
+        after = change.get("after")
+        if isinstance(before, list):
+            before_items.extend(before)
+        elif before not in (None, ""):
+            before_items.append(before)
+        if isinstance(after, list):
+            after_items.extend(after)
+        elif after not in (None, ""):
+            after_items.append(after)
+    return label, dedupe(before_items), dedupe(after_items)
 
 
 def strategy_routes(data: Mapping[str, Any]) -> dict[str, tuple[tuple[str, str], ...]]:

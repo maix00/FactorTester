@@ -884,42 +884,16 @@ def _print_weight_change_tables(prefix: str, field_name: str, changes: list[dict
 
 
 def _print_lifecycle_notice_change(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    short_name = field_name.rsplit(".", 1)[-1]
-    if short_name not in {"force_close_notices", "rollover_notices"}:
-        return False
-    context_changes = [change for change in changes if str(change.get("scope") or "") == "context"]
-    selected = context_changes[:1]
-    if not selected:
-        selected = changes
-    if len(selected) == 1:
-        change = selected[0]
-        _print_audit_diff_value(
-            prefix,
-            "合并事件草稿（所有 active strategies）",
-            _display_field_value(field_name, change.get("before")),
-            _display_field_value(field_name, change.get("after")),
-        )
-        return True
-
-    before_items: list[Any] = []
-    after_items: list[Any] = []
-    for change in selected:
-        before = change.get("before")
-        after = change.get("after")
-        if isinstance(before, list):
-            before_items.extend(before)
-        elif before not in (None, ""):
-            before_items.append(before)
-        if isinstance(after, list):
-            after_items.extend(after)
-        elif after not in (None, ""):
-            after_items.append(after)
-    _print_audit_diff_value(
-        prefix,
-        "合并事件草稿（所有 active strategies）",
-        _dedupe_audit_list(before_items),
-        _dedupe_audit_list(after_items),
+    diff = events_formatter.lifecycle_notice_change_diff(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        dedupe=_dedupe_audit_list,
     )
+    if diff is None:
+        return False
+    label, before, after = diff
+    _print_audit_diff_value(prefix, label, before, after)
     return True
 
 
