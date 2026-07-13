@@ -13,7 +13,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
-from tools.testers.backtest.modules.engine import engine_mode_for
+from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, run_window_envelope_for_state
 from tools.testers.backtest.modules.target import TargetStrategyModule, target_weight_intent
@@ -39,6 +39,10 @@ _LIFECYCLE_DATE_KEYS = (
     "delivery_date",
     "maturity_date",
 )
+_DERIVED_LIFECYCLE_SOURCE_FUNCTIONS = frozenset({
+    "exchange_rule_dayk_calendar_derived",
+    "local_cnfutures_dayk_coverage",
+})
 
 
 @dataclass
@@ -88,7 +92,7 @@ class TermStructureExpandModule(ExecutableModule):
 
     expand_term_structure: ClassVar[Flow] = Flow(
         "expand_term_structure",
-        inputs=(ProductSelectionModule.products, RunWindowModule.run_window_envelope),
+        inputs=(ProductSelectionModule.products, RunWindowModule.run_window_envelope, EngineModule.engine_mode),
         outputs=(expanded_contracts, contract_metadata),
         # order=20, not grouped with the other market_data.py PRE_REPLAY flows
         # (37-45): MarketDataModule.check_market_data_coverage/load_raw_market_data
@@ -107,7 +111,7 @@ class TermStructureExpandModule(ExecutableModule):
     )
     resolve_tradable_target_weights: ClassVar[Flow] = Flow(
         "resolve_tradable_target_weights",
-        inputs=(contract_metadata, _TARGET_WEIGHTS_REF),
+        inputs=(contract_metadata, _TARGET_WEIGHTS_REF, EngineModule.engine_mode),
         outputs=(_TARGET_WEIGHTS_REF, TargetStrategyModule.trade_intent),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
@@ -145,7 +149,7 @@ class DeliveryForceCloseModule(ExecutableModule):
 
     register_force_close_notices: ClassVar[Flow] = Flow(
         "register_force_close_notices",
-        inputs=(TermStructureExpandModule.contract_metadata, force_close_before_expiry),
+        inputs=(TermStructureExpandModule.contract_metadata, force_close_before_expiry, EngineModule.engine_mode),
         outputs=(force_close_notices,),
         phase=Phase.PRE_REPLAY,
         order=46,
@@ -211,7 +215,7 @@ class RolloverModule(ExecutableModule):
 
     register_rollover_notices: ClassVar[Flow] = Flow(
         "register_rollover_notices",
-        inputs=(TermStructureExpandModule.contract_metadata, rollover_policy, rollover_before_expiry),
+        inputs=(TermStructureExpandModule.contract_metadata, rollover_policy, rollover_before_expiry, EngineModule.engine_mode),
         outputs=(rollover_notices,),
         phase=Phase.PRE_REPLAY,
         order=46,
@@ -241,17 +245,18 @@ def _expand_term_structure(state, ctx) -> None:
     end_date = _datatime_date_text(end_dt)
     all_contracts: dict[Any, frozenset] = {}
     all_metadata: dict[Any, tuple[dict[str, Any], ...]] = {}
-    product_expansion_cache: dict[tuple[Any, str | None, str | None], tuple[list[Any], list[dict[str, Any]]]] = {}
+    product_expansion_cache: dict[tuple[Any, str | None, str | None, str], tuple[list[Any], list[dict[str, Any]]]] = {}
     strategies = ctx.active_strategies or frozenset(state.strategy_configs)
     for strategy in strategies:
+        engine_mode = engine_mode_for(state.config_for(strategy))
         products = ctx.get_for(ProductSelectionModule.products, strategy)
         expanded: list[Any] = []
         metadata: list[dict[str, Any]] = []
         for product in products:
-            cache_key = (product, start_date, end_date)
+            cache_key = (product, start_date, end_date, engine_mode)
             if cache_key not in product_expansion_cache:
                 product_expansion_cache[cache_key] = _expand_product_contracts(
-                    product, start_date=start_date, end_date=end_date,
+                    product, start_date=start_date, end_date=end_date, engine_mode=engine_mode,
                 )
             contracts, rows = product_expansion_cache[cache_key]
             expanded.extend(contracts)
@@ -486,7 +491,13 @@ def _datatime_date_text(value: Any) -> str | None:
     return cast(pd.Timestamp, pd.Timestamp(ts)).strftime("%Y-%m-%d")
 
 
-def _expand_product_contracts(product: Any, *, start_date: str | None, end_date: str | None) -> tuple[list[Any], list[dict[str, Any]]]:
+def _expand_product_contracts(
+    product: Any,
+    *,
+    start_date: str | None,
+    end_date: str | None,
+    engine_mode: str = "auto",
+) -> tuple[list[Any], list[dict[str, Any]]]:
     supports = getattr(product, "supports_term_structure", None)
     if not callable(supports) or not supports():
         return [product], [{
@@ -520,7 +531,7 @@ def _expand_product_contracts(product: Any, *, start_date: str | None, end_date:
             "contract_object": contract,
             "contract_product": getattr(contract, "name", str(contract)),
             "is_identity": False,
-        })
+        }, engine_mode=engine_mode)
         contracts.append(contract)
         metadata.append(metadata_row)
     return contracts, metadata
@@ -734,12 +745,14 @@ def _contract_lifecycle_source_label(exchange: str, source_function: Any, *, liv
         return f"DCE official portal new-contract listing{suffix}"
     if source_text == "local_cnfutures_dayk_coverage":
         return f"LocalCNFutures daily bars coverage{suffix}"
+    if source_text == "exchange_rule_dayk_calendar_derived":
+        return f"{exchange_text} product rule + trading calendar derived{suffix}"
     if source_text.startswith("futures_contract_info_"):
         return f"AKShare {exchange_text}{suffix}"
     return f"{exchange_text} contract lifecycle source={source_text or 'unknown'}"
 
 
-def _with_authoritative_lifecycle_fields(row: dict[str, Any]) -> dict[str, Any]:
+def _with_authoritative_lifecycle_fields(row: dict[str, Any], *, engine_mode: str = "auto") -> dict[str, Any]:
     if any(row.get(key) not in (None, "") for key in _LIFECYCLE_TS_KEYS + _LIFECYCLE_DATE_KEYS):
         return row
     key = _normalised_contract_id(row)
@@ -762,11 +775,26 @@ def _with_authoritative_lifecycle_fields(row: dict[str, Any]) -> dict[str, Any]:
                 spec.update(live_spec)
     if not spec:
         return row
+    _reject_derived_lifecycle_in_exact_mode(row, spec, engine_mode=engine_mode)
     enriched = dict(row)
     for field, value in spec.items():
         if value not in (None, "") and enriched.get(field) in (None, ""):
             enriched[field] = value
     return enriched
+
+
+def _reject_derived_lifecycle_in_exact_mode(row: dict[str, Any], spec: dict[str, Any], *, engine_mode: str) -> None:
+    if str(engine_mode or "").lower() != "exact":
+        return
+    source_function = str(spec.get("lifecycle_source_function") or "")
+    if source_function not in _DERIVED_LIFECYCLE_SOURCE_FUNCTIONS:
+        return
+    contract = row.get("contract") or row.get("uid") or row.get("contract_product") or _normalised_contract_id(row)
+    raise ValueError(
+        "exact engine_mode does not accept derived lifecycle metadata "
+        f"for contract={contract!r}; lifecycle_source_function={source_function!r}. "
+        "Use official/external exact lifecycle rows or run a non-exact engine mode."
+    )
 
 
 def _normalised_contract_id(row: dict[str, Any]) -> str:

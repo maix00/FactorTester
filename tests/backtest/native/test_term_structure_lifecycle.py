@@ -525,6 +525,84 @@ def test_lifecycle_specs_label_local_dayk_coverage_source(monkeypatch):
     assert specs["M2409"]["lifecycle_source"] == "LocalCNFutures daily bars coverage contract lifecycle"
 
 
+def test_lifecycle_specs_label_rule_calendar_derived_source(monkeypatch):
+    term_structure._akshare_lifecycle_specs_by_instrument.cache_clear()
+    monkeypatch.setattr(term_structure, "_local_cnfutures_product_exchange_by_code", lambda: {"M": "DCE"})
+    monkeypatch.setattr("sources.AKShare.lifecycle.read_contract_lifecycle", lambda: pd.DataFrame([{
+        "exchange": "DCE",
+        "product_code": "M",
+        "contract_code": "M2409",
+        "list_date": "2023-09-15",
+        "last_trading_date": "2024-09-13",
+        "delivery_notice_date": None,
+        "last_delivery_date": "2024-09-20",
+        "source_query_date": None,
+        "source_function": "exchange_rule_dayk_calendar_derived",
+        "fetched_at": 123.0,
+    }]))
+
+    specs = term_structure._akshare_lifecycle_specs_by_instrument()
+
+    assert specs["M2409"]["lifecycle_source_function"] == "exchange_rule_dayk_calendar_derived"
+    assert specs["M2409"]["lifecycle_source"] == "DCE product rule + trading calendar derived contract lifecycle"
+
+
+def test_exact_engine_mode_rejects_derived_lifecycle_source(monkeypatch):
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {
+        "M2409": {
+            "lifecycle_source_type": "local_db",
+            "lifecycle_exchange": "DCE",
+            "lifecycle_source_function": "exchange_rule_dayk_calendar_derived",
+            "open_date": "2023-09-15",
+            "last_trade_date": "2024-09-13",
+            "delivery_date": "2024-09-20",
+            "lifecycle_source": "Exchange product rule/listing source plus LocalCNFutures exchange trading calendar",
+        }
+    })
+
+    with pytest.raises(ValueError, match="exact engine_mode does not accept derived lifecycle metadata"):
+        term_structure._with_authoritative_lifecycle_fields({
+            "product": "M.DCE",
+            "contract": "M2409",
+            "uid": "M2409.DCE",
+        }, engine_mode="exact")
+
+
+def test_auto_engine_mode_allows_derived_lifecycle_source(monkeypatch):
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {
+        "M2409": {
+            "lifecycle_source_type": "local_db",
+            "lifecycle_exchange": "DCE",
+            "lifecycle_source_function": "exchange_rule_dayk_calendar_derived",
+            "open_date": "2023-09-15",
+            "last_trade_date": "2024-09-13",
+            "delivery_date": "2024-09-20",
+            "lifecycle_source": "Exchange product rule/listing source plus LocalCNFutures exchange trading calendar",
+        }
+    })
+
+    row = term_structure._with_authoritative_lifecycle_fields({
+        "product": "M.DCE",
+        "contract": "M2409",
+        "uid": "M2409.DCE",
+    }, engine_mode="auto")
+
+    assert row["lifecycle_source_function"] == "exchange_rule_dayk_calendar_derived"
+    assert row["delivery_date"] == "2024-09-20"
+
+
+def test_term_structure_lifecycle_flows_declare_engine_mode_input():
+    for flow in (
+        TermStructureExpandModule.expand_term_structure,
+        TermStructureExpandModule.resolve_tradable_target_weights,
+        DeliveryForceCloseModule.register_force_close_notices,
+        RolloverModule.register_rollover_notices,
+    ):
+        assert EngineModule.engine_mode in flow.inputs
+
+
 def test_akshare_live_lookup_is_attempted_once_per_exchange_and_persists(monkeypatch):
     monkeypatch.setattr(term_structure, "_akshare_live_cache", {})
     monkeypatch.setattr(term_structure, "_akshare_live_attempted", set())

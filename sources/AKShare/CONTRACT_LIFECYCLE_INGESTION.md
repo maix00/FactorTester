@@ -95,6 +95,8 @@ distinct `source_function` value `exchange_rule_dayk_calendar_derived` and are
 visibly separate from official per-contract table rows. Each row's `raw_json`
 stores the product rule source notice id/url, the formula, the original
 `last_trading_date`, the derived `last_delivery_date`, and the calendar path.
+Backtest `engine_mode=exact` rejects this derived source; exact mode requires
+official/external exact lifecycle rows.
 
 ## Completeness audit
 
