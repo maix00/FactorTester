@@ -31,6 +31,7 @@ from tools.cli.modules.backtest.audit_formatters import market_data as market_da
 from tools.cli.modules.backtest.audit_formatters import orders as orders_formatter
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
 from tools.cli.modules.backtest.audit_formatters import samples as samples_formatter
+from tools.cli.modules.backtest.audit_formatters import source_groups as source_group_formatter
 from tools.cli.modules.backtest.audit_formatters import strategy as strategy_formatter
 from tools.cli.modules.backtest.audit_formatters import table_render as table_render_formatter
 from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_intent_formatter
@@ -3757,82 +3758,19 @@ def _audit_group_key_label(keys: list[str]) -> str:
 
 
 def _audit_join(values: list[Any]) -> str:
-    unique = sorted({str(value) for value in values if value not in (None, "")})
-    return ", ".join(unique) if unique else "无"
+    return source_group_formatter.join(values)
 
 
 def _audit_source_group_label(entries: list[dict[str, Any]], *, shared_group: bool = False) -> str:
-    scopes = {str(entry.get("scope") or "") for entry in entries}
-    strategies = _audit_join([
-        strategy
-        for entry in entries
-        for strategy in (
-            entry.get("strategies")
-            if isinstance(entry.get("strategies"), list)
-            else [entry.get("strategy")]
-        )
-    ])
-    ledgers = _audit_join([entry.get("ledger") for entry in entries])
-    cash_pools = _audit_join([entry.get("cash_pool") for entry in entries])
-
-    if scopes <= {"strategy_config"}:
-        if strategies == "无":
-            return "[共享]"
-        return f"策略配置 {strategies}"
-    if scopes <= {"strategy_context"}:
-        if strategies == "无":
-            return "[共享]"
-        return f"策略上下文 {strategies}"
-    if scopes <= {"ledger"}:
-        if len(entries) > 1:
-            return _audit_ledger_group_label(entries, prefix="合并")
-        return f"账本 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
-    if scopes <= {"ledger_config"}:
-        if len(entries) > 1:
-            return _audit_ledger_group_label(entries, prefix="合并账本配置")
-        return f"账本配置 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
-    if scopes <= {"context"}:
-        return "[共享]"
-    if scopes <= {"context", "strategy_context"}:
-        if strategies == "无":
-            return "[共享]"
-        return f"共享上下文 + 策略上下文 {strategies}"
-    if scopes <= {"context", "strategy_config"}:
-        if strategies == "无":
-            return "[共享]"
-        return f"共享上下文 + 策略配置 {strategies}"
-    return "[合并] " + "；".join(_audit_source_label(entry) for entry in entries)
+    return source_group_formatter.source_group_label(entries, shared_group=shared_group)
 
 
 def _audit_ledger_group_label(entries: list[dict[str, Any]], *, prefix: str) -> str:
-    ledgers = {str(entry.get("ledger") or "") for entry in entries if entry.get("ledger") not in (None, "")}
-    cash_pools = {str(entry.get("cash_pool") or "") for entry in entries if entry.get("cash_pool") not in (None, "")}
-    strategies = {
-        str(strategy)
-        for entry in entries
-        for strategy in (entry.get("strategies") if isinstance(entry.get("strategies"), list) else [])
-        if strategy not in (None, "")
-    }
-    parts = [f"{prefix} {len(ledgers)} 个账本"]
-    if cash_pools:
-        parts.append(f"{len(cash_pools)} 个现金池")
-    if strategies:
-        parts.append(f"{len(strategies)} 个策略")
-    return " / ".join(parts)
+    return source_group_formatter.ledger_group_label(entries, prefix=prefix)
 
 
 def _audit_source_route_rows(entries: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
-    scopes = {str(entry.get("scope") or "") for entry in entries}
-    if len(entries) <= 1 or not scopes <= {"ledger", "ledger_config"}:
-        return []
-    rows = []
-    for entry in entries:
-        rows.append((
-            str(entry.get("ledger") or "?"),
-            str(entry.get("cash_pool") or "?"),
-            ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无",
-        ))
-    return sorted(rows)
+    return source_group_formatter.source_route_rows(entries)
 
 
 def _print_audit_source_routes(
@@ -3860,15 +3798,12 @@ def _print_audit_source_routes(
 
 
 def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    groups: dict[str, dict[str, Any]] = {}
-    for entry in values:
-        if not isinstance(entry, dict):
-            continue
-        display_value = _display_field_value(field_name, entry.get("value"))
-        key = _audit_display_key(display_value)
-        bucket = groups.setdefault(key, {"value": display_value, "entries": []})
-        bucket["entries"].append(entry)
-    return list(groups.values())
+    return source_group_formatter.grouped_values(
+        field_name,
+        values,
+        display_field_value=_display_field_value,
+        display_key=_audit_display_key,
+    )
 
 
 def _drop_empty_non_ledger_entries_when_ledger_values_exist(
@@ -3898,18 +3833,7 @@ def _drop_empty_non_ledger_entries_when_ledger_values_exist(
 
 
 def _audit_value_is_empty(value: Any) -> bool:
-    if value is None:
-        return True
-    normalized = _audit_normalized_value(value)
-    if normalized is None:
-        return True
-    if normalized == "":
-        return True
-    if isinstance(normalized, (list, tuple, dict, set)) and len(normalized) == 0:
-        return True
-    if isinstance(normalized, str) and normalized.strip().lower() in {"null", "none", "[]", "{}"}:
-        return True
-    return False
+    return source_group_formatter.value_is_empty(value, normalize=_audit_normalized_value)
 
 
 def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
@@ -3976,24 +3900,7 @@ def _audit_field_sort_key(qualified_name: str) -> tuple[int, int, str]:
 
 
 def _audit_source_label(entry: dict[str, Any]) -> str:
-    scope = str(entry.get("scope") or "")
-    if scope == "strategy_config":
-        return f"策略配置 {entry.get('strategy') or '?'}"
-    if scope == "strategy_context":
-        return f"策略上下文 {entry.get('strategy') or '?'}"
-    if scope == "ledger":
-        strategies = ", ".join(entry.get("strategies") or []) or "无"
-        return (
-            f"账本 {entry.get('ledger') or '?'} | 现金池 {entry.get('cash_pool') or '?'}"
-            f" | 策略 {strategies}"
-        )
-    if scope == "ledger_config":
-        strategies = ", ".join(entry.get("strategies") or []) or "无"
-        return (
-            f"账本配置 {entry.get('ledger') or '?'} | 现金池 {entry.get('cash_pool') or '?'}"
-            f" | 策略 {strategies}"
-        )
-    return "共享上下文"
+    return source_group_formatter.source_label(entry)
 
 
 def _print_audit_fields(
