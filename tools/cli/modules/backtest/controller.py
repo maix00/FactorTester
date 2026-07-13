@@ -2409,14 +2409,7 @@ def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
         click.echo(line)
 
 
-_StepNavigator = step_display_formatter.StepNavigator
-
-
-def _set_step_navigation(navigator: _StepNavigator, command: str) -> str | None:
-    return step_display_formatter.set_step_navigation(navigator, command)
-
-
-def _continue_step(client, run_token: str, navigator: _StepNavigator | None = None) -> None:
+def _continue_step(client, run_token: str, navigator: step_display_formatter.StepNavigator | None = None) -> None:
     payload = step_display_formatter.step_continue_payload(run_token, navigator)
     try:
         client.session.post("/step_continue", payload)
@@ -2428,7 +2421,7 @@ def _handle_step_event(
     data: dict[str, Any],
     client,
     run_token: str,
-    navigator: _StepNavigator,
+    navigator: step_display_formatter.StepNavigator,
 ) -> None:
     """Render one complete, post-compute audit record and continue once."""
     if str(data.get("phase") or "") != "step":
@@ -2477,7 +2470,7 @@ def _handle_step_event(
     click.echo("")
     while True:
         click.echo("命令: Enter=下一步 | until <时刻>=快进到时刻 | end=快进到底")
-        error = _set_step_navigation(navigator, input("step> "))
+        error = step_display_formatter.set_step_navigation(navigator, input("step> "))
         if error is None:
             break
         click.echo(f"  {error}")
@@ -2521,7 +2514,7 @@ def _run_backtest(
     # run so a new login/page_uuid cannot depend on an older page cache.
     template_state_helpers.register_template_factors(state, client)
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client), step_mode=step_mode)
-    step_navigator = _StepNavigator()
+    step_navigator = step_display_formatter.StepNavigator()
     _short_alias_map.clear()
     _short_alias_map.update(step_display_formatter.build_short_alias_map(state.backtest_groups, state.backtest_ls_configs))
     for event in client.run_group_test_stream(run_payload):

@@ -18,12 +18,12 @@ from werkzeug.serving import make_server
 from tools.cli.app import _backtest_errors, cli
 from tools.cli.http import ClientConfig, HttpClientError, save_config
 import tools.cli.modules.backtest.run_output as run_output
+from tools.cli.modules.backtest.audit_formatters import step_display as step_display_formatter
 from tools.cli.modules.backtest import config_state as config_state_helpers
 from tools.cli.modules.backtest import run_payloads as run_payload_helpers
 from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
-    _StepNavigator,
     _audit_change_cell,
     _merge_declared_and_ledger_changes,
     _audit_scalar_sequence_text,
@@ -40,7 +40,6 @@ from tools.cli.modules.backtest.controller import (
     _print_audit_value,
     _print_step_badge_box,
     _print_strategy_context,
-    _set_step_navigation,
     _unchanged_output_records,
     _display_field_value,
 )
@@ -2543,25 +2542,25 @@ def test_step_event_payloads_skip_empty_null_payloads(capsys) -> None:
 
 
 def test_step_navigation_supports_until_and_end_without_skipping_computation() -> None:
-    navigator = _StepNavigator()
+    navigator = step_display_formatter.StepNavigator()
 
-    assert _set_step_navigation(navigator, "until 2026-01-15 10:30:00") is None
+    assert step_display_formatter.set_step_navigation(navigator, "until 2026-01-15 10:30:00") is None
     assert not navigator.should_display("")
     assert not navigator.should_display("2026-01-15 10:29:59")
     assert navigator.should_display("2026-01-15 10:30:00")
     assert navigator.until is None
 
-    assert _set_step_navigation(navigator, "end") is None
+    assert step_display_formatter.set_step_navigation(navigator, "end") is None
     assert navigator.to_end
     assert not navigator.should_display("2026-01-31 15:00:00")
 
 
 def test_step_navigation_rejects_unknown_or_invalid_commands() -> None:
-    navigator = _StepNavigator()
+    navigator = step_display_formatter.StepNavigator()
 
-    assert _set_step_navigation(navigator, "until nope")
-    assert _set_step_navigation(navigator, "next")
-    assert _set_step_navigation(navigator, "") is None
+    assert step_display_formatter.set_step_navigation(navigator, "until nope")
+    assert step_display_formatter.set_step_navigation(navigator, "next")
+    assert step_display_formatter.set_step_navigation(navigator, "") is None
 
 
 def test_step_contract_audit_reports_pass_and_read_write_violations(capsys) -> None:
@@ -2617,7 +2616,7 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
         },
         client,
         "run-token",
-        _StepNavigator(),
+        step_display_formatter.StepNavigator(),
     )
 
     out = capsys.readouterr().out
