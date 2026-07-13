@@ -49,3 +49,82 @@ This baseline covers all exchanges present in LocalCNFutures daily data. It is
 insert-once by default, so official/portal lifecycle rows should be ingested
 first when exact list/delivery dates are available. Use `--overwrite` only when
 the intended result is to replace existing lifecycle rows with local coverage.
+
+## Field-source policy
+
+The lifecycle table keeps source provenance in `source_function`; the audit
+script prints the field policy for every source present in the table.
+
+- Official contract-info sources populate exact exchange-published fields:
+  - SHFE/INE: `OPENDATE`, `EXPIREDATE`, `STARTDELIVDATE`, `ENDDELIVDATE`,
+    `BASISPRICE`.
+  - CZCE: `firstTradingDay`, `lastTradingDay`, `deliveryNoticeDay`,
+    `lastDeliveryDay`.
+  - CFFEX: `opendate`, `expiredate`, `basisprice`.
+  - DCE portal: `startTradeDate`, `endTradeDate`, `endDeliveryDate`.
+- AKShare-compatible `futures_contract_info_*` rows preserve the same exchange
+  contract-info semantics when those rows already exist in the local store.
+- Tushare `fut_basic` can provide external contract metadata including
+  `last_ddate` for DCE/GFEX, but it requires a Tushare token and is not treated
+  as exchange-official per-contract data. In this environment no token is
+  configured, so the Tushare backfill path reports `skipped` and leaves the
+  missing fields visible to audit.
+- `local_cnfutures_dayk_coverage` is the 2024+ historical coverage fallback:
+  - `list_date` = first finite-close local daily bar.
+  - `last_trading_date` = last finite-close local daily bar only if not
+    right-censored.
+  - delivery fields are intentionally left empty unless an official/portal
+    lifecycle row supplies them.
+
+LocalCNFutures daily-bar upstreams are:
+
+- DCE: Sina daily bars through AKShare `futures_zh_daily_sina` fallback.
+- CFFEX: CFFEX official monthly daily-data zip.
+- SHFE / INE / CZCE / GFEX: AKShare daily futures data fetch; GFEX is retried
+  because transient empty responses have been observed.
+
+Sina is a daily/minute market-data source here; no public Sina lifecycle
+endpoint was found for exact `last_delivery_date`. Therefore Sina is only
+acceptable as coverage/cross-check input, not as a lifecycle delivery-date
+source.
+
+Exchange product rules such as "last delivery day is the third trading day
+after last trading day" are used only with explicit product rule/listing source
+provenance and the LocalCNFutures exchange trading calendar. These rows use the
+distinct `source_function` value `exchange_rule_dayk_calendar_derived` and are
+visibly separate from official per-contract table rows. Each row's `raw_json`
+stores the product rule source notice id/url, the formula, the original
+`last_trading_date`, the derived `last_delivery_date`, and the calendar path.
+
+## Completeness audit
+
+Run:
+
+```bash
+PYTHONPATH=. python sources/AKShare/scripts/audit_contract_lifecycle_coverage.py \
+  --start-date 2024-01-01 --strict
+```
+
+The audit checks coverage against 2024+ LocalCNFutures daily contracts,
+required fields, right-censored local coverage rows, source distribution, field
+completeness, and field-source policy. It does not require strict multi-source
+cross-validation.
+
+Optional precise-field backfills:
+
+```bash
+PYTHONPATH=. python sources/AKShare/scripts/backfill_missing_lifecycle_fields.py \
+  --source cffex-official
+PYTHONPATH=. python sources/AKShare/scripts/backfill_missing_lifecycle_fields.py \
+  --source tushare --exchange DCE --exchange GFEX
+PYTHONPATH=. python sources/AKShare/scripts/backfill_missing_lifecycle_fields.py \
+  --derive-rule-calendar --exchange DCE --exchange GFEX
+```
+
+The CFFEX path uses official trading-parameter XML and can fill missing
+`listing_base_price`. The Tushare path fills DCE/GFEX `last_delivery_date` only
+when a token is configured; without a token it reports `skipped` and writes
+nothing. The rule-calendar path fills DCE/GFEX `last_delivery_date` as a
+derived field when exact official/portal history is unavailable; it refuses to
+write rows without a product rule/listing source or without three later local
+exchange trading days.

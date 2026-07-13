@@ -193,19 +193,26 @@ def _official_contract_info_cffex(date: str) -> pd.DataFrame:
     text = response.content.decode(response.encoding or "utf-8", errors="replace").replace("&nbsp;", " ")
     root = ET.fromstring(text)
     rows: list[dict[str, Any]] = []
-    for contract in root.findall(".//contract"):
+    for contract in [*root.findall(".//contract"), *root.findall(".//INDEX")]:
         row = {child.tag: (child.text or "").strip() for child in list(contract)}
         if row:
             rows.append(row)
     frame = pd.DataFrame(rows)
     if frame.empty:
         return pd.DataFrame(columns=["查询交易日", "品种", "合约代码", "挂盘基准价", "上市日", "最后交易日"])
+    if "INSTRUMENT_ID" in frame.columns:
+        frame = frame[~frame["INSTRUMENT_ID"].astype(str).str.contains("-", regex=False)].copy()
     frame = frame.rename(columns={
         "instrumentid": "合约代码",
+        "INSTRUMENT_ID": "合约代码",
         "productid": "品种",
+        "PRODUCT_ID": "品种",
         "basisprice": "挂盘基准价",
+        "BASIS_PRICE": "挂盘基准价",
         "opendate": "上市日",
+        "OPEN_DATE": "上市日",
         "expiredate": "最后交易日",
+        "END_TRADING_DAY": "最后交易日",
     })
     frame["查询交易日"] = date
     return frame

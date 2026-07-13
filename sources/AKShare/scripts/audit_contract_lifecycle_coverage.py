@@ -27,6 +27,146 @@ REQUIRED_COLUMNS = (
     "source_function",
 )
 
+NON_LAST_REQUIRED_FIELDS_BY_EXCHANGE = {
+    # Futures lifecycle fields expected from exchange contract-info style data.
+    "SHFE": ("list_date", "delivery_start_date", "last_delivery_date", "listing_base_price"),
+    "INE": ("list_date", "delivery_start_date", "last_delivery_date", "listing_base_price"),
+    "CZCE": ("list_date", "delivery_notice_date", "last_delivery_date"),
+    "DCE": ("list_date", "last_delivery_date"),
+    "GFEX": ("list_date", "last_delivery_date"),
+    # CFFEX financial futures have no physical delivery lifecycle dates.
+    "CFFEX": ("list_date", "listing_base_price"),
+}
+
+SOURCE_FIELD_POLICY: dict[str, dict[str, Any]] = {
+    "official_contract_info_shfe": {
+        "source": "SHFE official ContractBaseInfo daily snapshot",
+        "fields": {
+            "list_date": "official OPENDATE",
+            "last_trading_date": "official EXPIREDATE",
+            "delivery_start_date": "official STARTDELIVDATE",
+            "last_delivery_date": "official ENDDELIVDATE",
+            "listing_base_price": "official BASISPRICE",
+        },
+    },
+    "official_contract_info_ine": {
+        "source": "INE official ContractBaseInfo daily snapshot",
+        "fields": {
+            "list_date": "official OPENDATE",
+            "last_trading_date": "official EXPIREDATE",
+            "delivery_start_date": "official STARTDELIVDATE",
+            "last_delivery_date": "official ENDDELIVDATE",
+            "listing_base_price": "official BASISPRICE",
+        },
+    },
+    "official_contract_info_czce": {
+        "source": "CZCE official FutureDataReferenceData daily XML",
+        "fields": {
+            "list_date": "official firstTradingDay",
+            "last_trading_date": "official lastTradingDay",
+            "delivery_notice_date": "official deliveryNoticeDay",
+            "last_delivery_date": "official lastDeliveryDay",
+        },
+    },
+    "official_contract_info_cffex": {
+        "source": "CFFEX official trading-parameter daily XML",
+        "fields": {
+            "list_date": "official opendate",
+            "last_trading_date": "official expiredate",
+            "listing_base_price": "official basisprice",
+        },
+    },
+    "official_dce_portal_contract_info": {
+        "source": "DCE official portal 数据中心/业务参数/合约信息 via browser context",
+        "fields": {
+            "list_date": "official startTradeDate",
+            "last_trading_date": "official endTradeDate",
+            "last_delivery_date": "official endDeliveryDate",
+        },
+    },
+    "tushare_fut_basic": {
+        "source": "Tushare Pro fut_basic external contract metadata",
+        "fields": {
+            "list_date": "Tushare fut_basic.list_date",
+            "last_trading_date": "Tushare fut_basic.delist_date",
+            "last_delivery_date": "Tushare fut_basic.last_ddate",
+        },
+        "note": "Optional external data-vendor source; not used unless a Tushare token is configured.",
+    },
+    "exchange_rule_dayk_calendar_derived": {
+        "source": "Exchange product rule/listing source plus LocalCNFutures exchange trading calendar",
+        "fields": {
+            "list_date": "carried from prior lifecycle row",
+            "last_trading_date": "carried from prior lifecycle row",
+            "last_delivery_date": "derived as the third exchange trading day after last_trading_date",
+        },
+        "note": (
+            "Derived fallback for DCE/GFEX historical contracts when exact official/portal rows are unavailable. "
+            "Each raw_json includes product rule source_notice_id/source_url and calendar provenance."
+        ),
+    },
+    "futures_contract_info_shfe": {
+        "source": "AKShare-compatible SHFE contract-info response",
+        "fields": {
+            "list_date": "上市日",
+            "last_trading_date": "到期日",
+            "delivery_start_date": "开始交割日",
+            "last_delivery_date": "最后交割日",
+            "listing_base_price": "挂牌基准价",
+        },
+    },
+    "futures_contract_info_ine": {
+        "source": "AKShare-compatible INE contract-info response",
+        "fields": {
+            "list_date": "上市日",
+            "last_trading_date": "到期日",
+            "delivery_start_date": "开始交割日",
+            "last_delivery_date": "最后交割日",
+            "listing_base_price": "挂牌基准价",
+        },
+    },
+    "futures_contract_info_czce": {
+        "source": "AKShare-compatible CZCE contract-info response",
+        "fields": {
+            "list_date": "第一交易日",
+            "last_trading_date": "最后交易日",
+            "delivery_notice_date": "交割通知日",
+            "last_delivery_date": "最后交割日",
+        },
+    },
+    "futures_contract_info_cffex": {
+        "source": "AKShare-compatible CFFEX contract-info response",
+        "fields": {
+            "list_date": "上市日",
+            "last_trading_date": "最后交易日",
+            "listing_base_price": "挂盘基准价",
+        },
+    },
+    "futures_contract_info_gfex": {
+        "source": "AKShare-compatible GFEX contract-info response",
+        "fields": {
+            "list_date": "开始交易日",
+            "last_trading_date": "最后交易日",
+            "last_delivery_date": "最后交割日",
+        },
+    },
+    "local_cnfutures_dayk_coverage": {
+        "source": "LocalCNFutures data_dayk.parquet coverage baseline",
+        "upstream_by_exchange": {
+            "DCE": "Sina daily bars fetched through AKShare futures_zh_daily_sina fallback",
+            "CFFEX": "CFFEX official monthly daily-data zip",
+            "SHFE": "AKShare daily futures data fetch",
+            "INE": "AKShare daily futures data fetch",
+            "CZCE": "AKShare daily futures data fetch",
+            "GFEX": "AKShare daily futures data fetch with retries",
+        },
+        "fields": {
+            "list_date": "first local daily bar with finite close",
+            "last_trading_date": "last local daily bar with finite close only when not right-censored by exchange data cutoff",
+        },
+    },
+}
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -36,6 +176,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--exchange", action="append", default=[])
     parser.add_argument("--sample-limit", type=int, default=20)
     parser.add_argument("--strict", action="store_true", help="Exit non-zero if coverage or required fields are incomplete")
+    parser.add_argument(
+        "--strict-cross-check",
+        action="store_true",
+        help="Also exit non-zero when non-censored local dayk last-trading cross-checks mismatch",
+    )
+    parser.add_argument(
+        "--strict-non-last-fields",
+        action="store_true",
+        help="Also exit non-zero when exchange-specific non-last lifecycle fields are missing",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON only")
     args = parser.parse_args(argv)
 
@@ -51,6 +201,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         _print_human_report(report)
     if args.strict and (report["missing_count"] or report["required_field_missing_count"]):
+        return 1
+    if args.strict_cross_check and report["last_trading_dayk_cross_check"]["mismatch_count"]:
+        return 1
+    if args.strict_non_last_fields and report["non_last_required_field_audit"]["missing_count"]:
         return 1
     return 0
 
@@ -79,6 +233,8 @@ def audit_lifecycle_coverage(
     source_distribution = _nested_counts(lifecycle_covered, ["exchange", "source_function"])
     field_completeness = _field_completeness(lifecycle_covered)
     right_censored = _right_censored_counts(lifecycle_covered)
+    last_trading_cross_check = _last_trading_dayk_cross_check(lifecycle_covered, expected, sample_limit)
+    non_last_required = _non_last_required_field_audit(lifecycle_covered, sample_limit)
 
     return {
         "dayk_path": str(dayk_path.expanduser().resolve()),
@@ -90,8 +246,11 @@ def audit_lifecycle_coverage(
         "by_exchange_expected": by_exchange_expected,
         "by_exchange_missing": by_exchange_missing,
         "source_distribution": source_distribution,
+        "source_field_policy": _source_field_policy_for(lifecycle_covered),
         "field_completeness": field_completeness,
         "right_censored_by_exchange": right_censored,
+        "last_trading_dayk_cross_check": last_trading_cross_check,
+        "non_last_required_field_audit": non_last_required,
         "required_columns": list(REQUIRED_COLUMNS),
         "required_field_missing_count": int(len(required_missing)),
         "missing_samples": _sample_records(missing, sample_limit),
@@ -123,6 +282,7 @@ def _expected_contracts_from_dayk(
     )
     grouped["contract_code"] = grouped["instrument_id"].map(normalise_instrument_code)
     grouped = grouped[(grouped["max"] >= pd.Timestamp(start_date)) & grouped["contract_code"].notna()]
+    exchange_cutoff = df.groupby("exchange_id")["trading_day"].max().to_dict()
     out = grouped.rename(columns={
         "exchange_id": "exchange",
         "product_id": "product_code",
@@ -130,7 +290,15 @@ def _expected_contracts_from_dayk(
         "max": "last_local_day",
         "count": "local_bar_count",
     })
-    return out[["exchange", "product_code", "contract_code", "first_local_day", "last_local_day", "local_bar_count"]].drop_duplicates(["exchange", "contract_code"])
+    out["exchange_data_cutoff"] = out["exchange"].map(exchange_cutoff)
+    out["right_censored_by_dayk"] = [
+        _is_right_censored(str(contract), pd.Timestamp(last_day), pd.Timestamp(cutoff))
+        for contract, last_day, cutoff in zip(out["contract_code"], out["last_local_day"], out["exchange_data_cutoff"], strict=False)
+    ]
+    return out[[
+        "exchange", "product_code", "contract_code", "first_local_day", "last_local_day",
+        "local_bar_count", "exchange_data_cutoff", "right_censored_by_dayk",
+    ]].drop_duplicates(["exchange", "contract_code"])
 
 
 def _required_field_missing(frame: pd.DataFrame) -> pd.DataFrame:
@@ -169,6 +337,103 @@ def _right_censored_counts(frame: pd.DataFrame) -> dict[str, int]:
     return _counts(censored, "exchange")
 
 
+def _last_trading_dayk_cross_check(lifecycle: pd.DataFrame, expected: pd.DataFrame, sample_limit: int) -> dict[str, Any]:
+    if lifecycle.empty or expected.empty:
+        return {
+            "compared_count": 0,
+            "matched_count": 0,
+            "mismatch_count": 0,
+            "skipped_right_censored": 0,
+            "mismatch_by_exchange": {},
+            "mismatch_by_source": {},
+            "mismatch_samples": [],
+        }
+    expected_cols = [
+        "key", "first_local_day", "last_local_day", "exchange_data_cutoff", "right_censored_by_dayk",
+        "local_bar_count",
+    ]
+    merged = lifecycle.merge(expected[expected_cols], on="key", how="left", suffixes=("", "_expected"))
+    merged = merged[merged["last_trading_date"].notna()].copy()
+    merged["last_trading_day"] = _parse_mixed_date_series(merged["last_trading_date"])
+    merged["last_local_day"] = _parse_mixed_date_series(merged["last_local_day"])
+    merged["right_censored_by_dayk"] = merged["right_censored_by_dayk"].fillna(True)
+    comparable = merged[~merged["right_censored_by_dayk"] & merged["last_trading_day"].notna() & merged["last_local_day"].notna()].copy()
+    mismatches = comparable[comparable["last_trading_day"] != comparable["last_local_day"]].copy()
+    return {
+        "basis": (
+            "Compare lifecycle.last_trading_date with LocalCNFutures last finite-close daily bar "
+            "only when local dayk is not right-censored. Right-censored contracts are reported as skipped."
+        ),
+        "compared_count": int(len(comparable)),
+        "matched_count": int(len(comparable) - len(mismatches)),
+        "mismatch_count": int(len(mismatches)),
+        "skipped_right_censored": int(merged["right_censored_by_dayk"].sum()),
+        "mismatch_by_exchange": _counts(mismatches, "exchange"),
+        "mismatch_by_source": _counts(mismatches, "source_function"),
+        "mismatch_samples": _sample_records(mismatches, sample_limit),
+    }
+
+
+def _non_last_required_field_audit(frame: pd.DataFrame, sample_limit: int) -> dict[str, Any]:
+    if frame.empty:
+        return {
+            "required_fields_by_exchange": NON_LAST_REQUIRED_FIELDS_BY_EXCHANGE,
+            "missing_count": 0,
+            "missing_by_exchange_field": {},
+            "missing_samples": [],
+        }
+    missing_rows: list[dict[str, Any]] = []
+    for _, row in frame.iterrows():
+        exchange = str(row.get("exchange") or "").upper()
+        required_fields = NON_LAST_REQUIRED_FIELDS_BY_EXCHANGE.get(exchange, ())
+        for field in required_fields:
+            value = row.get(field)
+            if _is_missing_value(value):
+                missing_rows.append({
+                    "exchange": exchange,
+                    "product_code": row.get("product_code"),
+                    "contract_code": row.get("contract_code"),
+                    "source_function": row.get("source_function"),
+                    "missing_field": field,
+                    "list_date": row.get("list_date"),
+                    "last_trading_date": row.get("last_trading_date"),
+                })
+    missing = pd.DataFrame(missing_rows)
+    return {
+        "required_fields_by_exchange": {key: list(value) for key, value in NON_LAST_REQUIRED_FIELDS_BY_EXCHANGE.items()},
+        "missing_count": int(len(missing)),
+        "missing_by_exchange_field": _nested_counts(missing, ["exchange", "missing_field"]) if not missing.empty else {},
+        "missing_by_source": _counts(missing, "source_function") if not missing.empty else {},
+        "missing_samples": _sample_records(missing, sample_limit),
+    }
+
+
+def _is_missing_value(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip() in {"", "NaN", "NaT", "nan", "None"}
+
+
+def _parse_mixed_date_series(values: pd.Series) -> pd.Series:
+    text = values.astype("string").str.strip()
+    parsed = pd.Series(pd.NaT, index=values.index, dtype="datetime64[ns]")
+    compact = text.str.fullmatch(r"\d{8}").fillna(False)
+    dashed = text.str.fullmatch(r"\d{4}-\d{2}-\d{2}").fillna(False)
+    if compact.any():
+        parsed.loc[compact] = pd.to_datetime(text.loc[compact], format="%Y%m%d", errors="coerce")
+    if dashed.any():
+        parsed.loc[dashed] = pd.to_datetime(text.loc[dashed], format="%Y-%m-%d", errors="coerce")
+    other = ~(compact | dashed)
+    if other.any():
+        parsed.loc[other] = pd.to_datetime(text.loc[other], errors="coerce")
+    return parsed.dt.normalize()
+
+
 def _counts(frame: pd.DataFrame, column: str) -> dict[str, int]:
     if frame.empty or column not in frame.columns:
         return {}
@@ -189,10 +454,54 @@ def _nested_counts(frame: pd.DataFrame, columns: list[str]) -> dict[str, Any]:
     return result
 
 
+def _is_right_censored(contract_code: str, local_last_day: pd.Timestamp, exchange_cutoff: pd.Timestamp) -> bool:
+    if local_last_day >= exchange_cutoff:
+        return True
+    contract_month = _contract_month(contract_code)
+    if contract_month is None:
+        return False
+    return contract_month > exchange_cutoff.to_period("M")
+
+
+def _contract_month(contract_code: str) -> pd.Period | None:
+    import re
+
+    match = re.match(r"^[A-Z]+([0-9]{3,4})", str(contract_code or "").upper())
+    if not match:
+        return None
+    digits = match.group(1)
+    if len(digits) == 3:
+        year = 2020 + int(digits[0])
+        month = int(digits[1:])
+    else:
+        year = 2000 + int(digits[:2])
+        month = int(digits[2:])
+    if not 1 <= month <= 12:
+        return None
+    return pd.Period(year=year, month=month, freq="M")
+
+
+def _source_field_policy_for(frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
+    if frame.empty or "source_function" not in frame.columns:
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for source_function in sorted({str(value) for value in frame["source_function"].dropna().unique()}):
+        result[source_function] = SOURCE_FIELD_POLICY.get(source_function, {
+            "source": f"unregistered source_function={source_function}",
+            "fields": {},
+        })
+    return result
+
+
 def _sample_records(frame: pd.DataFrame, limit: int) -> list[dict[str, Any]]:
     if frame.empty or limit <= 0:
         return []
-    cols = [col for col in ["exchange", "product_code", "contract_code", "first_local_day", "last_local_day", "source_function", "list_date", "last_trading_date"] if col in frame.columns]
+    cols = [
+        col for col in [
+            "exchange", "product_code", "contract_code", "first_local_day", "last_local_day",
+            "exchange_data_cutoff", "source_function", "list_date", "last_trading_date",
+        ] if col in frame.columns
+    ]
     sample = frame[cols].head(limit).copy()
     for col in sample.columns:
         if pd.api.types.is_datetime64_any_dtype(sample[col]):
@@ -214,10 +523,16 @@ def _print_human_report(report: dict[str, Any]) -> None:
     print(json.dumps(report["by_exchange_missing"], ensure_ascii=False, indent=2, sort_keys=True))
     print("\nSource distribution:")
     print(json.dumps(report["source_distribution"], ensure_ascii=False, indent=2, sort_keys=True))
+    print("\nSource field policy:")
+    print(json.dumps(report["source_field_policy"], ensure_ascii=False, indent=2, sort_keys=True))
     print("\nField completeness:")
     print(json.dumps(report["field_completeness"], ensure_ascii=False, indent=2, sort_keys=True))
     print("\nRight-censored local coverage rows by exchange:")
     print(json.dumps(report["right_censored_by_exchange"], ensure_ascii=False, indent=2, sort_keys=True))
+    print("\nLast trading date dayk cross-check:")
+    print(json.dumps(report["last_trading_dayk_cross_check"], ensure_ascii=False, indent=2, sort_keys=True))
+    print("\nNon-last required field audit:")
+    print(json.dumps(report["non_last_required_field_audit"], ensure_ascii=False, indent=2, sort_keys=True))
     print(f"\nRequired field missing rows: {report['required_field_missing_count']}")
     if report["missing_samples"]:
         print("\nMissing samples:")

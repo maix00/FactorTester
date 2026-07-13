@@ -7,6 +7,7 @@ import pytest
 
 from sources.AKShare import client
 from sources.AKShare import lifecycle as lc
+from sources.AKShare.scripts import backfill_missing_lifecycle_fields as missing_lifecycle
 from sources.AKShare.scripts.backfill_contract_lifecycle_from_local_dayk import lifecycle_rows_from_dayk
 from sources.DCE import portal as dce_portal
 
@@ -99,6 +100,47 @@ def test_normalize_cffex_has_no_delivery_date():
     assert row["last_trading_date"] == "2024-03-15"
     assert row["listing_base_price"] == 3400.0
     assert row["last_delivery_date"] is None
+
+
+def test_official_cffex_parser_reads_uppercase_xml_and_skips_options(monkeypatch):
+    class FakeResponse:
+        content = b"""<?xml version="1.0" encoding="UTF-8"?>
+        <tradeproperty>
+          <INDEX>
+            <TRADING_DAY>20240118</TRADING_DAY>
+            <PRODUCT_ID>HO</PRODUCT_ID>
+            <INSTRUMENT_ID>HO2401-C-1975</INSTRUMENT_ID>
+            <BASIS_PRICE>235.2</BASIS_PRICE>
+            <OPEN_DATE>20240118</OPEN_DATE>
+            <END_TRADING_DAY>20240119</END_TRADING_DAY>
+          </INDEX>
+          <INDEX>
+            <TRADING_DAY>20240118</TRADING_DAY>
+            <PRODUCT_ID>IF</PRODUCT_ID>
+            <INSTRUMENT_ID>IF2401</INSTRUMENT_ID>
+            <BASIS_PRICE>3201.2</BASIS_PRICE>
+            <OPEN_DATE>20231120</OPEN_DATE>
+            <END_TRADING_DAY>20240119</END_TRADING_DAY>
+          </INDEX>
+        </tradeproperty>
+        """
+        encoding = "utf-8"
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(*args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    frame = client._official_contract_info_cffex("20240118")
+
+    assert frame["合约代码"].to_list() == ["IF2401"]
+    assert frame.iloc[0]["品种"] == "IF"
+    assert frame.iloc[0]["挂盘基准价"] == "3201.2"
+    assert frame.iloc[0]["上市日"] == "20231120"
+    assert frame.iloc[0]["最后交易日"] == "20240119"
 
 
 def test_normalize_gfex_one_shot():
@@ -298,3 +340,49 @@ def test_local_dayk_backfill_does_not_treat_data_cutoff_as_last_trade(tmp_path):
     assert by_contract["M2409"]["last_trading_date"] == "2024-09-13"
     assert by_contract["M2609"]["last_trading_date"] is None
     assert '"right_censored": true' in by_contract["M2609"]["raw_json"]
+
+
+def test_rule_calendar_derives_third_trading_day_after_last_trade():
+    calendar = pd.DatetimeIndex([
+        pd.Timestamp("2024-09-13"),
+        pd.Timestamp("2024-09-18"),
+        pd.Timestamp("2024-09-19"),
+        pd.Timestamp("2024-09-20"),
+    ])
+
+    assert missing_lifecycle._third_trading_day_after(calendar, "2024-09-13") == "2024-09-20"
+
+
+def test_tushare_backfill_skips_without_token(monkeypatch, tmp_path):
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.delenv("TS_TOKEN", raising=False)
+    monkeypatch.delenv("TUSHARE_PRO_TOKEN", raising=False)
+    db_path = str(tmp_path / "cache.sqlite")
+    lc.upsert_contract_lifecycle([
+        {
+            "exchange": "DCE",
+            "product_code": "A",
+            "contract_code": "A2401",
+            "list_date": "2023-01-17",
+            "last_trading_date": "2024-01-15",
+            "delivery_start_date": None,
+            "delivery_notice_date": None,
+            "last_delivery_date": None,
+            "listing_base_price": None,
+            "source_query_date": None,
+            "source_function": "local_cnfutures_dayk_coverage",
+            "raw_json": "{}",
+            "fetched_at": 1.0,
+        }
+    ], db_path=db_path)
+
+    report = missing_lifecycle.backfill_tushare_last_delivery_date(
+        db_path=db_path,
+        dry_run=True,
+        exchanges=["DCE"],
+        sample_limit=5,
+    )
+
+    assert report["skipped"] is True
+    assert "TOKEN" in report["skip_reason"]
+    assert report["missing_before"] == 1
