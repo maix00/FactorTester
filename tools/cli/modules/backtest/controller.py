@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-from datetime import datetime
 from typing import Any
 
 import click
@@ -2501,13 +2500,7 @@ def _run_backtest(
         raise click.ClickException("没有可运行的分组；请先用 factortester group --add 新增分组")
     display_ls_configs = ls_configs if ls_configs is not None else state.backtest_ls_configs
     run_payload = payload or _run_payload(state, groups=groups)
-    if step_mode:
-        import uuid as _uuid
-        _run_token_id = _uuid.uuid4().hex
-        run_payload["run_token"] = _run_token_id
-        run_payload["step_mode"] = True
-    else:
-        _run_token_id = run_payload.get("run_token", "")
+    run_token = run_config_helpers.configure_step_mode_payload(run_payload, step_mode=step_mode)
     click.echo(f"开始运行{title}: groups={len(groups)}, long-short={len(display_ls_configs)}")
     if not step_mode:
         _print_run_strategy_info(groups, display_ls_configs)
@@ -2535,19 +2528,15 @@ def _run_backtest(
         event_name = str(event.get("event") or "message")
         data = event.get("data")
         if event_name == "error":
-            message = data.get("error") if isinstance(data, dict) else data
-            traceback_text = str(data.get("traceback") or "").strip() if isinstance(data, dict) else ""
-            if traceback_text:
-                message = f"{message}\n{traceback_text}"
-            raise click.ClickException(f"分组测试失败: {message}")
+            raise click.ClickException(f"分组测试失败: {run_config_helpers.stream_error_message(data)}")
         if event_name == "step" and isinstance(data, dict):
             _handle_step_event(
                 data,
                 client,
-                _run_token_id,
+                run_token,
                 step_navigator,
             )
-        elif event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
+        elif run_config_helpers.is_renderer_event(event_name):
             renderer.handle(event_name, data)
     renderer.handle("complete", {})
     if renderer.last_result:
@@ -2593,4 +2582,3 @@ def _print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict
 def _equity_curve_live_enabled(state, *, client=None) -> bool:
     _, store = config_state_helpers.stores_for_backtest(state, client=client)
     return run_config_helpers.equity_curve_live_enabled(store)
-
