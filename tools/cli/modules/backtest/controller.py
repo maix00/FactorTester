@@ -15,7 +15,6 @@ from typing import Any
 import click
 
 from tools.cli.core.context import client_from_config, ensure_child_available
-from tools.cli.core.display import print_backtest_welcome
 from tools.cli.core.errors import friendly_errors
 from tools.cli.field_help import render_settings_help
 from tools.cli.field_store import FieldStore
@@ -161,6 +160,7 @@ from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest import result_output as result_output_formatter
 from tools.cli.modules.backtest import results_data as results_data_formatter
 from tools.cli.modules.backtest import results_commands as results_command_handlers
+from tools.cli.modules.backtest import root_command as root_command_handler
 from tools.cli.modules.backtest import run_payloads as run_payload_formatter
 from tools.cli.modules.backtest import run_config as run_config_helpers
 from tools.cli.modules.backtest import config_views as config_view_formatter
@@ -237,18 +237,14 @@ def backtest(
       factortester group --add --group-name --help
       factortester group --add --group-name A1 --help
     """
-    if ctx.invoked_subcommand is not None:
-        state = load_state()
-        switch_backtest_space(state, BACKTEST_SPACE)
-        save_state(state)
-        return
-    state = load_state()
-    enter_backtest_state(state, scope=BACKTEST_SPACE)
-    save_state(state)
-    if run:
-        _run_backtest(state, groups=state.backtest_groups, verbose=verbose, step_mode=step)
-        return
-    print_backtest_welcome(state)
+    root_command_handler.handle_root_command(
+        ctx,
+        run=run,
+        step=step,
+        verbose=verbose,
+        run_backtest=_run_backtest,
+        enter_state=enter_backtest_state,
+    )
 
 
 @backtest.command("template", context_settings=SELECTOR_HELP_CONTEXT)
