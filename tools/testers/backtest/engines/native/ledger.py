@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from tools.data.types.base import UniqueNameObject
+from tools.testers.backtest.engines.native.guarded_dict import GuardedDict
 
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.fields import FieldRef
@@ -44,7 +45,8 @@ class LedgerState:
             self.ledger = ledger_identity(ledger)
         else:
             self.ledger = Ledger(name="ledger:default")
-        self.fields = fields if fields is not None else {}
+        self.fields = GuardedDict(fields or {}, label=f"LedgerState[{self.ledger.name}].fields")
+        self._flow_contract_audit: tuple[Any, object] | None = None
 
     @property
     def ledger_id(self) -> str:
@@ -54,7 +56,23 @@ class LedgerState:
         return self.fields.get(ref, default)
 
     def set(self, ref: "FieldRef", value: Any) -> None:
-        self.fields[ref] = value
+        audit = getattr(self, "_flow_contract_audit", None)
+        if audit is not None:
+            ctx, token = audit
+            ctx.record_external_contract_write(ref, token)
+        with self.fields.unguarded_write():
+            self.fields[ref] = value
+
+    def set_guarded_writes_enabled(self, enabled: bool) -> None:
+        self.fields.set_guarded_writes_enabled(enabled)
+
+    def enter_flow_contract_audit(self, ctx: Any, token: object) -> tuple[Any, object] | None:
+        previous = getattr(self, "_flow_contract_audit", None)
+        self._flow_contract_audit = (ctx, token)
+        return previous
+
+    def restore_flow_contract_audit(self, previous: tuple[Any, object] | None) -> None:
+        self._flow_contract_audit = previous
 
 
 def ledger_identity(value: str | Ledger) -> Ledger:

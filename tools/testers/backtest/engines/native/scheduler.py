@@ -646,6 +646,11 @@ class FlowContext:
             raise SchedulerError("invalid flow-contract audit token")
         self._record_contract_access("read", ref)
 
+    def record_external_contract_write(self, ref: "FieldRef", token: object) -> None:
+        if token is not self._contract_audit_token:
+            raise SchedulerError("invalid flow-contract audit token")
+        self._record_contract_access("write", ref)
+
     def _record_contract_access(self, access: str, ref: "FieldRef") -> None:
         if not self._audit_contract and not self._enforce_contract:
             return
@@ -1230,6 +1235,17 @@ def _step_after_flow(f, state, ctx, step_callback, before):
             output_changes.append({"field": output["field"], **change})
     ledger_changes = _audit_ledger_changes(before.get("ledgers_before", []), ledgers_after)
     declared_outputs = {ref.qualified_name for ref in f.outputs}
+    direct_contract_violations = list(ctx.contract_violations())[before.get("contract_violation_count", 0):]
+    direct_violation_keys = {
+        (
+            item.get("flow"),
+            item.get("phase"),
+            item.get("event_kind"),
+            item.get("access"),
+            item.get("field"),
+        )
+        for item in direct_contract_violations
+    }
     ledger_contract_violations = [
         {
             "flow": _flow_qualified_name(f),
@@ -1240,6 +1256,13 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         }
         for change in ledger_changes
         if change.get("field") not in declared_outputs
+        and (
+            _flow_qualified_name(f),
+            f.phase.value,
+            f.event_kind.name if f.event_kind is not None else "",
+            "write",
+            change.get("field"),
+        ) not in direct_violation_keys
     ]
     if ledger_contract_violations and ctx._enforce_contract:
         first = ledger_contract_violations[0]
@@ -1269,7 +1292,7 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         "event_payloads_after": event_payloads_after,
         "event_payload_changes": event_payload_changes,
         "input_contract_violations": [
-            *list(ctx.contract_violations())[before.get("contract_violation_count", 0):],
+            *direct_contract_violations,
             *ledger_contract_violations,
         ],
     })
@@ -1453,7 +1476,10 @@ def _set_state_store_guards(state: "BacktestRunState", enabled: bool) -> list[tu
     Stores that participate expose set_guarded_writes_enabled(bool).
     """
     restored: list[tuple[Any, bool]] = []
-    for store in (getattr(state, "market_data_store", None),):
+    object.__setattr__(state, "_store_guards_enabled", bool(enabled))
+    stores = [getattr(state, "market_data_store", None), getattr(state, "cash_pool_store", None)]
+    stores.extend(getattr(state, "ledgers", {}).values())
+    for store in stores:
         setter = getattr(store, "set_guarded_writes_enabled", None)
         if not callable(setter):
             continue
@@ -1461,6 +1487,22 @@ def _set_state_store_guards(state: "BacktestRunState", enabled: bool) -> list[tu
         setter(enabled)
         restored.append((store, previous))
     return restored
+
+
+def _restore_state_store_guards(state: "BacktestRunState", restored: list[tuple[Any, bool]]) -> None:
+    seen: set[int] = set()
+    for store, previous in restored:
+        seen.add(id(store))
+        setter = getattr(store, "set_guarded_writes_enabled", None)
+        if callable(setter):
+            setter(previous)
+    object.__setattr__(state, "_store_guards_enabled", False)
+    for ledger in getattr(state, "ledgers", {}).values():
+        if id(ledger) in seen:
+            continue
+        setter = getattr(ledger, "set_guarded_writes_enabled", None)
+        if callable(setter):
+            setter(False)
 
 
 def run(
@@ -1489,10 +1531,7 @@ def run(
             step_callback=step_callback,
         )
     finally:
-        for store, previous in guarded_stores:
-            setter = getattr(store, "set_guarded_writes_enabled", None)
-            if callable(setter):
-                setter(previous)
+        _restore_state_store_guards(state, guarded_stores)
         _step_mode_globals["enabled"] = previous_step_mode
 
 

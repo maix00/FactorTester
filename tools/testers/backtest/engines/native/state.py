@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Mapping
 import warnings
 
@@ -124,7 +125,14 @@ class BacktestRunState:
         ledger = ledger_identity(ledger)
         pool_config = cash_pool_config_for_ledger(self, ledger)
         base_currency = pool_config.base_currency or "CNY"
-        return LedgerState(strategy=strategy, base_currency=base_currency, ledger=ledger)
+        ledger_state = LedgerState(strategy=strategy, base_currency=base_currency, ledger=ledger)
+        if getattr(self, "_store_guards_enabled", False):
+            ledger_state.set_guarded_writes_enabled(True)
+        audit = getattr(self, "_flow_contract_audit", None)
+        if audit is not None:
+            ctx, token = audit
+            ledger_state.enter_flow_contract_audit(ctx, token)
+        return ledger_state
 
     def config_for(self, strategy: "Strategy") -> StrategyConfig:
         config = self.strategy_configs[strategy]
@@ -152,10 +160,20 @@ class BacktestRunState:
     def enter_flow_contract_audit(self, ctx: Any, token: object) -> tuple[Any, object] | None:
         previous = getattr(self, "_flow_contract_audit", None)
         object.__setattr__(self, "_flow_contract_audit", (ctx, token))
+        for ledger in getattr(self, "ledgers", {}).values():
+            ledger.enter_flow_contract_audit(ctx, token)
+        cash_pool_store = getattr(self, "cash_pool_store", None)
+        if cash_pool_store is not None:
+            cash_pool_store.enter_flow_contract_audit(ctx, token)
         return previous
 
     def restore_flow_contract_audit(self, previous: tuple[Any, object] | None) -> None:
         object.__setattr__(self, "_flow_contract_audit", previous)
+        for ledger in getattr(self, "ledgers", {}).values():
+            ledger.restore_flow_contract_audit(previous)
+        cash_pool_store = getattr(self, "cash_pool_store", None)
+        if cash_pool_store is not None:
+            cash_pool_store.restore_flow_contract_audit(previous)
 
     def __setattr__(self, name: str, value: Any) -> None:
         object.__setattr__(self, name, value)
@@ -212,7 +230,34 @@ class _AuditedStrategyConfig:
         return self._config.uses_flow(flow_name)
 
     def __getattr__(self, name: str) -> Any:
+        if name == "field_values":
+            return _AuditedStrategyFieldValues(self._config.field_values, self._ctx, self._token)
         return getattr(self._config, name)
+
+
+class _AuditedStrategyFieldValues(Mapping[FieldRef, Any]):
+    """Read-only FieldRef mapping proxy for direct StrategyConfig.field_values access."""
+
+    def __init__(self, values: Mapping[FieldRef, Any], ctx: Any, token: object) -> None:
+        self._values = values
+        self._ctx = ctx
+        self._token = token
+
+    def __getitem__(self, ref: FieldRef) -> Any:
+        if isinstance(ref, FieldRef):
+            self._ctx.record_external_contract_read(ref, self._token)
+        return self._values[ref]
+
+    def __iter__(self) -> Iterator[FieldRef]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def get(self, ref: FieldRef, default: Any = None) -> Any:
+        if isinstance(ref, FieldRef):
+            self._ctx.record_external_contract_read(ref, self._token)
+        return self._values.get(ref, default)
 
 
 _LEDGER_CONFIG_FIELD_REFS: dict[str, FieldRef[Any]] = {
