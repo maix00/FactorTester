@@ -162,6 +162,7 @@ from tools.cli.modules.backtest import result_output as result_output_formatter
 from tools.cli.modules.backtest import results_data as results_data_formatter
 from tools.cli.modules.backtest import results_commands as results_command_handlers
 from tools.cli.modules.backtest import run_payloads as run_payload_formatter
+from tools.cli.modules.backtest import run_config as run_config_helpers
 from tools.cli.modules.backtest import config_views as config_view_formatter
 from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest import config_state as config_state_helpers
@@ -3290,18 +3291,7 @@ def _print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict
 
 def _equity_curve_live_enabled(state, *, client=None) -> bool:
     _, store = _stores_for_backtest(state, client=client)
-    curve_mode = store.effective("equity_curve_mode")
-    if curve_mode is not None:
-        return str(curve_mode).strip().lower() == "live"
-    return _truthy(store.effective("equity_compute_live"))
-
-
-def _truthy(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"true", "1", "yes", "y", "on", "live"}
+    return run_config_helpers.equity_curve_live_enabled(store)
 
 
 def _print_run_event(event_name: str, data: Any) -> None:
