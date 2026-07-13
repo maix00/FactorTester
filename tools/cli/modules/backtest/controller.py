@@ -2584,6 +2584,58 @@ def _print_weight_change_tables(prefix: str, field_name: str, changes: list[dict
     return True
 
 
+def _print_lifecycle_notice_change(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    short_name = field_name.rsplit(".", 1)[-1]
+    if short_name not in {"force_close_notices", "rollover_notices"}:
+        return False
+    context_changes = [change for change in changes if str(change.get("scope") or "") == "context"]
+    selected = context_changes[:1]
+    if not selected:
+        selected = changes
+    if len(selected) == 1:
+        change = selected[0]
+        _print_audit_diff_value(
+            prefix,
+            "合并事件草稿（所有 active strategies）",
+            _display_field_value(field_name, change.get("before")),
+            _display_field_value(field_name, change.get("after")),
+        )
+        return True
+
+    before_items: list[Any] = []
+    after_items: list[Any] = []
+    for change in selected:
+        before = change.get("before")
+        after = change.get("after")
+        if isinstance(before, list):
+            before_items.extend(before)
+        elif before not in (None, ""):
+            before_items.append(before)
+        if isinstance(after, list):
+            after_items.extend(after)
+        elif after not in (None, ""):
+            after_items.append(after)
+    _print_audit_diff_value(
+        prefix,
+        "合并事件草稿（所有 active strategies）",
+        _dedupe_audit_list(before_items),
+        _dedupe_audit_list(after_items),
+    )
+    return True
+
+
+def _dedupe_audit_list(values: list[Any]) -> list[Any]:
+    seen: set[str] = set()
+    result: list[Any] = []
+    for value in values:
+        key = _audit_display_key(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
+
+
 def _audit_ledger_scalar_text(value: Any) -> str | None:
     lines = _audit_text(value).splitlines() or [""]
     if len(lines) != 1:
@@ -2913,23 +2965,28 @@ def _audit_transposed_table_lines(
 ) -> list[str] | None:
     if len(header_list) <= 8 or len(scalar_rows) > 3:
         return None
-    if _audit_table_key_column_count(header_list) != 1:
+    key_count = _audit_table_key_column_count(header_list)
+    if key_count < 1 or key_count > 2:
         return None
     max_width = max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
     full_width = len(indent) + sum(widths) + max(len(widths) - 1, 0) * 2
     if full_width <= max_width:
         return None
-    row_headers = [row[0] for row in scalar_rows]
+    row_headers = [
+        " | ".join(row[column] for column in range(key_count)).strip()
+        for row in scalar_rows
+    ]
     transposed_rows = [
         tuple([header_list[column], *[row[column] for row in scalar_rows]])
-        for column in range(1, len(header_list))
+        for column in range(key_count, len(header_list))
     ]
     transposed_headers = ["column", *row_headers]
     transposed_widths = [
         max(display_width(transposed_headers[column]), *(display_width(str(row[column])) for row in transposed_rows))
         for column in range(len(transposed_headers))
     ]
-    lines = [f"{indent}（表格已转置：原列数 {len(header_list)}，原行数 {len(scalar_rows)}）"]
+    key_label = " + ".join(header_list[:key_count])
+    lines = [f"{indent}（表格已转置：原列数 {len(header_list)}，原行数 {len(scalar_rows)}，行标={key_label}）"]
     lines.extend(_audit_table_block_lines(
         transposed_headers,
         [[str(item) for item in row] for row in transposed_rows],
@@ -3904,6 +3961,8 @@ def _print_audit_changes(
         by_field.setdefault(str(change.get("field") or ""), []).append(change)
     for field_name, field_changes in sorted(by_field.items(), key=lambda item: _audit_field_sort_key(item[0])):
         click.echo(f"  {_audit_field_label(field_name)}:")
+        if _print_lifecycle_notice_change("    ", field_name, field_changes):
+            continue
         if _print_weight_change_tables("    ", field_name, field_changes):
             continue
         if _print_strategy_scalar_change_table("    ", field_name, field_changes):

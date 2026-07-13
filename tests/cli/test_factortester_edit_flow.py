@@ -21,6 +21,7 @@ from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
     _StepNavigator,
+    _audit_table_lines,
     _audit_text,
     _handle_step_event,
     _print_audit_changes,
@@ -661,6 +662,63 @@ def test_step_audit_renders_lifecycle_notices_as_single_table() -> None:
     assert '"payload"' not in text
 
 
+def test_step_audit_lifecycle_notice_changes_prefer_merged_context(capsys) -> None:
+    common_after = [
+        {
+            "type": "EventDraft",
+            "timestamp": "2026-01-28 15:00:00+08:00",
+            "strategy": "A1",
+            "payload": {
+                "product": "FB.DCE",
+                "contract_product": "DCE|F|FB|2603",
+                "notice_type": "force_close",
+                "notice_reason": "auto_close_date",
+                "last_trade_date": "2026-03-02",
+                "delivery_date": "2026-03-05",
+                "lifecycle_source": "DCE product rule + trading calendar derived contract lifecycle",
+                "lifecycle_source_function": "exchange_rule_dayk_calendar_derived",
+            },
+        },
+        {
+            "type": "EventDraft",
+            "timestamp": "2026-01-28 15:00:00+08:00",
+            "strategy": "A2",
+            "payload": {
+                "product": "JD.DCE",
+                "contract_product": "DCE|F|JD|2603",
+                "notice_type": "force_close",
+                "notice_reason": "auto_close_date",
+                "last_trade_date": "2026-03-26",
+                "delivery_date": "2026-03-31",
+                "lifecycle_source": "DCE product rule + trading calendar derived contract lifecycle",
+                "lifecycle_source_function": "exchange_rule_dayk_calendar_derived",
+            },
+        },
+    ]
+    _print_audit_changes("声明输出的变化", [
+        {
+            "field": "DeliveryForceCloseModule.force_close_notices",
+            "scope": "context",
+            "before": None,
+            "after": common_after,
+        },
+        {
+            "field": "DeliveryForceCloseModule.force_close_notices",
+            "scope": "strategy_context",
+            "strategy": "A1",
+            "before": None,
+            "after": [common_after[0]],
+        },
+    ])
+
+    out = capsys.readouterr().out
+    assert "合并事件草稿（所有 active strategies）" in out
+    assert out.count("force_close_notices [DeliveryForceCloseModule.force_close_notices]") == 1
+    assert out.count("before =") == 1
+    assert "策略上下文 A1" not in out
+    assert "lifecycle_source_function" in out
+
+
 def test_step_audit_renders_sampled_event_drafts_as_table() -> None:
     text = _audit_text({
         "type": "list",
@@ -904,6 +962,57 @@ def test_step_audit_formats_wide_dataframe_columns_as_counts() -> None:
     assert "columns     = 5000 columns; sample shows 4 columns" in text
     assert "C4999" in text
     assert "sampled" not in text
+
+
+def test_step_audit_transposes_wide_two_key_tables(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((90, 20)))
+
+    lines = _audit_table_lines(
+        (
+            "notice_time",
+            "strategy",
+            "product",
+            "contract",
+            "notice_type",
+            "reason",
+            "last_trade_date",
+            "delivery_date",
+            "lifecycle_source",
+            "lifecycle_source_function",
+        ),
+        [
+            (
+                "2026-01-28 15:00:00+08:00",
+                "A5",
+                "PT.GFE",
+                "GFEX|F|PT|2606",
+                "force_close",
+                "auto_close_date",
+                "2026-06-12",
+                "2026-06-17",
+                "GFEX product rule + trading calendar derived contract lifecycle",
+                "exchange_rule_dayk_calendar_derived",
+            ),
+            (
+                "2026-01-28 15:00:00+08:00",
+                "A4",
+                "FB.DCE",
+                "DCE|F|FB|2603",
+                "force_close",
+                "auto_close_date",
+                "2026-03-02",
+                "2026-03-05",
+                "DCE product rule + trading calendar derived contract lifecycle",
+                "exchange_rule_dayk_calendar_derived",
+            ),
+        ],
+    )
+
+    text = "\n".join(lines)
+    assert "表格已转置" in text
+    assert "2026-01-28 15:00:00+08:00 | A5" in text
+    assert "lifecycle_source_function" in text
+    assert "columns 1/" not in text
 
 
 def test_step_audit_formats_contract_metadata_as_compact_table() -> None:
