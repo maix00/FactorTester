@@ -3538,111 +3538,33 @@ def _audit_run_window_summary(value: Any) -> dict[str, Any] | None:
 
 
 def _audit_historical_field_state_summary(value: Any) -> dict[str, Any] | None:
-    normalized = _audit_normalized_value(value)
-    if not isinstance(normalized, dict) or not normalized:
-        return None
-    rows: list[dict[str, Any]] = []
-    field_names: list[str] = []
-    for product, fields in normalized.items():
-        if not isinstance(fields, dict):
-            return None
-        row: dict[str, Any] = {"product": str(product)}
-        for field_name, field_value in fields.items():
-            field_name_text = str(field_name)
-            if isinstance(field_value, (dict, list, tuple)):
-                return None
-            if field_name_text not in field_names:
-                field_names.append(field_name_text)
-            row[field_name_text] = field_value
-        rows.append(row)
-    if not rows or not field_names:
-        return None
-    product_filter = _audit_field_state_product_filter
-    if product_filter:
-        filter_set = set(product_filter)
-        filtered_rows = [row for row in rows if str(row.get("product") or "") in filter_set]
-        if filtered_rows:
-            rows = filtered_rows
-            return {
-                "type": "HistoricalFieldStateTable",
-                "fields": field_names,
-                "rows": rows,
-                "product_filter": tuple(product for product in product_filter if product in {str(row.get("product") or "") for row in rows}),
-            }
-    return {"type": "HistoricalFieldStateTable", "fields": field_names, "rows": rows}
+    return market_data_formatter.historical_field_state_summary(
+        value,
+        normalize=_audit_normalized_value,
+        product_filter=_audit_field_state_product_filter,
+    )
 
 
 def _audit_is_historical_field_state_summary(value: dict[str, Any]) -> bool:
-    fields = {str(field) for field in (value.get("fields") or [])}
-    hints = {
-        "VolumeMultiple",
-        "OpenRatioByMoney",
-        "OpenRatioByVolume",
-        "CloseRatioByMoney",
-        "CloseRatioByVolume",
-        "CloseTodayRatioByMoney",
-        "CloseTodayRatioByVolume",
-        "LongMarginRatioByMoney",
-        "ShortMarginRatioByMoney",
-        "LongMarginRatioByVolume",
-        "ShortMarginRatioByVolume",
-        "CostBasisMethod",
-        "MoneyCalculationPolicy",
-    }
-    return bool(fields & hints)
+    return market_data_formatter.is_historical_field_state_summary(value)
 
 
 def _audit_historical_field_state_text(value: dict[str, Any]) -> str:
-    fields = [str(field) for field in (value.get("fields") or [])]
-    rows = value.get("rows")
-    if not fields or not isinstance(rows, list):
-        return "historical field state: (no rows)"
-    field_rows = [row for row in rows if isinstance(row, dict)]
-    if not field_rows:
-        return "historical field state: (empty)"
-    product_filter = tuple(str(item) for item in (value.get("product_filter") or ()))
-    return "\n".join(_audit_field_state_transposed_lines(fields, field_rows, product_filter=product_filter))
+    return market_data_formatter.historical_field_state_text(
+        value,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+    )
 
 
 def _audit_historical_field_state_diff_text(before: Any, after: Any) -> str | None:
-    if not (
-        isinstance(before, dict)
-        and isinstance(after, dict)
-        and before.get("type") == "HistoricalFieldStateTable"
-        and after.get("type") == "HistoricalFieldStateTable"
-    ):
-        return None
-    fields = list(dict.fromkeys([str(field) for field in (before.get("fields") or []) + (after.get("fields") or [])]))
-    before_rows = {
-        str(row.get("product") or ""): row
-        for row in before.get("rows") or []
-        if isinstance(row, dict)
-    }
-    after_rows = {
-        str(row.get("product") or ""): row
-        for row in after.get("rows") or []
-        if isinstance(row, dict)
-    }
-    table_rows: list[tuple[Any, ...]] = []
-    for product in sorted(set(before_rows) | set(after_rows)):
-        before_row = before_rows.get(product, {})
-        after_row = after_rows.get(product, {})
-        changed_row: dict[str, Any] = {"product": product}
-        row_changed = False
-        for field in fields:
-            before_value = before_row.get(field)
-            after_value = after_row.get(field)
-            if before_value != after_value:
-                changed_row[field] = _audit_change_cell(_audit_scalar_cell(before_value), _audit_scalar_cell(after_value))
-                row_changed = True
-            else:
-                changed_row[field] = ""
-        if row_changed:
-            table_rows.append(changed_row)
-    if not table_rows:
-        return "（无变化）"
-    product_filter = tuple(str(item) for item in (after.get("product_filter") or before.get("product_filter") or ()))
-    return "\n".join(_audit_field_state_transposed_lines(fields, table_rows, product_filter=product_filter))
+    return market_data_formatter.historical_field_state_diff_text(
+        before,
+        after,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _audit_field_state_transposed_lines(
@@ -3651,34 +3573,17 @@ def _audit_field_state_transposed_lines(
     *,
     product_filter: tuple[str, ...] = (),
 ) -> list[str]:
-    if product_filter:
-        sampled_rows = sorted(rows, key=lambda row: str(row.get("product") or ""))
-        note = f"event products: {', '.join(product_filter)}"
-    else:
-        sampled_rows, note = _audit_sample_field_state_products(rows)
-    products = [str(row.get("product") or "") for row in sampled_rows]
-    table_rows = []
-    for field in fields:
-        values = [_audit_scalar_cell(row.get(field)) for row in sampled_rows]
-        if any(value not in ("", "null") for value in values):
-            table_rows.append(tuple([field, *values]))
-    lines: list[str] = []
-    if note:
-        lines.extend(_wrap_audit_text(note, width=_audit_max_width(), subsequent_indent="  "))
-    if table_rows:
-        lines.extend(_audit_table_lines(("field", *products), table_rows, allow_transpose=False))
-    return lines or ["（无字段值）"]
+    return market_data_formatter.field_state_transposed_lines(
+        fields,
+        rows,
+        product_filter=product_filter,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+    )
 
 
 def _audit_sample_field_state_products(rows: list[dict[str, Any]], *, max_products: int = 6) -> tuple[list[dict[str, Any]], str | None]:
-    sorted_rows = sorted(rows, key=lambda row: str(row.get("product") or ""))
-    if len(sorted_rows) <= max_products:
-        return sorted_rows, None
-    head_count = max_products // 2
-    tail_count = max_products - head_count
-    sampled = [*sorted_rows[:head_count], *sorted_rows[-tail_count:]]
-    products = ", ".join(str(row.get("product") or "") for row in sampled)
-    return sampled, f"sample products: {len(sampled)}/{len(sorted_rows)} = {products}"
+    return market_data_formatter.sample_field_state_products(rows, max_products=max_products)
 
 
 _POSITION_SCALAR_COLUMNS = (

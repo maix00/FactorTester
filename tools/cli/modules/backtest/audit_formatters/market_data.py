@@ -6,6 +6,8 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from tools.cli.modules.backtest.audit_formatters import table_render
+
 
 TableRenderer = Callable[..., list[str]]
 ScalarCell = Callable[[Any], str]
@@ -529,3 +531,180 @@ def columns_summary(columns: Any) -> str:
             return json.dumps(columns, ensure_ascii=False, default=str)
         return f"{len(columns)} columns"
     return str(columns or "")
+
+
+HISTORICAL_FIELD_STATE_HINTS = {
+    "VolumeMultiple",
+    "OpenRatioByMoney",
+    "OpenRatioByVolume",
+    "CloseRatioByMoney",
+    "CloseRatioByVolume",
+    "CloseTodayRatioByMoney",
+    "CloseTodayRatioByVolume",
+    "LongMarginRatioByMoney",
+    "ShortMarginRatioByMoney",
+    "LongMarginRatioByVolume",
+    "ShortMarginRatioByVolume",
+    "CostBasisMethod",
+    "MoneyCalculationPolicy",
+}
+
+
+def historical_field_state_summary(
+    value: Any,
+    *,
+    normalize: Normalize,
+    product_filter: Sequence[str] = (),
+) -> dict[str, Any] | None:
+    normalized = normalize(value)
+    if not isinstance(normalized, Mapping) or not normalized:
+        return None
+    rows: list[dict[str, Any]] = []
+    field_names: list[str] = []
+    for product, fields in normalized.items():
+        if not isinstance(fields, Mapping):
+            return None
+        row: dict[str, Any] = {"product": str(product)}
+        for field_name, field_value in fields.items():
+            field_name_text = str(field_name)
+            if isinstance(field_value, (dict, list, tuple)):
+                return None
+            if field_name_text not in field_names:
+                field_names.append(field_name_text)
+            row[field_name_text] = field_value
+        rows.append(row)
+    if not rows or not field_names:
+        return None
+    if product_filter:
+        filter_set = set(product_filter)
+        filtered_rows = [row for row in rows if str(row.get("product") or "") in filter_set]
+        if filtered_rows:
+            rows = filtered_rows
+            present_products = {str(row.get("product") or "") for row in rows}
+            return {
+                "type": "HistoricalFieldStateTable",
+                "fields": field_names,
+                "rows": rows,
+                "product_filter": tuple(product for product in product_filter if product in present_products),
+            }
+    return {"type": "HistoricalFieldStateTable", "fields": field_names, "rows": rows}
+
+
+def is_historical_field_state_summary(value: Mapping[str, Any]) -> bool:
+    fields = {str(field) for field in (value.get("fields") or [])}
+    return bool(fields & HISTORICAL_FIELD_STATE_HINTS)
+
+
+def historical_field_state_text(
+    value: Mapping[str, Any],
+    *,
+    table_lines: TableRenderer,
+    scalar_cell: ScalarCell,
+) -> str:
+    fields = [str(field) for field in (value.get("fields") or [])]
+    rows = value.get("rows")
+    if not fields or not isinstance(rows, list):
+        return "historical field state: (no rows)"
+    field_rows = [row for row in rows if isinstance(row, dict)]
+    if not field_rows:
+        return "historical field state: (empty)"
+    product_filter = tuple(str(item) for item in (value.get("product_filter") or ()))
+    return "\n".join(field_state_transposed_lines(
+        fields,
+        field_rows,
+        product_filter=product_filter,
+        table_lines=table_lines,
+        scalar_cell=scalar_cell,
+    ))
+
+
+def historical_field_state_diff_text(
+    before: Any,
+    after: Any,
+    *,
+    table_lines: TableRenderer,
+    scalar_cell: ScalarCell,
+    change_cell: ChangeCell,
+) -> str | None:
+    if not (
+        isinstance(before, Mapping)
+        and isinstance(after, Mapping)
+        and before.get("type") == "HistoricalFieldStateTable"
+        and after.get("type") == "HistoricalFieldStateTable"
+    ):
+        return None
+    fields = list(dict.fromkeys([str(field) for field in (before.get("fields") or []) + (after.get("fields") or [])]))
+    before_rows = {
+        str(row.get("product") or ""): row
+        for row in before.get("rows") or []
+        if isinstance(row, Mapping)
+    }
+    after_rows = {
+        str(row.get("product") or ""): row
+        for row in after.get("rows") or []
+        if isinstance(row, Mapping)
+    }
+    table_rows: list[dict[str, Any]] = []
+    for product in sorted(set(before_rows) | set(after_rows)):
+        before_row = before_rows.get(product, {})
+        after_row = after_rows.get(product, {})
+        changed_row: dict[str, Any] = {"product": product}
+        row_changed = False
+        for field in fields:
+            before_value = before_row.get(field)
+            after_value = after_row.get(field)
+            if before_value != after_value:
+                changed_row[field] = change_cell(scalar_cell(before_value), scalar_cell(after_value))
+                row_changed = True
+            else:
+                changed_row[field] = ""
+        if row_changed:
+            table_rows.append(changed_row)
+    if not table_rows:
+        return "（无变化）"
+    product_filter = tuple(str(item) for item in (after.get("product_filter") or before.get("product_filter") or ()))
+    return "\n".join(field_state_transposed_lines(
+        fields,
+        table_rows,
+        product_filter=product_filter,
+        table_lines=table_lines,
+        scalar_cell=scalar_cell,
+    ))
+
+
+def field_state_transposed_lines(
+    fields: list[str],
+    rows: list[dict[str, Any]],
+    *,
+    product_filter: Sequence[str] = (),
+    table_lines: TableRenderer,
+    scalar_cell: ScalarCell,
+) -> list[str]:
+    if product_filter:
+        sampled_rows = sorted(rows, key=lambda row: str(row.get("product") or ""))
+        note = f"event products: {', '.join(product_filter)}"
+    else:
+        sampled_rows, note = sample_field_state_products(rows)
+    products = [str(row.get("product") or "") for row in sampled_rows]
+    table_rows = []
+    for field in fields:
+        values = [scalar_cell(row.get(field)) for row in sampled_rows]
+        if any(value not in ("", "null") for value in values):
+            table_rows.append(tuple([field, *values]))
+    lines: list[str] = []
+    if note:
+        lines.extend(table_render.wrap_text(note, width=table_render.max_width(), subsequent_indent="  "))
+    if table_rows:
+        lines.extend(table_lines(("field", *products), table_rows, allow_transpose=False))
+    return lines or ["（无字段值）"]
+
+
+def sample_field_state_products(rows: list[dict[str, Any]], *, max_products: int = 6) -> tuple[list[dict[str, Any]], str | None]:
+    sorted_rows = sorted(rows, key=lambda row: str(row.get("product") or ""))
+    if len(sorted_rows) <= max_products:
+        return sorted_rows, None
+    head_count = max_products // 2
+    tail_count = max_products - head_count
+    sampled = [*sorted_rows[:head_count], *sorted_rows[-tail_count:]]
+    products = ", ".join(str(row.get("product") or "") for row in sampled)
+    return sampled, f"sample products: {len(sampled)}/{len(sorted_rows)} = {products}"
