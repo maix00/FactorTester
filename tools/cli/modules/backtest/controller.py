@@ -1889,18 +1889,10 @@ def _audit_group_key_label(keys: list[str]) -> str:
 def _print_audit_source_routes(
     prefix: str,
     entries: list[dict[str, Any]],
-    *,
-    route_state: set[tuple[tuple[str, str, str], ...]] | None = None,
 ) -> bool:
-    rows = source_group_formatter.source_route_rows(entries)
-    if not rows:
+    status, rows = source_group_formatter.source_route_display(entries)
+    if status == "empty":
         return False
-    route_key = tuple(rows)
-    if route_state is not None and route_key in route_state:
-        click.echo(f"{prefix}ledger/cash pool/strategy 路由同上")
-        return True
-    if route_state is not None:
-        route_state.add(route_key)
     for line in _audit_table_lines(
         ("ledger", "cash pool", "strategies"),
         rows,
@@ -2018,13 +2010,11 @@ def _print_audit_fields(
     records: list[dict[str, Any]],
     *,
     empty_message: str = "（无字段）",
-    route_state: set[tuple[tuple[str, str, str], ...]] | None = None,
 ) -> None:
     _audit_section_printer().print_fields(
         title,
         records,
         empty_message=empty_message,
-        route_state=route_state,
     )
 
 
@@ -2057,10 +2047,8 @@ def _scalar_change_record_group(
 def _print_audit_changes(
     title: str,
     changes: list[dict[str, Any]],
-    *,
-    route_state: set[tuple[tuple[str, str, str], ...]] | None = None,
 ) -> None:
-    _audit_section_printer().print_changes(title, changes, route_state=route_state)
+    _audit_section_printer().print_changes(title, changes)
 
 
 def _scalar_change_group_key(item: tuple[str, list[dict[str, Any]]]) -> tuple[Any, tuple[Any, ...] | None] | None:

@@ -12,9 +12,6 @@ from tools.cli.modules.backtest.audit_formatters import printer_helpers
 from tools.cli.modules.backtest.audit_formatters import source_groups
 
 
-RouteState = set[tuple[tuple[str, str, str], ...]]
-
-
 @dataclass(frozen=True)
 class StepAuditSectionPrinter:
     print_step_section: Callable[[str], None]
@@ -52,7 +49,6 @@ class StepAuditSectionPrinter:
         records: list[dict[str, Any]],
         *,
         empty_message: str = "（无字段）",
-        route_state: RouteState | None = None,
     ) -> None:
         self.print_step_section(title)
         if not records:
@@ -117,15 +113,13 @@ class StepAuditSectionPrinter:
             if self.print_ledger_grouped_values("    ", field_name, values):
                 index += 1
                 continue
-            self._print_value_buckets(field_name, values, route_state=route_state)
+            self._print_value_buckets(field_name, values)
             index += 1
 
     def print_changes(
         self,
         title: str,
         changes: list[dict[str, Any]],
-        *,
-        route_state: RouteState | None = None,
     ) -> None:
         self.print_step_section(title)
         if not changes:
@@ -191,15 +185,13 @@ class StepAuditSectionPrinter:
             if self.print_ledger_grouped_changes("    ", field_name, field_changes):
                 index += 1
                 continue
-            self._print_change_buckets(field_name, field_changes, route_state=route_state)
+            self._print_change_buckets(field_name, field_changes)
             index += 1
 
     def _print_value_buckets(
         self,
         field_name: str,
         values: list[dict[str, Any]],
-        *,
-        route_state: RouteState | None,
     ) -> None:
         buckets = source_groups.grouped_values(
             field_name,
@@ -211,7 +203,7 @@ class StepAuditSectionPrinter:
             label = source_groups.source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
             if source_groups.source_route_rows(bucket["entries"]):
                 click.echo(f"    {label}:")
-                self.print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
+                self.print_audit_source_routes("      ", bucket["entries"])
                 self.print_audit_value("      ", "value", bucket["value"])
             else:
                 self.print_audit_value("    ", label, bucket["value"])
@@ -220,8 +212,6 @@ class StepAuditSectionPrinter:
         self,
         field_name: str,
         field_changes: list[dict[str, Any]],
-        *,
-        route_state: RouteState | None,
     ) -> None:
         buckets = printer_helpers.field_change_buckets(
             field_name,
@@ -233,7 +223,7 @@ class StepAuditSectionPrinter:
             label = source_groups.source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
             if source_groups.source_route_rows(bucket["entries"]):
                 click.echo(f"    {label}:")
-                self.print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
+                self.print_audit_source_routes("      ", bucket["entries"])
                 self.print_audit_diff_value("      ", "value", bucket["before"], bucket["after"])
             else:
                 self.print_audit_diff_value("    ", label, bucket["before"], bucket["after"])

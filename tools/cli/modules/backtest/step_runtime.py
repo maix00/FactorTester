@@ -42,12 +42,10 @@ class StepEventRenderer:
         with self.audit_context(data):
             self.print_strategy_context(list(data.get("strategies") or []))
             self.print_event_payloads(list(data.get("event_payloads") or []))
-            route_state: set[tuple[tuple[str, str, str], ...]] = set()
             self.print_audit_fields(
                 "输入字段",
                 list(data.get("inputs") or []),
                 empty_message="（此 flow 未声明输入字段）",
-                route_state=route_state,
             )
             unchanged_outputs, output_changes, unchanged_message = step_display.output_audit_sections(
                 data,
@@ -58,9 +56,8 @@ class StepEventRenderer:
                 "声明输出字段（未变化）",
                 unchanged_outputs,
                 empty_message=unchanged_message,
-                route_state=route_state,
             )
-            self.print_audit_changes("声明输出的变化", output_changes, route_state=route_state)
+            self.print_audit_changes("声明输出的变化", output_changes)
             self.print_contract_audit(list(data.get("input_contract_violations") or []))
 
 

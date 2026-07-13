@@ -1013,8 +1013,7 @@ def test_step_audit_prefers_ledger_total_over_empty_strategy_defaults(capsys) ->
     assert "0.0" in plain
 
 
-def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
-    route_state: set[tuple[tuple[str, str, str], ...]] = set()
+def test_step_audit_prints_ledger_routes_without_same_as_abbreviation(capsys) -> None:
     values = [
         {
             "scope": "ledger_config",
@@ -1041,14 +1040,12 @@ def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
     _print_audit_fields(
         "输入字段",
         [{"field": "TradingRuleModule.accounting_mode", "values": values}],
-        route_state=route_state,
     )
     _print_audit_fields(
         "输入字段",
         [{"field": "TradingRuleModule.cost_basis_method", "values": values}],
-        route_state=route_state,
     )
-    _print_audit_changes("账本与现金池变化", changes, route_state=route_state)
+    _print_audit_changes("账本与现金池变化", changes)
 
     out = capsys.readouterr().out
     assert out.count("private:L1") == 3

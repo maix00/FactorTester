@@ -90,6 +90,13 @@ def source_route_rows(entries: list[dict[str, Any]]) -> list[tuple[str, str, str
     return sorted(rows)
 
 
+def source_route_display(entries: list[dict[str, Any]]) -> tuple[str, list[tuple[str, str, str]]]:
+    rows = source_route_rows(entries)
+    if not rows:
+        return "empty", []
+    return "table", rows
+
+
 def grouped_values(
     field_name: str,
     values: list[dict[str, Any]],
