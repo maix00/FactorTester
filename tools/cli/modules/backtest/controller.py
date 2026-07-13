@@ -558,18 +558,8 @@ def results(ctx: click.Context) -> None:
 
 
 def _print_backtest_template_help(state) -> None:
-    click.echo("backtest template 命令")
-    current = state.factor_family or "（未选择）"
-    click.echo(f"当前因子家族: {current}")
-    click.echo("  list --factor-family <因子家族>    列出指定因子家族的设置模板")
-    click.echo("  load <模板ID或名称>               加载模板到 backtest 草稿")
-    click.echo("  --from-module-template single_factor_test load <模板>  从 single_factor_test 模块显式导入模板")
-    click.echo("  save [模板名]                     保存当前 CLI 草稿为设置模板")
-    click.echo("")
-    click.echo("示例:")
-    click.echo("  factortester backtest template --factor-family SgCCS list")
-    click.echo("  factortester backtest template --from-module-template single_factor_test --factor-family SgCCS load 1")
-    click.echo("  factortester backtest template --factor-family SgCCS save 'CLI 草稿'")
+    for line in config_view_formatter.template_help_lines(state.factor_family):
+        click.echo(line)
 
 
 def _list_backtest_templates(factor_family: str) -> None:
@@ -1107,34 +1097,8 @@ def _print_backtest_local_settings(state, *, validate: bool = True) -> None:
     if validate:
         _validate_registered_local_settings(state)
     _, store = _stores_for_backtest(state)
-    click.echo("Backtest local-settings")
-    if state.backtest_local_settings:
-        for key in sorted(state.backtest_local_settings):
-            click.echo(f"  {key}: {state.backtest_local_settings[key]}")
-        rows = []
-        for key in sorted(state.backtest_local_settings):
-            meta = store.field(key)
-            rows.append((
-                field_flag(key),
-                str(meta.get("label") or key),
-                repr(state.backtest_local_settings.get(key)),
-                repr(store.effective(key)),
-            ))
-        for line in render_table(("字段", "名称", "显式值", "有效值"), rows, indent="  ", max_widths=(30, 18, 28, 34)):
-            click.echo(line)
-    else:
-        click.echo("  （无显式 local-settings；使用页面/后端注册默认值）")
-    focus = ("engine_mode", "liquidity_mode", "participation_rate", "margin_mode", "allocation_policy")
-    rows = []
-    for key in focus:
-        meta = store.field(key)
-        if meta:
-            rows.append((field_flag(key), str(meta.get("label") or key), repr(meta.get("value")), repr(store.effective(key))))
-    if rows:
-        click.echo("")
-        click.echo("关键有效字段")
-        for line in render_table(("字段", "名称", "默认值", "有效值"), rows, indent="  ", max_widths=(30, 18, 24, 34)):
-            click.echo(line)
+    for line in config_view_formatter.local_settings_lines(state.backtest_local_settings, store):
+        click.echo(line)
 
 
 def _print_group_field_help(state, option: str, *, batch: bool = False) -> None:

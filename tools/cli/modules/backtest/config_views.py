@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from tools.cli.field_help import field_flag
 from tools.cli.modules.backtest.shared.selectors import selection_label
 from tools.cli.table import render_table
 
@@ -47,6 +48,53 @@ LEDGER_CONFIG_HELP_LINES = (
     "  这些字段属于 ledger-owned 配置，会传给后端 LedgerConfig；不是普通 per-strategy 字段。",
     "  其他字段可用 --field value 或 field=value 透传，但后端会按 LedgerConfig 校验/忽略未知 metadata。",
 )
+
+
+def template_help_lines(factor_family: str | None) -> list[str]:
+    current = factor_family or "（未选择）"
+    return [
+        "backtest template 命令",
+        f"当前因子家族: {current}",
+        "  list --factor-family <因子家族>    列出指定因子家族的设置模板",
+        "  load <模板ID或名称>               加载模板到 backtest 草稿",
+        "  --from-module-template single_factor_test load <模板>  从 single_factor_test 模块显式导入模板",
+        "  save [模板名]                     保存当前 CLI 草稿为设置模板",
+        "",
+        "示例:",
+        "  factortester backtest template --factor-family SgCCS list",
+        "  factortester backtest template --from-module-template single_factor_test --factor-family SgCCS load 1",
+        "  factortester backtest template --factor-family SgCCS save 'CLI 草稿'",
+    ]
+
+
+def local_settings_lines(local_settings: dict[str, Any], store) -> list[str]:
+    lines = ["Backtest local-settings"]
+    if local_settings:
+        for key in sorted(local_settings):
+            lines.append(f"  {key}: {local_settings[key]}")
+        rows = []
+        for key in sorted(local_settings):
+            meta = store.field(key)
+            rows.append((
+                field_flag(key),
+                str(meta.get("label") or key),
+                repr(local_settings.get(key)),
+                repr(store.effective(key)),
+            ))
+        lines.extend(render_table(("字段", "名称", "显式值", "有效值"), rows, indent="  ", max_widths=(30, 18, 28, 34)))
+    else:
+        lines.append("  （无显式 local-settings；使用页面/后端注册默认值）")
+    focus = ("engine_mode", "liquidity_mode", "participation_rate", "margin_mode", "allocation_policy")
+    rows = []
+    for key in focus:
+        meta = store.field(key)
+        if meta:
+            rows.append((field_flag(key), str(meta.get("label") or key), repr(meta.get("value")), repr(store.effective(key))))
+    if rows:
+        lines.append("")
+        lines.append("关键有效字段")
+        lines.extend(render_table(("字段", "名称", "默认值", "有效值"), rows, indent="  ", max_widths=(30, 18, 24, 34)))
+    return lines
 
 
 def group_list_lines(groups: list[dict[str, Any]]) -> list[str]:
