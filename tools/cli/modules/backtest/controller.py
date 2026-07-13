@@ -27,6 +27,7 @@ from tools.cli.modules.backtest.audit_formatters import orders as orders_formatt
 from tools.cli.modules.backtest.audit_formatters import printer_helpers as audit_printer_helpers
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
 from tools.cli.modules.backtest.audit_formatters import samples as samples_formatter
+from tools.cli.modules.backtest.audit_formatters import sections as audit_sections
 from tools.cli.modules.backtest.audit_formatters import source_groups as source_group_formatter
 from tools.cli.modules.backtest.audit_formatters import step_display as step_display_formatter
 from tools.cli.modules.backtest.audit_formatters import strategy as strategy_formatter
@@ -2112,6 +2113,39 @@ def _audit_field_sort_key(qualified_name: str) -> tuple[int, int, str]:
     return _field_metadata.sort_key(qualified_name)
 
 
+def _audit_section_printer() -> audit_sections.StepAuditSectionPrinter:
+    return audit_sections.StepAuditSectionPrinter(
+        print_step_section=_print_step_section,
+        field_sort_key=_audit_field_sort_key,
+        is_market_data_sample_field=_is_market_data_sample_field,
+        print_market_data_sample_value_table=_print_market_data_sample_value_table,
+        print_market_data_sample_change_table=_print_market_data_sample_change_table,
+        print_delta_mapping_value_table=_print_delta_mapping_value_table,
+        print_delta_mapping_change_table=_print_delta_mapping_change_table,
+        scalar_value_record_group=_scalar_value_record_group,
+        scalar_value_group_key=_scalar_value_group_key,
+        scalar_change_record_group=_scalar_change_record_group,
+        scalar_change_group_key=_scalar_change_group_key,
+        drop_empty_non_ledger_entries=_drop_empty_non_ledger_entries_when_ledger_values_exist,
+        print_strategy_record_value_table=_print_strategy_record_value_table,
+        print_ledger_scalar_value_table=_print_ledger_scalar_value_table,
+        print_strategy_scalar_value_table=_print_strategy_scalar_value_table,
+        print_ledger_grouped_values=_print_ledger_grouped_values,
+        display_field_value=_display_field_value,
+        display_key=_audit_display_key,
+        print_audit_source_routes=_print_audit_source_routes,
+        print_audit_value=_print_audit_value,
+        print_lifecycle_notice_change=_print_lifecycle_notice_change,
+        print_weight_change_tables=_print_weight_change_tables,
+        print_strategy_scalar_change_table=_print_strategy_scalar_change_table,
+        print_positions_change_table=_print_positions_change_table,
+        print_cash_pool_scalar_change_table=_print_cash_pool_scalar_change_table,
+        print_ledger_scalar_change_table=_print_ledger_scalar_change_table,
+        print_ledger_grouped_changes=_print_ledger_grouped_changes,
+        print_audit_diff_value=_print_audit_diff_value,
+    )
+
+
 def _print_audit_fields(
     title: str,
     records: list[dict[str, Any]],
@@ -2119,85 +2153,13 @@ def _print_audit_fields(
     empty_message: str = "（无字段）",
     route_state: set[tuple[tuple[str, str, str], ...]] | None = None,
 ) -> None:
-    _print_step_section(title)
-    if not records:
-        click.echo(f"  {empty_message}")
-        return
-    sorted_records = audit_printer_helpers.sorted_field_records(records, sort_key=_audit_field_sort_key)
-    consumed_indexes: set[int] = set()
-    index = 0
-    while index < len(sorted_records):
-        if index in consumed_indexes:
-            index += 1
-            continue
-        record = sorted_records[index]
-        field_name = str(record.get("field") or "")
-        values = record.get("values") or []
-        if _is_market_data_sample_field(field_name):
-            combined, next_index = audit_printer_helpers.collect_contiguous(
-                sorted_records,
-                start=index,
-                predicate=lambda item: _is_market_data_sample_field(str(item.get("field") or "")),
-            )
-            if _print_market_data_sample_value_table("    ", combined):
-                index = next_index
-                continue
-        if _print_delta_mapping_value_table("    ", field_name, values):
-            index += 1
-            continue
-        current_table, combined_printer, current_routes = _scalar_value_record_group(record)
-        if current_table is not None:
-            printed, next_index = audit_printer_helpers.try_print_combined_group(
-                sorted_records,
-                start=index,
-                consumed_indexes=consumed_indexes,
-                current_key=(combined_printer, current_routes),
-                key_fn=_scalar_value_group_key,
-                printer=combined_printer,
-                prefix="    ",
-                combine=lambda current, matches: [current, *matches],
-            )
-            if printed:
-                index = next_index
-                continue
-        if current_table is not None:
-            index += 1
-            continue
-        values = _drop_empty_non_ledger_entries_when_ledger_values_exist(field_name, values)
-        if not values:
-            click.echo(f"  {_audit_combined_single_field_label(field_name)}:", color=True)
-            click.echo("    （当前无值）")
-            index += 1
-            continue
-        if _print_strategy_record_value_table("    ", field_name, values):
-            index += 1
-            continue
-        click.echo(f"  {_audit_combined_single_field_label(field_name)}:", color=True)
-        if _print_ledger_scalar_value_table("    ", field_name, values):
-            index += 1
-            continue
-        if _print_strategy_scalar_value_table("    ", field_name, values):
-            index += 1
-            continue
-        if _print_ledger_grouped_values("    ", field_name, values):
-            index += 1
-            continue
-        buckets = source_group_formatter.grouped_values(
-            field_name,
-            values,
-            display_field_value=_display_field_value,
-            display_key=_audit_display_key,
-        )
-        for bucket in buckets:
-            label = source_group_formatter.source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
-            if source_group_formatter.source_route_rows(bucket["entries"]):
-                click.echo(f"    {label}:")
-                _print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
-                _print_audit_value("      ", "value", bucket["value"])
-            else:
-                _print_audit_value("    ", label, bucket["value"])
-        index += 1
-        
+    _audit_section_printer().print_fields(
+        title,
+        records,
+        empty_message=empty_message,
+        route_state=route_state,
+    )
+
 
 def _scalar_value_record_group(record: dict[str, Any]) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
     return audit_printer_helpers.scalar_record_group([
@@ -2231,85 +2193,7 @@ def _print_audit_changes(
     *,
     route_state: set[tuple[tuple[str, str, str], ...]] | None = None,
 ) -> None:
-    _print_step_section(title)
-    if not changes:
-        click.echo("  （无变化）")
-        return
-    sorted_items = audit_printer_helpers.sorted_field_change_items(changes, sort_key=_audit_field_sort_key)
-    consumed_indexes: set[int] = set()
-    index = 0
-    while index < len(sorted_items):
-        if index in consumed_indexes:
-            index += 1
-            continue
-        field_name, field_changes = sorted_items[index]
-        if _is_market_data_sample_field(field_name):
-            combined_market, next_index = audit_printer_helpers.collect_contiguous(
-                sorted_items,
-                start=index,
-                predicate=lambda item: _is_market_data_sample_field(item[0]),
-            )
-            if _print_market_data_sample_change_table("  ", combined_market):
-                index = next_index
-                continue
-        if _print_delta_mapping_change_table("    ", field_name, field_changes):
-            index += 1
-            continue
-        current_table, combined_printer, current_routes = _scalar_change_record_group(field_name, field_changes)
-        if current_table is not None:
-            printed, next_index = audit_printer_helpers.try_print_combined_group(
-                sorted_items,
-                start=index,
-                consumed_indexes=consumed_indexes,
-                current_key=(combined_printer, current_routes),
-                key_fn=_scalar_change_group_key,
-                printer=combined_printer,
-                prefix="  ",
-                combine=lambda current, matches: [current, *matches],
-            )
-            if printed:
-                index = next_index
-                continue
-        if current_table is not None:
-            index += 1
-            continue
-        click.echo(f"  {_audit_combined_single_field_label(field_name)}:", color=True)
-        if _print_lifecycle_notice_change("    ", field_name, field_changes):
-            index += 1
-            continue
-        if _print_weight_change_tables("    ", field_name, field_changes):
-            index += 1
-            continue
-        if _print_strategy_scalar_change_table("    ", field_name, field_changes):
-            index += 1
-            continue
-        if _print_positions_change_table("    ", field_name, field_changes):
-            index += 1
-            continue
-        if _print_cash_pool_scalar_change_table("    ", field_name, field_changes):
-            index += 1
-            continue
-        if _print_ledger_scalar_change_table("    ", field_name, field_changes):
-            index += 1
-            continue
-        if _print_ledger_grouped_changes("    ", field_name, field_changes):
-            index += 1
-            continue
-        buckets = audit_printer_helpers.field_change_buckets(
-            field_name,
-            field_changes,
-            display_value=_display_field_value,
-            display_key=_audit_display_key,
-        )
-        for bucket in buckets:
-            label = source_group_formatter.source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
-            if source_group_formatter.source_route_rows(bucket["entries"]):
-                click.echo(f"    {label}:")
-                _print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
-                _print_audit_diff_value("      ", "value", bucket["before"], bucket["after"])
-            else:
-                _print_audit_diff_value("    ", label, bucket["before"], bucket["after"])
-        index += 1
+    _audit_section_printer().print_changes(title, changes, route_state=route_state)
 
 
 def _scalar_change_group_key(item: tuple[str, list[dict[str, Any]]]) -> tuple[Any, tuple[Any, ...] | None] | None:
