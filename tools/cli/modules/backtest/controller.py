@@ -27,6 +27,7 @@ from tools.cli.modules.backtest.audit_formatters import field_metadata as field_
 from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatter
 from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
 from tools.cli.modules.backtest.audit_formatters import orders as orders_formatter
+from tools.cli.modules.backtest.audit_formatters import printer_helpers as audit_printer_helpers
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
 from tools.cli.modules.backtest.audit_formatters import samples as samples_formatter
 from tools.cli.modules.backtest.audit_formatters import source_groups as source_group_formatter
@@ -2036,21 +2037,21 @@ def _print_combined_ledger_scalar_value_table(prefix: str, records: list[dict[st
 
 
 def _audit_combined_field_label(records: list[dict[str, Any]]) -> str:
-    return "；".join(_audit_combined_single_field_label(str(record.get("field") or "")) for record in records)
+    return audit_printer_helpers.combined_field_label(records)
 
 
 def _print_combined_field_label_lines(prefix: str, records: list[dict[str, Any]]) -> None:
-    for record in records:
-        click.echo(f"{prefix}{_audit_combined_single_field_label(str(record.get('field') or ''))}", color=True)
+    for line in audit_printer_helpers.combined_field_label_lines(prefix, records):
+        click.echo(line, color=True)
 
 
 def _print_combined_change_field_label_lines(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> None:
-    for field_name, _ in records:
-        click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
+    for line in audit_printer_helpers.combined_change_field_label_lines(prefix, records):
+        click.echo(line, color=True)
 
 
 def _audit_combined_single_field_label(qualified_name: str) -> str:
-    return click.style(f"{qualified_name.rsplit('.', 1)[-1]} [{qualified_name}]", bold=True)
+    return audit_printer_helpers.combined_single_field_label(qualified_name)
 
 
 _MARKET_DATA_SAMPLE_FIELDS = {
@@ -2280,7 +2281,7 @@ def _print_combined_cash_pool_scalar_change_table(prefix: str, records: list[tup
 
 
 def _audit_combined_change_field_label(records: list[tuple[str, list[dict[str, Any]]]]) -> str:
-    return "；".join(_audit_combined_single_field_label(field_name) for field_name, _ in records)
+    return audit_printer_helpers.combined_change_field_label(records)
 
 
 def _print_ledger_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
@@ -2901,26 +2902,12 @@ def _drop_empty_non_ledger_entries_when_ledger_values_exist(
     field_name: str,
     values: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Prefer ledger/cash-pool total tables over repeated empty strategy defaults.
-
-    Some snapshots include a field's ledger value plus redundant strategy/config
-    defaults such as ``null``.  Printing both creates the old noisy
-    ``策略配置 ... = null`` block before the useful ledger table.  Keep non-ledger
-    entries only when they carry non-empty information.
-    """
-    if not any(str(entry.get("scope") or "") in {"ledger", "ledger_config"} for entry in values):
-        return values
-    compacted: list[dict[str, Any]] = []
-    for entry in values:
-        scope = str(entry.get("scope") or "")
-        if scope in {"ledger", "ledger_config"}:
-            compacted.append(entry)
-            continue
-        display_value = _display_field_value(field_name, entry.get("value"))
-        if _audit_value_is_empty(display_value):
-            continue
-        compacted.append(entry)
-    return compacted or values
+    return audit_printer_helpers.drop_empty_non_ledger_entries_when_ledger_values_exist(
+        field_name,
+        values,
+        display_value=_display_field_value,
+        value_is_empty=_audit_value_is_empty,
+    )
 
 
 def _audit_value_is_empty(value: Any) -> bool:
