@@ -33,6 +33,7 @@ from tools.cli.modules.backtest.audit_formatters import strategy as strategy_for
 from tools.cli.modules.backtest.audit_formatters import table_render as table_render_formatter
 from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_intent_formatter
 from tools.cli.modules.backtest.audit_formatters import value_text as value_text_formatter
+from tools.cli.modules.backtest import run_stream
 from tools.cli.modules.backtest import step_runtime
 from tools.testers.backtest.engines.native.flow import phase_label
 # Module-level mapping from group ID to short alias, populated at run time
@@ -2466,19 +2467,14 @@ def _run_backtest(
     _short_alias_map.clear()
     _short_alias_map.update(step_display_formatter.build_short_alias_map(state.backtest_groups, state.backtest_ls_configs))
     for event in client.run_group_test_stream(run_payload):
-        event_name = str(event.get("event") or "message")
-        data = event.get("data")
-        if event_name == "error":
-            raise click.ClickException(f"分组测试失败: {run_config_helpers.stream_error_message(data)}")
-        if event_name == "step" and isinstance(data, dict):
-            _handle_step_event(
-                data,
-                client,
-                run_token,
-                step_navigator,
-            )
-        elif run_config_helpers.is_renderer_event(event_name):
-            renderer.handle(event_name, data)
+        run_stream.handle_stream_event(
+            event,
+            renderer=renderer,
+            client=client,
+            run_token=run_token,
+            step_navigator=step_navigator,
+            handle_step_event=_handle_step_event,
+        )
     renderer.handle("complete", {})
     if renderer.last_result:
         state.backtest_last_result = renderer.last_result
