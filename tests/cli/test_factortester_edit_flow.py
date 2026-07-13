@@ -452,6 +452,30 @@ def test_step_audit_renders_event_payload_lists_as_table() -> None:
     assert '"ledger_id"' not in text
 
 
+def test_step_audit_renders_trading_day_resolver_summary() -> None:
+    text = _audit_text({
+        "type": "TimestampTradingDayResolver",
+        "purpose": "timestamp -> trading_day",
+        "mapping_count": 3,
+        "timestamp_index": {"start": "2026-01-05 09:01:00", "end": "2026-01-06 09:01:00"},
+        "trading_days": {"count": 2, "start": "2026-01-05", "end": "2026-01-06"},
+        "sample": {
+            "head": {
+                "columns": ["trading_day"],
+                "index": ["2026-01-05 09:01:00"],
+                "rows": [["2026-01-05"]],
+            }
+        },
+    })
+
+    assert "TimestampTradingDayResolver: timestamp -> trading_day" in text
+    assert "mapping_count = 3" in text
+    assert "trading_days = 2 days; 2026-01-05 → 2026-01-06" in text
+    assert "sample.head:" in text
+    assert "trading_day" in text
+    assert "repr" not in text
+
+
 def test_step_audit_renders_target_weight_intent_as_table() -> None:
     text = _audit_text({
         "type": "TargetWeightIntent",

@@ -2111,6 +2111,8 @@ def _audit_special_text(value: Any) -> str | None:
         return None
     if value.get("type") in {"TargetWeightIntent", "OrderDeltaIntent"}:
         return _audit_trade_intent_text(value)
+    if value.get("type") == "TimestampTradingDayResolver":
+        return _audit_trading_day_resolver_text(value)
     if value.get("type") == "ContractMetadataTable":
         return _audit_contract_metadata_text(value)
     if value.get("type") == "PriceTablesSummary":
@@ -2180,6 +2182,31 @@ def _audit_event_draft_table_lines(
         rows,
         indent=indent,
     )
+
+
+def _audit_trading_day_resolver_text(value: dict[str, Any]) -> str:
+    lines = ["TimestampTradingDayResolver: timestamp -> trading_day"]
+    mapping_count = value.get("mapping_count")
+    if mapping_count is not None:
+        lines.append(f"mapping_count = {mapping_count}")
+    timestamp_index = value.get("timestamp_index")
+    if isinstance(timestamp_index, dict) and {"start", "end"} <= set(timestamp_index):
+        lines.append(f"timestamp_index = {timestamp_index.get('start')} → {timestamp_index.get('end')}")
+    trading_days = value.get("trading_days")
+    if isinstance(trading_days, dict):
+        count = trading_days.get("count")
+        start = trading_days.get("start")
+        end = trading_days.get("end")
+        if count is not None:
+            lines.append(f"trading_days = {count} days; {start} → {end}")
+    sample = value.get("sample")
+    if isinstance(sample, dict):
+        for name in ("head", "tail"):
+            part = sample.get(name)
+            if isinstance(part, dict):
+                lines.append(f"sample.{name}:")
+                lines.extend(_audit_dataframe_table_lines(part, indent="  "))
+    return "\n".join(lines)
 
 
 def _audit_event_payload_details(payload: Any) -> Any:

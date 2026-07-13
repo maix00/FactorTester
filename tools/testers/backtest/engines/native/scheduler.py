@@ -227,6 +227,8 @@ def _audit_value(
         return str(value)
     if isinstance(value, EventDraft):
         return _audit_event_draft_value(value, key_labels=key_labels)
+    if type(value).__name__ == "TimestampTradingDayResolver":
+        return _audit_trading_day_resolver_value(value, key_labels=key_labels)
     if isinstance(value, pd.Series):
         if len(value) > _AUDIT_MAX_FULL_SERIES_LENGTH:
             return {
@@ -362,6 +364,30 @@ def _audit_trade_intent_value(value: Any, *, key_labels: Mapping[str, str] | Non
             "deltas": _audit_value(getattr(value, "deltas", {}), key_labels=key_labels, _seen=seen),
         }
     return {"type": type(value).__name__, "repr": str(value)}
+
+
+def _audit_trading_day_resolver_value(value: Any, *, key_labels: Mapping[str, str] | None = None) -> dict[str, Any]:
+    series = getattr(value, "_series", None)
+    if not isinstance(series, pd.Series):
+        return {"type": type(value).__name__, "repr": str(value)}
+    clean = series.dropna().sort_index()
+    trading_days = pd.DatetimeIndex(pd.to_datetime(clean.to_numpy(), errors="coerce")).dropna().unique()
+    trading_days = pd.DatetimeIndex(trading_days).sort_values()
+    sample = pd.DataFrame({
+        "trading_day": [str(pd.Timestamp(item).normalize().date()) for item in clean.to_list()],
+    }, index=clean.index)
+    return {
+        "type": "TimestampTradingDayResolver",
+        "purpose": "timestamp -> trading_day",
+        "mapping_count": int(len(clean)),
+        "timestamp_index": _audit_index_bounds(clean.index, key_labels=key_labels),
+        "trading_days": {
+            "count": int(len(trading_days)),
+            "start": str(trading_days[0].date()) if len(trading_days) else None,
+            "end": str(trading_days[-1].date()) if len(trading_days) else None,
+        },
+        "sample": _audit_frame_sample(sample, key_labels=key_labels, rows=3),
+    }
 
 
 import pandas as pd

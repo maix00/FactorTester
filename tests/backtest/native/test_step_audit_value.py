@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from tools.data.field_history import TimestampTradingDayResolver
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.scheduler import (
     _audit_contract_metadata_value,
@@ -57,6 +58,23 @@ def test_step_audit_serializes_target_weight_intent_as_typed_payload() -> None:
         "reason": "unit_test",
         "weights": {"RB.SHF": 1.0},
     }
+
+
+def test_step_audit_serializes_trading_day_resolver_as_summary() -> None:
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-01-05 09:01:00"): pd.Timestamp("2026-01-05"),
+        pd.Timestamp("2026-01-05 09:02:00"): pd.Timestamp("2026-01-05"),
+        pd.Timestamp("2026-01-06 09:01:00"): pd.Timestamp("2026-01-06"),
+    })
+
+    serialized = _audit_value(resolver)
+
+    assert serialized["type"] == "TimestampTradingDayResolver"
+    assert serialized["purpose"] == "timestamp -> trading_day"
+    assert serialized["mapping_count"] == 3
+    assert serialized["trading_days"] == {"count": 2, "start": "2026-01-05", "end": "2026-01-06"}
+    assert "sample" in serialized
+    assert "repr" not in serialized
 
 
 def test_step_audit_keeps_small_dataframes_complete() -> None:
