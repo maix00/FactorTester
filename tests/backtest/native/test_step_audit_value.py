@@ -195,7 +195,7 @@ def test_step_audit_contract_metadata_keeps_every_contract_as_compact_rows() -> 
     }
 
 
-def test_step_audit_price_tables_summarizes_basis_tables_without_values() -> None:
+def test_step_audit_price_tables_summarizes_basis_tables_with_bounded_sample() -> None:
     index = pd.date_range("2026-01-01 09:00:00", periods=25, freq="min")
     close = pd.DataFrame({"RB.SHF": range(25), "AG.SHF": range(100, 125)}, index=index)
     open_ = close + 0.5
@@ -204,21 +204,15 @@ def test_step_audit_price_tables_summarizes_basis_tables_without_values() -> Non
 
     assert serialized["type"] == "PriceTablesSummary"
     assert serialized["columns"] == ["basis", "shape", "index", "columns"]
-    assert serialized["rows"] == [
-        {
-            "basis": "close",
-            "shape": [25, 2],
-            "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
-            "columns": ["RB.SHF", "AG.SHF"],
-        },
-        {
-            "basis": "open",
-            "shape": [25, 2],
-            "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
-            "columns": ["RB.SHF", "AG.SHF"],
-        },
-    ]
-    assert "sample" not in serialized["rows"][0]
+    assert len(serialized["rows"]) == 2
+    assert serialized["rows"][0]["basis"] == "close"
+    assert serialized["rows"][0]["shape"] == [25, 2]
+    assert serialized["rows"][0]["index"] == {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"}
+    assert serialized["rows"][0]["columns"] == ["RB.SHF", "AG.SHF"]
+    assert serialized["rows"][0]["sample"]["head"]["rows"] == [[0, 100], [1, 101]]
+    assert serialized["rows"][0]["sample"]["tail"]["rows"] == [[23, 123], [24, 124]]
+    assert serialized["rows"][1]["basis"] == "open"
+    assert serialized["rows"][1]["sample"]["head"]["rows"] == [[0.5, 100.5], [1.5, 101.5]]
 
 
 def test_step_ledger_topology_omits_unrelated_full_state_but_keeps_identity_and_cash() -> None:

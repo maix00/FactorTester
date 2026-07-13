@@ -174,12 +174,13 @@ def _audit_price_tables_value(value: Any, *, key_labels: Mapping[str, str] | Non
         table = value[basis]
         if isinstance(table, pd.DataFrame):
             row_count, column_count = table.shape
-            columns, _sample = _audit_frame_column_payload(table, key_labels=key_labels)
+            columns, sample_frame = _audit_frame_column_payload(table, key_labels=key_labels)
             rows.append({
                 "basis": str(basis),
                 "shape": [int(row_count), int(column_count)],
                 "index": _audit_index_bounds(table.index, key_labels=key_labels),
                 "columns": columns,
+                "sample": _audit_frame_sample(sample_frame, key_labels=key_labels, rows=2),
             })
         else:
             rows.append({

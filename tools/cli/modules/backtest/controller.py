@@ -86,7 +86,7 @@ from tools.cli.modules.backtest.shared.selectors import (
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.run_output import _chart_body_width, _multi_series_chart, _result_series
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
-from tools.cli.table import display_width, render_table
+from tools.cli.table import display_width, pad_display, render_table
 
 
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
@@ -2094,6 +2094,9 @@ def _audit_text(value: Any) -> str:
     pandas_text = _audit_pandas_text(value)
     if pandas_text is not None:
         return pandas_text
+    mapping_text = _audit_mapping_table_text(value)
+    if mapping_text is not None:
+        return mapping_text
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
 
 
@@ -2105,6 +2108,44 @@ def _audit_special_text(value: Any) -> str | None:
     if value.get("type") == "PriceTablesSummary":
         return _audit_price_tables_text(value)
     return None
+
+
+def _audit_mapping_table_text(value: Any) -> str | None:
+    if not isinstance(value, dict) or not value:
+        return None
+    if any(str(key) == "type" for key in value):
+        return None
+    if all(not isinstance(item, (dict, list, tuple)) for item in value.values()):
+        rows = [(str(key), _audit_scalar_cell(item)) for key, item in value.items()]
+        return "\n".join(_audit_table_lines(("key", "value"), rows))
+    if all(isinstance(item, dict) for item in value.values()):
+        child_keys: list[str] = []
+        for item in value.values():
+            if not isinstance(item, dict):
+                return None
+            for child_key, child_value in item.items():
+                if isinstance(child_value, (dict, list, tuple)):
+                    return None
+                child_key_text = str(child_key)
+                if child_key_text not in child_keys:
+                    child_keys.append(child_key_text)
+        if not child_keys:
+            return None
+        rows = [
+            tuple([str(key), *[_audit_scalar_cell(item.get(child_key)) for child_key in child_keys]])
+            for key, item in value.items()
+            if isinstance(item, dict)
+        ]
+        return "\n".join(_audit_table_lines(("key", *child_keys), rows))
+    return None
+
+
+def _audit_scalar_cell(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, float):
+        return f"{value:.12g}"
+    return str(value)
 
 
 def _audit_contract_metadata_text(value: dict[str, Any]) -> str:
@@ -2123,11 +2164,60 @@ def _audit_contract_metadata_text(value: dict[str, Any]) -> str:
         ))
     if not table_rows:
         return "contract_metadata: (empty)"
-    return "\n".join(render_table(
+    return "\n".join(_audit_table_lines(
         ("原产品", "新合约", "起始时间", "终止时间"),
         table_rows,
-        max_widths=(18, 24, 16, 16),
     ))
+
+
+def _audit_table_lines(
+    headers: tuple[str, ...] | list[str],
+    rows: list[tuple[Any, ...]] | list[list[Any]],
+    *,
+    indent: str = "",
+) -> list[str]:
+    """Render audit tables without ellipsis and split complex cells into details."""
+    if not rows:
+        return []
+    header_list = [str(header) for header in headers]
+    scalar_rows: list[list[str]] = []
+    details: list[tuple[int, str, Any]] = []
+    detail_index = 1
+    for row in rows:
+        scalar_row: list[str] = []
+        for column_index, header in enumerate(header_list):
+            cell = row[column_index] if column_index < len(row) else ""
+            if _audit_table_cell_is_complex(cell):
+                scalar_row.append(f"[明细 {detail_index}]")
+                details.append((detail_index, header, cell))
+                detail_index += 1
+            else:
+                scalar_row.append(str(cell))
+        scalar_rows.append(scalar_row)
+    widths = [
+        max(display_width(header_list[column]), *(display_width(row[column]) for row in scalar_rows))
+        for column in range(len(header_list))
+    ]
+    lines = [
+        indent + "  ".join(pad_display(header, widths[index]) for index, header in enumerate(header_list)).rstrip()
+    ]
+    for row in scalar_rows:
+        lines.append(indent + "  ".join(pad_display(cell, widths[index]) for index, cell in enumerate(row)).rstrip())
+    for index, header, value in details:
+        lines.append(f"{indent}明细 {index} ({header}):")
+        for line in _audit_text(value).splitlines() or [""]:
+            lines.append(f"{indent}  {line}")
+    return lines
+
+
+def _audit_table_cell_is_complex(value: Any) -> bool:
+    return isinstance(value, (dict, list, tuple)) and not _audit_table_cell_is_scalar_sequence(value)
+
+
+def _audit_table_cell_is_scalar_sequence(value: Any) -> bool:
+    if not isinstance(value, (list, tuple)):
+        return False
+    return len(value) <= 3 and all(not isinstance(item, (dict, list, tuple)) for item in value)
 
 
 def _audit_price_tables_text(value: dict[str, Any]) -> str:
@@ -2154,6 +2244,13 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
         lines.append(f"  shape   = {shape_text}")
         lines.append(f"  index   = {index_text}")
         lines.append(f"  columns = {_audit_columns_summary(row.get('columns'))}")
+        sample = row.get("sample")
+        if isinstance(sample, dict):
+            for name in ("head", "tail"):
+                part = sample.get(name)
+                if isinstance(part, dict):
+                    lines.append(f"  sample.{name}:")
+                    lines.extend(_audit_dataframe_table_lines(part, indent="    "))
     if not lines:
         return "price_tables: (empty)"
     return "\n".join(lines)
@@ -2240,7 +2337,7 @@ def _audit_dataframe_table_lines(value: dict[str, Any], *, indent: str = "") -> 
         table_rows.append((str(index), *[str(item) for item in row_values]))
     if not table_rows:
         return [f"{indent}(empty)"]
-    return render_table(("index", *columns), table_rows, indent=indent)
+    return _audit_table_lines(("index", *columns), table_rows, indent=indent)
 
 
 def _audit_series_text(value: dict[str, Any]) -> str:
@@ -2278,7 +2375,7 @@ def _audit_series_table_lines(value: dict[str, Any], *, indent: str = "") -> lis
     table_rows = [(str(index), str(item)) for index, item in zip(indexes, values, strict=False)]
     if not table_rows:
         return [f"{indent}(empty)"]
-    return render_table(("index", "value"), table_rows, indent=indent)
+    return _audit_table_lines(("index", "value"), table_rows, indent=indent)
 
 
 def _parse_audit_literal(value: str) -> Any | None:
@@ -2444,9 +2541,21 @@ def _audit_repeated_owner_groups(value: Any) -> list[tuple[str, Any]]:
     if len(groups) >= len(items):
         return []
     return [
-        (f"策略 {', '.join(sorted(bucket['keys']))}", bucket["value"])
+        (f"{_audit_group_key_label(bucket['keys'])} {', '.join(sorted(bucket['keys']))}", bucket["value"])
         for bucket in groups.values()
     ]
+
+
+def _audit_group_key_label(keys: list[str]) -> str:
+    price_bases = {
+        "open", "high", "low", "close", "vwap", "settlement", "pre_settlement",
+        "upper_limit", "lower_limit", "volume",
+    }
+    if keys and all(key in price_bases for key in keys):
+        return "价格字段"
+    if keys and all("." in key or "|" in key for key in keys):
+        return "产品"
+    return "策略"
 
 
 def _audit_join(values: list[Any]) -> str:
@@ -2543,11 +2652,10 @@ def _print_audit_source_routes(
         return True
     if route_state is not None:
         route_state.add(route_key)
-    for line in render_table(
+    for line in _audit_table_lines(
         ("ledger", "cash pool", "strategies"),
         rows,
         indent=prefix,
-        max_widths=(34, 34, 52),
     ):
         click.echo(line)
     return True
@@ -2692,12 +2800,33 @@ def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
             ledger.get("ledger") or "?",
             ledger.get("cash_pool") or "?",
             ", ".join(ledger.get("strategies") or []) or "无",
-            _audit_text(ledger.get("cash")).replace("\n", " "),
+            _audit_cash_summary(ledger.get("cash")),
         )
         for ledger in ledgers
     ]
-    for line in render_table(("ledger", "cash pool", "strategies", "cash"), rows, indent="  ", max_widths=(32, 32, 36, 24)):
+    for line in _audit_table_lines(("ledger", "cash pool", "strategies", "cash"), rows, indent="  "):
         click.echo(line)
+
+
+def _audit_cash_summary(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, dict):
+        amount = value.get("amount")
+        amount_value: Any = amount
+        if isinstance(amount, dict):
+            amount_value = amount.get("repr", amount.get("value"))
+        currency = str(value.get("currency") or "")
+        scale = value.get("scale")
+        use_minor = bool(value.get("use_minor_units"))
+        try:
+            if use_minor and scale:
+                major = float(amount_value) / float(scale)
+                return f"{major:,.2f} {currency}".strip()
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+        return " ".join(str(part) for part in (amount_value, currency) if part not in (None, ""))
+    return _audit_text(value).replace("\n", " ")
 
 
 def _unchanged_output_records(
@@ -2719,11 +2848,12 @@ def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
         )
         for strategy in strategies
     ]
-    for line in render_table(("strategy", "ledgers"), rows, indent="  ", max_widths=(24, 52)):
+    for line in _audit_table_lines(("strategy", "ledgers"), rows, indent="  "):
         click.echo(line)
 
 
 def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
+    payloads = [payload for payload in payloads if not _audit_payloads_empty(payload.get("payloads"))]
     if not payloads:
         return
     _print_step_section("本批事件草稿载荷（执行前，非完整事件队列）")
@@ -2733,6 +2863,10 @@ def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
         else:
             label = f"账本 {payload.get('ledger') or '?'} | 现金池 {payload.get('cash_pool') or '?'}"
         _print_audit_value("  ", label, payload.get("payloads"))
+
+
+def _audit_payloads_empty(value: Any) -> bool:
+    return value in (None, [], [None], [None, None])
 
 
 def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
@@ -2846,8 +2980,10 @@ def _handle_step_event(
     flow_name = str(data.get("flow_name") or "")
     flow_id = str(data.get("flow_id") or "")
     phase_text = f"{flow_phase.upper()} ({phase_label(flow_phase)})"
+    timestamp_text = str(data.get("timestamp") or "")
+    timestamp_suffix = f" @ {timestamp_text}" if timestamp_text else ""
     click.echo("")
-    click.secho(f"flow: {phase_text} · {flow_id} ({flow_name})", fg="red", color=True)
+    click.secho(f"flow: {phase_text} · {flow_id} ({flow_name}){timestamp_suffix}", fg="red", color=True)
     description = str(data.get("description") or "")
     if description:
         click.echo(f"说明: {description}")

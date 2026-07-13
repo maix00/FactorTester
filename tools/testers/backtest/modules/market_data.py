@@ -190,6 +190,9 @@ class MarketDataModule(ExecutableModule):
     historical_field_provider: ClassVar[FieldRef[Any]] = FieldRef("historical_field_provider")
     trading_day_resolver: ClassVar[FieldRef[Any]] = FieldRef("trading_day_resolver")
     historical_field_policy: ClassVar[FieldRef[str]] = FieldRef("historical_field_policy")
+    field_state_baseline: ClassVar[FieldRef[Any]] = FieldRef("field_state_baseline")
+    field_change_events: ClassVar[FieldRef[Any]] = FieldRef("field_change_events")
+    causal_valuation_table: ClassVar[FieldRef[Any]] = FieldRef("causal_valuation_table")
     current_historical_fields: ClassVar[FieldRef[dict[Any, dict[str, object]]]] = FieldRef("current_historical_fields")
     current_prices: ClassVar[FieldRef[Any]] = FieldRef("current_prices")  # dict[Product, float], looked up per-timestamp
     current_market_snapshot: ClassVar[FieldRef[Any]] = FieldRef("current_market_snapshot")
@@ -230,6 +233,9 @@ class MarketDataModule(ExecutableModule):
         "volume": FieldDefinition(public=False),
         "historical_field_provider": FieldDefinition(public=False),
         "trading_day_resolver": FieldDefinition(public=False),
+        "field_state_baseline": FieldDefinition(public=False),
+        "field_change_events": FieldDefinition(public=False),
+        "causal_valuation_table": FieldDefinition(public=False),
         "historical_field_policy": FieldDefinition(
             public=True,
             label="历史字段",
@@ -342,7 +348,7 @@ class MarketDataModule(ExecutableModule):
     initialize_field_state: ClassVar[Flow] = Flow(
         "initialize_field_state",
         inputs=(raw_prices, trading_day_resolver),
-        outputs=(historical_field_policy,),
+        outputs=(historical_field_policy, field_state_baseline, field_change_events),
         phase=Phase.PRE_REPLAY, order=44, after=(build_trading_day_resolver,),
         description="初始化字段状态缓存",
         compute=lambda state, ctx: _initialize_field_state(state, ctx),
@@ -356,7 +362,7 @@ class MarketDataModule(ExecutableModule):
         compute=lambda state, ctx: _handle_field_changes(state, ctx),
     )
     causal_valuation: ClassVar[Flow] = Flow(
-        "causal_valuation", inputs=(raw_prices,), outputs=(),
+        "causal_valuation", inputs=(raw_prices,), outputs=(causal_valuation_table,),
         phase=Phase.PRE_REPLAY, order=45, after=(load_raw_market_data,),
         description="生成因果估值序列",
         compute=lambda state, ctx: _causal_valuation(state, ctx),
@@ -1222,8 +1228,14 @@ def _initialize_field_state(state, ctx) -> None:
         inst_name = str(getattr(instrument, "name", instrument) or "")
         pname = product_to_parent_key.get(inst_name, inst_name)
         store.field_state_store[inst_name] = dict(parent_baselines.get(pname, {}))
+    ctx.set(MarketDataModule.field_state_baseline, {
+        inst_name: dict(values)
+        for inst_name, values in store.field_state_store.items()
+        if inst_name in product_to_parent_key
+    })
     # Register FIELD_CHANGE events from FieldHistory provider's record frame
     # This replaces the old per-timestamp bulk query with incremental events
+    ctx.set(MarketDataModule.field_change_events, [])
     try:
         provider_frame = provider.frame
         if provider_frame is not None and not provider_frame.empty:
@@ -1266,6 +1278,7 @@ def _initialize_field_state(state, ctx) -> None:
                 mask &= (pf_ts >= run_start) & (pf_ts <= run_end)
                 
                 change_records = pf[mask]
+                field_change_drafts: list[dict[str, object]] = []
                 if not change_records.empty:
                     # Group by timestamp then by instrument
                     for (change_ts,), ts_group in change_records.groupby('effective_timestamp'):
@@ -1284,6 +1297,10 @@ def _initialize_field_state(state, ctx) -> None:
                                         changes[product_key] = {}
                                     changes[product_key][field] = value
                         if changes:
+                            field_change_drafts.append({
+                                "timestamp": str(_pd.Timestamp(change_ts)),
+                                "products": changes,
+                            })
                             for strategy in getattr(state, "strategy_configs", {}):
                                 ctx._event_queue.push_event(EventDraft(
                                     kind=EventKind.FIELD_CHANGE,
@@ -1291,6 +1308,7 @@ def _initialize_field_state(state, ctx) -> None:
                                     strategy=strategy,
                                     payload={"changes": changes},
                                 ))
+                ctx.set(MarketDataModule.field_change_events, field_change_drafts)
     except Exception:
         import traceback
         ctx.set(MarketDataModule.historical_field_policy, "fallback")
@@ -1626,7 +1644,9 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
 def _causal_valuation(state, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
     store = market_data_store_for(state)
-    store.publish_causal_valuation(raw_prices.ffill())
+    causal_prices = raw_prices.ffill()
+    store.publish_causal_valuation(causal_prices)
+    ctx.set(MarketDataModule.causal_valuation_table, causal_prices)
 
 
 def _set_current_market_snapshot(state, ctx) -> None:

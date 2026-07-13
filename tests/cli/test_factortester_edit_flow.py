@@ -26,6 +26,7 @@ from tools.cli.modules.backtest.controller import (
     _print_audit_changes,
     _print_contract_audit,
     _print_event_payload_changes,
+    _print_event_payloads,
     _print_audit_fields,
     _print_audit_value,
     _print_ledger_snapshot,
@@ -300,7 +301,38 @@ def test_step_audit_collapses_repeated_strategy_mapping_values(capsys) -> None:
     out = capsys.readouterr().out
     assert "策略 A1, A2, A3 =" in out
     assert '"A1, A2, A3": {' not in out
-    assert out.count('"warmup_window": "0 days 00:02:00"') == 1
+    assert out.count("warmup_window") == 1
+    assert "0 days 00:02:00" in out
+
+
+def test_step_audit_repeated_product_mapping_values_are_not_labeled_as_strategy(capsys) -> None:
+    _print_audit_changes("声明输出的变化", [{
+        "field": "MarketDataModule.field_state_baseline",
+        "scope": "context",
+        "before": None,
+        "after": {
+            "RB.SHF": {"VolumeMultiple": 10.0, "LongMarginRatioByMoney": 0.07},
+            "SHFE|F|RB|2610": {"VolumeMultiple": 10.0, "LongMarginRatioByMoney": 0.07},
+        },
+    }])
+
+    out = capsys.readouterr().out
+    assert "产品 RB.SHF, SHFE|F|RB|2610" in out
+    assert "策略 RB.SHF" not in out
+    assert "VolumeMultiple" in out
+
+
+def test_step_audit_renders_dict_of_dict_scalars_as_table() -> None:
+    text = _audit_text({
+        "close": {"RB.SHF": 3187.0, "SHFE|F|RB|2610": 3187.0},
+        "volume": {"RB.SHF": 9496.0, "SHFE|F|RB|2610": 9496.0},
+    })
+
+    assert "key" in text
+    assert "RB.SHF" in text
+    assert "close" in text
+    assert '"close"' not in text
+    assert "{" not in text
 
 
 def test_step_audit_unowned_strategy_context_change_is_shared(capsys) -> None:
@@ -404,6 +436,13 @@ def test_step_audit_formats_price_tables_as_basis_summary() -> None:
                 "shape": [25, 2],
                 "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
                 "columns": ["RB.SHF", "AG.SHF"],
+                "sample": {
+                    "head": {
+                        "columns": ["RB.SHF", "AG.SHF"],
+                        "index": ["2026-01-01 09:00:00"],
+                        "rows": [[1.0, 2.0]],
+                    }
+                },
             },
             {
                 "basis": "open",
@@ -419,6 +458,8 @@ def test_step_audit_formats_price_tables_as_basis_summary() -> None:
     assert "  shape   = 25 x 2" in text
     assert "  index   = 2026-01-01 09:00:00 → 2026-01-01 09:24:00" in text
     assert '  columns = ["RB.SHF", "AG.SHF"]' in text
+    assert "  sample.head:" in text
+    assert "2026-01-01 09:00:00" in text
     assert "价格字段: open" in text
     assert "  shape   = 25 x 5000" in text
     assert "  columns = 5000 columns; sample shows 4 columns" in text
@@ -511,7 +552,17 @@ def test_step_active_context_renders_compact_one_line_rows(capsys) -> None:
         {"strategy": "A2", "ledgers": ["private:A2"]},
     ])
     _print_ledger_snapshot([
-        {"ledger": "private:A1", "cash_pool": "private:A1", "strategies": ["A1"], "cash": 100},
+        {
+            "ledger": "private:A1",
+            "cash_pool": "private:A1",
+            "strategies": ["A1"],
+            "cash": {
+                "amount": {"repr": "10000000000", "type": "int64"},
+                "currency": "CNY",
+                "scale": 100,
+                "use_minor_units": True,
+            },
+        },
         {"ledger": "private:A2", "cash_pool": "private:A2", "strategies": ["A2"], "cash": 200},
     ])
 
@@ -519,8 +570,19 @@ def test_step_active_context_renders_compact_one_line_rows(capsys) -> None:
     assert "strategy" in out
     assert "private:A1" in out
     assert "cash pool" in out
+    assert "100,000,000.00 CNY" in out
+    assert '"amount"' not in out
     assert "绑定策略" not in out
     assert "现金池余额" not in out
+
+
+def test_step_event_payloads_skip_empty_null_payloads(capsys) -> None:
+    _print_event_payloads([
+        {"scope": "strategy", "strategy": "A1", "payloads": [None]},
+    ])
+
+    out = capsys.readouterr().out
+    assert "本批事件草稿载荷" not in out
 
 
 def test_step_navigation_supports_until_and_end_without_skipping_computation() -> None:
