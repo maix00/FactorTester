@@ -1367,28 +1367,61 @@ def test_step_audit_collapses_repeated_strategy_mapping_values(capsys) -> None:
         "before": None,
         "after": {
             "A1": {
-                "start_dt": {"ts": "2026-01-01 09:00:00+08:00"},
-                "end_dt": {"ts": "2026-01-31 15:00:00+08:00"},
+                "start_dt": {"precision": "exact", "ts": "2026-01-01 09:00:00+08:00", "tz": "Asia/Shanghai"},
+                "end_dt": {"precision": "exact", "ts": "2026-01-31 15:00:00+08:00", "tz": "Asia/Shanghai"},
                 "warmup_window": "0 days 00:02:00",
             },
             "A2": {
-                "start_dt": {"ts": "2026-01-01 09:00:00+08:00"},
-                "end_dt": {"ts": "2026-01-31 15:00:00+08:00"},
+                "start_dt": {"precision": "exact", "ts": "2026-01-01 09:00:00+08:00", "tz": "Asia/Shanghai"},
+                "end_dt": {"precision": "exact", "ts": "2026-01-31 15:00:00+08:00", "tz": "Asia/Shanghai"},
                 "warmup_window": "0 days 00:02:00",
             },
             "A3": {
-                "start_dt": {"ts": "2026-01-01 09:00:00+08:00"},
-                "end_dt": {"ts": "2026-01-31 15:00:00+08:00"},
+                "start_dt": {"precision": "exact", "ts": "2026-01-01 09:00:00+08:00", "tz": "Asia/Shanghai"},
+                "end_dt": {"precision": "exact", "ts": "2026-01-31 15:00:00+08:00", "tz": "Asia/Shanghai"},
                 "warmup_window": "0 days 00:02:00",
             },
         },
     }])
 
     out = capsys.readouterr().out
-    assert "start = 2026-01-01 09:00:00+08:00" in out
-    assert "end   = 2026-01-31 15:00:00+08:00" in out
+    assert "DataTime.ts" in out
+    assert "DataTime.tz" in out
+    assert "DataTime.precision" in out
+    assert "A1, A2, A3" in out
+    assert "start_dt" in out
+    assert "2026-01-01 09:00:00+08:00" in out
+    assert "Asia/Shanghai" in out
+    assert "exact" in out
+    assert "end_dt" in out
+    assert "2026-01-31 15:00:00+08:00" in out
+    assert "warmup_window" in out
+    assert "0 days 00:02:00" in out
     assert '"A1, A2, A3": {' not in out
-    assert "warmup_window" not in out
+
+
+def test_step_audit_run_window_envelope_renders_datatime_values(capsys) -> None:
+    _print_audit_changes("声明输出的变化", [{
+        "field": "RunWindowModule.run_window_envelope",
+        "scope": "context",
+        "before": None,
+        "after": {
+            "start_dt": {"precision": "exact", "ts": "2026-01-01 09:00:00+08:00", "tz": "Asia/Shanghai"},
+            "end_dt": {"precision": "exact", "ts": "2026-01-31 15:00:00+08:00", "tz": "Asia/Shanghai"},
+        },
+    }])
+
+    out = capsys.readouterr().out
+    assert "DataTime.ts" in out
+    assert "DataTime.tz" in out
+    assert "DataTime.precision" in out
+    assert "envelope" in out
+    assert "start_dt" in out
+    assert "2026-01-01 09:00:00+08:00" in out
+    assert "Asia/Shanghai" in out
+    assert "exact" in out
+    assert "end_dt" in out
+    assert "2026-01-31 15:00:00+08:00" in out
 
 
 def test_step_audit_field_state_baseline_renders_as_product_field_table(capsys) -> None:

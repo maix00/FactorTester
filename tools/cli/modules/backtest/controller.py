@@ -28,6 +28,7 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.field_help import field_flag, field_type_label, render_settings_help
 from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
+from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
 from tools.data.types.data_money import _format_data_money
@@ -4769,14 +4770,20 @@ def _audit_columns_summary(columns: Any) -> str:
 
 
 def _audit_run_window_text(value: dict[str, Any]) -> str:
-    start = value.get("start")
-    end = value.get("end")
-    lines: list[str] = []
-    if start not in (None, ""):
-        lines.append(f"start = {start}")
-    if end not in (None, ""):
-        lines.append(f"end   = {end}")
-    return "\n".join(lines) if lines else "（无窗口）"
+    return run_window_formatter.run_window_text(
+        value,
+        table_lines=lambda headers, rows: _audit_table_lines(headers, rows, allow_transpose=False),
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+    )
+
+
+def _audit_datatime_text(value: Any) -> str:
+    return run_window_formatter.datatime_text(value, normalize=_audit_normalized_value)
+
+
+def _audit_datatime_parts(value: Any) -> dict[str, str] | None:
+    return run_window_formatter.datatime_parts(value, normalize=_audit_normalized_value)
 
 
 def _audit_timestamp_text(value: Any) -> str | None:
@@ -4790,34 +4797,11 @@ def _audit_timestamp_text(value: Any) -> str | None:
 
 
 def _audit_run_window_summary(value: Any) -> dict[str, Any] | None:
-    normalized = _audit_normalized_value(value)
-    start: str | None = None
-    end: str | None = None
-    if isinstance(normalized, dict) and {"start_dt", "end_dt"} <= set(normalized):
-        start = _audit_timestamp_text(normalized.get("start_dt"))
-        end = _audit_timestamp_text(normalized.get("end_dt"))
-    elif isinstance(normalized, dict) and normalized and all(isinstance(item, dict) for item in normalized.values()):
-        starts: list[str] = []
-        ends: list[str] = []
-        for item in normalized.values():
-            if not isinstance(item, dict):
-                continue
-            item_start = _audit_timestamp_text(item.get("start_dt") or item.get("start"))
-            item_end = _audit_timestamp_text(item.get("end_dt") or item.get("end"))
-            if item_start:
-                starts.append(item_start)
-            if item_end:
-                ends.append(item_end)
-        if starts and len(set(starts)) == 1:
-            start = starts[0]
-        if ends and len(set(ends)) == 1:
-            end = ends[0]
-    elif isinstance(normalized, (list, tuple)) and len(normalized) >= 2:
-        start = _audit_timestamp_text(normalized[0])
-        end = _audit_timestamp_text(normalized[1])
-    if start is None and end is None:
-        return None
-    return {"type": "RunWindowSummary", "start": start, "end": end}
+    return run_window_formatter.run_window_summary(
+        value,
+        normalize=_audit_normalized_value,
+        display_key=_audit_display_key,
+    )
 
 
 def _audit_historical_field_state_summary(value: Any) -> dict[str, Any] | None:
