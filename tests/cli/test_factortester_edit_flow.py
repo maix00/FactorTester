@@ -1974,7 +1974,7 @@ def test_step_audit_transposes_wide_two_key_tables(monkeypatch) -> None:
     assert max(len(_strip_ansi(line)) for line in lines) <= 140
 
 
-def test_step_audit_transposes_positions_after_grouping_when_columns_dominate() -> None:
+def test_step_audit_keeps_positions_as_product_index_table() -> None:
     text = _audit_text({
         "type": "PositionsTable",
         "positions": {
@@ -1995,10 +1995,13 @@ def test_step_audit_transposes_positions_after_grouping_when_columns_dominate() 
         },
     })
 
-    assert "表格已转置" in text
-    assert "原列数 6，原行数 1" in text
+    assert "表格已转置" not in text
+    assert "products" in text
     assert "quantity" in text
+    assert "average_cost" in text
+    assert "settlement_price" in text
     assert "全部相同" not in text
+    assert "全部产品" in text
 
 
 def test_step_audit_transposed_tables_split_long_row_labels(monkeypatch) -> None:

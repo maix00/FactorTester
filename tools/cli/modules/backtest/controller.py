@@ -3632,7 +3632,7 @@ def _print_positions_value_table(prefix: str, field_name: str, values: list[dict
                 *row,
             ))
     headers = ("ledger", "cash pool", "strategies", "products", *_POSITION_SCALAR_COLUMNS)
-    for line in _audit_table_lines(headers, sorted(rows), indent=prefix):
+    for line in _audit_table_lines(headers, sorted(rows), indent=prefix, allow_transpose=False):
         click.echo(line)
     return True
 
@@ -3655,7 +3655,7 @@ def _print_positions_change_table(prefix: str, field_name: str, changes: list[di
         return False
     if not _audit_is_ledger_entries(changes):
         return False
-    rows: list[tuple[Any, ...]] = []
+    wide_rows: list[tuple[Any, ...]] = []
     for change in changes:
         before = _display_field_value(field_name, change.get("before"))
         after = _display_field_value(field_name, change.get("after"))
@@ -3664,13 +3664,13 @@ def _print_positions_change_table(prefix: str, field_name: str, changes: list[di
             return False
         strategies = ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无"
         for row in position_rows:
-            rows.append((
+            wide_rows.append((
                 str(change.get("ledger") or "?"),
                 str(change.get("cash_pool") or "?"),
                 strategies,
                 *row,
             ))
-    if not rows:
+    if not wide_rows:
         click.echo(f"{prefix}（无变化）")
         return True
     base_headers = ("ledger", "cash pool", "strategies", "products")
@@ -3678,16 +3678,16 @@ def _print_positions_change_table(prefix: str, field_name: str, changes: list[di
     kept_value_indexes = [
         index
         for index, header in enumerate(value_headers)
-        if header != "lot changes" and any(row[len(base_headers) + index] not in ("", "null -> null") for row in rows)
+        if header != "lot changes" and any(row[len(base_headers) + index] not in ("", "null -> null") for row in wide_rows)
     ]
-    if any(row[-1] for row in rows):
+    if any(row[-1] for row in wide_rows):
         kept_value_indexes.append(len(value_headers) - 1)
     headers = (*base_headers, *[value_headers[index] for index in kept_value_indexes])
     compact_rows = [
         tuple([*row[:len(base_headers)], *[row[len(base_headers) + index] for index in kept_value_indexes]])
-        for row in rows
+        for row in wide_rows
     ]
-    for line in _audit_table_lines(headers, sorted(compact_rows), indent=prefix):
+    for line in _audit_table_lines(headers, sorted(compact_rows), indent=prefix, allow_transpose=False):
         click.echo(line)
     return True
 
@@ -4818,7 +4818,7 @@ def _audit_positions_text(value: dict[str, Any]) -> str:
     if not positions:
         return "positions: (empty)"
     rows = _audit_grouped_position_rows(positions)
-    return "\n".join(_audit_table_lines(("products", *_POSITION_SCALAR_COLUMNS), rows))
+    return "\n".join(_audit_table_lines(("products", *_POSITION_SCALAR_COLUMNS), rows, allow_transpose=False))
 
 
 def _audit_grouped_position_rows(positions: dict[str, dict[str, Any]]) -> list[tuple[Any, ...]]:
@@ -4865,7 +4865,7 @@ def _audit_positions_diff_text(before: Any, after: Any) -> str | None:
         rows = [row[:-1] for row in rows]
     else:
         headers = ("products", "quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count", "lot changes")
-    return "\n".join(_audit_table_lines(headers, rows))
+    return "\n".join(_audit_table_lines(headers, rows, allow_transpose=False))
 
 
 def _audit_positions_diff_rows(before: Any, after: Any) -> list[tuple[str, ...]] | None:
