@@ -66,9 +66,11 @@ def test_step_audit_groups_identical_values_by_partial_strategy_sets(capsys) -> 
     _print_audit_fields("输入字段", records)
 
     out = capsys.readouterr().out
-    assert "策略配置 A1, A2" in out
+    assert "strategies" in out
+    assert "value" in out
+    assert "A1, A2" in out
     assert "0 days 00:02:00" in out
-    assert "策略配置 A3" in out
+    assert "A3" in out
     assert "0 days 00:05:00" in out
     assert "[跨策略]" not in out
 
@@ -445,6 +447,64 @@ def test_step_audit_combines_repeated_ledger_scalar_input_fields(capsys) -> None
     assert out.count("ledger") == 1
     assert out.count("private:L1") == 1
     assert out.count("private:L2") == 1
+
+
+def test_step_audit_combines_repeated_strategy_scalar_input_fields(capsys) -> None:
+    values = [
+        {
+            "scope": "strategy_config",
+            "strategy": strategy,
+            "value": value,
+        }
+        for strategy, value in (("A1", "CNY"), ("A2", "CNY"))
+    ]
+
+    _print_audit_fields("输入字段", [
+        {"field": "CashPoolModule.base_currency", "values": values},
+        {"field": "CashPoolModule.initial_capital_major", "values": [
+            {**entry, "value": 100000000.0}
+            for entry in values
+        ]},
+        {"field": "EngineModule.engine_mode", "values": [
+            {**entry, "value": "auto"}
+            for entry in values
+        ]},
+    ])
+
+    out = capsys.readouterr().out
+    assert "合并策略字段" in out
+    assert "base_currency" in out
+    assert "initial_capital_major" in out
+    assert "engine_mode" in out
+    assert "A1, A2" in out
+    assert out.count("strategies") == 1
+    assert "base_currency [CashPoolModule.base_currency]" not in out
+    assert "策略配置 A1, A2 = CNY" not in out
+
+
+def test_step_audit_strategy_scalar_table_merges_only_identical_rows(capsys) -> None:
+    values = [
+        {"scope": "strategy_config", "strategy": "A1", "value": "CNY"},
+        {"scope": "strategy_config", "strategy": "A2", "value": "CNY"},
+        {"scope": "strategy_config", "strategy": "A3", "value": "USD"},
+    ]
+
+    _print_audit_fields("输入字段", [
+        {"field": "CashPoolModule.base_currency", "values": values},
+        {"field": "EngineModule.engine_mode", "values": [
+            {**entry, "value": "auto"}
+            for entry in values
+        ]},
+    ])
+
+    out = capsys.readouterr().out
+    assert "合并策略字段" in out
+    assert "strategies" in out
+    assert "base_currency" in out
+    assert "engine_mode" in out
+    assert "A1, A2" in out
+    assert "A3" in out
+    assert "表格已转置" not in out
 
 
 def test_step_audit_keeps_moderate_combined_ledger_fields_in_one_table(capsys, monkeypatch) -> None:
@@ -1082,7 +1142,7 @@ def test_step_audit_unowned_strategy_context_change_is_shared(capsys) -> None:
     assert "策略上下文 无" not in out
 
 
-def test_step_audit_identical_strategy_context_values_are_merged_with_strategy_label(capsys) -> None:
+def test_step_audit_identical_strategy_context_values_are_merged_in_strategy_table(capsys) -> None:
     _print_audit_fields("输入字段", [{
         "field": "ProductSelectionModule.products",
         "values": [
@@ -1093,10 +1153,12 @@ def test_step_audit_identical_strategy_context_values_are_merged_with_strategy_l
 
     out = capsys.readouterr().out
     assert "[共享]" not in out
-    assert "策略上下文 A1, A2" in out
+    assert "strategies" in out
+    assert "value" in out
+    assert "A1, A2" in out
 
 
-def test_step_audit_compacts_long_strategy_input_lists_without_source_column(capsys) -> None:
+def test_step_audit_compacts_long_strategy_input_lists_in_strategy_table(capsys) -> None:
     products = [f"P{index}.EX" for index in range(12)]
 
     _print_audit_fields("输入字段", [{
@@ -1109,7 +1171,9 @@ def test_step_audit_compacts_long_strategy_input_lists_without_source_column(cap
 
     out = capsys.readouterr().out
     assert "source" not in out
-    assert "策略上下文 A1, A2 =" in out
+    assert "strategies" in out
+    assert "value" in out
+    assert "A1, A2" in out
     assert "P0.EX, P1.EX, P2.EX, ..." in out
     assert "共 12 个" not in out
     assert "P3.EX" not in out
@@ -1338,7 +1402,12 @@ def test_step_audit_formats_price_tables_as_basis_summary() -> None:
                         "columns": ["RB.SHF", "AG.SHF"],
                         "index": ["2026-01-01 09:00:00"],
                         "rows": [[1.0, 2.0]],
-                    }
+                    },
+                    "tail": {
+                        "columns": ["RB.SHF", "AG.SHF"],
+                        "index": ["2026-01-01 09:24:00"],
+                        "rows": [[3.0, 4.0]],
+                    },
                 },
             },
             {
@@ -1357,16 +1426,28 @@ def test_step_audit_formats_price_tables_as_basis_summary() -> None:
     })
 
     assert "价格字段" in text
-    assert "价格字段: close" in text
-    assert "  shape   = 25 x 2" in text
-    assert "  index   = 2026-01-01 09:00:00 → 2026-01-01 09:24:00" in text
-    assert '  columns = ["RB.SHF", "AG.SHF"]' in text
-    assert "  sample.head:" in text
+    assert "价格字段元信息:" in text
+    assert "basis" in text
+    assert "shape" in text
+    assert "index" in text
+    assert "timestamp" in text
+    assert "close" in text
+    assert "25 x 2" in text
+    assert "start  2026-01-01 09:00:00" in text
+    assert "end    2026-01-01 09:24:00" in text
+    assert '["RB.SHF", "AG.SHF"]' in text
+    assert "价格字段 sample（行索引=field/product，列=首尾 sample 时间）:" in text
+    assert "field  product  2026-01-01 09:00:00" in text
+    assert "2026-01-01 09:24:00" in text
+    assert "close  AG.SHF   2" in text
+    assert "4" in text
+    assert "close  RB.SHF   1" in text
+    assert "3" in text
+    assert "sample.head:" not in text
     assert "2026-01-01 09:00:00" in text
-    assert "价格字段: open" in text
-    assert "  shape   = 25 x 5000" in text
-    assert "  columns = 5000 columns; sample shows 4 columns" in text
-    assert "价格字段: settlement" in text
+    assert "open        25 x 5000" in text
+    assert "5000 columns; sample shows 4 columns" in text
+    assert "settlement  25 x 2" in text
     assert "日级结算字段" in text
     assert '"rows"' not in text
 

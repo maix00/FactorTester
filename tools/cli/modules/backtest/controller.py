@@ -2937,13 +2937,65 @@ def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[
 def _print_strategy_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
     if not _audit_is_strategy_entries(values):
         return False
-    rows: list[tuple[str, str]] = []
+    grouped: dict[str, list[str]] = {}
     for entry in values:
         value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
         if value_text is None:
             return False
-        rows.append((str(entry.get("strategy") or "?"), value_text))
-    for line in _audit_table_lines(("strategy", "value"), sorted(rows), indent=prefix):
+        grouped.setdefault(value_text, []).append(str(entry.get("strategy") or "?"))
+    rows = [
+        (", ".join(sorted(dict.fromkeys(strategies))), value_text)
+        for value_text, strategies in grouped.items()
+    ]
+    for line in _audit_table_lines(("strategies", "value"), sorted(rows), indent=prefix):
+        click.echo(line)
+    return True
+
+
+def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[str, str, dict[str, str]] | None:
+    field_name = str(record.get("field") or "")
+    values = record.get("values") or []
+    if not _audit_is_strategy_entries(values):
+        return None
+    scopes = {str(entry.get("scope") or "") for entry in values}
+    if len(scopes) != 1:
+        return None
+    by_strategy: dict[str, str] = {}
+    for entry in values:
+        value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
+        if value_text is None:
+            return None
+        strategy = str(entry.get("strategy") or "?")
+        if strategy in by_strategy and by_strategy[strategy] != value_text:
+            return None
+        by_strategy[strategy] = value_text
+    if not by_strategy:
+        return None
+    return field_name.rsplit(".", 1)[-1], next(iter(scopes)), by_strategy
+
+
+def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
+    tables = [_strategy_scalar_record_table(record) for record in records]
+    if any(table is None for table in tables) or len(tables) < 2:
+        return False
+    scopes = {table[1] for table in tables if table is not None}
+    if len(scopes) != 1:
+        return False
+    strategy_keys = [tuple(sorted(table[2])) for table in tables if table is not None]
+    if not strategy_keys or any(keys != strategy_keys[0] for keys in strategy_keys[1:]):
+        return False
+    field_columns = [table[0] for table in tables if table is not None]
+    value_maps = [table[2] for table in tables if table is not None]
+    grouped_rows: dict[tuple[str, ...], list[str]] = {}
+    for strategy in strategy_keys[0]:
+        row_values = tuple(value_map[strategy] for value_map in value_maps)
+        grouped_rows.setdefault(row_values, []).append(strategy)
+    rows = [
+        tuple([", ".join(strategies), *row_values])
+        for row_values, strategies in grouped_rows.items()
+    ]
+    click.echo(f"{prefix}合并策略字段:")
+    for line in _audit_table_lines(("strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
 
@@ -3189,6 +3241,7 @@ def _audit_table_lines(
     rows: list[tuple[Any, ...]] | list[list[Any]],
     *,
     indent: str = "",
+    allow_transpose: bool = True,
 ) -> list[str]:
     """Render audit tables without ellipsis and split complex cells into details."""
     if not rows:
@@ -3212,7 +3265,7 @@ def _audit_table_lines(
         max(_audit_display_width(header_list[column]), *(_audit_display_width(row[column]) for row in scalar_rows))
         for column in range(len(header_list))
     ]
-    transposed = _audit_transposed_table_lines(header_list, scalar_rows, widths, indent=indent)
+    transposed = _audit_transposed_table_lines(header_list, scalar_rows, widths, indent=indent) if allow_transpose else None
     if transposed is not None:
         lines = transposed
         for index, header, value in details:
@@ -3256,6 +3309,8 @@ def _audit_transposed_table_lines(
     if header_list and header_list[0] == "op":
         return None
     key_count = _audit_table_key_column_count(header_list)
+    if header_list and header_list[0] in {"strategy", "strategies"} and len(scalar_rows) > 1:
+        return None
     value_column_count = max(len(header_list) - 1, 0)
     should_transpose_dense = (
         key_count <= 2
@@ -3404,10 +3459,14 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
     rows = value.get("rows")
     if not isinstance(rows, list):
         return "price_tables: (no rows)"
+    meta_records: list[dict[str, Any]] = []
+    sample_rows: list[tuple[Any, ...]] = []
+    sample_columns: list[str] = []
     lines: list[str] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
+        basis = str(row.get("basis") or "")
         shape = row.get("shape")
         if isinstance(shape, list | tuple) and len(shape) == 2:
             shape_text = f"{shape[0]} x {shape[1]}"
@@ -3415,29 +3474,133 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
             shape_text = str(shape or "")
         index_value = row.get("index")
         if isinstance(index_value, dict) and {"start", "end"} <= set(index_value):
-            index_text = f"{index_value.get('start')} → {index_value.get('end')}"
+            index_start_parts = _audit_index_parts(index_value.get("start"))
+            index_end_parts = _audit_index_parts(index_value.get("end"))
         else:
-            index_text = str(index_value or "")
-        if lines:
-            lines.append("")
-        lines.append(f"价格字段: {row.get('basis') or ''}")
-        lines.append(f"  shape   = {shape_text}")
-        lines.append(f"  index   = {index_text}")
-        lines.append(f"  columns = {_audit_columns_summary(row.get('columns'))}")
-        if row.get("basis") in {"settlement", "pre_settlement"}:
-            lines.append("  note    = 日级结算字段；本地分钟表按 trading_day 重复携带，结算 flow 只应在日终通知时使用")
+            index_start_parts = _audit_index_parts(index_value)
+            index_end_parts = [""]
+        note = ""
+        if basis in {"settlement", "pre_settlement"}:
+            note = "日级结算字段；本地分钟表按 trading_day 重复携带，结算 flow 只应在日终通知时使用"
+        meta_records.append({
+            "basis": basis,
+            "shape": shape_text,
+            "index_start": index_start_parts,
+            "index_end": index_end_parts,
+            "columns": _audit_columns_summary(row.get("columns")),
+            "note": note,
+        })
         sample = row.get("sample")
         if isinstance(sample, dict):
-            selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
-            if selected is not None:
-                lines.extend(f"  {line}" for line in _audit_sample_note_lines(sample, selected.name))
-                part, row_notes = _audit_single_sample_frame(selected.value)
-                lines.extend(f"  {line}" for line in row_notes)
-                lines.append(f"  sample.{selected.name}:")
-                lines.extend(_audit_dataframe_table_lines(part, indent="    "))
-    if not lines:
+            selected_frames = _audit_price_sample_edge_frames(sample)
+            if selected_frames:
+                if "head" in sample and "tail" in sample:
+                    lines.append(f"{basis}.sample = 仅显示最早一条和最晚一条")
+                for _sample_name, part in selected_frames:
+                    part_columns = [str(column) for column in (part.get("columns") or [])]
+                    for column in part_columns:
+                        if column not in sample_columns:
+                            sample_columns.append(column)
+                    for index_item, row_values in zip(part.get("index") or [], part.get("rows") or [], strict=False):
+                        value_map = {
+                            str(column): _audit_scalar_cell(row_values[index])
+                            for index, column in enumerate(part_columns)
+                            if index < len(row_values)
+                        }
+                        sample_rows.append((
+                            basis,
+                            _sample_name,
+                            _audit_index_parts(index_item),
+                            value_map,
+                        ))
+    if not meta_records:
         return "price_tables: (empty)"
+    lines.append("价格字段元信息:")
+    meta_rows: list[tuple[Any, ...]] = []
+    for record in meta_records:
+        for endpoint, timestamps in (("start", record["index_start"]), ("end", record["index_end"])):
+            for timestamp in timestamps:
+                meta_rows.append((
+                    record["basis"],
+                    record["shape"],
+                    endpoint,
+                    timestamp,
+                    record["columns"],
+                    record["note"],
+                ))
+    lines.extend(_audit_table_lines(
+        ("basis", "shape", "index", "timestamp", "columns", "note"),
+        meta_rows,
+        indent="  ",
+    ))
+    if sample_rows and sample_columns:
+        lines.append("")
+        sample_times: list[str] = []
+        grouped_values: dict[tuple[str, str], dict[str, str]] = {}
+        for basis, _sample_name, sample_index, value_map in sample_rows:
+            sample_time = _audit_sample_time_label(sample_index)
+            if sample_time not in sample_times:
+                sample_times.append(sample_time)
+            for column in sample_columns:
+                grouped_values.setdefault((basis, column), {})[sample_time] = value_map.get(column, "")
+        lines.append("价格字段 sample（行索引=field/product，列=首尾 sample 时间）:")
+        rendered_rows = [
+            tuple([basis, product, *[values.get(sample_time, "") for sample_time in sample_times]])
+            for (basis, product), values in sorted(grouped_values.items())
+        ]
+        lines.extend(_audit_table_lines(
+            ("field", "product", *sample_times),
+            rendered_rows,
+            indent="  ",
+            allow_transpose=False,
+        ))
     return "\n".join(lines)
+
+
+def _audit_index_cell(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        return " | ".join(str(item) for item in value)
+    return str(value)
+
+
+def _audit_price_sample_edge_frames(sample: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    frames: list[tuple[str, dict[str, Any]]] = []
+    seen_indexes: set[str] = set()
+    for name, row_selector in (("head", 0), ("tail", -1)):
+        frame = sample.get(name)
+        if not isinstance(frame, dict):
+            continue
+        indexes = frame.get("index")
+        rows = frame.get("rows")
+        if not isinstance(indexes, list) or not isinstance(rows, list) or not indexes or not rows:
+            continue
+        selected_index = indexes[row_selector]
+        selected_row = rows[row_selector]
+        index_key = json.dumps(_audit_normalized_value(selected_index), ensure_ascii=False, sort_keys=True, default=str)
+        if index_key in seen_indexes:
+            continue
+        seen_indexes.add(index_key)
+        frames.append((
+            name,
+            {
+                **frame,
+                "index": [selected_index],
+                "rows": [selected_row],
+            },
+        ))
+    return frames
+
+
+def _audit_index_parts(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value or "")]
+
+
+def _audit_sample_time_label(parts: list[str]) -> str:
+    if len(parts) >= 2:
+        return f"{parts[0]} | {parts[1]}"
+    return parts[0] if parts else ""
 
 
 def _audit_columns_summary(columns: Any) -> str:
@@ -4277,17 +4440,25 @@ def _print_audit_fields(
     while index < len(sorted_records):
         record = sorted_records[index]
         combined = [record]
-        current_table = _ledger_scalar_record_table(record)
+        current_table = _strategy_scalar_record_table(record)
+        combined_printer = _print_combined_strategy_scalar_value_table
+        if current_table is None:
+            current_table = _ledger_scalar_record_table(record)
+            combined_printer = _print_combined_ledger_scalar_value_table
         if current_table is not None:
-            current_routes = tuple(sorted(current_table[1]))
+            current_routes = _combined_scalar_routes(current_table, strategy=combined_printer is _print_combined_strategy_scalar_value_table)
             lookahead = index + 1
             while lookahead < len(sorted_records):
-                next_table = _ledger_scalar_record_table(sorted_records[lookahead])
-                if next_table is None or tuple(sorted(next_table[1])) != current_routes:
+                next_table = (
+                    _strategy_scalar_record_table(sorted_records[lookahead])
+                    if combined_printer is _print_combined_strategy_scalar_value_table
+                    else _ledger_scalar_record_table(sorted_records[lookahead])
+                )
+                if next_table is None or _combined_scalar_routes(next_table, strategy=combined_printer is _print_combined_strategy_scalar_value_table) != current_routes:
                     break
                 combined.append(sorted_records[lookahead])
                 lookahead += 1
-        if len(combined) >= 2 and _print_combined_ledger_scalar_value_table("    ", combined):
+        if len(combined) >= 2 and combined_printer("    ", combined):
             index += len(combined)
             continue
         click.echo(f"  {_audit_field_label(str(record.get('field') or ''))}:")
@@ -4298,6 +4469,9 @@ def _print_audit_fields(
             continue
         field_name = str(record.get("field") or "")
         if _print_ledger_scalar_value_table("    ", field_name, values):
+            index += 1
+            continue
+        if _print_strategy_scalar_value_table("    ", field_name, values):
             index += 1
             continue
         if _print_ledger_grouped_values("    ", field_name, values):
@@ -4314,6 +4488,12 @@ def _print_audit_fields(
                 _print_audit_value("    ", label, bucket["value"])
         index += 1
         
+
+def _combined_scalar_routes(table: tuple[Any, ...], *, strategy: bool) -> tuple[Any, ...]:
+    if strategy:
+        return (table[1], tuple(sorted(table[2])))
+    return tuple(sorted(table[1]))
+
 
 def _print_audit_changes(
     title: str,
