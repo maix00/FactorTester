@@ -189,13 +189,18 @@ def test_daily_mark_to_market_flow_gating_by_engine_and_custom_field():
         assert not config.uses_flow("apply_daily_mark_to_market")
 
 
-def test_apply_strategy_configs_sets_account_attribute():
+def test_fixed_fee_rate_without_fixed_fee_mode_raises():
     account = BacktestRunState()
-    apply_strategy_configs(account, {"A1": {"fixed_fee_rate": 0.001, **_GROUP_FIELDS}})
-    assert len(account.strategy_configs) == 1
-    strategy = next(iter(account.strategy_configs))
-    assert account.strategy_configs[strategy].get(FeeModule.fixed_fee_rate) is None
-    assert account.ledger_config_for(f"private:{strategy.alias}").fixed_fee_rate == 0.001
+
+    with pytest.raises(ValueError, match="fixed_fee_rate"):
+        apply_strategy_configs(account, {"A1": {"fixed_fee_rate": 0.001, **_GROUP_FIELDS}})
+
+
+def test_fixed_margin_ratio_without_fixed_margin_mode_raises():
+    account = BacktestRunState()
+
+    with pytest.raises(ValueError, match="fixed_margin_ratio"):
+        apply_strategy_configs(account, {"A1": {"fixed_margin_ratio": 0.2, **_GROUP_FIELDS}})
 
 
 def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
@@ -232,6 +237,60 @@ def test_auto_daily_mark_to_market_is_not_materialized_as_ledger_default():
 
     assert ledger_config.accounting_mode == "Auto"
     assert ledger_config.daily_mark_to_market_enabled is None
+
+
+def test_hidden_fixed_fee_and_margin_defaults_are_not_materialized_for_auto_modes():
+    account = BacktestRunState()
+    apply_strategy_configs(account, {"A1": {"engine_mode": "auto", **_GROUP_FIELDS}})
+
+    strategy = next(iter(account.strategy_configs))
+    ledger_config = account.ledger_config_for(f"private:{strategy.alias}")
+
+    assert ledger_config.fee_mode == "auto"
+    assert ledger_config.fixed_fee_rate is None
+    assert ledger_config.margin_mode == "auto"
+    assert ledger_config.fixed_margin_ratio is None
+
+
+def test_hidden_fixed_fee_and_margin_defaults_from_resolved_settings_are_ignored():
+    account = BacktestRunState()
+    apply_strategy_configs(
+        account,
+        {
+            "A1": {
+                "engine_mode": "auto",
+                "fee_mode": "auto",
+                "fixed_fee_rate": 0.0,
+                "margin_mode": "auto",
+                "fixed_margin_ratio": 1.0,
+                **_GROUP_FIELDS,
+            }
+        },
+    )
+
+    strategy = next(iter(account.strategy_configs))
+    ledger_config = account.ledger_config_for(f"private:{strategy.alias}")
+
+    assert ledger_config.fee_mode == "auto"
+    assert ledger_config.fixed_fee_rate is None
+    assert ledger_config.margin_mode == "auto"
+    assert ledger_config.fixed_margin_ratio is None
+
+
+def test_fixed_fee_and_margin_modes_materialize_their_backend_defaults():
+    account = BacktestRunState()
+    apply_strategy_configs(
+        account,
+        {"A1": {"engine_mode": "custom", "fee_mode": "fixed", "margin_mode": "fixed", **_GROUP_FIELDS}},
+    )
+
+    strategy = next(iter(account.strategy_configs))
+    ledger_config = account.ledger_config_for(f"private:{strategy.alias}")
+
+    assert ledger_config.fee_mode == "fixed"
+    assert ledger_config.fixed_fee_rate == 0.0
+    assert ledger_config.margin_mode == "fixed"
+    assert ledger_config.fixed_margin_ratio == 1.0
 
 
 def test_missing_frontend_only_default_field_raises():

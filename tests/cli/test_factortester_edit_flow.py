@@ -2347,6 +2347,39 @@ def test_step_audit_combines_market_data_sample_changes(capsys, monkeypatch) -> 
     assert "SM.CZC" not in plain
 
 
+def test_step_audit_renders_causal_valuation_table_as_market_sample(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((132, 20)))
+    after = {
+        "type": "DataFrame",
+        "sample": {
+            "head": {
+                "columns": ["AP.CZC", "CJ.CZC", "PK.CZC", "SM.CZC"],
+                "index": [["2026-01-05 00:00:00", "2026-01-05 09:01:00+08:00"]],
+                "rows": [[1, 2, 3, 4]],
+            },
+            "tail": {
+                "columns": ["AP.CZC", "CJ.CZC", "PK.CZC", "SM.CZC"],
+                "index": [["2026-01-30 00:00:00", "2026-01-30 15:00:00+08:00"]],
+                "rows": [[11, 12, 13, 14]],
+            },
+        },
+    }
+
+    _print_audit_changes("声明输出的变化", [
+        {"field": "MarketDataModule.causal_valuation_table", "before": None, "after": after},
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "市场数据 sample 总表（每个价格字段最多 3 个产品）" in plain
+    assert "causal_valuation_table" in plain
+    assert "pd.DataFrame shape" not in plain
+    assert "AP.CZC" in plain
+    assert "CJ.CZC" in plain
+    assert "PK.CZC" in plain
+    assert "SM.CZC" not in plain
+    assert "columns 1/" not in plain
+
+
 def test_step_audit_formats_series_payloads_as_tables() -> None:
     text = _audit_text({
         "type": "Series",

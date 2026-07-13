@@ -3754,7 +3754,13 @@ def _audit_combined_single_field_label(qualified_name: str) -> str:
     return click.style(f"{qualified_name.rsplit('.', 1)[-1]} [{qualified_name}]", bold=True)
 
 
-_MARKET_DATA_SAMPLE_FIELDS = {"price_tables", "raw_prices", "settlement_price", "volume"}
+_MARKET_DATA_SAMPLE_FIELDS = {
+    "price_tables",
+    "raw_prices",
+    "settlement_price",
+    "volume",
+    "causal_valuation_table",
+}
 _MARKET_DATA_SAMPLE_PRODUCT_LIMIT = 3
 
 
