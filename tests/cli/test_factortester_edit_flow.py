@@ -413,20 +413,32 @@ def test_step_audit_collapses_repeated_strategy_mapping_values(capsys) -> None:
         "scope": "context",
         "before": None,
         "after": {
-            "A1": {"warmup_window": "0 days 00:02:00"},
-            "A2": {"warmup_window": "0 days 00:02:00"},
-            "A3": {"warmup_window": "0 days 00:02:00"},
+            "A1": {
+                "start_dt": {"ts": "2026-01-01 09:00:00+08:00"},
+                "end_dt": {"ts": "2026-01-31 15:00:00+08:00"},
+                "warmup_window": "0 days 00:02:00",
+            },
+            "A2": {
+                "start_dt": {"ts": "2026-01-01 09:00:00+08:00"},
+                "end_dt": {"ts": "2026-01-31 15:00:00+08:00"},
+                "warmup_window": "0 days 00:02:00",
+            },
+            "A3": {
+                "start_dt": {"ts": "2026-01-01 09:00:00+08:00"},
+                "end_dt": {"ts": "2026-01-31 15:00:00+08:00"},
+                "warmup_window": "0 days 00:02:00",
+            },
         },
     }])
 
     out = capsys.readouterr().out
-    assert "策略 A1, A2, A3 =" in out
+    assert "start = 2026-01-01 09:00:00+08:00" in out
+    assert "end   = 2026-01-31 15:00:00+08:00" in out
     assert '"A1, A2, A3": {' not in out
-    assert out.count("warmup_window") == 1
-    assert "0 days 00:02:00" in out
+    assert "warmup_window" not in out
 
 
-def test_step_audit_repeated_product_mapping_values_are_not_labeled_as_strategy(capsys) -> None:
+def test_step_audit_field_state_baseline_renders_as_product_field_table(capsys) -> None:
     _print_audit_changes("声明输出的变化", [{
         "field": "MarketDataModule.field_state_baseline",
         "scope": "context",
@@ -438,9 +450,32 @@ def test_step_audit_repeated_product_mapping_values_are_not_labeled_as_strategy(
     }])
 
     out = capsys.readouterr().out
-    assert "产品 RB.SHF, SHFE|F|RB|2610" in out
+    assert "product" in out
+    assert "RB.SHF" in out
+    assert "SHFE|F|RB|2610" in out
     assert "策略 RB.SHF" not in out
     assert "VolumeMultiple" in out
+    assert "LongMarginRatioByMoney" in out
+
+
+def test_step_audit_field_state_baseline_diff_only_prints_changed_rows(capsys) -> None:
+    _print_audit_changes("声明输出的变化", [{
+        "field": "MarketDataModule.field_state_baseline",
+        "scope": "context",
+        "before": {
+            "RB.SHF": {"VolumeMultiple": 10.0, "LongMarginRatioByMoney": 0.07},
+            "AG.SHF": {"VolumeMultiple": 15.0, "LongMarginRatioByMoney": 0.09},
+        },
+        "after": {
+            "RB.SHF": {"VolumeMultiple": 10.0, "LongMarginRatioByMoney": 0.08},
+            "AG.SHF": {"VolumeMultiple": 15.0, "LongMarginRatioByMoney": 0.09},
+        },
+    }])
+
+    out = capsys.readouterr().out
+    assert "RB.SHF" in out
+    assert "0.07 -> 0.08" in out
+    assert "AG.SHF" not in out
 
 
 def test_step_audit_renders_dict_of_dict_scalars_as_table() -> None:
@@ -649,6 +684,20 @@ def test_step_audit_unowned_strategy_context_change_is_shared(capsys) -> None:
     assert "策略上下文 无" not in out
 
 
+def test_step_audit_identical_strategy_context_values_are_shared(capsys) -> None:
+    _print_audit_fields("输入字段", [{
+        "field": "ProductSelectionModule.products",
+        "values": [
+            {"scope": "strategy_context", "strategy": "A1", "value": ["AP.CZC", "CJ.CZC"]},
+            {"scope": "strategy_context", "strategy": "A2", "value": ["AP.CZC", "CJ.CZC"]},
+        ],
+    }])
+
+    out = capsys.readouterr().out
+    assert "[共享]" in out
+    assert "策略上下文 A1, A2" not in out
+
+
 def test_step_audit_formats_python_literal_strings_as_json() -> None:
     text = _audit_text("{'id': 'pg_bc7963105fe8', 'selected_paths': ['Product/Futures/CNFutures/日夜盘/日盘']}")
 
@@ -751,6 +800,12 @@ def test_step_audit_formats_price_tables_as_basis_summary() -> None:
                 "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
                 "columns": {"count": 5000, "sampled": ["C0", "C1", "C4998", "C4999"], "sample_truncated": True},
             },
+            {
+                "basis": "settlement",
+                "shape": [25, 2],
+                "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
+                "columns": ["RB.SHF", "AG.SHF"],
+            },
         ],
     })
 
@@ -764,6 +819,8 @@ def test_step_audit_formats_price_tables_as_basis_summary() -> None:
     assert "价格字段: open" in text
     assert "  shape   = 25 x 5000" in text
     assert "  columns = 5000 columns; sample shows 4 columns" in text
+    assert "价格字段: settlement" in text
+    assert "日级结算字段" in text
     assert '"rows"' not in text
 
 

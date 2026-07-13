@@ -2120,6 +2120,10 @@ def _audit_special_text(value: Any) -> str | None:
         return _audit_contract_metadata_text(value)
     if value.get("type") == "PriceTablesSummary":
         return _audit_price_tables_text(value)
+    if value.get("type") == "RunWindowSummary":
+        return _audit_run_window_text(value)
+    if value.get("type") == "HistoricalFieldStateTable":
+        return _audit_historical_field_state_text(value)
     object_text = _audit_runtime_object_text(value)
     if object_text is not None:
         return object_text
@@ -2770,6 +2774,8 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
         lines.append(f"  shape   = {shape_text}")
         lines.append(f"  index   = {index_text}")
         lines.append(f"  columns = {_audit_columns_summary(row.get('columns'))}")
+        if row.get("basis") in {"settlement", "pre_settlement"}:
+            lines.append("  note    = 日级结算字段；本地分钟表按 trading_day 重复携带，结算 flow 只应在日终通知时使用")
         sample = row.get("sample")
         if isinstance(sample, dict):
             for name in ("head", "tail"):
@@ -2796,6 +2802,134 @@ def _audit_columns_summary(columns: Any) -> str:
             return json.dumps(columns, ensure_ascii=False, default=str)
         return f"{len(columns)} columns"
     return str(columns or "")
+
+
+def _audit_run_window_text(value: dict[str, Any]) -> str:
+    start = value.get("start")
+    end = value.get("end")
+    lines: list[str] = []
+    if start not in (None, ""):
+        lines.append(f"start = {start}")
+    if end not in (None, ""):
+        lines.append(f"end   = {end}")
+    return "\n".join(lines) if lines else "（无窗口）"
+
+
+def _audit_timestamp_text(value: Any) -> str | None:
+    if isinstance(value, dict):
+        ts = value.get("ts")
+        if ts not in (None, ""):
+            return str(ts)
+    if value not in (None, ""):
+        return str(value)
+    return None
+
+
+def _audit_run_window_summary(value: Any) -> dict[str, Any] | None:
+    normalized = _audit_normalized_value(value)
+    start: str | None = None
+    end: str | None = None
+    if isinstance(normalized, dict) and {"start_dt", "end_dt"} <= set(normalized):
+        start = _audit_timestamp_text(normalized.get("start_dt"))
+        end = _audit_timestamp_text(normalized.get("end_dt"))
+    elif isinstance(normalized, dict) and normalized and all(isinstance(item, dict) for item in normalized.values()):
+        starts: list[str] = []
+        ends: list[str] = []
+        for item in normalized.values():
+            if not isinstance(item, dict):
+                continue
+            item_start = _audit_timestamp_text(item.get("start_dt") or item.get("start"))
+            item_end = _audit_timestamp_text(item.get("end_dt") or item.get("end"))
+            if item_start:
+                starts.append(item_start)
+            if item_end:
+                ends.append(item_end)
+        if starts and len(set(starts)) == 1:
+            start = starts[0]
+        if ends and len(set(ends)) == 1:
+            end = ends[0]
+    elif isinstance(normalized, (list, tuple)) and len(normalized) >= 2:
+        start = _audit_timestamp_text(normalized[0])
+        end = _audit_timestamp_text(normalized[1])
+    if start is None and end is None:
+        return None
+    return {"type": "RunWindowSummary", "start": start, "end": end}
+
+
+def _audit_historical_field_state_summary(value: Any) -> dict[str, Any] | None:
+    normalized = _audit_normalized_value(value)
+    if not isinstance(normalized, dict) or not normalized:
+        return None
+    rows: list[dict[str, Any]] = []
+    field_names: list[str] = []
+    for product, fields in normalized.items():
+        if not isinstance(fields, dict):
+            return None
+        row: dict[str, Any] = {"product": str(product)}
+        for field_name, field_value in fields.items():
+            field_name_text = str(field_name)
+            if isinstance(field_value, (dict, list, tuple)):
+                return None
+            if field_name_text not in field_names:
+                field_names.append(field_name_text)
+            row[field_name_text] = field_value
+        rows.append(row)
+    if not rows or not field_names:
+        return None
+    return {"type": "HistoricalFieldStateTable", "fields": field_names, "rows": rows}
+
+
+def _audit_historical_field_state_text(value: dict[str, Any]) -> str:
+    fields = [str(field) for field in (value.get("fields") or [])]
+    rows = value.get("rows")
+    if not fields or not isinstance(rows, list):
+        return "historical field state: (no rows)"
+    table_rows: list[tuple[Any, ...]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        table_rows.append(tuple([row.get("product") or "", *[_audit_scalar_cell(row.get(field)) for field in fields]]))
+    if not table_rows:
+        return "historical field state: (empty)"
+    return "\n".join(_audit_table_lines(("product", *fields), table_rows))
+
+
+def _audit_historical_field_state_diff_text(before: Any, after: Any) -> str | None:
+    if not (
+        isinstance(before, dict)
+        and isinstance(after, dict)
+        and before.get("type") == "HistoricalFieldStateTable"
+        and after.get("type") == "HistoricalFieldStateTable"
+    ):
+        return None
+    fields = list(dict.fromkeys([str(field) for field in (before.get("fields") or []) + (after.get("fields") or [])]))
+    before_rows = {
+        str(row.get("product") or ""): row
+        for row in before.get("rows") or []
+        if isinstance(row, dict)
+    }
+    after_rows = {
+        str(row.get("product") or ""): row
+        for row in after.get("rows") or []
+        if isinstance(row, dict)
+    }
+    table_rows: list[tuple[Any, ...]] = []
+    for product in sorted(set(before_rows) | set(after_rows)):
+        before_row = before_rows.get(product, {})
+        after_row = after_rows.get(product, {})
+        changed_values: list[str] = []
+        for field in fields:
+            before_value = before_row.get(field)
+            after_value = after_row.get(field)
+            if before_value != after_value:
+                changed_values.append(f"{_audit_scalar_cell(before_value)} -> {_audit_scalar_cell(after_value)}")
+            else:
+                changed_values.append("")
+        if any(changed_values):
+            table_rows.append(tuple([product, *changed_values]))
+    if not table_rows:
+        return "（无变化）"
+    return "\n".join(_audit_table_lines(("product", *fields), table_rows))
 
 
 def _audit_pandas_text(value: Any) -> str | None:
@@ -2973,6 +3107,14 @@ def _compact_product_path_selection_for_audit(value: dict[str, Any]) -> dict[str
 
 
 def _display_field_value(qualified_name: str, value: Any) -> Any:
+    if qualified_name in {"RunWindowModule.run_window_envelope", "RunWindowModule.strategy_windows"}:
+        summary = _audit_run_window_summary(value)
+        if summary is not None:
+            return summary
+    if qualified_name == "MarketDataModule.field_state_baseline":
+        summary = _audit_historical_field_state_summary(value)
+        if summary is not None:
+            return summary
     if qualified_name == "MarketDataModule.required_data_source" and value in ((), []):
         return "auto（自动选择）"
     if qualified_name.rsplit(".", 1)[-1] == "cash":
@@ -3024,7 +3166,7 @@ def _print_audit_block_line(prefix: str, line: str) -> None:
 
 
 def _print_wrapped_line(line: str, *, continuation_indent: str) -> None:
-    width = max(40, shutil.get_terminal_size((120, 20)).columns)
+    width = max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
     if len(line) <= width:
         click.echo(line)
         return
@@ -3091,7 +3233,7 @@ def _audit_join(values: list[Any]) -> str:
     return ", ".join(unique) if unique else "无"
 
 
-def _audit_source_group_label(entries: list[dict[str, Any]]) -> str:
+def _audit_source_group_label(entries: list[dict[str, Any]], *, shared_group: bool = False) -> str:
     scopes = {str(entry.get("scope") or "") for entry in entries}
     strategies = _audit_join([
         strategy
@@ -3106,11 +3248,11 @@ def _audit_source_group_label(entries: list[dict[str, Any]]) -> str:
     cash_pools = _audit_join([entry.get("cash_pool") for entry in entries])
 
     if scopes <= {"strategy_config"}:
-        if strategies == "无":
+        if strategies == "无" or shared_group:
             return "[共享]"
         return f"策略配置 {strategies}"
     if scopes <= {"strategy_context"}:
-        if strategies == "无":
+        if strategies == "无" or shared_group:
             return "[共享]"
         return f"策略上下文 {strategies}"
     if scopes <= {"ledger"}:
@@ -3202,6 +3344,12 @@ def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list
 
 
 def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
+    diff_text = _audit_historical_field_state_diff_text(before, after)
+    if diff_text is not None:
+        click.echo(f"{prefix}{label}:")
+        for line in diff_text.splitlines() or [""]:
+            _print_audit_block_line(f"{prefix}  ", line)
+        return
     if _audit_repeated_owner_groups(before) or _audit_repeated_owner_groups(after):
         click.echo(f"{prefix}{label}:")
         _print_audit_value(f"{prefix}  ", "before", before)
@@ -3280,8 +3428,9 @@ def _print_audit_fields(
             continue
         if _print_ledger_grouped_values("    ", field_name, values):
             continue
-        for bucket in _audit_grouped_values(field_name, values):
-            label = _audit_source_group_label(bucket["entries"])
+        buckets = _audit_grouped_values(field_name, values)
+        for bucket in buckets:
+            label = _audit_source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
             if _audit_source_route_rows(bucket["entries"]):
                 click.echo(f"    {label}:")
                 _print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
@@ -3318,8 +3467,9 @@ def _print_audit_changes(
             key = (_audit_display_key(before), _audit_display_key(after))
             bucket = grouped.setdefault(key, {"before": before, "after": after, "entries": []})
             bucket["entries"].append(change)
-        for bucket in grouped.values():
-            label = _audit_source_group_label(bucket["entries"])
+        buckets = list(grouped.values())
+        for bucket in buckets:
+            label = _audit_source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
             if _audit_source_route_rows(bucket["entries"]):
                 click.echo(f"    {label}:")
                 _print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
