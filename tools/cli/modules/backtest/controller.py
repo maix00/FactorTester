@@ -168,6 +168,7 @@ from tools.cli.modules.backtest import config_state as config_state_helpers
 from tools.cli.modules.backtest import config_commands as config_command_handlers
 from tools.cli.modules.backtest import compare_commands as compare_command_handlers
 from tools.cli.modules.backtest import long_short_commands as long_short_command_handlers
+from tools.cli.modules.backtest import template_commands as template_command_handlers
 from tools.cli.modules.backtest import template_state as template_state_helpers
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 from tools.cli.table import pad_display, render_table
@@ -254,39 +255,9 @@ def template(ctx: click.Context) -> None:
     """管理 backtest 设置模板的便捷入口。"""
     state = load_state()
     switch_backtest_space(state, BACKTEST_SPACE)
-    parsed_args = config_arg_helpers.parse_template_args(tuple(ctx.args))
-    args = parsed_args.args
-    source_module = ""
-    if parsed_args.factor_family:
-        state.factor_family = parsed_args.factor_family
-
-    if args[:1] == ("--from-module-template",):
-        if len(args) < 3:
-            raise click.ClickException("--from-module-template 需要模块名和动作，例如: --from-module-template single_factor_test load <模板>")
-        source_module = args[1]
-        if source_module not in {"single_factor_test", "single_factor_family_test"}:
-            raise click.ClickException(f"暂不支持从该模块模板导入: {source_module}")
-        args = args[2:]
-    if not args or args[0] in {"help", "--help", "-h"}:
-        _print_backtest_template_help(state)
-        return
-    if not state.factor_family:
-        raise click.ClickException("template 命令需要先选择因子家族，例如加上 --factor-family SgCCS")
-    if args[0] in {"list", "ls"}:
-        _list_backtest_templates(state.factor_family)
-        return
-    if args[0] == "load":
-        if len(args) < 2:
-            raise click.ClickException("template load 需要模板 ID 或名称")
-        template_state_helpers.load_backtest_template_into_state(state, args[1], source_module=source_module)
+    changed = template_command_handlers.handle_template_command(state, tuple(ctx.args))
+    if changed:
         save_state(state)
-        return
-    if args[0] == "save":
-        name = args[1] if len(args) >= 2 else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        template_state_helpers.save_backtest_template_from_state(state, name)
-        save_state(state)
-        return
-    raise click.ClickException("template 支持的动作: list, load, save, help")
 
 
 @backtest.command("local-settings", context_settings=SELECTOR_HELP_CONTEXT)
@@ -436,21 +407,6 @@ def results(ctx: click.Context) -> None:
         output_options,
         lambda: results_command_handlers.dispatch_stored_result_command(state, action, args[1:]),
     )
-
-
-def _print_backtest_template_help(state) -> None:
-    for line in config_view_formatter.template_help_lines(state.factor_family):
-        click.echo(line)
-
-
-def _list_backtest_templates(factor_family: str) -> None:
-    templates = client_from_config().list_single_factor_setting_templates(factor_family)
-    click.echo(f"{factor_family} 模板列表")
-    if not templates:
-        click.echo("  （空）")
-        return
-    for index, template in enumerate(templates, start=1):
-        click.echo(f"  {index}. {template.get('name') or template.get('id')} · id={template.get('id')}")
 
 
 def _ensure_active_backtest_scope(state) -> None:
