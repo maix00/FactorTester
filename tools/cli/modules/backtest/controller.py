@@ -1231,39 +1231,35 @@ def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *,
 
 def _audit_text(value: Any) -> str:
     if isinstance(value, str):
-        parsed = _parse_audit_literal(value)
-        if parsed is not None:
-            parsed = _compact_audit_display_aliases(parsed)
-            special_text = _audit_special_text(parsed)
-            if special_text is not None:
-                return special_text
-            pandas_text = _audit_pandas_text(parsed)
-            if pandas_text is not None:
-                return pandas_text
-            return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        parsed_text = display_value_formatter.parsed_literal_text(
+            value,
+            compact=_compact_audit_display_aliases,
+            special=_audit_special_text,
+            pandas=_audit_pandas_text,
+            json_dumps=_audit_json_text,
+        )
+        if parsed_text is not None:
+            return parsed_text
         return value
     value = _compact_audit_display_aliases(value)
-    event_table_text = _audit_event_draft_table_text(value)
-    if event_table_text is not None:
-        return event_table_text
-    event_payload_text = _audit_event_payload_table_text(value)
-    if event_payload_text is not None:
-        return event_payload_text
-    order_text = _audit_order_table_text(value)
-    if order_text is not None:
-        return order_text
-    special_text = _audit_special_text(value)
-    if special_text is not None:
-        return special_text
-    pandas_text = _audit_pandas_text(value)
-    if pandas_text is not None:
-        return pandas_text
-    sequence_mapping_text = _audit_sequence_mapping_table_text(value)
-    if sequence_mapping_text is not None:
-        return sequence_mapping_text
-    mapping_text = _audit_mapping_table_text(value)
-    if mapping_text is not None:
-        return mapping_text
+    available = display_value_formatter.first_available_text(
+        value,
+        [
+            _audit_event_draft_table_text,
+            _audit_event_payload_table_text,
+            _audit_order_table_text,
+            _audit_special_text,
+            _audit_pandas_text,
+            _audit_sequence_mapping_table_text,
+            _audit_mapping_table_text,
+        ],
+    )
+    if available is not None:
+        return available
+    return _audit_json_text(value)
+
+
+def _audit_json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
 
 

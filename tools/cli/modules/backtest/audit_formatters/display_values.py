@@ -13,6 +13,7 @@ CashSummary = Callable[[Any], str]
 ScalarSequenceText = Callable[[list[Any] | tuple[Any, ...]], str]
 ProductListCell = Callable[[list[str]], str]
 TextFormatter = Callable[[dict[str, Any]], str]
+AnyTextFormatter = Callable[[Any], str | None]
 
 
 def parse_literal(value: str) -> Any | None:
@@ -205,3 +206,32 @@ def special_text(value: Any, *, formatters: Mapping[str, TextFormatter]) -> str 
     if formatter is not None:
         return formatter(value)
     return runtime_object_text(value)
+
+
+def parsed_literal_text(
+    value: str,
+    *,
+    compact: Callable[[Any], Any],
+    special: AnyTextFormatter,
+    pandas: AnyTextFormatter,
+    json_dumps: Callable[[Any], str],
+) -> str | None:
+    parsed = parse_literal(value)
+    if parsed is None:
+        return None
+    parsed = compact(parsed)
+    special_result = special(parsed)
+    if special_result is not None:
+        return special_result
+    pandas_result = pandas(parsed)
+    if pandas_result is not None:
+        return pandas_result
+    return json_dumps(parsed)
+
+
+def first_available_text(value: Any, formatters: list[AnyTextFormatter]) -> str | None:
+    for formatter in formatters:
+        text = formatter(value)
+        if text is not None:
+            return text
+    return None
