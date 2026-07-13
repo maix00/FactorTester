@@ -150,7 +150,6 @@ from tools.cli.modules.backtest.shared.selectors import (
     AddGroupSelectors,
     parse_add_group_selectors,
     parse_add_group_selector_groups,
-    parse_long_short_selector,
     resolve_factor_family_selector,
     resolve_factor_selector,
     resolve_product_group_selector,
@@ -167,6 +166,7 @@ from tools.cli.modules.backtest import config_views as config_view_formatter
 from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest import config_state as config_state_helpers
 from tools.cli.modules.backtest import compare_commands as compare_command_handlers
+from tools.cli.modules.backtest import long_short_commands as long_short_command_handlers
 from tools.cli.modules.backtest import template_state as template_state_helpers
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 from tools.cli.table import pad_display, render_table
@@ -594,34 +594,18 @@ def long_short(ctx: click.Context) -> None:
     state = load_state()
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
         enter_backtest_state(state, scope=BACKTEST_SPACE)
-    args = tuple(ctx.args)
-    show_help = config_arg_helpers.has_context_help(args)
-    clean_args = config_arg_helpers.strip_context_help(args)
-    if config_arg_helpers.is_list_action(clean_args):
-        _print_long_short_list(state)
-        return
-    if show_help:
-        _validate_registered_local_settings(state)
-        _print_backtest_settings_help(state)
-        return
-    if "--add" not in clean_args:
-        raise click.ClickException("long-short 需要明确动作：list 或 --add")
-    selector = parse_long_short_selector(tuple(arg for arg in clean_args if arg != "--add"))
-    long_group = _resolve_ls_leg(state, selector.long_leg, side="long")
-    short_group = _resolve_ls_leg(state, selector.short_leg, side="short")
-    config: dict[str, Any] = {
-        "name": selector.name or f"LS {long_group.get('name') or long_group.get('id')} / {short_group.get('name') or short_group.get('id')}",
-        "long_group": _group_ref(long_group),
-        "short_group": _group_ref(short_group),
-    }
-    state.backtest_ls_configs.append(config)
-    save_state(state)
-    click.echo("新增 Long-Short")
-    click.echo(f"名称: {config['name']}")
-    long_ref = config["long_group"]
-    short_ref = config["short_group"]
-    click.echo(f"多头: {long_ref.get('name') or long_ref.get('id')}")
-    click.echo(f"空头: {short_ref.get('name') or short_ref.get('id')}")
+    changed = long_short_command_handlers.handle_long_short_command(
+        state,
+        tuple(ctx.args),
+        resolve_long_leg=lambda current_state, leg: _resolve_ls_leg(current_state, leg, side="long"),
+        resolve_short_leg=lambda current_state, leg: _resolve_ls_leg(current_state, leg, side="short"),
+        group_ref=_group_ref,
+        print_list=_print_long_short_list,
+        validate_settings=_validate_registered_local_settings,
+        print_settings_help=_print_backtest_settings_help,
+    )
+    if changed:
+        save_state(state)
 
 
 def enter_backtest_state(state, *, scope: str = BACKTEST_SPACE) -> None:
