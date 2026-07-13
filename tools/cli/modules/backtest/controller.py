@@ -1024,18 +1024,6 @@ def _audit_bracket_scalar_list_text(value: Any) -> str | None:
     return ledger_formatter.bracket_scalar_list_text(value, scalar_sequence_text=_audit_scalar_sequence_text)
 
 
-def _audit_is_ledger_entries(entries: list[dict[str, Any]]) -> bool:
-    return ledger_formatter.is_ledger_entries(entries)
-
-
-def _audit_is_strategy_entries(entries: list[dict[str, Any]]) -> bool:
-    return strategy_formatter.is_strategy_entries(entries)
-
-
-def _audit_is_cash_field(field_name: str) -> bool:
-    return ledger_formatter.is_cash_field(field_name)
-
-
 def _audit_cash_pool_group_key(entry: dict[str, Any], *values: str) -> tuple[str, ...]:
     return ledger_formatter.cash_pool_group_key(entry, *values)
 
@@ -1075,9 +1063,9 @@ def _print_combined_cash_pool_scalar_value_table(prefix: str, records: list[dict
 
 
 def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    if not _audit_is_ledger_entries(values):
+    if not ledger_formatter.is_ledger_entries(values):
         return False
-    if _audit_is_cash_field(field_name):
+    if ledger_formatter.is_cash_field(field_name):
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for entry in values:
             value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
@@ -1113,7 +1101,7 @@ def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[
 
 
 def _print_strategy_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    if not _audit_is_strategy_entries(values):
+    if not strategy_formatter.is_strategy_entries(values):
         return False
     grouped: dict[str, list[str]] = {}
     for entry in values:
@@ -1233,9 +1221,9 @@ def _audit_ledger_entry_title(entry: dict[str, Any]) -> str:
 
 
 def _print_ledger_grouped_values(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    if not _audit_is_ledger_entries(values):
+    if not ledger_formatter.is_ledger_entries(values):
         return False
-    if _audit_is_cash_field(field_name):
+    if ledger_formatter.is_cash_field(field_name):
         return False
     if _print_positions_value_table(prefix, field_name, values):
         return True
@@ -1263,9 +1251,9 @@ def _print_positions_value_table(prefix: str, field_name: str, values: list[dict
 
 
 def _print_ledger_grouped_changes(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    if not _audit_is_ledger_entries(changes):
+    if not ledger_formatter.is_ledger_entries(changes):
         return False
-    if _audit_is_cash_field(field_name):
+    if ledger_formatter.is_cash_field(field_name):
         return False
     for change in sorted(changes, key=lambda item: (str(item.get("ledger") or ""), str(item.get("cash_pool") or ""))):
         before = _display_field_value(field_name, change.get("before"))
@@ -1443,7 +1431,7 @@ def _market_data_series_sample_cells(field_label: str, value: dict[str, Any]) ->
 
 
 def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    if not _audit_is_strategy_entries(changes):
+    if not strategy_formatter.is_strategy_entries(changes):
         return False
     grouped: dict[tuple[str, str], list[str]] = {}
     for change in changes:
@@ -1464,7 +1452,7 @@ def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: l
 
 
 def _print_cash_pool_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    if not _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(changes):
+    if not ledger_formatter.is_cash_field(field_name) or not ledger_formatter.is_ledger_entries(changes):
         return False
     grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for change in changes:
@@ -1567,9 +1555,9 @@ def _audit_combined_change_field_label(records: list[tuple[str, list[dict[str, A
 
 
 def _print_ledger_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    if not _audit_is_ledger_entries(changes):
+    if not ledger_formatter.is_ledger_entries(changes):
         return False
-    if _audit_is_cash_field(field_name):
+    if ledger_formatter.is_cash_field(field_name):
         return False
     rows: list[tuple[str, str, str, str]] = []
     for change in changes:
