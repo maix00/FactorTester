@@ -8,10 +8,8 @@ adapter maps that public command to the backend group-test application.
 from __future__ import annotations
 
 import contextlib
-import io
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import click
@@ -161,6 +159,7 @@ from tools.cli.modules.backtest.shared.selectors import (
 )
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.run_output import _chart_body_width, _multi_series_chart, _result_series
+from tools.cli.modules.backtest import result_output as result_output_formatter
 from tools.cli.modules.backtest import run_payloads as run_payload_formatter
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 from tools.cli.table import pad_display, render_table
@@ -4463,62 +4462,15 @@ def _print_results_help() -> None:
 
 
 def _parse_result_output_options(args: tuple[str, ...]) -> tuple[dict[str, Any], tuple[str, ...]]:
-    options: dict[str, Any] = {
-        "output": "",
-        "terminal": True,
-        "append": False,
-    }
-    cleaned: list[str] = []
-    i = 0
-    while i < len(args):
-        token = args[i]
-        if token in {"--output", "-o"}:
-            if i + 1 >= len(args) or args[i + 1].startswith("--"):
-                raise click.ClickException(f"{token} 缺少文件路径")
-            options["output"] = args[i + 1]
-            i += 2
-            continue
-        if token.startswith("--output="):
-            options["output"] = token.split("=", 1)[1]
-            i += 1
-            continue
-        if token == "--no-terminal":
-            options["terminal"] = False
-            i += 1
-            continue
-        if token == "--append":
-            options["append"] = True
-            i += 1
-            continue
-        cleaned.append(token)
-        i += 1
-    if not options["terminal"] and not options["output"]:
-        raise click.ClickException("--no-terminal 必须搭配 --output PATH")
-    return options, tuple(cleaned)
+    return result_output_formatter.parse_result_output_options(args, error=click.ClickException)
 
 
 def _emit_result_output(options: dict[str, Any], callback) -> None:
-    output_path = str(options.get("output") or "")
-    terminal = bool(options.get("terminal", True))
-    append = bool(options.get("append", False))
-    if terminal and not output_path:
-        callback()
-        return
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        callback()
-    text = buffer.getvalue()
-    if output_path:
-        path = Path(output_path).expanduser()
-        if path.parent and str(path.parent) not in {"", "."}:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        mode = "a" if append else "w"
-        with path.open(mode, encoding="utf-8") as fh:
-            fh.write(text)
-            if text and not text.endswith("\n"):
-                fh.write("\n")
-    if terminal and text:
-        click.echo(text, nl=False)
+    result_output_formatter.emit_result_output(
+        options,
+        callback,
+        echo=lambda text: click.echo(text, nl=False),
+    )
 
 
 def _require_last_result(state) -> dict[str, Any]:
