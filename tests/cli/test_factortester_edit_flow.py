@@ -615,7 +615,7 @@ def test_step_audit_keeps_moderate_combined_ledger_fields_in_one_table(capsys, m
     assert "columns 1/" not in out
 
 
-def test_step_audit_displays_auto_dmtm_ledger_config_as_runtime_resolved(capsys) -> None:
+def test_step_audit_displays_backend_null_dmtm_ledger_config_verbatim(capsys) -> None:
     values = [
         {
             "scope": "ledger_config",
@@ -635,8 +635,7 @@ def test_step_audit_displays_auto_dmtm_ledger_config_as_runtime_resolved(capsys)
     assert "合并账本字段" in out
     assert "cost_basis_method" in out
     assert "daily_mark_to_market_enabled" in out
-    assert "auto（逐产品按历史字段解析）" in out
-    assert "null" not in out
+    assert "null" in out
 
 
 def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:

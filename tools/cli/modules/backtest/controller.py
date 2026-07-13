@@ -4377,10 +4377,6 @@ def _display_field_value(qualified_name: str, value: Any) -> Any:
             return summary
     if qualified_name == "MarketDataModule.required_data_source" and value in ((), []):
         return "auto（自动选择）"
-    if qualified_name == "TradingRuleModule.daily_mark_to_market_enabled" and value in (None, ""):
-        return "auto（逐产品按历史字段解析）"
-    if qualified_name == "TradingRuleModule.cost_basis_method" and value in (None, ""):
-        return "auto（逐产品按历史字段解析）"
     if qualified_name.rsplit(".", 1)[-1] == "cash":
         return _audit_cash_summary(value)
     if isinstance(value, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in value):
