@@ -2227,6 +2227,21 @@ def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
         click.echo(line)
 
 
+def _step_event_renderer() -> step_runtime.StepEventRenderer:
+    return step_runtime.StepEventRenderer(
+        phase_label=phase_label,
+        audit_context=_audit_step_event_context,
+        print_badge_box=_print_step_badge_box,
+        print_strategy_context=_print_strategy_context,
+        print_event_payloads=_print_event_payloads,
+        print_audit_fields=_print_audit_fields,
+        print_audit_changes=_print_audit_changes,
+        print_contract_audit=_print_contract_audit,
+        display_key=_audit_display_key,
+        normalize=_audit_normalized_value,
+    )
+
+
 def _handle_step_event(
     data: dict[str, Any],
     client,
@@ -2240,42 +2255,7 @@ def _handle_step_event(
         step_runtime.continue_step(client, run_token, navigator)
         return
 
-    flow_phase = str(data.get("flow_phase") or "")
-    flow_name = str(data.get("flow_name") or "")
-    flow_id = str(data.get("flow_id") or "")
-    phase_text = f"{flow_phase.upper()} ({phase_label(flow_phase)})"
-    timestamp_text = str(data.get("timestamp") or "")
-    click.echo("")
-    _print_step_badge_box(data, phase_text, flow_id, flow_name, timestamp_text)
-    description = str(data.get("description") or "")
-    if description:
-        click.echo(f"说明: {description}")
-
-    with _audit_step_event_context(data):
-        strategies = list(data.get("strategies") or [])
-        _print_strategy_context(strategies)
-        _print_event_payloads(list(data.get("event_payloads") or []))
-        route_state: set[tuple[tuple[str, str, str], ...]] = set()
-        _print_audit_fields(
-            "输入字段",
-            list(data.get("inputs") or []),
-            empty_message="（此 flow 未声明输入字段）",
-            route_state=route_state,
-        )
-        unchanged_outputs, output_changes, unchanged_message = step_display_formatter.output_audit_sections(
-            data,
-            display_key=_audit_display_key,
-            normalize=_audit_normalized_value,
-        )
-        _print_audit_fields(
-            "声明输出字段（未变化）",
-            unchanged_outputs,
-            empty_message=unchanged_message,
-            route_state=route_state,
-        )
-        _print_audit_changes("声明输出的变化", output_changes, route_state=route_state)
-        _print_contract_audit(list(data.get("input_contract_violations") or []))
-
+    _step_event_renderer().render(data)
     click.echo("")
     step_runtime.prompt_step_navigation(navigator)
     step_runtime.continue_step(client, run_token, navigator)
