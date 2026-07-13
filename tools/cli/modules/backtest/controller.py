@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +32,7 @@ from tools.cli.modules.backtest.audit_formatters import orders as orders_formatt
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
 from tools.cli.modules.backtest.audit_formatters import samples as samples_formatter
 from tools.cli.modules.backtest.audit_formatters import source_groups as source_group_formatter
+from tools.cli.modules.backtest.audit_formatters import step_display as step_display_formatter
 from tools.cli.modules.backtest.audit_formatters import strategy as strategy_formatter
 from tools.cli.modules.backtest.audit_formatters import table_render as table_render_formatter
 from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_intent_formatter
@@ -4220,27 +4220,7 @@ def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
 
 
 def _current_event_subject_summary(current_event: dict[str, Any]) -> str:
-    subjects = current_event.get("subjects")
-    if not isinstance(subjects, list) or not subjects:
-        return "无事件主体"
-    parts: list[str] = []
-    for item in subjects[:3]:
-        if not isinstance(item, dict):
-            continue
-        strategy = item.get("strategy") or ""
-        ledger = item.get("ledger") or ""
-        subject = item.get("subject") or ""
-        action = item.get("action") or ""
-        order_id = item.get("order_id") or ""
-        owner = strategy or ledger or "共享"
-        detail = str(subject or action or order_id or "?")
-        if action and action != subject:
-            detail = f"{detail}/{action}" if detail else str(action)
-        parts.append(f"{owner}:{detail}")
-    remaining = len(subjects) - len(parts)
-    if remaining > 0:
-        parts.append(f"...另 {remaining} 条")
-    return "；".join(parts) if parts else "无事件主体"
+    return step_display_formatter.current_event_subject_summary(current_event)
 
 
 def _audit_max_width() -> int:
@@ -4252,33 +4232,8 @@ def _wrap_audit_text(text: str, *, width: int, subsequent_indent: str = "") -> l
 
 
 def _print_step_badge_box(data: dict[str, Any], phase_text: str, flow_id: str, flow_name: str, timestamp_text: str) -> None:
-    current_event = data.get("current_event")
-    if not isinstance(current_event, dict):
-        current_event = {}
-    event_kind = str(current_event.get("event_kind") or data.get("event_kind") or "")
-    batch_count = current_event.get("batch_count")
-    fields = [
-        ("flow", f"{phase_text} · {flow_id} ({flow_name})"),
-        ("timestamp", timestamp_text or "-"),
-    ]
-    if event_kind or batch_count not in (None, ""):
-        fields.append(("event_kind", event_kind or "-"))
-        fields.append(("batch_count", str(batch_count) if batch_count not in (None, "") else "-"))
-        fields.append(("event_subjects", _current_event_subject_summary(current_event)))
-    key_width = max(_audit_display_width(key) for key, _value in fields)
-    max_width = _audit_max_width() - 4
-    display_lines: list[str] = []
-    for key, value in fields:
-        line_prefix = f"{_pad_audit_cell(key, key_width)} = "
-        line = f"{line_prefix}{value}"
-        continuation = " " * _audit_display_width(line_prefix)
-        display_lines.extend(_wrap_audit_text(line, width=max_width, subsequent_indent=continuation))
-    box_width = min(max_width, max(_audit_display_width(line) for line in display_lines))
-    border = "━" * (box_width + 2)
-    click.echo(_audit_badge_highlight(f"┏{border}┓"), color=True)
-    for line in display_lines:
-        click.echo(_audit_badge_highlight(f"┃ {_pad_audit_cell(line, box_width)} ┃"), color=True)
-    click.echo(_audit_badge_highlight(f"┗{border}┛"), color=True)
+    for line in step_display_formatter.step_badge_box_lines(data, phase_text, flow_id, flow_name, timestamp_text):
+        click.echo(_audit_badge_highlight(line), color=True)
 
 
 def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
@@ -4293,63 +4248,19 @@ def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
         click.echo(f"  {action}: {field}")
 
 
-@dataclass
-class _StepNavigator:
-    until: datetime | None = None
-    to_end: bool = False
-
-    def should_display(self, timestamp: Any) -> bool:
-        if self.to_end:
-            return False
-        if self.until is None:
-            return True
-        current = _parse_step_timestamp(timestamp)
-        if current is None or current < self.until:
-            return False
-        self.until = None
-        return True
+_StepNavigator = step_display_formatter.StepNavigator
 
 
 def _parse_step_timestamp(value: Any) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is not None:
-        # Compare the wall-clock timestamp exactly as printed by the server;
-        # the remote CLI machine may live in a different local timezone.
-        parsed = parsed.replace(tzinfo=None)
-    return parsed
+    return step_display_formatter.parse_step_timestamp(value)
 
 
 def _set_step_navigation(navigator: _StepNavigator, command: str) -> str | None:
-    text = command.strip()
-    if not text:
-        return None
-    if text.lower() in {"end", "finish"}:
-        navigator.to_end = True
-        navigator.until = None
-        return None
-    if text.lower().startswith("until "):
-        target = _parse_step_timestamp(text[6:].strip())
-        if target is None:
-            return "无法解析时刻；示例: until 2026-01-15 10:30:00"
-        navigator.until = target
-        navigator.to_end = False
-        return None
-    return "未知命令；使用 Enter、until <时刻> 或 end"
+    return step_display_formatter.set_step_navigation(navigator, command)
 
 
 def _continue_step(client, run_token: str, navigator: _StepNavigator | None = None) -> None:
-    payload: dict[str, Any] = {"run_token": run_token, "action": "continue"}
-    if navigator is not None and navigator.to_end:
-        payload["action"] = "end"
-    elif navigator is not None and navigator.until is not None:
-        payload["action"] = "until"
-        payload["until"] = navigator.until.isoformat(sep=" ")
+    payload = step_display_formatter.step_continue_payload(run_token, navigator)
     try:
         client.session.post("/step_continue", payload)
     except Exception as exc:
