@@ -160,6 +160,7 @@ from tools.cli.modules.backtest.shared.selectors import (
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.run_output import _chart_body_width, _multi_series_chart, _result_series
 from tools.cli.modules.backtest import result_output as result_output_formatter
+from tools.cli.modules.backtest import results_data as results_data_formatter
 from tools.cli.modules.backtest import run_payloads as run_payload_formatter
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 from tools.cli.table import pad_display, render_table
@@ -4837,50 +4838,19 @@ def _print_order_flow_result(state, args: tuple[str, ...]) -> None:
 
 
 def _result_timestamp_ms(data: dict[str, Any], args: tuple[str, ...]) -> int:
-    explicit = _arg_value(args, "--timestamp-ms")
-    if explicit:
-        return int(explicit)
-    index_raw = _arg_value(args, "--index")
-    index = int(index_raw or "1") - 1
-    groups_raw = data.get("groups")
-    groups = groups_raw if isinstance(groups_raw, list) else []
-    for group in groups:
-        if not isinstance(group, dict):
-            continue
-        timestamps = group.get("timestamps")
-        if isinstance(timestamps, list) and timestamps:
-            index = max(0, min(index, len(timestamps) - 1))
-            return _timestamp_value_to_ms(timestamps[index])
-    raise click.ClickException("最近一次结果没有时间索引，无法请求快照")
+    return results_data_formatter.result_timestamp_ms(data, args, error=click.ClickException)
 
 
 def _selected_result_groups(data: dict[str, Any], group_name: str = "") -> list[dict[str, Any]]:
-    groups = [group for group in (data.get("groups") or []) if isinstance(group, dict)]
-    if not group_name:
-        return groups
-    group = _result_group_for_name(data, group_name)
-    return [group] if group else []
+    return results_data_formatter.selected_result_groups(data, group_name)
 
 
 def _result_group_for_name(data: dict[str, Any], name: str) -> dict[str, Any] | None:
-    for group in data.get("groups") or []:
-        if not isinstance(group, dict):
-            continue
-        keys = {
-            str(group.get("name") or ""),
-            str(group.get("id") or ""),
-            str(group.get("group_id") or ""),
-        }
-        if name in keys:
-            return group
-    return None
+    return results_data_formatter.result_group_for_name(data, name)
 
 
 def _group_equity_curve(group: dict[str, Any]) -> list[float]:
-    values = group.get("total_equity") or group.get("equity_curve") or []
-    if isinstance(values, dict):
-        values = list(values.values())
-    return [_float(value) for value in values]
+    return results_data_formatter.group_equity_curve(group)
 
 
 def _fetch_order_flow_for_group(state, data: dict[str, Any], group_name: str) -> list[dict[str, Any]]:
@@ -4898,139 +4868,63 @@ def _fetch_order_flow_for_group(state, data: dict[str, Any], group_name: str) ->
 
 
 def _attribution_bucket(record: dict[str, Any], by: str) -> str:
-    if by in {"ledger", "ledgers"}:
-        return _record_ledger_id(record) or "(未记录账本)"
-    if by in {"cash-pool", "cash_pool", "cashpool"}:
-        return _record_cash_pool_id(record) or "(未记录资金池)"
-    if by in {"product", "products", "contract", "contracts"}:
-        return str(record.get("product") or record.get("instrument") or "")
-    return ""
+    return results_data_formatter.attribution_bucket(record, by)
 
 
 def _attribution_table_title(by: str) -> str:
-    if by in {"ledger", "ledgers"}:
-        return "费用按账本聚合"
-    if by in {"cash-pool", "cash_pool", "cashpool"}:
-        return "费用按资金池聚合"
-    return "费用按产品/合约聚合"
+    return results_data_formatter.attribution_table_title(by)
 
 
 def _attribution_table_header(by: str) -> str:
-    if by in {"ledger", "ledgers"}:
-        return "账本"
-    if by in {"cash-pool", "cash_pool", "cashpool"}:
-        return "资金池"
-    return "产品/合约"
+    return results_data_formatter.attribution_table_header(by)
 
 
 def _record_ledger_id(record: dict[str, Any]) -> str:
-    return _record_detail_value(record, "ledger_id")
+    return results_data_formatter.record_ledger_id(record)
 
 
 def _record_cash_pool_id(record: dict[str, Any]) -> str:
-    return _record_detail_value(record, "cash_pool_id")
+    return results_data_formatter.record_cash_pool_id(record)
 
 
 def _record_detail_value(record: dict[str, Any], key: str) -> str:
-    value = record.get(key)
-    if value not in (None, ""):
-        return str(value)
-    details = record.get("details")
-    if isinstance(details, dict):
-        value = details.get(key)
-        if value not in (None, ""):
-            return str(value)
-    return ""
+    return results_data_formatter.record_detail_value(record, key)
 
 
 def _group_detail_payload(state, data: dict[str, Any], group: dict[str, Any]) -> dict[str, Any]:
-    product_path_selection_id = str(
-        group.get("product_path_selection_id")
-        or data.get("product_path_selection_id")
-        or ""
-    )
-    if not product_path_selection_id:
-        raise click.ClickException("最近一次结果没有 product_path_selection_id，无法请求组内详情")
-    return {
-        "page_uuid": state.page_uuid,
-        "product_path_selection_id": product_path_selection_id,
-        "group_index": group.get("group_index", group.get("groupIndex", 1)),
-        "group_id": group.get("group_id") or group.get("id"),
-    }
+    return results_data_formatter.group_detail_payload(state, data, group, error=click.ClickException)
 
 
 def _product_display(product: Any) -> str:
-    if not isinstance(product, dict):
-        return str(product or "")
-    name = str(product.get("name") or product.get("product") or product.get("display_ref") or "")
-    desc = str(product.get("desc") or product.get("description") or "")
-    if desc and desc not in name:
-        return f"{name}({desc})"
-    return name
+    return results_data_formatter.product_display(product)
 
 
 def _float(value: Any) -> float:
-    try:
-        if value is None or value == "":
-            return 0.0
-        return float(value)
-    except Exception:
-        return 0.0
+    return results_data_formatter.as_float(value)
 
 
 def _pct(value: float) -> str:
-    return f"{value * 100:.2f}%"
+    return results_data_formatter.pct(value)
 
 
 def _fmt_optional(value: Any) -> str:
-    if value is None or value == "":
-        return ""
-    if isinstance(value, float):
-        return f"{value:.6g}"
-    return str(value)
+    return results_data_formatter.fmt_optional(value)
 
 
 def _fmt_detail_number(record: dict[str, Any], key: str) -> str:
-    value = record.get(key)
-    if value is None and isinstance(record.get("details"), dict):
-        value = record["details"].get(key)
-    if value is None:
-        return ""
-    return f"{_float(value):,.2f}"
+    return results_data_formatter.fmt_detail_number(record, key)
 
 
 def _timestamp_value_to_ms(value: Any) -> int:
-    if isinstance(value, (int, float)):
-        return int(value)
-    text = str(value).strip()
-    if not text:
-        raise click.ClickException("时间索引为空，无法请求快照")
-    try:
-        return int(float(text))
-    except ValueError:
-        pass
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise click.ClickException(f"无法解析时间索引: {text}") from exc
-    return int(parsed.timestamp() * 1000)
+    return results_data_formatter.timestamp_value_to_ms(value, error=click.ClickException)
 
 
 def _group_id_for_name(data: dict[str, Any], name: str) -> str:
-    for group in data.get("groups") or []:
-        if not isinstance(group, dict):
-            continue
-        keys = {str(group.get("name") or ""), str(group.get("id") or ""), str(group.get("group_id") or "")}
-        if name in keys:
-            return str(group.get("id") or group.get("group_id") or "")
-    return ""
+    return results_data_formatter.group_id_for_name(data, name)
 
 
 def _arg_value(args: tuple[str, ...], flag: str) -> str:
-    for index, token in enumerate(args):
-        if token == flag and index + 1 < len(args):
-            return str(args[index + 1])
-    return ""
+    return results_data_formatter.arg_value(args, flag)
 
 
 def _print_backtest_result_hints() -> None:
