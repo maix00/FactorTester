@@ -9,6 +9,7 @@ import click
 
 
 DisplayValue = Callable[[str, Any], Any]
+DisplayKey = Callable[[Any], str]
 ValueIsEmpty = Callable[[Any], bool]
 ScalarRecordCandidate = tuple[tuple[Any, ...] | None, Any, bool]
 
@@ -71,3 +72,20 @@ def scalar_record_group(candidates: list[ScalarRecordCandidate]) -> tuple[tuple[
         if table is not None:
             return table, printer, combined_scalar_routes(table)
     return None, None, None
+
+
+def field_change_buckets(
+    field_name: str,
+    changes: list[dict[str, Any]],
+    *,
+    display_value: DisplayValue,
+    display_key: DisplayKey,
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for change in changes:
+        before = display_value(field_name, change.get("before"))
+        after = display_value(field_name, change.get("after"))
+        key = (display_key(before), display_key(after))
+        bucket = grouped.setdefault(key, {"before": before, "after": after, "entries": []})
+        bucket["entries"].append(change)
+    return list(grouped.values())

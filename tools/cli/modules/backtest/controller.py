@@ -2985,14 +2985,12 @@ def _print_audit_changes(
         if _print_ledger_grouped_changes("    ", field_name, field_changes):
             index += 1
             continue
-        grouped: dict[tuple[str, str], dict[str, Any]] = {}
-        for change in field_changes:
-            before = _display_field_value(field_name, change.get("before"))
-            after = _display_field_value(field_name, change.get("after"))
-            key = (_audit_display_key(before), _audit_display_key(after))
-            bucket = grouped.setdefault(key, {"before": before, "after": after, "entries": []})
-            bucket["entries"].append(change)
-        buckets = list(grouped.values())
+        buckets = audit_printer_helpers.field_change_buckets(
+            field_name,
+            field_changes,
+            display_value=_display_field_value,
+            display_key=_audit_display_key,
+        )
         for bucket in buckets:
             label = _audit_source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
             if _audit_source_route_rows(bucket["entries"]):
@@ -3148,16 +3146,10 @@ def _handle_step_event(
         )
         outputs = list(data.get("outputs") or [])
         unchanged_outputs = _unchanged_output_records(outputs, output_changes)
-        if not outputs:
-            unchanged_output_message = "（此 flow 未声明输出字段）"
-        elif output_changes:
-            unchanged_output_message = "（所有声明输出字段均发生变化，见下方“声明输出的变化”）"
-        else:
-            unchanged_output_message = "（没有未变化的声明输出字段）"
         _print_audit_fields(
             "声明输出字段（未变化）",
             unchanged_outputs,
-            empty_message=unchanged_output_message,
+            empty_message=step_display_formatter.unchanged_output_message(outputs, output_changes),
             route_state=route_state,
         )
         _print_audit_changes("声明输出的变化", output_changes, route_state=route_state)

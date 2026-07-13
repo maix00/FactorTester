@@ -156,6 +156,14 @@ def unchanged_output_records(
     return [record for record in records if str(record.get("field") or "") not in changed_fields]
 
 
+def unchanged_output_message(outputs: list[dict[str, Any]], output_changes: list[dict[str, Any]]) -> str:
+    if not outputs:
+        return "（此 flow 未声明输出字段）"
+    if output_changes:
+        return "（所有声明输出字段均发生变化，见下方“声明输出的变化”）"
+    return "（没有未变化的声明输出字段）"
+
+
 def merge_declared_and_ledger_changes(
     output_changes: list[dict[str, Any]],
     ledger_changes: list[dict[str, Any]],
