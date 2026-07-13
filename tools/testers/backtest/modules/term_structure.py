@@ -571,18 +571,68 @@ def _akshare_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
     if not isinstance(specs, pd.DataFrame) or specs.empty:
         return {}
     out: dict[str, dict[str, Any]] = {}
+    product_exchange = _local_cnfutures_product_exchange_by_code()
     for _, spec in specs.iterrows():
         key = normalise_instrument_code(spec.get("contract_code"))
         if not key:
             continue
-        out[key] = {
+        exchange = str(spec.get("exchange") or "").upper()
+        candidate = {
+            "lifecycle_exchange": exchange,
             "open_date": spec.get("list_date"),
             "last_trade_date": spec.get("last_trading_date"),
             "notice_date": spec.get("delivery_notice_date"),
             "delivery_date": spec.get("last_delivery_date"),
-            "lifecycle_source": f"AKShare {spec.get('exchange')} contract lifecycle",
+            "lifecycle_source": f"AKShare {exchange} contract lifecycle",
         }
+        product_code = str(spec.get("product_code") or "").upper()
+        _select_akshare_lifecycle_spec(out, key, candidate, product_code, product_exchange)
     return out
+
+
+def _select_akshare_lifecycle_spec(
+    out: dict[str, dict[str, Any]],
+    key: str,
+    candidate: dict[str, Any],
+    product_code: str,
+    product_exchange: dict[str, str],
+) -> None:
+    expected_exchange = product_exchange.get(str(product_code or "").upper())
+    existing = out.get(key)
+    if existing is not None and expected_exchange:
+        candidate_exchange = str(candidate.get("lifecycle_exchange") or "").upper()
+        existing_exchange = str(existing.get("lifecycle_exchange") or "").upper()
+        if existing_exchange == expected_exchange and candidate_exchange != expected_exchange:
+            return
+        if candidate_exchange == expected_exchange and existing_exchange != expected_exchange:
+            out[key] = candidate
+            return
+    out[key] = candidate
+
+
+@lru_cache(maxsize=1)
+def _local_cnfutures_product_exchange_by_code() -> dict[str, str]:
+    try:
+        from scripts.data_dir import CACHE_DB_PATH
+        from tools.data.sqlite.db import connect_sqlite
+    except Exception:
+        return {}
+    try:
+        with connect_sqlite(CACHE_DB_PATH) as conn:
+            rows = conn.execute(
+                """
+                SELECT product_code, sector_exchange_code
+                FROM src_local_cnfutures_discovered_products
+                WHERE product_code IS NOT NULL AND sector_exchange_code IS NOT NULL
+                """
+            ).fetchall()
+    except Exception:
+        return {}
+    return {
+        str(row["product_code"]).upper(): str(row["sector_exchange_code"]).upper()
+        for row in rows
+        if row["product_code"] not in (None, "") and row["sector_exchange_code"] not in (None, "")
+    }
 
 
 # Local product/contract names are suffixed with these short exchange codes
@@ -647,6 +697,7 @@ def _akshare_live_lookup(exchange: str, key: str) -> dict[str, Any] | None:
         if not code:
             continue
         _akshare_live_cache[code] = {
+            "lifecycle_exchange": exchange,
             "open_date": live_row.get("list_date"),
             "last_trade_date": live_row.get("last_trading_date"),
             "notice_date": live_row.get("delivery_notice_date"),

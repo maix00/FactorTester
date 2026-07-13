@@ -11,6 +11,7 @@ import contextlib
 import io
 import json
 import ast
+import math
 import shutil
 import textwrap
 from dataclasses import dataclass
@@ -2212,13 +2213,44 @@ def _audit_lifecycle_notice_table_lines(
     *,
     indent: str = "",
 ) -> list[str] | None:
+    extra_columns: list[str] = []
+    preferred_extra_columns = [
+        "open_date",
+        "notice_date",
+        "lifecycle_exchange",
+        "lifecycle_source",
+    ]
+    ignored = {
+        "product",
+        "contract",
+        "uid",
+        "contract_product",
+        "contract_object",
+        "notice_type",
+        "notice_reason",
+        "last_trade_date",
+        "delivery_date",
+    }
+    for item in value:
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        for key, item_value in payload.items():
+            key_text = str(key)
+            if key_text in ignored or _audit_table_cell_is_complex(item_value):
+                continue
+            if key_text not in extra_columns:
+                extra_columns.append(key_text)
+    extra_columns = [
+        key for key in preferred_extra_columns if key in extra_columns
+    ] + [
+        key for key in extra_columns if key not in preferred_extra_columns
+    ]
     rows = []
     for item in value:
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
         notice_type = payload.get("notice_type")
         if notice_type not in {"force_close", "rollover"}:
             return None
-        rows.append((
+        row = [
             item.get("timestamp") or "",
             item.get("strategy") or "",
             payload.get("product") or "",
@@ -2227,11 +2259,13 @@ def _audit_lifecycle_notice_table_lines(
             payload.get("notice_reason") or "",
             _audit_notice_scalar(payload.get("last_trade_date")),
             _audit_notice_scalar(payload.get("delivery_date")),
-        ))
+        ]
+        row.extend(_audit_notice_scalar(payload.get(column)) for column in extra_columns)
+        rows.append(tuple(row))
     if not rows:
         return None
     return _audit_table_lines(
-        ("notice_time", "strategy", "product", "contract", "notice_type", "reason", "last_trade_date", "delivery_date"),
+        ("notice_time", "strategy", "product", "contract", "notice_type", "reason", "last_trade_date", "delivery_date", *extra_columns),
         rows,
         indent=indent,
     )
@@ -2239,6 +2273,8 @@ def _audit_lifecycle_notice_table_lines(
 
 def _audit_notice_scalar(value: Any) -> str:
     if value is None:
+        return ""
+    if isinstance(value, float) and math.isnan(value):
         return ""
     if isinstance(value, dict):
         for key in ("name", "repr", "value", "contract_product", "contract", "uid"):

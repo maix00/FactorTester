@@ -408,6 +408,37 @@ def test_row_exchange_maps_local_suffix_to_akshare_code():
     assert term_structure._row_exchange({"contract": "P2601"}) is None
 
 
+def test_akshare_lifecycle_duplicate_contract_prefers_local_product_exchange():
+    out: dict[str, dict[str, object]] = {}
+    product_exchange = {"EC": "INE"}
+
+    term_structure._select_akshare_lifecycle_spec(
+        out,
+        "EC2602",
+        {
+            "lifecycle_exchange": "INE",
+            "last_trade_date": "2026-02-23",
+            "lifecycle_source": "AKShare INE contract lifecycle",
+        },
+        "EC",
+        product_exchange,
+    )
+    term_structure._select_akshare_lifecycle_spec(
+        out,
+        "EC2602",
+        {
+            "lifecycle_exchange": "SHFE",
+            "last_trade_date": "2026-02-23",
+            "lifecycle_source": "AKShare SHFE contract lifecycle",
+        },
+        "EC",
+        product_exchange,
+    )
+
+    assert out["EC2602"]["lifecycle_exchange"] == "INE"
+    assert out["EC2602"]["lifecycle_source"] == "AKShare INE contract lifecycle"
+
+
 def test_akshare_live_lookup_is_attempted_once_per_exchange_and_persists(monkeypatch):
     monkeypatch.setattr(term_structure, "_akshare_live_cache", {})
     monkeypatch.setattr(term_structure, "_akshare_live_attempted", set())
@@ -430,6 +461,7 @@ def test_akshare_live_lookup_is_attempted_once_per_exchange_and_persists(monkeyp
     missing = term_structure._akshare_live_lookup("GFEX", "SI2412")
 
     assert first == {
+        "lifecycle_exchange": "GFEX",
         "open_date": "2022-12-22",
         "last_trade_date": "2024-11-15",
         "notice_date": None,

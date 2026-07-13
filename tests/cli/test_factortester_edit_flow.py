@@ -527,6 +527,7 @@ def test_step_audit_renders_lifecycle_notices_as_single_table() -> None:
                 "last_trade_date": "2026-01-08",
                 "delivery_date": "2026-01-12",
                 "lifecycle_source": "AKShare CZCE contract lifecycle",
+                "lifecycle_exchange": "CZCE",
                 "notice_type": "force_close",
                 "notice_reason": "auto_close_date",
             },
@@ -554,9 +555,12 @@ def test_step_audit_renders_lifecycle_notices_as_single_table() -> None:
     assert "strategy" in text
     assert "product" in text
     assert "contract" in text
+    assert "lifecycle_source" in text
+    assert "lifecycle_exchange" in text
     assert "RS.CZC" in text
     assert "RS609.CZC" in text
     assert "EC2602.INE" in text
+    assert "AKShare CZCE contract lifecycle" in text
     assert "auto_close_date" in text
     assert "明细" not in text
     assert '"payload"' not in text
