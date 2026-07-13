@@ -37,7 +37,6 @@ from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_i
 from tools.cli.modules.backtest.audit_formatters import value_text as value_text_formatter
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
-from tools.data.types.data_money import _format_data_money
 from tools.testers.backtest.engines.native.flow import phase_label
 # Module-level mapping from group ID to short alias, populated at run time
 _short_alias_map: dict[str, str] = {}
@@ -3351,23 +3350,7 @@ def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
 
 
 def _audit_cash_summary(value: Any) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, dict):
-        amount = value.get("amount")
-        amount_value: Any = amount
-        if isinstance(amount, dict):
-            amount_value = amount.get("repr", amount.get("value"))
-        currency = str(value.get("currency") or "")
-        scale = value.get("scale")
-        use_minor = bool(value.get("use_minor_units"))
-        if currency and scale not in (None, ""):
-            try:
-                return _format_data_money(amount_value, currency, use_minor, int(scale))
-            except (TypeError, ValueError):
-                pass
-        return f"DataMoney({' '.join(str(part) for part in (amount_value, currency) if part not in (None, ''))})"
-    return _audit_text(value).replace("\n", " ")
+    return value_text_formatter.cash_summary(value, audit_text=_audit_text)
 
 
 def _unchanged_output_records(

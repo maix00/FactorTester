@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from tools.cli.modules.backtest.audit_formatters import table_render
+from tools.data.types.data_money import _format_data_money
 
 
 TableLines = Callable[..., list[str]]
@@ -57,6 +58,26 @@ def scalar_cell(value: Any, *, cash_summary: CashSummary) -> str:
     if isinstance(value, float):
         return f"{value:.12g}"
     return str(value)
+
+
+def cash_summary(value: Any, *, audit_text: Callable[[Any], str]) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, dict):
+        amount = value.get("amount")
+        amount_value: Any = amount
+        if isinstance(amount, dict):
+            amount_value = amount.get("repr", amount.get("value"))
+        currency = str(value.get("currency") or "")
+        scale = value.get("scale")
+        use_minor = bool(value.get("use_minor_units"))
+        if currency and scale not in (None, ""):
+            try:
+                return _format_data_money(amount_value, currency, use_minor, int(scale))
+            except (TypeError, ValueError):
+                pass
+        return f"DataMoney({' '.join(str(part) for part in (amount_value, currency) if part not in (None, ''))})"
+    return audit_text(value).replace("\n", " ")
 
 
 def mapping_table_text(
