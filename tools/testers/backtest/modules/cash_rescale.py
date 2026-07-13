@@ -23,6 +23,7 @@ from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.cash_pool import cash_for_ledger
 from tools.testers.backtest.modules.strategy_book import StrategyBookModule, available_cash_for_ledger
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
@@ -36,6 +37,7 @@ class LedgerCashConstraintModule(ExecutableModule):
         "constrain_to_ledger_cash",
         inputs=(
             OrderConstructModule.orders,
+            EngineModule.engine_mode,
             MarketDataModule.current_prices,
             MarketDataModule.current_historical_fields,
             FeeModule.fee_mode,
@@ -65,6 +67,7 @@ class LedgerCashConstraintModule(ExecutableModule):
         inputs=(
             MarketDataModule.current_prices,
             MarketDataModule.current_historical_fields,
+            EngineModule.engine_mode,
             FeeModule.fee_mode,
             FeeModule.fixed_fee_rate,
             MarginModule.margin_mode,

@@ -14,7 +14,7 @@ from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.custom_product import custom_product_editor_definition
-from tools.testers.backtest.modules.engine import engine_mode_for
+from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
@@ -109,6 +109,7 @@ class FeeModule(ExecutableModule):
     resolve_fee_cost: ClassVar[Flow] = Flow(
         "resolve_fee_cost",
         inputs=(
+            EngineModule.engine_mode,
             fee_mode,
             transaction_fee_source,
             fixed_fee_rate,

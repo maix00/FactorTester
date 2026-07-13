@@ -2113,6 +2113,8 @@ def _audit_text(value: Any) -> str:
 def _audit_special_text(value: Any) -> str | None:
     if not isinstance(value, dict):
         return None
+    if value.get("type") == "PositionsTable":
+        return _audit_positions_text(value)
     if value.get("type") in {"TargetWeightIntent", "OrderDeltaIntent"}:
         return _audit_trade_intent_text(value)
     if value.get("type") == "TimestampTradingDayResolver":
@@ -2222,6 +2224,7 @@ def _audit_lifecycle_notice_table_lines(
         "lifecycle_fetched_at",
         "lifecycle_exchange",
         "open_date",
+        "expire_date",
         "notice_date",
     ]
     ignored = {
@@ -2248,24 +2251,30 @@ def _audit_lifecycle_notice_table_lines(
     ] + [
         key for key in extra_columns if key not in preferred_extra_columns
     ]
-    rows = []
+    grouped_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
     for item in value:
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
         notice_type = payload.get("notice_type")
         if notice_type not in {"force_close", "rollover"}:
             return None
-        row = [
+        row_key = (
             item.get("timestamp") or "",
-            item.get("strategy") or "",
             payload.get("product") or "",
             _audit_notice_scalar(payload.get("contract_product") or payload.get("contract") or payload.get("uid") or payload.get("contract_object")),
             notice_type,
             payload.get("notice_reason") or "",
             _audit_notice_scalar(payload.get("last_trade_date")),
             _audit_notice_scalar(payload.get("delivery_date")),
-        ]
-        row.extend(_audit_notice_scalar(payload.get(column)) for column in extra_columns)
-        rows.append(tuple(row))
+            *[_audit_notice_scalar(payload.get(column)) for column in extra_columns],
+        )
+        grouped = grouped_rows.setdefault(row_key, {"strategies": []})
+        strategy = item.get("strategy")
+        if strategy not in (None, ""):
+            grouped["strategies"].append(str(strategy))
+    rows = []
+    for row_key, grouped in grouped_rows.items():
+        strategies = ", ".join(sorted(dict.fromkeys(grouped.get("strategies") or [])))
+        rows.append(tuple([row_key[0], strategies, *row_key[1:]]))
     if not rows:
         return None
     return _audit_table_lines(
@@ -2591,6 +2600,13 @@ def _audit_is_ledger_entries(entries: list[dict[str, Any]]) -> bool:
     return bool(scopes) and scopes <= {"ledger", "ledger_config"}
 
 
+def _audit_is_strategy_entries(entries: list[dict[str, Any]]) -> bool:
+    if not entries:
+        return False
+    scopes = {str(entry.get("scope") or "") for entry in entries}
+    return bool(scopes) and scopes <= {"strategy_context", "strategy_config"}
+
+
 def _audit_is_cash_field(field_name: str) -> bool:
     return field_name.rsplit(".", 1)[-1] == "cash"
 
@@ -2652,6 +2668,22 @@ def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[
     return True
 
 
+def _print_strategy_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
+    if not _audit_is_strategy_entries(values):
+        return False
+    rows: list[tuple[str, str, str]] = []
+    for entry in values:
+        value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
+        if value_text is None:
+            return False
+        scope = str(entry.get("scope") or "")
+        label = "策略配置" if scope == "strategy_config" else "策略上下文"
+        rows.append((str(entry.get("strategy") or "?"), label, value_text))
+    for line in _audit_table_lines(("strategy", "source", "value"), sorted(rows), indent=prefix):
+        click.echo(line)
+    return True
+
+
 def _audit_ledger_entry_title(entry: dict[str, Any]) -> str:
     strategies = ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无"
     return f"账本 {entry.get('ledger') or '?'} | 现金池 {entry.get('cash_pool') or '?'} | 策略 {strategies}"
@@ -2678,6 +2710,29 @@ def _print_ledger_grouped_changes(prefix: str, field_name: str, changes: list[di
         after = _display_field_value(field_name, change.get("after"))
         click.echo(f"{prefix}{_audit_ledger_entry_title(change)}:")
         _print_audit_diff_value(f"{prefix}  ", "value", before, after)
+    return True
+
+
+def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    if not _audit_is_strategy_entries(changes):
+        return False
+    grouped: dict[tuple[str, str, str], list[str]] = {}
+    for change in changes:
+        before = _display_field_value(field_name, change.get("before"))
+        after = _display_field_value(field_name, change.get("after"))
+        before_text = _audit_ledger_scalar_text(before)
+        after_text = _audit_ledger_scalar_text(after)
+        if before_text is None or after_text is None:
+            return False
+        scope = str(change.get("scope") or "")
+        label = "策略配置" if scope == "strategy_config" else "策略上下文"
+        grouped.setdefault((label, before_text, after_text), []).append(str(change.get("strategy") or "?"))
+    rows = [
+        (", ".join(sorted(dict.fromkeys(strategies))), label, before_text, after_text)
+        for (label, before_text, after_text), strategies in grouped.items()
+    ]
+    for line in _audit_table_lines(("strategy", "source", "before", "after"), sorted(rows), indent=prefix):
+        click.echo(line)
     return True
 
 
@@ -2815,6 +2870,14 @@ def _audit_table_lines(
         max(display_width(header_list[column]), *(display_width(row[column]) for row in scalar_rows))
         for column in range(len(header_list))
     ]
+    transposed = _audit_transposed_table_lines(header_list, scalar_rows, widths, indent=indent)
+    if transposed is not None:
+        lines = transposed
+        for index, header, value in details:
+            lines.append(f"{indent}明细 {index} ({header}):")
+            for line in _audit_text(value).splitlines() or [""]:
+                lines.append(f"{indent}  {line}")
+        return lines
     column_groups = _audit_table_column_groups(header_list, scalar_rows, widths, indent=indent)
     if len(column_groups) > 1:
         lines: list[str] = []
@@ -2838,6 +2901,42 @@ def _audit_table_lines(
         lines.append(f"{indent}明细 {index} ({header}):")
         for line in _audit_text(value).splitlines() or [""]:
             lines.append(f"{indent}  {line}")
+    return lines
+
+
+def _audit_transposed_table_lines(
+    header_list: list[str],
+    scalar_rows: list[list[str]],
+    widths: list[int],
+    *,
+    indent: str = "",
+) -> list[str] | None:
+    if len(header_list) <= 8 or len(scalar_rows) > 3:
+        return None
+    if _audit_table_key_column_count(header_list) != 1:
+        return None
+    max_width = max(40, min(shutil.get_terminal_size((112, 20)).columns, 112))
+    full_width = len(indent) + sum(widths) + max(len(widths) - 1, 0) * 2
+    if full_width <= max_width:
+        return None
+    row_headers = [row[0] for row in scalar_rows]
+    transposed_rows = [
+        tuple([header_list[column], *[row[column] for row in scalar_rows]])
+        for column in range(1, len(header_list))
+    ]
+    transposed_headers = ["column", *row_headers]
+    transposed_widths = [
+        max(display_width(transposed_headers[column]), *(display_width(str(row[column])) for row in transposed_rows))
+        for column in range(len(transposed_headers))
+    ]
+    lines = [f"{indent}（表格已转置：原列数 {len(header_list)}，原行数 {len(scalar_rows)}）"]
+    lines.extend(_audit_table_block_lines(
+        transposed_headers,
+        [[str(item) for item in row] for row in transposed_rows],
+        transposed_widths,
+        list(range(len(transposed_headers))),
+        indent=indent,
+    ))
     return lines
 
 
@@ -3101,6 +3200,177 @@ def _audit_historical_field_state_diff_text(before: Any, after: Any) -> str | No
     return "\n".join(_audit_table_lines(("product", *fields), table_rows))
 
 
+_POSITION_SCALAR_COLUMNS = (
+    "quantity",
+    "average_cost",
+    "settlement_price",
+    "margin_reserved",
+    "lots_count",
+)
+
+
+def _audit_positions_summary(value: Any) -> dict[str, Any] | None:
+    positions = _audit_normalized_positions(value)
+    if positions is None:
+        return None
+    return {"type": "PositionsTable", "positions": positions}
+
+
+def _audit_normalized_positions(value: Any) -> dict[str, dict[str, Any]] | None:
+    if isinstance(value, dict) and value.get("type") == "PositionsTable":
+        positions = value.get("positions")
+        return positions if isinstance(positions, dict) else {}
+    normalized = _audit_normalized_value(value)
+    if normalized in (None, ""):
+        return {}
+    if not isinstance(normalized, dict):
+        return None
+    positions: dict[str, dict[str, Any]] = {}
+    for product, payload in normalized.items():
+        if not isinstance(payload, dict):
+            return None
+        row = dict(payload)
+        row["lots_count"] = _audit_lots_count(row.get("lots"))
+        positions[str(product)] = row
+    return positions
+
+
+def _audit_lots_count(value: Any) -> int | str:
+    if value in (None, ""):
+        return 0
+    if isinstance(value, dict):
+        if value.get("type") in {"deque", "list", "tuple", "set", "frozenset"} and value.get("length") is not None:
+            return value.get("length")
+        if isinstance(value.get("sample"), list) and value.get("truncated"):
+            return f"{value.get('length', len(value.get('sample') or []))}+"
+        return len(value)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return len(value)
+    return "?"
+
+
+def _audit_positions_text(value: dict[str, Any]) -> str:
+    positions = _audit_normalized_positions(value)
+    if positions is None:
+        return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    if not positions:
+        return "positions: (empty)"
+    rows = _audit_grouped_position_rows(positions)
+    return "\n".join(_audit_table_lines(("products", *_POSITION_SCALAR_COLUMNS), rows))
+
+
+def _audit_grouped_position_rows(positions: dict[str, dict[str, Any]]) -> list[tuple[Any, ...]]:
+    grouped: dict[tuple[str, ...], list[str]] = {}
+    row_values: dict[tuple[str, ...], tuple[str, ...]] = {}
+    for product, payload in sorted(positions.items()):
+        values = tuple(_audit_position_scalar(payload, column) for column in _POSITION_SCALAR_COLUMNS)
+        grouped.setdefault(values, []).append(product)
+        row_values[values] = values
+    rows: list[tuple[Any, ...]] = []
+    for values, products in sorted(grouped.items(), key=lambda item: item[1][0]):
+        rows.append((_audit_product_list_cell(products), *row_values[values]))
+    return rows
+
+
+def _audit_product_list_cell(products: list[str]) -> str:
+    if len(products) <= 24:
+        return ", ".join(products)
+    head = ", ".join(products[:12])
+    tail = ", ".join(products[-3:])
+    return f"{head}, ... , {tail}（共 {len(products)} 个）"
+
+
+def _audit_position_scalar(payload: dict[str, Any], column: str) -> str:
+    if column == "lots_count":
+        return _audit_scalar_cell(payload.get("lots_count"))
+    value = payload.get(column)
+    if column == "margin_reserved" and isinstance(value, dict):
+        return _audit_cash_summary(value)
+    return _audit_scalar_cell(value)
+
+
+def _audit_positions_diff_text(before: Any, after: Any) -> str | None:
+    before_is_positions = isinstance(before, dict) and before.get("type") == "PositionsTable"
+    after_is_positions = isinstance(after, dict) and after.get("type") == "PositionsTable"
+    if not (before_is_positions or after_is_positions):
+        return None
+    before_positions = _audit_normalized_positions(before)
+    after_positions = _audit_normalized_positions(after)
+    if before_positions is None or after_positions is None:
+        return None
+    products = sorted(set(before_positions) | set(after_positions))
+    grouped: dict[tuple[str, ...], list[str]] = {}
+    for product in products:
+        before_payload = before_positions.get(product)
+        after_payload = after_positions.get(product)
+        if before_payload == after_payload:
+            continue
+        row = _audit_position_diff_values(before_payload, after_payload)
+        grouped.setdefault(row, []).append(product)
+    rows = [
+        (_audit_product_list_cell(products), *values)
+        for values, products in sorted(grouped.items(), key=lambda item: item[1][0])
+    ]
+    if not rows:
+        return "（无变化）"
+    headers: tuple[str, ...]
+    if all(not row[-1] for row in rows):
+        headers = ("products", "quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count")
+        rows = [row[:-1] for row in rows]
+    else:
+        headers = ("products", "quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count", "lot changes")
+    return "\n".join(_audit_table_lines(headers, rows))
+
+
+def _audit_position_diff_values(
+    before_payload: dict[str, Any] | None,
+    after_payload: dict[str, Any] | None,
+) -> tuple[str, ...]:
+    cells: list[str] = []
+    for column in ("quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count"):
+        before_value = _audit_position_scalar(before_payload or {}, column)
+        after_value = _audit_position_scalar(after_payload or {}, column)
+        cells.append("" if before_value == after_value else f"{before_value} -> {after_value}")
+    return (*cells, _audit_lot_change_summary(before_payload, after_payload))
+
+
+def _audit_lot_change_summary(before_payload: dict[str, Any] | None, after_payload: dict[str, Any] | None) -> str:
+    before_lots = (before_payload or {}).get("lots")
+    after_lots = (after_payload or {}).get("lots")
+    if before_lots == after_lots:
+        return ""
+    before_count = _audit_lots_count(before_lots)
+    after_count = _audit_lots_count(after_lots)
+    before_sequence = _audit_lot_sequence(before_lots)
+    after_sequence = _audit_lot_sequence(after_lots)
+    if before_sequence is not None and after_sequence is not None:
+        changed = _audit_changed_lot_count(before_sequence, after_sequence)
+        if changed == 0:
+            return ""
+        return f"{before_count} -> {after_count}; changed lots {changed}"
+    return f"{before_count} -> {after_count}"
+
+
+def _audit_lot_sequence(value: Any) -> list[Any] | None:
+    if value in (None, ""):
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if isinstance(value, dict) and value.get("type") in {"deque", "list", "tuple"}:
+        sample = value.get("sample")
+        if isinstance(sample, list) and not value.get("truncated"):
+            return sample
+    return None
+
+
+def _audit_changed_lot_count(before_lots: list[Any], after_lots: list[Any]) -> int:
+    count = abs(len(after_lots) - len(before_lots))
+    for before_item, after_item in zip(before_lots, after_lots, strict=False):
+        if before_item != after_item:
+            count += 1
+    return count
+
+
 def _audit_pandas_text(value: Any) -> str | None:
     if not isinstance(value, dict):
         return None
@@ -3123,24 +3393,25 @@ def _audit_dataframe_text(value: dict[str, Any]) -> str:
         row_count = len(rows) if isinstance(rows, list) else "?"
         column_count = len(columns) if isinstance(columns, list) else "?"
         header = f"pd.DataFrame shape=({row_count}, {column_count})"
+    lines.append(header)
     index_bounds = value.get("index")
     if isinstance(index_bounds, dict) and {"start", "end"} <= set(index_bounds):
-        header = f"{header} index={index_bounds.get('start')} → {index_bounds.get('end')}"
+        lines.append(f"index.start = {index_bounds.get('start')}")
+        lines.append(f"index.end   = {index_bounds.get('end')}")
     if value.get("truncated"):
-        header = f"{header} truncated=True"
-    lines.append(header)
+        lines.append("truncated   = True")
     columns = value.get("columns")
     if value.get("truncated"):
         if isinstance(columns, list):
-            lines.append(f"columns = {json.dumps(columns, ensure_ascii=False, default=str)}")
+            lines.append(f"columns     = {json.dumps(columns, ensure_ascii=False, default=str)}")
         elif isinstance(columns, dict):
             count = columns.get("count")
             sampled = columns.get("sampled")
             sampled_count = len(sampled) if isinstance(sampled, list) else 0
             if count is not None and sampled_count:
-                lines.append(f"columns = {count} columns; sample shows {sampled_count} columns")
+                lines.append(f"columns     = {count} columns; sample shows {sampled_count} columns")
             elif count is not None:
-                lines.append(f"columns = {count} columns")
+                lines.append(f"columns     = {count} columns")
 
     if isinstance(value.get("sample"), dict):
         sample = value["sample"]
@@ -3276,6 +3547,10 @@ def _compact_product_path_selection_for_audit(value: dict[str, Any]) -> dict[str
 
 
 def _display_field_value(qualified_name: str, value: Any) -> Any:
+    if qualified_name == "LedgerModule.positions" or qualified_name.rsplit(".", 1)[-1] == "positions":
+        summary = _audit_positions_summary(value)
+        if summary is not None:
+            return summary
     if qualified_name in {"RunWindowModule.run_window_envelope", "RunWindowModule.strategy_windows"}:
         summary = _audit_run_window_summary(value)
         if summary is not None:
@@ -3417,11 +3692,11 @@ def _audit_source_group_label(entries: list[dict[str, Any]], *, shared_group: bo
     cash_pools = _audit_join([entry.get("cash_pool") for entry in entries])
 
     if scopes <= {"strategy_config"}:
-        if strategies == "无" or shared_group:
+        if strategies == "无":
             return "[共享]"
         return f"策略配置 {strategies}"
     if scopes <= {"strategy_context"}:
-        if strategies == "无" or shared_group:
+        if strategies == "无":
             return "[共享]"
         return f"策略上下文 {strategies}"
     if scopes <= {"ledger"}:
@@ -3513,6 +3788,12 @@ def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list
 
 
 def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
+    positions_diff_text = _audit_positions_diff_text(before, after)
+    if positions_diff_text is not None:
+        click.echo(f"{prefix}{label}:")
+        for line in positions_diff_text.splitlines() or [""]:
+            _print_audit_block_line(f"{prefix}  ", line)
+        return
     diff_text = _audit_historical_field_state_diff_text(before, after)
     if diff_text is not None:
         click.echo(f"{prefix}{label}:")
@@ -3624,6 +3905,8 @@ def _print_audit_changes(
     for field_name, field_changes in sorted(by_field.items(), key=lambda item: _audit_field_sort_key(item[0])):
         click.echo(f"  {_audit_field_label(field_name)}:")
         if _print_weight_change_tables("    ", field_name, field_changes):
+            continue
+        if _print_strategy_scalar_change_table("    ", field_name, field_changes):
             continue
         if _print_ledger_scalar_change_table("    ", field_name, field_changes):
             continue
@@ -3840,7 +4123,13 @@ def _handle_step_event(
     timestamp_text = str(data.get("timestamp") or "")
     timestamp_suffix = f" @ {timestamp_text}" if timestamp_text else ""
     click.echo("")
-    click.secho(f"flow: {phase_text} · {flow_id} ({flow_name}){timestamp_suffix}", fg="red", color=True)
+    click.secho(
+        f"━━ FLOW {phase_text} · {flow_id} ({flow_name}){timestamp_suffix} ━━",
+        fg="white",
+        bg="red",
+        bold=True,
+        color=True,
+    )
     description = str(data.get("description") or "")
     if description:
         click.echo(f"说明: {description}")

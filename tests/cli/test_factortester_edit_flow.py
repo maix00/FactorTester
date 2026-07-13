@@ -28,6 +28,7 @@ from tools.cli.modules.backtest.controller import (
     _print_event_payload_changes,
     _print_event_payloads,
     _print_audit_fields,
+    _print_audit_diff_value,
     _print_audit_value,
     _print_ledger_snapshot,
     _print_strategy_context,
@@ -35,6 +36,7 @@ from tools.cli.modules.backtest.controller import (
     _serialize_strategy_book_for_run,
     _set_step_navigation,
     _unchanged_output_records,
+    _display_field_value,
 )
 from tools.cli.modules.registry import ControllerRegistry
 
@@ -223,6 +225,89 @@ def test_step_audit_groups_complex_ledger_fields_by_ledger(capsys) -> None:
     assert "账本 L2 | 现金池 P2 | 策略 A2" in out
     assert "quantity" in out
     assert "average_cost" in out
+
+
+def test_step_audit_renders_positions_as_grouped_table() -> None:
+    positions = {
+        "AP.CZC": {
+            "quantity": 0,
+            "average_cost": 0.0,
+            "settlement_price": None,
+            "margin_reserved": None,
+            "lots": [],
+        },
+        "CJ.CZC": {
+            "quantity": 0,
+            "average_cost": 0.0,
+            "settlement_price": None,
+            "margin_reserved": None,
+            "lots": [],
+        },
+        "RB.SHF": {
+            "quantity": 2,
+            "average_cost": 3000,
+            "settlement_price": 3010,
+            "margin_reserved": {"amount": {"repr": "120000"}, "currency": "CNY", "scale": 100, "use_minor_units": True},
+            "lots": [{"quantity": 2, "entry_price": 3000, "multiplier": 10}],
+        },
+    }
+
+    text = _audit_text(_display_field_value("LedgerModule.positions", positions))
+
+    assert "products" in text
+    assert "lots_count" in text
+    assert "AP.CZC, CJ.CZC" in text
+    assert "RB.SHF" in text
+    assert "1,200.00 CNY" in text
+    assert "[明细" not in text
+
+
+def test_step_audit_positions_diff_lists_only_changed_products(capsys) -> None:
+    before = {
+        "AP.CZC": {"quantity": 0, "average_cost": 0.0, "lots": []},
+        "CJ.CZC": {"quantity": 0, "average_cost": 0.0, "lots": []},
+        "RB.SHF": {"quantity": 1, "average_cost": 3000, "lots": [{"quantity": 1, "entry_price": 3000}]},
+    }
+    after = {
+        "AP.CZC": {"quantity": 0, "average_cost": 0.0, "lots": []},
+        "CJ.CZC": {"quantity": 0, "average_cost": 0.0, "lots": []},
+        "RB.SHF": {"quantity": 2, "average_cost": 3010, "lots": [{"quantity": 2, "entry_price": 3010}]},
+    }
+
+    _print_audit_diff_value(
+        "  ",
+        "value",
+        _display_field_value("LedgerModule.positions", before),
+        _display_field_value("LedgerModule.positions", after),
+    )
+
+    out = capsys.readouterr().out
+    assert "products" in out
+    assert "RB.SHF" in out
+    assert "1 -> 2" in out
+    assert "changed lots 1" in out
+    assert "AP.CZC" not in out
+    assert "CJ.CZC" not in out
+
+
+def test_step_audit_positions_diff_groups_identical_initialization(capsys) -> None:
+    after = {
+        "AP.CZC": {"quantity": 0, "average_cost": 0.0, "lots": []},
+        "CJ.CZC": {"quantity": 0, "average_cost": 0.0, "lots": []},
+    }
+
+    _print_audit_diff_value(
+        "  ",
+        "value",
+        _display_field_value("LedgerModule.positions", None),
+        _display_field_value("LedgerModule.positions", after),
+    )
+
+    out = capsys.readouterr().out
+    assert "products" in out
+    assert "AP.CZC, CJ.CZC" in out
+    assert out.count("null -> 0") == 3
+    assert "lot changes" not in out
 
 
 def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
@@ -748,7 +833,7 @@ def test_step_audit_unowned_strategy_context_change_is_shared(capsys) -> None:
     assert "策略上下文 无" not in out
 
 
-def test_step_audit_identical_strategy_context_values_are_shared(capsys) -> None:
+def test_step_audit_identical_strategy_context_values_are_merged_with_strategy_label(capsys) -> None:
     _print_audit_fields("输入字段", [{
         "field": "ProductSelectionModule.products",
         "values": [
@@ -758,8 +843,8 @@ def test_step_audit_identical_strategy_context_values_are_shared(capsys) -> None
     }])
 
     out = capsys.readouterr().out
-    assert "[共享]" in out
-    assert "策略上下文 A1, A2" not in out
+    assert "[共享]" not in out
+    assert "策略上下文 A1, A2" in out
 
 
 def test_step_audit_formats_python_literal_strings_as_json() -> None:
@@ -789,9 +874,11 @@ def test_step_audit_formats_dataframe_payloads_as_tables() -> None:
         "truncated": True,
     })
 
-    assert text.startswith("pd.DataFrame shape=(25, 2) index=2026-01-01 09:00:00")
-    assert "truncated=True" in text
-    assert 'columns = ["RB.SHF", "AG.SHF"]' in text
+    assert text.startswith("pd.DataFrame shape=(25, 2)")
+    assert "index.start = 2026-01-01 09:00:00" in text
+    assert "index.end   = 2026-01-01 09:24:00" in text
+    assert "truncated   = True" in text
+    assert 'columns     = ["RB.SHF", "AG.SHF"]' in text
     assert "sample.head:" in text
     assert "RB.SHF" in text
     assert "2026-01-01 09:01:00" in text
@@ -814,7 +901,7 @@ def test_step_audit_formats_wide_dataframe_columns_as_counts() -> None:
         "truncated": True,
     })
 
-    assert "columns = 5000 columns; sample shows 4 columns" in text
+    assert "columns     = 5000 columns; sample shows 4 columns" in text
     assert "C4999" in text
     assert "sampled" not in text
 
@@ -940,7 +1027,7 @@ def test_step_wrapped_long_scalar_values_align_to_value_column(capsys, monkeypat
     assert out[1].startswith(" " * len("    策略配置 A1 = "))
 
 
-def test_step_multiline_dataframe_values_are_not_wrapped_by_audit_printer(capsys, monkeypatch) -> None:
+def test_step_multiline_dataframe_metadata_wraps_with_value_indent(capsys, monkeypatch) -> None:
     monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((50, 20)))
     value = {
         "type": "DataFrame",
@@ -960,12 +1047,13 @@ def test_step_multiline_dataframe_values_are_not_wrapped_by_audit_printer(capsys
         "truncated": True,
     }
 
-    expected_lines = _audit_text(value).splitlines()
     _print_audit_value("    ", "after", value)
 
     out = capsys.readouterr().out.splitlines()
-    printed_value_lines = [line.removeprefix("      ") for line in out[1:]]
-    assert printed_value_lines == expected_lines
+    assert out[0] == "    after ="
+    assert any(line.startswith("      index.start = ") for line in out)
+    assert any(line.startswith("                    '2026-05-26 09:01:00+08:00']") for line in out)
+    assert any("sample.head:" in line for line in out)
 
 
 def test_step_active_context_renders_compact_one_line_rows(capsys) -> None:
@@ -1075,7 +1163,7 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
     )
 
     out = capsys.readouterr().out
-    assert "\x1b[31mflow: PRE_REPLAY" in out
+    assert "\x1b[37m\x1b[41m\x1b[1m━━ FLOW PRE_REPLAY" in out
     assert "\x1b[0m" in out
     assert posted == [("/step_continue", {"run_token": "run-token", "action": "continue"})]
 

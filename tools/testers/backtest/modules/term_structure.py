@@ -21,6 +21,9 @@ from tools.testers.backtest.modules.target import TargetStrategyModule, target_w
 
 _POSITIONS_REF = FieldRef("positions", owner="LedgerModule")
 _TARGET_WEIGHTS_REF = TargetStrategyModule.target_weights
+_ROLLOVER_POLICY_REF = FieldRef("rollover_policy", owner="RolloverModule")
+_ROLLOVER_BEFORE_EXPIRY_REF = FieldRef("rollover_before_expiry", owner="RolloverModule")
+_FORCE_CLOSE_BEFORE_EXPIRY_REF = FieldRef("force_close_before_expiry", owner="DeliveryForceCloseModule")
 _LIFECYCLE_TS_KEYS = (
     "auto_close_ts",
     "last_trade_ts",
@@ -111,7 +114,14 @@ class TermStructureExpandModule(ExecutableModule):
     )
     resolve_tradable_target_weights: ClassVar[Flow] = Flow(
         "resolve_tradable_target_weights",
-        inputs=(contract_metadata, _TARGET_WEIGHTS_REF, EngineModule.engine_mode),
+        inputs=(
+            contract_metadata,
+            _TARGET_WEIGHTS_REF,
+            EngineModule.engine_mode,
+            _ROLLOVER_POLICY_REF,
+            _ROLLOVER_BEFORE_EXPIRY_REF,
+            _FORCE_CLOSE_BEFORE_EXPIRY_REF,
+        ),
         outputs=(_TARGET_WEIGHTS_REF, TargetStrategyModule.trade_intent),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
@@ -149,7 +159,13 @@ class DeliveryForceCloseModule(ExecutableModule):
 
     register_force_close_notices: ClassVar[Flow] = Flow(
         "register_force_close_notices",
-        inputs=(TermStructureExpandModule.contract_metadata, force_close_before_expiry, EngineModule.engine_mode),
+        inputs=(
+            TermStructureExpandModule.contract_metadata,
+            force_close_before_expiry,
+            EngineModule.engine_mode,
+            RunWindowModule.time_precision,
+            RunWindowModule.timezone,
+        ),
         outputs=(force_close_notices,),
         phase=Phase.PRE_REPLAY,
         order=46,
@@ -215,7 +231,14 @@ class RolloverModule(ExecutableModule):
 
     register_rollover_notices: ClassVar[Flow] = Flow(
         "register_rollover_notices",
-        inputs=(TermStructureExpandModule.contract_metadata, rollover_policy, rollover_before_expiry, EngineModule.engine_mode),
+        inputs=(
+            TermStructureExpandModule.contract_metadata,
+            rollover_policy,
+            rollover_before_expiry,
+            EngineModule.engine_mode,
+            RunWindowModule.time_precision,
+            RunWindowModule.timezone,
+        ),
         outputs=(rollover_notices,),
         phase=Phase.PRE_REPLAY,
         order=46,

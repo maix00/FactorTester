@@ -16,6 +16,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     contract_multiplier_from_fields,
@@ -74,7 +75,14 @@ class OrderConstructModule(ExecutableModule):
     )
     round_order_quantity: ClassVar[Flow] = Flow(
         "round_order_quantity",
-        inputs=(raw_deltas, MarketDataModule.lot_sizes, quantity_rounding_policy, TradingRuleModule.use_int_position),
+        inputs=(
+            raw_deltas,
+            MarketDataModule.lot_sizes,
+            quantity_rounding_policy,
+            EngineModule.engine_mode,
+            TradingRuleModule.accounting_mode,
+            TradingRuleModule.use_int_position,
+        ),
         outputs=(sized_deltas, deltas),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
