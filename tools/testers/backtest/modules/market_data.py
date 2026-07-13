@@ -1,12 +1,12 @@
-"""MarketDataModule — owns market data observations and the causal
-(no-lookahead) valuation series derived from them.
+"""MarketDataModule — owns market data observations and the forward-filled
+market price view derived from them.
 
 Market data can arrive either as an explicit `raw_market_data` payload (legacy
 test/adaptor path) or through this module's resolved load plan. The load plan
 is strategy-scoped up to the coverage stage and becomes a concrete
-product/frequency/source list before raw tables are read. `causal_valuation`
-then turns the already-loaded, possibly-gappy raw_prices frame into a ffill'd,
-gap-free `current_prices` lookup.
+product/frequency/source list before raw tables are read. The
+``causal_valuation`` flow then turns the already-loaded, possibly-gappy
+raw_prices frame into a forward-filled, no-lookahead market price lookup.
 
 The ffill'd table itself is stored in `state.market_data_store` (not `ctx`)
 because it's computed once in PRE_REPLAY but needs to survive into every later
@@ -409,7 +409,7 @@ class MarketDataModule(ExecutableModule):
     causal_valuation: ClassVar[Flow] = Flow(
         "causal_valuation", inputs=(raw_prices,), outputs=(causal_valuation_table,),
         phase=Phase.PRE_REPLAY, order=45, after=(load_raw_market_data,),
-        description="生成因果估值序列",
+        description="市场价格向前填充",
         compute=lambda state, ctx: _causal_valuation(state, ctx),
     )
 

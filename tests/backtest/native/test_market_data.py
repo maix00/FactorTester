@@ -547,6 +547,10 @@ def test_check_market_data_coverage_declares_load_plan_outputs():
     assert MarketDataModule.excluded_out_of_range_products in MarketDataModule.check_market_data_coverage.outputs
 
 
+def test_causal_valuation_flow_description_names_forward_fill_semantics():
+    assert MarketDataModule.causal_valuation.description == "市场价格向前填充"
+
+
 def test_check_market_data_coverage_reports_raw_market_data_seed_as_load_plan():
     account = BacktestRunState()
     account.raw_market_data = {
