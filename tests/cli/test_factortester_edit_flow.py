@@ -526,8 +526,12 @@ def test_step_audit_renders_lifecycle_notices_as_single_table() -> None:
                 "contract_object": {"type": "Contract", "repr": "RS609.CZC"},
                 "last_trade_date": "2026-01-08",
                 "delivery_date": "2026-01-12",
+                "lifecycle_source_type": "local_db",
                 "lifecycle_source": "AKShare CZCE contract lifecycle",
+                "lifecycle_source_function": "futures_contract_info_czce",
+                "lifecycle_source_query_date": "20260108",
                 "lifecycle_exchange": "CZCE",
+                "notice_date": float("nan"),
                 "notice_type": "force_close",
                 "notice_reason": "auto_close_date",
             },
@@ -555,12 +559,18 @@ def test_step_audit_renders_lifecycle_notices_as_single_table() -> None:
     assert "strategy" in text
     assert "product" in text
     assert "contract" in text
+    assert "lifecycle_source_type" in text
     assert "lifecycle_source" in text
+    assert "lifecycle_source_function" in text
+    assert "lifecycle_source_query_date" in text
     assert "lifecycle_exchange" in text
     assert "RS.CZC" in text
     assert "RS609.CZC" in text
     assert "EC2602.INE" in text
+    assert "local_db" in text
     assert "AKShare CZCE contract lifecycle" in text
+    assert "futures_contract_info_czce" in text
+    assert "nan" not in text
     assert "auto_close_date" in text
     assert "明细" not in text
     assert '"payload"' not in text

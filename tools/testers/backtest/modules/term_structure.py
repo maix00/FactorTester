@@ -545,6 +545,9 @@ def _openctp_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
             normalise_instrument_code(spec.get("NormalizedInstrumentID")),
         }
         row = {
+            "lifecycle_source_type": "local_db",
+            "lifecycle_exchange": spec.get("ExchangeID"),
+            "lifecycle_source_function": "src_openctp_cnfutures_contract_specs",
             "open_date": spec.get("OpenDate"),
             "last_trade_date": spec.get("ExpireDate"),
             "delivery_date": spec.get("DeliveryDate"),
@@ -578,7 +581,11 @@ def _akshare_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
             continue
         exchange = str(spec.get("exchange") or "").upper()
         candidate = {
+            "lifecycle_source_type": "local_db",
             "lifecycle_exchange": exchange,
+            "lifecycle_source_function": spec.get("source_function"),
+            "lifecycle_source_query_date": spec.get("source_query_date"),
+            "lifecycle_fetched_at": spec.get("fetched_at"),
             "open_date": spec.get("list_date"),
             "last_trade_date": spec.get("last_trading_date"),
             "notice_date": spec.get("delivery_notice_date"),
@@ -697,7 +704,11 @@ def _akshare_live_lookup(exchange: str, key: str) -> dict[str, Any] | None:
         if not code:
             continue
         _akshare_live_cache[code] = {
+            "lifecycle_source_type": "live_akshare_then_local_db",
             "lifecycle_exchange": exchange,
+            "lifecycle_source_function": live_row.get("source_function") or f"fetch_and_store_live:{exchange}",
+            "lifecycle_source_query_date": live_row.get("source_query_date"),
+            "lifecycle_fetched_at": live_row.get("fetched_at"),
             "open_date": live_row.get("list_date"),
             "last_trade_date": live_row.get("last_trading_date"),
             "notice_date": live_row.get("delivery_notice_date"),
@@ -945,9 +956,10 @@ def _lifecycle_base_timestamp(
         raise ValueError(
             "exact engine_mode could not determine whether "
             f"{row.get('contract_product') or row.get('contract') or row.get('uid')} "
-            "has stopped trading: no authoritative lifecycle date, and local "
-            "coverage inference is inconclusive (either no market data to check, "
-            "or the contract may still be trading)"
+            "has stopped trading: no lifecycle date in contract metadata, "
+            "OpenCTP local SQLite snapshots, or AKShare local/live lifecycle store; "
+            "LocalCNFutures coverage inference is inconclusive (either no market "
+            "data to check, or the contract may still be trading)"
         )
     return None
 
@@ -979,6 +991,8 @@ def _local_cnfutures_inferred_lifecycle(
     if pd.isna(ts):
         return None
     row.setdefault("lifecycle_source", result.get("source"))
+    row.setdefault("lifecycle_source_type", "inference")
+    row.setdefault("lifecycle_source_function", "sources.LocalCNFutures.lifecycle.infer_contract_end_from_coverage")
     row.setdefault("lifecycle_inference", result)
     _record_lifecycle_inference_fallback(state, row, ts, result)
     return cast(pd.Timestamp, ts)

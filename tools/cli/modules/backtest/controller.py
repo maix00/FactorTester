@@ -2215,10 +2215,14 @@ def _audit_lifecycle_notice_table_lines(
 ) -> list[str] | None:
     extra_columns: list[str] = []
     preferred_extra_columns = [
+        "lifecycle_source_type",
+        "lifecycle_source",
+        "lifecycle_source_function",
+        "lifecycle_source_query_date",
+        "lifecycle_fetched_at",
+        "lifecycle_exchange",
         "open_date",
         "notice_date",
-        "lifecycle_exchange",
-        "lifecycle_source",
     ]
     ignored = {
         "product",
@@ -2275,6 +2279,8 @@ def _audit_notice_scalar(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, float) and math.isnan(value):
+        return ""
+    if str(value).strip().lower() in {"nan", "nat", "none"}:
         return ""
     if isinstance(value, dict):
         for key in ("name", "repr", "value", "contract_product", "contract", "uid"):
