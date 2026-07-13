@@ -28,6 +28,8 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.field_help import field_flag, field_type_label, render_settings_help
 from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
+from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatter
+from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
@@ -3182,43 +3184,22 @@ def _dedupe_audit_list(values: list[Any]) -> list[Any]:
 
 
 def _audit_ledger_scalar_text(value: Any) -> str | None:
-    bracket_list_text = _audit_bracket_scalar_list_text(value)
-    if bracket_list_text is not None:
-        return bracket_list_text
-    normalized = _audit_normalized_value(value)
-    if isinstance(normalized, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in normalized):
-        return _audit_scalar_sequence_text(normalized)
-    lines = _audit_text(value).splitlines() or [""]
-    if len(lines) != 1:
-        inline_text = _audit_inline_complex_cell_text(value)
-        return inline_text
-    if _audit_table_cell_is_complex(normalized):
-        return _audit_inline_complex_cell_text(value)
-    return lines[0]
+    return ledger_formatter.ledger_scalar_text(
+        value,
+        normalize=_audit_normalized_value,
+        scalar_sequence_text=_audit_scalar_sequence_text,
+        audit_text=_audit_text,
+        inline_complex_cell_text=_audit_inline_complex_cell_text,
+        table_cell_is_complex=_audit_table_cell_is_complex,
+    )
 
 
 def _audit_bracket_scalar_list_text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not (text.startswith("[") and text.endswith("]")):
-        return None
-    body = text[1:-1].strip()
-    if not body:
-        return "[]"
-    if any(mark in body for mark in ("{", "}", "\n")):
-        return None
-    items = [item.strip().strip("'\"") for item in body.split(",") if item.strip()]
-    if not items:
-        return None
-    return _audit_scalar_sequence_text(items)
+    return ledger_formatter.bracket_scalar_list_text(value, scalar_sequence_text=_audit_scalar_sequence_text)
 
 
 def _audit_is_ledger_entries(entries: list[dict[str, Any]]) -> bool:
-    if not entries:
-        return False
-    scopes = {str(entry.get("scope") or "") for entry in entries}
-    return bool(scopes) and scopes <= {"ledger", "ledger_config"}
+    return ledger_formatter.is_ledger_entries(entries)
 
 
 def _audit_is_strategy_entries(entries: list[dict[str, Any]]) -> bool:
@@ -3231,78 +3212,43 @@ def _audit_is_strategy_entries(entries: list[dict[str, Any]]) -> bool:
 
 
 def _audit_is_cash_field(field_name: str) -> bool:
-    return field_name.rsplit(".", 1)[-1] == "cash"
+    return ledger_formatter.is_cash_field(field_name)
 
 
 def _audit_cash_pool_group_key(entry: dict[str, Any], *values: str) -> tuple[str, ...]:
-    return (str(entry.get("cash_pool") or "?"), *values)
+    return ledger_formatter.cash_pool_group_key(entry, *values)
 
 
 def _audit_join_entry_values(entries: list[dict[str, Any]], key: str) -> str:
-    values = [str(entry.get(key) or "") for entry in entries if entry.get(key) not in (None, "")]
-    return ", ".join(sorted(dict.fromkeys(values))) if values else "无"
+    return ledger_formatter.join_entry_values(entries, key)
 
 
 def _audit_join_entry_strategies(entries: list[dict[str, Any]]) -> str:
-    values = [
-        str(strategy)
-        for entry in entries
-        for strategy in (entry.get("strategies") or [])
-        if strategy not in (None, "")
-    ]
-    return ", ".join(sorted(dict.fromkeys(values))) if values else "无"
+    return ledger_formatter.join_entry_strategies(entries)
 
 
 def _cash_pool_scalar_record_table(record: dict[str, Any]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
-    field_name = str(record.get("field") or "")
-    values = record.get("values") or []
-    if not _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(values):
-        return None
-    rows: dict[tuple[str, str, str], str] = {}
-    for entry in values:
-        value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
-        if value_text is None:
-            return None
-        route = (
-            str(entry.get("cash_pool") or "?"),
-            str(entry.get("ledger") or "?"),
-            ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无",
-        )
-        rows[route] = value_text
-    if not rows:
-        return None
-    return field_name.rsplit(".", 1)[-1], _merge_cash_pool_routes(rows)
+    return ledger_formatter.cash_pool_scalar_record_table(
+        record,
+        display_field_value=_display_field_value,
+        scalar_text=_audit_ledger_scalar_text,
+    )
 
 
 def _merge_cash_pool_routes(rows: dict[tuple[str, str, str], str]) -> dict[tuple[str, str, str], str]:
-    grouped: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    for (cash_pool, ledger, strategies), value in rows.items():
-        grouped.setdefault((cash_pool, value), []).append((ledger, strategies))
-    return {
-        (
-            cash_pool,
-            ", ".join(sorted(dict.fromkeys(ledger for ledger, _ in entries))),
-            ", ".join(sorted(dict.fromkeys(strategy for _, strategies in entries for strategy in strategies.split(", ") if strategy and strategy != "无"))) or "无",
-        ): value
-        for (cash_pool, value), entries in grouped.items()
-    }
+    return ledger_formatter.merge_cash_pool_routes(rows)
 
 
 def _print_combined_cash_pool_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
     tables = [_cash_pool_scalar_record_table(record) for record in records]
     if any(table is None for table in tables) or not tables:
         return False
-    route_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
-    if not route_keys or any(keys != route_keys[0] for keys in route_keys[1:]):
+    combined = ledger_formatter.combined_scalar_value_rows([table for table in tables if table is not None])
+    if combined is None:
         return False
-    field_columns = [table[0] for table in tables if table is not None]
-    value_maps = [table[1] for table in tables if table is not None]
-    rows = [
-        tuple([cash_pool, ledgers, strategies, *[value_map[(cash_pool, ledgers, strategies)] for value_map in value_maps]])
-        for cash_pool, ledgers, strategies in route_keys[0]
-    ]
+    field_columns, rows = combined
     _print_combined_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
 
@@ -3599,8 +3545,7 @@ def _audit_annotated_strategy_row_values(field_columns: list[str], row_values: t
 
 
 def _audit_ledger_entry_title(entry: dict[str, Any]) -> str:
-    strategies = ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无"
-    return f"账本 {entry.get('ledger') or '?'} | 现金池 {entry.get('cash_pool') or '?'} | 策略 {strategies}"
+    return ledger_formatter.ledger_entry_title(entry)
 
 
 def _print_ledger_grouped_values(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
@@ -3617,27 +3562,18 @@ def _print_ledger_grouped_values(prefix: str, field_name: str, values: list[dict
 
 
 def _print_positions_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    if field_name != "LedgerModule.positions" and field_name.rsplit(".", 1)[-1] != "positions":
+    rows = ledger_formatter.positions_value_rows(
+        field_name,
+        values,
+        display_field_value=_display_field_value,
+        normalize=_audit_normalized_value,
+        scalar_cell=_audit_scalar_cell,
+        cash_summary=_audit_cash_summary,
+    )
+    if rows is None:
         return False
-    if not _audit_is_ledger_entries(values):
-        return False
-    rows: list[tuple[Any, ...]] = []
-    for entry in values:
-        display_value = _display_field_value(field_name, entry.get("value"))
-        positions = _audit_normalized_positions(display_value)
-        if positions is None:
-            return False
-        strategies = ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无"
-        position_rows = _audit_grouped_position_rows(positions) if positions else [("全部产品", "null", "null", "null", "null", "0")]
-        for row in position_rows:
-            rows.append((
-                str(entry.get("ledger") or "?"),
-                str(entry.get("cash_pool") or "?"),
-                strategies,
-                *row,
-            ))
     headers = ("ledger", "cash pool", "strategies", "products", *_POSITION_SCALAR_COLUMNS)
-    for line in _audit_table_lines(headers, sorted(rows), indent=prefix, allow_transpose=False):
+    for line in _audit_table_lines(headers, rows, indent=prefix, allow_transpose=False):
         click.echo(line)
     return True
 
@@ -3656,83 +3592,44 @@ def _print_ledger_grouped_changes(prefix: str, field_name: str, changes: list[di
 
 
 def _print_positions_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    if field_name != "LedgerModule.positions" and field_name.rsplit(".", 1)[-1] != "positions":
+    result = ledger_formatter.positions_change_rows(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        normalize=_audit_normalized_value,
+        scalar_cell=_audit_scalar_cell,
+        cash_summary=_audit_cash_summary,
+        change_cell=_audit_change_cell,
+    )
+    if result is None:
         return False
-    if not _audit_is_ledger_entries(changes):
-        return False
-    wide_rows: list[tuple[Any, ...]] = []
-    for change in changes:
-        before = _display_field_value(field_name, change.get("before"))
-        after = _display_field_value(field_name, change.get("after"))
-        position_rows = _audit_positions_diff_rows(before, after)
-        if position_rows is None:
-            return False
-        strategies = ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无"
-        for row in position_rows:
-            wide_rows.append((
-                str(change.get("ledger") or "?"),
-                str(change.get("cash_pool") or "?"),
-                strategies,
-                *row,
-            ))
-    if not wide_rows:
+    headers, rows = result
+    if not rows:
         click.echo(f"{prefix}（无变化）")
         return True
-    base_headers = ("ledger", "cash pool", "strategies", "products")
-    value_headers = ("quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count", "lot changes")
-    kept_value_indexes = [
-        index
-        for index, header in enumerate(value_headers)
-        if header != "lot changes" and any(row[len(base_headers) + index] not in ("", "null -> null") for row in wide_rows)
-    ]
-    if any(row[-1] for row in wide_rows):
-        kept_value_indexes.append(len(value_headers) - 1)
-    headers = (*base_headers, *[value_headers[index] for index in kept_value_indexes])
-    compact_rows = [
-        tuple([*row[:len(base_headers)], *[row[len(base_headers) + index] for index in kept_value_indexes]])
-        for row in wide_rows
-    ]
-    for line in _audit_table_lines(headers, sorted(compact_rows), indent=prefix, allow_transpose=False):
+    for line in _audit_table_lines(headers, rows, indent=prefix, allow_transpose=False):
         click.echo(line)
     return True
 
 
 def _ledger_scalar_record_table(record: dict[str, Any]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
-    field_name = str(record.get("field") or "")
-    values = record.get("values") or []
-    if _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(values):
-        return None
-    rows: dict[tuple[str, str, str], str] = {}
-    for entry in values:
-        value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
-        if value_text is None:
-            return None
-        route = (
-            str(entry.get("ledger") or "?"),
-            str(entry.get("cash_pool") or "?"),
-            ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无",
-        )
-        rows[route] = value_text
-    if not rows:
-        return None
-    return field_name.rsplit(".", 1)[-1], rows
+    return ledger_formatter.ledger_scalar_record_table(
+        record,
+        display_field_value=_display_field_value,
+        scalar_text=_audit_ledger_scalar_text,
+    )
 
 
 def _print_combined_ledger_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
     tables = [_ledger_scalar_record_table(record) for record in records]
     if any(table is None for table in tables) or not tables:
         return False
-    route_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
-    if not route_keys or any(keys != route_keys[0] for keys in route_keys[1:]):
+    combined = ledger_formatter.combined_scalar_value_rows([table for table in tables if table is not None])
+    if combined is None:
         return False
-    field_columns = [table[0] for table in tables if table is not None]
-    value_maps = [table[1] for table in tables if table is not None]
-    rows = [
-        tuple([ledger, cash_pool, strategies, *[value_map[(ledger, cash_pool, strategies)] for value_map in value_maps]])
-        for ledger, cash_pool, strategies in route_keys[0]
-    ]
+    field_columns, rows = combined
     _print_combined_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+    for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
 
@@ -3756,19 +3653,13 @@ def _audit_combined_single_field_label(qualified_name: str) -> str:
 
 
 _MARKET_DATA_SAMPLE_FIELDS = {
-    "price_tables",
-    "raw_prices",
-    "settlement_price",
-    "volume",
-    "causal_valuation_table",
+    *market_data_formatter.MARKET_DATA_SAMPLE_FIELDS,
 }
-_MARKET_DATA_SAMPLE_PRODUCT_LIMIT = 3
+_MARKET_DATA_SAMPLE_PRODUCT_LIMIT = market_data_formatter.MARKET_DATA_SAMPLE_PRODUCT_LIMIT
 
 
 def _is_market_data_sample_field(field_name: str) -> bool:
-    if not field_name.startswith("MarketDataModule."):
-        return False
-    return field_name.rsplit(".", 1)[-1] in _MARKET_DATA_SAMPLE_FIELDS
+    return market_data_formatter.is_market_data_sample_field(field_name)
 
 
 def _print_market_data_sample_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
@@ -3806,122 +3697,65 @@ def _print_market_data_sample_change_table(prefix: str, records: list[tuple[str,
 
 
 def _market_data_sample_rows_from_value_records(records: list[dict[str, Any]]) -> tuple[list[tuple[Any, ...]], list[str]]:
-    samples: list[tuple[str, str, dict[str, str]]] = []
-    time_columns: list[str] = []
-    for record in records:
-        field_name = str(record.get("field") or "")
-        for entry in record.get("values") or []:
-            value = _display_field_value(field_name, entry.get("value"))
-            for field_label, product, values_by_time in _market_data_sample_cells(field_name, value):
-                samples.append((field_label, product, values_by_time))
-                for time_label in values_by_time:
-                    if time_label not in time_columns:
-                        time_columns.append(time_label)
-    return _market_data_sample_rows(samples, time_columns), time_columns
+    return market_data_formatter.sample_rows_from_value_records(
+        records,
+        display_field_value=_display_field_value,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+        select_sample_part=_audit_select_sample_part,
+    )
 
 
 def _market_data_sample_rows_from_change_records(records: list[tuple[str, list[dict[str, Any]]]]) -> tuple[list[tuple[Any, ...]], list[str]]:
-    samples: list[tuple[str, str, dict[str, str]]] = []
-    time_columns: list[str] = []
-    for field_name, changes in records:
-        for change in changes:
-            before = _display_field_value(field_name, change.get("before"))
-            after = _display_field_value(field_name, change.get("after"))
-            before_cells = {
-                (field_label, product): values_by_time
-                for field_label, product, values_by_time in _market_data_sample_cells(field_name, before)
-            }
-            for field_label, product, after_by_time in _market_data_sample_cells(field_name, after):
-                before_by_time = before_cells.get((field_label, product), {})
-                changed_by_time = {
-                    time_label: _audit_change_cell(before_by_time.get(time_label, "null"), after_value)
-                    for time_label, after_value in after_by_time.items()
-                }
-                samples.append((field_label, product, changed_by_time))
-                for time_label in changed_by_time:
-                    if time_label not in time_columns:
-                        time_columns.append(time_label)
-    return _market_data_sample_rows(samples, time_columns), time_columns
+    return market_data_formatter.sample_rows_from_change_records(
+        records,
+        display_field_value=_display_field_value,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+        change_cell=_audit_change_cell,
+        select_sample_part=_audit_select_sample_part,
+    )
 
 
 def _market_data_sample_rows(samples: list[tuple[str, str, dict[str, str]]], time_columns: list[str]) -> list[tuple[Any, ...]]:
-    return [
-        tuple([field_label, product, *[values_by_time.get(time_label, "") for time_label in time_columns]])
-        for field_label, product, values_by_time in samples
-    ]
+    return market_data_formatter.sample_rows(samples, time_columns)
 
 
 def _market_data_sample_cells(field_name: str, value: Any) -> list[tuple[str, str, dict[str, str]]]:
-    normalized = _audit_normalized_value(value)
-    if not isinstance(normalized, dict):
-        return []
-    short_name = field_name.rsplit(".", 1)[-1]
-    if normalized.get("type") == "PriceTablesSummary":
-        return _market_data_price_tables_sample_cells(normalized)
-    if normalized.get("type") == "DataFrame":
-        return _market_data_frame_sample_cells(short_name, normalized)
-    if normalized.get("type") == "Series":
-        return _market_data_series_sample_cells(short_name, normalized)
-    if normalized and all(not isinstance(item, (dict, list, tuple)) for item in normalized.values()):
-        return [
-            (short_name, str(product), {"value": _audit_scalar_cell(scalar_value)})
-            for product, scalar_value in list(sorted(normalized.items()))[:_MARKET_DATA_SAMPLE_PRODUCT_LIMIT]
-        ]
-    return []
+    return market_data_formatter.sample_cells(
+        field_name,
+        value,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+        select_sample_part=_audit_select_sample_part,
+    )
 
 
 def _market_data_price_tables_sample_cells(value: dict[str, Any]) -> list[tuple[str, str, dict[str, str]]]:
-    rows = value.get("rows")
-    if not isinstance(rows, list):
-        return []
-    cells: list[tuple[str, str, dict[str, str]]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        basis = str(row.get("basis") or "")
-        cells.extend(_market_data_frame_sample_cells(f"price_tables.{basis}", row))
-    return cells
+    return market_data_formatter.price_tables_sample_cells(
+        value,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+        select_sample_part=_audit_select_sample_part,
+    )
 
 
 def _market_data_frame_sample_cells(field_label: str, value: dict[str, Any]) -> list[tuple[str, str, dict[str, str]]]:
-    sample = value.get("sample")
-    frames = _audit_price_sample_edge_frames(sample) if isinstance(sample, dict) else [("value", value)]
-    if not frames:
-        return []
-    selected_products: list[str] = []
-    per_product: dict[str, dict[str, str]] = {}
-    for _sample_name, part in frames:
-        columns = [str(column) for column in (part.get("columns") or [])]
-        if not selected_products:
-            selected_products = columns[:_MARKET_DATA_SAMPLE_PRODUCT_LIMIT]
-        indexes = part.get("index")
-        rows = part.get("rows")
-        if not isinstance(indexes, list) or not isinstance(rows, list):
-            continue
-        for index_item, row_values in zip(indexes, rows, strict=False):
-            if not isinstance(row_values, list):
-                continue
-            time_label = _audit_sample_time_label(_audit_index_parts(index_item))
-            for column_index, product in enumerate(columns):
-                if product not in selected_products or column_index >= len(row_values):
-                    continue
-                per_product.setdefault(product, {})[time_label] = _audit_scalar_cell(row_values[column_index])
-    return [(field_label, product, per_product.get(product, {})) for product in selected_products if per_product.get(product)]
+    return market_data_formatter.frame_sample_cells(
+        field_label,
+        value,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+    )
 
 
 def _market_data_series_sample_cells(field_label: str, value: dict[str, Any]) -> list[tuple[str, str, dict[str, str]]]:
-    sample = value.get("sample")
-    if isinstance(sample, dict):
-        selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
-        value = selected.value if selected is not None else value
-    indexes = value.get("index")
-    values = value.get("values")
-    if not isinstance(indexes, list) or not isinstance(values, list):
-        return []
-    return [
-        (field_label, _audit_index_cell(product), {"value": _audit_scalar_cell(scalar_value)})
-        for product, scalar_value in list(zip(indexes, values, strict=False))[:_MARKET_DATA_SAMPLE_PRODUCT_LIMIT]
-    ]
+    return market_data_formatter.series_sample_cells(
+        field_label,
+        value,
+        scalar_cell=_audit_scalar_cell,
+        select_sample_part=_audit_select_sample_part,
+    )
 
 
 def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
@@ -4019,39 +3853,23 @@ def _strategy_scalar_change_record_table(field_name: str, changes: list[dict[str
 
 
 def _ledger_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
-    if _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(changes):
-        return None
-    rows: dict[tuple[str, str, str], str] = {}
-    for change in changes:
-        before_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("before")))
-        after_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("after")))
-        if before_text is None or after_text is None:
-            return None
-        route = (
-            str(change.get("ledger") or "?"),
-            str(change.get("cash_pool") or "?"),
-            ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无",
-        )
-        rows[route] = _audit_change_cell(before_text, after_text)
-    return field_name.rsplit(".", 1)[-1], rows
+    return ledger_formatter.ledger_scalar_change_record_table(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        scalar_text=_audit_ledger_scalar_text,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _cash_pool_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
-    if not _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(changes):
-        return None
-    raw_rows: dict[tuple[str, str, str], str] = {}
-    for change in changes:
-        before_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("before")))
-        after_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("after")))
-        if before_text is None or after_text is None:
-            return None
-        route = (
-            str(change.get("cash_pool") or "?"),
-            str(change.get("ledger") or "?"),
-            ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无",
-        )
-        raw_rows[route] = _audit_change_cell(before_text, after_text)
-    return field_name.rsplit(".", 1)[-1], _merge_cash_pool_routes(raw_rows)
+    return ledger_formatter.cash_pool_scalar_change_record_table(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        scalar_text=_audit_ledger_scalar_text,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _print_combined_strategy_scalar_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
@@ -4083,17 +3901,12 @@ def _print_combined_ledger_scalar_change_table(prefix: str, records: list[tuple[
     tables = [_ledger_scalar_change_record_table(field_name, changes) for field_name, changes in records]
     if any(table is None for table in tables) or not tables:
         return False
-    route_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
-    if not route_keys or any(keys != route_keys[0] for keys in route_keys[1:]):
+    combined = ledger_formatter.combined_scalar_value_rows([table for table in tables if table is not None])
+    if combined is None:
         return False
-    field_columns = [table[0] for table in tables if table is not None]
-    value_maps = [table[1] for table in tables if table is not None]
-    rows = [
-        tuple([ledger, cash_pool, strategies, *[value_map[(ledger, cash_pool, strategies)] for value_map in value_maps]])
-        for ledger, cash_pool, strategies in route_keys[0]
-    ]
+    field_columns, rows = combined
     _print_combined_change_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+    for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
 
@@ -4102,17 +3915,12 @@ def _print_combined_cash_pool_scalar_change_table(prefix: str, records: list[tup
     tables = [_cash_pool_scalar_change_record_table(field_name, changes) for field_name, changes in records]
     if any(table is None for table in tables) or not tables:
         return False
-    route_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
-    if not route_keys or any(keys != route_keys[0] for keys in route_keys[1:]):
+    combined = ledger_formatter.combined_scalar_value_rows([table for table in tables if table is not None])
+    if combined is None:
         return False
-    field_columns = [table[0] for table in tables if table is not None]
-    value_maps = [table[1] for table in tables if table is not None]
-    rows = [
-        tuple([cash_pool, ledgers, strategies, *[value_map[(cash_pool, ledgers, strategies)] for value_map in value_maps]])
-        for cash_pool, ledgers, strategies in route_keys[0]
-    ]
+    field_columns, rows = combined
     _print_combined_change_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
 
@@ -4608,165 +4416,43 @@ def _audit_table_cell_is_scalar_sequence(value: Any) -> bool:
 
 
 def _audit_price_tables_text(value: dict[str, Any]) -> str:
-    rows = value.get("rows")
-    if not isinstance(rows, list):
-        return "price_tables: (no rows)"
-    sample_rows: list[tuple[Any, ...]] = []
-    sample_columns: list[str] = []
-    lines: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        basis = str(row.get("basis") or "")
-        sample = row.get("sample")
-        if isinstance(sample, dict):
-            selected_frames = _audit_price_sample_edge_frames(sample)
-            if selected_frames:
-                for _sample_name, part in selected_frames:
-                    part_columns = [str(column) for column in (part.get("columns") or [])]
-                    for column in part_columns:
-                        if column not in sample_columns:
-                            sample_columns.append(column)
-                    for index_item, row_values in zip(part.get("index") or [], part.get("rows") or [], strict=False):
-                        value_map = {
-                            str(column): _audit_scalar_cell(row_values[index])
-                            for index, column in enumerate(part_columns)
-                            if index < len(row_values)
-                        }
-                        sample_rows.append((
-                            basis,
-                            _sample_name,
-                            _audit_index_parts(index_item),
-                            value_map,
-                        ))
-    if sample_rows and sample_columns:
-        sample_times: list[str] = []
-        grouped_values: dict[tuple[str, str], dict[str, str]] = {}
-        for basis, _sample_name, sample_index, value_map in sample_rows:
-            sample_time = _audit_sample_time_label(sample_index)
-            if sample_time not in sample_times:
-                sample_times.append(sample_time)
-            for column in sample_columns:
-                grouped_values.setdefault((basis, column), {})[sample_time] = value_map.get(column, "")
-        lines.append("价格字段 sample（行索引=field/product，列=首尾 sample 时间）:")
-        rendered_rows = [
-            tuple([basis, product, *[values.get(sample_time, "") for sample_time in sample_times]])
-            for (basis, product), values in sorted(grouped_values.items())
-        ]
-        lines.extend(_audit_table_lines(
-            ("field", "product", *sample_times),
-            rendered_rows,
-            indent="  ",
-            allow_transpose=False,
-            allow_split=False,
-        ))
-    return "\n".join(lines) if lines else "price_tables: (no sample)"
+    return market_data_formatter.price_tables_text(
+        value,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+    )
 
 
 def _audit_market_data_load_plan_text(value: dict[str, Any]) -> str:
-    items = value.get("items")
-    if isinstance(items, dict):
-        table_rows = [
-            (
-                str(product),
-                details.get("frequency") or "",
-                details.get("data_source") or "",
-            )
-            for product, details in sorted(items.items())
-            if isinstance(details, dict)
-        ]
-    else:
-        rows = value.get("rows")
-        if not isinstance(rows, list):
-            return "market_data_load_plan: (no rows)"
-        table_rows = [
-            (
-                row.get("product") or "",
-                row.get("frequency") or "",
-                row.get("data_source") or "",
-            )
-            for row in rows
-            if isinstance(row, dict)
-        ]
-    lines = [f"planned products = {value.get('count', len(table_rows))}"]
-    if table_rows:
-        lines.extend(_audit_table_lines(("product", "frequency", "data_source"), table_rows, indent="  ", allow_transpose=False))
-    return "\n".join(lines)
+    return market_data_formatter.market_data_load_plan_text(value, table_lines=_audit_table_lines)
 
 
 def _audit_market_data_excluded_products_text(value: dict[str, Any]) -> str:
-    rows = value.get("rows")
-    if not isinstance(rows, list):
-        return "excluded_out_of_range_products: (no rows)"
-    products = [str(row.get("product") or "") for row in rows if isinstance(row, dict) and row.get("product")]
-    if not products:
-        return "excluded products = 0"
-    return "\n".join([
-        f"excluded products = {value.get('count', len(products))}",
-        _audit_scalar_sequence_text(products, width=96),
-    ])
+    return market_data_formatter.market_data_excluded_products_text(
+        value,
+        scalar_sequence_text=_audit_scalar_sequence_text,
+    )
 
 
 def _audit_index_cell(value: Any) -> str:
-    if isinstance(value, (list, tuple)):
-        return " | ".join(str(item) for item in value)
-    return str(value)
+    return market_data_formatter.index_cell(value)
 
 
 def _audit_price_sample_edge_frames(sample: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    frames: list[tuple[str, dict[str, Any]]] = []
-    seen_indexes: set[str] = set()
-    for name, row_selector in (("head", 0), ("tail", -1)):
-        frame = sample.get(name)
-        if not isinstance(frame, dict):
-            continue
-        indexes = frame.get("index")
-        rows = frame.get("rows")
-        if not isinstance(indexes, list) or not isinstance(rows, list) or not indexes or not rows:
-            continue
-        selected_index = indexes[row_selector]
-        selected_row = rows[row_selector]
-        index_key = json.dumps(_audit_normalized_value(selected_index), ensure_ascii=False, sort_keys=True, default=str)
-        if index_key in seen_indexes:
-            continue
-        seen_indexes.add(index_key)
-        frames.append((
-            name,
-            {
-                **frame,
-                "index": [selected_index],
-                "rows": [selected_row],
-            },
-        ))
-    return frames
+    return market_data_formatter.price_sample_edge_frames(sample, normalize=_audit_normalized_value)
 
 
 def _audit_index_parts(value: Any) -> list[str]:
-    if isinstance(value, (list, tuple)):
-        return [str(item) for item in value]
-    return [str(value or "")]
+    return market_data_formatter.index_parts(value)
 
 
 def _audit_sample_time_label(parts: list[str]) -> str:
-    if len(parts) >= 2:
-        return f"{parts[0]} | {parts[1]}"
-    return parts[0] if parts else ""
+    return market_data_formatter.sample_time_label(parts)
 
 
 def _audit_columns_summary(columns: Any) -> str:
-    if isinstance(columns, dict):
-        count = columns.get("count")
-        sampled = columns.get("sampled")
-        sampled_count = len(sampled) if isinstance(sampled, list) else 0
-        if count is not None and sampled_count:
-            return f"{count} columns; sample shows {sampled_count} columns"
-        if count is not None:
-            return f"{count} columns"
-    if isinstance(columns, list):
-        if len(columns) <= 20:
-            return json.dumps(columns, ensure_ascii=False, default=str)
-        return f"{len(columns)} columns"
-    return str(columns or "")
+    return market_data_formatter.columns_summary(columns)
 
 
 def _audit_run_window_text(value: dict[str, Any]) -> str:
@@ -4958,174 +4644,99 @@ _POSITION_SCALAR_COLUMNS = (
 
 
 def _audit_positions_summary(value: Any) -> dict[str, Any] | None:
-    positions = _audit_normalized_positions(value)
-    if positions is None:
-        return None
-    return {"type": "PositionsTable", "positions": positions}
+    return ledger_formatter.positions_summary(value, normalize=_audit_normalized_value)
 
 
 def _audit_normalized_positions(value: Any) -> dict[str, dict[str, Any]] | None:
-    if isinstance(value, dict) and value.get("type") == "PositionsTable":
-        positions = value.get("positions")
-        return positions if isinstance(positions, dict) else {}
-    normalized = _audit_normalized_value(value)
-    if normalized in (None, ""):
-        return {}
-    if not isinstance(normalized, dict):
-        return None
-    positions: dict[str, dict[str, Any]] = {}
-    for product, payload in normalized.items():
-        if not isinstance(payload, dict):
-            return None
-        row = dict(payload)
-        row["lots_count"] = _audit_lots_count(row.get("lots"))
-        positions[str(product)] = row
-    return positions
+    return ledger_formatter.normalized_positions(value, normalize=_audit_normalized_value)
 
 
 def _audit_lots_count(value: Any) -> int | str:
-    if value in (None, ""):
-        return 0
-    if isinstance(value, dict):
-        if value.get("type") in {"deque", "list", "tuple", "set", "frozenset"} and value.get("length") is not None:
-            return value.get("length")
-        if isinstance(value.get("sample"), list) and value.get("truncated"):
-            return f"{value.get('length', len(value.get('sample') or []))}+"
-        return len(value)
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return len(value)
-    return "?"
+    return ledger_formatter.lots_count(value)
 
 
 def _audit_positions_text(value: dict[str, Any]) -> str:
-    positions = _audit_normalized_positions(value)
-    if positions is None:
-        return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-    if not positions:
-        return "positions: (empty)"
-    rows = _audit_grouped_position_rows(positions)
-    return "\n".join(_audit_table_lines(("products", *_POSITION_SCALAR_COLUMNS), rows, allow_transpose=False))
+    text = ledger_formatter.positions_text(
+        value,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+        cash_summary=_audit_cash_summary,
+    )
+    return text or json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
 
 
 def _audit_grouped_position_rows(positions: dict[str, dict[str, Any]]) -> list[tuple[Any, ...]]:
-    grouped: dict[tuple[str, ...], list[str]] = {}
-    row_values: dict[tuple[str, ...], tuple[str, ...]] = {}
-    for product, payload in sorted(positions.items()):
-        values = tuple(_audit_position_scalar(payload, column) for column in _POSITION_SCALAR_COLUMNS)
-        grouped.setdefault(values, []).append(product)
-        row_values[values] = values
-    rows: list[tuple[Any, ...]] = []
-    all_products = sorted(positions)
-    for values, products in sorted(grouped.items(), key=lambda item: item[1][0]):
-        rows.append((_audit_product_list_cell(products, all_products=all_products), *row_values[values]))
-    return rows
+    return ledger_formatter.grouped_position_rows(
+        positions,
+        scalar_cell=_audit_scalar_cell,
+        cash_summary=_audit_cash_summary,
+    )
 
 
 def _audit_product_list_cell(products: list[str], *, all_products: list[str] | None = None) -> str:
-    if all_products and len(products) > 1 and set(products) == set(all_products):
-        return "全部产品"
-    if len(products) <= 6:
-        return ", ".join(products)
-    head = ", ".join(products[:3])
-    return f"{head}, ..."
+    return ledger_formatter.product_list_cell(products, all_products=all_products)
 
 
 def _audit_position_scalar(payload: dict[str, Any], column: str) -> str:
-    if column == "lots_count":
-        return _audit_scalar_cell(payload.get("lots_count"))
-    value = payload.get(column)
-    if column == "margin_reserved" and isinstance(value, dict):
-        return _audit_cash_summary(value)
-    return _audit_scalar_cell(value)
+    return ledger_formatter.position_scalar(
+        payload,
+        column,
+        scalar_cell=_audit_scalar_cell,
+        cash_summary=_audit_cash_summary,
+    )
 
 
 def _audit_positions_diff_text(before: Any, after: Any) -> str | None:
-    rows = _audit_positions_diff_rows(before, after)
-    if rows is None:
-        return None
-    if not rows:
-        return "（无变化）"
-    headers: tuple[str, ...]
-    if all(not row[-1] for row in rows):
-        headers = ("products", "quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count")
-        rows = [row[:-1] for row in rows]
-    else:
-        headers = ("products", "quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count", "lot changes")
-    return "\n".join(_audit_table_lines(headers, rows, allow_transpose=False))
+    return ledger_formatter.positions_diff_text(
+        before,
+        after,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+        cash_summary=_audit_cash_summary,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _audit_positions_diff_rows(before: Any, after: Any) -> list[tuple[str, ...]] | None:
-    before_is_positions = isinstance(before, dict) and before.get("type") == "PositionsTable"
-    after_is_positions = isinstance(after, dict) and after.get("type") == "PositionsTable"
-    if not (before_is_positions or after_is_positions):
-        return None
-    before_positions = _audit_normalized_positions(before)
-    after_positions = _audit_normalized_positions(after)
-    if before_positions is None or after_positions is None:
-        return None
-    all_products = sorted(set(before_positions) | set(after_positions))
-    grouped: dict[tuple[str, ...], list[str]] = {}
-    for product in all_products:
-        before_payload = before_positions.get(product)
-        after_payload = after_positions.get(product)
-        if before_payload == after_payload:
-            continue
-        row = _audit_position_diff_values(before_payload, after_payload)
-        grouped.setdefault(row, []).append(product)
-    rows = [
-        (_audit_product_list_cell(group_products, all_products=all_products), *values)
-        for values, group_products in sorted(grouped.items(), key=lambda item: item[1][0])
-    ]
-    return rows
+    return ledger_formatter.positions_diff_rows(
+        before,
+        after,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+        cash_summary=_audit_cash_summary,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _audit_position_diff_values(
     before_payload: dict[str, Any] | None,
     after_payload: dict[str, Any] | None,
 ) -> tuple[str, ...]:
-    cells: list[str] = []
-    for column in ("quantity", "average_cost", "settlement_price", "margin_reserved", "lots_count"):
-        before_value = _audit_position_scalar(before_payload or {}, column)
-        after_value = _audit_position_scalar(after_payload or {}, column)
-        cells.append("" if before_value == after_value else _audit_change_cell(before_value, after_value))
-    return (*cells, _audit_lot_change_summary(before_payload, after_payload))
+    return ledger_formatter.position_diff_values(
+        before_payload,
+        after_payload,
+        scalar_cell=_audit_scalar_cell,
+        cash_summary=_audit_cash_summary,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _audit_lot_change_summary(before_payload: dict[str, Any] | None, after_payload: dict[str, Any] | None) -> str:
-    before_lots = (before_payload or {}).get("lots")
-    after_lots = (after_payload or {}).get("lots")
-    if before_lots == after_lots:
-        return ""
-    before_count = _audit_lots_count(before_lots)
-    after_count = _audit_lots_count(after_lots)
-    before_sequence = _audit_lot_sequence(before_lots)
-    after_sequence = _audit_lot_sequence(after_lots)
-    if before_sequence is not None and after_sequence is not None:
-        changed = _audit_changed_lot_count(before_sequence, after_sequence)
-        if changed == 0:
-            return ""
-        return f"{_audit_change_cell(before_count, after_count)}; changed lots {changed}"
-    return _audit_change_cell(before_count, after_count)
+    return ledger_formatter.lot_change_summary(
+        before_payload,
+        after_payload,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _audit_lot_sequence(value: Any) -> list[Any] | None:
-    if value in (None, ""):
-        return []
-    if isinstance(value, (list, tuple)):
-        return list(value)
-    if isinstance(value, dict) and value.get("type") in {"deque", "list", "tuple"}:
-        sample = value.get("sample")
-        if isinstance(sample, list) and not value.get("truncated"):
-            return sample
-    return None
+    return ledger_formatter.lot_sequence(value)
 
 
 def _audit_changed_lot_count(before_lots: list[Any], after_lots: list[Any]) -> int:
-    count = abs(len(after_lots) - len(before_lots))
-    for before_item, after_item in zip(before_lots, after_lots, strict=False):
-        if before_item != after_item:
-            count += 1
-    return count
+    return ledger_formatter.changed_lot_count(before_lots, after_lots)
 
 
 def _audit_pandas_text(value: Any) -> str | None:
@@ -5140,103 +4751,39 @@ def _audit_pandas_text(value: Any) -> str | None:
 
 
 def _audit_dataframe_text(value: dict[str, Any]) -> str:
-    lines: list[str] = []
-    shape = value.get("shape")
-    if isinstance(shape, list | tuple) and len(shape) == 2:
-        header = f"pd.DataFrame shape=({shape[0]}, {shape[1]})"
-    else:
-        rows = value.get("rows")
-        columns = value.get("columns")
-        row_count = len(rows) if isinstance(rows, list) else "?"
-        column_count = len(columns) if isinstance(columns, list) else "?"
-        header = f"pd.DataFrame shape=({row_count}, {column_count})"
-    lines.append(header)
-    index_bounds = value.get("index")
-    if isinstance(index_bounds, dict) and {"start", "end"} <= set(index_bounds):
-        lines.append(f"index.start = {index_bounds.get('start')}")
-        lines.append(f"index.end   = {index_bounds.get('end')}")
-    if value.get("truncated"):
-        lines.append("truncated   = True")
-    columns = value.get("columns")
-    if value.get("truncated"):
-        if isinstance(columns, list):
-            lines.append(f"columns     = {json.dumps(columns, ensure_ascii=False, default=str)}")
-        elif isinstance(columns, dict):
-            count = columns.get("count")
-            sampled = columns.get("sampled")
-            sampled_count = len(sampled) if isinstance(sampled, list) else 0
-            if count is not None and sampled_count:
-                lines.append(f"columns     = {count} columns; sample shows {sampled_count} columns")
-            elif count is not None:
-                lines.append(f"columns     = {count} columns")
-
-    if isinstance(value.get("sample"), dict):
-        sample = value["sample"]
-        selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
-        if selected is not None:
-            lines.extend(_audit_sample_note_lines(sample, selected.name))
-            part, row_notes = _audit_single_sample_frame(selected.value)
-            lines.extend(row_notes)
-            lines.append(f"sample.{selected.name}:")
-            lines.extend(_audit_dataframe_table_lines(part, indent="  "))
-    else:
-        lines.extend(_audit_dataframe_table_lines(value, indent="  "))
-    return "\n".join(lines)
+    return market_data_formatter.dataframe_text(
+        value,
+        table_lines=_audit_table_lines,
+        select_sample_part=_audit_select_sample_part,
+        sample_note_lines=_audit_sample_note_lines,
+        single_sample_frame=_audit_single_sample_frame,
+    )
 
 
 def _audit_dataframe_table_lines(value: dict[str, Any], *, indent: str = "") -> list[str]:
-    columns = [str(column) for column in value.get("columns", [])]
-    indexes = value.get("index", [])
-    rows = value.get("rows", [])
-    if not isinstance(indexes, list) or not isinstance(rows, list):
-        return [f"{indent}(no tabular rows)"]
-    table_rows = []
-    for index, row in zip(indexes, rows, strict=False):
-        row_values = row if isinstance(row, list) else [row]
-        table_rows.append((str(index), *[str(item) for item in row_values]))
-    if not table_rows:
-        return [f"{indent}(empty)"]
-    return _audit_table_lines(("index", *columns), table_rows, indent=indent)
+    return market_data_formatter.dataframe_table_lines(
+        value,
+        table_lines=_audit_table_lines,
+        indent=indent,
+    )
 
 
 def _audit_series_text(value: dict[str, Any]) -> str:
-    name = value.get("name")
-    length = value.get("length")
-    if length is not None:
-        header = f"pd.Series name={name!r} length={length}"
-    else:
-        values = value.get("values")
-        header = f"pd.Series name={name!r} length={len(values) if isinstance(values, list) else '?'}"
-    index_bounds = value.get("index")
-    if isinstance(index_bounds, dict) and {"start", "end"} <= set(index_bounds):
-        header = f"{header} index={index_bounds.get('start')} → {index_bounds.get('end')}"
-    if value.get("truncated"):
-        header = f"{header} truncated=True"
-
-    lines = [header]
-    if isinstance(value.get("sample"), dict):
-        sample = value["sample"]
-        selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
-        if selected is not None:
-            lines.extend(_audit_sample_note_lines(sample, selected.name))
-            part, row_notes = _audit_single_sample_series(selected.value)
-            lines.extend(row_notes)
-            lines.append(f"sample.{selected.name}:")
-            lines.extend(_audit_series_table_lines(part, indent="  "))
-    else:
-        lines.extend(_audit_series_table_lines(value, indent="  "))
-    return "\n".join(lines)
+    return market_data_formatter.series_text(
+        value,
+        table_lines=_audit_table_lines,
+        select_sample_part=_audit_select_sample_part,
+        sample_note_lines=_audit_sample_note_lines,
+        single_sample_series=_audit_single_sample_series,
+    )
 
 
 def _audit_series_table_lines(value: dict[str, Any], *, indent: str = "") -> list[str]:
-    indexes = value.get("index", [])
-    values = value.get("values", [])
-    if not isinstance(indexes, list) or not isinstance(values, list):
-        return [f"{indent}(no series rows)"]
-    table_rows = [(str(index), str(item)) for index, item in zip(indexes, values, strict=False)]
-    if not table_rows:
-        return [f"{indent}(empty)"]
-    return _audit_table_lines(("index", "value"), table_rows, indent=indent)
+    return market_data_formatter.series_table_lines(
+        value,
+        table_lines=_audit_table_lines,
+        indent=indent,
+    )
 
 
 def _parse_audit_literal(value: str) -> Any | None:
