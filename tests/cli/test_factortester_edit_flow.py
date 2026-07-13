@@ -23,6 +23,7 @@ from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
     _StepNavigator,
     _audit_change_cell,
+    _merge_declared_and_ledger_changes,
     _audit_scalar_sequence_text,
     _audit_step_event_context,
     _audit_table_lines,
@@ -63,6 +64,29 @@ def test_step_audit_does_not_repeat_changed_output_after_value() -> None:
     assert _unchanged_output_records(records, [{"field": "Ledger.cash", "before": 100, "after": 90}]) == [
         records[1],
     ]
+
+
+def test_step_audit_treats_ledger_side_channel_changes_as_declared_output_changes() -> None:
+    outputs = [
+        {"field": "CashPoolModule.cash", "values": [{"scope": "ledger", "ledger": "L1", "cash_pool": "P1", "value": None}]},
+        {"field": "LedgerModule.positions", "values": [{"scope": "ledger", "ledger": "L1", "cash_pool": "P1", "value": None}]},
+    ]
+    ledger_changes = [
+        {
+            "field": "CashPoolModule.cash",
+            "scope": "ledger",
+            "ledger": "L1",
+            "cash_pool": "P1",
+            "before": None,
+            "after": {"currency": "CNY", "amount": 100},
+        }
+    ]
+
+    merged_changes = _merge_declared_and_ledger_changes([], ledger_changes)
+
+    assert [change["field"] for change in merged_changes] == ["CashPoolModule.cash"]
+    unchanged = _unchanged_output_records(outputs, merged_changes)
+    assert [record["field"] for record in unchanged] == ["LedgerModule.positions"]
 
 
 def test_step_audit_groups_identical_values_by_partial_strategy_sets(capsys) -> None:

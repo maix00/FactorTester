@@ -5903,6 +5903,41 @@ def _unchanged_output_records(
     return [record for record in records if str(record.get("field") or "") not in changed_fields]
 
 
+def _merge_declared_and_ledger_changes(
+    output_changes: list[dict[str, Any]],
+    ledger_changes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Render ledger/cash-pool mutations in the single declared-change section.
+
+    Step mode should not show a field as unchanged merely because the runtime
+    reported its mutation through the ledger-change side channel.  Keep
+    output_changes first, then add non-duplicate ledger_changes to the same
+    section.
+    """
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for change in [*output_changes, *ledger_changes]:
+        key = _step_change_identity(change)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(change)
+    return merged
+
+
+def _step_change_identity(change: dict[str, Any]) -> str:
+    owner = {
+        key: change.get(key)
+        for key in ("field", "scope", "strategy", "ledger", "cash_pool", "subject", "action", "order_id")
+        if change.get(key) not in (None, "")
+    }
+    return _audit_display_key({
+        "owner": owner,
+        "before": _audit_normalized_value(change.get("before")),
+        "after": _audit_normalized_value(change.get("after")),
+    })
+
+
 def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
     _print_step_section("本次 flow 的 active strategies")
     if not strategies:
@@ -6144,7 +6179,10 @@ def _handle_step_event(
             empty_message="（此 flow 未声明输入字段）",
             route_state=route_state,
         )
-        output_changes = list(data.get("output_changes") or [])
+        output_changes = _merge_declared_and_ledger_changes(
+            list(data.get("output_changes") or []),
+            list(data.get("ledger_changes") or []),
+        )
         outputs = list(data.get("outputs") or [])
         unchanged_outputs = _unchanged_output_records(outputs, output_changes)
         if not outputs:
