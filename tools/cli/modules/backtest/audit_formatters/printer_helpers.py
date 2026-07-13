@@ -15,6 +15,8 @@ ScalarRecordCandidate = tuple[tuple[Any, ...] | None, Any, bool]
 ItemKey = Callable[[Any], Any]
 FieldSortKey = Callable[[str], tuple[Any, ...]]
 ItemPredicate = Callable[[Any], bool]
+CombinedPrinter = Callable[[str, list[Any]], bool]
+CombinedBuilder = Callable[[Any, list[Any]], list[Any]]
 
 
 def combined_single_field_label(qualified_name: str) -> str:
@@ -98,6 +100,31 @@ def collect_following_by_key(
             indexes.append(lookahead)
         lookahead += 1
     return matches, indexes
+
+
+def try_print_combined_group(
+    items: list[Any],
+    *,
+    start: int,
+    consumed_indexes: set[int],
+    current_key: Any,
+    key_fn: ItemKey,
+    printer: CombinedPrinter,
+    prefix: str,
+    combine: CombinedBuilder,
+) -> tuple[bool, int]:
+    matches, combined_indexes = collect_following_by_key(
+        items,
+        start=start,
+        consumed_indexes=consumed_indexes,
+        current_key=current_key,
+        key_fn=key_fn,
+    )
+    combined = combine(items[start], matches)
+    if printer(prefix, combined):
+        consumed_indexes.update(combined_indexes)
+        return True, start + 1
+    return False, start
 
 
 def sorted_field_records(records: list[dict[str, Any]], *, sort_key: FieldSortKey) -> list[dict[str, Any]]:

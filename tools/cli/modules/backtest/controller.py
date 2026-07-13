@@ -2147,17 +2147,18 @@ def _print_audit_fields(
             continue
         current_table, combined_printer, current_routes = _scalar_value_record_group(record)
         if current_table is not None:
-            matches, combined_indexes = audit_printer_helpers.collect_following_by_key(
+            printed, next_index = audit_printer_helpers.try_print_combined_group(
                 sorted_records,
                 start=index,
                 consumed_indexes=consumed_indexes,
                 current_key=(combined_printer, current_routes),
                 key_fn=_scalar_value_group_key,
+                printer=combined_printer,
+                prefix="    ",
+                combine=lambda current, matches: [current, *matches],
             )
-            combined = [record, *matches]
-            if combined_printer("    ", combined):
-                consumed_indexes.update(combined_indexes)
-                index += 1
+            if printed:
+                index = next_index
                 continue
         if current_table is not None:
             index += 1
@@ -2256,17 +2257,18 @@ def _print_audit_changes(
             continue
         current_table, combined_printer, current_routes = _scalar_change_record_group(field_name, field_changes)
         if current_table is not None:
-            matches, combined_indexes = audit_printer_helpers.collect_following_by_key(
+            printed, next_index = audit_printer_helpers.try_print_combined_group(
                 sorted_items,
                 start=index,
                 consumed_indexes=consumed_indexes,
                 current_key=(combined_printer, current_routes),
                 key_fn=_scalar_change_group_key,
+                printer=combined_printer,
+                prefix="  ",
+                combine=lambda current, matches: [current, *matches],
             )
-            combined = [(field_name, field_changes), *matches]
-            if combined_printer("  ", combined):
-                consumed_indexes.update(combined_indexes)
-                index += 1
+            if printed:
+                index = next_index
                 continue
         if current_table is not None:
             index += 1
