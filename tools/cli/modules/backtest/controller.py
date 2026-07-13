@@ -2088,6 +2088,12 @@ def _audit_text(value: Any) -> str:
             return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         return value
     value = _compact_audit_display_aliases(value)
+    event_table_text = _audit_event_draft_table_text(value)
+    if event_table_text is not None:
+        return event_table_text
+    event_payload_text = _audit_event_payload_table_text(value)
+    if event_payload_text is not None:
+        return event_payload_text
     special_text = _audit_special_text(value)
     if special_text is not None:
         return special_text
@@ -2103,11 +2109,266 @@ def _audit_text(value: Any) -> str:
 def _audit_special_text(value: Any) -> str | None:
     if not isinstance(value, dict):
         return None
+    if value.get("type") in {"TargetWeightIntent", "OrderDeltaIntent"}:
+        return _audit_trade_intent_text(value)
     if value.get("type") == "ContractMetadataTable":
         return _audit_contract_metadata_text(value)
     if value.get("type") == "PriceTablesSummary":
         return _audit_price_tables_text(value)
     return None
+
+
+def _audit_event_draft_table_text(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return _audit_event_draft_sample_table_text(value)
+    if not isinstance(value, list) or not value:
+        return None
+    if not _audit_is_event_draft_list(value):
+        return None
+    return "\n".join(_audit_event_draft_table_lines(value))
+
+
+def _audit_event_draft_sample_table_text(value: dict[str, Any]) -> str | None:
+    if value.get("type") not in {"list", "tuple", "set", "frozenset"}:
+        return None
+    sample = value.get("sample")
+    if not isinstance(sample, dict):
+        return None
+    parts: list[tuple[str, list[dict[str, Any]]]] = []
+    for name in ("head", "tail"):
+        items = sample.get(name)
+        if isinstance(items, list) and items and _audit_is_event_draft_list(items):
+            parts.append((name, items))
+    if not parts:
+        return None
+    length = value.get("length")
+    header = f"事件草稿列表 length={length}" if length is not None else "事件草稿列表"
+    if value.get("truncated"):
+        header = f"{header} truncated=True"
+    lines = [header]
+    for name, items in parts:
+        lines.append(f"sample.{name}:")
+        lines.extend(_audit_event_draft_table_lines(items, indent="  "))
+    return "\n".join(lines)
+
+
+def _audit_is_event_draft_list(value: list[Any]) -> bool:
+    return all(isinstance(item, dict) and item.get("type") == "EventDraft" for item in value)
+
+
+def _audit_event_draft_table_lines(
+    value: list[dict[str, Any]],
+    *,
+    indent: str = "",
+) -> list[str]:
+    rows = []
+    for item in value:
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        details = _audit_event_payload_details(payload)
+        route = item.get("strategy") or item.get("ledger") or ""
+        rows.append((
+            item.get("timestamp") or "",
+            item.get("kind") or payload.get("kind") or "",
+            route,
+            payload.get("product") or payload.get("ledger_id") or payload.get("trading_day") or "",
+            payload.get("notice_type") or payload.get("kind") or "",
+            payload.get("notice_reason") or payload.get("reason") or "",
+            details if details else "",
+        ))
+    return _audit_table_lines(
+        ("timestamp", "event", "route", "subject", "action", "reason", "details"),
+        rows,
+        indent=indent,
+    )
+
+
+def _audit_event_payload_details(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    ignored = {"kind", "ledger_id", "trading_day", "notice_type", "notice_reason", "reason", "product"}
+    return {key: value for key, value in payload.items() if key not in ignored}
+
+
+def _audit_event_payload_table_text(value: Any) -> str | None:
+    if not isinstance(value, list) or not value:
+        return None
+    if not all(isinstance(item, dict) for item in value):
+        return None
+    if not all(_looks_like_event_payload(item) for item in value):
+        return None
+    rows = []
+    for payload in value:
+        details = _audit_event_payload_details(payload)
+        rows.append((
+            payload.get("kind") or "",
+            payload.get("product") or payload.get("ledger_id") or payload.get("trading_day") or "",
+            payload.get("notice_type") or payload.get("kind") or "",
+            payload.get("notice_reason") or payload.get("reason") or "",
+            details if details else "",
+        ))
+    return "\n".join(_audit_table_lines(("event", "subject", "action", "reason", "details"), rows))
+
+
+def _looks_like_event_payload(value: dict[str, Any]) -> bool:
+    if "kind" not in value:
+        return False
+    event_keys = {"ledger_id", "trading_day", "product", "notice_type", "notice_reason", "reason"}
+    return any(key in value for key in event_keys) or len(value) == 1
+
+
+def _audit_trade_intent_text(value: dict[str, Any]) -> str:
+    if value.get("type") == "TargetWeightIntent":
+        rows = _audit_weight_rows(value.get("weights"))
+        lines = [f"reason = {value.get('reason') or ''}"]
+        if rows:
+            lines.extend(_audit_table_lines(("product", "target_weight"), rows))
+        return "\n".join(lines)
+    if value.get("type") == "OrderDeltaIntent":
+        rows = _audit_weight_rows(value.get("deltas"))
+        lines = [f"reason = {value.get('reason') or ''}"]
+        if rows:
+            lines.extend(_audit_table_lines(("product", "delta"), rows))
+        return "\n".join(lines)
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+
+
+def _audit_weight_rows(value: Any) -> list[tuple[str, str]]:
+    if not isinstance(value, dict):
+        return []
+    return [(str(product), _audit_scalar_cell(weight)) for product, weight in value.items()]
+
+
+def _audit_weight_change_field(field_name: str) -> str | None:
+    short_name = field_name.rsplit(".", 1)[-1]
+    if short_name == "target_weights":
+        return "target_weight"
+    if short_name == "trade_intent":
+        return "target_weight"
+    return None
+
+
+def _audit_strategy_change_label(change: dict[str, Any]) -> str:
+    strategy = change.get("strategy")
+    if strategy not in (None, ""):
+        return str(strategy)
+    strategies = change.get("strategies")
+    if isinstance(strategies, list) and strategies:
+        return ", ".join(str(item) for item in strategies)
+    return _audit_source_group_label([change])
+
+
+def _audit_weight_mapping(value: Any) -> dict[str, Any]:
+    normalized = _audit_normalized_value(value)
+    if not isinstance(normalized, dict):
+        return {}
+    if normalized.get("type") == "TargetWeightIntent":
+        weights = normalized.get("weights")
+        return dict(weights) if isinstance(weights, dict) else {}
+    if normalized.get("type") == "OrderDeltaIntent":
+        deltas = normalized.get("deltas")
+        return dict(deltas) if isinstance(deltas, dict) else {}
+    if "weights" in normalized and isinstance(normalized.get("weights"), dict):
+        return dict(normalized["weights"])
+    if "deltas" in normalized and isinstance(normalized.get("deltas"), dict):
+        return dict(normalized["deltas"])
+    if "type" not in normalized and all(not isinstance(item, (dict, list, tuple)) for item in normalized.values()):
+        return dict(normalized)
+    return {}
+
+
+def _audit_intent_reason(value: Any) -> str:
+    normalized = _audit_normalized_value(value)
+    if isinstance(normalized, dict):
+        reason = normalized.get("reason")
+        return "" if reason in (None, "") else str(reason)
+    return ""
+
+
+def _audit_compact_identical_weight_rows(rows: list[tuple[str, dict[str, Any], str]]) -> list[tuple[str, dict[str, Any], str]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for strategy, weights, reason in rows:
+        key = (_audit_display_key(weights), reason)
+        bucket = grouped.setdefault(key, {"strategies": [], "weights": weights, "reason": reason})
+        bucket["strategies"].append(strategy)
+    compacted: list[tuple[str, dict[str, Any], str]] = []
+    for bucket in grouped.values():
+        compacted.append((
+            ", ".join(str(item) for item in bucket["strategies"]),
+            bucket["weights"],
+            bucket["reason"],
+        ))
+    return compacted
+
+
+def _audit_weight_table_lines(
+    rows: list[tuple[str, dict[str, Any], str]],
+    *,
+    value_label: str,
+    include_reason: bool = False,
+    indent: str = "",
+) -> list[str]:
+    if not rows:
+        return [f"{indent}（无值）"]
+    compacted = _audit_compact_identical_weight_rows(rows)
+    products: list[str] = []
+    for _, weights, _ in compacted:
+        for product in weights:
+            product_text = str(product)
+            if product_text not in products:
+                products.append(product_text)
+    products.sort()
+    if not products:
+        headers = ("strategy", "reason") if include_reason else ("strategy", value_label)
+        empty_rows = [
+            (strategy, reason) if include_reason else (strategy, "null")
+            for strategy, _, reason in compacted
+        ]
+        return _audit_table_lines(headers, empty_rows, indent=indent)
+    headers = ["strategy"]
+    if include_reason:
+        headers.append("reason")
+    headers.extend(products)
+    table_rows: list[tuple[Any, ...]] = []
+    for strategy, weights, reason in compacted:
+        row: list[Any] = [strategy]
+        if include_reason:
+            row.append(reason)
+        row.extend(_audit_scalar_cell(weights.get(product, "")) for product in products)
+        table_rows.append(tuple(row))
+    return _audit_table_lines(headers, table_rows, indent=indent)
+
+
+def _print_weight_change_tables(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    value_label = _audit_weight_change_field(field_name)
+    if value_label is None:
+        return False
+    before_rows: list[tuple[str, dict[str, Any], str]] = []
+    after_rows: list[tuple[str, dict[str, Any], str]] = []
+    reason_rows: list[tuple[str, str, str]] = []
+    for change in changes:
+        strategy = _audit_strategy_change_label(change)
+        before = _display_field_value(field_name, change.get("before"))
+        after = _display_field_value(field_name, change.get("after"))
+        before_weights = _audit_weight_mapping(before)
+        after_weights = _audit_weight_mapping(after)
+        before_reason = _audit_intent_reason(before)
+        after_reason = _audit_intent_reason(after)
+        before_rows.append((strategy, before_weights, before_reason))
+        after_rows.append((strategy, after_weights, after_reason))
+        if before_reason or after_reason:
+            reason_rows.append((strategy, before_reason, after_reason))
+
+    click.echo(f"{prefix}before:")
+    for line in _audit_weight_table_lines(before_rows, value_label=value_label, indent=f"{prefix}  "):
+        click.echo(line)
+    click.echo(f"{prefix}after:")
+    for line in _audit_weight_table_lines(after_rows, value_label=value_label, indent=f"{prefix}  "):
+        click.echo(line)
+    if reason_rows:
+        click.echo(f"{prefix}reason 变化:")
+        for line in _audit_table_lines(("strategy", "before_reason", "after_reason"), reason_rows, indent=f"{prefix}  "):
+            click.echo(line)
+    return True
 
 
 def _audit_mapping_table_text(value: Any) -> str | None:
@@ -2773,6 +3034,8 @@ def _print_audit_changes(
         by_field.setdefault(str(change.get("field") or ""), []).append(change)
     for field_name, field_changes in sorted(by_field.items(), key=lambda item: _audit_field_sort_key(item[0])):
         click.echo(f"  {_audit_field_label(field_name)}:")
+        if _print_weight_change_tables("    ", field_name, field_changes):
+            continue
         grouped: dict[tuple[str, str], dict[str, Any]] = {}
         for change in field_changes:
             before = _display_field_value(field_name, change.get("before"))

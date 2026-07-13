@@ -254,10 +254,53 @@ def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
     _print_audit_changes("声明输出的变化", changes)
 
     out = capsys.readouterr().out
-    assert "策略上下文 A1, A2" in out
-    assert "策略上下文 A3" in out
-    assert out.count("before =") == 2
-    assert out.count("after =") == 2
+    assert "before:" in out
+    assert "after:" in out
+    assert "strategy" in out
+    assert "A1, A2" in out
+    assert "A3" in out
+    assert "CJ.CZC" in out
+    assert "SI.GFE" in out
+    assert "before =" not in out
+    assert "after =" not in out
+
+
+def test_step_audit_renders_trade_intent_changes_as_tables(capsys) -> None:
+    changes = [
+        {
+            "field": "TargetStrategyModule.trade_intent",
+            "scope": "strategy_context",
+            "strategy": "A1",
+            "before": None,
+            "after": {
+                "type": "TargetWeightIntent",
+                "reason": "group_quantile",
+                "weights": {"CJ.CZC": 0.5, "SF.CZC": 0.5},
+            },
+        },
+        {
+            "field": "TargetStrategyModule.trade_intent",
+            "scope": "strategy_context",
+            "strategy": "A2",
+            "before": None,
+            "after": {
+                "type": "TargetWeightIntent",
+                "reason": "group_quantile",
+                "weights": {"CJ.CZC": 0.5, "SF.CZC": 0.5},
+            },
+        },
+    ]
+
+    _print_audit_changes("声明输出的变化", changes)
+
+    out = capsys.readouterr().out
+    assert "trade_intent [TargetStrategyModule.trade_intent]" in out
+    assert "before:" in out
+    assert "after:" in out
+    assert "A1, A2" in out
+    assert "CJ.CZC" in out
+    assert "reason 变化:" in out
+    assert "group_quantile" in out
     assert "[跨策略]" not in out
 
 
@@ -333,6 +376,94 @@ def test_step_audit_renders_dict_of_dict_scalars_as_table() -> None:
     assert "close" in text
     assert '"close"' not in text
     assert "{" not in text
+
+
+def test_step_audit_renders_event_drafts_as_table() -> None:
+    text = _audit_text([
+        {
+            "type": "EventDraft",
+            "kind": "ledger",
+            "timestamp": "2026-01-01 15:00:00",
+            "strategy": "",
+            "ledger": "private:L1",
+            "payload": {"kind": "margin_check", "ledger_id": "private:L1", "extra": {"x": 1}},
+            "index_key": None,
+        }
+    ])
+
+    assert "timestamp" in text
+    assert "margin_check" in text
+    assert "private:L1" in text
+    assert "明细 1 (details):" in text
+    assert "extra" in text
+    assert '"extra"' not in text
+
+
+def test_step_audit_renders_sampled_event_drafts_as_table() -> None:
+    text = _audit_text({
+        "type": "list",
+        "length": 300,
+        "truncated": True,
+        "sample": {
+            "head": [
+                {
+                    "type": "EventDraft",
+                    "kind": "ledger",
+                    "timestamp": "2026-01-01 09:01:00",
+                    "strategy": "",
+                    "ledger": "private:L1",
+                    "payload": {"kind": "margin_check", "ledger_id": "private:L1"},
+                    "index_key": None,
+                }
+            ],
+            "tail": [
+                {
+                    "type": "EventDraft",
+                    "kind": "ledger",
+                    "timestamp": "2026-01-01 15:00:00",
+                    "strategy": "",
+                    "ledger": "private:L1",
+                    "payload": {"kind": "margin_check", "ledger_id": "private:L1"},
+                    "index_key": None,
+                }
+            ],
+        },
+    })
+
+    assert "事件草稿列表 length=300 truncated=True" in text
+    assert "sample.head:" in text
+    assert "sample.tail:" in text
+    assert "margin_check" in text
+    assert '"payload"' not in text
+    assert "明细" not in text
+
+
+def test_step_audit_renders_event_payload_lists_as_table() -> None:
+    text = _audit_text([
+        {"kind": "margin_check", "ledger_id": "private:L1"},
+        {"kind": "force_close", "product": "RB.SHF", "notice_reason": "expiry"},
+    ])
+
+    assert "event" in text
+    assert "subject" in text
+    assert "margin_check" in text
+    assert "private:L1" in text
+    assert "RB.SHF" in text
+    assert '"ledger_id"' not in text
+
+
+def test_step_audit_renders_target_weight_intent_as_table() -> None:
+    text = _audit_text({
+        "type": "TargetWeightIntent",
+        "reason": "group_quantile",
+        "weights": {"RB.SHF": 0.5, "AG.SHF": 0.5},
+    })
+
+    assert "reason = group_quantile" in text
+    assert "product" in text
+    assert "target_weight" in text
+    assert "RB.SHF" in text
+    assert "0.5" in text
 
 
 def test_step_audit_unowned_strategy_context_change_is_shared(capsys) -> None:

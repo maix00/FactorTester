@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.scheduler import (
     _audit_contract_metadata_value,
     _audit_price_tables_value,
@@ -9,6 +10,7 @@ from tools.testers.backtest.engines.native.scheduler import (
     _audit_ledger_topology,
     _audit_value,
 )
+from tools.testers.backtest.modules.target import TargetWeightIntent
 
 
 @dataclass
@@ -26,6 +28,35 @@ def test_step_audit_serializes_dataclass_instance_without_treating_class_as_inst
     assert serialized_class["type"] == "type"
     assert serialized_class["repr"].endswith("._AuditRecord'>")
     assert _audit_value(_FalseDataclassMarker())["type"] == "_FalseDataclassMarker"
+
+
+def test_step_audit_serializes_event_draft_as_compact_record() -> None:
+    draft = EventDraft(
+        EventKind.LEDGER,
+        pd.Timestamp("2026-01-01 15:00:00"),
+        payload={"kind": "margin_check", "ledger_id": "private:L1", "extra": {"x": 1}},
+        ledger="private:L1",
+    )
+
+    assert _audit_value(draft) == {
+        "type": "EventDraft",
+        "kind": "ledger",
+        "timestamp": "2026-01-01 15:00:00",
+        "strategy": "",
+        "ledger": "private:L1",
+        "payload": {"kind": "margin_check", "ledger_id": "private:L1", "extra": {"x": 1}},
+        "index_key": None,
+    }
+
+
+def test_step_audit_serializes_target_weight_intent_as_typed_payload() -> None:
+    intent = TargetWeightIntent({"RB.SHF": 1.0}, reason="unit_test")
+
+    assert _audit_value(intent) == {
+        "type": "TargetWeightIntent",
+        "reason": "unit_test",
+        "weights": {"RB.SHF": 1.0},
+    }
 
 
 def test_step_audit_keeps_small_dataframes_complete() -> None:

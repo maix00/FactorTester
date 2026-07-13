@@ -225,6 +225,8 @@ def _audit_value(
         return value if math.isfinite(value) else str(value)
     if isinstance(value, (pd.Timestamp, pd.Timedelta)):
         return str(value)
+    if isinstance(value, EventDraft):
+        return _audit_event_draft_value(value, key_labels=key_labels)
     if isinstance(value, pd.Series):
         if len(value) > _AUDIT_MAX_FULL_SERIES_LENGTH:
             return {
@@ -297,6 +299,8 @@ def _audit_value(
             return [_audit_value(item, key_labels=key_labels, _seen=seen) for item in values]
         if isinstance(value, UniqueNameObject):
             return str(value)
+        if type(value).__name__ in {"TargetWeightIntent", "OrderDeltaIntent"}:
+            return _audit_trade_intent_value(value, key_labels=key_labels, seen=seen)
         to_audit_dict = getattr(value, "to_audit_dict", None)
         if callable(to_audit_dict):
             return _audit_value(to_audit_dict(), key_labels=key_labels, _seen=seen)
@@ -328,6 +332,36 @@ def _audit_value(
         return {"type": type(value).__name__, "repr": str(value)}
     finally:
         seen.discard(object_id)
+
+
+def _audit_event_draft_value(value: EventDraft, *, key_labels: Mapping[str, str] | None = None) -> dict[str, Any]:
+    strategy = getattr(value, "strategy", None)
+    ledger = getattr(value, "ledger", None)
+    return {
+        "type": "EventDraft",
+        "kind": value.kind.name.lower(),
+        "timestamp": _audit_value(value.timestamp, key_labels=key_labels),
+        "strategy": key_labels.get(str(strategy), str(strategy)) if strategy is not None and key_labels is not None else (str(strategy) if strategy is not None else ""),
+        "ledger": str(ledger) if ledger is not None else "",
+        "payload": _audit_value(value.payload, key_labels=key_labels),
+        "index_key": _audit_value(value.index_key, key_labels=key_labels),
+    }
+
+
+def _audit_trade_intent_value(value: Any, *, key_labels: Mapping[str, str] | None, seen: set[int]) -> dict[str, Any]:
+    if hasattr(value, "weights"):
+        return {
+            "type": "TargetWeightIntent",
+            "reason": _audit_value(getattr(value, "reason", ""), key_labels=key_labels, _seen=seen),
+            "weights": _audit_value(getattr(value, "weights", {}), key_labels=key_labels, _seen=seen),
+        }
+    if hasattr(value, "deltas"):
+        return {
+            "type": "OrderDeltaIntent",
+            "reason": _audit_value(getattr(value, "reason", ""), key_labels=key_labels, _seen=seen),
+            "deltas": _audit_value(getattr(value, "deltas", {}), key_labels=key_labels, _seen=seen),
+        }
+    return {"type": type(value).__name__, "repr": str(value)}
 
 
 import pandas as pd
