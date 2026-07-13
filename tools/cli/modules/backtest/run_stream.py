@@ -32,3 +32,23 @@ def handle_stream_event(
         return
     if run_config.is_renderer_event(event_name):
         renderer.handle(event_name, data)
+
+
+def consume_stream(
+    client: Any,
+    run_payload: dict[str, Any],
+    *,
+    renderer: Any,
+    run_token: str,
+    step_navigator: step_display.StepNavigator,
+    handle_step_event: StepEventHandler,
+) -> None:
+    for event in client.run_group_test_stream(run_payload):
+        handle_stream_event(
+            event,
+            renderer=renderer,
+            client=client,
+            run_token=run_token,
+            step_navigator=step_navigator,
+            handle_step_event=handle_step_event,
+        )

@@ -2292,15 +2292,14 @@ def _run_backtest(
     step_navigator = step_display_formatter.StepNavigator()
     _short_alias_map.clear()
     _short_alias_map.update(step_display_formatter.build_short_alias_map(state.backtest_groups, state.backtest_ls_configs))
-    for event in client.run_group_test_stream(run_payload):
-        run_stream.handle_stream_event(
-            event,
-            renderer=renderer,
-            client=client,
-            run_token=run_token,
-            step_navigator=step_navigator,
-            handle_step_event=_handle_step_event,
-        )
+    run_stream.consume_stream(
+        client,
+        run_payload,
+        renderer=renderer,
+        run_token=run_token,
+        step_navigator=step_navigator,
+        handle_step_event=_handle_step_event,
+    )
     renderer.handle("complete", {})
     if renderer.last_result:
         state.backtest_last_result = renderer.last_result
