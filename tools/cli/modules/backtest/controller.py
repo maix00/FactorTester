@@ -1268,40 +1268,21 @@ def _audit_text(value: Any) -> str:
 
 
 def _audit_special_text(value: Any) -> str | None:
-    if not isinstance(value, dict):
-        return None
-    if value.get("type") == "PositionsTable":
-        return _audit_positions_text(value)
-    if value.get("type") in {"TargetWeightIntent", "OrderDeltaIntent"}:
-        return _audit_trade_intent_text(value)
-    if value.get("type") == "TimestampTradingDayResolver":
-        return _audit_trading_day_resolver_text(value)
-    if value.get("type") == "ContractMetadataTable":
-        return _audit_contract_metadata_text(value)
-    if value.get("type") == "PriceTablesSummary":
-        return _audit_price_tables_text(value)
-    if value.get("type") == "MarketDataLoadPlan":
-        return _audit_market_data_load_plan_text(value)
-    if value.get("type") == "MarketDataExcludedProducts":
-        return _audit_market_data_excluded_products_text(value)
-    if value.get("type") == "RunWindowSummary":
-        return _audit_run_window_text(value)
-    if value.get("type") == "HistoricalFieldStateTable":
-        return _audit_historical_field_state_text(value)
-    object_text = _audit_runtime_object_text(value)
-    if object_text is not None:
-        return object_text
-    return None
-
-
-def _audit_runtime_object_text(value: dict[str, Any]) -> str | None:
-    value_type = value.get("type")
-    repr_text = value.get("repr")
-    if not value_type or not isinstance(repr_text, str):
-        return None
-    if " object at 0x" not in repr_text:
-        return None
-    return f"{value_type}（runtime object）"
+    return display_value_formatter.special_text(
+        value,
+        formatters={
+            "PositionsTable": _audit_positions_text,
+            "TargetWeightIntent": _audit_trade_intent_text,
+            "OrderDeltaIntent": _audit_trade_intent_text,
+            "TimestampTradingDayResolver": _audit_trading_day_resolver_text,
+            "ContractMetadataTable": _audit_contract_metadata_text,
+            "PriceTablesSummary": _audit_price_tables_text,
+            "MarketDataLoadPlan": _audit_market_data_load_plan_text,
+            "MarketDataExcludedProducts": _audit_market_data_excluded_products_text,
+            "RunWindowSummary": _audit_run_window_text,
+            "HistoricalFieldStateTable": _audit_historical_field_state_text,
+        },
+    )
 
 
 def _audit_event_draft_table_text(value: Any) -> str | None:

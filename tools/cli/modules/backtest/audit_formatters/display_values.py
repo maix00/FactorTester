@@ -12,6 +12,7 @@ Summary = Callable[[Any], Any | None]
 CashSummary = Callable[[Any], str]
 ScalarSequenceText = Callable[[list[Any] | tuple[Any, ...]], str]
 ProductListCell = Callable[[list[str]], str]
+TextFormatter = Callable[[dict[str, Any]], str]
 
 
 def parse_literal(value: str) -> Any | None:
@@ -184,3 +185,23 @@ def inline_summary(value: Any, *, audit_text: Callable[[Any], str], display_widt
     if len(text) == 1 and display_width(first) <= 80:
         return first
     return f"{first} ... ({len(text)} 行)"
+
+
+def runtime_object_text(value: dict[str, Any]) -> str | None:
+    value_type = value.get("type")
+    repr_text = value.get("repr")
+    if not value_type or not isinstance(repr_text, str):
+        return None
+    if " object at 0x" not in repr_text:
+        return None
+    return f"{value_type}（runtime object）"
+
+
+def special_text(value: Any, *, formatters: Mapping[str, TextFormatter]) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    value_type = str(value.get("type") or "")
+    formatter = formatters.get(value_type)
+    if formatter is not None:
+        return formatter(value)
+    return runtime_object_text(value)
