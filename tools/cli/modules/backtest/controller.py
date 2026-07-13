@@ -3373,84 +3373,34 @@ def _audit_cash_summary(value: Any) -> str:
 def _unchanged_output_records(
     records: list[dict[str, Any]], changes: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    changed_fields = {str(change.get("field") or "") for change in changes}
-    return [record for record in records if str(record.get("field") or "") not in changed_fields]
+    return step_display_formatter.unchanged_output_records(records, changes)
 
 
 def _merge_declared_and_ledger_changes(
     output_changes: list[dict[str, Any]],
     ledger_changes: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Render ledger/cash-pool mutations in the single declared-change section.
-
-    Step mode should not show a field as unchanged merely because the runtime
-    reported its mutation through the ledger-change side channel.  Keep
-    output_changes first, then add non-duplicate ledger_changes to the same
-    section.
-    """
-    merged: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for change in [*output_changes, *ledger_changes]:
-        key = _step_change_identity(change)
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(change)
-    return merged
-
-
-def _step_change_identity(change: dict[str, Any]) -> str:
-    owner = {
-        key: change.get(key)
-        for key in ("field", "scope", "strategy", "ledger", "cash_pool", "subject", "action", "order_id")
-        if change.get(key) not in (None, "")
-    }
-    return _audit_display_key({
-        "owner": owner,
-        "before": _audit_normalized_value(change.get("before")),
-        "after": _audit_normalized_value(change.get("after")),
-    })
+    return step_display_formatter.merge_declared_and_ledger_changes(
+        output_changes,
+        ledger_changes,
+        display_key=_audit_display_key,
+        normalize=_audit_normalized_value,
+    )
 
 
 def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
     _print_step_section("本次 flow 的 active strategies")
-    if not strategies:
-        click.echo("  （此 flow 尚未关联策略）")
-        return
-    aliases: list[str] = []
-    for strategy in strategies:
-        alias = _active_strategy_short_alias(strategy)
-        if alias and alias not in aliases:
-            aliases.append(alias)
-    click.echo(f"  {', '.join(aliases) if aliases else '（无）'}")
-
-
-def _active_strategy_short_alias(strategy: dict[str, Any]) -> str:
-    for key in ("shortAlias", "short_alias", "alias", "display_name", "name"):
-        value = str(strategy.get(key) or "").strip()
-        if value:
-            return value
-    strategy_id = str(strategy.get("strategy") or strategy.get("id") or "").strip()
-    if strategy_id and strategy_id in _short_alias_map:
-        return _short_alias_map[strategy_id]
-    return strategy_id or "?"
+    for line in step_display_formatter.strategy_context_lines(strategies, short_alias_map=_short_alias_map):
+        click.echo(line)
 
 
 def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
-    payloads = [payload for payload in payloads if not _audit_payloads_empty(payload.get("payloads"))]
+    payloads = step_display_formatter.non_empty_event_payloads(payloads)
     if not payloads:
         return
     _print_step_section("本批事件草稿载荷（执行前，非完整事件队列）")
     for payload in payloads:
-        if payload.get("scope") == "strategy":
-            label = f"策略 {payload.get('strategy') or '?'}"
-        else:
-            label = f"账本 {payload.get('ledger') or '?'} | 现金池 {payload.get('cash_pool') or '?'}"
-        _print_audit_value("  ", label, payload.get("payloads"))
-
-
-def _audit_payloads_empty(value: Any) -> bool:
-    return value in (None, [], [None], [None, None])
+        _print_audit_value("  ", step_display_formatter.event_payload_label(payload), payload.get("payloads"))
 
 
 def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:

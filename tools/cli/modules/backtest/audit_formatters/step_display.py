@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from tools.cli.modules.backtest.audit_formatters import table_render
+
+
+DisplayKey = Callable[[Any], str]
+Normalize = Callable[[Any], Any]
 
 
 @dataclass
@@ -140,3 +145,88 @@ def contract_audit_lines(violations: list[dict[str, Any]]) -> list[str]:
         field = violation.get("field") or "?"
         lines.append(f"  {action}: {field}")
     return lines
+
+
+def unchanged_output_records(
+    records: list[dict[str, Any]],
+    changes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    changed_fields = {str(change.get("field") or "") for change in changes}
+    return [record for record in records if str(record.get("field") or "") not in changed_fields]
+
+
+def merge_declared_and_ledger_changes(
+    output_changes: list[dict[str, Any]],
+    ledger_changes: list[dict[str, Any]],
+    *,
+    display_key: DisplayKey,
+    normalize: Normalize,
+) -> list[dict[str, Any]]:
+    """Merge declared output and ledger side-channel changes without duplicates."""
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for change in [*output_changes, *ledger_changes]:
+        key = step_change_identity(change, display_key=display_key, normalize=normalize)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(change)
+    return merged
+
+
+def step_change_identity(
+    change: dict[str, Any],
+    *,
+    display_key: DisplayKey,
+    normalize: Normalize,
+) -> str:
+    owner = {
+        key: change.get(key)
+        for key in ("field", "scope", "strategy", "ledger", "cash_pool", "subject", "action", "order_id")
+        if change.get(key) not in (None, "")
+    }
+    return display_key({
+        "owner": owner,
+        "before": normalize(change.get("before")),
+        "after": normalize(change.get("after")),
+    })
+
+
+def strategy_context_lines(
+    strategies: list[dict[str, Any]],
+    *,
+    short_alias_map: dict[str, str],
+) -> list[str]:
+    if not strategies:
+        return ["  （此 flow 尚未关联策略）"]
+    aliases: list[str] = []
+    for strategy in strategies:
+        alias = active_strategy_short_alias(strategy, short_alias_map=short_alias_map)
+        if alias and alias not in aliases:
+            aliases.append(alias)
+    return [f"  {', '.join(aliases) if aliases else '（无）'}"]
+
+
+def active_strategy_short_alias(strategy: dict[str, Any], *, short_alias_map: dict[str, str]) -> str:
+    for key in ("shortAlias", "short_alias", "alias", "display_name", "name"):
+        value = str(strategy.get(key) or "").strip()
+        if value:
+            return value
+    strategy_id = str(strategy.get("strategy") or strategy.get("id") or "").strip()
+    if strategy_id and strategy_id in short_alias_map:
+        return short_alias_map[strategy_id]
+    return strategy_id or "?"
+
+
+def payloads_empty(value: Any) -> bool:
+    return value in (None, [], [None], [None, None])
+
+
+def non_empty_event_payloads(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [payload for payload in payloads if not payloads_empty(payload.get("payloads"))]
+
+
+def event_payload_label(payload: dict[str, Any]) -> str:
+    if payload.get("scope") == "strategy":
+        return f"策略 {payload.get('strategy') or '?'}"
+    return f"账本 {payload.get('ledger') or '?'} | 现金池 {payload.get('cash_pool') or '?'}"
