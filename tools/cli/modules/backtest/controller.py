@@ -166,8 +166,7 @@ from tools.cli.modules.backtest import run_config as run_config_helpers
 from tools.cli.modules.backtest import config_views as config_view_formatter
 from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest import config_state as config_state_helpers
-from tools.cli.modules.backtest import compare_views as compare_view_formatter
-from tools.cli.modules.backtest import compare_payloads as compare_payload_helpers
+from tools.cli.modules.backtest import compare_commands as compare_command_handlers
 from tools.cli.modules.backtest import template_state as template_state_helpers
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 from tools.cli.table import pad_display, render_table
@@ -350,58 +349,21 @@ def compare(
     """在一次 backend run 中克隆当前草稿，批量对比关键执行/保证金场景。"""
     state = load_state()
     _ensure_active_backtest_scope(state)
-    args = tuple(ctx.args)
-    if not args or args[0] in {"help", "--help", "-h"}:
-        _print_backtest_compare_help()
-        return
-    preset = args[0]
-    if preset == "volume-capacity-margin":
-        if volume_rate <= 0:
-            raise click.ClickException("--volume-rate 必须大于 0")
-        payload, groups, ls_configs, scenarios = compare_payload_helpers.volume_capacity_margin_compare_payload(
-            state,
-            volume_rate=volume_rate,
-        )
-        click.echo("批量对比场景:")
-        for scenario in scenarios:
-            click.echo(f"  {scenario['label']}: {scenario['description']}")
-        _run_backtest(
-            state,
-            groups=groups,
-            ls_configs=ls_configs,
-            payload=payload,
-            verbose=verbose,
-            title="批量对比回测",
-            show_topology=False,
-        )
-        _print_compare_result_summary(state, scenarios)
-        return
-    if preset == "factor-grid":
-        payload, groups, ls_configs, scenarios = compare_payload_helpers.factor_grid_payload(
-            state,
-            factor_family=factor_family,
-            n_values=n_values,
-            f_values=f_values,
-            product_groups=product_groups,
-            rev=rev,
-            liquidity_mode=liquidity_mode,
-            participation_rate=participation_rate if participation_rate is not None else volume_rate,
-        )
-        click.echo("因子参数/产品组批量研究:")
-        for scenario in scenarios:
-            click.echo(f"  {scenario['label']}: {scenario['description']}")
-        _run_backtest(
-            state,
-            groups=groups,
-            ls_configs=ls_configs,
-            payload=payload,
-            verbose=verbose,
-            title="因子参数网格回测",
-            show_topology=False,
-        )
-        _print_factor_grid_result_summary(state, scenarios, top=top)
-        return
-    raise click.ClickException("compare 支持 preset: volume-capacity-margin, factor-grid")
+    compare_command_handlers.handle_compare_command(
+        state,
+        tuple(ctx.args),
+        volume_rate=volume_rate,
+        factor_family=factor_family,
+        n_values=n_values,
+        f_values=f_values,
+        product_groups=product_groups,
+        rev=rev,
+        top=top,
+        liquidity_mode=liquidity_mode,
+        participation_rate=participation_rate,
+        verbose=verbose,
+        run_backtest=_run_backtest,
+    )
 
 
 @backtest.command("strategy-book", context_settings=SELECTOR_HELP_CONTEXT)
@@ -1166,25 +1128,6 @@ def _group_ref(group: dict[str, Any]) -> dict[str, Any]:
 def _print_group(group: dict[str, Any]) -> None:
     for line in config_view_formatter.group_detail_lines(group):
         click.echo(line)
-
-
-def _print_backtest_compare_help() -> None:
-    for line in compare_view_formatter.COMPARE_HELP_LINES:
-        click.echo(line)
-
-
-def _print_compare_result_summary(state, scenarios: list[dict[str, str]]) -> None:
-    data = results_command_handlers.require_last_result(state)
-    for line in compare_view_formatter.compare_result_summary_lines(data, scenarios):
-        click.echo(line)
-
-
-def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *, top: int) -> None:
-    data = results_command_handlers.require_last_result(state)
-    for line in compare_view_formatter.factor_grid_result_summary_lines(data, scenarios, top=top):
-        click.echo(line)
-
-
 
 
 def _audit_text(value: Any) -> str:
