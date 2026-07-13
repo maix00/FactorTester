@@ -4411,15 +4411,23 @@ def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
     if not strategies:
         click.echo("  （此 flow 尚未关联策略）")
         return
-    rows = [
-        (
-            str(strategy.get("strategy") or "?"),
-            ", ".join(strategy.get("ledgers") or []) or "无",
-        )
-        for strategy in strategies
-    ]
-    for line in _audit_table_lines(("strategy", "ledgers"), rows, indent="  "):
-        click.echo(line)
+    aliases: list[str] = []
+    for strategy in strategies:
+        alias = _active_strategy_short_alias(strategy)
+        if alias and alias not in aliases:
+            aliases.append(alias)
+    click.echo(f"  {', '.join(aliases) if aliases else '（无）'}")
+
+
+def _active_strategy_short_alias(strategy: dict[str, Any]) -> str:
+    for key in ("shortAlias", "short_alias", "alias", "display_name", "name"):
+        value = str(strategy.get(key) or "").strip()
+        if value:
+            return value
+    strategy_id = str(strategy.get("strategy") or strategy.get("id") or "").strip()
+    if strategy_id and strategy_id in _short_alias_map:
+        return _short_alias_map[strategy_id]
+    return strategy_id or "?"
 
 
 def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
@@ -4630,7 +4638,6 @@ def _handle_step_event(
 
     strategies = list(data.get("strategies") or [])
     _print_strategy_context(strategies)
-    _print_ledger_snapshot(list(data.get("ledgers_before") or []))
     _print_event_payloads(list(data.get("event_payloads") or []))
     route_state: set[tuple[tuple[str, str, str], ...]] = set()
     _print_audit_fields(

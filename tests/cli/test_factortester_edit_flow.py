@@ -32,7 +32,6 @@ from tools.cli.modules.backtest.controller import (
     _print_audit_fields,
     _print_audit_diff_value,
     _print_audit_value,
-    _print_ledger_snapshot,
     _print_strategy_context,
     _serialize_group_for_run,
     _serialize_strategy_book_for_run,
@@ -1456,32 +1455,16 @@ def test_step_multiline_dataframe_metadata_wraps_with_value_indent(capsys, monke
 
 def test_step_active_context_renders_compact_one_line_rows(capsys) -> None:
     _print_strategy_context([
-        {"strategy": "A1", "ledgers": ["private:A1"]},
-        {"strategy": "A2", "ledgers": ["private:A2"]},
-    ])
-    _print_ledger_snapshot([
-        {
-            "ledger": "private:A1",
-            "cash_pool": "private:A1",
-            "strategies": ["A1"],
-            "cash": {
-                "amount": {"repr": "10000000000", "type": "int64"},
-                "currency": "CNY",
-                "scale": 100,
-                "use_minor_units": True,
-            },
-        },
-        {"ledger": "private:A2", "cash_pool": "private:A2", "strategies": ["A2"], "cash": 200},
+        {"strategy": "runtime-bg-1", "shortAlias": "A1", "ledgers": ["private:A1"]},
+        {"strategy": "runtime-bg-2", "short_alias": "A2", "ledgers": ["private:A2"]},
     ])
 
     out = capsys.readouterr().out
-    assert "strategy" in out
-    assert "private:A1" in out
-    assert "cash pool" in out
-    assert "100,000,000.00 CNY" in out
-    assert '"amount"' not in out
-    assert "绑定策略" not in out
-    assert "现金池余额" not in out
+    assert "本次 flow 的 active strategies" in out
+    assert "A1, A2" in out
+    assert "runtime-bg" not in out
+    assert "private:A1" not in out
+    assert "cash pool" not in out
 
 
 def test_step_event_payloads_skip_empty_null_payloads(capsys) -> None:
