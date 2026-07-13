@@ -26,6 +26,7 @@ from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.backtest.audit_formatters import delta_tables as delta_table_formatter
 from tools.cli.modules.backtest.audit_formatters import display_values as display_value_formatter
 from tools.cli.modules.backtest.audit_formatters import events as events_formatter
+from tools.cli.modules.backtest.audit_formatters import field_metadata as field_metadata_formatter
 from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatter
 from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
 from tools.cli.modules.backtest.audit_formatters import orders as orders_formatter
@@ -140,45 +141,12 @@ def _audit_single_sample_frame(frame: dict[str, Any]) -> tuple[dict[str, Any], l
 def _audit_single_sample_series(series: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return samples_formatter.single_sample_series(series)
 
-# Field metadata comes from the executable-module registry, not a hand-picked
-# controller list. Adding a registered backtest module automatically makes its
-# labels and chip ordering available to this renderer.
-_field_labels: dict[str, str] = {}
-_field_tab_order: dict[str, int] = {}
-_field_display_order: dict[str, int] = {}
-_field_display_offsets: dict[str, int] = {}
-try:
-    from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
-
-    for _mod in _ALL_MODULE_CLASSES:
-        if hasattr(_mod, 'fields'):
-            for _fn, _fd in _mod.fields.items():
-                _qualified = f"{_mod.__name__}.{_fn}"
-                _label = getattr(_fd, 'label', '') or ''
-                if _label:
-                    _field_labels[_fn] = _label
-                    _field_labels[_qualified] = _label
-                    _to = getattr(_fd, 'tab_order', None)
-                    if _to is not None:
-                        _field_tab_order[_fn] = _to
-                        _field_tab_order[_qualified] = _to
-                    _serialization = getattr(_fd, "serialization", None) or {}
-                    if isinstance(_serialization, dict) and _serialization.get("display_order") is not None:
-                        _display_order = int(_serialization["display_order"])
-                        _field_display_order[_fn] = _display_order
-                        _field_display_order[_qualified] = _display_order
-                    _offset = getattr(_fd, "display_offset", 0)
-                    if _offset:
-                        _field_display_offsets[_fn] = int(_offset)
-                        _field_display_offsets[_qualified] = int(_offset)
-except Exception:
-    pass
+_field_metadata = field_metadata_formatter.load_field_metadata()
+_field_display_offsets = _field_metadata.display_offsets
 
 
 def _flabel(name: str) -> str:
-    """Return field name with Chinese label: 'margin_mode (保证金模式)'"""
-    cn = _field_labels.get(name) or _field_labels.get(name.rsplit(".", 1)[-1])
-    return f"{name} ({cn})" if cn else name
+    return _field_metadata.label(name)
 
 
 from tools.cli.modules.backtest.shared.selectors import (
@@ -3884,19 +3852,11 @@ def _audit_inline_summary(value: Any) -> str:
 
 
 def _audit_field_label(qualified_name: str) -> str:
-    field_name = qualified_name.rsplit(".", 1)[-1]
-    return f"{_flabel(field_name)} [{qualified_name}]"
+    return _field_metadata.field_label(qualified_name)
 
 
 def _audit_field_sort_key(qualified_name: str) -> tuple[int, int, str]:
-    field_name = qualified_name.rsplit(".", 1)[-1]
-    display_order = _field_display_order.get(qualified_name, _field_display_order.get(field_name))
-    tab_order = _field_tab_order.get(qualified_name, _field_tab_order.get(field_name))
-    return (
-        int(display_order) if display_order is not None else 1_000_000,
-        int(tab_order) if tab_order is not None else 1_000_000,
-        qualified_name,
-    )
+    return _field_metadata.sort_key(qualified_name)
 
 
 def _audit_source_label(entry: dict[str, Any]) -> str:
