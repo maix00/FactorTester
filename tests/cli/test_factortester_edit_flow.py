@@ -18,6 +18,8 @@ from werkzeug.serving import make_server
 from tools.cli.app import _backtest_errors, cli
 from tools.cli.http import ClientConfig, HttpClientError, save_config
 import tools.cli.modules.backtest.run_output as run_output
+from tools.cli.modules.backtest import config_state as config_state_helpers
+from tools.cli.modules.backtest import run_payloads as run_payload_helpers
 from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
@@ -38,8 +40,6 @@ from tools.cli.modules.backtest.controller import (
     _print_audit_value,
     _print_step_badge_box,
     _print_strategy_context,
-    _serialize_group_for_run,
-    _serialize_strategy_book_for_run,
     _set_step_navigation,
     _unchanged_output_records,
     _display_field_value,
@@ -2635,7 +2635,7 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
 
 
 def test_run_payload_uses_backend_group_contract_names() -> None:
-    assert _serialize_group_for_run({
+    assert run_payload_helpers.serialize_group_for_run({
         "name": "A1",
         "split_count": 5,
         "group_index": 1,
@@ -2664,7 +2664,10 @@ def test_strategy_book_short_aliases_are_mapped_to_runtime_strategy_ids() -> Non
         {"id": "bg_runtime_2", "name": "完整模板分组名2", "shortAlias": "A2"},
     ]
 
-    payload = _serialize_strategy_book_for_run(state, groups)
+    payload = run_payload_helpers.serialize_strategy_book_for_run(
+        config_state_helpers.strategy_book_payload(state),
+        groups,
+    )
 
     assert set(payload["strategies"]) == {"bg_runtime_1", "bg_runtime_2"}
     assert payload["strategies"]["bg_runtime_1"]["ledger_ids"] == ["shared"]

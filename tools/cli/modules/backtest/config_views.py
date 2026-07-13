@@ -302,19 +302,3 @@ def run_strategy_info_lines(groups: list[dict[str, Any]], ls_configs: list[dict[
         lines.append(f"  {name} · Long-Short · 多头={long_label} · 空头={short_label}")
     return lines
 
-
-def run_event_lines(event_name: str, data: Any) -> list[str]:
-    if isinstance(data, dict):
-        if event_name == "runtime_info":
-            row_type = data.get("type") or data.get("status") or "运行信息"
-            detail = data.get("detail") or data.get("message") or data
-            return [f"[运行信息] {row_type}: {detail}"]
-        if event_name in {"complete", "done"}:
-            return ["回测完成"]
-        label = data.get("label") or data.get("message") or data.get("phase") or data.get("status")
-        if label:
-            return [f"[{event_name}] {label}"]
-        return []
-    if data:
-        return [f"[{event_name}] {data}"]
-    return []

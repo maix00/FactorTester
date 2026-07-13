@@ -2413,10 +2413,6 @@ def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
 _StepNavigator = step_display_formatter.StepNavigator
 
 
-def _parse_step_timestamp(value: Any) -> datetime | None:
-    return step_display_formatter.parse_step_timestamp(value)
-
-
 def _set_step_navigation(navigator: _StepNavigator, command: str) -> str | None:
     return step_display_formatter.set_step_navigation(navigator, command)
 
@@ -2568,17 +2564,6 @@ def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
     )
 
 
-def _serialize_strategy_book_for_run(state, groups: list[dict[str, Any]]) -> dict[str, Any]:
-    return run_payload_formatter.serialize_strategy_book_for_run(
-        _strategy_book_payload(state),
-        groups,
-    )
-
-
-def _serialize_group_for_run(group: dict[str, Any]) -> dict[str, Any]:
-    return run_payload_formatter.serialize_group_for_run(group)
-
-
 def _parse_result_output_options(args: tuple[str, ...]) -> tuple[dict[str, Any], tuple[str, ...]]:
     return result_output_formatter.parse_result_output_options(args, error=click.ClickException)
 
@@ -2609,7 +2594,3 @@ def _equity_curve_live_enabled(state, *, client=None) -> bool:
     _, store = config_state_helpers.stores_for_backtest(state, client=client)
     return run_config_helpers.equity_curve_live_enabled(store)
 
-
-def _print_run_event(event_name: str, data: Any) -> None:
-    for line in config_view_formatter.run_event_lines(event_name, data):
-        click.echo(line)
