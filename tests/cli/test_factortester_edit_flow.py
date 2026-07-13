@@ -2211,6 +2211,38 @@ def test_step_audit_formats_price_tables_as_basis_summary(monkeypatch) -> None:
     assert '"rows"' not in text
 
 
+def test_step_audit_formats_market_data_load_plan_as_table() -> None:
+    text = _audit_text({
+        "type": "MarketDataLoadPlan",
+        "count": 2,
+        "items": {
+            "AP.CZC": {"frequency": "MIN1", "data_source": "Local"},
+            "CJ.CZC": {"frequency": "MIN1", "data_source": "auto"},
+        },
+    })
+
+    assert "planned products = 2" in text
+    assert "product" in text
+    assert "frequency" in text
+    assert "data_source" in text
+    assert "AP.CZC" in text
+    assert "Local" in text
+    assert '"rows"' not in text
+
+
+def test_step_audit_formats_market_data_excluded_products_compactly() -> None:
+    text = _audit_text({
+        "type": "MarketDataExcludedProducts",
+        "count": 2,
+        "rows": [{"product": "ER.CZC"}, {"product": "RO.CZC"}],
+    })
+
+    assert "excluded products = 2" in text
+    assert "ER.CZC" in text
+    assert "RO.CZC" in text
+    assert '"rows"' not in text
+
+
 def test_step_audit_combines_market_data_samples_into_one_table(capsys, monkeypatch) -> None:
     monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((132, 20)))
     frame_sample = {
@@ -2257,7 +2289,7 @@ def test_step_audit_combines_market_data_samples_into_one_table(capsys, monkeypa
     assert "价格字段元信息:" not in plain
 
 
-def test_step_audit_keeps_field_product_index_when_market_sample_table_splits(capsys, monkeypatch) -> None:
+def test_step_audit_does_not_split_market_sample_table(capsys, monkeypatch) -> None:
     monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((72, 20)))
     frame_sample = {
         "type": "DataFrame",
@@ -2280,13 +2312,14 @@ def test_step_audit_keeps_field_product_index_when_market_sample_table_splits(ca
     ])
 
     plain = _strip_ansi(capsys.readouterr().out)
-    split_headers = [
+    headers = [
         line.strip()
         for line in plain.splitlines()
         if line.strip().startswith("field")
     ]
-    assert len(split_headers) > 1
-    assert all(header.startswith("field       product") for header in split_headers)
+    assert "columns 1/" not in plain
+    assert len(headers) == 1
+    assert headers[0].startswith("field       product")
 
 
 def test_step_audit_combines_market_data_sample_changes(capsys, monkeypatch) -> None:

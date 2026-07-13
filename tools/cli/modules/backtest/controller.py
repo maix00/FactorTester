@@ -2345,6 +2345,10 @@ def _audit_special_text(value: Any) -> str | None:
         return _audit_contract_metadata_text(value)
     if value.get("type") == "PriceTablesSummary":
         return _audit_price_tables_text(value)
+    if value.get("type") == "MarketDataLoadPlan":
+        return _audit_market_data_load_plan_text(value)
+    if value.get("type") == "MarketDataExcludedProducts":
+        return _audit_market_data_excluded_products_text(value)
     if value.get("type") == "RunWindowSummary":
         return _audit_run_window_text(value)
     if value.get("type") == "HistoricalFieldStateTable":
@@ -3766,7 +3770,13 @@ def _print_market_data_sample_value_table(prefix: str, records: list[dict[str, A
         return False
     _print_combined_field_label_lines(prefix, records)
     click.echo(f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:")
-    for line in _audit_table_lines(("field", "product", *time_columns), rows, indent=f"{prefix}  ", allow_transpose=False):
+    for line in _audit_table_lines(
+        ("field", "product", *time_columns),
+        rows,
+        indent=f"{prefix}  ",
+        allow_transpose=False,
+        allow_split=False,
+    ):
         click.echo(line)
     return True
 
@@ -3777,7 +3787,13 @@ def _print_market_data_sample_change_table(prefix: str, records: list[tuple[str,
         return False
     _print_combined_change_field_label_lines(prefix, records)
     click.echo(f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:")
-    for line in _audit_table_lines(("field", "product", *time_columns), rows, indent=f"{prefix}  ", allow_transpose=False):
+    for line in _audit_table_lines(
+        ("field", "product", *time_columns),
+        rows,
+        indent=f"{prefix}  ",
+        allow_transpose=False,
+        allow_split=False,
+    ):
         click.echo(line)
     return True
 
@@ -4215,6 +4231,7 @@ def _audit_table_lines(
     *,
     indent: str = "",
     allow_transpose: bool = True,
+    allow_split: bool = True,
 ) -> list[str]:
     """Render audit tables without ellipsis and split complex cells into details."""
     if not rows:
@@ -4262,7 +4279,10 @@ def _audit_table_lines(
         lines = transposed
         _append_audit_detail_lines(lines, details, indent=indent)
         return lines
-    column_groups = _audit_table_column_groups(header_list, scalar_rows, widths, indent=indent)
+    column_groups = (
+        _audit_table_column_groups(header_list, scalar_rows, widths, indent=indent)
+        if allow_split else [list(range(len(header_list)))]
+    )
     if len(column_groups) > 1:
         lines: list[str] = []
         for group_index, columns in enumerate(column_groups, start=1):
@@ -4631,8 +4651,53 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
             rendered_rows,
             indent="  ",
             allow_transpose=False,
+            allow_split=False,
         ))
     return "\n".join(lines) if lines else "price_tables: (no sample)"
+
+
+def _audit_market_data_load_plan_text(value: dict[str, Any]) -> str:
+    items = value.get("items")
+    if isinstance(items, dict):
+        table_rows = [
+            (
+                str(product),
+                details.get("frequency") or "",
+                details.get("data_source") or "",
+            )
+            for product, details in sorted(items.items())
+            if isinstance(details, dict)
+        ]
+    else:
+        rows = value.get("rows")
+        if not isinstance(rows, list):
+            return "market_data_load_plan: (no rows)"
+        table_rows = [
+            (
+                row.get("product") or "",
+                row.get("frequency") or "",
+                row.get("data_source") or "",
+            )
+            for row in rows
+            if isinstance(row, dict)
+        ]
+    lines = [f"planned products = {value.get('count', len(table_rows))}"]
+    if table_rows:
+        lines.extend(_audit_table_lines(("product", "frequency", "data_source"), table_rows, indent="  ", allow_transpose=False))
+    return "\n".join(lines)
+
+
+def _audit_market_data_excluded_products_text(value: dict[str, Any]) -> str:
+    rows = value.get("rows")
+    if not isinstance(rows, list):
+        return "excluded_out_of_range_products: (no rows)"
+    products = [str(row.get("product") or "") for row in rows if isinstance(row, dict) and row.get("product")]
+    if not products:
+        return "excluded products = 0"
+    return "\n".join([
+        f"excluded products = {value.get('count', len(products))}",
+        _audit_scalar_sequence_text(products, width=96),
+    ])
 
 
 def _audit_index_cell(value: Any) -> str:

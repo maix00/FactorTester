@@ -219,6 +219,8 @@ class MarketDataModule(ExecutableModule):
     required_data_source: ClassVar[FieldRef[Any]] = FieldRef("required_data_source")
     required_frequency: ClassVar[FieldRef[DataFreq]] = FieldRef("required_frequency")
     required_factor_columns: ClassVar[FieldRef[Any]] = FieldRef("required_factor_columns")
+    market_data_load_plan: ClassVar[FieldRef[Any]] = FieldRef("market_data_load_plan")
+    excluded_out_of_range_products: ClassVar[FieldRef[Any]] = FieldRef("excluded_out_of_range_products")
 
     _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
     _fixed_fee_rate_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_fee_rate", owner="FeeModule")
@@ -303,6 +305,8 @@ class MarketDataModule(ExecutableModule):
         "required_frequency": FieldDefinition(public=False),
         "required_data_source": FieldDefinition(public=False),
         "required_factor_columns": FieldDefinition(public=False),
+        "market_data_load_plan": FieldDefinition(public=False),
+        "excluded_out_of_range_products": FieldDefinition(public=False),
     }
 
     resolve_market_data_request: ClassVar[Flow] = Flow(
@@ -325,7 +329,7 @@ class MarketDataModule(ExecutableModule):
             required_data_source, required_frequency, ProductSelectionModule.products,
             TermStructureExpandModule.expanded_contracts, TermStructureExpandModule.contract_metadata,
         ),
-        outputs=(),
+        outputs=(market_data_load_plan, excluded_out_of_range_products),
         phase=Phase.PRE_REPLAY, order=38,
         after=(resolve_market_data_request, TermStructureExpandModule.expand_term_structure),
         description="检查产品覆盖期",
@@ -708,6 +712,8 @@ def _check_market_data_coverage(state, ctx) -> None:
     if "raw_market_data" in request:
         raw = request["raw_market_data"]
         store.publish_coverage_seed(raw)
+        ctx.set(MarketDataModule.market_data_load_plan, _market_data_coverage_seed_summary(raw))
+        ctx.set(MarketDataModule.excluded_out_of_range_products, _market_data_excluded_products_summary(store.excluded_out_of_range))
         return
     products_by_strategy = _products_by_strategy_from_selection_context(state, ctx)
     products = _products_from_selection_context(state, ctx) or list(request.get("products") or ())
@@ -824,7 +830,51 @@ def _check_market_data_coverage(state, ctx) -> None:
         )
     store.load_plan = load_plan
     store.excluded_out_of_range = tuple(_dedupe_products(excluded_out_of_range))
+    ctx.set(MarketDataModule.market_data_load_plan, _market_data_load_plan_summary(store.load_plan))
+    ctx.set(MarketDataModule.excluded_out_of_range_products, _market_data_excluded_products_summary(store.excluded_out_of_range))
     _record_excluded_out_of_range_products(state, store.excluded_out_of_range)
+
+
+def _market_data_load_plan_summary(load_plan: list[Any]) -> dict[str, Any]:
+    items: dict[str, dict[str, str]] = {}
+    for plan_item in load_plan:
+        product, freq, source = _unpack_market_data_load_plan_item(plan_item)
+        items[str(getattr(product, "name", product))] = {
+            "frequency": str(getattr(freq, "name", freq)),
+            "data_source": _data_source_instance_label(source),
+        }
+    return {"type": "MarketDataLoadPlan", "items": items, "count": len(items)}
+
+
+def _market_data_coverage_seed_summary(raw: dict[str, Any]) -> dict[str, Any]:
+    products: list[str] = []
+    raw_prices = raw.get("raw_prices")
+    raw_price_columns = getattr(raw_prices, "columns", None)
+    for product in list(raw_price_columns) if raw_price_columns is not None else []:
+        product_text = str(product)
+        if product_text not in products:
+            products.append(product_text)
+    price_tables = raw.get("price_tables")
+    if isinstance(price_tables, dict):
+        for table in price_tables.values():
+            table_columns = getattr(table, "columns", None)
+            for product in list(table_columns) if table_columns is not None else []:
+                product_text = str(product)
+                if product_text not in products:
+                    products.append(product_text)
+    items = {
+        product: {"frequency": "provided", "data_source": "raw_market_data"}
+        for product in products
+    }
+    return {"type": "MarketDataLoadPlan", "items": items, "count": len(items)}
+
+
+def _market_data_excluded_products_summary(products: tuple[Any, ...]) -> dict[str, Any]:
+    rows = [
+        {"product": str(getattr(product, "name", product))}
+        for product in products
+    ]
+    return {"type": "MarketDataExcludedProducts", "rows": rows, "count": len(rows)}
 
 
 def _select_required_product_frequency(

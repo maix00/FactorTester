@@ -530,6 +530,46 @@ def test_check_market_data_coverage_uses_resolved_frequency_not_first_available(
     _check_market_data_coverage(account, ctx)
 
     assert account.market_data_store.load_plan == [(product, DataFreq.MIN1, None)]
+    assert ctx.get(MarketDataModule.market_data_load_plan) == {
+        "type": "MarketDataLoadPlan",
+        "items": {"P1": {"frequency": "MIN1", "data_source": "auto"}},
+        "count": 1,
+    }
+    assert ctx.get(MarketDataModule.excluded_out_of_range_products) == {
+        "type": "MarketDataExcludedProducts",
+        "rows": [],
+        "count": 0,
+    }
+
+
+def test_check_market_data_coverage_declares_load_plan_outputs():
+    assert MarketDataModule.market_data_load_plan in MarketDataModule.check_market_data_coverage.outputs
+    assert MarketDataModule.excluded_out_of_range_products in MarketDataModule.check_market_data_coverage.outputs
+
+
+def test_check_market_data_coverage_reports_raw_market_data_seed_as_load_plan():
+    account = BacktestRunState()
+    account.raw_market_data = {
+        "raw_prices": pd.DataFrame({"P1": [1.0], "P2": [2.0]}, index=pd.date_range("2024-01-01", periods=1)),
+        "excluded_out_of_range_products": ("P3",),
+    }
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _check_market_data_coverage(account, ctx)
+
+    assert ctx.get(MarketDataModule.market_data_load_plan) == {
+        "type": "MarketDataLoadPlan",
+        "items": {
+            "P1": {"frequency": "provided", "data_source": "raw_market_data"},
+            "P2": {"frequency": "provided", "data_source": "raw_market_data"},
+        },
+        "count": 2,
+    }
+    assert ctx.get(MarketDataModule.excluded_out_of_range_products) == {
+        "type": "MarketDataExcludedProducts",
+        "rows": [{"product": "P3"}],
+        "count": 1,
+    }
 
 
 def test_check_market_data_coverage_rejects_missing_resolved_frequency():
