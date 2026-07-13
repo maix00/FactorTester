@@ -1148,20 +1148,20 @@ def _audit_annotated_strategy_row_values(field_columns: list[str], row_values: t
     return strategy_formatter.annotated_strategy_row_values(field_columns, row_values)
 
 
-def _audit_ledger_entry_title(entry: dict[str, Any]) -> str:
-    return ledger_formatter.ledger_entry_title(entry)
-
-
 def _print_ledger_grouped_values(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    if not ledger_formatter.is_ledger_entries(values):
-        return False
-    if ledger_formatter.is_cash_field(field_name):
-        return False
     if _print_positions_value_table(prefix, field_name, values):
         return True
-    for entry in sorted(values, key=lambda item: (str(item.get("ledger") or ""), str(item.get("cash_pool") or ""))):
-        click.echo(f"{prefix}{_audit_ledger_entry_title(entry)}:")
-        _print_audit_value(f"{prefix}  ", "value", _display_field_value(field_name, entry.get("value")))
+    items = ledger_formatter.ledger_detail_value_groups(
+        field_name,
+        values,
+        display_field_value=_display_field_value,
+        display_key=_audit_display_key,
+    )
+    if items is None:
+        return False
+    for title, value in items:
+        click.echo(f"{prefix}{title}:")
+        _print_audit_value(f"{prefix}  ", "value", value)
     return True
 
 
@@ -1183,14 +1183,16 @@ def _print_positions_value_table(prefix: str, field_name: str, values: list[dict
 
 
 def _print_ledger_grouped_changes(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    if not ledger_formatter.is_ledger_entries(changes):
+    items = ledger_formatter.ledger_detail_change_groups(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        display_key=_audit_display_key,
+    )
+    if items is None:
         return False
-    if ledger_formatter.is_cash_field(field_name):
-        return False
-    for change in sorted(changes, key=lambda item: (str(item.get("ledger") or ""), str(item.get("cash_pool") or ""))):
-        before = _display_field_value(field_name, change.get("before"))
-        after = _display_field_value(field_name, change.get("after"))
-        click.echo(f"{prefix}{_audit_ledger_entry_title(change)}:")
+    for title, before, after in items:
+        click.echo(f"{prefix}{title}:")
         _print_audit_diff_value(f"{prefix}  ", "value", before, after)
     return True
 

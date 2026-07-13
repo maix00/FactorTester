@@ -10,6 +10,7 @@ from tools.cli.modules.backtest.audit_formatters import scope_tables
 
 Normalize = Callable[[Any], Any]
 DisplayFieldValue = Callable[[str, Any], Any]
+DisplayKey = Callable[[Any], str]
 ScalarCell = Callable[[Any], str]
 ScalarSequenceText = Callable[[Sequence[Any]], str]
 AuditText = Callable[[Any], str]
@@ -105,6 +106,70 @@ def join_entry_strategies(entries: Sequence[Mapping[str, Any]]) -> str:
 def ledger_entry_title(entry: Mapping[str, Any]) -> str:
     strategies = ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无"
     return f"账本 {entry.get('ledger') or '?'} | 现金池 {entry.get('cash_pool') or '?'} | 策略 {strategies}"
+
+
+def ledger_detail_group_label(entries: Sequence[Mapping[str, Any]]) -> str:
+    return (
+        f"账本 {join_entry_values(entries, 'ledger')} | "
+        f"现金池 {join_entry_values(entries, 'cash_pool')} | "
+        f"策略 {join_entry_strategies(entries)}"
+    )
+
+
+def ledger_detail_value_groups(
+    field_name: str,
+    values: Sequence[Mapping[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    display_key: DisplayKey,
+) -> list[tuple[str, Any]] | None:
+    if not is_ledger_entries(values) or is_cash_field(field_name):
+        return None
+    grouped: dict[str, dict[str, Any]] = {}
+    for entry in values:
+        value = display_field_value(field_name, entry.get("value"))
+        bucket = grouped.setdefault(display_key(value), {"entries": [], "value": value})
+        bucket["entries"].append(entry)
+    return [
+        (ledger_detail_group_label(bucket["entries"]), bucket["value"])
+        for bucket in sorted(
+            grouped.values(),
+            key=lambda item: (
+                join_entry_values(item["entries"], "ledger"),
+                join_entry_values(item["entries"], "cash_pool"),
+            ),
+        )
+    ]
+
+
+def ledger_detail_change_groups(
+    field_name: str,
+    changes: Sequence[Mapping[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    display_key: DisplayKey,
+) -> list[tuple[str, Any, Any]] | None:
+    if not is_ledger_entries(changes) or is_cash_field(field_name):
+        return None
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for change in changes:
+        before = display_field_value(field_name, change.get("before"))
+        after = display_field_value(field_name, change.get("after"))
+        bucket = grouped.setdefault(
+            (display_key(before), display_key(after)),
+            {"entries": [], "before": before, "after": after},
+        )
+        bucket["entries"].append(change)
+    return [
+        (ledger_detail_group_label(bucket["entries"]), bucket["before"], bucket["after"])
+        for bucket in sorted(
+            grouped.values(),
+            key=lambda item: (
+                join_entry_values(item["entries"], "ledger"),
+                join_entry_values(item["entries"], "cash_pool"),
+            ),
+        )
+    ]
 
 
 def cash_pool_scalar_record_table(
