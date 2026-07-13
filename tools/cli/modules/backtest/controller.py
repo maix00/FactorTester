@@ -2183,6 +2183,9 @@ def _audit_event_draft_table_lines(
     *,
     indent: str = "",
 ) -> list[str]:
+    lifecycle_notice_lines = _audit_lifecycle_notice_table_lines(value, indent=indent)
+    if lifecycle_notice_lines is not None:
+        return lifecycle_notice_lines
     rows = []
     for item in value:
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
@@ -2202,6 +2205,48 @@ def _audit_event_draft_table_lines(
         rows,
         indent=indent,
     )
+
+
+def _audit_lifecycle_notice_table_lines(
+    value: list[dict[str, Any]],
+    *,
+    indent: str = "",
+) -> list[str] | None:
+    rows = []
+    for item in value:
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        notice_type = payload.get("notice_type")
+        if notice_type not in {"force_close", "rollover"}:
+            return None
+        rows.append((
+            item.get("timestamp") or "",
+            item.get("strategy") or "",
+            payload.get("product") or "",
+            _audit_notice_scalar(payload.get("contract_product") or payload.get("contract") or payload.get("uid") or payload.get("contract_object")),
+            notice_type,
+            payload.get("notice_reason") or "",
+            _audit_notice_scalar(payload.get("last_trade_date")),
+            _audit_notice_scalar(payload.get("delivery_date")),
+        ))
+    if not rows:
+        return None
+    return _audit_table_lines(
+        ("notice_time", "strategy", "product", "contract", "notice_type", "reason", "last_trade_date", "delivery_date"),
+        rows,
+        indent=indent,
+    )
+
+
+def _audit_notice_scalar(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        for key in ("name", "repr", "value", "contract_product", "contract", "uid"):
+            item = value.get(key)
+            if item not in (None, ""):
+                return str(item)
+        return _audit_text(value).replace("\n", " ")
+    return str(value)
 
 
 def _audit_trading_day_resolver_text(value: dict[str, Any]) -> str:

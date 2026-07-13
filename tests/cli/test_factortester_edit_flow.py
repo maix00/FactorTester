@@ -512,6 +512,56 @@ def test_step_audit_renders_event_drafts_as_table() -> None:
     assert '"extra"' not in text
 
 
+def test_step_audit_renders_lifecycle_notices_as_single_table() -> None:
+    text = _audit_text([
+        {
+            "type": "EventDraft",
+            "kind": "trade_intent",
+            "timestamp": "2026-01-08 15:00:00+08:00",
+            "strategy": "A1",
+            "ledger": "",
+            "payload": {
+                "product": "RS.CZC",
+                "contract_product": "RS609.CZC",
+                "contract_object": {"type": "Contract", "repr": "RS609.CZC"},
+                "last_trade_date": "2026-01-08",
+                "delivery_date": "2026-01-12",
+                "lifecycle_source": "AKShare CZCE contract lifecycle",
+                "notice_type": "force_close",
+                "notice_reason": "auto_close_date",
+            },
+            "index_key": None,
+        },
+        {
+            "type": "EventDraft",
+            "kind": "trade_intent",
+            "timestamp": "2026-01-09 15:00:00+08:00",
+            "strategy": "A2",
+            "ledger": "",
+            "payload": {
+                "product": "EC.INE",
+                "contract_product": "EC2602.INE",
+                "last_trade_date": "2026-01-09",
+                "delivery_date": "2026-01-13",
+                "notice_type": "force_close",
+                "notice_reason": "auto_close_date",
+            },
+            "index_key": None,
+        },
+    ])
+
+    assert "notice_time" in text
+    assert "strategy" in text
+    assert "product" in text
+    assert "contract" in text
+    assert "RS.CZC" in text
+    assert "RS609.CZC" in text
+    assert "EC2602.INE" in text
+    assert "auto_close_date" in text
+    assert "明细" not in text
+    assert '"payload"' not in text
+
+
 def test_step_audit_renders_sampled_event_drafts_as_table() -> None:
     text = _audit_text({
         "type": "list",
