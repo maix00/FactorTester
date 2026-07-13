@@ -182,6 +182,39 @@ def ledger_scalar_record_table(
     return field_name.rsplit(".", 1)[-1], rows
 
 
+def ledger_scalar_value_rows(
+    field_name: str,
+    values: Sequence[Mapping[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    scalar_text: Callable[[Any], str | None],
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    if not is_ledger_entries(values):
+        return None
+    table = (
+        cash_pool_scalar_record_table(
+            {"field": field_name, "values": list(values)},
+            display_field_value=display_field_value,
+            scalar_text=scalar_text,
+        )
+        if is_cash_field(field_name)
+        else ledger_scalar_record_table(
+            {"field": field_name, "values": list(values)},
+            display_field_value=display_field_value,
+            scalar_text=scalar_text,
+        )
+    )
+    if table is None:
+        return None
+    _field_column, route_values = table
+    if is_cash_field(field_name):
+        headers = ("cash pool", "ledgers", "strategies", "value")
+    else:
+        headers = ("ledger", "cash pool", "strategies", "value")
+    rows = [(*route, value) for route, value in route_values.items()]
+    return headers, sorted(rows)
+
+
 def cash_pool_scalar_change_record_table(
     field_name: str,
     changes: Sequence[Mapping[str, Any]],
@@ -228,6 +261,54 @@ def ledger_scalar_change_record_table(
         )
         rows[route] = change_cell(before_text, after_text)
     return field_name.rsplit(".", 1)[-1], rows
+
+
+def ledger_scalar_change_rows(
+    field_name: str,
+    changes: Sequence[Mapping[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    scalar_text: Callable[[Any], str | None],
+    change_cell: ChangeCell,
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    if not is_ledger_entries(changes):
+        return None
+    if is_cash_field(field_name):
+        return None
+    table = ledger_scalar_change_record_table(
+        field_name,
+        changes,
+        display_field_value=display_field_value,
+        scalar_text=scalar_text,
+        change_cell=change_cell,
+    )
+    if table is None:
+        return None
+    _field_column, route_values = table
+    rows = [(*route, value) for route, value in route_values.items()]
+    return ("ledger", "cash pool", "strategies", "change"), sorted(rows)
+
+
+def cash_pool_scalar_change_rows(
+    field_name: str,
+    changes: Sequence[Mapping[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    scalar_text: Callable[[Any], str | None],
+    change_cell: ChangeCell,
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    table = cash_pool_scalar_change_record_table(
+        field_name,
+        changes,
+        display_field_value=display_field_value,
+        scalar_text=scalar_text,
+        change_cell=change_cell,
+    )
+    if table is None:
+        return None
+    field_column, route_values = table
+    rows = [(*route, value) for route, value in route_values.items()]
+    return ("cash pool", "ledgers", "strategies", field_column), sorted(rows)
 
 
 def combined_scalar_value_rows(

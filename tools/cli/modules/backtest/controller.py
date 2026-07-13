@@ -998,28 +998,12 @@ def _audit_bracket_scalar_list_text(value: Any) -> str | None:
     return ledger_formatter.bracket_scalar_list_text(value, scalar_sequence_text=_audit_scalar_sequence_text)
 
 
-def _audit_cash_pool_group_key(entry: dict[str, Any], *values: str) -> tuple[str, ...]:
-    return ledger_formatter.cash_pool_group_key(entry, *values)
-
-
-def _audit_join_entry_values(entries: list[dict[str, Any]], key: str) -> str:
-    return ledger_formatter.join_entry_values(entries, key)
-
-
-def _audit_join_entry_strategies(entries: list[dict[str, Any]]) -> str:
-    return ledger_formatter.join_entry_strategies(entries)
-
-
 def _cash_pool_scalar_record_table(record: dict[str, Any]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
     return ledger_formatter.cash_pool_scalar_record_table(
         record,
         display_field_value=_display_field_value,
         scalar_text=_audit_ledger_scalar_text,
     )
-
-
-def _merge_cash_pool_routes(rows: dict[tuple[str, str, str], str]) -> dict[tuple[str, str, str], str]:
-    return ledger_formatter.merge_cash_pool_routes(rows)
 
 
 def _print_combined_cash_pool_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
@@ -1037,39 +1021,16 @@ def _print_combined_cash_pool_scalar_value_table(prefix: str, records: list[dict
 
 
 def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    if not ledger_formatter.is_ledger_entries(values):
+    result = ledger_formatter.ledger_scalar_value_rows(
+        field_name,
+        values,
+        display_field_value=_display_field_value,
+        scalar_text=_audit_ledger_scalar_text,
+    )
+    if result is None:
         return False
-    if ledger_formatter.is_cash_field(field_name):
-        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for entry in values:
-            value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
-            if value_text is None:
-                return False
-            grouped.setdefault(_audit_cash_pool_group_key(entry, value_text), []).append(entry)
-        rows = [
-            (
-                cash_pool,
-                _audit_join_entry_values(entries, "ledger"),
-                _audit_join_entry_strategies(entries),
-                value_text,
-            )
-            for (cash_pool, value_text), entries in grouped.items()
-        ]
-        for line in _audit_table_lines(("cash pool", "ledgers", "strategies", "value"), sorted(rows), indent=prefix):
-            click.echo(line)
-        return True
-    rows: list[tuple[str, str, str, str]] = []
-    for entry in values:
-        value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
-        if value_text is None:
-            return False
-        rows.append((
-            str(entry.get("ledger") or "?"),
-            str(entry.get("cash_pool") or "?"),
-            ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无",
-            value_text,
-        ))
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", "value"), sorted(rows), indent=prefix):
+    headers, rows = result
+    for line in _audit_table_lines(headers, rows, indent=prefix):
         click.echo(line)
     return True
 
@@ -1426,28 +1387,18 @@ def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: l
 
 
 def _print_cash_pool_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    if not ledger_formatter.is_cash_field(field_name) or not ledger_formatter.is_ledger_entries(changes):
+    result = ledger_formatter.cash_pool_scalar_change_rows(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        scalar_text=_audit_ledger_scalar_text,
+        change_cell=_audit_change_cell,
+    )
+    if result is None:
         return False
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    for change in changes:
-        before = _display_field_value(field_name, change.get("before"))
-        after = _display_field_value(field_name, change.get("after"))
-        before_text = _audit_ledger_scalar_text(before)
-        after_text = _audit_ledger_scalar_text(after)
-        if before_text is None or after_text is None:
-            return False
-        grouped.setdefault(_audit_cash_pool_group_key(change, before_text, after_text), []).append(change)
-    rows = [
-        (
-            cash_pool,
-            _audit_join_entry_values(entries, "ledger"),
-            _audit_join_entry_strategies(entries),
-            _audit_change_cell(before_text, after_text),
-        )
-        for (cash_pool, before_text, after_text), entries in grouped.items()
-    ]
+    headers, rows = result
     click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
-    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", field_name.rsplit(".", 1)[-1]), sorted(rows), indent=f"{prefix}  "):
+    for line in _audit_table_lines(headers, rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
 
@@ -1529,25 +1480,17 @@ def _audit_combined_change_field_label(records: list[tuple[str, list[dict[str, A
 
 
 def _print_ledger_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    if not ledger_formatter.is_ledger_entries(changes):
+    result = ledger_formatter.ledger_scalar_change_rows(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        scalar_text=_audit_ledger_scalar_text,
+        change_cell=_audit_change_cell,
+    )
+    if result is None:
         return False
-    if ledger_formatter.is_cash_field(field_name):
-        return False
-    rows: list[tuple[str, str, str, str]] = []
-    for change in changes:
-        before = _display_field_value(field_name, change.get("before"))
-        after = _display_field_value(field_name, change.get("after"))
-        before_text = _audit_ledger_scalar_text(before)
-        after_text = _audit_ledger_scalar_text(after)
-        if before_text is None or after_text is None:
-            return False
-        rows.append((
-            str(change.get("ledger") or "?"),
-            str(change.get("cash_pool") or "?"),
-            ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无",
-            _audit_change_cell(before_text, after_text),
-        ))
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", "change"), sorted(rows), indent=prefix):
+    headers, rows = result
+    for line in _audit_table_lines(headers, rows, indent=prefix):
         click.echo(line)
     return True
 
