@@ -42,6 +42,18 @@ _LIFECYCLE_DATE_KEYS = (
     "delivery_date",
     "maturity_date",
 )
+_FORCE_CLOSE_LIFECYCLE_TS_KEYS = (
+    "last_trade_ts",
+    "expire_ts",
+    "delivery_ts",
+    "maturity_ts",
+)
+_FORCE_CLOSE_LIFECYCLE_DATE_KEYS = (
+    "last_trade_date",
+    "expire_date",
+    "delivery_date",
+    "maturity_date",
+)
 _DERIVED_LIFECYCLE_SOURCE_FUNCTIONS = frozenset({
     "exchange_rule_dayk_calendar_derived",
     "local_cnfutures_dayk_coverage",
@@ -306,6 +318,7 @@ def _register_force_close_notices(state, ctx) -> None:
             offset=offset, notice_type="force_close", notice_reason="auto_close_date",
             state=state, reference_tz=_reference_timezone(state, strategy),
             engine_mode=engine_mode_for(state.config_for(strategy)),
+            lifecycle_anchor="force_close",
         )
         drafts.extend(strategy_drafts)
         ctx.set_for(DeliveryForceCloseModule.force_close_notices, strategy, strategy_drafts)
@@ -940,6 +953,7 @@ def _lifecycle_event_drafts(
     state: Any | None = None,
     reference_tz: str | None = None,
     engine_mode: str = "auto",
+    lifecycle_anchor: str | None = None,
 ) -> list[EventDraft]:
     drafts: list[EventDraft] = []
     start_key = _sort_key(start_dt)
@@ -949,7 +963,7 @@ def _lifecycle_event_drafts(
             continue
         ts = _event_timestamp_from_row(
             row, offset=offset, state=state, reference_tz=reference_tz,
-            peer_rows=metadata, engine_mode=engine_mode,
+            peer_rows=metadata, engine_mode=engine_mode, lifecycle_anchor=lifecycle_anchor,
         )
         if ts is None:
             continue
@@ -975,6 +989,7 @@ def _event_timestamp_from_row(
     reference_tz: str | None = None,
     peer_rows: list[dict[str, Any]] | None = None,
     engine_mode: str = "auto",
+    lifecycle_anchor: str | None = None,
 ) -> pd.Timestamp | None:
     # Deterministic given (row identity, offset) -- never depends on the
     # current event timestamp -- but resolve_tradable_target_weights calls
@@ -982,11 +997,12 @@ def _event_timestamp_from_row(
     # event_timestamp_cache for why this must be memoized, not recomputed.
     store = getattr(state, "term_structure_store", None) if state is not None else None
     cache = store.event_timestamp_cache if store is not None else None
-    cache_key = (id(row), offset)
+    cache_key = (id(row), offset, lifecycle_anchor)
     if cache is not None and cache_key in cache:
         return cache[cache_key]
     base = _lifecycle_base_timestamp(
         row, reference_tz=reference_tz, state=state, peer_rows=peer_rows, engine_mode=engine_mode,
+        lifecycle_anchor=lifecycle_anchor,
     )
     result = None if base is None else _apply_lifecycle_offset(base, offset, state=state)
     if cache is not None:
@@ -1001,8 +1017,11 @@ def _lifecycle_base_timestamp(
     state: Any | None = None,
     peer_rows: list[dict[str, Any]] | None = None,
     engine_mode: str = "auto",
+    lifecycle_anchor: str | None = None,
 ) -> pd.Timestamp | None:
-    for key in _LIFECYCLE_TS_KEYS:
+    ts_keys = _FORCE_CLOSE_LIFECYCLE_TS_KEYS if lifecycle_anchor == "force_close" else _LIFECYCLE_TS_KEYS
+    date_keys = _FORCE_CLOSE_LIFECYCLE_DATE_KEYS if lifecycle_anchor == "force_close" else _LIFECYCLE_DATE_KEYS
+    for key in ts_keys:
         value = row.get(key)
         if value is None or value == "":
             continue
@@ -1013,7 +1032,7 @@ def _lifecycle_base_timestamp(
             return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
         except Exception:
             pass
-    for key in _LIFECYCLE_DATE_KEYS:
+    for key in date_keys:
         value = row.get(key)
         if value in (None, ""):
             continue
@@ -1149,6 +1168,8 @@ def _shift_on_event_axis(base: pd.Timestamp, offset: pd.Timedelta, table: pd.Dat
     if events.empty:
         return None
     aligned_base = data_index.tz_align(base)
+    if aligned_base > events[-1]:
+        return None
     day_count = max(0, int(offset.days))
     subday = cast(pd.Timedelta, offset - pd.Timedelta(days=day_count))
     anchor = aligned_base

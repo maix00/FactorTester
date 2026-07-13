@@ -23,6 +23,7 @@ from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
     _StepNavigator,
     _audit_change_cell,
+    _audit_scalar_sequence_text,
     _audit_table_lines,
     _audit_text,
     _handle_step_event,
@@ -130,12 +131,13 @@ def test_step_audit_changes_follow_backend_display_order(capsys) -> None:
 def test_step_audit_change_cell_uses_distinct_highlight() -> None:
     cell = _audit_change_cell("100", "90")
 
-    assert "\x1b[93m" in cell
+    assert "\x1b[30m" in cell
+    assert "\x1b[103m" in cell
     assert "\x1b[43m" not in cell
     assert "100 -> 90" in cell
 
 
-def test_step_badge_uses_light_foreground_without_red_background(capsys) -> None:
+def test_step_badge_uses_light_pink_background(capsys) -> None:
     _print_step_badge_box(
         {
             "current_event": {"event_kind": "ORDER", "batch_count": 1},
@@ -148,7 +150,9 @@ def test_step_badge_uses_light_foreground_without_red_background(capsys) -> None
     )
 
     out = capsys.readouterr().out
-    assert "\x1b[91m" in out
+    assert "\x1b[30m\x1b[48;2;255;214;231m" in out
+    assert "\x1b[101m" not in out
+    assert "\x1b[105m" not in out
     assert "\x1b[41m" not in out
     assert "apply_order_fill" in out
 
@@ -176,15 +180,17 @@ def test_step_audit_multiline_diff_uses_arrow_without_old_new_labels(capsys) -> 
     assert "before" not in out
     assert "after" not in out
     assert "RB.SHF" in out
+    assert "  \x1b[30m\x1b[103mnull ->" in out
+    assert "    \x1b[30m\x1b[103m" in out
 
 
 def test_step_audit_transposed_long_list_wraps_and_truncates(monkeypatch) -> None:
     monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((54, 20)))
-    long_list = "[" + ", ".join(f"P{index}.EX" for index in range(30)) + "]"
+    long_list = "[" + ", ".join(f"P{index}.EX" for index in range(80)) + "]"
 
     lines = _audit_table_lines(
         ("strategies", "products"),
-        [("A1, A2", long_list)],
+        [("A1, A2", _audit_change_cell("null", long_list))],
         indent="    ",
     )
     text = "\n".join(lines)
@@ -193,7 +199,60 @@ def test_step_audit_transposed_long_list_wraps_and_truncates(monkeypatch) -> Non
     assert "products" in text
     assert "P0.EX" in text
     assert "已截断" in text
-    assert any(line.startswith("      ") and "P" in line for line in lines[2:])
+    assert any(line.startswith("      ") and "\x1b[103m" in line for line in lines[2:])
+    assert not any(line.startswith("\x1b[103m      ") for line in lines)
+
+
+def test_step_audit_product_change_table_wraps_list_inside_cell() -> None:
+    products = [
+        "AP.CZC", "CJ.CZC", "EC.INE", "ER.CZC", "FB.DCE", "JD.DCE",
+        "LC.GFE", "LG.DCE", "LH.DCE", "ME.CZC", "PD.GFE", "PK.CZC",
+        "PS.GFE", "PT.GFE", "RO.CZC", "SF.CZC", "SI.GFE", "SM.CZC",
+        "TC.CZC", "UR.CZC", "WR.SHF", "WS.CZC", "WT.CZC",
+    ]
+    after = _audit_scalar_sequence_text(products, width=44)
+    lines = _audit_table_lines(
+        ("strategies", "products"),
+        [("A1, A1:1, A1a, A2, A3, A4, A5, LS A1/A5", _audit_change_cell("null", after))],
+        indent="    ",
+        allow_transpose=False,
+    )
+    text = "\n".join(lines)
+
+    assert "null -> [AP.CZC" in text
+    assert "WT.CZC]" in text
+    assert "已截断" not in text
+    assert any("    \x1b[30m\x1b[103m" in line for line in lines[2:])
+    assert not any("\x1b[103m    " in line for line in lines)
+
+
+def test_step_audit_inlines_small_complex_cell_in_table() -> None:
+    lines = _audit_table_lines(
+        ("strategy", "payload"),
+        [("A1", {"quantity": 1, "price": 2})],
+        indent="  ",
+    )
+    text = "\n".join(lines)
+
+    assert "[明细" not in text
+    assert "key" in text
+    assert "quantity" in text
+    assert "price" in text
+
+
+def test_step_audit_separates_large_details_with_rules() -> None:
+    lines = _audit_table_lines(
+        ("strategy", "payload", "other"),
+        [("A1", {"rows": [{"x": index} for index in range(8)]}, {"rows": [{"y": index} for index in range(8)]})],
+        indent="  ",
+    )
+    text = "\n".join(lines)
+
+    assert "[明细 1]" in text
+    assert "[明细 2]" in text
+    assert text.count("========================") >= 2
+    assert "明细 1 (payload):" in text
+    assert "明细 2 (other):" in text
 
 
 def test_step_audit_groups_identical_changes_inline_without_before_after_sections(capsys) -> None:
@@ -257,8 +316,8 @@ def test_step_audit_compacts_long_scalar_list_changes(capsys) -> None:
 
     out = capsys.readouterr().out
     assert "共 12 个" not in out
-    assert "C0.EX, C1.EX, C2.EX, ..." in out
-    assert "C3.EX" not in out
+    assert "C0.EX, C1.EX, C2.EX" in out
+    assert "C11.EX]" in out
     assert "null -> [C0.EX" in out
 
 
@@ -990,12 +1049,34 @@ def test_step_audit_field_state_baseline_renders_as_product_field_table(capsys) 
     }])
 
     out = capsys.readouterr().out
-    assert "product" in out
+    assert "field" in out
     assert "RB.SHF" in out
     assert "SHFE|F|RB|2610" in out
     assert "策略 RB.SHF" not in out
     assert "VolumeMultiple" in out
     assert "LongMarginRatioByMoney" in out
+
+
+def test_step_audit_field_state_baseline_samples_products_then_transposes(capsys) -> None:
+    after = {
+        f"P{index}.EX": {"VolumeMultiple": index, "LongMarginRatioByMoney": index / 100}
+        for index in range(10)
+    }
+    _print_audit_changes("声明输出的变化", [{
+        "field": "MarketDataModule.field_state_baseline",
+        "scope": "context",
+        "before": None,
+        "after": after,
+    }])
+
+    out = capsys.readouterr().out
+    assert "sample products: 6/10" in out
+    assert "field" in out
+    assert "VolumeMultiple" in out
+    assert "LongMarginRatioByMoney" in out
+    assert "P0.EX" in out
+    assert "P9.EX" in out
+    assert "P4.EX" not in out
 
 
 def test_step_audit_field_state_baseline_diff_only_prints_changed_rows(capsys) -> None:
@@ -1014,6 +1095,7 @@ def test_step_audit_field_state_baseline_diff_only_prints_changed_rows(capsys) -
 
     out = capsys.readouterr().out
     assert "RB.SHF" in out
+    assert "AG.SHF" not in out
     assert "0.07 -> 0.08" in out
     assert "AG.SHF" not in out
 
@@ -1047,7 +1129,8 @@ def test_step_audit_renders_event_drafts_as_table() -> None:
     assert "timestamp" in text
     assert "margin_check" in text
     assert "private:L1" in text
-    assert "明细 1 (details):" in text
+    assert "明细 1 (details):" not in text
+    assert "details" in text
     assert "extra" in text
     assert '"extra"' not in text
 
@@ -1431,9 +1514,32 @@ def test_step_audit_compacts_long_strategy_input_lists_in_strategy_table(capsys)
     assert "strategies" in out
     assert "products" in out
     assert "A1, A2" in out
-    assert "P0.EX, P1.EX, P2.EX, ..." in out
+    assert "P0.EX, P1.EX" in out
     assert "共 12 个" not in out
-    assert "P3.EX" not in out
+    assert "P11.EX]" in out
+
+
+def test_step_audit_annotates_signal_frequency_and_inactive_warmup_window(capsys) -> None:
+    fields = [
+        ("FactorSignalModule.warmup_mode", "auto"),
+        ("FactorSignalModule.warmup_window", "30d"),
+        ("FactorSignalModule.signal_freq", "1d"),
+        ("MarketDataModule.required_frequency", "MIN1"),
+    ]
+    _print_audit_fields("输入字段", [
+        {
+            "field": field,
+            "values": [
+                {"scope": "strategy_context", "strategy": "A1", "value": value},
+                {"scope": "strategy_context", "strategy": "A2", "value": value},
+            ],
+        }
+        for field, value in fields
+    ])
+
+    out = capsys.readouterr().out
+    assert "30d（fixed模式配置；当前auto未生效）" in out
+    assert "1d（信号调度；行情频率见required_frequency=MIN1）" in out
 
 
 def test_step_audit_formats_python_literal_strings_as_json() -> None:
@@ -1893,7 +1999,9 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
     )
 
     out = capsys.readouterr().out
-    assert "\x1b[91m\x1b[1m┏" in out
+    assert "\x1b[30m\x1b[48;2;255;214;231m┏" in out
+    assert "\x1b[101m" not in out
+    assert "\x1b[105m" not in out
     assert "\x1b[41m" not in out
     assert "FLOW PRE_REPLAY" in out
     assert "timestamp: 2026-01-05 09:02:00+08:00" in out

@@ -52,11 +52,57 @@ def _pad_audit_cell(value: object, width: int) -> str:
 
 
 def _audit_change_cell(before: Any, after: Any) -> str:
-    return click.style(f"{before} -> {after}", fg="bright_yellow", bold=True)
+    return "\n".join(_audit_change_highlight_content(line) for line in f"{before} -> {after}".splitlines())
 
 
 def _audit_change_prefix(before: Any) -> str:
-    return click.style(f"{before} ->", fg="bright_yellow", bold=True)
+    return _audit_change_highlight(f"{before} ->")
+
+
+def _audit_change_highlight(text: str) -> str:
+    return click.style(text, fg="black", bg="bright_yellow")
+
+
+def _audit_badge_highlight(text: str) -> str:
+    return f"\x1b[30m\x1b[48;2;255;214;231m{text}\x1b[0m"
+
+
+def _audit_change_highlight_content(line: str) -> str:
+    leading_width = len(line) - len(line.lstrip(" "))
+    leading = line[:leading_width]
+    content = line[leading_width:]
+    if not content:
+        return leading
+    return leading + _audit_change_highlight(content)
+
+
+def _audit_scalar_sequence_text(value: list[Any] | tuple[Any, ...], *, width: int = 72) -> str:
+    items = [str(item) for item in value]
+    if not items:
+        return "[]"
+    lines: list[str] = []
+    current = "["
+    for index, item in enumerate(items):
+        token = item + ("," if index < len(items) - 1 else "")
+        separator = "" if current.endswith("[") else " "
+        candidate = f"{current}{separator}{token}"
+        if _audit_display_width(candidate) <= width:
+            current = candidate
+            continue
+        if current != "[":
+            lines.append(current)
+            current = f"  {token}"
+        else:
+            lines.append(f"[{token}")
+            current = "  "
+    closing_candidate = f"{current}]"
+    if _audit_display_width(closing_candidate) <= width:
+        lines.append(closing_candidate)
+    else:
+        if current.strip():
+            lines.append(current)
+        lines.append("]")
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -2899,7 +2945,7 @@ def _audit_ledger_scalar_text(value: Any) -> str | None:
         return bracket_list_text
     normalized = _audit_normalized_value(value)
     if isinstance(normalized, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in normalized):
-        return "[" + _audit_product_list_cell([str(item) for item in normalized]) + "]"
+        return _audit_scalar_sequence_text(normalized)
     lines = _audit_text(value).splitlines() or [""]
     if len(lines) != 1:
         return None
@@ -2922,7 +2968,7 @@ def _audit_bracket_scalar_list_text(value: Any) -> str | None:
     items = [item.strip().strip("'\"") for item in body.split(",") if item.strip()]
     if not items:
         return None
-    return "[" + _audit_product_list_cell(items) + "]"
+    return _audit_scalar_sequence_text(items)
 
 
 def _audit_is_ledger_entries(entries: list[dict[str, Any]]) -> bool:
@@ -3210,7 +3256,10 @@ def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[
     value_maps = [table[1] for table in tables if table is not None]
     grouped_rows: dict[tuple[str, ...], dict[str, Any]] = {}
     for strategy in strategy_keys[0]:
-        row_values = tuple(value for value_map in value_maps for value in value_map[strategy])
+        row_values = _audit_annotated_strategy_row_values(
+            field_columns,
+            tuple(value for value_map in value_maps for value in value_map[strategy]),
+        )
         row_key = tuple(_audit_display_key(value) for value in row_values)
         bucket = grouped_rows.setdefault(row_key, {"strategies": [], "values": row_values})
         bucket["strategies"].append(strategy)
@@ -3222,6 +3271,29 @@ def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[
     for line in _audit_table_lines(("strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
+
+
+def _audit_annotated_strategy_row_values(field_columns: list[str], row_values: tuple[Any, ...]) -> tuple[Any, ...]:
+    values = list(row_values)
+    by_column = {column: index for index, column in enumerate(field_columns)}
+    warmup_mode_index = by_column.get("warmup_mode")
+    warmup_window_index = by_column.get("warmup_window")
+    if warmup_mode_index is not None and warmup_window_index is not None:
+        mode = str(values[warmup_mode_index]).lower()
+        if mode == "auto" and values[warmup_window_index] not in ("", "null", None):
+            values[warmup_window_index] = f"{values[warmup_window_index]}（fixed模式配置；当前auto未生效）"
+    signal_freq_index = by_column.get("signal_freq")
+    required_frequency_index = (
+        by_column["required_frequency.context"]
+        if "required_frequency.context" in by_column
+        else by_column.get("required_frequency")
+    )
+    if signal_freq_index is not None and required_frequency_index is not None:
+        signal_value = values[signal_freq_index]
+        required_value = values[required_frequency_index]
+        if signal_value not in ("", "null", None) and required_value not in ("", "null", None):
+            values[signal_freq_index] = f"{signal_value}（信号调度；行情频率见required_frequency={required_value}）"
+    return tuple(values)
 
 
 def _audit_ledger_entry_title(entry: dict[str, Any]) -> str:
@@ -3683,23 +3755,30 @@ def _audit_table_lines(
         for column_index, header in enumerate(header_list):
             cell = row[column_index] if column_index < len(row) else ""
             if _audit_table_cell_is_complex(cell):
-                scalar_row.append(f"[明细 {detail_index}]")
-                details.append((detail_index, header, cell))
-                detail_index += 1
+                inline_text = _audit_inline_complex_cell_text(cell)
+                if inline_text is not None:
+                    scalar_row.append(inline_text)
+                else:
+                    scalar_row.append(f"[明细 {detail_index}]")
+                    details.append((detail_index, header, cell))
+                    detail_index += 1
             else:
                 scalar_row.append(str(cell))
         scalar_rows.append(scalar_row)
     widths = [
-        max(_audit_display_width(header_list[column]), *(_audit_display_width(row[column]) for row in scalar_rows))
+        max(
+            _audit_display_width(header_list[column]),
+            *(
+                max(_audit_display_width(part) for part in (row[column].splitlines() or [""]))
+                for row in scalar_rows
+            ),
+        )
         for column in range(len(header_list))
     ]
     transposed = _audit_transposed_table_lines(header_list, scalar_rows, widths, indent=indent) if allow_transpose else None
     if transposed is not None:
         lines = transposed
-        for index, header, value in details:
-            lines.append(f"{indent}明细 {index} ({header}):")
-            for line in _audit_text(value).splitlines() or [""]:
-                lines.append(f"{indent}  {line}")
+        _append_audit_detail_lines(lines, details, indent=indent)
         return lines
     column_groups = _audit_table_column_groups(header_list, scalar_rows, widths, indent=indent)
     if len(column_groups) > 1:
@@ -3714,17 +3793,34 @@ def _audit_table_lines(
             else:
                 lines.append(f"{indent}columns {group_index}/{len(column_groups)}")
             lines.extend(_audit_table_block_lines(header_list, scalar_rows, widths, columns, indent=indent))
-        for index, header, value in details:
-            lines.append(f"{indent}明细 {index} ({header}):")
-            for line in _audit_text(value).splitlines() or [""]:
-                lines.append(f"{indent}  {line}")
+        _append_audit_detail_lines(lines, details, indent=indent)
         return lines
     lines = _audit_table_block_lines(header_list, scalar_rows, widths, column_groups[0], indent=indent)
-    for index, header, value in details:
+    _append_audit_detail_lines(lines, details, indent=indent)
+    return lines
+
+
+def _audit_inline_complex_cell_text(value: Any) -> str | None:
+    text = _audit_text(value)
+    lines = text.splitlines() or [""]
+    if len(lines) > 4:
+        return None
+    if any(_audit_display_width(line) > 64 for line in lines):
+        return None
+    return text
+
+
+def _append_audit_detail_lines(lines: list[str], details: list[tuple[int, str, Any]], *, indent: str) -> None:
+    if not details:
+        return
+    separator = f"{indent}{'=' * 24}"
+    lines.append(separator)
+    for detail_offset, (index, header, value) in enumerate(details):
+        if detail_offset:
+            lines.append(separator)
         lines.append(f"{indent}明细 {index} ({header}):")
         for line in _audit_text(value).splitlines() or [""]:
             lines.append(f"{indent}  {line}")
-    return lines
 
 
 def _audit_transposed_table_lines(
@@ -3816,7 +3912,17 @@ def _audit_table_block_lines(
         indent + "  ".join(_pad_audit_cell(header_list[column], widths[column]) for column in columns).rstrip()
     ]
     for row in scalar_rows:
-        lines.append(indent + "  ".join(_pad_audit_cell(row[column], widths[column]) for column in columns).rstrip())
+        cell_lines = [
+            (row[column].splitlines() or [""])
+            for column in columns
+        ]
+        row_height = max(len(lines_for_cell) for lines_for_cell in cell_lines)
+        for line_index in range(row_height):
+            physical_cells = []
+            for cell_index, column in enumerate(columns):
+                parts = cell_lines[cell_index]
+                physical_cells.append(_pad_audit_cell(parts[line_index] if line_index < len(parts) else "", widths[column]))
+            lines.append(indent + "  ".join(physical_cells).rstrip())
     return lines
 
 
@@ -3848,16 +3954,20 @@ def _audit_wrapped_table_block_lines(
     return lines
 
 
-def _audit_wrapped_table_cell(value: str, *, width: int, max_lines: int = 4) -> list[str]:
+def _audit_wrapped_table_cell(value: str, *, width: int, max_lines: int = 8) -> list[str]:
     if not value:
         return [value]
+    has_change_highlight = "\x1b[" in value and " -> " in click.unstyle(value)
+    wrap_value = click.unstyle(value) if has_change_highlight else value
     subsequent_indent = "  "
-    wrapped = _wrap_audit_text(value, width=width, subsequent_indent=subsequent_indent)
+    wrapped: list[str] = []
+    for physical_line in wrap_value.splitlines() or [""]:
+        wrapped.extend(_wrap_audit_text(physical_line, width=width, subsequent_indent=subsequent_indent))
     if len(wrapped) <= max_lines:
-        return wrapped
+        return [_audit_change_highlight_content(line) for line in wrapped] if has_change_highlight else wrapped
     kept = wrapped[: max_lines - 1]
     kept.append(f"{subsequent_indent}...（已截断 {len(wrapped) - len(kept)} 行）")
-    return kept
+    return [_audit_change_highlight_content(line) for line in kept] if has_change_highlight else kept
 
 
 def _audit_table_column_groups(
@@ -4182,14 +4292,10 @@ def _audit_historical_field_state_text(value: dict[str, Any]) -> str:
     rows = value.get("rows")
     if not fields or not isinstance(rows, list):
         return "historical field state: (no rows)"
-    table_rows: list[tuple[Any, ...]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        table_rows.append(tuple([row.get("product") or "", *[_audit_scalar_cell(row.get(field)) for field in fields]]))
-    if not table_rows:
+    field_rows = [row for row in rows if isinstance(row, dict)]
+    if not field_rows:
         return "historical field state: (empty)"
-    return "\n".join(_audit_table_lines(("product", *fields), table_rows))
+    return "\n".join(_audit_field_state_transposed_lines(fields, field_rows))
 
 
 def _audit_historical_field_state_diff_text(before: Any, after: Any) -> str | None:
@@ -4215,19 +4321,48 @@ def _audit_historical_field_state_diff_text(before: Any, after: Any) -> str | No
     for product in sorted(set(before_rows) | set(after_rows)):
         before_row = before_rows.get(product, {})
         after_row = after_rows.get(product, {})
-        changed_values: list[str] = []
+        changed_row: dict[str, Any] = {"product": product}
+        row_changed = False
         for field in fields:
             before_value = before_row.get(field)
             after_value = after_row.get(field)
             if before_value != after_value:
-                changed_values.append(_audit_change_cell(_audit_scalar_cell(before_value), _audit_scalar_cell(after_value)))
+                changed_row[field] = _audit_change_cell(_audit_scalar_cell(before_value), _audit_scalar_cell(after_value))
+                row_changed = True
             else:
-                changed_values.append("")
-        if any(changed_values):
-            table_rows.append(tuple([product, *changed_values]))
+                changed_row[field] = ""
+        if row_changed:
+            table_rows.append(changed_row)
     if not table_rows:
         return "（无变化）"
-    return "\n".join(_audit_table_lines(("product", *fields), table_rows))
+    return "\n".join(_audit_field_state_transposed_lines(fields, table_rows))
+
+
+def _audit_field_state_transposed_lines(fields: list[str], rows: list[dict[str, Any]]) -> list[str]:
+    sampled_rows, note = _audit_sample_field_state_products(rows)
+    products = [str(row.get("product") or "") for row in sampled_rows]
+    table_rows = []
+    for field in fields:
+        values = [_audit_scalar_cell(row.get(field)) for row in sampled_rows]
+        if any(value not in ("", "null") for value in values):
+            table_rows.append(tuple([field, *values]))
+    lines: list[str] = []
+    if note:
+        lines.append(note)
+    if table_rows:
+        lines.extend(_audit_table_lines(("field", *products), table_rows, allow_transpose=False))
+    return lines or ["（无字段值）"]
+
+
+def _audit_sample_field_state_products(rows: list[dict[str, Any]], *, max_products: int = 6) -> tuple[list[dict[str, Any]], str | None]:
+    sorted_rows = sorted(rows, key=lambda row: str(row.get("product") or ""))
+    if len(sorted_rows) <= max_products:
+        return sorted_rows, None
+    head_count = max_products // 2
+    tail_count = max_products - head_count
+    sampled = [*sorted_rows[:head_count], *sorted_rows[-tail_count:]]
+    products = ", ".join(str(row.get("product") or "") for row in sampled)
+    return sampled, f"sample products: {len(sampled)}/{len(sorted_rows)} = {products}"
 
 
 _POSITION_SCALAR_COLUMNS = (
@@ -4607,7 +4742,7 @@ def _display_field_value(qualified_name: str, value: Any) -> Any:
     if qualified_name.rsplit(".", 1)[-1] == "cash":
         return _audit_cash_summary(value)
     if isinstance(value, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in value):
-        return "[" + _audit_product_list_cell([str(item) for item in value]) + "]"
+        return _audit_scalar_sequence_text(value)
     offset = _field_display_offsets.get(qualified_name, _field_display_offsets.get(qualified_name.rsplit(".", 1)[-1], 0))
     if offset and isinstance(value, (int, float)) and not isinstance(value, bool):
         return value + offset
@@ -4907,9 +5042,9 @@ def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) ->
 
 def _print_audit_arrow_diff(prefix: str, before: Any, after: Any) -> None:
     after_lines = _audit_text(after).splitlines() or [""]
-    click.echo(f"{prefix}{_audit_change_prefix(_audit_inline_summary(before))}")
+    click.echo(f"{prefix}{_audit_change_prefix(_audit_inline_summary(before))}", color=True)
     for line in after_lines:
-        _print_audit_block_line(f"{prefix}  ", line)
+        click.echo(f"{prefix}  {_audit_change_highlight_content(line)}", color=True)
 
 
 def _audit_inline_summary(value: Any) -> str:
@@ -5295,10 +5430,10 @@ def _print_step_badge_box(data: dict[str, Any], phase_text: str, flow_id: str, f
         display_lines.extend(_wrap_audit_text(line, width=max_width, subsequent_indent=continuation))
     box_width = min(max_width, max(_audit_display_width(line) for line in display_lines))
     border = "━" * (box_width + 2)
-    click.secho(f"┏{border}┓", fg="bright_red", bold=True, color=True)
+    click.echo(_audit_badge_highlight(f"┏{border}┓"), color=True)
     for line in display_lines:
-        click.secho(f"┃ {_pad_audit_cell(line, box_width)} ┃", fg="bright_red", bold=True, color=True)
-    click.secho(f"┗{border}┛", fg="bright_red", bold=True, color=True)
+        click.echo(_audit_badge_highlight(f"┃ {_pad_audit_cell(line, box_width)} ┃"), color=True)
+    click.echo(_audit_badge_highlight(f"┗{border}┛"), color=True)
 
 
 def _print_contract_audit(violations: list[dict[str, Any]]) -> None:

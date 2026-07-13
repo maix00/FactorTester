@@ -99,6 +99,20 @@ class _CoverageOnlyTermProduct(_TermProduct):
         }]
 
 
+class _AutoCloseBeforeLastTradeProduct(_TermProduct):
+    def get_contract_list(self, start_date=None, end_date=None):
+        return [{
+            "uid": "FB2603.DCE",
+            "contract": "FB2603",
+            "start": "2025-11-21",
+            "end": "2026-02-02",
+            "end_ts": _ms("2026-02-02 00:00"),
+            "auto_close_date": "2026-01-28",
+            "last_trade_date": "2026-03-02",
+            "delivery_date": "2026-03-05",
+        }]
+
+
 class _CoverageOnlyTwoContractTermProduct(_TermProduct):
     def get_contract_list(self, start_date=None, end_date=None):
         return [
@@ -145,6 +159,8 @@ def test_term_structure_registers_force_close_event_before_expiry():
         ),
     })
     account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    axis = pd.date_range("2026-01-01 09:00", "2026-01-30 15:00", freq="1D", tz="Asia/Shanghai")
+    account.market_data_store.current_prices_table = pd.DataFrame({"FB2603.DCE": range(len(axis))}, index=axis)
     queue = EventQueue()
     captured: list[EventDraft] = []
     queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: captured.extend(batch))
@@ -159,6 +175,36 @@ def test_term_structure_registers_force_close_event_before_expiry():
     assert captured[0].timestamp == pd.Timestamp("2026-01-29 15:00", tz="Asia/Shanghai")
     assert captured[0].payload["notice_type"] == "force_close"
     assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
+
+
+def test_force_close_notice_uses_last_trade_date_not_auto_close_or_row_end():
+    strategy = Strategy(alias="A")
+    product = _AutoCloseBeforeLastTradeProduct()
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                DeliveryForceCloseModule.force_close_before_expiry: "2d",
+            },
+        ),
+    })
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    queue = EventQueue()
+    captured: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    _register_force_close_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert captured == []
 
 
 def test_term_structure_expands_shared_product_once_across_strategies():
