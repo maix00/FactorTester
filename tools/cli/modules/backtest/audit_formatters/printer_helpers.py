@@ -12,6 +12,7 @@ DisplayValue = Callable[[str, Any], Any]
 DisplayKey = Callable[[Any], str]
 ValueIsEmpty = Callable[[Any], bool]
 ScalarRecordCandidate = tuple[tuple[Any, ...] | None, Any, bool]
+ItemKey = Callable[[Any], Any]
 
 
 def combined_single_field_label(qualified_name: str) -> str:
@@ -72,6 +73,29 @@ def scalar_record_group(candidates: list[ScalarRecordCandidate]) -> tuple[tuple[
         if table is not None:
             return table, printer, combined_scalar_routes(table)
     return None, None, None
+
+
+def collect_following_by_key(
+    items: list[Any],
+    *,
+    start: int,
+    consumed_indexes: set[int],
+    current_key: Any,
+    key_fn: ItemKey,
+) -> tuple[list[Any], list[int]]:
+    matches: list[Any] = []
+    indexes: list[int] = []
+    lookahead = start + 1
+    while lookahead < len(items):
+        if lookahead in consumed_indexes:
+            lookahead += 1
+            continue
+        item = items[lookahead]
+        if key_fn(item) == current_key:
+            matches.append(item)
+            indexes.append(lookahead)
+        lookahead += 1
+    return matches, indexes
 
 
 def field_change_buckets(

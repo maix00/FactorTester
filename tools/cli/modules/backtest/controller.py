@@ -2157,18 +2157,14 @@ def _print_audit_fields(
             continue
         current_table, combined_printer, current_routes = _scalar_value_record_group(record)
         if current_table is not None:
-            combined = [record]
-            combined_indexes: list[int] = []
-            lookahead = index + 1
-            while lookahead < len(sorted_records):
-                if lookahead in consumed_indexes:
-                    lookahead += 1
-                    continue
-                next_table, next_printer, next_routes = _scalar_value_record_group(sorted_records[lookahead])
-                if next_table is not None and next_printer is combined_printer and next_routes == current_routes:
-                    combined.append(sorted_records[lookahead])
-                    combined_indexes.append(lookahead)
-                lookahead += 1
+            matches, combined_indexes = audit_printer_helpers.collect_following_by_key(
+                sorted_records,
+                start=index,
+                consumed_indexes=consumed_indexes,
+                current_key=(combined_printer, current_routes),
+                key_fn=_scalar_value_group_key,
+            )
+            combined = [record, *matches]
             if combined_printer("    ", combined):
                 consumed_indexes.update(combined_indexes)
                 index += 1
@@ -2220,6 +2216,13 @@ def _scalar_value_record_group(record: dict[str, Any]) -> tuple[tuple[Any, ...] 
     ])
 
 
+def _scalar_value_group_key(record: dict[str, Any]) -> tuple[Any, tuple[Any, ...] | None] | None:
+    table, printer, routes = _scalar_value_record_group(record)
+    if table is None:
+        return None
+    return printer, routes
+
+
 def _scalar_change_record_group(
     field_name: str,
     field_changes: list[dict[str, Any]],
@@ -2266,19 +2269,14 @@ def _print_audit_changes(
             continue
         current_table, combined_printer, current_routes = _scalar_change_record_group(field_name, field_changes)
         if current_table is not None:
-            combined = [(field_name, field_changes)]
-            combined_indexes: list[int] = []
-            lookahead = index + 1
-            while lookahead < len(sorted_items):
-                if lookahead in consumed_indexes:
-                    lookahead += 1
-                    continue
-                next_field, next_changes = sorted_items[lookahead]
-                next_table, next_printer, next_routes = _scalar_change_record_group(next_field, next_changes)
-                if next_table is not None and next_printer is combined_printer and next_routes == current_routes:
-                    combined.append((next_field, next_changes))
-                    combined_indexes.append(lookahead)
-                lookahead += 1
+            matches, combined_indexes = audit_printer_helpers.collect_following_by_key(
+                sorted_items,
+                start=index,
+                consumed_indexes=consumed_indexes,
+                current_key=(combined_printer, current_routes),
+                key_fn=_scalar_change_group_key,
+            )
+            combined = [(field_name, field_changes), *matches]
             if combined_printer("  ", combined):
                 consumed_indexes.update(combined_indexes)
                 index += 1
@@ -2323,6 +2321,13 @@ def _print_audit_changes(
             else:
                 _print_audit_diff_value("    ", label, bucket["before"], bucket["after"])
         index += 1
+
+
+def _scalar_change_group_key(item: tuple[str, list[dict[str, Any]]]) -> tuple[Any, tuple[Any, ...] | None] | None:
+    table, printer, routes = _scalar_change_record_group(item[0], item[1])
+    if table is None:
+        return None
+    return printer, routes
 
 
 def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
