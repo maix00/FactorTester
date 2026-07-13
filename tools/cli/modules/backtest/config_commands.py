@@ -62,6 +62,20 @@ def handle_ledger_config_command(state, args: tuple[str, ...], *, arg_value: Arg
     return True
 
 
+def handle_clear_command(state, *, page_settings: bool) -> None:
+    state.backtest_local_settings.clear()
+    state.backtest_strategy_book.clear()
+    state.backtest_ledger_configs.clear()
+    state.backtest_groups.clear()
+    state.backtest_ls_configs.clear()
+    state.backtest_last_result.clear()
+    if page_settings:
+        state.page_settings.clear()
+    click.echo("已清空 backtest 配置")
+    if page_settings:
+        click.echo("已同时清空页面级设置")
+
+
 def print_strategy_book(state) -> None:
     print_strategy_book_payload(config_state_helpers.strategy_book_payload(state))
 

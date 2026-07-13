@@ -406,18 +406,8 @@ def clear(page_settings: bool) -> None:
     """清空当前 backtest 配置草稿。"""
     state = load_state()
     switch_backtest_space(state, BACKTEST_SPACE)
-    state.backtest_local_settings.clear()
-    state.backtest_strategy_book.clear()
-    state.backtest_ledger_configs.clear()
-    state.backtest_groups.clear()
-    state.backtest_ls_configs.clear()
-    state.backtest_last_result.clear()
-    if page_settings:
-        state.page_settings.clear()
+    config_command_handlers.handle_clear_command(state, page_settings=page_settings)
     save_state(state)
-    click.echo("已清空 backtest 配置")
-    if page_settings:
-        click.echo("已同时清空页面级设置")
 
 
 @backtest.command("results", context_settings=SELECTOR_HELP_CONTEXT)
