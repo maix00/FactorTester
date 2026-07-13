@@ -2446,17 +2446,8 @@ def _run_backtest(
     click.echo(f"开始运行{title}: groups={len(groups)}, long-short={len(display_ls_configs)}")
     if not step_mode:
         _print_run_strategy_info(groups, display_ls_configs)
-    payload_strategy_book = run_payload.get("strategy_book")
-    payload_ledger_configs = run_payload.get("ledger_configs")
     if show_topology:
-        if state.backtest_strategy_book and payload is None:
-            config_command_handlers.print_strategy_book(state)
-        elif isinstance(payload_strategy_book, dict) and payload_strategy_book:
-            config_command_handlers.print_strategy_book_payload(payload_strategy_book)
-        if state.backtest_ledger_configs and payload is None:
-            config_command_handlers.print_ledger_configs(state)
-        elif isinstance(payload_ledger_configs, dict) and payload_ledger_configs:
-            config_command_handlers.print_ledger_config_payload(payload_ledger_configs)
+        config_command_handlers.print_run_topology(state, payload=payload, run_payload=run_payload)
     client = client_from_config()
     # A saved template/CLI draft persists aliases and parameters, never Factor
     # instances.  Recreate one-off Factors in the current page before every

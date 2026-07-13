@@ -131,3 +131,16 @@ def print_ledger_config_payload(configs: dict[str, Any]) -> None:
 def print_ledger_config_help() -> None:
     for line in config_view_formatter.LEDGER_CONFIG_HELP_LINES:
         click.echo(line)
+
+
+def print_run_topology(state, *, payload: dict[str, Any] | None, run_payload: dict[str, Any]) -> None:
+    payload_strategy_book = run_payload.get("strategy_book")
+    payload_ledger_configs = run_payload.get("ledger_configs")
+    if state.backtest_strategy_book and payload is None:
+        print_strategy_book(state)
+    elif isinstance(payload_strategy_book, dict) and payload_strategy_book:
+        print_strategy_book_payload(payload_strategy_book)
+    if state.backtest_ledger_configs and payload is None:
+        print_ledger_configs(state)
+    elif isinstance(payload_ledger_configs, dict) and payload_ledger_configs:
+        print_ledger_config_payload(payload_ledger_configs)
