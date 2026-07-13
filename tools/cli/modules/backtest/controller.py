@@ -516,35 +516,10 @@ def results(ctx: click.Context) -> None:
         results_command_handlers.print_results_help()
         return
     action = args[0]
-
-    def dispatch() -> None:
-        if action == "summary":
-            results_command_handlers.print_stored_result_summary(state)
-            return
-        if action == "equity":
-            results_command_handlers.print_stored_equity_chart(state)
-            return
-        if action in {"attribution", "attr"}:
-            results_command_handlers.print_attribution_result(state, args[1:])
-            return
-        if action in {"ledgers", "ledger", "cash-pools", "cash-pool"}:
-            results_command_handlers.print_ledger_replay_result(state, args[1:])
-            return
-        if action == "detail":
-            results_command_handlers.print_group_detail_result(state, args[1:])
-            return
-        if action in {"ranking", "rank"}:
-            results_command_handlers.print_group_ranking_result(state, args[1:])
-            return
-        if action == "snapshot":
-            results_command_handlers.print_snapshot_result(state, args[1:])
-            return
-        if action in {"order-flow", "orders"}:
-            results_command_handlers.print_order_flow_result(state, args[1:])
-            return
-        raise click.ClickException("results 支持: summary, equity, attribution, ledgers, detail, ranking, snapshot, order-flow")
-
-    _emit_result_output(output_options, dispatch)
+    _emit_result_output(
+        output_options,
+        lambda: results_command_handlers.dispatch_stored_result_command(state, action, args[1:]),
+    )
 
 
 def _print_backtest_template_help(state) -> None:

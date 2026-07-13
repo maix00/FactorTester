@@ -23,6 +23,34 @@ def print_results_help() -> None:
         click.echo(line)
 
 
+def dispatch_stored_result_command(state, action: str, args: tuple[str, ...]) -> None:
+    if action == "summary":
+        print_stored_result_summary(state)
+        return
+    if action == "equity":
+        print_stored_equity_chart(state)
+        return
+    if action in {"attribution", "attr"}:
+        print_attribution_result(state, args)
+        return
+    if action in {"ledgers", "ledger", "cash-pools", "cash-pool"}:
+        print_ledger_replay_result(state, args)
+        return
+    if action == "detail":
+        print_group_detail_result(state, args)
+        return
+    if action in {"ranking", "rank"}:
+        print_group_ranking_result(state, args)
+        return
+    if action == "snapshot":
+        print_snapshot_result(state, args)
+        return
+    if action in {"order-flow", "orders"}:
+        print_order_flow_result(state, args)
+        return
+    raise click.ClickException("results 支持: summary, equity, attribution, ledgers, detail, ranking, snapshot, order-flow")
+
+
 def require_last_result(state) -> dict[str, Any]:
     if not state.backtest_last_result:
         raise click.ClickException("没有最近一次 backtest 结果；请先运行 factortester backtest --run")
