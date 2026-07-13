@@ -2120,7 +2120,20 @@ def _audit_special_text(value: Any) -> str | None:
         return _audit_contract_metadata_text(value)
     if value.get("type") == "PriceTablesSummary":
         return _audit_price_tables_text(value)
+    object_text = _audit_runtime_object_text(value)
+    if object_text is not None:
+        return object_text
     return None
+
+
+def _audit_runtime_object_text(value: dict[str, Any]) -> str | None:
+    value_type = value.get("type")
+    repr_text = value.get("repr")
+    if not value_type or not isinstance(repr_text, str):
+        return None
+    if " object at 0x" not in repr_text:
+        return None
+    return f"{value_type}（runtime object）"
 
 
 def _audit_event_draft_table_text(value: Any) -> str | None:

@@ -611,6 +611,17 @@ def test_step_audit_renders_trading_day_resolver_summary() -> None:
     assert "repr" not in text
 
 
+def test_step_audit_renders_runtime_object_without_memory_address() -> None:
+    text = _audit_text({
+        "type": "FieldHistoryProvider",
+        "repr": "<tools.data.field_history.FieldHistoryProvider object at 0x1234>",
+    })
+
+    assert text == "FieldHistoryProvider（runtime object）"
+    assert "0x1234" not in text
+    assert '"repr"' not in text
+
+
 def test_step_audit_renders_target_weight_intent_as_table() -> None:
     text = _audit_text({
         "type": "TargetWeightIntent",
