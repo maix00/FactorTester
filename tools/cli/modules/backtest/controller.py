@@ -33,6 +33,7 @@ from tools.cli.modules.backtest.audit_formatters import market_data as market_da
 from tools.cli.modules.backtest.audit_formatters import orders as orders_formatter
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
 from tools.cli.modules.backtest.audit_formatters import strategy as strategy_formatter
+from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_intent_formatter
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
 from tools.data.types.data_money import _format_data_money
@@ -2522,34 +2523,19 @@ def _audit_order_diff_text(before: Any, after: Any) -> str | None:
 
 
 def _audit_trade_intent_text(value: dict[str, Any]) -> str:
-    if value.get("type") == "TargetWeightIntent":
-        rows = _audit_weight_rows(value.get("weights"))
-        lines = [f"reason = {value.get('reason') or ''}"]
-        if rows:
-            lines.extend(_audit_table_lines(("product", "target_weight"), rows))
-        return "\n".join(lines)
-    if value.get("type") == "OrderDeltaIntent":
-        rows = _audit_weight_rows(value.get("deltas"))
-        lines = [f"reason = {value.get('reason') or ''}"]
-        if rows:
-            lines.extend(_audit_table_lines(("product", "delta"), rows))
-        return "\n".join(lines)
-    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    return trade_intent_formatter.trade_intent_text(
+        value,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+    )
 
 
 def _audit_weight_rows(value: Any) -> list[tuple[str, str]]:
-    if not isinstance(value, dict):
-        return []
-    return [(str(product), _audit_scalar_cell(weight)) for product, weight in value.items()]
+    return trade_intent_formatter.weight_rows(value, scalar_cell=_audit_scalar_cell)
 
 
 def _audit_weight_change_field(field_name: str) -> str | None:
-    short_name = field_name.rsplit(".", 1)[-1]
-    if short_name == "target_weights":
-        return "target_weight"
-    if short_name == "trade_intent":
-        return "target_weight"
-    return None
+    return trade_intent_formatter.weight_change_field(field_name)
 
 
 def _audit_strategy_change_label(change: dict[str, Any]) -> str:
@@ -2563,46 +2549,15 @@ def _audit_strategy_change_label(change: dict[str, Any]) -> str:
 
 
 def _audit_weight_mapping(value: Any) -> dict[str, Any]:
-    normalized = _audit_normalized_value(value)
-    if not isinstance(normalized, dict):
-        return {}
-    if normalized.get("type") == "TargetWeightIntent":
-        weights = normalized.get("weights")
-        return dict(weights) if isinstance(weights, dict) else {}
-    if normalized.get("type") == "OrderDeltaIntent":
-        deltas = normalized.get("deltas")
-        return dict(deltas) if isinstance(deltas, dict) else {}
-    if "weights" in normalized and isinstance(normalized.get("weights"), dict):
-        return dict(normalized["weights"])
-    if "deltas" in normalized and isinstance(normalized.get("deltas"), dict):
-        return dict(normalized["deltas"])
-    if "type" not in normalized and all(not isinstance(item, (dict, list, tuple)) for item in normalized.values()):
-        return dict(normalized)
-    return {}
+    return trade_intent_formatter.weight_mapping(value, normalize=_audit_normalized_value)
 
 
 def _audit_intent_reason(value: Any) -> str:
-    normalized = _audit_normalized_value(value)
-    if isinstance(normalized, dict):
-        reason = normalized.get("reason")
-        return "" if reason in (None, "") else str(reason)
-    return ""
+    return trade_intent_formatter.intent_reason(value, normalize=_audit_normalized_value)
 
 
 def _audit_compact_identical_weight_rows(rows: list[tuple[str, dict[str, Any], str]]) -> list[tuple[str, dict[str, Any], str]]:
-    grouped: dict[tuple[str, str], dict[str, Any]] = {}
-    for strategy, weights, reason in rows:
-        key = (_audit_display_key(weights), reason)
-        bucket = grouped.setdefault(key, {"strategies": [], "weights": weights, "reason": reason})
-        bucket["strategies"].append(strategy)
-    compacted: list[tuple[str, dict[str, Any], str]] = []
-    for bucket in grouped.values():
-        compacted.append((
-            ", ".join(str(item) for item in bucket["strategies"]),
-            bucket["weights"],
-            bucket["reason"],
-        ))
-    return compacted
+    return trade_intent_formatter.compact_identical_weight_rows(rows, display_key=_audit_display_key)
 
 
 def _audit_weight_table_lines(
@@ -2612,35 +2567,15 @@ def _audit_weight_table_lines(
     include_reason: bool = False,
     indent: str = "",
 ) -> list[str]:
-    if not rows:
-        return [f"{indent}（无值）"]
-    compacted = _audit_compact_identical_weight_rows(rows)
-    products: list[str] = []
-    for _, weights, _ in compacted:
-        for product in weights:
-            product_text = str(product)
-            if product_text not in products:
-                products.append(product_text)
-    products.sort()
-    if not products:
-        headers = ("strategy", "reason") if include_reason else ("strategy", value_label)
-        empty_rows = [
-            (strategy, reason) if include_reason else (strategy, "null")
-            for strategy, _, reason in compacted
-        ]
-        return _audit_table_lines(headers, empty_rows, indent=indent)
-    headers = ["strategy"]
-    if include_reason:
-        headers.append("reason")
-    headers.extend(products)
-    table_rows: list[tuple[Any, ...]] = []
-    for strategy, weights, reason in compacted:
-        row: list[Any] = [strategy]
-        if include_reason:
-            row.append(reason)
-        row.extend(_audit_scalar_cell(weights.get(product, "")) for product in products)
-        table_rows.append(tuple(row))
-    return _audit_table_lines(headers, table_rows, indent=indent)
+    return trade_intent_formatter.weight_table_lines(
+        rows,
+        value_label=value_label,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        display_key=_audit_display_key,
+        include_reason=include_reason,
+        indent=indent,
+    )
 
 
 def _audit_weight_change_table_lines(
@@ -2650,71 +2585,22 @@ def _audit_weight_change_table_lines(
     include_reason: bool = False,
     indent: str = "",
 ) -> list[str]:
-    if not rows:
-        return [f"{indent}（无变化）"]
-    headers = ["strategy", "product", value_label]
-    if include_reason:
-        headers.append("reason")
-    table_rows: list[tuple[Any, ...]] = []
-    for strategy, before_weights, after_weights, before_reason, after_reason in _audit_compact_weight_change_rows(rows):
-        reason_cell = (
-            _audit_change_cell(before_reason or "null", after_reason or "null")
-            if before_reason != after_reason else before_reason
-        )
-        products = sorted(str(product) for product in (set(before_weights) | set(after_weights)))
-        emitted = False
-        for product in products:
-            before_value = _audit_scalar_cell(before_weights.get(product))
-            after_value = _audit_scalar_cell(after_weights.get(product))
-            if before_value == after_value and not reason_cell:
-                continue
-            row: list[Any] = [strategy, product, "" if before_value == after_value else _audit_change_cell(before_value, after_value)]
-            if include_reason:
-                row.append(reason_cell)
-            table_rows.append(tuple(row))
-            emitted = True
-        if not emitted and reason_cell:
-            row = [strategy, "（无产品权重变化）", ""]
-            if include_reason:
-                row.append(reason_cell)
-            table_rows.append(tuple(row))
-    if not table_rows:
-        return [f"{indent}（无变化）"]
-    return _audit_table_lines(headers, table_rows, indent=indent)
+    return trade_intent_formatter.weight_change_table_lines(
+        rows,
+        value_label=value_label,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+        display_key=_audit_display_key,
+        include_reason=include_reason,
+        indent=indent,
+    )
 
 
 def _audit_compact_weight_change_rows(
     rows: list[tuple[str, dict[str, Any], dict[str, Any], str, str]]
 ) -> list[tuple[str, dict[str, Any], dict[str, Any], str, str]]:
-    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-    for strategy, before_weights, after_weights, before_reason, after_reason in rows:
-        key = (
-            _audit_display_key(before_weights),
-            _audit_display_key(after_weights),
-            before_reason,
-            after_reason,
-        )
-        bucket = grouped.setdefault(
-            key,
-            {
-                "strategies": [],
-                "before": before_weights,
-                "after": after_weights,
-                "before_reason": before_reason,
-                "after_reason": after_reason,
-            },
-        )
-        bucket["strategies"].append(strategy)
-    return [
-        (
-            ", ".join(str(item) for item in bucket["strategies"]),
-            bucket["before"],
-            bucket["after"],
-            bucket["before_reason"],
-            bucket["after_reason"],
-        )
-        for bucket in grouped.values()
-    ]
+    return trade_intent_formatter.compact_weight_change_rows(rows, display_key=_audit_display_key)
 
 
 def _print_weight_change_tables(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
@@ -4439,19 +4325,7 @@ def _display_field_value(qualified_name: str, value: Any) -> Any:
 
 
 def _audit_trade_intent_summary(value: Any) -> str | None:
-    normalized = _audit_normalized_value(value)
-    if not isinstance(normalized, dict):
-        return None
-    intent_type = str(normalized.get("type") or "").strip()
-    if intent_type not in {"TargetWeightIntent", "OrderDeltaIntent"}:
-        return None
-    reason = str(normalized.get("reason") or "").strip()
-    payload = normalized.get("weights") if intent_type == "TargetWeightIntent" else normalized.get("deltas")
-    count = len(payload) if isinstance(payload, dict) else 0
-    suffix = "weights" if intent_type == "TargetWeightIntent" else "deltas"
-    if reason:
-        return f"{intent_type}(reason={reason}; {count} {suffix})"
-    return f"{intent_type}({count} {suffix})"
+    return trade_intent_formatter.trade_intent_summary(value, normalize=_audit_normalized_value)
 
 
 def _print_audit_value(prefix: str, label: str, value: Any) -> None:
