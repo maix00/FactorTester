@@ -51,3 +51,62 @@ def group_rows_by_value_tuple(
         (joined_key_header,),
         [tuple([", ".join(keys), *values]) for values, keys in grouped.items()],
     )
+
+
+def mapping_sequence_subfield_columns(
+    base_column: str,
+    values: Sequence[Any],
+    *,
+    normalize,
+) -> list[str] | None:
+    """Return stable child columns for a single-item mapping sequence.
+
+    This is scope-agnostic: callers decide whether a field is allowed to use
+    this expansion.  The helper only verifies that every present value has the
+    same scalar child-key layout.
+    """
+    columns: list[str] | None = None
+    for value in values:
+        if value is None:
+            continue
+        child_keys = single_mapping_sequence_keys(value, normalize=normalize)
+        if child_keys is None:
+            return None
+        candidate = [f"{base_column}.{child_key}" for child_key in child_keys]
+        if columns is None:
+            columns = candidate
+        elif columns != candidate:
+            return None
+    return columns
+
+
+def mapping_sequence_subfield_values(
+    value: Any,
+    expected_count: int,
+    *,
+    normalize,
+    scalar_cell,
+) -> list[str]:
+    item = single_mapping_sequence_item(value, normalize=normalize)
+    if item is None:
+        return [""] * expected_count
+    return [scalar_cell(item.get(child_key)) for child_key in list(item)[:expected_count]]
+
+
+def single_mapping_sequence_keys(value: Any, *, normalize) -> list[str] | None:
+    item = single_mapping_sequence_item(value, normalize=normalize)
+    if item is None:
+        return None
+    return [str(key) for key in item]
+
+
+def single_mapping_sequence_item(value: Any, *, normalize) -> dict[str, Any] | None:
+    normalized = normalize(value)
+    if not isinstance(normalized, (list, tuple)) or len(normalized) != 1:
+        return None
+    item = normalized[0]
+    if not isinstance(item, dict) or not item:
+        return None
+    if any(isinstance(child_value, (dict, list, tuple)) for child_value in item.values()):
+        return None
+    return item

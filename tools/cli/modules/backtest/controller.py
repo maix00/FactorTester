@@ -31,6 +31,7 @@ from tools.cli.modules.backtest.audit_formatters import events as events_formatt
 from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatter
 from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
+from tools.cli.modules.backtest.audit_formatters import strategy as strategy_formatter
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
 from tools.data.types.data_money import _format_data_money
@@ -3065,12 +3066,7 @@ def _audit_is_ledger_entries(entries: list[dict[str, Any]]) -> bool:
 
 
 def _audit_is_strategy_entries(entries: list[dict[str, Any]]) -> bool:
-    if not entries:
-        return False
-    scopes = {str(entry.get("scope") or "") for entry in entries}
-    if not (bool(scopes) and scopes <= {"strategy_context", "strategy_config"}):
-        return False
-    return all(entry.get("strategy") not in (None, "") for entry in entries)
+    return strategy_formatter.is_strategy_entries(entries)
 
 
 def _audit_is_cash_field(field_name: str) -> bool:
@@ -3172,45 +3168,17 @@ def _print_strategy_scalar_value_table(prefix: str, field_name: str, values: lis
 
 
 def _print_strategy_record_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    if not values or any(str(entry.get("scope") or "") in {"ledger", "ledger_config"} for entry in values):
+    result = strategy_formatter.strategy_record_value_rows(
+        field_name,
+        values,
+        display_field_value=_display_field_value,
+        display_key=_audit_display_key,
+        table_cell_is_complex=_audit_table_cell_is_complex,
+        scalar_cell=_audit_scalar_cell,
+    )
+    if result is None:
         return False
-    strategy_entries = [
-        entry for entry in values
-        if str(entry.get("scope") or "") in {"strategy_config", "strategy_context"} and entry.get("strategy")
-    ]
-    if not strategy_entries:
-        return False
-    strategies = sorted(dict.fromkeys(str(entry.get("strategy") or "?") for entry in strategy_entries))
-    scope_order = ["context", "strategy_context", "strategy_config"]
-    present_scopes = [
-        scope for scope in scope_order
-        if any(str(entry.get("scope") or "") == scope for entry in values)
-    ]
-    if not present_scopes:
-        return False
-    short_name = field_name.rsplit(".", 1)[-1]
-    headers = [short_name] if len(present_scopes) == 1 else [_audit_scope_column_label(scope) for scope in present_scopes]
-    missing = object()
-    shared_values = [entry.get("value") for entry in values if str(entry.get("scope") or "") == "context"]
-    shared_value: Any = shared_values[-1] if shared_values else missing
-    by_strategy_scope: dict[tuple[str, str], Any] = {}
-    for entry in strategy_entries:
-        by_strategy_scope[(str(entry.get("strategy") or "?"), str(entry.get("scope") or ""))] = entry.get("value")
-    grouped: dict[tuple[str, ...], dict[str, Any]] = {}
-    for strategy in strategies:
-        row_values = []
-        row_keys = []
-        for scope in present_scopes:
-            value = shared_value if scope == "context" else by_strategy_scope.get((strategy, scope), missing)
-            display_value = "" if value is missing else _audit_strategy_table_cell(field_name, value)
-            row_values.append(display_value)
-            row_keys.append(_audit_display_key(display_value))
-        bucket = grouped.setdefault(tuple(row_keys), {"strategies": [], "values": row_values})
-        bucket["strategies"].append(strategy)
-    rows = [
-        tuple([", ".join(bucket["strategies"]), *bucket["values"]])
-        for bucket in grouped.values()
-    ]
+    headers, rows = result
     click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
     for line in _audit_table_lines(("strategies", *headers), rows, indent=f"{prefix}  "):
         click.echo(line)
@@ -3218,192 +3186,83 @@ def _print_strategy_record_value_table(prefix: str, field_name: str, values: lis
 
 
 def _audit_strategy_table_cell(field_name: str, value: Any) -> Any:
-    display_value = _display_field_value(field_name, value)
-    if _audit_table_cell_is_complex(display_value):
-        return display_value
-    return _audit_scalar_cell(display_value)
+    return strategy_formatter.strategy_table_cell(
+        field_name,
+        value,
+        display_field_value=_display_field_value,
+        table_cell_is_complex=_audit_table_cell_is_complex,
+        scalar_cell=_audit_scalar_cell,
+    )
 
 
 def _audit_scope_column_label(scope: str) -> str:
-    if scope == "context":
-        return "共享"
-    if scope == "strategy_context":
-        return "策略上下文"
-    if scope == "strategy_config":
-        return "策略配置"
-    return scope or "value"
+    return strategy_formatter.scope_column_label(scope)
 
 
 _AUDIT_MISSING = object()
 
 
 def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[list[str], dict[str, tuple[Any, ...]]] | None:
-    field_name = str(record.get("field") or "")
-    values = record.get("values") or []
-    if not values or any(str(entry.get("scope") or "") in {"ledger", "ledger_config"} for entry in values):
-        return None
-    strategy_entries = [
-        entry for entry in values
-        if str(entry.get("scope") or "") in {"strategy_config", "strategy_context"} and entry.get("strategy")
-    ]
-    if not strategy_entries:
-        return None
-    scope_order = ["context", "strategy_context", "strategy_config"]
-    present_scopes = [
-        scope for scope in scope_order
-        if any(str(entry.get("scope") or "") == scope for entry in values)
-    ]
-    if not present_scopes:
-        return None
-    short_name = field_name.rsplit(".", 1)[-1]
-    shared_values = [entry.get("value") for entry in values if str(entry.get("scope") or "") == "context"]
-    shared_value: Any = shared_values[-1] if shared_values else _AUDIT_MISSING
-    by_strategy_scope: dict[tuple[str, str], Any] = {}
-    for entry in strategy_entries:
-        key = (str(entry.get("strategy") or "?"), str(entry.get("scope") or ""))
-        value = entry.get("value")
-        if key in by_strategy_scope and _audit_display_key(by_strategy_scope[key]) != _audit_display_key(value):
-            return None
-        by_strategy_scope[key] = value
-    strategies = sorted(dict.fromkeys(str(entry.get("strategy") or "?") for entry in strategy_entries))
-    scope_specs: list[tuple[str, list[str], bool]] = []
-    for scope in present_scopes:
-        base_column = short_name if len(present_scopes) == 1 else f"{short_name}.{_audit_scope_suffix(scope)}"
-        candidate_values = [
-            shared_value if scope == "context" else by_strategy_scope.get((strategy, scope), _AUDIT_MISSING)
-            for strategy in strategies
-        ]
-        expanded_columns = _audit_strategy_subfield_columns(short_name, base_column, candidate_values)
-        if expanded_columns is None:
-            scope_specs.append((scope, [base_column], False))
-        else:
-            scope_specs.append((scope, expanded_columns, True))
-    columns = [column for _scope, scope_columns, _expanded in scope_specs for column in scope_columns]
-    by_strategy: dict[str, tuple[Any, ...]] = {}
-    for strategy in strategies:
-        row_values: list[Any] = []
-        for scope, scope_columns, expanded in scope_specs:
-            value = shared_value if scope == "context" else by_strategy_scope.get((strategy, scope), _AUDIT_MISSING)
-            if value is _AUDIT_MISSING:
-                row_values.extend([""] * len(scope_columns))
-            elif expanded:
-                row_values.extend(_audit_strategy_subfield_values(value, len(scope_columns)))
-            else:
-                row_values.append(_audit_strategy_table_cell(field_name, value))
-        by_strategy[strategy] = tuple(row_values)
-    if not by_strategy:
-        return None
-    return columns, by_strategy
+    return strategy_formatter.strategy_scalar_record_table(
+        record,
+        display_field_value=_display_field_value,
+        display_key=_audit_display_key,
+        normalize=_audit_normalized_value,
+        scalar_cell=_audit_scalar_cell,
+        table_cell_is_complex=_audit_table_cell_is_complex,
+    )
 
 
 def _audit_strategy_subfield_columns(short_name: str, base_column: str, values: list[Any]) -> list[str] | None:
-    if short_name not in {"long_leg_strategy_ids", "short_leg_strategy_ids"}:
-        return None
-    columns: list[str] | None = None
-    for value in values:
-        if value is _AUDIT_MISSING:
-            continue
-        child_keys = _audit_single_mapping_sequence_keys(value)
-        if child_keys is None:
-            return None
-        candidate = [f"{base_column}.{child_key}" for child_key in child_keys]
-        if columns is None:
-            columns = candidate
-        elif columns != candidate:
-            return None
-    return columns
+    return strategy_formatter.strategy_subfield_columns(
+        short_name,
+        base_column,
+        values,
+        normalize=_audit_normalized_value,
+    )
 
 
 def _audit_strategy_subfield_values(value: Any, expected_count: int) -> list[str]:
-    item = _audit_single_mapping_sequence_item(value)
-    if item is None:
-        return [""] * expected_count
-    return [_audit_scalar_cell(item.get(child_key)) for child_key in list(item)[:expected_count]]
+    return strategy_formatter.strategy_subfield_values(
+        value,
+        expected_count,
+        normalize=_audit_normalized_value,
+        scalar_cell=_audit_scalar_cell,
+    )
 
 
 def _audit_single_mapping_sequence_keys(value: Any) -> list[str] | None:
-    item = _audit_single_mapping_sequence_item(value)
-    if item is None:
-        return None
-    return [str(key) for key in item]
+    return strategy_formatter.single_mapping_sequence_keys(value, normalize=_audit_normalized_value)
 
 
 def _audit_single_mapping_sequence_item(value: Any) -> dict[str, Any] | None:
-    normalized = _audit_normalized_value(value)
-    if not isinstance(normalized, (list, tuple)) or len(normalized) != 1:
-        return None
-    item = normalized[0]
-    if not isinstance(item, dict) or not item:
-        return None
-    if any(isinstance(child_value, (dict, list, tuple)) for child_value in item.values()):
-        return None
-    return item
+    return strategy_formatter.single_mapping_sequence_item(value, normalize=_audit_normalized_value)
 
 
 def _audit_scope_suffix(scope: str) -> str:
-    if scope == "context":
-        return "shared"
-    if scope == "strategy_context":
-        return "context"
-    if scope == "strategy_config":
-        return "config"
-    return scope or "value"
+    return strategy_formatter.scope_suffix(scope)
 
 
 def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
     tables = [_strategy_scalar_record_table(record) for record in records]
     if any(table is None for table in tables) or not tables:
         return False
-    strategy_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
-    if not strategy_keys or any(keys != strategy_keys[0] for keys in strategy_keys[1:]):
+    combined = strategy_formatter.combine_strategy_tables(
+        [table for table in tables if table is not None],
+        display_key=_audit_display_key,
+        annotate=_audit_annotated_strategy_row_values,
+    )
+    if combined is None:
         return False
-    field_columns = [
-        column
-        for table in tables
-        if table is not None
-        for column in table[0]
-    ]
-    value_maps = [table[1] for table in tables if table is not None]
-    grouped_rows: dict[tuple[str, ...], dict[str, Any]] = {}
-    for strategy in strategy_keys[0]:
-        row_values = _audit_annotated_strategy_row_values(
-            field_columns,
-            tuple(value for value_map in value_maps for value in value_map[strategy]),
-        )
-        row_key = tuple(_audit_display_key(value) for value in row_values)
-        bucket = grouped_rows.setdefault(row_key, {"strategies": [], "values": row_values})
-        bucket["strategies"].append(strategy)
-    rows = [
-        tuple([", ".join(bucket["strategies"]), *bucket["values"]])
-        for bucket in grouped_rows.values()
-    ]
+    field_columns, rows = combined
     _print_combined_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+    for line in _audit_table_lines(("strategies", *field_columns), rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
 
 
 def _audit_annotated_strategy_row_values(field_columns: list[str], row_values: tuple[Any, ...]) -> tuple[Any, ...]:
-    values = list(row_values)
-    by_column = {column: index for index, column in enumerate(field_columns)}
-    warmup_mode_index = by_column.get("warmup_mode")
-    warmup_window_index = by_column.get("warmup_window")
-    if warmup_mode_index is not None and warmup_window_index is not None:
-        mode = str(values[warmup_mode_index]).lower()
-        if mode == "auto" and values[warmup_window_index] not in ("", "null", None):
-            values[warmup_window_index] = f"{values[warmup_window_index]}（fixed模式配置；当前auto未生效）"
-    signal_freq_index = by_column.get("signal_freq")
-    required_frequency_index = (
-        by_column["required_frequency.context"]
-        if "required_frequency.context" in by_column
-        else by_column.get("required_frequency")
-    )
-    if signal_freq_index is not None and required_frequency_index is not None:
-        signal_value = values[signal_freq_index]
-        required_value = values[required_frequency_index]
-        if signal_value not in ("", "null", None) and required_value not in ("", "null", None):
-            values[signal_freq_index] = f"{signal_value}（信号事件频率；因子/行情数据频率见required_frequency={required_value}）"
-    return tuple(values)
+    return strategy_formatter.annotated_strategy_row_values(field_columns, row_values)
 
 
 def _audit_ledger_entry_title(entry: dict[str, Any]) -> str:
@@ -3669,49 +3528,13 @@ def _print_cash_pool_scalar_change_table(prefix: str, field_name: str, changes: 
 
 
 def _strategy_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[list[str], dict[str, tuple[str, ...]]] | None:
-    if not changes or any(str(change.get("scope") or "") in {"ledger", "ledger_config"} for change in changes):
-        return None
-    strategy_changes = [
-        change for change in changes
-        if str(change.get("scope") or "") in {"strategy_config", "strategy_context"} and change.get("strategy")
-    ]
-    if not strategy_changes:
-        return None
-    scope_order = ["context", "strategy_context", "strategy_config"]
-    present_scopes = [
-        scope for scope in scope_order
-        if any(str(change.get("scope") or "") == scope for change in changes)
-    ]
-    if not present_scopes:
-        return None
-    short_name = field_name.rsplit(".", 1)[-1]
-    columns = [short_name] if len(present_scopes) == 1 else [
-        f"{short_name}.{_audit_scope_suffix(scope)}" for scope in present_scopes
-    ]
-    shared_changes = [change for change in changes if str(change.get("scope") or "") == "context"]
-    shared_change: dict[str, Any] | None = shared_changes[-1] if shared_changes else None
-    by_strategy_scope: dict[tuple[str, str], str] = {}
-    for change in strategy_changes:
-        before_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("before")))
-        after_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("after")))
-        if before_text is None or after_text is None:
-            return None
-        by_strategy_scope[(str(change.get("strategy") or "?"), str(change.get("scope") or ""))] = _audit_change_cell(before_text, after_text)
-    shared_text = ""
-    if shared_change is not None:
-        before_text = _audit_ledger_scalar_text(_display_field_value(field_name, shared_change.get("before")))
-        after_text = _audit_ledger_scalar_text(_display_field_value(field_name, shared_change.get("after")))
-        if before_text is None or after_text is None:
-            return None
-        shared_text = _audit_change_cell(before_text, after_text)
-    strategies = sorted(dict.fromkeys(str(change.get("strategy") or "?") for change in strategy_changes))
-    by_strategy: dict[str, tuple[str, ...]] = {}
-    for strategy in strategies:
-        row_values: list[str] = []
-        for scope in present_scopes:
-            row_values.append(shared_text if scope == "context" else by_strategy_scope.get((strategy, scope), ""))
-        by_strategy[strategy] = tuple(row_values)
-    return columns, by_strategy
+    return strategy_formatter.strategy_scalar_change_record_table(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        ledger_scalar_text=_audit_ledger_scalar_text,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _ledger_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
@@ -3738,23 +3561,12 @@ def _print_combined_strategy_scalar_change_table(prefix: str, records: list[tupl
     tables = [_strategy_scalar_change_record_table(field_name, changes) for field_name, changes in records]
     if any(table is None for table in tables) or not tables:
         return False
-    strategy_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
-    if not strategy_keys or any(keys != strategy_keys[0] for keys in strategy_keys[1:]):
+    combined = strategy_formatter.combine_strategy_tables([table for table in tables if table is not None])
+    if combined is None:
         return False
-    field_columns = [
-        column
-        for table in tables
-        if table is not None
-        for column in table[0]
-    ]
-    value_maps = [table[1] for table in tables if table is not None]
-    grouped_rows: dict[tuple[str, ...], list[str]] = {}
-    for strategy in strategy_keys[0]:
-        row_values = tuple(value for value_map in value_maps for value in value_map[strategy])
-        grouped_rows.setdefault(row_values, []).append(strategy)
-    rows = [tuple([", ".join(strategies), *row_values]) for row_values, strategies in grouped_rows.items()]
+    field_columns, rows = combined
     _print_combined_change_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+    for line in _audit_table_lines(("strategies", *field_columns), rows, indent=f"{prefix}  "):
         click.echo(line)
     return True
 
