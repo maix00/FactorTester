@@ -161,6 +161,7 @@ from tools.cli.modules.backtest.shared.selectors import (
 )
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.run_output import _chart_body_width, _multi_series_chart, _result_series
+from tools.cli.modules.backtest import run_payloads as run_payload_formatter
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 from tools.cli.table import pad_display, render_table
 
@@ -4416,52 +4417,22 @@ def _run_backtest(
 
 
 def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
-    payload = {
-        "page_uuid": state.page_uuid,
-        "local_settings": dict(state.backtest_local_settings),
-        "groups": [_serialize_group_for_run(group) for group in groups],
-        "ls_configs": list(state.backtest_ls_configs),
-    }
-    if state.backtest_strategy_book:
-        payload["strategy_book"] = _serialize_strategy_book_for_run(state, groups)
-    if state.backtest_ledger_configs:
-        payload["ledger_configs"] = {
-            str(ledger): dict(config)
-            for ledger, config in state.backtest_ledger_configs.items()
-        }
-    return payload
+    return run_payload_formatter.run_payload(
+        state,
+        groups=groups,
+        strategy_book_payload=_strategy_book_payload,
+    )
 
 
 def _serialize_strategy_book_for_run(state, groups: list[dict[str, Any]]) -> dict[str, Any]:
-    payload = _strategy_book_payload(state)
-    strategy_ids: dict[str, str] = {}
-    for group in groups:
-        strategy_id = str(group.get("id") or "")
-        if not strategy_id:
-            continue
-        for candidate in (group.get("shortAlias"), group.get("name"), strategy_id):
-            alias = str(candidate or "")
-            if alias:
-                strategy_ids[alias] = strategy_id
-    strategies = payload.get("strategies")
-    if isinstance(strategies, dict):
-        payload["strategies"] = {
-            strategy_ids.get(str(alias), str(alias)): value
-            for alias, value in strategies.items()
-        }
-    return payload
+    return run_payload_formatter.serialize_strategy_book_for_run(
+        _strategy_book_payload(state),
+        groups,
+    )
 
 
 def _serialize_group_for_run(group: dict[str, Any]) -> dict[str, Any]:
-    """Translate the CLI's registered field names at the HTTP boundary."""
-    payload = dict(group)
-    if "split_count" in group:
-        payload["splitCount"] = group["split_count"]
-    if "group_index" in group:
-        payload["groupIndex"] = group["group_index"]
-    if "factor" in group:
-        payload["factorAlias"] = group["factor"]
-    return payload
+    return run_payload_formatter.serialize_group_for_run(group)
 
 
 def _print_results_help() -> None:
