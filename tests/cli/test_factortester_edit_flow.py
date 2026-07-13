@@ -715,13 +715,14 @@ def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
     _print_audit_changes("声明输出的变化", changes)
 
     out = capsys.readouterr().out
-    assert "before:" in out
-    assert "after:" in out
+    assert "before:" not in out
+    assert "after:" not in out
     assert "strategy" in out
     assert "A1, A2" in out
     assert "A3" in out
     assert "CJ.CZC" in out
     assert "SI.GFE" in out
+    assert "null -> 0.5" in out
     assert "before =" not in out
     assert "after =" not in out
 
@@ -756,11 +757,12 @@ def test_step_audit_renders_trade_intent_changes_as_tables(capsys) -> None:
 
     out = capsys.readouterr().out
     assert "trade_intent [TargetStrategyModule.trade_intent]" in out
-    assert "before:" in out
-    assert "after:" in out
+    assert "before:" not in out
+    assert "after:" not in out
     assert "A1, A2" in out
     assert "CJ.CZC" in out
-    assert "reason 变化:" in out
+    assert "reason" in out
+    assert "null -> group_quantile" in out
     assert "group_quantile" in out
     assert "[跨策略]" not in out
 

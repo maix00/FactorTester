@@ -2741,13 +2741,86 @@ def _audit_weight_table_lines(
     return _audit_table_lines(headers, table_rows, indent=indent)
 
 
+def _audit_weight_change_table_lines(
+    rows: list[tuple[str, dict[str, Any], dict[str, Any], str, str]],
+    *,
+    value_label: str,
+    include_reason: bool = False,
+    indent: str = "",
+) -> list[str]:
+    if not rows:
+        return [f"{indent}（无变化）"]
+    headers = ["strategy", "product", value_label]
+    if include_reason:
+        headers.append("reason")
+    table_rows: list[tuple[Any, ...]] = []
+    for strategy, before_weights, after_weights, before_reason, after_reason in _audit_compact_weight_change_rows(rows):
+        reason_cell = (
+            _audit_change_cell(before_reason or "null", after_reason or "null")
+            if before_reason != after_reason else before_reason
+        )
+        products = sorted(str(product) for product in (set(before_weights) | set(after_weights)))
+        emitted = False
+        for product in products:
+            before_value = _audit_scalar_cell(before_weights.get(product))
+            after_value = _audit_scalar_cell(after_weights.get(product))
+            if before_value == after_value and not reason_cell:
+                continue
+            row: list[Any] = [strategy, product, "" if before_value == after_value else _audit_change_cell(before_value, after_value)]
+            if include_reason:
+                row.append(reason_cell)
+            table_rows.append(tuple(row))
+            emitted = True
+        if not emitted and reason_cell:
+            row = [strategy, "（无产品权重变化）", ""]
+            if include_reason:
+                row.append(reason_cell)
+            table_rows.append(tuple(row))
+    if not table_rows:
+        return [f"{indent}（无变化）"]
+    return _audit_table_lines(headers, table_rows, indent=indent)
+
+
+def _audit_compact_weight_change_rows(
+    rows: list[tuple[str, dict[str, Any], dict[str, Any], str, str]]
+) -> list[tuple[str, dict[str, Any], dict[str, Any], str, str]]:
+    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for strategy, before_weights, after_weights, before_reason, after_reason in rows:
+        key = (
+            _audit_display_key(before_weights),
+            _audit_display_key(after_weights),
+            before_reason,
+            after_reason,
+        )
+        bucket = grouped.setdefault(
+            key,
+            {
+                "strategies": [],
+                "before": before_weights,
+                "after": after_weights,
+                "before_reason": before_reason,
+                "after_reason": after_reason,
+            },
+        )
+        bucket["strategies"].append(strategy)
+    return [
+        (
+            ", ".join(str(item) for item in bucket["strategies"]),
+            bucket["before"],
+            bucket["after"],
+            bucket["before_reason"],
+            bucket["after_reason"],
+        )
+        for bucket in grouped.values()
+    ]
+
+
 def _print_weight_change_tables(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
     value_label = _audit_weight_change_field(field_name)
     if value_label is None:
         return False
-    before_rows: list[tuple[str, dict[str, Any], str]] = []
-    after_rows: list[tuple[str, dict[str, Any], str]] = []
-    reason_rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, dict[str, Any], dict[str, Any], str, str]] = []
+    include_reason = False
     for change in changes:
         strategy = _audit_strategy_change_label(change)
         before = _display_field_value(field_name, change.get("before"))
@@ -2756,21 +2829,11 @@ def _print_weight_change_tables(prefix: str, field_name: str, changes: list[dict
         after_weights = _audit_weight_mapping(after)
         before_reason = _audit_intent_reason(before)
         after_reason = _audit_intent_reason(after)
-        before_rows.append((strategy, before_weights, before_reason))
-        after_rows.append((strategy, after_weights, after_reason))
-        if before_reason or after_reason:
-            reason_rows.append((strategy, before_reason, after_reason))
+        include_reason = include_reason or bool(before_reason or after_reason)
+        rows.append((strategy, before_weights, after_weights, before_reason, after_reason))
 
-    click.echo(f"{prefix}before:")
-    for line in _audit_weight_table_lines(before_rows, value_label=value_label, indent=f"{prefix}  "):
+    for line in _audit_weight_change_table_lines(rows, value_label=value_label, include_reason=include_reason, indent=prefix):
         click.echo(line)
-    click.echo(f"{prefix}after:")
-    for line in _audit_weight_table_lines(after_rows, value_label=value_label, indent=f"{prefix}  "):
-        click.echo(line)
-    if reason_rows:
-        click.echo(f"{prefix}reason 变化:")
-        for line in _audit_table_lines(("strategy", "before_reason", "after_reason"), reason_rows, indent=f"{prefix}  "):
-            click.echo(line)
     return True
 
 
@@ -3128,9 +3191,37 @@ def _print_ledger_grouped_values(prefix: str, field_name: str, values: list[dict
         return False
     if _audit_is_cash_field(field_name):
         return False
+    if _print_positions_value_table(prefix, field_name, values):
+        return True
     for entry in sorted(values, key=lambda item: (str(item.get("ledger") or ""), str(item.get("cash_pool") or ""))):
         click.echo(f"{prefix}{_audit_ledger_entry_title(entry)}:")
         _print_audit_value(f"{prefix}  ", "value", _display_field_value(field_name, entry.get("value")))
+    return True
+
+
+def _print_positions_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
+    if field_name != "LedgerModule.positions" and field_name.rsplit(".", 1)[-1] != "positions":
+        return False
+    if not _audit_is_ledger_entries(values):
+        return False
+    rows: list[tuple[Any, ...]] = []
+    for entry in values:
+        display_value = _display_field_value(field_name, entry.get("value"))
+        positions = _audit_normalized_positions(display_value)
+        if positions is None:
+            return False
+        strategies = ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无"
+        position_rows = _audit_grouped_position_rows(positions) if positions else [("全部产品", "null", "null", "null", "null", "0")]
+        for row in position_rows:
+            rows.append((
+                str(entry.get("ledger") or "?"),
+                str(entry.get("cash_pool") or "?"),
+                strategies,
+                *row,
+            ))
+    headers = ("ledger", "cash pool", "strategies", "products", *_POSITION_SCALAR_COLUMNS)
+    for line in _audit_table_lines(headers, sorted(rows), indent=prefix):
+        click.echo(line)
     return True
 
 
