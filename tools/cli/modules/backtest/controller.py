@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-import ast
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +24,7 @@ from tools.cli.field_help import field_flag, field_type_label, render_settings_h
 from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.backtest.audit_formatters import delta_tables as delta_table_formatter
+from tools.cli.modules.backtest.audit_formatters import display_values as display_value_formatter
 from tools.cli.modules.backtest.audit_formatters import events as events_formatter
 from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatter
 from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
@@ -3647,100 +3647,33 @@ def _audit_series_table_lines(value: dict[str, Any], *, indent: str = "") -> lis
 
 
 def _parse_audit_literal(value: str) -> Any | None:
-    text = value.strip()
-    if len(text) < 2 or text[0] not in "[{":
-        return None
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError):
-        pass
-    try:
-        parsed = ast.literal_eval(text)
-    except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
-        return None
-    if isinstance(parsed, (dict, list, tuple)):
-        return parsed
-    return None
+    return display_value_formatter.parse_literal(value)
 
 
 def _compact_audit_display_aliases(value: Any) -> Any:
-    if isinstance(value, dict):
-        compacted = {
-            str(key): _compact_audit_display_aliases(item)
-            for key, item in value.items()
-        }
-        if _looks_like_product_path_selection(compacted):
-            return _compact_product_path_selection_for_audit(compacted)
-        return compacted
-    if isinstance(value, list):
-        return [_compact_audit_display_aliases(item) for item in value]
-    if isinstance(value, tuple):
-        return [_compact_audit_display_aliases(item) for item in value]
-    return value
+    return display_value_formatter.compact_aliases(value)
 
 
 def _looks_like_product_path_selection(value: dict[str, Any]) -> bool:
-    return bool(
-        "product_path_selection_id" in value
-        or ("id" in value and ("selected_paths" in value or "paths" in value))
-        or ("selected_paths" in value and "paths" in value)
-        or ("product_group_template_id" in value and "path_id" in value)
-    )
+    return display_value_formatter.looks_like_product_path_selection(value)
 
 
 def _compact_product_path_selection_for_audit(value: dict[str, Any]) -> dict[str, Any]:
-    compacted: dict[str, Any] = {}
-    selection_id = value.get("product_path_selection_id") or value.get("selection_id") or value.get("id")
-    if selection_id not in (None, ""):
-        compacted["product_path_selection_id"] = selection_id
-    label = value.get("label") or value.get("product_group")
-    if label not in (None, ""):
-        compacted["label"] = label
-    product_group = value.get("product_group")
-    if product_group not in (None, "", label):
-        compacted["product_group"] = product_group
-    template_id = value.get("product_group_template_id") or value.get("path_id")
-    if template_id not in (None, ""):
-        compacted["product_group_template_id"] = template_id
-    paths = value.get("paths") if "paths" in value else value.get("selected_paths")
-    if paths not in (None, ""):
-        compacted["paths"] = paths
-    source_type = value.get("source_type")
-    if source_type not in (None, ""):
-        compacted["source_type"] = source_type
-    source_key = value.get("source_key")
-    if source_key not in (None, "", selection_id, template_id):
-        compacted["source_key"] = source_key
-    return compacted
+    return display_value_formatter.compact_product_path_selection(value)
 
 
 def _display_field_value(qualified_name: str, value: Any) -> Any:
-    if qualified_name.rsplit(".", 1)[-1] == "trade_intent":
-        summary = _audit_trade_intent_summary(value)
-        if summary is not None:
-            return summary
-    if qualified_name == "LedgerModule.positions" or qualified_name.rsplit(".", 1)[-1] == "positions":
-        summary = _audit_positions_summary(value)
-        if summary is not None:
-            return summary
-    if qualified_name in {"RunWindowModule.run_window_envelope", "RunWindowModule.strategy_windows"}:
-        summary = _audit_run_window_summary(value)
-        if summary is not None:
-            return summary
-    if qualified_name == "MarketDataModule.field_state_baseline":
-        summary = _audit_historical_field_state_summary(value)
-        if summary is not None:
-            return summary
-    if qualified_name == "MarketDataModule.required_data_source" and value in ((), []):
-        return "auto（自动选择）"
-    if qualified_name.rsplit(".", 1)[-1] == "cash":
-        return _audit_cash_summary(value)
-    if isinstance(value, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in value):
-        return _audit_scalar_sequence_text(value)
-    offset = _field_display_offsets.get(qualified_name, _field_display_offsets.get(qualified_name.rsplit(".", 1)[-1], 0))
-    if offset and isinstance(value, (int, float)) and not isinstance(value, bool):
-        return value + offset
-    return value
+    return display_value_formatter.display_field_value(
+        qualified_name,
+        value,
+        trade_intent_summary=_audit_trade_intent_summary,
+        positions_summary=_audit_positions_summary,
+        run_window_summary=_audit_run_window_summary,
+        historical_field_state_summary=_audit_historical_field_state_summary,
+        cash_summary=_audit_cash_summary,
+        scalar_sequence_text=_audit_scalar_sequence_text,
+        field_display_offsets=_field_display_offsets,
+    )
 
 
 def _audit_trade_intent_summary(value: Any) -> str | None:
@@ -3801,53 +3734,26 @@ def _print_wrapped_line(line: str, *, continuation_indent: str) -> None:
 
 
 def _audit_display_key(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return display_value_formatter.display_key(value)
 
 
 def _audit_normalized_value(value: Any) -> Any:
-    if isinstance(value, str):
-        parsed = _parse_audit_literal(value)
-        if parsed is not None:
-            return _compact_audit_display_aliases(parsed)
-    return _compact_audit_display_aliases(value)
+    return display_value_formatter.normalized_value(value)
 
 
 def _audit_repeated_owner_groups(value: Any) -> list[tuple[str, Any]]:
-    normalized = _audit_normalized_value(value)
-    if not isinstance(normalized, dict) or len(normalized) <= 1:
-        return []
-    items = list(normalized.items())
-    if not all(isinstance(item_value, (dict, list)) for _, item_value in items):
-        return []
-    groups: dict[str, dict[str, Any]] = {}
-    for item_key, item_value in items:
-        group_key = _audit_display_key(item_value)
-        bucket = groups.setdefault(group_key, {"keys": [], "value": item_value})
-        bucket["keys"].append(str(item_key))
-    if len(groups) >= len(items):
-        return []
-    return [
-        (f"{_audit_group_key_label(bucket['keys'])} {_audit_group_keys_text(sorted(bucket['keys']))}", bucket["value"])
-        for bucket in groups.values()
-    ]
+    return display_value_formatter.repeated_owner_groups(
+        value,
+        product_list_cell=lambda keys: _audit_product_list_cell(keys),
+    )
 
 
 def _audit_group_keys_text(keys: list[str]) -> str:
-    if not keys:
-        return "无"
-    return _audit_product_list_cell(keys)
+    return display_value_formatter.group_keys_text(keys, product_list_cell=lambda items: _audit_product_list_cell(items))
 
 
 def _audit_group_key_label(keys: list[str]) -> str:
-    price_bases = {
-        "open", "high", "low", "close", "vwap", "settlement", "pre_settlement",
-        "upper_limit", "lower_limit", "volume",
-    }
-    if keys and all(key in price_bases for key in keys):
-        return "价格字段"
-    if keys and all("." in key or "|" in key for key in keys):
-        return "产品"
-    return "策略"
+    return display_value_formatter.group_key_label(keys)
 
 
 def _audit_join(values: list[Any]) -> str:
@@ -4046,13 +3952,11 @@ def _print_audit_arrow_diff(prefix: str, before: Any, after: Any) -> None:
 
 
 def _audit_inline_summary(value: Any) -> str:
-    text = _audit_text(value).splitlines()
-    if not text:
-        return ""
-    first = text[0].strip()
-    if len(text) == 1 and _audit_display_width(first) <= 80:
-        return first
-    return f"{first} ... ({len(text)} 行)"
+    return display_value_formatter.inline_summary(
+        value,
+        audit_text=_audit_text,
+        display_width=_audit_display_width,
+    )
 
 
 def _audit_field_label(qualified_name: str) -> str:
