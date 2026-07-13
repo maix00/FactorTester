@@ -1452,7 +1452,7 @@ def _audit_strategy_change_label(change: dict[str, Any]) -> str:
     strategies = change.get("strategies")
     if isinstance(strategies, list) and strategies:
         return ", ".join(str(item) for item in strategies)
-    return _audit_source_group_label([change])
+    return source_group_formatter.source_group_label([change])
 
 
 def _audit_weight_mapping(value: Any) -> dict[str, Any]:
@@ -2680,29 +2680,13 @@ def _audit_group_key_label(keys: list[str]) -> str:
     return display_value_formatter.group_key_label(keys)
 
 
-def _audit_join(values: list[Any]) -> str:
-    return source_group_formatter.join(values)
-
-
-def _audit_source_group_label(entries: list[dict[str, Any]], *, shared_group: bool = False) -> str:
-    return source_group_formatter.source_group_label(entries, shared_group=shared_group)
-
-
-def _audit_ledger_group_label(entries: list[dict[str, Any]], *, prefix: str) -> str:
-    return source_group_formatter.ledger_group_label(entries, prefix=prefix)
-
-
-def _audit_source_route_rows(entries: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
-    return source_group_formatter.source_route_rows(entries)
-
-
 def _print_audit_source_routes(
     prefix: str,
     entries: list[dict[str, Any]],
     *,
     route_state: set[tuple[tuple[str, str, str], ...]] | None = None,
 ) -> bool:
-    rows = _audit_source_route_rows(entries)
+    rows = source_group_formatter.source_route_rows(entries)
     if not rows:
         return False
     route_key = tuple(rows)
@@ -2720,15 +2704,6 @@ def _print_audit_source_routes(
     return True
 
 
-def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return source_group_formatter.grouped_values(
-        field_name,
-        values,
-        display_field_value=_display_field_value,
-        display_key=_audit_display_key,
-    )
-
-
 def _drop_empty_non_ledger_entries_when_ledger_values_exist(
     field_name: str,
     values: list[dict[str, Any]],
@@ -2737,12 +2712,11 @@ def _drop_empty_non_ledger_entries_when_ledger_values_exist(
         field_name,
         values,
         display_value=_display_field_value,
-        value_is_empty=_audit_value_is_empty,
+        value_is_empty=lambda value: source_group_formatter.value_is_empty(
+            value,
+            normalize=_audit_normalized_value,
+        ),
     )
-
-
-def _audit_value_is_empty(value: Any) -> bool:
-    return source_group_formatter.value_is_empty(value, normalize=_audit_normalized_value)
 
 
 def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
@@ -2798,10 +2772,6 @@ def _audit_field_label(qualified_name: str) -> str:
 
 def _audit_field_sort_key(qualified_name: str) -> tuple[int, int, str]:
     return _field_metadata.sort_key(qualified_name)
-
-
-def _audit_source_label(entry: dict[str, Any]) -> str:
-    return source_group_formatter.source_label(entry)
 
 
 def _print_audit_fields(
@@ -2877,10 +2847,15 @@ def _print_audit_fields(
         if _print_ledger_grouped_values("    ", field_name, values):
             index += 1
             continue
-        buckets = _audit_grouped_values(field_name, values)
+        buckets = source_group_formatter.grouped_values(
+            field_name,
+            values,
+            display_field_value=_display_field_value,
+            display_key=_audit_display_key,
+        )
         for bucket in buckets:
-            label = _audit_source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
-            if _audit_source_route_rows(bucket["entries"]):
+            label = source_group_formatter.source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
+            if source_group_formatter.source_route_rows(bucket["entries"]):
                 click.echo(f"    {label}:")
                 _print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
                 _print_audit_value("      ", "value", bucket["value"])
@@ -2992,8 +2967,8 @@ def _print_audit_changes(
             display_key=_audit_display_key,
         )
         for bucket in buckets:
-            label = _audit_source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
-            if _audit_source_route_rows(bucket["entries"]):
+            label = source_group_formatter.source_group_label(bucket["entries"], shared_group=len(buckets) == 1)
+            if source_group_formatter.source_route_rows(bucket["entries"]):
                 click.echo(f"    {label}:")
                 _print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
                 _print_audit_diff_value("      ", "value", bucket["before"], bucket["after"])
@@ -3057,7 +3032,7 @@ def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
     for bucket in step_display_formatter.event_payload_change_buckets(changes, display_key=_audit_display_key):
         _print_audit_diff_value(
             "  ",
-            _audit_source_group_label(bucket["entries"]),
+            source_group_formatter.source_group_label(bucket["entries"]),
             bucket["before"],
             bucket["after"],
         )
