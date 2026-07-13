@@ -2330,36 +2330,8 @@ def _scalar_change_group_key(item: tuple[str, list[dict[str, Any]]]) -> tuple[An
     return printer, routes
 
 
-def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
-    _print_step_section("本次 flow 的 active ledgers / cash pools（执行前）")
-    if not ledgers:
-        click.echo("  （此 flow 尚未关联账本）")
-        return
-    rows = step_display_formatter.ledger_snapshot_rows(ledgers, cash_summary=_audit_cash_summary)
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", "cash"), rows, indent="  "):
-        click.echo(line)
-
-
 def _audit_cash_summary(value: Any) -> str:
     return value_text_formatter.cash_summary(value, audit_text=_audit_text)
-
-
-def _unchanged_output_records(
-    records: list[dict[str, Any]], changes: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    return step_display_formatter.unchanged_output_records(records, changes)
-
-
-def _merge_declared_and_ledger_changes(
-    output_changes: list[dict[str, Any]],
-    ledger_changes: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    return step_display_formatter.merge_declared_and_ledger_changes(
-        output_changes,
-        ledger_changes,
-        display_key=_audit_display_key,
-        normalize=_audit_normalized_value,
-    )
 
 
 def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
@@ -2389,10 +2361,6 @@ def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
             bucket["before"],
             bucket["after"],
         )
-
-
-def _current_event_subject_summary(current_event: dict[str, Any]) -> str:
-    return step_display_formatter.current_event_subject_summary(current_event)
 
 
 def _audit_max_width() -> int:
@@ -2457,12 +2425,14 @@ def _handle_step_event(
             empty_message="（此 flow 未声明输入字段）",
             route_state=route_state,
         )
-        output_changes = _merge_declared_and_ledger_changes(
+        output_changes = step_display_formatter.merge_declared_and_ledger_changes(
             list(data.get("output_changes") or []),
             list(data.get("ledger_changes") or []),
+            display_key=_audit_display_key,
+            normalize=_audit_normalized_value,
         )
         outputs = list(data.get("outputs") or [])
-        unchanged_outputs = _unchanged_output_records(outputs, output_changes)
+        unchanged_outputs = step_display_formatter.unchanged_output_records(outputs, output_changes)
         _print_audit_fields(
             "声明输出字段（未变化）",
             unchanged_outputs,

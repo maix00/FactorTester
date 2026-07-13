@@ -25,7 +25,6 @@ from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
     _audit_change_cell,
-    _merge_declared_and_ledger_changes,
     _audit_scalar_sequence_text,
     _audit_step_event_context,
     _audit_table_lines,
@@ -40,9 +39,9 @@ from tools.cli.modules.backtest.controller import (
     _print_audit_value,
     _print_step_badge_box,
     _print_strategy_context,
-    _unchanged_output_records,
     _display_field_value,
 )
+from tools.cli.modules.backtest.audit_formatters import display_values as display_value_formatter
 from tools.cli.modules.registry import ControllerRegistry
 from tools.data.types.data_money import DataMoney
 
@@ -60,7 +59,10 @@ def test_step_audit_does_not_repeat_changed_output_after_value() -> None:
         {"field": "Ledger.status", "values": [{"scope": "context", "value": "open"}]},
     ]
 
-    assert _unchanged_output_records(records, [{"field": "Ledger.cash", "before": 100, "after": 90}]) == [
+    assert step_display_formatter.unchanged_output_records(
+        records,
+        [{"field": "Ledger.cash", "before": 100, "after": 90}],
+    ) == [
         records[1],
     ]
 
@@ -81,10 +83,15 @@ def test_step_audit_treats_ledger_side_channel_changes_as_declared_output_change
         }
     ]
 
-    merged_changes = _merge_declared_and_ledger_changes([], ledger_changes)
+    merged_changes = step_display_formatter.merge_declared_and_ledger_changes(
+        [],
+        ledger_changes,
+        display_key=display_value_formatter.display_key,
+        normalize=display_value_formatter.normalized_value,
+    )
 
     assert [change["field"] for change in merged_changes] == ["CashPoolModule.cash"]
-    unchanged = _unchanged_output_records(outputs, merged_changes)
+    unchanged = step_display_formatter.unchanged_output_records(outputs, merged_changes)
     assert [record["field"] for record in unchanged] == ["LedgerModule.positions"]
 
 
