@@ -2185,7 +2185,10 @@ def _audit_event_draft_table_lines(
 
 
 def _audit_trading_day_resolver_text(value: dict[str, Any]) -> str:
-    lines = ["TimestampTradingDayResolver: timestamp -> trading_day"]
+    lines = ["TimestampTradingDayResolver: timestamp -> trading_day（仅用于交易日级历史字段记录）"]
+    effective_rule = value.get("effective_rule")
+    if effective_rule:
+        lines.append(f"effective_rule = {effective_rule}")
     mapping_count = value.get("mapping_count")
     if mapping_count is not None:
         lines.append(f"mapping_count = {mapping_count}")

@@ -378,7 +378,11 @@ def _audit_trading_day_resolver_value(value: Any, *, key_labels: Mapping[str, st
     }, index=clean.index)
     return {
         "type": "TimestampTradingDayResolver",
-        "purpose": "timestamp -> trading_day",
+        "purpose": "timestamp -> trading_day for trading-day-scoped historical field rows",
+        "effective_rule": (
+            "rows with effective_timestamp are compared against the actual timestamp; "
+            "only rows without effective_timestamp use the mapped trading_day"
+        ),
         "mapping_count": int(len(clean)),
         "timestamp_index": _audit_index_bounds(clean.index, key_labels=key_labels),
         "trading_days": {

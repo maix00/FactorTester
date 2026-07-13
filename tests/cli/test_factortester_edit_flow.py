@@ -455,7 +455,11 @@ def test_step_audit_renders_event_payload_lists_as_table() -> None:
 def test_step_audit_renders_trading_day_resolver_summary() -> None:
     text = _audit_text({
         "type": "TimestampTradingDayResolver",
-        "purpose": "timestamp -> trading_day",
+        "purpose": "timestamp -> trading_day for trading-day-scoped historical field rows",
+        "effective_rule": (
+            "rows with effective_timestamp are compared against the actual timestamp; "
+            "only rows without effective_timestamp use the mapped trading_day"
+        ),
         "mapping_count": 3,
         "timestamp_index": {"start": "2026-01-05 09:01:00", "end": "2026-01-06 09:01:00"},
         "trading_days": {"count": 2, "start": "2026-01-05", "end": "2026-01-06"},
@@ -468,7 +472,9 @@ def test_step_audit_renders_trading_day_resolver_summary() -> None:
         },
     })
 
-    assert "TimestampTradingDayResolver: timestamp -> trading_day" in text
+    assert "TimestampTradingDayResolver: timestamp -> trading_day（仅用于交易日级历史字段记录）" in text
+    assert "effective_timestamp" in text
+    assert "mapped trading_day" in text
     assert "mapping_count = 3" in text
     assert "trading_days = 2 days; 2026-01-05 → 2026-01-06" in text
     assert "sample.head:" in text

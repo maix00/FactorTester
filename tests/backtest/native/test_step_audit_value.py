@@ -70,7 +70,9 @@ def test_step_audit_serializes_trading_day_resolver_as_summary() -> None:
     serialized = _audit_value(resolver)
 
     assert serialized["type"] == "TimestampTradingDayResolver"
-    assert serialized["purpose"] == "timestamp -> trading_day"
+    assert serialized["purpose"] == "timestamp -> trading_day for trading-day-scoped historical field rows"
+    assert "effective_timestamp" in serialized["effective_rule"]
+    assert "mapped trading_day" in serialized["effective_rule"]
     assert serialized["mapping_count"] == 3
     assert serialized["trading_days"] == {"count": 2, "start": "2026-01-05", "end": "2026-01-06"}
     assert "sample" in serialized
