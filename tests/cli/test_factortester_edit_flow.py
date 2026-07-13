@@ -137,9 +137,10 @@ def test_step_audit_groups_identical_changes_inline_without_before_after_section
     _print_audit_changes("账本与现金池变化", changes)
 
     out = capsys.readouterr().out
-    assert "合并 2 个账本 / 2 个现金池 / 2 个策略" in out
-    assert "ledger" in out
+    assert "合并 2 个账本 / 2 个现金池 / 2 个策略" not in out
     assert "cash pool" in out
+    assert "ledgers" in out
+    assert "ledger" in out
     assert "strategies" in out
     assert "L1" in out
     assert "P1" in out
@@ -147,10 +148,81 @@ def test_step_audit_groups_identical_changes_inline_without_before_after_section
     assert "L2" in out
     assert "P2" in out
     assert "A2" in out
-    assert "100 -> 90" in out
+    assert "before" in out
+    assert "after" in out
+    assert "100" in out
+    assert "90" in out
     assert "修改前" not in out
     assert "修改后" not in out
     assert "[跨账本]" not in out
+
+
+def test_step_audit_groups_cash_by_cash_pool_with_bound_ledgers(capsys) -> None:
+    changes = [
+        {
+            "field": "CashPoolModule.cash",
+            "scope": "ledger",
+            "ledger": "L1",
+            "cash_pool": "P1",
+            "strategies": ["A1"],
+            "before": {"amount": {"repr": "10000"}, "currency": "CNY", "scale": 100, "use_minor_units": True},
+            "after": {"amount": {"repr": "9000"}, "currency": "CNY", "scale": 100, "use_minor_units": True},
+        },
+        {
+            "field": "CashPoolModule.cash",
+            "scope": "ledger",
+            "ledger": "L2",
+            "cash_pool": "P1",
+            "strategies": ["A2"],
+            "before": {"amount": {"repr": "10000"}, "currency": "CNY", "scale": 100, "use_minor_units": True},
+            "after": {"amount": {"repr": "9000"}, "currency": "CNY", "scale": 100, "use_minor_units": True},
+        },
+    ]
+
+    _print_audit_changes("账本与现金池变化", changes)
+
+    out = capsys.readouterr().out
+    assert "cash pool" in out
+    assert "ledgers" in out
+    assert "P1" in out
+    assert "L1, L2" in out
+    assert "A1, A2" in out
+    assert "100.00 CNY" in out
+    assert "90.00 CNY" in out
+    assert out.count("P1") == 1
+
+
+def test_step_audit_groups_complex_ledger_fields_by_ledger(capsys) -> None:
+    changes = [
+        {
+            "field": "LedgerModule.positions",
+            "scope": "ledger",
+            "ledger": "L1",
+            "cash_pool": "P1",
+            "strategies": ["A1"],
+            "before": None,
+            "after": {"RB.SHF": {"quantity": 1, "average_cost": 3000}},
+        },
+        {
+            "field": "LedgerModule.positions",
+            "scope": "ledger",
+            "ledger": "L2",
+            "cash_pool": "P2",
+            "strategies": ["A2"],
+            "before": None,
+            "after": {"RB.SHF": {"quantity": 2, "average_cost": 3100}},
+        },
+    ]
+
+    _print_audit_changes("账本与现金池变化", changes)
+
+    out = capsys.readouterr().out
+    assert "合并 2 个账本" not in out
+    assert "ledger/cash pool/strategy 路由同上" not in out
+    assert "账本 L1 | 现金池 P1 | 策略 A1" in out
+    assert "账本 L2 | 现金池 P2 | 策略 A2" in out
+    assert "quantity" in out
+    assert "average_cost" in out
 
 
 def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
@@ -170,7 +242,7 @@ def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
     _print_audit_changes("账本与现金池变化", changes)
 
     out = capsys.readouterr().out
-    assert "合并 8 个账本 / 8 个现金池 / 8 个策略" in out
+    assert "合并 8 个账本 / 8 个现金池 / 8 个策略" not in out
     assert "private:L1, private:L2" not in out
     assert "ledger" in out
     assert "cash pool" in out
@@ -178,7 +250,10 @@ def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
     assert "private:L8" in out
     assert "pool-8" in out
     assert "A8" in out
-    assert out.count("null -> 0.0") == 1
+    assert "before" in out
+    assert "after" in out
+    assert out.count("null") == 8
+    assert out.count("0") >= 8
 
 
 def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
@@ -219,11 +294,14 @@ def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
     _print_audit_changes("账本与现金池变化", changes, route_state=route_state)
 
     out = capsys.readouterr().out
-    assert out.count("private:L1") == 1
-    assert out.count("pool-1") == 1
-    assert out.count("ledger/cash pool/strategy 路由同上") == 2
-    assert "value = Auto" in out
-    assert "null -> 100" in out
+    assert out.count("private:L1") == 3
+    assert out.count("pool-1") == 3
+    assert "ledger/cash pool/strategy 路由同上" not in out
+    assert "value" in out
+    assert "before" in out
+    assert "after" in out
+    assert "Auto" in out
+    assert "100" in out
 
 
 def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
