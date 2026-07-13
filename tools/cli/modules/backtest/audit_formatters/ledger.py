@@ -72,10 +72,11 @@ def bracket_scalar_list_text(value: Any, *, scalar_sequence_text: ScalarSequence
 
 
 def is_ledger_entries(entries: Sequence[Mapping[str, Any]]) -> bool:
-    if not entries:
-        return False
-    scopes = {str(entry.get("scope") or "") for entry in entries}
-    return bool(scopes) and scopes <= {"ledger", "ledger_config"}
+    return scope_tables.is_scoped_entries(
+        entries,
+        required_dimensions=("ledger", "cash_pool"),
+        allowed_record_scopes={"ledger", "ledger_config"},
+    )
 
 
 def is_cash_field(field_name: str) -> bool:
@@ -83,7 +84,7 @@ def is_cash_field(field_name: str) -> bool:
 
 
 def cash_pool_group_key(entry: Mapping[str, Any], *values: str) -> tuple[str, ...]:
-    return (str(entry.get("cash_pool") or "?"), *values)
+    return (*scope_tables.scope_route(entry, ("cash_pool",)), *values)
 
 
 def join_entry_values(entries: Sequence[Mapping[str, Any]], key: str) -> str:
@@ -124,8 +125,7 @@ def cash_pool_scalar_record_table(
         if value_text is None:
             return None
         route = (
-            str(entry.get("cash_pool") or "?"),
-            str(entry.get("ledger") or "?"),
+            *scope_tables.scope_route(entry, ("cash_pool", "ledger")),
             ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无",
         )
         rows[route] = value_text
@@ -173,8 +173,7 @@ def ledger_scalar_record_table(
         if value_text is None:
             return None
         route = (
-            str(entry.get("ledger") or "?"),
-            str(entry.get("cash_pool") or "?"),
+            *scope_tables.scope_route(entry, ("ledger", "cash_pool")),
             ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无",
         )
         rows[route] = value_text
@@ -200,8 +199,7 @@ def cash_pool_scalar_change_record_table(
         if before_text is None or after_text is None:
             return None
         route = (
-            str(change.get("cash_pool") or "?"),
-            str(change.get("ledger") or "?"),
+            *scope_tables.scope_route(change, ("cash_pool", "ledger")),
             ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无",
         )
         raw_rows[route] = change_cell(before_text, after_text)
@@ -225,8 +223,7 @@ def ledger_scalar_change_record_table(
         if before_text is None or after_text is None:
             return None
         route = (
-            str(change.get("ledger") or "?"),
-            str(change.get("cash_pool") or "?"),
+            *scope_tables.scope_route(change, ("ledger", "cash_pool")),
             ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无",
         )
         rows[route] = change_cell(before_text, after_text)
@@ -493,8 +490,7 @@ def positions_value_rows(
         )
         for row in position_rows:
             rows.append((
-                str(entry.get("ledger") or "?"),
-                str(entry.get("cash_pool") or "?"),
+                *scope_tables.scope_route(entry, ("ledger", "cash_pool")),
                 strategies,
                 *row,
             ))
@@ -532,8 +528,7 @@ def positions_change_rows(
         strategies = ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无"
         for row in position_rows:
             wide_rows.append((
-                str(change.get("ledger") or "?"),
-                str(change.get("cash_pool") or "?"),
+                *scope_tables.scope_route(change, ("ledger", "cash_pool")),
                 strategies,
                 *row,
             ))

@@ -9,6 +9,55 @@ from typing import Any
 Route = tuple[str, ...]
 ValueMap = Mapping[Route, str]
 NamedValueMap = tuple[str, ValueMap]
+ScopeDimension = str
+
+SCOPE_DIMENSIONS: tuple[ScopeDimension, ...] = ("strategy", "ledger", "cash_pool", "product")
+
+
+def scoped_dimensions(entry: Mapping[str, Any]) -> tuple[ScopeDimension, ...]:
+    """Return owner dimensions present on a scoped audit entry.
+
+    This separates the table owner dimensions (strategy/ledger/cash_pool/product)
+    from the legacy ``scope`` string (strategy_config/ledger_config/context).
+    """
+    return tuple(dimension for dimension in SCOPE_DIMENSIONS if entry.get(dimension) not in (None, ""))
+
+
+def scope_route(entry: Mapping[str, Any], dimensions: Sequence[ScopeDimension]) -> Route:
+    """Build a route tuple for the requested owner dimensions."""
+    return tuple(str(entry.get(dimension) or "?") for dimension in dimensions)
+
+
+def is_scoped_entries(
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    required_dimensions: Sequence[ScopeDimension] = (),
+    allowed_record_scopes: set[str] | frozenset[str] | None = None,
+    forbid_record_scopes: set[str] | frozenset[str] | None = None,
+    require_all_required_dimensions: bool = True,
+) -> bool:
+    """Return whether records can be rendered as a scoped table.
+
+    ``required_dimensions`` describes owner/index dimensions, for example
+    ``("strategy",)`` or ``("ledger", "cash_pool")``.  ``allowed_record_scopes``
+    checks the legacy backend record scope values while the renderer is migrated.
+    """
+    if not entries:
+        return False
+    record_scopes = {str(entry.get("scope") or "") for entry in entries}
+    if allowed_record_scopes is not None and not (bool(record_scopes) and record_scopes <= set(allowed_record_scopes)):
+        return False
+    if forbid_record_scopes is not None and any(scope in forbid_record_scopes for scope in record_scopes):
+        return False
+    if require_all_required_dimensions:
+        return all(
+            all(entry.get(dimension) not in (None, "") for dimension in required_dimensions)
+            for entry in entries
+        )
+    return any(
+        all(entry.get(dimension) not in (None, "") for dimension in required_dimensions)
+        for entry in entries
+    )
 
 
 def combine_route_value_maps(

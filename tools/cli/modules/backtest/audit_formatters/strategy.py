@@ -20,12 +20,11 @@ MISSING = object()
 
 
 def is_strategy_entries(entries: Sequence[Mapping[str, Any]]) -> bool:
-    if not entries:
-        return False
-    scopes = {str(entry.get("scope") or "") for entry in entries}
-    if not (bool(scopes) and scopes <= {"strategy_config", "strategy_context"}):
-        return False
-    return all(entry.get("strategy") not in (None, "") for entry in entries)
+    return scope_tables.is_scoped_entries(
+        entries,
+        required_dimensions=("strategy",),
+        allowed_record_scopes={"strategy_config", "strategy_context"},
+    )
 
 
 def strategy_table_cell(
@@ -79,7 +78,7 @@ def strategy_record_value_rows(
     ]
     if not strategy_entries:
         return None
-    strategies = sorted(dict.fromkeys(str(entry.get("strategy") or "?") for entry in strategy_entries))
+    strategies = sorted(dict.fromkeys(scope_tables.scope_route(entry, ("strategy",))[0] for entry in strategy_entries))
     present_scopes = present_strategy_scopes(values)
     if not present_scopes:
         return None
@@ -89,7 +88,7 @@ def strategy_record_value_rows(
     shared_value: Any = shared_values[-1] if shared_values else MISSING
     by_strategy_scope: dict[tuple[str, str], Any] = {}
     for entry in strategy_entries:
-        by_strategy_scope[(str(entry.get("strategy") or "?"), str(entry.get("scope") or ""))] = entry.get("value")
+        by_strategy_scope[(scope_tables.scope_route(entry, ("strategy",))[0], str(entry.get("scope") or ""))] = entry.get("value")
     grouped: dict[tuple[str, ...], dict[str, Any]] = {}
     for strategy in strategies:
         row_values = []
@@ -141,12 +140,12 @@ def strategy_scalar_record_table(
     shared_value: Any = shared_values[-1] if shared_values else MISSING
     by_strategy_scope: dict[tuple[str, str], Any] = {}
     for entry in strategy_entries:
-        key = (str(entry.get("strategy") or "?"), str(entry.get("scope") or ""))
+        key = (scope_tables.scope_route(entry, ("strategy",))[0], str(entry.get("scope") or ""))
         value = entry.get("value")
         if key in by_strategy_scope and display_key(by_strategy_scope[key]) != display_key(value):
             return None
         by_strategy_scope[key] = value
-    strategies = sorted(dict.fromkeys(str(entry.get("strategy") or "?") for entry in strategy_entries))
+    strategies = sorted(dict.fromkeys(scope_tables.scope_route(entry, ("strategy",))[0] for entry in strategy_entries))
     scope_specs: list[tuple[str, list[str], bool]] = []
     for scope in present_scopes:
         base_column = short_name if len(present_scopes) == 1 else f"{short_name}.{scope_suffix(scope)}"
@@ -214,7 +213,7 @@ def strategy_scalar_change_record_table(
         after_text = ledger_scalar_text(display_field_value(field_name, change.get("after")))
         if before_text is None or after_text is None:
             return None
-        by_strategy_scope[(str(change.get("strategy") or "?"), str(change.get("scope") or ""))] = change_cell(before_text, after_text)
+        by_strategy_scope[(scope_tables.scope_route(change, ("strategy",))[0], str(change.get("scope") or ""))] = change_cell(before_text, after_text)
     shared_text = ""
     if shared_change is not None:
         before_text = ledger_scalar_text(display_field_value(field_name, shared_change.get("before")))
@@ -222,7 +221,7 @@ def strategy_scalar_change_record_table(
         if before_text is None or after_text is None:
             return None
         shared_text = change_cell(before_text, after_text)
-    strategies = sorted(dict.fromkeys(str(change.get("strategy") or "?") for change in strategy_changes))
+    strategies = sorted(dict.fromkeys(scope_tables.scope_route(change, ("strategy",))[0] for change in strategy_changes))
     by_strategy: dict[str, tuple[str, ...]] = {}
     for strategy in strategies:
         row_values: list[str] = []
