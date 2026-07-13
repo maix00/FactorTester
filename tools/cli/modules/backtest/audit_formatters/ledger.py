@@ -552,7 +552,7 @@ def positions_value_rows(
     normalize: Normalize,
     scalar_cell: ScalarCell,
     cash_summary: CashSummary,
-) -> list[tuple[Any, ...]] | None:
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
     if field_name != "LedgerModule.positions" and field_name.rsplit(".", 1)[-1] != "positions":
         return None
     if not is_ledger_entries(values):
@@ -575,7 +575,8 @@ def positions_value_rows(
                 strategies,
                 *row,
             ))
-    return sorted(rows)
+    headers = ("ledger", "cash pool", "strategies", "products", *POSITION_SCALAR_COLUMNS)
+    return headers, sorted(rows)
 
 
 def positions_change_rows(

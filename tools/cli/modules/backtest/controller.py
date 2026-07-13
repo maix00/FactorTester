@@ -1166,7 +1166,7 @@ def _print_ledger_grouped_values(prefix: str, field_name: str, values: list[dict
 
 
 def _print_positions_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    rows = ledger_formatter.positions_value_rows(
+    result = ledger_formatter.positions_value_rows(
         field_name,
         values,
         display_field_value=_display_field_value,
@@ -1174,9 +1174,9 @@ def _print_positions_value_table(prefix: str, field_name: str, values: list[dict
         scalar_cell=_audit_scalar_cell,
         cash_summary=_audit_cash_summary,
     )
-    if rows is None:
+    if result is None:
         return False
-    headers = ("ledger", "cash pool", "strategies", "products", *_POSITION_SCALAR_COLUMNS)
+    headers, rows = result
     for line in _audit_table_lines(headers, rows, indent=prefix, allow_transpose=False):
         click.echo(line)
     return True
@@ -1665,15 +1665,6 @@ def _audit_field_state_transposed_lines(
 
 def _audit_sample_field_state_products(rows: list[dict[str, Any]], *, max_products: int = 6) -> tuple[list[dict[str, Any]], str | None]:
     return market_data_formatter.sample_field_state_products(rows, max_products=max_products)
-
-
-_POSITION_SCALAR_COLUMNS = (
-    "quantity",
-    "average_cost",
-    "settlement_price",
-    "margin_reserved",
-    "lots_count",
-)
 
 
 def _audit_positions_summary(value: Any) -> dict[str, Any] | None:
