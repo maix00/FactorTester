@@ -26,6 +26,93 @@ if TYPE_CHECKING:
 from .core import FactorExpr, EvaluateContext
 from .composite import CompositeExpr
 
+
+class _IndexLevelFreq(NamedTuple):
+    pos: int
+    name: str
+    freq: DataFreq
+
+
+def _coerce_tuple_index(data: pd.DataFrame) -> pd.DataFrame:
+    index = data.index
+    if isinstance(index, pd.MultiIndex) or len(index) == 0:
+        return data
+    first = index[0]
+    if not isinstance(first, tuple) or len(first) == 0:
+        return data
+    tuple_len = len(first)
+    if not all(isinstance(value, tuple) and len(value) == tuple_len for value in index):
+        return data
+    result = data.copy(deep=False)
+    result.index = pd.MultiIndex.from_tuples(index)
+    return result
+
+
+def _positive_freq_from_name(name: Any) -> DataFreq | None:
+    try:
+        freq = DataFreq(name)
+    except Exception:
+        return None
+    if freq.value <= pd.Timedelta(0):
+        return None
+    return freq
+
+
+def _infer_positive_freq_from_level(index: pd.Index, level_pos: int) -> DataFreq | None:
+    if isinstance(index, pd.MultiIndex):
+        values = index.get_level_values(level_pos)
+    else:
+        values = index
+    try:
+        timestamps = pd.DatetimeIndex(pd.to_datetime(values, errors="coerce"))
+    except Exception:
+        return None
+    timestamps = pd.DatetimeIndex(timestamps.dropna().unique()).sort_values()
+    if len(timestamps) < 2:
+        return None
+    diffs = timestamps.to_series().diff().dropna()
+    positive = diffs[diffs > pd.Timedelta(0)]
+    if positive.empty:
+        return None
+    return DataFreq(cast(pd.Timedelta, positive.min()))
+
+
+def _index_level_freqs(index: pd.Index) -> list[_IndexLevelFreq]:
+    names = list(index.names) if isinstance(index, pd.MultiIndex) else [index.name]
+    resolved: list[_IndexLevelFreq] = []
+    for pos, raw_name in enumerate(names):
+        name = str(raw_name)
+        freq = _positive_freq_from_name(name)
+        if freq is None:
+            freq = _infer_positive_freq_from_level(index, pos)
+        if freq is not None:
+            resolved.append(_IndexLevelFreq(pos, name, freq))
+    return resolved
+
+
+def _named_time_index(data: pd.DataFrame, level_freqs: Sequence[_IndexLevelFreq]) -> tuple[pd.DataFrame, list[str]]:
+    index = data.index
+    names = list(index.names) if isinstance(index, pd.MultiIndex) else [index.name]
+    freq_by_pos = {level.pos: level.freq.name for level in level_freqs}
+    used: dict[str, int] = {}
+    resolved: list[str] = []
+    for pos, raw_name in enumerate(names):
+        if raw_name is None:
+            name = freq_by_pos.get(pos, f"level_{pos}")
+        else:
+            name = str(raw_name)
+        count = used.get(name, 0)
+        used[name] = count + 1
+        if count:
+            name = f"{name}_{count}"
+        resolved.append(name)
+    if list(names) == resolved:
+        return data, resolved
+    result = data.copy(deep=False)
+    result.index = result.index.set_names(resolved)
+    return result, resolved
+
+
 def signal_align(
     data: pd.DataFrame,
     freq: Any,
@@ -53,18 +140,22 @@ def signal_align(
     bp = basepoint
     end_skip = end_session_skip
     end_gap = end_session_gap
+    data = _coerce_tuple_index(data)
 
     # 找到 freq 是其整数倍的索引层级（第一个匹配的）
-    index_names = [str(n) for n in data.index.names]
-    index_freqs = [DataFreq(n) for n in index_names]
+    level_freqs = _index_level_freqs(data.index)
+    data, index_names = _named_time_index(data, level_freqs)
     try:
-        first_true_idx = next(
-            (i for i, f in enumerate(index_freqs)
-             if freq_dc.value.total_seconds() % f.value.total_seconds() == 0))
+        aligned_level = next(
+            level
+            for level in level_freqs
+            if freq_dc.value.total_seconds() % level.freq.value.total_seconds() == 0
+        )
     except StopIteration:
         raise ValueError(
             f"频率 {freq_dc} 不是任何数据索引频率的整数倍")
-    multiple = int(freq_dc.value.total_seconds() / index_freqs[first_true_idx].value.total_seconds())
+    first_true_idx = aligned_level.pos
+    multiple = int(freq_dc.value.total_seconds() / aligned_level.freq.value.total_seconds())
 
     idx_name = index_names[first_true_idx]
     idx_series = data.index.get_level_values(idx_name).to_series().reset_index(drop=True)

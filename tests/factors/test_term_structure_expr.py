@@ -12,6 +12,7 @@ from tools.factors.FactorExpr import (
     CLOSE,
     ColumnRef,
     EvaluateContext,
+    SignalAlign,
     term_carry_annualized,
     term_contango,
     term_curvature,
@@ -108,13 +109,18 @@ def _term_rows(
 def _fake_product(
     product: str = "TERM_FAKE",
     curves: Iterable[tuple[str, list[float], list[int]]] | None = None,
+    times: Iterable[str] | None = None,
 ) -> _FakeTermProduct:
-    index = _raw_index([
+    times = times or [
         "2024-01-02 09:00",
         "2024-01-02 10:00",
         "2024-01-03 09:00",
-    ])
-    market_data = pd.DataFrame({DataColumn.CLOSE.name: [1.0, 2.0, 3.0]}, index=index)
+    ]
+    index = _raw_index(times)
+    market_data = pd.DataFrame(
+        {DataColumn.CLOSE.name: [float(i + 1) for i in range(len(index))]},
+        index=index,
+    )
     return _FakeTermProduct(product, market_data, _MemoryTermStore(_term_rows(product, curves)))
 
 
@@ -258,6 +264,45 @@ def test_term_structure_column_ref_output_feeds_cross_sectional_ops_with_multiin
     pd.testing.assert_series_equal(rank[near_flat], pd.Series([0.0, 0.0, 0.0], index=expected_index, name=near_flat))
     pd.testing.assert_series_equal(rank[near_steep], pd.Series([0.5, 0.5, 0.5], index=expected_index, name=near_steep))
     assert zscore.notna().all().all()
+
+
+def test_term_ratio_signal_align_infers_frequency_from_semantic_time_levels() -> None:
+    product = _fake_product(
+        times=[
+            "2024-01-02 09:00",
+            "2024-01-02 10:00",
+            "2024-01-03 09:00",
+            "2024-01-03 10:00",
+        ],
+    )
+    market_data = pd.DataFrame(
+        {DataColumn.CLOSE.name: [1.0, 2.0, 3.0, 4.0]},
+        index=product._market_data.index,
+    )
+    product = _FakeTermProduct(product.name, market_data, product._store)
+    ctx = EvaluateContext(products=[product], freq=DataFreq.MIN1, cache={})
+
+    aligned = SignalAlign(
+        term_ratio(0, 1, CLOSE),
+        "1d",
+        daily_basepoint="10:00:00",
+        end_session_skip=False,
+    ).evaluate(ctx=ctx)
+
+    expected_index = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime(["2024-01-02", "2024-01-03"]),
+            pd.to_datetime(["2024-01-02 10:00", "2024-01-03 10:00"]),
+        ],
+        names=["_SIGNAL@DAY1", "数据源时间"],
+    )
+    pd.testing.assert_frame_equal(
+        aligned,
+        pd.DataFrame(
+            {product: [100.0 / 95.0 - 1.0, 110.0 / 100.0 - 1.0]},
+            index=expected_index,
+        ),
+    )
 
 
 def test_term_structure_ops_are_declared_live_incremental_with_streaming_curve_support() -> None:

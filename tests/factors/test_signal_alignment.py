@@ -39,3 +39,23 @@ def test_signal_align_daily_basepoint_selects_specific_time():
 
     aligned = signal_align(raw, "1d", daily_basepoint="10:00:00", end_session_skip=False)
     assert list(aligned["A"]) == [1, 4]
+
+
+def test_signal_align_daily_basepoint_recovers_tuple_time_index():
+    times = list(pd.date_range("2026-01-01 09:00", periods=3, freq="h"))
+    times += list(pd.date_range("2026-01-02 09:00", periods=3, freq="h"))
+    idx = pd.Index([(ts.normalize(), ts) for ts in times])
+    raw = pd.DataFrame({"A": range(6)}, index=idx)
+
+    aligned = signal_align(raw, "1d", daily_basepoint="10:00:00", end_session_skip=False)
+
+    assert list(aligned["A"]) == [1, 4]
+    assert aligned.index.names == ["_SIGNAL@DAY1", "HOUR1"]
+    assert list(aligned.index.get_level_values("_SIGNAL@DAY1")) == [
+        pd.Timestamp("2026-01-01"),
+        pd.Timestamp("2026-01-02"),
+    ]
+    assert list(aligned.index.get_level_values("HOUR1")) == [
+        pd.Timestamp("2026-01-01 10:00"),
+        pd.Timestamp("2026-01-02 10:00"),
+    ]
