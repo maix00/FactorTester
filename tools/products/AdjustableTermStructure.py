@@ -4,7 +4,8 @@ The storage model is a normalized snapshot table:
 
     PRODUCT, TRADING_DAY, CONTRACT_UID, CONTRACT,
     MATURITY_DATE, DAYS_TO_MATURITY, TERM_RANK,
-    OPEN, HIGH, LOW, CLOSE, VOLUME, OPEN_INTEREST,
+    OPEN, HIGH, LOW, CLOSE, VWAP, SETTLEMENT_PRICE, PRE_SETTLEMENT_PRICE,
+    VOLUME, OPEN_INTEREST,
     IS_MAIN
 
 Each row represents one tradable contract for one product on one trading day.
