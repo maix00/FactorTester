@@ -1378,7 +1378,8 @@ def test_step_audit_groups_shared_and_strategy_context_sources(capsys) -> None:
     assert "[合并]" not in out
 
 
-def test_step_audit_collapses_repeated_strategy_mapping_values(capsys) -> None:
+def test_step_audit_collapses_repeated_strategy_mapping_values(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((88, 20)))
     _print_audit_changes("声明输出的变化", [{
         "field": "RunWindowModule.strategy_windows",
         "scope": "context",
@@ -1404,8 +1405,7 @@ def test_step_audit_collapses_repeated_strategy_mapping_values(capsys) -> None:
 
     out = capsys.readouterr().out
     plain = _strip_ansi(out)
-    assert "columns 1/2" not in plain
-    assert "表格已转置" not in plain
+    assert "表格已转置" in plain
     assert "strategies" in plain
     assert "start_dt" in plain
     assert "end_dt" in plain
@@ -2396,6 +2396,28 @@ def test_step_audit_does_not_split_market_sample_table(capsys, monkeypatch) -> N
     assert "columns 1/" not in plain
     assert len(headers) == 1
     assert headers[0].startswith("field       product")
+
+
+def test_step_audit_market_sample_field_without_sample_does_not_fallback_to_strategy_table(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((132, 20)))
+
+    _print_audit_fields("输入字段", [
+        {
+            "field": "OrderExecutionModule.execution_price_basis",
+            "values": [{"scope": "strategy_config", "strategy": "A1", "value": "open"}],
+        },
+        {
+            "field": "MarketDataModule.price_tables",
+            "values": [{"scope": "strategy_context", "strategy": "A1", "value": None}],
+        },
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "price_tables [MarketDataModule.price_tables]" in plain
+    assert "市场数据 sample 总表（每个价格字段最多 3 个产品）" in plain
+    assert "（无可采样值）" in plain
+    assert "execution_price_basis  price_tables" not in plain
+    assert "[共享]:" not in plain
 
 
 def test_step_audit_combines_market_data_sample_changes(capsys, monkeypatch) -> None:

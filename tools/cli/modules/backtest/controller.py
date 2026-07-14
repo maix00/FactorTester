@@ -817,17 +817,11 @@ def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[
     if combined is None:
         return False
     field_columns, rows = combined
-    is_strategy_scoped_mapping = any(
-        _field_metadata.display_value_kind(str(record.get("field") or "")) == "strategy_scoped_mapping"
-        for record in records
-    )
     return _print_audit_table(
         ("strategies", *field_columns),
         rows,
         indent=f"{prefix}  ",
         label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
-        allow_transpose=not is_strategy_scoped_mapping,
-        allow_split=not is_strategy_scoped_mapping,
     )
 
 
@@ -960,9 +954,15 @@ _MARKET_DATA_SAMPLE_PRODUCT_LIMIT = market_data_formatter.MARKET_DATA_SAMPLE_PRO
 
 
 def _print_market_data_sample_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
+    if not records:
+        return False
     rows, time_columns = _market_data_sample_rows_from_value_records(records)
     if not rows or not time_columns:
-        return False
+        for line in audit_printer_helpers.combined_field_label_lines(prefix, records):
+            click.echo(line, color=True)
+        click.echo(f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:")
+        click.echo(f"{prefix}  （无可采样值）")
+        return True
     return _print_audit_table(
         ("field", "product", *time_columns),
         rows,
@@ -975,9 +975,15 @@ def _print_market_data_sample_value_table(prefix: str, records: list[dict[str, A
 
 
 def _print_market_data_sample_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
+    if not records:
+        return False
     rows, time_columns = _market_data_sample_rows_from_change_records(records)
     if not rows or not time_columns:
-        return False
+        for line in audit_printer_helpers.combined_change_field_label_lines(prefix, records):
+            click.echo(line, color=True)
+        click.echo(f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:")
+        click.echo(f"{prefix}  （无可采样值）")
+        return True
     return _print_audit_table(
         ("field", "product", *time_columns),
         rows,
@@ -1126,17 +1132,11 @@ def _print_combined_strategy_scalar_change_table(prefix: str, records: list[tupl
     if combined is None:
         return False
     field_columns, rows = combined
-    is_strategy_scoped_mapping = any(
-        _field_metadata.display_value_kind(field_name) == "strategy_scoped_mapping"
-        for field_name, _changes in records
-    )
     return _print_audit_table(
         ("strategies", *field_columns),
         rows,
         indent=f"{prefix}  ",
         label_lines=audit_printer_helpers.combined_change_field_label_lines(prefix, records),
-        allow_transpose=not is_strategy_scoped_mapping,
-        allow_split=not is_strategy_scoped_mapping,
     )
 
 
@@ -1600,6 +1600,8 @@ def _print_audit_fields(
 
 
 def _scalar_value_record_group(record: dict[str, Any]) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
+    if _field_metadata.display_value_kind(str(record.get("field") or "")) == "market_data_sample":
+        return None, None, None
     return audit_printer_helpers.scalar_record_group([
         (_cash_pool_scalar_record_table(record), _print_combined_cash_pool_scalar_value_table, False),
         (_strategy_scalar_record_table(record), _print_combined_strategy_scalar_value_table, True),
@@ -1618,6 +1620,8 @@ def _scalar_change_record_group(
     field_name: str,
     field_changes: list[dict[str, Any]],
 ) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
+    if _field_metadata.display_value_kind(field_name) == "market_data_sample":
+        return None, None, None
     return audit_printer_helpers.scalar_record_group([
         (_cash_pool_scalar_change_record_table(field_name, field_changes), _print_combined_cash_pool_scalar_change_table, False),
         (_strategy_scalar_change_record_table(field_name, field_changes), _print_combined_strategy_scalar_change_table, True),

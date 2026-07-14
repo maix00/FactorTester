@@ -49,37 +49,34 @@ def load_field_metadata() -> AuditFieldMetadata:
     display_order: dict[str, int] = {}
     display_offsets: dict[str, int] = {}
     display_value_kinds: dict[str, str] = {}
-    try:
-        from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
+    from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
-        for module_class in _ALL_MODULE_CLASSES:
-            if not hasattr(module_class, "fields"):
-                continue
-            for field_name, field_definition in module_class.fields.items():
-                qualified = f"{module_class.__name__}.{field_name}"
-                label = getattr(field_definition, "label", "") or ""
-                if label:
-                    labels[field_name] = label
-                    labels[qualified] = label
-                tab_order_value = getattr(field_definition, "tab_order", None)
-                if tab_order_value is not None:
-                    tab_order[field_name] = tab_order_value
-                    tab_order[qualified] = tab_order_value
-                serialization = getattr(field_definition, "serialization", None) or {}
-                if isinstance(serialization, dict) and serialization.get("display_order") is not None:
-                    display_order_value = int(serialization["display_order"])
-                    display_order[field_name] = display_order_value
-                    display_order[qualified] = display_order_value
-                offset = getattr(field_definition, "display_offset", 0)
-                if offset:
-                    display_offsets[field_name] = int(offset)
-                    display_offsets[qualified] = int(offset)
-                display_value_kind = getattr(field_definition, "display_value_kind", None)
-                if display_value_kind:
-                    display_value_kinds[field_name] = str(display_value_kind)
-                    display_value_kinds[qualified] = str(display_value_kind)
-    except Exception:
-        pass
+    for module_class in _ALL_MODULE_CLASSES:
+        if not hasattr(module_class, "fields"):
+            continue
+        for field_name, field_definition in module_class.fields.items():
+            qualified = f"{module_class.__name__}.{field_name}"
+            label = getattr(field_definition, "label", "") or ""
+            if label:
+                labels[field_name] = label
+                labels[qualified] = label
+            tab_order_value = getattr(field_definition, "tab_order", None)
+            if tab_order_value is not None:
+                tab_order[field_name] = tab_order_value
+                tab_order[qualified] = tab_order_value
+            serialization = getattr(field_definition, "serialization", None) or {}
+            if isinstance(serialization, dict) and serialization.get("display_order") is not None:
+                display_order_value = int(serialization["display_order"])
+                display_order[field_name] = display_order_value
+                display_order[qualified] = display_order_value
+            offset = getattr(field_definition, "display_offset", 0)
+            if offset:
+                display_offsets[field_name] = int(offset)
+                display_offsets[qualified] = int(offset)
+            display_value_kind = getattr(field_definition, "display_value_kind", None)
+            if display_value_kind:
+                display_value_kinds[field_name] = str(display_value_kind)
+                display_value_kinds[qualified] = str(display_value_kind)
     return AuditFieldMetadata(
         labels=labels,
         tab_order=tab_order,
