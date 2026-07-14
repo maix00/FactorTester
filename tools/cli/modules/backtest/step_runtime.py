@@ -19,13 +19,14 @@ class StepEventRenderer:
     phase_label: Callable[[str], str]
     audit_context: Callable[[dict[str, Any]], Any]
     print_badge_box: Callable[[dict[str, Any], str, str, str, str], None]
-    print_strategy_context: Callable[[list[dict[str, Any]]], None]
+    print_strategy_context: Callable[[list[dict[str, Any]], dict[str, str]], None]
     print_event_payloads: Callable[[list[dict[str, Any]]], None]
     print_audit_fields: Callable[..., None]
     print_audit_changes: Callable[..., None]
     print_contract_audit: Callable[[list[dict[str, Any]]], None]
     display_key: step_display.DisplayKey
     normalize: step_display.Normalize
+    short_alias_map: dict[str, str]
 
     def render(self, data: dict[str, Any]) -> None:
         flow_phase = str(data.get("flow_phase") or "")
@@ -40,7 +41,7 @@ class StepEventRenderer:
             click.echo(f"说明: {description}")
 
         with self.audit_context(data):
-            self.print_strategy_context(list(data.get("strategies") or []))
+            self.print_strategy_context(list(data.get("strategies") or []), self.short_alias_map)
             self.print_event_payloads(list(data.get("event_payloads") or []))
             self.print_audit_fields(
                 "输入字段",

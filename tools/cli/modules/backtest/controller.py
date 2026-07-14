@@ -37,8 +37,6 @@ from tools.cli.modules.backtest.audit_formatters import value_text as value_text
 from tools.cli.modules.backtest import run_stream
 from tools.cli.modules.backtest import step_runtime
 from tools.testers.backtest.engines.native.flow import phase_label
-# Module-level mapping from group ID to short alias, populated at run time
-_short_alias_map: dict[str, str] = {}
 
 _audit_field_state_product_filter: tuple[str, ...] = ()
 _audit_strategy_ledger_routes: dict[str, tuple[tuple[str, str], ...]] = {}
@@ -1697,9 +1695,9 @@ def _audit_cash_summary(value: Any) -> str:
     return value_text_formatter.cash_summary(value, audit_text=_audit_text)
 
 
-def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
+def _print_strategy_context(strategies: list[dict[str, Any]], short_alias_map: dict[str, str] | None = None) -> None:
     _print_step_section("本次 flow 的 active strategies")
-    for line in step_display_formatter.strategy_context_lines(strategies, short_alias_map=_short_alias_map):
+    for line in step_display_formatter.strategy_context_lines(strategies, short_alias_map=short_alias_map or {}):
         click.echo(line)
 
 
@@ -1745,7 +1743,7 @@ def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
         click.echo(line)
 
 
-def _step_event_renderer() -> step_runtime.StepEventRenderer:
+def _step_event_renderer(short_alias_map: dict[str, str]) -> step_runtime.StepEventRenderer:
     return step_runtime.StepEventRenderer(
         phase_label=phase_label,
         audit_context=_audit_step_event_context,
@@ -1757,6 +1755,7 @@ def _step_event_renderer() -> step_runtime.StepEventRenderer:
         print_contract_audit=_print_contract_audit,
         display_key=_audit_display_key,
         normalize=_audit_normalized_value,
+        short_alias_map=short_alias_map,
     )
 
 
@@ -1765,6 +1764,8 @@ def _handle_step_event(
     client,
     run_token: str,
     navigator: step_display_formatter.StepNavigator,
+    *,
+    short_alias_map: dict[str, str] | None = None,
 ) -> None:
     """Render one complete, post-compute audit record and continue once."""
     if str(data.get("phase") or "") != "step":
@@ -1773,7 +1774,7 @@ def _handle_step_event(
         step_runtime.continue_step(client, run_token, navigator)
         return
 
-    _step_event_renderer().render(data)
+    _step_event_renderer(short_alias_map or {}).render(data)
     click.echo("")
     step_runtime.prompt_step_navigation(navigator)
     step_runtime.continue_step(client, run_token, navigator)
@@ -1808,15 +1809,20 @@ def _run_backtest(
     template_state_helpers.register_template_factors(state, client)
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client), step_mode=step_mode)
     step_navigator = step_display_formatter.StepNavigator()
-    _short_alias_map.clear()
-    _short_alias_map.update(step_display_formatter.build_short_alias_map(state.backtest_groups, state.backtest_ls_configs))
+    short_alias_map = step_display_formatter.build_short_alias_map(state.backtest_groups, state.backtest_ls_configs)
     run_stream.consume_stream(
         client,
         run_payload,
         renderer=renderer,
         run_token=run_token,
         step_navigator=step_navigator,
-        handle_step_event=_handle_step_event,
+        handle_step_event=lambda data, client, run_token, navigator: _handle_step_event(
+            data,
+            client,
+            run_token,
+            navigator,
+            short_alias_map=short_alias_map,
+        ),
     )
     renderer.handle("complete", {})
     if renderer.last_result:
