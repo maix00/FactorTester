@@ -20,20 +20,7 @@ SingleSampleFrame = Callable[[dict[str, Any]], tuple[dict[str, Any], list[str]]]
 SingleSampleSeries = Callable[[dict[str, Any]], tuple[dict[str, Any], list[str]]]
 
 
-MARKET_DATA_SAMPLE_FIELDS = {
-    "price_tables",
-    "raw_prices",
-    "settlement_price",
-    "volume",
-    "causal_valuation_table",
-}
 MARKET_DATA_SAMPLE_PRODUCT_LIMIT = 3
-
-
-def is_market_data_sample_field(field_name: str) -> bool:
-    if not field_name.startswith("MarketDataModule."):
-        return False
-    return field_name.rsplit(".", 1)[-1] in MARKET_DATA_SAMPLE_FIELDS
 
 
 def sample_rows_from_value_records(
