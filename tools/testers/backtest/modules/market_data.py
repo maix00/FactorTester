@@ -1424,8 +1424,7 @@ def _handle_field_changes(state, ctx) -> None:
     """Process FIELD_CHANGE events: update field_state_store with new values."""
     store = market_data_store_for(state)
     for strategy in ctx.active_strategies:
-        for draft in ctx.payloads_for(strategy, kind="field_change"):
-            payload = getattr(draft, "payload", None)
+        for payload in ctx.payloads_for(strategy, kind="field_change"):
             if not isinstance(payload, dict):
                 continue
             changes = payload.get("changes", {})

@@ -219,6 +219,45 @@ def test_historical_fields_frame_row_cache_reuses_same_effective_rule_row():
     assert changed[product]["VolumeMultiple"] == 2.0
 
 
+def test_field_change_event_updates_field_state_store_for_later_materialization():
+    class _Product:
+        name = "P1.CFE"
+
+    product = _Product()
+    timestamp = pd.Timestamp("2026-01-05 09:01:00", tz="Asia/Shanghai")
+    state = BacktestRunState()
+    state.market_data_store.historical_field_names = ("VolumeMultiple",)
+    state.market_data_store.historical_field_provider = object()
+    state.market_data_store.trading_day_resolver = object()
+    state.market_data_store.field_state_store = {"P1.CFE": {"VolumeMultiple": 10.0}}
+    state.market_data_store.current_prices_table = pd.DataFrame({product: [100.0]}, index=[timestamp])
+    strategy = Strategy(alias="A1")
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={
+            strategy: [
+                EventDraft(
+                    EventKind.FIELD_CHANGE,
+                    timestamp,
+                    strategy=strategy,
+                    payload={"changes": {"P1.CFE": {"VolumeMultiple": 20.0}}},
+                )
+            ]
+        },
+        event_kind=EventKind.FIELD_CHANGE,
+    )
+
+    market_data_module._handle_field_changes(state, ctx)
+    state.market_data_store.historical_fields_cache.clear()
+
+    fields = market_data_module.current_historical_fields_at(state, timestamp)
+
+    assert state.market_data_store.field_state_store["P1.CFE"]["VolumeMultiple"] == 20.0
+    assert fields[product]["VolumeMultiple"] == 20.0
+
+
 def test_order_event_current_prices_use_open_snapshot_not_close_snapshot():
     product = object()
     timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
