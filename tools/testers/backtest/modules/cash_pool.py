@@ -61,6 +61,7 @@ class CashPoolModule(ExecutableModule):
     currency_conversion_fee_rate: ClassVar[FieldRef[float]] = FieldRef("currency_conversion_fee_rate")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
+        "cash": FieldDefinition(public=False, display_value_kind="cash"),
         "initial_capital_major": FieldDefinition(
             public=True, label="初始资金", control_template="number", default=100_000_000.0, tab="capital",
             chip_template="初始资金: {value}", tab_label="资金", tab_order=50,

@@ -117,7 +117,7 @@ def display_field_value(
             return summary
     if qualified_name == "MarketDataModule.required_data_source" and value in ((), []):
         return "auto（自动选择）"
-    if qualified_name.rsplit(".", 1)[-1] == "cash":
+    if value_kind == "cash" or qualified_name.rsplit(".", 1)[-1] == "cash":
         return cash_summary(value)
     if isinstance(value, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in value):
         return scalar_sequence_text(value)
