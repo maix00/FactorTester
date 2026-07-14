@@ -927,3 +927,22 @@ def test_signal_live_compiles_factor_expr_executor_from_bar_events():
     _evaluate_signal_live(account, signal_ctx)
 
     assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 11.0}
+
+
+def test_signal_live_factor_expr_requires_canonical_data_column_snapshot_fields():
+    strategy = Strategy(alias="A")
+    factor = ColumnRef(DataColumn.CLOSE) + 1.0
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0},
+    })
+
+    _observe_signal_live_bar(account, bar_ctx)
+
+    assert account.factor_signal_store.live_executors == {}
+    assert bar_ctx.get_for(FactorSignalModule.live_factor_state, strategy) is None

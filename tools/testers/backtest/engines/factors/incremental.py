@@ -18,6 +18,7 @@ from tools.factors.expr import (
     FactorExpr,
     RollingOp,
     ShiftOp,
+    WhereOp,
 )
 
 if TYPE_CHECKING:
@@ -146,6 +147,27 @@ class RollingWindowNode:
         raise UnsupportedStreamingFactor(f"unsupported rolling op: {self.op}")
 
 
+class ExpandingEwmNode:
+    def __init__(self, child: StreamingNode, span: int, width: int) -> None:
+        self.child = child
+        self.span = span
+        self._history: list[np.ndarray] = []
+        self._width = width
+
+    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        self._history.append(self.child.update(market, cache).copy())
+        frame = pd.DataFrame(np.asarray(self._history, dtype=float))
+        min_periods = max(1, self.span // 2)
+        result = frame.ewm(span=self.span, min_periods=min_periods).mean().iloc[-1]
+        cache[key] = result.to_numpy(dtype=float)
+        if len(cache[key]) != self._width:
+            raise ValueError("streaming ewm output width changed unexpectedly")
+        return cache[key]
+
+
 class ShiftNode:
     def __init__(self, child: StreamingNode, periods: int, width: int) -> None:
         self.child = child
@@ -164,10 +186,14 @@ class ShiftNode:
 @dataclass(slots=True)
 class CrossSectionalNode:
     op: str
-    child: StreamingNode
+    children: tuple[StreamingNode, ...]
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
-        values = self.child.update(market, cache)
+        if len(self.children) != 1:
+            raise UnsupportedStreamingFactor(
+                f"{self.op} produces an IC time series, not product-level live signal values"
+            )
+        values = self.children[0].update(market, cache)
         series = pd.Series(values, dtype=float)
         if self.op == "cs_rank":
             return (series.rank(pct=True) - 0.5).to_numpy()
@@ -177,6 +203,19 @@ class CrossSectionalNode:
                 return np.where(series.isna(), np.nan, 0.0)
             return ((series - series.mean()) / std).to_numpy()
         raise UnsupportedStreamingFactor(f"unsupported cross-sectional op: {self.op}")
+
+
+@dataclass(slots=True)
+class WhereNode:
+    cond: StreamingNode
+    true_value: StreamingNode
+    false_value: StreamingNode
+
+    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        cond = self.cond.update(market, cache).astype(bool)
+        true_value = self.true_value.update(market, cache)
+        false_value = self.false_value.update(market, cache)
+        return np.where(cond, true_value, false_value)
 
 
 class StreamingFactorPlan:
@@ -261,20 +300,21 @@ def compile_streaming_factor(
             if not isinstance(expr.window, ConstExpr):
                 raise UnsupportedStreamingFactor("streaming windows must resolve to fixed bars")
             window = _resolve_window_bars(expr.window.value, source_freq)
-            if expr.op == "rolling_ema":
-                raise UnsupportedStreamingFactor(
-                    "rolling_ema requires a dedicated constant-memory incremental kernel"
-                )
             children = tuple(
                 compile_node(item)
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
             )
-            node = RollingWindowNode(
-                expr.op,
-                children,
-                window,
-                len(products),
-            )
+            if expr.op == "rolling_ema":
+                if len(children) != 1:
+                    raise UnsupportedStreamingFactor("rolling_ema expects one streaming operand")
+                node = ExpandingEwmNode(children[0], window, len(products))
+            else:
+                node = RollingWindowNode(
+                    expr.op,
+                    children,
+                    window,
+                    len(products),
+                )
         elif isinstance(expr, ShiftOp):
             if not isinstance(expr.periods, ConstExpr) or not isinstance(expr.periods.value, int):
                 raise UnsupportedStreamingFactor("streaming shifts must resolve to fixed bars")
@@ -286,11 +326,23 @@ def compile_streaming_factor(
                 len(products),
             )
         elif isinstance(expr, CrossSectionalOp):
+            if expr.op in {"cs_corr", "cs_spearman"}:
+                raise UnsupportedStreamingFactor(
+                    f"{expr.op} produces an IC time series, not product-level live signal values"
+                )
             if expr.op not in {"cs_rank", "cs_zscore"}:
                 raise UnsupportedStreamingFactor(
                     f"unsupported cross-sectional op: {expr.op}"
                 )
-            node = CrossSectionalNode(expr.op, compile_node(expr.operand))
+            node = CrossSectionalNode(expr.op, (compile_node(expr.operand),))
+        elif isinstance(expr, WhereOp):
+            if len(expr.operands) != 3:
+                raise UnsupportedStreamingFactor("where expects condition, true, and false operands")
+            node = WhereNode(
+                compile_node(expr.operands[0]),
+                compile_node(expr.operands[1]),
+                compile_node(expr.operands[2]),
+            )
         else:
             raise UnsupportedStreamingFactor(
                 f"unsupported FactorExpr node: {type(expr).__name__}"
