@@ -405,6 +405,27 @@ def test_order_sizing_volume_capacity_caps_to_participation_rate_times_volume():
     assert capped[p] == pytest.approx(10.0)  # capped, 0.1*100
 
 
+def test_order_sizing_volume_capacity_uses_current_bar_when_ctx_has_volume_table():
+    s = Strategy(alias="S")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={
+        VolumeCapacityMode.liquidity_mode: "volume_participation", VolumeCapacityMode.participation_rate: 0.1,
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    timestamp = pd.Timestamp("2024-01-02 09:01")
+    volume_table = pd.DataFrame(
+        {p: [100.0, 300.0]},
+        index=[pd.Timestamp("2024-01-02 09:00"), timestamp],
+    )
+    account.market_data_store.volume_table = volume_table
+    ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.volume, volume_table)
+
+    capped = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+
+    assert capped[p] == pytest.approx(30.0)
+
+
 def test_order_sizing_volume_capacity_requires_volume_for_each_product():
     s = Strategy(alias="S")
     p = _product()

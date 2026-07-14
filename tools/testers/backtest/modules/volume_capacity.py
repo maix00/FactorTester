@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, current_volume_at
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
 
@@ -48,7 +48,7 @@ def apply_volume_capacity_policy(
     config = config_for(strategy) if callable(config_for) else {}
     if config.get(VolumeCapacityMode.liquidity_mode, "infinite") != "volume_participation":
         return deltas
-    volume = ctx.get(MarketDataModule.volume, {})
+    volume = _current_volume_snapshot(state, ctx)
     store = order_flow_store_for(state)
     rate = config.get(VolumeCapacityMode.participation_rate, 0.1)
     missing_volume_products = [
@@ -60,7 +60,7 @@ def apply_volume_capacity_policy(
         _record_missing_volume_capacity_info(state, ctx, strategy, deltas, missing_volume_products)
         raise KeyError(_missing_volume_capacity_message(state, ctx, strategy, deltas, missing_volume_products))
     capped = {
-        product: _cap_one(quantity, rate * volume[product]) if _requires_volume_capacity(quantity) else quantity
+        product: _cap_one(quantity, float(rate) * volume[product]) if _requires_volume_capacity(quantity) else quantity
         for product, quantity in deltas.items()
     }
     if capped != deltas:
@@ -76,6 +76,27 @@ def apply_volume_capacity_policy(
             },
         )
     return capped
+
+
+def _current_volume_snapshot(state: object, ctx: object) -> dict[Any, float]:
+    volume = ctx.get(MarketDataModule.volume, {})
+    if _is_scalar_volume_snapshot(volume):
+        return {product: float(value) for product, value in volume.items()}
+    timestamp = getattr(ctx, "timestamp", None)
+    if timestamp is None:
+        return {}
+    return current_volume_at(state, timestamp)
+
+
+def _is_scalar_volume_snapshot(volume: object) -> bool:
+    if not isinstance(volume, dict):
+        return False
+    for value in volume.values():
+        try:
+            float(value)
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 def _cap_one(quantity: float, capacity: float) -> float:
