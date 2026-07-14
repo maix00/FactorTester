@@ -571,6 +571,8 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
                 settlement_prices,
                 close_prices,
                 require_exact=_ledger_requires_exact(ledger_config),
+                timestamp=ctx.timestamp,
+                trading_day=_daily_mark_to_market_trading_day(ctx, ledger),
             )
             if settlement_source == "close":
                 _record_daily_mark_to_market_fallback(
@@ -696,6 +698,20 @@ def _ledger_targets(state: Any, ctx: Any) -> list[Any]:
     return targets
 
 
+def _daily_mark_to_market_trading_day(ctx: Any, ledger: Any) -> str | None:
+    ledger_key = getattr(ledger, "ledger", ledger)
+    payloads = ctx.payloads_for_ledger(ledger_key, kind="daily_mark_to_market")
+    if not payloads and ledger_key is not ledger:
+        payloads = ctx.payloads_for_ledger(ledger, kind="daily_mark_to_market")
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        trading_day = payload.get("trading_day")
+        if trading_day not in (None, ""):
+            return str(trading_day)
+    return None
+
+
 def _settlement_price_for_product(
     product: Any,
     fields: Mapping[str, object],
@@ -703,6 +719,9 @@ def _settlement_price_for_product(
     close_prices: Mapping[Any, float],
     *,
     require_exact: bool,
+    timestamp: Any | None = None,
+    trading_day: str | None = None,
+    source: str = "market_snapshot.settlement",
 ) -> tuple[float, str]:
     value = _positive_number_or_none(_lookup_product_value(settlement_prices, product))
     if value is not None:
@@ -712,11 +731,32 @@ def _settlement_price_for_product(
         if field_value is not None:
             return field_value, field_name
     if require_exact:
-        raise KeyError(f"exact daily mark-to-market requires settlement price for {product}")
+        context = _settlement_missing_context(
+            timestamp=timestamp,
+            trading_day=trading_day,
+            source=source,
+        )
+        raise KeyError(f"exact daily mark-to-market requires settlement price for {product}{context}")
     fallback = _positive_number_or_none(_lookup_product_value(close_prices, product))
     if fallback is not None:
         return fallback, "close"
     raise KeyError(f"daily mark-to-market requires price for {product}")
+
+
+def _settlement_missing_context(
+    *,
+    timestamp: Any | None,
+    trading_day: str | None,
+    source: str,
+) -> str:
+    parts: list[str] = []
+    if timestamp is not None:
+        parts.append(f"timestamp={timestamp}")
+    if trading_day:
+        parts.append(f"trading_day={trading_day}")
+    if source:
+        parts.append(f"source={source}")
+    return "" if not parts else " (" + ", ".join(parts) + ")"
 
 
 def _record_daily_mark_to_market_fallback(

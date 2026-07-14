@@ -390,7 +390,7 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
                 state=state,
                 engine_mode=engine_mode_for(config),
             )
-            target = row.get("contract_object", product) if row is not None else product
+            target = row.get("contract_object", product) if row is not None else None
             if target is None:
                 mapping_trace[str(product)] = None
                 continue
@@ -428,7 +428,11 @@ def _handle_rollover_notice(state, ctx) -> None:
                 intent_quantity=-quantity,
                 strategy=strategy,
                 status=OrderStatus.SCHEDULED,
-                fields={"reason": "term_structure_rollover_close", "source": payload},
+                fields={
+                    "reason": "term_structure_rollover_close",
+                    "source": payload,
+                    "price_timestamp": ctx.timestamp,
+                },
             )
             open_order = Order(
                 instrument=next_contract,
@@ -441,6 +445,7 @@ def _handle_rollover_notice(state, ctx) -> None:
                     "reason": "term_structure_rollover_open",
                     "source": payload,
                     "rollover_from": old_contract,
+                    "price_timestamp": ctx.timestamp,
                 },
             )
             orders.extend((close_order, open_order))
@@ -480,6 +485,7 @@ def _handle_delivery_force_close_notice(state, ctx) -> None:
                 fields={
                     "reason": "term_structure_force_close",
                     "source": payload,
+                    "price_timestamp": ctx.timestamp,
                 },
             )
             orders.append(order)
@@ -976,6 +982,7 @@ def _lifecycle_event_drafts(
             continue
         payload = {
             **row,
+            "kind": notice_type,
             "notice_type": notice_type,
             "notice_reason": notice_reason,
         }

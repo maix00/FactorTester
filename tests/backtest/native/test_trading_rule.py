@@ -30,7 +30,7 @@ from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _resolve_daily_mark_to_market_enabled, _resolve_daily_mark_to_market_enabled_for_ledger,
     _resolve_method, _resolve_use_int_position,
     close_position, infer_auto_cost_basis_method, mark_to_market, open_position, _apply_daily_mark_to_market,
-    _register_daily_mark_to_market_notices,
+    _register_daily_mark_to_market_notices, _settlement_price_for_product,
 )
 from tools.testers.backtest.modules.margin import (
     MarginModule, _apply_margin_requirement_change, _handle_margin_liquidation_notice,
@@ -706,6 +706,27 @@ def test_daily_mark_to_market_records_settlement_close_fallback_interval():
     assert details["count"] == 2
     assert details["start"].startswith("2026-03-10")
     assert details["end"].startswith("2026-03-11")
+
+
+def test_exact_daily_mark_to_market_missing_settlement_reports_event_context():
+    product = _product()
+
+    with pytest.raises(KeyError) as exc:
+        _settlement_price_for_product(
+            product,
+            {},
+            {},
+            {product: 12.0},
+            require_exact=True,
+            timestamp=pd.Timestamp("2024-02-23 00:00:00.000000001", tz="Asia/Shanghai"),
+            trading_day="2024-02-22",
+        )
+
+    message = str(exc.value)
+    assert f"settlement price for {product}" in message
+    assert "timestamp=2024-02-23 00:00:00.000000001+08:00" in message
+    assert "trading_day=2024-02-22" in message
+    assert "source=market_snapshot.settlement" in message
 
 
 def test_daily_mark_to_market_fallback_interval_dedupes_multiple_ledgers_same_timestamp():

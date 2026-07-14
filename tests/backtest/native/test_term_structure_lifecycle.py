@@ -5,13 +5,17 @@ from typing import cast
 import pandas as pd
 import pytest
 
+from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.position import ProductPosition
-from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
+from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext, FlowRegistry, make_dispatcher, sort_and_validate
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
 from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules import term_structure
 from tools.testers.backtest.modules.term_structure import (
@@ -173,6 +177,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
 
     assert captured
     assert captured[0].timestamp == pd.Timestamp("2026-01-29 15:00", tz="Asia/Shanghai")
+    assert captured[0].payload["kind"] == "force_close"
     assert captured[0].payload["notice_type"] == "force_close"
     assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
 
@@ -833,6 +838,7 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
     queue.set_dispatcher(EventKind.ORDER, lambda batch: order_events.extend(batch))
     ts = pd.Timestamp("2026-01-29 15:00")
     draft = EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload={
+        "kind": "force_close",
         "notice_type": "force_close",
         "contract_object": contract,
     })
@@ -851,6 +857,73 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
     assert order.instrument == contract
     assert order.quantity == -3
     assert order.get("reason") == "term_structure_force_close"
+    assert order.get("price_timestamp") == ts
+
+
+def test_force_close_order_dispatch_fills_and_clears_position_before_settlement():
+    strategy = Strategy(alias="A")
+    contract = _Contract("P2601.DCE")
+    flow_names = frozenset({
+        "handle_delivery_force_close_notice",
+        "lookup_current_prices_on_order",
+        "resolve_execution_price",
+        "apply_order_fill",
+    })
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, active_flow_names=flow_names),
+    })
+    ledger = account.ledger_for_strategy(strategy)
+    ledger.set(LedgerModule.positions, {contract: ProductPosition(quantity=3)})
+    set_cash_for_ledger_pool(
+        account,
+        ledger,
+        DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False),
+    )
+    ts = pd.Timestamp("2026-01-31 00:00", tz="Asia/Shanghai")
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {contract: [10.0]},
+        index=pd.DatetimeIndex([ts]),
+    )
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({contract: [10.0]}, index=pd.DatetimeIndex([ts])),
+    }
+
+    registry = FlowRegistry()
+    for flow in (
+        DeliveryForceCloseModule.handle_delivery_force_close_notice,
+        MarketDataModule.lookup_current_prices_on_order,
+        OrderExecutionModule.resolve_execution_price,
+        LedgerModule.apply_order_fill,
+    ):
+        registry.register_flow(flow)
+    groups = sort_and_validate(registry.resolve())
+    queue = EventQueue()
+    queue.set_dispatcher(
+        EventKind.TRADE_INTENT,
+        make_dispatcher(groups[(DeliveryForceCloseModule.handle_delivery_force_close_notice.phase, EventKind.TRADE_INTENT)], account, queue),
+    )
+    order_events: list[EventDraft] = []
+    order_dispatcher = make_dispatcher(groups[(LedgerModule.apply_order_fill.phase, EventKind.ORDER)], account, queue)
+
+    def _capture_and_dispatch_order(batch):
+        order_events.extend(batch)
+        order_dispatcher(batch)
+
+    queue.set_dispatcher(EventKind.ORDER, _capture_and_dispatch_order)
+    queue.push_event(EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload={
+        "kind": "force_close",
+        "notice_type": "force_close",
+        "contract_object": contract,
+    }))
+
+    queue.run_until_drained()
+
+    assert len(order_events) == 1
+    order = order_events[0].payload
+    assert order.get("reason") == "term_structure_force_close"
+    assert order.get("price_timestamp") == ts
+    assert order.status.value == "filled"
+    assert ledger.get(LedgerModule.positions)[contract].quantity == 0
 
 
 def test_signal_target_weights_map_abstract_product_to_current_contract():
@@ -885,6 +958,42 @@ def test_signal_target_weights_map_abstract_product_to_current_contract():
 
     weights = ctx.get_for(GroupMembershipModule.target_weights, strategy)
     assert weights == {_Contract("P2601.DCE"): 1.0}
+
+
+def test_signal_target_weights_drop_expired_last_contract_after_force_close_time():
+    strategy = Strategy(alias="A")
+    product = _TermProduct()
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                DeliveryForceCloseModule.force_close_before_expiry: "0d",
+            },
+        ),
+    })
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    pre_replay_ctx = FlowContext(
+        timestamp=None,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    pre_replay_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+    _expand_term_structure(account, pre_replay_ctx)
+
+    per_event_ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-02-01 09:01", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    per_event_ctx.set_for(GroupMembershipModule.target_weights, strategy, {product: 1.0})
+    _resolve_tradable_target_weights(account, per_event_ctx)
+
+    assert per_event_ctx.get_for(GroupMembershipModule.target_weights, strategy) == {}
 
 
 def test_signal_target_weights_resolve_across_separate_pre_replay_and_per_event_contexts():
@@ -1118,6 +1227,7 @@ def test_rollover_notice_emits_close_and_open_orders_for_existing_position():
 
     ts = pd.Timestamp("2026-01-26 15:00")
     draft = EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload={
+        "kind": "rollover",
         "notice_type": "rollover",
         "notice_reason": "date_before_expiry",
         "product": "P.DCE",
