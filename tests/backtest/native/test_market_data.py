@@ -23,12 +23,17 @@ from tools.testers.backtest.modules.market_data import (
     _resolve_market_data_request, _set_current_market_snapshot,
     contract_multiplier_from_fields,
     current_market_snapshot_at, current_prices_at, historical_fields_for_product,
+    market_snapshot_for_index_key,
     order_constraints_from_snapshot,
 )
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.data.types import DataColumn
 from tools.data.types.time import DataTime
 from tools.data.types.time_freq import DataFreq
+from tools.products.AdjustableTermStructure import (
+    TERM_DAYS_TO_MATURITY_COL,
+    TERM_RANK_COL,
+)
 from tools.data.field_history import (
     FieldHistoryProvider,
     HistoricalFieldFallbackPolicy,
@@ -414,6 +419,65 @@ def test_signal_event_minimal_snapshot_matches_relevant_full_snapshot_fields():
         assert signal[key] == full[key]
     assert "open" not in signal
     assert "settlement" not in signal
+
+
+def test_current_market_snapshot_includes_rank_ordered_term_structure_curve():
+    class _TermProduct:
+        name = "TERM"
+
+        def supports_term_structure(self) -> bool:
+            return True
+
+        def get_term_structure(self, trading_day, depth=None):
+            assert pd.Timestamp(trading_day) == pd.Timestamp("2024-01-02")
+            return pd.DataFrame({
+                TERM_RANK_COL: [1, 0],
+                TERM_DAYS_TO_MATURITY_COL: [40, 10],
+                DataColumn.CLOSE.name: [95.0, 100.0],
+            })
+
+    class _PlainProduct:
+        name = "PLAIN"
+
+    term_product = _TermProduct()
+    plain_product = _PlainProduct()
+    timestamp = pd.Timestamp("2024-01-02 09:01")
+    account = BacktestRunState()
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {term_product: [11.0], plain_product: [21.0]},
+        index=[timestamp],
+    )
+
+    snapshot = current_market_snapshot_at(account, timestamp)
+
+    curves = snapshot["TERM_STRUCTURE"]
+    assert list(curves) == [term_product]
+    assert curves[term_product][TERM_RANK_COL].tolist() == [0, 1]
+    assert curves[term_product][DataColumn.CLOSE.name].tolist() == [100.0, 95.0]
+
+
+def test_exact_index_market_snapshot_includes_term_structure_curve():
+    class _TermProduct:
+        name = "TERM"
+
+        def supports_term_structure(self) -> bool:
+            return True
+
+        def get_term_structure(self, trading_day, depth=None):
+            return pd.DataFrame({
+                TERM_RANK_COL: [0, 1],
+                TERM_DAYS_TO_MATURITY_COL: [10, 40],
+                DataColumn.CLOSE.name: [100.0, 95.0],
+            })
+
+    product = _TermProduct()
+    index_key = pd.Timestamp("2024-01-02 09:01")
+    account = BacktestRunState()
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [11.0]}, index=[index_key])
+
+    snapshot = market_snapshot_for_index_key(account, index_key)
+
+    assert snapshot["TERM_STRUCTURE"][product][DataColumn.CLOSE.name].tolist() == [100.0, 95.0]
 
 
 def test_ledger_event_minimal_snapshot_matches_settlement_and_close_only():

@@ -3,9 +3,11 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from tools.data.types import DataColumn
-from tools.factors.expr import ColumnRef
+from tools.factors.expr import CLOSE, ColumnRef, term_ratio
+from tools.products.AdjustableTermStructure import TERM_DAYS_TO_MATURITY_COL, TERM_RANK_COL
 from tools.data.types.time_freq import DataFreq
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import StrategyConfig
@@ -146,6 +148,9 @@ def test_live_factor_fields_keep_canonical_data_column_names_per_product():
         "CLOSE": {"P1": 10.0, "P2": 20.0},
         "CLOSE_ADJUSTED": {"P1": 11.0, "P2": 21.0},
         "VOLUME": {"P1": 100.0, "P2": 200.0},
+        "TERM_STRUCTURE": {
+            "P1": pd.DataFrame({TERM_RANK_COL: [0], DataColumn.CLOSE.name: [10.0]}),
+        },
     }) == {
         "P1": {"CLOSE": 10.0, "CLOSE_ADJUSTED": 11.0, "VOLUME": 100.0},
         "P2": {"CLOSE": 20.0, "CLOSE_ADJUSTED": 21.0, "VOLUME": 200.0},
@@ -995,3 +1000,138 @@ def test_signal_live_compiles_factor_expr_executor_from_bar_events():
     _evaluate_signal_live(account, signal_ctx)
 
     assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 11.0}
+
+
+def test_signal_live_factor_expr_requires_canonical_data_column_snapshot_fields():
+    strategy = Strategy(alias="A")
+    factor = ColumnRef(DataColumn.CLOSE) + 1.0
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0},
+    })
+
+    _observe_signal_live_bar(account, bar_ctx)
+
+    assert account.factor_signal_store.live_executors == {}
+    assert bar_ctx.get_for(FactorSignalModule.live_factor_state, strategy) is None
+
+
+def test_signal_live_shared_factor_expr_executor_updates_once_across_strategies():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    factor = ColumnRef(DataColumn.CLOSE).rolling_mean(2)
+    configs = {
+        s1: StrategyConfig(strategy=s1, field_values={FactorModule.factor: factor}),
+        s2: StrategyConfig(strategy=s2, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+
+    first_bar = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:00"), event_queue=EventQueue(),
+                            active_strategies=frozenset({s1, s2}))
+    first_bar.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0, "P2": 20.0},
+        "CLOSE": {"P1": 10.0, "P2": 20.0},
+    })
+    _observe_signal_live_bar(account, first_bar)
+
+    second_bar = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({s1, s2}))
+    second_bar.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 12.0, "P2": 18.0},
+        "CLOSE": {"P1": 12.0, "P2": 18.0},
+    })
+    _observe_signal_live_bar(account, second_bar)
+
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({s1, s2}))
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert len(account.factor_signal_store.live_executors) == 1
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 11.0, "P2": 19.0}
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 11.0, "P2": 19.0}
+
+
+def test_signal_live_factor_expr_uses_strategy_products_not_extra_snapshot_products():
+    strategy = Strategy(alias="A")
+    factor = ColumnRef(DataColumn.CLOSE) + 1.0
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({"P1"}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0, "CONTRACT_EXTRA": 99.0},
+        "CLOSE": {"P1": 10.0, "CONTRACT_EXTRA": 99.0},
+    })
+
+    _observe_signal_live_bar(account, bar_ctx)
+
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({strategy}))
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 11.0}
+
+
+def test_signal_live_term_structure_factor_expr_from_bar_events():
+    strategy = Strategy(alias="A")
+    p1, p2 = "TERM1", "TERM2"
+    factor = term_ratio(0, 1, CLOSE)
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02 09:00"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({p1, p2}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {p1: 1.0, p2: 1.0},
+        "CLOSE": {p1: 1.0, p2: 1.0},
+        "TERM_STRUCTURE": {
+            p1: pd.DataFrame({
+                TERM_RANK_COL: [0, 1],
+                TERM_DAYS_TO_MATURITY_COL: [10, 40],
+                DataColumn.CLOSE.name: [100.0, 95.0],
+            }),
+            p2: pd.DataFrame({
+                TERM_RANK_COL: [0, 1],
+                TERM_DAYS_TO_MATURITY_COL: [10, 40],
+                DataColumn.CLOSE.name: [120.0, 90.0],
+            }),
+        },
+    })
+
+    _observe_signal_live_bar(account, bar_ctx)
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02 09:00"), event_queue=EventQueue(),
+                             active_strategies=frozenset({strategy}))
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {
+        p1: 100.0 / 95.0 - 1.0,
+        p2: 120.0 / 90.0 - 1.0,
+    }
+
+
+def test_signal_live_term_structure_factor_requires_curve_snapshot():
+    strategy = Strategy(alias="A")
+    factor = term_ratio(0, 1, CLOSE)
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02 09:00"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({"TERM1"}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"TERM1": 1.0},
+        "CLOSE": {"TERM1": 1.0},
+    })
+
+    with pytest.raises(KeyError, match="TERM_STRUCTURE snapshot is missing curve"):
+        _observe_signal_live_bar(account, bar_ctx)

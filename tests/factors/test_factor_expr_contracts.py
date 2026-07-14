@@ -181,3 +181,23 @@ def test_undefined_constant_cross_section_ic_propagates_as_nan():
     ).evaluate(ctx=EvaluateContext(products=["A", "B"], freq=DataFreq.MIN1, cache={}))
 
     assert result["IC"].isna().all()
+
+
+def test_cross_section_ic_empty_overlap_preserves_multiindex_shape():
+    index = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime(["2024-01-02", "2024-01-03"]),
+            pd.to_datetime(["2024-01-02 09:00", "2024-01-03 09:00"]),
+        ],
+        names=["交易日", "数据源时间"],
+    )
+    left = pd.DataFrame({"A": [1.0, 2.0]}, index=index)
+    right = pd.DataFrame({"B": [3.0, 4.0]}, index=index)
+
+    result = CrossSectionalOp(
+        "cs_spearman", _FrameExpr(left), _FrameExpr(right),
+    ).evaluate(ctx=EvaluateContext(products=["A", "B"], freq=DataFreq.MIN1, cache={}))
+
+    assert result.empty
+    assert isinstance(result.index, pd.MultiIndex)
+    assert result.index.names == index.names
