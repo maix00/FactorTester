@@ -54,11 +54,12 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
-def test_step_audit_field_metadata_loads_audit_value_kind_from_field_definitions() -> None:
+def test_step_audit_field_metadata_loads_display_value_kind_from_field_definitions() -> None:
     metadata = load_field_metadata()
 
     assert metadata.value_kind("MarketDataModule.raw_prices") == "market_data_sample"
     assert metadata.value_kind("raw_prices") == "market_data_sample"
+    assert metadata.value_kind("LedgerModule.positions") == "positions"
 
 
 def test_step_audit_does_not_repeat_changed_output_after_value() -> None:

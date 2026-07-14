@@ -236,12 +236,12 @@ class MarketDataModule(ExecutableModule):
     _allocation_policy_ref: ClassVar[FieldRef[str]] = FieldRef("allocation_policy", owner="GroupMembershipModule")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "raw_prices": FieldDefinition(public=False, audit_value_kind="market_data_sample"),
-        "price_tables": FieldDefinition(public=False, audit_value_kind="market_data_sample"),
+        "raw_prices": FieldDefinition(public=False, display_value_kind="market_data_sample"),
+        "price_tables": FieldDefinition(public=False, display_value_kind="market_data_sample"),
         "lot_sizes": FieldDefinition(public=False),
         "margin_ratio": FieldDefinition(public=False),
-        "settlement_price": FieldDefinition(public=False, audit_value_kind="market_data_sample"),
-        "volume": FieldDefinition(public=False, audit_value_kind="market_data_sample"),
+        "settlement_price": FieldDefinition(public=False, display_value_kind="market_data_sample"),
+        "volume": FieldDefinition(public=False, display_value_kind="market_data_sample"),
         "historical_field_provider": FieldDefinition(public=False),
         "trading_day_resolver": FieldDefinition(public=False),
         "field_state_baseline": FieldDefinition(public=False),

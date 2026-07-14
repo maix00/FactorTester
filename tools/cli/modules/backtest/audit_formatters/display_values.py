@@ -14,6 +14,7 @@ ScalarSequenceText = Callable[[list[Any] | tuple[Any, ...]], str]
 ProductListCell = Callable[[list[str]], str]
 TextFormatter = Callable[[dict[str, Any]], str]
 AnyTextFormatter = Callable[[Any], str | None]
+FieldValueKind = Callable[[str], str | None]
 
 
 def parse_literal(value: str) -> Any | None:
@@ -88,6 +89,7 @@ def display_field_value(
     qualified_name: str,
     value: Any,
     *,
+    field_value_kind: FieldValueKind | None = None,
     trade_intent_summary: Summary,
     positions_summary: Summary,
     run_window_summary: Summary,
@@ -96,11 +98,12 @@ def display_field_value(
     scalar_sequence_text: ScalarSequenceText,
     field_display_offsets: Mapping[str, int],
 ) -> Any:
-    if qualified_name.rsplit(".", 1)[-1] == "trade_intent":
+    value_kind = field_value_kind(qualified_name) if field_value_kind is not None else None
+    if value_kind == "trade_intent" or qualified_name.rsplit(".", 1)[-1] == "trade_intent":
         summary = trade_intent_summary(value)
         if summary is not None:
             return summary
-    if qualified_name == "LedgerModule.positions" or qualified_name.rsplit(".", 1)[-1] == "positions":
+    if value_kind == "positions" or qualified_name == "LedgerModule.positions" or qualified_name.rsplit(".", 1)[-1] == "positions":
         summary = positions_summary(value)
         if summary is not None:
             return summary

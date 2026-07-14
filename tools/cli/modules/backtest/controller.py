@@ -1762,6 +1762,7 @@ def _display_field_value(qualified_name: str, value: Any) -> Any:
     return display_value_formatter.display_field_value(
         qualified_name,
         value,
+        field_value_kind=_field_metadata.value_kind,
         trade_intent_summary=_audit_trade_intent_summary,
         positions_summary=_audit_positions_summary,
         run_window_summary=_audit_run_window_summary,

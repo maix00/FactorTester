@@ -66,7 +66,9 @@ class LedgerModule(ExecutableModule):
     _margin_deficit_ref: ClassVar[FieldRef[float]] = FieldRef("margin_deficit", owner="MarginModule")
     _margin_excess_ref: ClassVar[FieldRef[float]] = FieldRef("margin_excess", owner="MarginModule")
 
-    fields: ClassVar[dict[str, FieldDefinition]] = {}
+    fields: ClassVar[dict[str, FieldDefinition]] = {
+        "positions": FieldDefinition(public=False, display_value_kind="positions"),
+    }
 
     initialize_ledgers: ClassVar[Flow] = Flow(
         "initialize_ledgers",

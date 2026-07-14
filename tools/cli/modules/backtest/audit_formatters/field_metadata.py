@@ -74,10 +74,10 @@ def load_field_metadata() -> AuditFieldMetadata:
                 if offset:
                     display_offsets[field_name] = int(offset)
                     display_offsets[qualified] = int(offset)
-                audit_value_kind = getattr(field_definition, "audit_value_kind", None)
-                if audit_value_kind:
-                    value_kinds[field_name] = str(audit_value_kind)
-                    value_kinds[qualified] = str(audit_value_kind)
+                display_value_kind = getattr(field_definition, "display_value_kind", None)
+                if display_value_kind:
+                    value_kinds[field_name] = str(display_value_kind)
+                    value_kinds[qualified] = str(display_value_kind)
     except Exception:
         pass
     return AuditFieldMetadata(
