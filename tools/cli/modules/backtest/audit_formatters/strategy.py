@@ -10,6 +10,7 @@ from tools.cli.modules.backtest.audit_formatters import scope_tables
 
 DisplayFieldValue = Callable[[str, Any], Any]
 DisplayKey = Callable[[Any], str]
+FieldValueKind = Callable[[str], str | None]
 Normalize = Callable[[Any], Any]
 ScalarCell = Callable[[Any], str]
 LedgerScalarText = Callable[[Any], str | None]
@@ -116,6 +117,7 @@ def strategy_record_value_rows(
 def strategy_scalar_record_table(
     record: Mapping[str, Any],
     *,
+    field_display_value_kind: FieldValueKind | None = None,
     display_field_value: DisplayFieldValue,
     display_key: DisplayKey,
     normalize: Normalize,
@@ -123,7 +125,12 @@ def strategy_scalar_record_table(
     table_cell_is_complex: TableCellIsComplex,
 ) -> tuple[list[str], dict[str, tuple[Any, ...]]] | None:
     field_name = str(record.get("field") or "")
-    values = record.get("values") or []
+    values = expand_strategy_scoped_mapping_entries(
+        field_name,
+        record.get("values") or [],
+        field_display_value_kind=field_display_value_kind,
+        normalize=normalize,
+    )
     if not values or any(str(entry.get("scope") or "") in {"ledger", "ledger_config"} for entry in values):
         return None
     strategy_entries = [
@@ -136,6 +143,10 @@ def strategy_scalar_record_table(
     if not present_scopes:
         return None
     short_name = field_name.rsplit(".", 1)[-1]
+    allow_mapping_row_expansion = (
+        field_display_value_kind is not None
+        and field_display_value_kind(field_name) == "strategy_scoped_mapping"
+    )
     shared_values = [entry.get("value") for entry in values if str(entry.get("scope") or "") == "context"]
     shared_value: Any = shared_values[-1] if shared_values else MISSING
     by_strategy_scope: dict[tuple[str, str], Any] = {}
@@ -153,7 +164,13 @@ def strategy_scalar_record_table(
             shared_value if scope == "context" else by_strategy_scope.get((strategy, scope), MISSING)
             for strategy in strategies
         ]
-        expanded_columns = strategy_subfield_columns(short_name, base_column, candidate_values, normalize=normalize)
+        expanded_columns = strategy_subfield_columns(
+            short_name,
+            base_column,
+            candidate_values,
+            normalize=normalize,
+            allow_mapping_row_expansion=allow_mapping_row_expansion,
+        )
         if expanded_columns is None:
             scope_specs.append((scope, [base_column], False))
         else:
@@ -186,10 +203,25 @@ def strategy_scalar_change_record_table(
     field_name: str,
     changes: Sequence[Mapping[str, Any]],
     *,
+    field_display_value_kind: FieldValueKind | None = None,
     display_field_value: DisplayFieldValue,
+    display_key: DisplayKey | None = None,
+    normalize: Normalize | None = None,
+    scalar_cell: ScalarCell | None = None,
     ledger_scalar_text: LedgerScalarText,
     change_cell: ChangeCell,
 ) -> tuple[list[str], dict[str, tuple[str, ...]]] | None:
+    if field_display_value_kind is not None and field_display_value_kind(field_name) == "strategy_scoped_mapping":
+        if display_key is None or normalize is None or scalar_cell is None:
+            return None
+        return strategy_scoped_mapping_change_record_table(
+            field_name,
+            changes,
+            normalize=normalize,
+            display_key=display_key,
+            scalar_cell=scalar_cell,
+            change_cell=change_cell,
+        )
     if not changes or any(str(change.get("scope") or "") in {"ledger", "ledger_config"} for change in changes):
         return None
     strategy_changes = [
@@ -346,17 +378,152 @@ def strategy_subfield_columns(
     values: Sequence[Any],
     *,
     normalize: Normalize,
+    allow_mapping_row_expansion: bool = False,
 ) -> list[str] | None:
-    if short_name not in {"long_leg_strategy_ids", "short_leg_strategy_ids"}:
+    if short_name in {"long_leg_strategy_ids", "short_leg_strategy_ids"}:
+        return scope_tables.mapping_sequence_subfield_columns(
+            base_column,
+            [None if value is MISSING else value for value in values],
+            normalize=normalize,
+        )
+    if allow_mapping_row_expansion:
+        mapping_columns = mapping_row_subfield_columns([None if value is MISSING else value for value in values], normalize=normalize)
+        if mapping_columns is not None:
+            return mapping_columns
+    return None
+
+
+def mapping_row_subfield_columns(values: Sequence[Any], *, normalize: Normalize) -> list[str] | None:
+    columns: list[str] | None = None
+    for value in values:
+        if value is None:
+            continue
+        normalized = normalize(value)
+        if not isinstance(normalized, Mapping) or not normalized:
+            return None
+        child_keys = [str(key) for key in normalized]
+        if any(isinstance(normalize(normalized.get(key)), (list, tuple)) for key in child_keys):
+            return None
+        if columns is None:
+            columns = child_keys
+        elif columns != child_keys:
+            return None
+    return columns
+
+
+def mapping_row_subfield_values(value: Any, expected_count: int, *, normalize: Normalize, scalar_cell: ScalarCell) -> list[str] | None:
+    normalized = normalize(value)
+    if not isinstance(normalized, Mapping):
         return None
-    return scope_tables.mapping_sequence_subfield_columns(
-        base_column,
-        [None if value is MISSING else value for value in values],
-        normalize=normalize,
-    )
+    return [
+        mapping_child_cell(normalized.get(child_key), normalize=normalize, scalar_cell=scalar_cell)
+        for child_key in list(normalized)[:expected_count]
+    ]
+
+
+def mapping_child_cell(value: Any, *, normalize: Normalize, scalar_cell: ScalarCell) -> str:
+    normalized = normalize(value)
+    if isinstance(normalized, Mapping) and normalized.get("ts") not in (None, ""):
+        parts = [f"ts={normalized.get('ts')}"]
+        if normalized.get("tz") not in (None, ""):
+            parts.append(f"tz={normalized.get('tz')}")
+        if normalized.get("precision") not in (None, ""):
+            parts.append(f"precision={normalized.get('precision')}")
+        return f"DataTime({', '.join(parts)})"
+    return scalar_cell(value)
+
+
+def expand_strategy_scoped_mapping_entries(
+    field_name: str,
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    field_display_value_kind: FieldValueKind | None,
+    normalize: Normalize,
+) -> list[Mapping[str, Any]]:
+    if field_display_value_kind is None or field_display_value_kind(field_name) != "strategy_scoped_mapping":
+        return list(entries)
+    expanded: list[Mapping[str, Any]] = []
+    for entry in entries:
+        if str(entry.get("scope") or "") != "context":
+            expanded.append(entry)
+            continue
+        mapping = strategy_scoped_mapping(entry.get("value"), normalize=normalize)
+        if mapping is None:
+            expanded.append(entry)
+            continue
+        for strategy, value in mapping.items():
+            expanded.append({**dict(entry), "scope": "strategy_context", "strategy": strategy, "value": value})
+    return expanded
+
+
+def strategy_scoped_mapping(value: Any, *, normalize: Normalize) -> dict[str, Any] | None:
+    normalized = normalize(value)
+    if not isinstance(normalized, Mapping) or not normalized:
+        return None
+    out: dict[str, Any] = {}
+    for key, item in normalized.items():
+        item_normalized = normalize(item)
+        if not isinstance(item_normalized, Mapping):
+            return None
+        out[str(key)] = item
+    return out
+
+
+def strategy_scoped_mapping_change_record_table(
+    field_name: str,
+    changes: Sequence[Mapping[str, Any]],
+    *,
+    normalize: Normalize,
+    display_key: DisplayKey,
+    scalar_cell: ScalarCell,
+    change_cell: ChangeCell,
+) -> tuple[list[str], dict[str, tuple[str, ...]]] | None:
+    if not changes:
+        return None
+    by_strategy: dict[str, tuple[Mapping[str, Any] | None, Mapping[str, Any] | None]] = {}
+    columns: list[str] | None = None
+    for change in changes:
+        if str(change.get("scope") or "") not in {"context", "strategy_context", "strategy_config"}:
+            return None
+        before_map = strategy_scoped_mapping(change.get("before"), normalize=normalize)
+        after_map = strategy_scoped_mapping(change.get("after"), normalize=normalize)
+        if before_map is None and after_map is None and change.get("strategy"):
+            before_value = normalize(change.get("before"))
+            after_value = normalize(change.get("after"))
+            before_map = {str(change.get("strategy")): before_value} if isinstance(before_value, Mapping) else {}
+            after_map = {str(change.get("strategy")): after_value} if isinstance(after_value, Mapping) else {}
+        if before_map is None and after_map is None:
+            return None
+        sample_values = [value for value in [*(before_map or {}).values(), *(after_map or {}).values()] if value is not None]
+        candidate_columns = mapping_row_subfield_columns(sample_values, normalize=normalize)
+        if candidate_columns is None:
+            return None
+        if columns is None:
+            columns = candidate_columns
+        elif columns != candidate_columns:
+            return None
+        for strategy in sorted(set(before_map or {}) | set(after_map or {})):
+            by_strategy[strategy] = (
+                before_map.get(strategy) if before_map else None,
+                after_map.get(strategy) if after_map else None,
+            )
+    if columns is None or not by_strategy:
+        return None
+    rows: dict[str, tuple[str, ...]] = {}
+    for strategy, (before_row, after_row) in by_strategy.items():
+        cells = []
+        for column in columns:
+            before_value = mapping_child_cell(before_row.get(column) if before_row else None, normalize=normalize, scalar_cell=scalar_cell)
+            after_value = mapping_child_cell(after_row.get(column) if after_row else None, normalize=normalize, scalar_cell=scalar_cell)
+            cells.append(change_cell(before_value, after_value))
+        rows[strategy] = tuple(cells)
+    return columns, rows
 
 
 def strategy_subfield_values(value: Any, expected_count: int, *, normalize: Normalize, scalar_cell: ScalarCell) -> list[str]:
+    mapping_values = mapping_row_subfield_values(value, expected_count, normalize=normalize, scalar_cell=scalar_cell)
+    if mapping_values is not None:
+        return mapping_values
     return scope_tables.mapping_sequence_subfield_values(
         value,
         expected_count,

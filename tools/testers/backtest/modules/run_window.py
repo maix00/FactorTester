@@ -116,7 +116,7 @@ class RunWindowModule(ExecutableModule):
             chip_template="样本切分: {value}", tab_label="时间范围", tab_order=40,
             serialization={"display_order": 70},
         ),
-        "strategy_windows": FieldDefinition(public=False, display_value_kind="run_window"),
+        "strategy_windows": FieldDefinition(public=False, display_value_kind="strategy_scoped_mapping"),
         "run_window_envelope": FieldDefinition(public=False, display_value_kind="run_window"),
     }
 

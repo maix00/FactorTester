@@ -62,7 +62,7 @@ def test_step_audit_field_metadata_loads_display_value_kind_from_field_definitio
     assert metadata.display_value_kind("MarketDataModule.causal_valuation_table") == "market_data_sample"
     assert metadata.display_value_kind("LedgerModule.positions") == "positions"
     assert metadata.display_value_kind("TargetStrategyModule.trade_intent") == "trade_intent"
-    assert metadata.display_value_kind("RunWindowModule.strategy_windows") == "run_window"
+    assert metadata.display_value_kind("RunWindowModule.strategy_windows") == "strategy_scoped_mapping"
     assert metadata.display_value_kind("MarketDataModule.field_state_baseline") == "historical_field_state"
     assert metadata.display_value_kind("CashPoolModule.cash") == "cash"
     assert metadata.display_value_kind("MarketDataModule.required_data_source") == "auto_when_empty"
@@ -1403,17 +1403,18 @@ def test_step_audit_collapses_repeated_strategy_mapping_values(capsys) -> None:
     }])
 
     out = capsys.readouterr().out
-    assert "DataTime.ts" in out
-    assert "DataTime.tz" in out
-    assert "DataTime.precision" in out
+    plain = _strip_ansi(out)
+    assert "columns 1/2" not in plain
+    assert "表格已转置" not in plain
+    assert "strategies" in plain
+    assert "start_dt" in plain
+    assert "end_dt" in plain
+    assert "warmup_window" in plain
     assert "A1, A2, A3" in out
-    assert "start_dt" in out
-    assert "2026-01-01 09:00:00+08:00" in out
+    assert "DataTime(ts=2026-01-01 09:00:00+08:00, tz=Asia/Shanghai," in plain
     assert "Asia/Shanghai" in out
     assert "exact" in out
-    assert "end_dt" in out
-    assert "2026-01-31 15:00:00+08:00" in out
-    assert "warmup_window" in out
+    assert "DataTime(ts=2026-01-31 15:00:00+08:00, tz=Asia/Shanghai," in plain
     assert "0 days 00:02:00" in out
     assert '"A1, A2, A3": {' not in out
 

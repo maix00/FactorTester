@@ -65,13 +65,17 @@ class StepAuditSectionPrinter:
             field_name = str(record.get("field") or "")
             values = record.get("values") or []
             if self._is_market_data_sample_field(field_name):
-                combined, next_index = printer_helpers.collect_contiguous(
-                    sorted_records,
-                    start=index,
-                    predicate=lambda item: self._is_market_data_sample_field(str(item.get("field") or "")),
-                )
+                combined = [
+                    item for item_index, item in enumerate(sorted_records)
+                    if item_index not in consumed_indexes
+                    and self._is_market_data_sample_field(str(item.get("field") or ""))
+                ]
                 if self.print_market_data_sample_value_table("    ", combined):
-                    index = next_index
+                    consumed_indexes.update(
+                        item_index for item_index, item in enumerate(sorted_records)
+                        if self._is_market_data_sample_field(str(item.get("field") or ""))
+                    )
+                    index += 1
                     continue
             if self.print_delta_mapping_value_table("    ", field_name, values):
                 index += 1
@@ -134,13 +138,17 @@ class StepAuditSectionPrinter:
                 continue
             field_name, field_changes = sorted_items[index]
             if self._is_market_data_sample_field(field_name):
-                combined_market, next_index = printer_helpers.collect_contiguous(
-                    sorted_items,
-                    start=index,
-                    predicate=lambda item: self._is_market_data_sample_field(item[0]),
-                )
+                combined_market = [
+                    item for item_index, item in enumerate(sorted_items)
+                    if item_index not in consumed_indexes
+                    and self._is_market_data_sample_field(item[0])
+                ]
                 if self.print_market_data_sample_change_table("  ", combined_market):
-                    index = next_index
+                    consumed_indexes.update(
+                        item_index for item_index, item in enumerate(sorted_items)
+                        if self._is_market_data_sample_field(item[0])
+                    )
+                    index += 1
                     continue
             if self.print_delta_mapping_change_table("    ", field_name, field_changes):
                 index += 1

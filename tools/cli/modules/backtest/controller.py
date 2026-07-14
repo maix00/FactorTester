@@ -796,6 +796,7 @@ _AUDIT_MISSING = object()
 def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[list[str], dict[str, tuple[Any, ...]]] | None:
     return strategy_formatter.strategy_scalar_record_table(
         record,
+        field_display_value_kind=_field_metadata.display_value_kind,
         display_field_value=_display_field_value,
         display_key=_audit_display_key,
         normalize=_audit_normalized_value,
@@ -816,11 +817,17 @@ def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[
     if combined is None:
         return False
     field_columns, rows = combined
+    is_strategy_scoped_mapping = any(
+        _field_metadata.display_value_kind(str(record.get("field") or "")) == "strategy_scoped_mapping"
+        for record in records
+    )
     return _print_audit_table(
         ("strategies", *field_columns),
         rows,
         indent=f"{prefix}  ",
         label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
+        allow_transpose=not is_strategy_scoped_mapping,
+        allow_split=not is_strategy_scoped_mapping,
     )
 
 
@@ -857,7 +864,7 @@ def _print_positions_value_table(prefix: str, field_name: str, values: list[dict
     if result is None:
         return False
     headers, rows = result
-    return _print_audit_table(headers, rows, indent=prefix, allow_transpose=False)
+    return _print_audit_table(headers, rows, indent=prefix, allow_transpose=False, allow_split=False)
 
 
 def _print_ledger_grouped_changes(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
@@ -891,7 +898,7 @@ def _print_positions_change_table(prefix: str, field_name: str, changes: list[di
     if not rows:
         click.echo(f"{prefix}（无变化）")
         return True
-    return _print_audit_table(headers, rows, indent=prefix, allow_transpose=False)
+    return _print_audit_table(headers, rows, indent=prefix, allow_transpose=False, allow_split=False)
 
 
 def _ledger_scalar_record_table(record: dict[str, Any]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
@@ -1081,7 +1088,11 @@ def _strategy_scalar_change_record_table(field_name: str, changes: list[dict[str
     return strategy_formatter.strategy_scalar_change_record_table(
         field_name,
         changes,
+        field_display_value_kind=_field_metadata.display_value_kind,
         display_field_value=_display_field_value,
+        display_key=_audit_display_key,
+        normalize=_audit_normalized_value,
+        scalar_cell=_audit_scalar_cell,
         ledger_scalar_text=_audit_ledger_scalar_text,
         change_cell=_audit_change_cell,
     )
@@ -1115,11 +1126,17 @@ def _print_combined_strategy_scalar_change_table(prefix: str, records: list[tupl
     if combined is None:
         return False
     field_columns, rows = combined
+    is_strategy_scoped_mapping = any(
+        _field_metadata.display_value_kind(field_name) == "strategy_scoped_mapping"
+        for field_name, _changes in records
+    )
     return _print_audit_table(
         ("strategies", *field_columns),
         rows,
         indent=f"{prefix}  ",
         label_lines=audit_printer_helpers.combined_change_field_label_lines(prefix, records),
+        allow_transpose=not is_strategy_scoped_mapping,
+        allow_split=not is_strategy_scoped_mapping,
     )
 
 
