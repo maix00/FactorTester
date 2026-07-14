@@ -115,7 +115,7 @@ def display_field_value(
         summary = historical_field_state_summary(value)
         if summary is not None:
             return summary
-    if qualified_name == "MarketDataModule.required_data_source" and value in ((), []):
+    if value_kind == "auto_when_empty" and value in ((), []):
         return "auto（自动选择）"
     if value_kind == "cash":
         return cash_summary(value)

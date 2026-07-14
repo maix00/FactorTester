@@ -303,7 +303,7 @@ class MarketDataModule(ExecutableModule):
             tab_order=36,
         ),
         "required_frequency": FieldDefinition(public=False),
-        "required_data_source": FieldDefinition(public=False),
+        "required_data_source": FieldDefinition(public=False, display_value_kind="auto_when_empty"),
         "required_factor_columns": FieldDefinition(public=False),
         "market_data_load_plan": FieldDefinition(public=False),
         "excluded_out_of_range_products": FieldDefinition(public=False),
