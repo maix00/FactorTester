@@ -27,6 +27,8 @@ class StepAuditSectionPrinter:
     print_delta_mapping_change_table: Callable[[str, str, list[dict[str, Any]]], bool]
     print_order_value_table: Callable[[str, str, list[dict[str, Any]]], bool]
     print_order_change_table: Callable[[str, str, list[dict[str, Any]]], bool]
+    print_execution_price_value_table: Callable[[str, str, list[dict[str, Any]]], bool]
+    print_execution_price_change_table: Callable[[str, str, list[dict[str, Any]]], bool]
     scalar_value_record_group: Callable[[dict[str, Any]], tuple[Any, Any, Any]]
     scalar_value_group_key: Callable[[dict[str, Any]], Any]
     scalar_change_record_group: Callable[[str, list[dict[str, Any]]], tuple[Any, Any, Any]]
@@ -110,6 +112,9 @@ class StepAuditSectionPrinter:
                     index += 1
                     continue
             if self._is_order_table_field(field_name) and self.print_order_value_table("    ", field_name, values):
+                index += 1
+                continue
+            if self._is_execution_price_table_field(field_name) and self.print_execution_price_value_table("    ", field_name, values):
                 index += 1
                 continue
             if self.print_delta_mapping_value_table("    ", field_name, values):
@@ -214,6 +219,9 @@ class StepAuditSectionPrinter:
             if self._is_order_table_field(field_name) and self.print_order_change_table("    ", field_name, field_changes):
                 index += 1
                 continue
+            if self._is_execution_price_table_field(field_name) and self.print_execution_price_change_table("    ", field_name, field_changes):
+                index += 1
+                continue
             if self.print_delta_mapping_change_table("    ", field_name, field_changes):
                 index += 1
                 continue
@@ -271,6 +279,9 @@ class StepAuditSectionPrinter:
 
     def _is_order_table_field(self, field_name: str) -> bool:
         return self.field_display_value_kind(field_name) == "order_table"
+
+    def _is_execution_price_table_field(self, field_name: str) -> bool:
+        return self.field_display_value_kind(field_name) == "execution_price_table"
 
     def _print_value_buckets(
         self,

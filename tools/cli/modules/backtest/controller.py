@@ -19,6 +19,7 @@ from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.backtest.audit_formatters import delta_tables as delta_table_formatter
 from tools.cli.modules.backtest.audit_formatters import display_values as display_value_formatter
 from tools.cli.modules.backtest.audit_formatters import events as events_formatter
+from tools.cli.modules.backtest.audit_formatters import execution_prices as execution_price_formatter
 from tools.cli.modules.backtest.audit_formatters import field_metadata as field_metadata_formatter
 from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatter
 from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
@@ -830,6 +831,45 @@ def _print_order_change_table(prefix: str, field_name: str, changes: list[dict[s
     for line in text.splitlines():
         click.echo(f"{prefix}  {line}", color=True)
     return True
+
+
+def _print_execution_price_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
+    result = execution_price_formatter.value_table(
+        field_name,
+        values,
+        display_field_value=_display_field_value,
+        normalize=_audit_normalized_value,
+        scalar_cell=_audit_scalar_cell,
+    )
+    if result is None:
+        return False
+    headers, rows = result
+    return _print_audit_table(
+        headers,
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=[f"{prefix}{_audit_combined_single_field_label(field_name)}"],
+    )
+
+
+def _print_execution_price_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    result = execution_price_formatter.change_table(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        normalize=_audit_normalized_value,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+    )
+    if result is None:
+        return False
+    headers, rows = result
+    return _print_audit_table(
+        headers,
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=[f"{prefix}{_audit_combined_single_field_label(field_name)}"],
+    )
 
 
 def _dedupe_audit_list(values: list[Any]) -> list[Any]:
@@ -1746,6 +1786,8 @@ def _audit_section_printer() -> audit_sections.StepAuditSectionPrinter:
         print_delta_mapping_change_table=_print_delta_mapping_change_table,
         print_order_value_table=_print_order_value_table,
         print_order_change_table=_print_order_change_table,
+        print_execution_price_value_table=_print_execution_price_value_table,
+        print_execution_price_change_table=_print_execution_price_change_table,
         scalar_value_record_group=_scalar_value_record_group,
         scalar_value_group_key=_scalar_value_group_key,
         scalar_change_record_group=_scalar_change_record_group,
@@ -1789,6 +1831,7 @@ def _scalar_value_record_group(record: dict[str, Any]) -> tuple[tuple[Any, ...] 
         "market_snapshot",
         "delta_table",
         "order_table",
+        "execution_price_table",
     }:
         return None, None, None
     return audit_printer_helpers.scalar_record_group([
@@ -1814,6 +1857,7 @@ def _scalar_change_record_group(
         "market_snapshot",
         "delta_table",
         "order_table",
+        "execution_price_table",
     }:
         return None, None, None
     return audit_printer_helpers.scalar_record_group([

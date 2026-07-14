@@ -72,6 +72,7 @@ def test_step_audit_field_metadata_loads_display_value_kind_from_field_definitio
     assert metadata.display_value_kind("OrderConstructModule.sized_deltas") == "delta_table"
     assert metadata.display_value_kind("OrderConstructModule.deltas") == "delta_table"
     assert metadata.display_value_kind("OrderConstructModule.orders") == "order_table"
+    assert metadata.display_value_kind("OrderExecutionModule.execution_prices") == "execution_price_table"
     assert metadata.display_value_kind("CashPoolModule.cash") == "cash"
     assert metadata.display_value_kind("MarketDataModule.required_data_source") == "auto_when_empty"
 
@@ -2063,6 +2064,49 @@ def test_step_audit_order_change_highlights_added_rows_and_changed_cells(capsys,
     assert "GFEX|F|SI|2605" in plain
     assert re.search(r"\x1b\[[0-9;]*m新增", out)
     assert re.search(r"\x1b\[[0-9;]*m421 -> 400", out)
+
+
+def test_step_audit_combines_execution_prices_without_context_duplicates(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((120, 20)))
+
+    _print_audit_changes("声明输出的变化", [
+        {
+            "field": "OrderExecutionModule.execution_prices",
+            "scope": "context",
+            "before": None,
+            "after": {
+                "A1": {"CZCE|F|CJ|2605": 8920, "GFEX|F|SI|2605": 8775},
+                "A2": {"CZCE|F|SM|2603": 5924},
+            },
+        },
+        {
+            "field": "OrderExecutionModule.execution_prices",
+            "scope": "strategy_context",
+            "strategy": "A1",
+            "before": None,
+            "after": {"CZCE|F|CJ|2605": 8920, "GFEX|F|SI|2605": 8775},
+        },
+        {
+            "field": "OrderExecutionModule.execution_prices",
+            "scope": "strategy_context",
+            "strategy": "A2",
+            "before": None,
+            "after": {"CZCE|F|SM|2603": 5924},
+        },
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "execution_prices [OrderExecutionModule.execution_prices]" in plain
+    assert "strategy" in plain
+    assert "product" in plain
+    assert "execution_price" in plain
+    assert "A1" in plain
+    assert "A2" in plain
+    assert "CZCE|F|CJ|2605" in plain
+    assert "null -> 8920" in plain
+    assert plain.count("CZCE|F|CJ|2605") == 1
+    assert "[共享]" not in plain
+    assert "明细" not in plain
 
 
 def test_step_audit_renders_trading_day_resolver_summary() -> None:

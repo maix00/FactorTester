@@ -48,7 +48,7 @@ class OrderExecutionModule(ExecutableModule):
             ),
             chip_template="撮合: {value}", tab_label="订单执行", tab_order=120,
         ),
-        "execution_prices": FieldDefinition(public=False),
+        "execution_prices": FieldDefinition(public=False, display_value_kind="execution_price_table"),
     }
 
     resolve_execution_price: ClassVar[Flow] = Flow(
