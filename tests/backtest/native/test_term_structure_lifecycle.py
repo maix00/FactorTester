@@ -843,6 +843,46 @@ def test_term_structure_force_close_offset_accepts_intraday_window():
     assert captured[0].timestamp == pd.Timestamp("2026-01-31 14:55", tz="Asia/Shanghai")
 
 
+def test_date_only_lifecycle_anchor_uses_trading_day_last_event_time():
+    strategy = Strategy(alias="A")
+    row = {
+        "uid": "P2601.DCE",
+        "contract": "P2601",
+        "product": "P.DCE",
+        "contract_object": _Contract("P2601.DCE"),
+        "contract_product": "P2601.DCE",
+        "last_trade_date": "2026-01-31",
+    }
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.timezone: "Asia/Shanghai",
+                RunWindowModule.time_precision: "exact",
+            },
+        ),
+    })
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {_Contract("P2601.DCE"): [10.0, 11.0]},
+        index=pd.DatetimeIndex([
+            pd.Timestamp("2026-01-31 09:01", tz="Asia/Shanghai"),
+            pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
+        ]),
+    )
+
+    ts = term_structure._event_timestamp_from_row(
+        row,
+        offset=pd.Timedelta(0),
+        state=account,
+        reference_tz="Asia/Shanghai",
+        peer_rows=[row],
+        engine_mode="auto",
+        lifecycle_anchor="force_close",
+    )
+
+    assert ts == pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai")
+
+
 def test_force_close_event_emits_reverse_order_for_existing_position():
     strategy = Strategy(alias="A")
     contract = _Contract("P2601.DCE")
@@ -876,6 +916,45 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
     assert order.quantity == -3
     assert order.get("reason") == "term_structure_force_close"
     assert order.get("price_timestamp") == ts
+
+
+def test_force_close_notice_dedupes_same_held_contract_in_one_batch():
+    strategy = Strategy(alias="A")
+    contract = _Contract("P2601.DCE")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy),
+    })
+    ledger = account.ledger_for_strategy(strategy)
+    ledger.set(LedgerModule.positions, {contract: ProductPosition(quantity=-3)})
+    queue = EventQueue()
+    order_events: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.ORDER, lambda batch: order_events.extend(batch))
+    ts = pd.Timestamp("2026-01-29 15:00")
+    payload = {
+        "kind": "force_close",
+        "notice_type": "force_close",
+        "contract_object": contract,
+        "uid": "P2601.DCE",
+    }
+    drafts = [
+        EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload={**payload, "source_row": 1}),
+        EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload={**payload, "source_row": 2}),
+    ]
+    ctx = FlowContext(
+        timestamp=ts,
+        event_queue=queue,
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={strategy: drafts},
+    )
+
+    _handle_delivery_force_close_notice(account, ctx)
+    queue.run_until_drained()
+
+    assert len(order_events) == 1
+    order = order_events[0].payload
+    assert order.instrument == contract
+    assert order.quantity == 3
+    assert order.get("reason") == "term_structure_force_close"
 
 
 def test_force_close_order_dispatch_fills_and_clears_position_before_settlement():

@@ -408,6 +408,7 @@ def _handle_rollover_notice(state, ctx) -> None:
         ledger = state.ledger_for_strategy(strategy)
         positions = ledger.get(_POSITIONS_REF, {})
         orders: list[Order] = []
+        closed_contracts: set[Any] = set()
         for raw_payload in ctx.payloads_for(strategy, kind="rollover"):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             if str(payload.get("notice_type") or "") != "rollover":
@@ -420,9 +421,13 @@ def _handle_rollover_notice(state, ctx) -> None:
             held_contract, entry = _held_position_item_for_notice(positions, old_contract, payload)
             if held_contract is None:
                 continue
+            held_key = _position_contract_key(held_contract, payload)
+            if held_key in closed_contracts:
+                continue
             quantity = getattr(entry, "quantity", 0) if entry is not None else 0
             if not quantity:
                 continue
+            closed_contracts.add(held_key)
             close_order = Order(
                 instrument=held_contract,
                 timestamp=ctx.timestamp,
@@ -464,6 +469,7 @@ def _handle_delivery_force_close_notice(state, ctx) -> None:
         ledger = state.ledger_for_strategy(strategy)
         positions = ledger.get(_POSITIONS_REF, {})
         orders: list[Order] = []
+        closed_contracts: set[Any] = set()
         for raw_payload in ctx.payloads_for(strategy, kind="force_close"):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             notice_type = str(payload.get("notice_type") or "")
@@ -476,9 +482,14 @@ def _handle_delivery_force_close_notice(state, ctx) -> None:
             held_contract, entry = _held_position_item_for_notice(positions, contract, payload)
             if held_contract is None:
                 continue
+            held_key = _position_contract_key(held_contract, payload)
+            if held_key in closed_contracts:
+                _record_term_structure_notice(state, payload)
+                continue
             quantity = getattr(entry, "quantity", 0) if entry is not None else 0
             if not quantity:
                 continue
+            closed_contracts.add(held_key)
             order = Order(
                 instrument=held_contract,
                 timestamp=ctx.timestamp,
@@ -537,6 +548,13 @@ def _held_position_item_for_notice(
         if wanted & _contract_identity_keys(held_contract):
             return held_contract, entry
     return None, None
+
+
+def _position_contract_key(contract: Any, payload: dict[str, Any] | None = None) -> tuple[str, ...]:
+    keys = _contract_identity_keys(contract, payload)
+    if keys:
+        return tuple(sorted(keys))
+    return (str(getattr(contract, "name", contract)),)
 
 
 def _contracts_match(left: Any, right: Any, payload: dict[str, Any] | None = None) -> bool:
@@ -1105,7 +1123,7 @@ def _lifecycle_base_timestamp(
         ts = pd.Timestamp(cast(Any, value))
         if pd.isna(ts):
             continue
-        return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
+        return _lifecycle_date_anchor_timestamp(cast(pd.Timestamp, ts), state=state, reference_tz=reference_tz)
     # Row fields → AKShare cache → OpenCTP → live AKShare lookup all ran already
     # in _with_authoritative_lifecycle_fields; reaching here means none of them
     # had this contract. LocalCNFutures coverage inference is the last resort —
@@ -1196,6 +1214,50 @@ def _with_reference_timezone(ts: pd.Timestamp, reference_tz: str | None) -> pd.T
             return cast(pd.Timestamp, ts.tz_localize(reference_tz))
         return cast(pd.Timestamp, ts.tz_convert(reference_tz))
     return ts
+
+
+def _lifecycle_date_anchor_timestamp(
+    ts: pd.Timestamp,
+    *,
+    state: Any | None,
+    reference_tz: str | None,
+) -> pd.Timestamp:
+    """Map a lifecycle date to that trading day's last market event.
+
+    Exchange lifecycle sources often expose only ``last_trade_date`` or
+    ``delivery_date``.  Treating such a date as midnight registers lifecycle
+    orders at a non-trading timestamp and can leave positions open into the
+    next trading day.  When the run already loaded market data, use the
+    DataIndex trading-day helper to anchor the date to the last observed event
+    in that trading-day group.
+    """
+    day = _date_key(ts, reference_tz)
+    for table in (_current_prices_table_for(state), _raw_prices_table_for(state)):
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        try:
+            last_events = DataIndex.trading_day_last_event_times_from_index(table.index)
+        except Exception:
+            continue
+        if last_events.empty:
+            continue
+        index_days = pd.DatetimeIndex(last_events.index)
+        if index_days.tz is not None:
+            index_days = cast(pd.DatetimeIndex, index_days.tz_localize(None))
+        index_days = index_days.normalize()
+        matches = index_days == day
+        if not bool(matches.any()):
+            continue
+        return cast(pd.Timestamp, pd.Timestamp(last_events.iloc[int(matches.nonzero()[0][-1])]))
+    return _with_reference_timezone(ts, reference_tz)
+
+
+def _date_key(ts: pd.Timestamp, reference_tz: str | None) -> pd.Timestamp:
+    if ts.tzinfo is not None:
+        if reference_tz:
+            ts = cast(pd.Timestamp, ts.tz_convert(reference_tz))
+        ts = cast(pd.Timestamp, ts.tz_localize(None))
+    return cast(pd.Timestamp, ts.normalize())
 
 
 def _apply_lifecycle_offset(
