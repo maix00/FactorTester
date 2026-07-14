@@ -63,6 +63,14 @@ class StepAuditSectionPrinter:
         empty_message: str = "（无字段）",
     ) -> None:
         self.print_step_section(title)
+        self.print_field_records(records, empty_message=empty_message)
+
+    def print_field_records(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        empty_message: str = "（无字段）",
+    ) -> None:
         if not records:
             click.echo(f"  {empty_message}")
             return

@@ -12,6 +12,13 @@ AuditText = Callable[[Any], str]
 TableCellIsComplex = Callable[[Any], bool]
 SelectSamplePart = Callable[[dict[str, Any], Any], Any]
 DedupeValues = Callable[[list[Any]], list[Any]]
+ScalarCell = Callable[[Any], str]
+ChangeCell = Callable[[Any, Any], str]
+HighlightCell = Callable[[str], str]
+
+EVENT_DRAFT_TIMESTAMP_SAMPLE_LIMIT = 10
+EVENT_DRAFT_TIMESTAMP_SAMPLE_HEAD = 5
+EVENT_DRAFT_TIMESTAMP_SAMPLE_TAIL = 5
 
 
 def lifecycle_notice_change_diff(
@@ -139,6 +146,8 @@ def event_draft_table_text(
     table_lines: TableLines,
     table_cell_is_complex: TableCellIsComplex,
     notice_scalar: Callable[[Any], str],
+    highlight_cell: HighlightCell | None = None,
+    highlight_rows: bool = False,
 ) -> str | None:
     if isinstance(value, dict):
         return None
@@ -151,6 +160,51 @@ def event_draft_table_text(
         table_lines=table_lines,
         table_cell_is_complex=table_cell_is_complex,
         notice_scalar=notice_scalar,
+        highlight_cell=highlight_cell,
+        highlight_rows=highlight_rows,
+    ))
+
+
+def event_draft_diff_table_text(
+    before: Any,
+    after: Any,
+    *,
+    table_lines: TableLines,
+    table_cell_is_complex: TableCellIsComplex,
+    notice_scalar: Callable[[Any], str],
+    scalar_cell: ScalarCell,
+    change_cell: ChangeCell,
+    highlight_cell: HighlightCell,
+) -> str | None:
+    before_list = [] if before is None else before
+    after_list = [] if after is None else after
+    if not isinstance(before_list, list) or not isinstance(after_list, list):
+        return None
+    if before_list and not is_event_draft_list(before_list):
+        return None
+    if after_list and not is_event_draft_list(after_list):
+        return None
+    if not before_list and not after_list:
+        return "（无事件变化）"
+    order_lines = order_event_draft_diff_table_lines(
+        before_list,
+        after_list,
+        table_lines=table_lines,
+        scalar_cell=scalar_cell,
+        change_cell=change_cell,
+        highlight_cell=highlight_cell,
+    )
+    if order_lines is not None:
+        return "\n".join(order_lines)
+    return "\n".join(generic_event_draft_diff_table_lines(
+        before_list,
+        after_list,
+        table_lines=table_lines,
+        table_cell_is_complex=table_cell_is_complex,
+        notice_scalar=notice_scalar,
+        scalar_cell=scalar_cell,
+        change_cell=change_cell,
+        highlight_cell=highlight_cell,
     ))
 
 
@@ -202,25 +256,36 @@ def event_draft_table_lines(
     table_cell_is_complex: TableCellIsComplex,
     notice_scalar: Callable[[Any], str],
     indent: str = "",
+    highlight_cell: HighlightCell | None = None,
+    highlight_rows: bool = False,
 ) -> list[str]:
+    value, sample_note = sample_event_drafts_by_timestamp(value)
     lifecycle_notice_lines = lifecycle_notice_table_lines(
         value,
         table_lines=table_lines,
         table_cell_is_complex=table_cell_is_complex,
         notice_scalar=notice_scalar,
         indent=indent,
+        highlight_cell=highlight_cell,
+        highlight_rows=highlight_rows,
     )
     if lifecycle_notice_lines is not None:
-        return lifecycle_notice_lines
-    order_lines = order_event_draft_table_lines(value, table_lines=table_lines, indent=indent)
+        return [*sample_note, *lifecycle_notice_lines]
+    order_lines = order_event_draft_table_lines(
+        value,
+        table_lines=table_lines,
+        indent=indent,
+        highlight_cell=highlight_cell,
+        highlight_rows=highlight_rows,
+    )
     if order_lines is not None:
-        return order_lines
+        return [*sample_note, *order_lines]
     rows = []
     for item in value:
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
         details = event_payload_details(payload)
         route = item.get("strategy") or item.get("ledger") or ""
-        rows.append((
+        row = (
             item.get("timestamp") or "",
             item.get("kind") or payload.get("kind") or "",
             route,
@@ -228,12 +293,16 @@ def event_draft_table_lines(
             payload.get("notice_type") or payload.get("kind") or "",
             payload.get("notice_reason") or payload.get("reason") or "",
             details if details else "",
-        ))
-    return table_lines(
-        ("timestamp", "event", "route", "subject", "action", "reason", "details"),
-        rows,
-        indent=indent,
-    )
+        )
+        rows.append(highlight_row(row, highlight_cell=highlight_cell) if highlight_rows else row)
+    return [
+        *sample_note,
+        *table_lines(
+            ("timestamp", "event", "route", "subject", "action", "reason", "details"),
+            rows,
+            indent=indent,
+        ),
+    ]
 
 
 def order_event_draft_table_lines(
@@ -241,6 +310,8 @@ def order_event_draft_table_lines(
     *,
     table_lines: TableLines,
     indent: str = "",
+    highlight_cell: HighlightCell | None = None,
+    highlight_rows: bool = False,
 ) -> list[str] | None:
     rows = []
     for item in value:
@@ -249,7 +320,7 @@ def order_event_draft_table_lines(
             return None
         if not looks_like_order_payload(payload):
             return None
-        rows.append((
+        row = (
             "新增",
             item.get("timestamp") or payload.get("timestamp") or "",
             item.get("kind") or payload.get("kind") or "",
@@ -261,7 +332,8 @@ def order_event_draft_table_lines(
             payload.get("status") or "",
             payload.get("reject_reason") or "",
             payload.get("price_timestamp") or "",
-        ))
+        )
+        rows.append(highlight_row(row, highlight_cell=highlight_cell) if highlight_rows else row)
     if not rows:
         return None
     return [
@@ -293,6 +365,221 @@ def looks_like_order_payload(value: Mapping[str, Any]) -> bool:
     return required <= set(value)
 
 
+def order_event_draft_diff_table_lines(
+    before: Sequence[Mapping[str, Any]],
+    after: Sequence[Mapping[str, Any]],
+    *,
+    table_lines: TableLines,
+    scalar_cell: ScalarCell,
+    change_cell: ChangeCell,
+    highlight_cell: HighlightCell,
+) -> list[str] | None:
+    if before and order_event_draft_table_lines(before, table_lines=table_lines) is None:
+        return None
+    if after and order_event_draft_table_lines(after, table_lines=table_lines) is None:
+        return None
+    before_by_key = {event_draft_key(item, index): item for index, item in enumerate(before)}
+    after_by_key = {event_draft_key(item, index): item for index, item in enumerate(after)}
+    keys = [key for key in after_by_key]
+    keys.extend(key for key in before_by_key if key not in after_by_key)
+    rows: list[tuple[Any, ...]] = []
+    for key in keys:
+        before_item = before_by_key.get(key)
+        after_item = after_by_key.get(key)
+        operation = "新增" if before_item is None else "删除" if after_item is None else "修改"
+        row = order_event_draft_diff_row(
+            before_item,
+            after_item,
+            operation=operation,
+            scalar_cell=scalar_cell,
+            change_cell=change_cell,
+            highlight_cell=highlight_cell,
+        )
+        if row is not None:
+            rows.append(row)
+    if not rows:
+        return ["（无事件变化）"]
+    total_rows = len(rows)
+    rows, sample_note = sample_rows_by_event_time(rows, time_index=1)
+    return [
+        *sample_note,
+        f"订单事件变化表 rows={total_rows}（字段变化以黄色 before -> after 标识）",
+        *table_lines(
+            (
+                "op",
+                "event_time",
+                "event_kind",
+                "strategy",
+                "order_id",
+                "instrument",
+                "intent_quantity",
+                "quantity",
+                "status",
+                "reject_reason",
+                "price_timestamp",
+            ),
+            rows,
+            allow_transpose=False,
+            allow_split=False,
+        ),
+    ]
+
+
+def order_event_draft_diff_row(
+    before_item: Mapping[str, Any] | None,
+    after_item: Mapping[str, Any] | None,
+    *,
+    operation: str,
+    scalar_cell: ScalarCell,
+    change_cell: ChangeCell,
+    highlight_cell: HighlightCell,
+) -> tuple[Any, ...] | None:
+    display_item = after_item or before_item
+    if display_item is None:
+        return None
+    before_payload = before_item.get("payload") if isinstance(before_item, Mapping) and isinstance(before_item.get("payload"), Mapping) else {}
+    after_payload = after_item.get("payload") if isinstance(after_item, Mapping) and isinstance(after_item.get("payload"), Mapping) else {}
+    display_payload = display_item.get("payload") if isinstance(display_item.get("payload"), Mapping) else {}
+    columns = (
+        lambda item, payload: item.get("timestamp") or payload.get("timestamp") or "",
+        lambda item, payload: item.get("kind") or payload.get("kind") or "",
+        lambda item, payload: item.get("strategy") or payload.get("strategy") or "",
+        lambda item, payload: payload.get("order_id") or "",
+        lambda item, payload: payload.get("instrument") or "",
+        lambda item, payload: payload.get("intent_quantity"),
+        lambda item, payload: payload.get("quantity"),
+        lambda item, payload: payload.get("status") or "",
+        lambda item, payload: payload.get("reject_reason") or "",
+        lambda item, payload: payload.get("price_timestamp") or "",
+    )
+    row: list[Any] = [operation]
+    for getter in columns:
+        before_value = getter(before_item, before_payload) if before_item is not None else None
+        after_value = getter(after_item, after_payload) if after_item is not None else None
+        display_value = getter(display_item, display_payload)
+        if operation == "新增":
+            row.append(highlight_cell(scalar_cell(after_value)))
+        elif operation == "删除":
+            row.append(highlight_cell(scalar_cell(before_value)))
+        elif before_value != after_value:
+            row.append(change_cell(scalar_cell(before_value), scalar_cell(after_value)))
+        else:
+            row.append(scalar_cell(display_value))
+    if operation in {"新增", "删除"}:
+        row[0] = highlight_cell(operation)
+    return tuple(row)
+
+
+def generic_event_draft_diff_table_lines(
+    before: Sequence[Mapping[str, Any]],
+    after: Sequence[Mapping[str, Any]],
+    *,
+    table_lines: TableLines,
+    table_cell_is_complex: TableCellIsComplex,
+    notice_scalar: Callable[[Any], str],
+    scalar_cell: ScalarCell,
+    change_cell: ChangeCell,
+    highlight_cell: HighlightCell,
+) -> list[str]:
+    before_by_key = {event_draft_key(item, index): item for index, item in enumerate(before)}
+    after_by_key = {event_draft_key(item, index): item for index, item in enumerate(after)}
+    keys = [key for key in after_by_key]
+    keys.extend(key for key in before_by_key if key not in after_by_key)
+    rows: list[tuple[Any, ...]] = []
+    for key in keys:
+        before_item = before_by_key.get(key)
+        after_item = after_by_key.get(key)
+        operation = "新增" if before_item is None else "删除" if after_item is None else "修改"
+        before_row = generic_event_draft_row(before_item, table_cell_is_complex=table_cell_is_complex, notice_scalar=notice_scalar)
+        after_row = generic_event_draft_row(after_item, table_cell_is_complex=table_cell_is_complex, notice_scalar=notice_scalar)
+        display_row = after_row or before_row
+        if display_row is None:
+            continue
+        if operation in {"新增", "删除"}:
+            rows.append(tuple([highlight_cell(operation), *[highlight_cell(scalar_cell(cell)) for cell in display_row]]))
+            continue
+        row = [operation]
+        for before_cell, after_cell in zip(before_row or (), after_row or (), strict=False):
+            before_text = scalar_cell(before_cell)
+            after_text = scalar_cell(after_cell)
+            row.append(change_cell(before_text, after_text) if before_text != after_text else after_text)
+        rows.append(tuple(row))
+    total_rows = len(rows)
+    rows, sample_note = sample_rows_by_event_time(rows, time_index=1)
+    return [
+        *sample_note,
+        f"事件变化表 rows={total_rows}（字段变化以黄色 before -> after 标识）",
+        *table_lines(("op", "timestamp", "event", "route", "subject", "action", "reason", "details"), rows, allow_transpose=False),
+    ]
+
+
+def generic_event_draft_row(
+    item: Mapping[str, Any] | None,
+    *,
+    table_cell_is_complex: TableCellIsComplex,
+    notice_scalar: Callable[[Any], str],
+) -> tuple[Any, ...] | None:
+    if item is None:
+        return None
+    payload = item.get("payload") if isinstance(item.get("payload"), Mapping) else {}
+    details = event_payload_details(payload)
+    route = item.get("strategy") or item.get("ledger") or ""
+    return (
+        item.get("timestamp") or "",
+        item.get("kind") or payload.get("kind") or "",
+        route,
+        payload.get("product") or payload.get("ledger_id") or payload.get("trading_day") or "",
+        payload.get("notice_type") or payload.get("kind") or "",
+        payload.get("notice_reason") or payload.get("reason") or "",
+        details if details and not table_cell_is_complex(details) else notice_scalar(details) if details else "",
+    )
+
+
+def event_draft_key(item: Mapping[str, Any], fallback_index: int) -> str:
+    payload = item.get("payload") if isinstance(item.get("payload"), Mapping) else {}
+    order_id = payload.get("order_id")
+    if order_id not in (None, ""):
+        return f"order:{order_id}"
+    index_key = item.get("index_key")
+    if index_key not in (None, ""):
+        return f"index:{index_key}"
+    return "|".join(str(part) for part in (
+        item.get("timestamp") or "",
+        item.get("kind") or "",
+        item.get("strategy") or "",
+        item.get("ledger") or "",
+        payload.get("kind") or payload.get("notice_type") or "",
+        payload.get("product") or payload.get("ledger_id") or payload.get("trading_day") or "",
+        fallback_index,
+    ))
+
+
+def highlight_row(row: Sequence[Any], *, highlight_cell: HighlightCell | None) -> tuple[Any, ...]:
+    if highlight_cell is None:
+        return tuple(row)
+    return tuple(highlight_cell(str(cell)) for cell in row)
+
+
+def sample_event_drafts_by_timestamp(value: Sequence[Mapping[str, Any]]) -> tuple[list[Mapping[str, Any]], list[str]]:
+    timestamps = list(dict.fromkeys(str(item.get("timestamp") or "") for item in value))
+    if len(timestamps) <= EVENT_DRAFT_TIMESTAMP_SAMPLE_LIMIT:
+        return list(value), []
+    keep = set(timestamps[:EVENT_DRAFT_TIMESTAMP_SAMPLE_HEAD] + timestamps[-EVENT_DRAFT_TIMESTAMP_SAMPLE_TAIL:])
+    sampled = [item for item in value if str(item.get("timestamp") or "") in keep]
+    note = f"事件时间戳 sample: {len(keep)}/{len(timestamps)}；保留前 {EVENT_DRAFT_TIMESTAMP_SAMPLE_HEAD} 个和后 {EVENT_DRAFT_TIMESTAMP_SAMPLE_TAIL} 个时间戳"
+    return sampled, [note]
+
+
+def sample_rows_by_event_time(rows: list[tuple[Any, ...]], *, time_index: int) -> tuple[list[tuple[Any, ...]], list[str]]:
+    timestamps = list(dict.fromkeys(str(row[time_index]) for row in rows))
+    if len(timestamps) <= EVENT_DRAFT_TIMESTAMP_SAMPLE_LIMIT:
+        return rows, []
+    keep = set(timestamps[:EVENT_DRAFT_TIMESTAMP_SAMPLE_HEAD] + timestamps[-EVENT_DRAFT_TIMESTAMP_SAMPLE_TAIL:])
+    sampled = [row for row in rows if str(row[time_index]) in keep]
+    note = f"事件时间戳 sample: {len(keep)}/{len(timestamps)}；保留前 {EVENT_DRAFT_TIMESTAMP_SAMPLE_HEAD} 个和后 {EVENT_DRAFT_TIMESTAMP_SAMPLE_TAIL} 个时间戳"
+    return sampled, [note]
+
+
 def lifecycle_notice_table_lines(
     value: Sequence[Mapping[str, Any]],
     *,
@@ -300,6 +587,8 @@ def lifecycle_notice_table_lines(
     table_cell_is_complex: TableCellIsComplex,
     notice_scalar: Callable[[Any], str],
     indent: str = "",
+    highlight_cell: HighlightCell | None = None,
+    highlight_rows: bool = False,
 ) -> list[str] | None:
     extra_columns: list[str] = []
     preferred_extra_columns = [
@@ -360,7 +649,8 @@ def lifecycle_notice_table_lines(
     rows = []
     for row_key, grouped in grouped_rows.items():
         strategies = ", ".join(sorted(dict.fromkeys(grouped.get("strategies") or [])))
-        rows.append(tuple([row_key[0], strategies, *row_key[1:]]))
+        row = tuple([row_key[0], strategies, *row_key[1:]])
+        rows.append(highlight_row(row, highlight_cell=highlight_cell) if highlight_rows else row)
     if not rows:
         return None
     return table_lines(

@@ -2171,9 +2171,10 @@ def test_step_audit_dispatched_order_events_render_as_event_add_table(capsys, mo
         ],
     }])
 
-    plain = _strip_ansi(capsys.readouterr().out)
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
     assert "dispatched_order_events [GroupMembershipModule.dispatched_order_events]" in plain
-    assert "事件新增表 rows=1" in plain
+    assert "订单事件变化表 rows=1" in plain
     assert "op" in plain
     assert "新增" in plain
     assert "event_time" in plain
@@ -2184,6 +2185,7 @@ def test_step_audit_dispatched_order_events_render_as_event_add_table(capsys, mo
     assert "A1-1" in plain
     assert "[共享]" not in plain
     assert "明细" not in plain
+    assert re.search(r"\x1b\[[0-9;]*m新增", out)
 
 
 def test_step_audit_renders_trading_day_resolver_summary() -> None:
@@ -3108,6 +3110,56 @@ def test_step_navigation_rejects_unknown_or_invalid_commands() -> None:
     assert step_display_formatter.set_step_navigation(navigator, "") is None
 
 
+def test_step_navigation_event_command_prints_queue_head_without_continuing(capsys, monkeypatch) -> None:
+    posted: list[tuple[str, dict[str, object]]] = []
+
+    class _Session:
+        def post(self, path: str, payload: dict[str, object]) -> None:
+            posted.append((path, payload))
+
+    commands = iter(["event 1", ""])
+    monkeypatch.setattr("builtins.input", lambda _: next(commands))
+    client = SimpleNamespace(session=_Session())
+
+    _handle_step_event(
+        {
+            "phase": "step",
+            "flow_phase": "per_event",
+            "flow_id": "dispatch_orders",
+            "flow_name": "派发订单事件",
+            "timestamp": "2026-01-05 09:01:00+08:00",
+            "current_event": {"event_kind": "SIGNAL", "batch_count": 1, "subjects": []},
+            "strategies": [],
+            "inputs": [],
+            "outputs": [],
+            "output_changes": [],
+            "ledger_changes": [],
+            "event_queue": {
+                "pending_count": 1,
+                "items": [{
+                    "index": 1,
+                    "timestamp": "2026-01-05 09:01:00.000001+08:00",
+                    "event_kind": "ORDER",
+                    "strategy": "A1",
+                    "subject": "CZCE|F|SM|2603",
+                    "action": "scheduled",
+                    "order_id": "A1-1",
+                    "payload": {"order_id": "A1-1"},
+                }],
+            },
+        },
+        client,
+        "run-token",
+        step_display_formatter.StepNavigator(),
+    )
+
+    out = capsys.readouterr().out
+    assert "event <序号>" in out
+    assert '"event_kind": "ORDER"' in out
+    assert '"order_id": "A1-1"' in out
+    assert posted == [("/step_continue", {"run_token": "run-token", "action": "continue"})]
+
+
 def test_step_contract_audit_reports_pass_and_read_write_violations(capsys) -> None:
     _print_contract_audit([])
     out = capsys.readouterr().out
@@ -3153,6 +3205,21 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
             "description": "",
             "strategies": [],
             "ledgers_before": [],
+            "event_payloads": [{
+                "scope": "strategy",
+                "strategy": "A1",
+                "payloads": [{
+                    "kind": "order",
+                    "instrument": "CZCE|F|SM|2603",
+                    "intent_quantity": 438,
+                    "order_id": "A1-1",
+                    "quantity": 438,
+                    "reject_reason": None,
+                    "status": "scheduled",
+                    "strategy": "A1",
+                    "timestamp": "2026-01-05 09:02:00+08:00",
+                }],
+            }],
             "inputs": [],
             "outputs": [],
             "output_changes": [],
@@ -3173,6 +3240,10 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
     assert "timestamp      = 2026-01-05 09:02:00+08:00" in out
     assert "event_kind     = ORDER" in out
     assert "batch_count    = 1" in out
+    assert "━━ 输入字段 ━━" in out
+    assert "事件输入（当前批次，非完整事件队列）" in out
+    assert "本批事件草稿载荷（执行前" not in out
+    assert "CZCE|F|SM|2603" in out
     assert "event_subjects = A1:CZCE|F|SM|2603/scheduled" in out
     assert "\x1b[0m" in out
     assert posted == [("/step_continue", {"run_token": "run-token", "action": "continue"})]

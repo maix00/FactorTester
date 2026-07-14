@@ -783,6 +783,12 @@ class EventQueue:
     def pending_count_by_kind(self, kind: EventKind) -> int:
         return sum(1 for _, draft_kind, _, _ in self._heap if draft_kind is kind)
 
+    def snapshot_head(self, limit: int = 50) -> list[EventDraft]:
+        """Return the next pending events in dispatch order without mutating the heap."""
+        if limit <= 0:
+            return []
+        return [draft for _timestamp, _kind, _counter, draft in sorted(self._heap)[:limit]]
+
     def run_until_drained(self) -> None:
         """Progress reporting lives in `make_dispatcher` (Flow-level), not
         here -- a batch can fan out across many strategies x Flows, and
@@ -1116,6 +1122,43 @@ def _audit_current_event_batch(
     }
 
 
+def _audit_event_queue_head(state: "BacktestRunState", event_queue: EventQueue, *, limit: int = 50) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for index, draft in enumerate(event_queue.snapshot_head(limit), start=1):
+        payload = _audit_event_subject_payload(draft.payload)
+        rows.append({
+            "index": index,
+            "timestamp": str(draft.timestamp),
+            "event_kind": draft.kind.name,
+            "strategy": _strategy_alias(state, draft.strategy) if draft.strategy is not None else "",
+            "ledger": str(draft.ledger) if draft.ledger is not None else "",
+            "subject": _audit_value(
+                payload.get("instrument")
+                or payload.get("product")
+                or payload.get("contract_product")
+                or payload.get("contract")
+                or payload.get("ledger_id")
+                or draft.index_key
+                or ""
+            ),
+            "action": _audit_value(
+                payload.get("notice_type")
+                or payload.get("kind")
+                or payload.get("status")
+                or payload.get("reason")
+                or ""
+            ),
+            "order_id": _audit_value(payload.get("order_id") if isinstance(payload, dict) else ""),
+            "payload": _audit_value(payload),
+        })
+    return {
+        "pending_count": event_queue.pending_count(),
+        "head_count": len(rows),
+        "head_limit": limit,
+        "items": rows,
+    }
+
+
 def _audit_event_subject_row(
     state: "BacktestRunState",
     draft: EventDraft,
@@ -1375,6 +1418,7 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         "event_payloads": before.get("event_payloads", []),
         "event_payloads_after": event_payloads_after,
         "event_payload_changes": event_payload_changes,
+        "event_queue": _audit_event_queue_head(state, ctx._event_queue),
         "input_contract_violations": [
             *direct_contract_violations,
             *ledger_contract_violations,

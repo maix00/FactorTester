@@ -598,6 +598,19 @@ def _audit_event_draft_table_text(value: Any) -> str | None:
     )
 
 
+def _audit_event_draft_diff_table_text(before: Any, after: Any) -> str | None:
+    return events_formatter.event_draft_diff_table_text(
+        before,
+        after,
+        table_lines=_audit_table_lines,
+        table_cell_is_complex=_audit_table_cell_is_complex,
+        notice_scalar=_audit_notice_scalar,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+        highlight_cell=_audit_change_highlight_content,
+    )
+
+
 def _audit_event_draft_sample_table_text(value: dict[str, Any]) -> str | None:
     return events_formatter.event_draft_sample_table_text(
         value,
@@ -894,14 +907,22 @@ def _print_event_draft_value_table(prefix: str, field_name: str, values: list[di
 
 
 def _print_event_draft_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    drafts: list[Any] = []
+    before_drafts: list[Any] = []
+    after_drafts: list[Any] = []
     for change in changes:
+        before = _display_field_value(field_name, change.get("before"))
         after = _display_field_value(field_name, change.get("after"))
+        if isinstance(before, list):
+            before_drafts.extend(before)
+        elif before not in (None, ""):
+            before_drafts.append(before)
         if isinstance(after, list):
-            drafts.extend(after)
+            after_drafts.extend(after)
         elif after not in (None, ""):
-            drafts.append(after)
-    text = _audit_event_draft_table_text(drafts)
+            after_drafts.append(after)
+    text = _audit_event_draft_diff_table_text(before_drafts, after_drafts)
+    if text is None:
+        text = _audit_event_draft_table_text(after_drafts)
     if text is None:
         return False
     click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
@@ -1984,9 +2005,137 @@ def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
     payloads = step_display_formatter.non_empty_event_payloads(payloads)
     if not payloads:
         return
-    _print_step_section("本批事件草稿载荷（执行前，非完整事件队列）")
+    click.echo("  事件输入（当前批次，非完整事件队列）:")
+    table = _event_payload_input_table(payloads)
+    if table is not None:
+        headers, rows = table
+        _print_audit_table(headers, rows, indent="    ", allow_transpose=False)
+        return
     for payload in payloads:
-        _print_audit_value("  ", step_display_formatter.event_payload_label(payload), payload.get("payloads"))
+        _print_audit_value("    ", step_display_formatter.event_payload_label(payload), payload.get("payloads"))
+
+
+def _event_payload_input_table(payloads: list[dict[str, Any]]) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    rows: list[tuple[Any, ...]] = []
+    all_order_payloads = True
+    for entry in payloads:
+        for item in _event_payload_items(entry.get("payloads")):
+            if not _event_payload_looks_like_order(item):
+                all_order_payloads = False
+                break
+        if not all_order_payloads:
+            break
+    for entry in payloads:
+        for item in _event_payload_items(entry.get("payloads")):
+            if all_order_payloads:
+                rows.append(_order_event_payload_input_row(entry, item))
+            else:
+                rows.append(_generic_event_payload_input_row(entry, item))
+    if not rows:
+        return None
+    if all_order_payloads:
+        return _drop_empty_event_input_columns(
+            (
+                "scope",
+                "strategy",
+                "ledger",
+                "cash pool",
+                "event_time",
+                "event_kind",
+                "order_id",
+                "instrument",
+                "intent_quantity",
+                "quantity",
+                "status",
+                "reject_reason",
+            ),
+            rows,
+            optional_columns={"strategy", "ledger", "cash pool", "reject_reason"},
+        )
+    return _drop_empty_event_input_columns(
+        ("scope", "strategy", "ledger", "cash pool", "event", "subject", "action", "reason", "details"),
+        rows,
+        optional_columns={"strategy", "ledger", "cash pool", "reason", "details"},
+    )
+
+
+def _drop_empty_event_input_columns(
+    headers: tuple[str, ...],
+    rows: list[tuple[Any, ...]],
+    *,
+    optional_columns: set[str],
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]]:
+    keep_indexes = [
+        index
+        for index, header in enumerate(headers)
+        if header not in optional_columns
+        or any(str(row[index] if index < len(row) else "").strip() for row in rows)
+    ]
+    return (
+        tuple(headers[index] for index in keep_indexes),
+        [tuple(row[index] if index < len(row) else "" for index in keep_indexes) for row in rows],
+    )
+
+
+def _event_payload_items(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return [item for item in value if item not in (None, "")]
+    return [] if value in (None, "") else [value]
+
+
+def _event_payload_looks_like_order(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    required = {"instrument", "quantity", "intent_quantity", "status", "strategy", "timestamp", "order_id"}
+    return required <= set(value)
+
+
+def _order_event_payload_input_row(entry: dict[str, Any], payload: Any) -> tuple[Any, ...]:
+    item = payload if isinstance(payload, dict) else {}
+    return (
+        entry.get("scope") or "",
+        item.get("strategy") or entry.get("strategy") or "",
+        entry.get("ledger") or "",
+        entry.get("cash_pool") or "",
+        item.get("timestamp") or "",
+        item.get("kind") or "order",
+        item.get("order_id") or "",
+        item.get("instrument") or "",
+        _audit_scalar_cell(item.get("intent_quantity")),
+        _audit_scalar_cell(item.get("quantity")),
+        _audit_scalar_cell(item.get("status")),
+        _audit_scalar_cell(item.get("reject_reason")),
+    )
+
+
+def _generic_event_payload_input_row(entry: dict[str, Any], payload: Any) -> tuple[Any, ...]:
+    item = payload if isinstance(payload, dict) else {"value": payload}
+    subject = item.get("product") or item.get("ledger_id") or item.get("trading_day") or item.get("instrument") or ""
+    action = item.get("notice_type") or item.get("kind") or item.get("status") or item.get("reason") or ""
+    details = events_formatter.event_payload_details(item)
+    return (
+        entry.get("scope") or "",
+        entry.get("strategy") or "",
+        entry.get("ledger") or "",
+        entry.get("cash_pool") or "",
+        item.get("kind") or "",
+        _audit_scalar_cell(subject),
+        _audit_scalar_cell(action),
+        _audit_scalar_cell(item.get("notice_reason") or item.get("reason") or ""),
+        details if details else "",
+    )
+
+
+def _print_audit_inputs(
+    event_payloads: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    empty_message: str,
+) -> None:
+    _print_step_section("输入字段")
+    _print_event_payloads(event_payloads)
+    if event_payloads and records:
+        click.echo("  声明输入字段:")
+    _audit_section_printer().print_field_records(records, empty_message=empty_message)
 
 
 def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
@@ -2028,7 +2177,7 @@ def _step_event_renderer(short_alias_map: dict[str, str]) -> step_runtime.StepEv
         audit_context=lambda data: _audit_step_event_context(data, short_alias_map=short_alias_map),
         print_badge_box=_print_step_badge_box,
         print_strategy_context=_print_strategy_context,
-        print_event_payloads=_print_event_payloads,
+        print_audit_inputs=_print_audit_inputs,
         print_audit_fields=_print_audit_fields,
         print_audit_changes=_print_audit_changes,
         print_contract_audit=_print_contract_audit,
@@ -2055,6 +2204,7 @@ def _handle_step_event(
 
     _step_event_renderer(short_alias_map or {}).render(data)
     click.echo("")
+    step_display_formatter.set_event_queue_snapshot(navigator, data.get("event_queue"))
     step_runtime.prompt_step_navigation(navigator)
     step_runtime.continue_step(client, run_token, navigator)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -19,6 +19,8 @@ CashSummary = Callable[[Any], str]
 class StepNavigator:
     until: datetime | None = None
     to_end: bool = False
+    event_queue_items: list[dict[str, Any]] = field(default_factory=list)
+    event_queue_pending_count: int = 0
 
     def should_display(self, timestamp: Any) -> bool:
         if self.to_end:
@@ -62,7 +64,40 @@ def set_step_navigation(navigator: StepNavigator, command: str) -> str | None:
         navigator.until = target
         navigator.to_end = False
         return None
-    return "未知命令；使用 Enter、until <时刻> 或 end"
+    return "未知命令；使用 Enter、until <时刻>、end 或 event <序号>"
+
+
+def event_lookup_text(navigator: StepNavigator, command: str) -> str | None:
+    text = command.strip()
+    if not text.lower().startswith("event "):
+        return None
+    index_text = text[6:].strip()
+    try:
+        index = int(index_text)
+    except ValueError:
+        return "无法解析 event 序号；示例: event 1"
+    if index <= 0:
+        return "event 序号从 1 开始"
+    if index > len(navigator.event_queue_items):
+        pending = navigator.event_queue_pending_count
+        shown = len(navigator.event_queue_items)
+        return f"队列 head 只包含 {shown}/{pending} 个 pending event，找不到 event {index}"
+    import json
+
+    return json.dumps(navigator.event_queue_items[index - 1], ensure_ascii=False, indent=2, sort_keys=True, default=str)
+
+
+def set_event_queue_snapshot(navigator: StepNavigator, value: Any) -> None:
+    if not isinstance(value, dict):
+        navigator.event_queue_items = []
+        navigator.event_queue_pending_count = 0
+        return
+    items = value.get("items")
+    navigator.event_queue_items = list(items) if isinstance(items, list) else []
+    try:
+        navigator.event_queue_pending_count = int(value.get("pending_count") or len(navigator.event_queue_items))
+    except (TypeError, ValueError):
+        navigator.event_queue_pending_count = len(navigator.event_queue_items)
 
 
 def step_continue_payload(run_token: str, navigator: StepNavigator | None = None) -> dict[str, Any]:

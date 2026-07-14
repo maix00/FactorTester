@@ -11,7 +11,7 @@ import click
 from tools.cli.modules.backtest.audit_formatters import step_display
 
 
-PROMPT_TEXT = "命令: Enter=下一步 | until <时刻>=快进到时刻 | end=快进到底"
+PROMPT_TEXT = "命令: Enter=下一步 | until <时刻>=快进到时刻 | end=快进到底 | event <序号>=查看队列头部事件"
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ class StepEventRenderer:
     audit_context: Callable[[dict[str, Any]], Any]
     print_badge_box: Callable[[dict[str, Any], str, str, str, str], None]
     print_strategy_context: Callable[[list[dict[str, Any]], dict[str, str]], None]
-    print_event_payloads: Callable[[list[dict[str, Any]]], None]
+    print_audit_inputs: Callable[[list[dict[str, Any]], list[dict[str, Any]], str], None]
     print_audit_fields: Callable[..., None]
     print_audit_changes: Callable[..., None]
     print_contract_audit: Callable[[list[dict[str, Any]]], None]
@@ -42,11 +42,10 @@ class StepEventRenderer:
 
         with self.audit_context(data):
             self.print_strategy_context(list(data.get("strategies") or []), self.short_alias_map)
-            self.print_event_payloads(list(data.get("event_payloads") or []))
-            self.print_audit_fields(
-                "输入字段",
+            self.print_audit_inputs(
+                list(data.get("event_payloads") or []),
                 list(data.get("inputs") or []),
-                empty_message="（此 flow 未声明输入字段）",
+                "（此 flow 未声明输入字段）",
             )
             unchanged_outputs, output_changes, unchanged_message = step_display.output_audit_sections(
                 data,
@@ -80,7 +79,12 @@ def prompt_step_navigation(
         read_input = input
     while True:
         echo(PROMPT_TEXT)
-        error = step_display.set_step_navigation(navigator, read_input("step> "))
+        command = read_input("step> ")
+        event_text = step_display.event_lookup_text(navigator, command)
+        if event_text is not None:
+            echo(event_text)
+            continue
+        error = step_display.set_step_navigation(navigator, command)
         if error is None:
             return
         echo(f"  {error}")
