@@ -419,6 +419,21 @@ def test_order_sizing_volume_capacity_requires_volume_for_each_product():
         apply_order_sizing_policy(account, ctx, s, {p: 50.0})
 
 
+def test_order_sizing_volume_capacity_does_not_require_volume_for_zero_delta():
+    s = Strategy(alias="S")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={
+        VolumeCapacityMode.liquidity_mode: "volume_participation", VolumeCapacityMode.participation_rate: 0.1,
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.volume, {})
+
+    capped = apply_order_sizing_policy(account, ctx, s, {p: 0.0})
+
+    assert capped[p] == 0.0
+
+
 def test_order_sizing_volume_capacity_does_not_defer_excess_to_next_bar():
     s = Strategy(alias="S")
     p = _product()

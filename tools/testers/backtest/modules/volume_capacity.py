@@ -51,14 +51,18 @@ def apply_volume_capacity_policy(
     volume = ctx.get(MarketDataModule.volume, {})
     store = order_flow_store_for(state)
     rate = config.get(VolumeCapacityMode.participation_rate, 0.1)
-    missing_volume_products = [product for product in deltas if product not in volume]
+    missing_volume_products = [
+        product
+        for product, quantity in deltas.items()
+        if _requires_volume_capacity(quantity) and product not in volume
+    ]
     if missing_volume_products:
         raise KeyError(
             "volume_participation volume capacity requires MarketDataModule volume for "
             + ", ".join(str(getattr(product, "name", product)) for product in missing_volume_products)
         )
     capped = {
-        product: _cap_one(quantity, rate * volume[product])
+        product: _cap_one(quantity, rate * volume[product]) if _requires_volume_capacity(quantity) else quantity
         for product, quantity in deltas.items()
     }
     if capped != deltas:
@@ -80,6 +84,10 @@ def _cap_one(quantity: float, capacity: float) -> float:
     if abs(quantity) <= capacity:
         return quantity
     return capacity if quantity > 0 else -capacity
+
+
+def _requires_volume_capacity(quantity: float) -> bool:
+    return quantity != 0
 
 
 def _stringify_deltas(deltas: dict) -> dict[str, float]:
