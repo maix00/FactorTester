@@ -57,10 +57,8 @@ def apply_volume_capacity_policy(
         if _requires_volume_capacity(quantity) and product not in volume
     ]
     if missing_volume_products:
-        raise KeyError(
-            "volume_participation volume capacity requires MarketDataModule volume for "
-            + ", ".join(str(getattr(product, "name", product)) for product in missing_volume_products)
-        )
+        _record_missing_volume_capacity_info(state, ctx, strategy, deltas, missing_volume_products)
+        raise KeyError(_missing_volume_capacity_message(state, ctx, strategy, deltas, missing_volume_products))
     capped = {
         product: _cap_one(quantity, rate * volume[product]) if _requires_volume_capacity(quantity) else quantity
         for product, quantity in deltas.items()
@@ -88,6 +86,101 @@ def _cap_one(quantity: float, capacity: float) -> float:
 
 def _requires_volume_capacity(quantity: float) -> bool:
     return quantity != 0
+
+
+def _record_missing_volume_capacity_info(
+    state: object,
+    ctx: object,
+    strategy: object,
+    deltas: dict[Any, float],
+    products: list[Any],
+) -> None:
+    from tools.testers.backtest.modules.runtime_info import record_runtime_info
+
+    timestamp = getattr(ctx, "timestamp", None)
+    rows = [_missing_volume_product_details(state, product, deltas.get(product)) for product in products]
+    product_text = ", ".join(row["product"] for row in rows)
+    record_runtime_info(
+        state,
+        code="volume_capacity_missing_volume",
+        type="成交量容量",
+        status="已中止",
+        level="error",
+        message=f"成交量容量缺少当前 bar volume: {product_text}",
+        detail=(
+            "volume_participation 需要当前事件 bar 的真实成交量；"
+            f"timestamp={timestamp}, strategy={getattr(strategy, 'alias', strategy)}, products={product_text}。"
+            "不会使用 0、前值填充或未来成交量替代。"
+        ),
+        details={
+            "timestamp": str(timestamp),
+            "strategy": str(getattr(strategy, "alias", strategy)),
+            "products": rows,
+        },
+    )
+
+
+def _missing_volume_capacity_message(
+    state: object,
+    ctx: object,
+    strategy: object,
+    deltas: dict[Any, float],
+    products: list[Any],
+) -> str:
+    timestamp = getattr(ctx, "timestamp", None)
+    product_details = ", ".join(
+        _missing_volume_product_message(state, product, deltas.get(product))
+        for product in products
+    )
+    return (
+        "volume_participation volume capacity requires MarketDataModule volume for "
+        f"{product_details} at {timestamp} "
+        f"(strategy={getattr(strategy, 'alias', strategy)}; "
+        "no zero/ffill/future-volume fallback is allowed)"
+    )
+
+
+def _missing_volume_product_message(state: object, product: Any, delta: float | None) -> str:
+    details = _missing_volume_product_details(state, product, delta)
+    suffix = f"delta={details['delta']}"
+    if details.get("last_observed_volume_timestamp"):
+        suffix += f", last_observed_volume_timestamp={details['last_observed_volume_timestamp']}"
+    if details.get("loaded_volume_column") is not None:
+        suffix += f", loaded_volume_column={details['loaded_volume_column']}"
+    return f"{details['product']} ({suffix})"
+
+
+def _missing_volume_product_details(state: object, product: Any, delta: float | None) -> dict[str, Any]:
+    loaded, last_timestamp = _volume_table_coverage_for_product(state, product)
+    return {
+        "product": str(getattr(product, "name", product)),
+        "delta": None if delta is None else float(delta),
+        "loaded_volume_column": loaded,
+        "last_observed_volume_timestamp": None if last_timestamp is None else str(last_timestamp),
+    }
+
+
+def _volume_table_coverage_for_product(state: object, product: Any) -> tuple[bool | None, Any | None]:
+    try:
+        from tools.testers.backtest.modules.market_data import volume_table_for
+    except Exception:
+        return None, None
+    table = volume_table_for(state)
+    columns = getattr(table, "columns", None)
+    if columns is None:
+        return None, None
+    product_name = str(getattr(product, "name", product))
+    matches = [
+        column
+        for column in list(columns)
+        if column is product or str(getattr(column, "name", column)) == product_name
+    ]
+    if not matches:
+        return False, None
+    series = table[matches[0]].dropna()
+    if series.empty:
+        return True, None
+    return True, series.index[-1]
 
 
 def _stringify_deltas(deltas: dict) -> dict[str, float]:

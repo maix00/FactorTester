@@ -412,11 +412,21 @@ def test_order_sizing_volume_capacity_requires_volume_for_each_product():
         VolumeCapacityMode.liquidity_mode: "volume_participation", VolumeCapacityMode.participation_rate: 0.1,
     })
     account = BacktestRunState(strategy_configs={s: config})
+    account.market_data_store.volume_table = pd.DataFrame({p: [100.0]}, index=[pd.Timestamp("2023-12-29 15:00")])
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {})
 
-    with pytest.raises(KeyError, match="requires MarketDataModule volume"):
+    with pytest.raises(KeyError, match="requires MarketDataModule volume.*delta=50.0.*2024-01-01"):
         apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+
+    assert account.runtime_info_rows
+    row = account.runtime_info_rows[-1]
+    assert row["code"] == "volume_capacity_missing_volume"
+    assert row["level"] == "error"
+    assert row["details"]["timestamp"] == "2024-01-01 00:00:00"
+    assert row["details"]["products"][0]["delta"] == 50.0
+    assert row["details"]["products"][0]["loaded_volume_column"] is True
+    assert row["details"]["products"][0]["last_observed_volume_timestamp"] == "2023-12-29 15:00:00"
 
 
 def test_order_sizing_volume_capacity_does_not_require_volume_for_zero_delta():
