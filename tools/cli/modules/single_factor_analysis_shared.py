@@ -9,7 +9,7 @@ import click
 from tools.cli.core.context import client_from_config
 from tools.cli.field_help import render_settings_help
 from tools.cli.field_store import FieldStore
-from tools.cli.modules.backtest.controller import _parse_raw_settings
+from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest.shared.selectors import (
     FactorSelector,
     ProductGroupSelector,
@@ -32,7 +32,7 @@ def apply_local_settings(state: Any, *, application: str, values_attr: str, args
     args = tuple(arg for arg in args if arg not in {"--help", "-h"})
     values = getattr(state, values_attr)
     if args:
-        parsed = _parse_raw_settings(args)
+        parsed = config_arg_helpers.parse_raw_settings(args)
         _, store = stores_for_application(state, application, values)
         unknown = [key for key in parsed if key not in store.defaults]
         if unknown:

@@ -68,8 +68,10 @@ class MarginModule(ExecutableModule):
     margin_excess: ClassVar[FieldRef[float]] = FieldRef("margin_excess")
     margin_liquidation_orders: ClassVar[FieldRef[Any]] = FieldRef("margin_liquidation_orders")
 
-    _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="LedgerModule")
+    _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="CashPoolModule")
     _ledger_positions_ref: ClassVar[FieldRef[Any]] = FieldRef("positions", owner="LedgerModule")
+    _cash_reserve_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_ratio", owner="StrategyBookModule")
+    _cash_reserve_major_ref: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_major", owner="StrategyBookModule")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "margin_mode": FieldDefinition(
@@ -143,22 +145,47 @@ class MarginModule(ExecutableModule):
     )
     apply_margin_requirement_change: ClassVar[Flow] = Flow(
         "apply_margin_requirement_change",
-        inputs=(_ledger_cash_ref, _ledger_positions_ref),
-        outputs=(margin_requirement, margin_reserved, margin_deficit, margin_excess),
+        inputs=(
+            _ledger_cash_ref,
+            _ledger_positions_ref,
+            margin_mode,
+            fixed_margin_ratio,
+            margin_call_mode,
+            liquidation_target_buffer,
+            _cash_reserve_ratio_ref,
+            _cash_reserve_major_ref,
+            FieldRef("current_prices", owner="MarketDataModule"),
+            FieldRef("current_market_snapshot", owner="MarketDataModule"),
+            FieldRef("current_historical_fields", owner="MarketDataModule"),
+        ),
+        outputs=(_ledger_cash_ref, _ledger_positions_ref, margin_requirement, margin_reserved, margin_deficit, margin_excess),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,
         order=60,
         description="处理保证金要求变化",
+        event_payload_inputs=("margin_check",),
         compute=lambda state, ctx: _apply_margin_requirement_change(state, ctx),
     )
     handle_margin_liquidation_notice: ClassVar[Flow] = Flow(
         "handle_margin_liquidation_notice",
-        inputs=(_ledger_cash_ref, _ledger_positions_ref, margin_deficit),
+        inputs=(
+            _ledger_cash_ref,
+            _ledger_positions_ref,
+            margin_mode,
+            fixed_margin_ratio,
+            margin_call_mode,
+            liquidation_target_buffer,
+            FieldRef("current_prices", owner="MarketDataModule"),
+            FieldRef("current_market_snapshot", owner="MarketDataModule"),
+            FieldRef("current_historical_fields", owner="MarketDataModule"),
+            margin_deficit,
+        ),
         outputs=(margin_liquidation_orders,),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.TRADE_INTENT,
         order=70,
         description="处理保证金强平通知",
+        event_payload_inputs=("margin_liquidation",),
         compute=lambda state, ctx: _handle_margin_liquidation_notice(state, ctx),
     )
 
@@ -512,8 +539,8 @@ def _ledger_payloads(state: Any, ctx: Any, *, kind: str) -> list[tuple[Any, dict
         ledger = state.ledgers.get(ledger_identity(ledger_key))
         if ledger is None:
             continue
-        for payload in ctx.payloads_for_ledger(ledger_key):
-            if isinstance(payload, dict) and str(payload.get("kind") or "") == kind:
+        for payload in ctx.payloads_for_ledger(ledger_key, kind=kind):
+            if isinstance(payload, dict):
                 result.append((ledger, payload))
     return result
 

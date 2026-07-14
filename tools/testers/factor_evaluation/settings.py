@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tools.testers.settings.applications import (
+from tools.testers._shared import (
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SELECTION_KEYS,
     MARKET_DATA_SELECTION_KEYS,

@@ -65,6 +65,47 @@ from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
 from server.modules.shared.price_data_helpers import to_epoch_ms
+
+# Step-through debug mode: run_token -> threading.Event for step continuation
+_step_events: dict[str, "threading.Event"] = {}
+_step_controls: dict[str, dict[str, Any]] = {}
+
+
+def _step_should_pause(control: dict[str, Any], info: dict[str, Any]) -> bool:
+    mode = str(control.get("mode") or "step")
+    if mode == "end":
+        return False
+    if mode != "until":
+        return True
+    timestamp = str(info.get("timestamp") or "").strip()
+    target = control.get("until")
+    if not timestamp or target is None or pd.Timestamp(timestamp).tz_localize(None) < target:
+        return False
+    control["mode"] = "step"
+    control["until"] = None
+    return True
+
+
+def _apply_step_action(control: dict[str, Any], action: str, raw_until: str = "") -> None:
+    if action == "continue":
+        control["mode"] = "step"
+        control["until"] = None
+        return
+    if action == "end":
+        control["mode"] = "end"
+        control["until"] = None
+        return
+    if action != "until":
+        raise ValueError(f"未知 step action: {action}")
+    try:
+        target = pd.Timestamp(raw_until)
+    except Exception as exc:
+        raise ValueError("until 时刻格式无效") from exc
+    if pd.isna(target):
+        raise ValueError("until 时刻格式无效")
+    control["mode"] = "until"
+    control["until"] = target.tz_localize(None)
+
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 _log = logging.getLogger(__name__)
@@ -1912,70 +1953,33 @@ def _product_list_from_group_payload(group: dict) -> list[str] | None:
     return None
 
 
-class _FactorEvaluateAdapter:
-    """Wraps a real Factor + its resolved product universe so
-    FactorSignalModule can evaluate it through an explicit run window while
-    the real `Factor.evaluate(products, ...)` signature keeps product and time
-    inputs mandatory."""
+_AUTO_INFERRED_LEDGER_DEFAULTS = {
+    "cost_basis_method": "WeightAverage",
+    "daily_mark_to_market_enabled": False,
+}
 
-    def __init__(self, factor: Any, products) -> None:
-        self._factor = factor
-        self._products = products
 
-    @property
-    def underlying_factor(self) -> Any:
-        return self._factor
+def _strip_implicit_auto_ledger_defaults(
+    settings: dict[str, Any],
+    *,
+    local_settings: dict[str, Any],
+    group_payload: dict[str, Any],
+) -> None:
+    """Do not pass UI display defaults as explicit ledger config in auto/exact.
 
-    @property
-    def expression(self) -> Any:
-        return (
-            getattr(self._factor, "expression", None)
-            or getattr(self._factor, "_expr", None)
-            or getattr(self._factor, "_source_expr", None)
-        )
-
-    def supports_vectorized(self) -> bool:
-        flag = getattr(self._factor, "supports_vectorized", None)
-        if callable(flag):
-            return bool(flag())
-        if flag is not None:
-            return bool(flag)
-        expr = self.expression
-        expr_flag = getattr(expr, "supports_vectorized", None)
-        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
-
-    def supports_incremental(self) -> bool:
-        flag = getattr(self._factor, "supports_incremental", None)
-        if callable(flag):
-            return bool(flag())
-        if flag is not None:
-            return bool(flag)
-        expr = self.expression
-        expr_flag = getattr(expr, "supports_incremental", None)
-        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
-
-    def required_warmup_window(self) -> Any:
-        required = getattr(self._factor, "required_warmup_window", None) or getattr(self._factor, "required_lookback", None)
-        if callable(required):
-            return required()
-        if required is not None:
-            return required
-        return None
-
-    def backtest_factor_cache_key(self) -> tuple:
-        factor_key = (
-            getattr(self._factor, "alias", None)
-            or getattr(self._factor, "name", None)
-            or id(self._factor)
-        )
-        product_key = tuple(str(getattr(product, "name", product)) for product in self._products)
-        return ("factor_evaluate_adapter", factor_key, product_key)
-
-    def evaluate(self, *, start_dt=None, end_dt=None, run_window=None, warmup_window=None) -> pd.DataFrame:
-        if run_window is not None and (start_dt is None or end_dt is None):
-            start_dt, end_dt = run_window
-        self._factor.evaluate(self._products, start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window)
-        return self._factor.table
+    Native accounting infers these fields from historical trading-rule rows.
+    `resolve_group_settings` returns a complete value map, so without this
+    bridge cleanup an unedited UI default such as cost_basis_method=WeightAverage
+    would mask the intended FIFO/DMTM inference in step-mode audit output.
+    """
+    engine_mode = str(settings.get("engine_mode") or "auto").lower()
+    if engine_mode not in {"auto", "exact"}:
+        return
+    for key, default in _AUTO_INFERRED_LEDGER_DEFAULTS.items():
+        if key in local_settings or key in group_payload:
+            continue
+        if settings.get(key) == default:
+            settings.pop(key, None)
 
 
 def _resolve_group_strategy_settings(
@@ -1987,6 +1991,7 @@ def _resolve_group_strategy_settings(
     data: dict,
     page_factors_dict: dict,
     selection_cache: dict[str, Any],
+    username: str = "",
 ) -> dict[str, Any]:
     """Per-group bridge from the existing flat-settings resolution
     (resolve_group_settings, scalar values only) to the resolved_settings
@@ -1996,12 +2001,19 @@ def _resolve_group_strategy_settings(
 
     group_id = str(g.get('id') or '')
     group_settings = dict(resolved_backtest_settings.get(group_id) or fallback_group_settings)
+    local_settings = _payload_local_settings(data)
+    _strip_implicit_auto_ledger_defaults(
+        group_settings,
+        local_settings=local_settings,
+        group_payload=g,
+    )
 
     raw_split_count = g.get('splitCount')
     if raw_split_count is None:
         raise ValueError(f"缺少 splitCount: group={g.get('name') or group_id}")
     group_settings['split_count'] = int(raw_split_count)
     group_settings['group_index'] = int(g.get('groupIndex', 1)) - 1  # 前端 1-based -> 后端 0-based
+    group_settings['display_name'] = str(g.get('shortAlias') or g.get('name') or group_id)
 
     selection_id = _group_product_path_selection_id(g)
     if not selection_id:
@@ -2018,8 +2030,15 @@ def _resolve_group_strategy_settings(
     factor_alias = str(g.get('factorAlias', ''))
     factor = page_factors_dict.get(factor_alias)
     if factor is None:
-        raise ValueError(f"未找到因子 {factor_alias}。请确认当前因子参数已保存，或刷新页面后重试。")
-    group_settings['factor'] = _FactorEvaluateAdapter(factor, selection.products)
+        from server.services.factor_registry import factor_from_alias
+        try:
+            factor = factor_from_alias(factor_alias, username=username, page_uuid=page_uuid)
+        except Exception as exc:
+            raise ValueError(
+                f"未找到因子 {factor_alias}。仅允许从当前用户可访问的公共因子家族"
+                "或当前用户自己的因子家族解析。"
+            ) from exc
+    group_settings['factor'] = factor
 
     return group_settings
 
@@ -2049,6 +2068,7 @@ def _resolve_long_short_strategy_settings(
     resolved_backtest_settings: dict[str, dict[str, Any]],
     source_settings_by_alias: dict[str, dict[str, Any]],
     fallback_group_settings: dict[str, Any],
+    local_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a peer long-short strategy from source strategy ids.
 
@@ -2083,8 +2103,14 @@ def _resolve_long_short_strategy_settings(
     })
     settings["strategy_kind"] = "long_short"
     settings["strategy_id"] = strategy_id
+    settings["display_name"] = str(config.get("shortAlias") or config.get("name") or strategy_id)
     settings["long_leg_strategy_ids"] = long_legs
     settings["short_leg_strategy_ids"] = short_legs
+    _strip_implicit_auto_ledger_defaults(
+        settings,
+        local_settings=local_settings or {},
+        group_payload=config,
+    )
     return settings
 
 
@@ -3146,6 +3172,10 @@ def run_group_test_stream():
     data = dict(data)
     data['_run_user'] = run_user
     data['_group_owner_username'] = owner
+    step_mode = bool(data.get('step_mode', False))
+    if step_mode:
+        _step_events[run_token] = threading.Event()
+        _step_controls[run_token] = {"mode": "step", "until": None}
 
     emitter = SSEProgressEmitter()
 
@@ -3196,7 +3226,7 @@ def run_group_test_stream():
                 resolved_settings_by_alias[group_id] = _resolve_group_strategy_settings(
                     g, resolved_backtest_settings=resolved_backtest_settings,
                     fallback_group_settings=fallback_group_settings,
-                    page_uuid=page_uuid, data=payload, page_factors_dict=page_factors_dict,
+                    page_uuid=page_uuid, username=owner, data=payload, page_factors_dict=page_factors_dict,
                     selection_cache=selection_cache,
                 )
             group_owner.extend(_build_group_owner_rows(flat_groups, is_ls=False))
@@ -3217,6 +3247,7 @@ def run_group_test_stream():
                     resolved_backtest_settings=resolved_backtest_settings,
                     source_settings_by_alias=resolved_settings_by_alias,
                     fallback_group_settings=fallback_group_settings,
+                    local_settings=local_settings,
                 )
             group_owner.extend(_build_long_short_owner_rows(
                 normalized_ls_configs, source_owner_by_id=group_owner_by_id))
@@ -3263,10 +3294,26 @@ def run_group_test_stream():
                 if active_run.cancelled.is_set():
                     raise BacktestCancelled()
 
+            step_callback = None
+            if step_mode and run_token in _step_events:
+                _step_event = _step_events[run_token]
+                _step_control = _step_controls[run_token]
+                def _make_step_callback(emitter, event, control):
+                    def _cb(info: dict[str, Any]) -> None:
+                        emitter.emit_step(info)
+                        event.wait()
+                        event.clear()
+                    _cb.should_capture = lambda timestamp: _step_should_pause(
+                        control, {"timestamp": timestamp},
+                    )
+                    return _cb
+                step_callback = _make_step_callback(emitter, _step_event, _step_control)
+
             execution = tester.dispatch(
                 "backtest", run_state=account, group_owner=group_owner,
                 settings_by_strategy=resolved_settings_by_alias,
                 run_id=run_token, progress=_on_progress, activity_sink=emitter,
+                step_mode=step_mode, step_callback=step_callback,
             )
             runtime_info_rows = list(getattr(account, "runtime_info_rows", ()))
             serialized_execution = _serialize_event_execution(
@@ -3330,8 +3377,27 @@ def run_group_test_stream():
             import traceback as _tb
             emitter.emit_error(str(e), traceback=_tb.format_exc())
         finally:
+            _step_events.pop(run_token, None)
+            _step_controls.pop(run_token, None)
             backtest_runs.finish(run_token)
             emitter.close()
 
     threading.Thread(target=_compute_and_emit, daemon=True).start()
     return emitter.get_response()
+
+
+@sft_bp.route('/step_continue', methods=['POST'])
+def step_continue():
+    """Continue one flow, fast-forward to a timestamp, or run to the end."""
+    data = request.get_json(silent=True) or {}
+    run_token = str(data.get('run_token') or '')
+    if not run_token or run_token not in _step_events or run_token not in _step_controls:
+        return jsonify({'success': False, 'error': '无效的 run_token 或 step 模式未启动'}), 400
+    action = str(data.get('action') or 'continue').strip().lower()
+    control = _step_controls[run_token]
+    try:
+        _apply_step_action(control, action, str(data.get('until') or '').strip())
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    _step_events[run_token].set()
+    return jsonify({'success': True, 'mode': control['mode']})

@@ -13,14 +13,41 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.config import CashPoolConfig
+from tools.testers.backtest.engines.native.guarded_dict import GuardedDict
 from tools.testers.backtest.engines.native.ledger import Ledger
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 
 
 @dataclass
 class CashPoolStore:
-    cash_by_pool: dict[str, Any] = field(default_factory=dict)
+    cash_by_pool: dict[str, Any] = field(default_factory=lambda: GuardedDict(label="CashPoolStore.cash_by_pool"))
     config_by_pool: dict[str, CashPoolConfig] = field(default_factory=dict)
+    _flow_contract_audit: tuple[Any, object] | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.cash_by_pool, GuardedDict):
+            self.cash_by_pool = GuardedDict(self.cash_by_pool, label="CashPoolStore.cash_by_pool")
+
+    def set_cash(self, pool_id: str, cash: Any, ref: FieldRef[Any]) -> None:
+        audit = getattr(self, "_flow_contract_audit", None)
+        if audit is not None:
+            ctx, token = audit
+            ctx.record_external_contract_write(ref, token)
+        with self.cash_by_pool.unguarded_write():  # type: ignore[attr-defined]
+            self.cash_by_pool[str(pool_id)] = cash
+
+    def set_guarded_writes_enabled(self, enabled: bool) -> None:
+        setter = getattr(self.cash_by_pool, "set_guarded_writes_enabled", None)
+        if callable(setter):
+            setter(enabled)
+
+    def enter_flow_contract_audit(self, ctx: Any, token: object) -> tuple[Any, object] | None:
+        previous = getattr(self, "_flow_contract_audit", None)
+        self._flow_contract_audit = (ctx, token)
+        return previous
+
+    def restore_flow_contract_audit(self, previous: tuple[Any, object] | None) -> None:
+        self._flow_contract_audit = previous
 
 
 class CashPoolModule(ExecutableModule):
@@ -34,6 +61,7 @@ class CashPoolModule(ExecutableModule):
     currency_conversion_fee_rate: ClassVar[FieldRef[float]] = FieldRef("currency_conversion_fee_rate")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
+        "cash": FieldDefinition(public=False, display_value_kind="cash"),
         "initial_capital_major": FieldDefinition(
             public=True, label="初始资金", control_template="number", default=100_000_000.0, tab="capital",
             chip_template="初始资金: {value}", tab_label="资金", tab_order=50,
@@ -119,7 +147,7 @@ def ensure_cash_pool_config_for_strategy_ledger(
 def set_cash_for_ledger_pool(state: object, ledger_state: object, cash: object) -> None:
     from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger
 
-    cash_pool_store_for(state).cash_by_pool[cash_pool_id_for_ledger(state, ledger_state)] = cash
+    cash_pool_store_for(state).set_cash(cash_pool_id_for_ledger(state, ledger_state), cash, CashPoolModule.cash)
 
 
 def _merge_compatible_cash_pool_config(

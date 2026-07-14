@@ -47,6 +47,24 @@ def test_load_raw_market_data_reads_from_account_supplied_input():
     assert ctx.get(MarketDataModule.lot_sizes) == {"P1": 5.0}
 
 
+def test_market_data_store_guard_blocks_direct_runtime_writes_but_allows_publish_methods():
+    account = BacktestRunState()
+    store = account.market_data_store
+    store.set_guarded_writes_enabled(True)
+    prices = pd.DataFrame({"P1": [1.0]}, index=pd.date_range("2024-01-01", periods=1))
+
+    with pytest.raises(RuntimeError, match="MarketDataStore.current_prices_table is guarded"):
+        store.current_prices_table = prices
+
+    store.publish_causal_valuation(prices)
+    assert store.current_prices_table is prices
+
+    store.set_guarded_writes_enabled(False)
+    replacement = pd.DataFrame({"P1": [2.0]}, index=pd.date_range("2024-01-02", periods=1))
+    store.current_prices_table = replacement
+    assert store.current_prices_table is replacement
+
+
 def test_load_raw_market_data_carries_price_limit_columns_into_order_constraints():
     class _Product:
         name = "P.XLIM"
@@ -199,6 +217,45 @@ def test_historical_fields_frame_row_cache_reuses_same_effective_rule_row():
     assert first[product]["VolumeMultiple"] == 1.0
     assert changed is not first
     assert changed[product]["VolumeMultiple"] == 2.0
+
+
+def test_field_change_event_updates_field_state_store_for_later_materialization():
+    class _Product:
+        name = "P1.CFE"
+
+    product = _Product()
+    timestamp = pd.Timestamp("2026-01-05 09:01:00", tz="Asia/Shanghai")
+    state = BacktestRunState()
+    state.market_data_store.historical_field_names = ("VolumeMultiple",)
+    state.market_data_store.historical_field_provider = object()
+    state.market_data_store.trading_day_resolver = object()
+    state.market_data_store.field_state_store = {"P1.CFE": {"VolumeMultiple": 10.0}}
+    state.market_data_store.current_prices_table = pd.DataFrame({product: [100.0]}, index=[timestamp])
+    strategy = Strategy(alias="A1")
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={
+            strategy: [
+                EventDraft(
+                    EventKind.FIELD_CHANGE,
+                    timestamp,
+                    strategy=strategy,
+                    payload={"changes": {"P1.CFE": {"VolumeMultiple": 20.0}}},
+                )
+            ]
+        },
+        event_kind=EventKind.FIELD_CHANGE,
+    )
+
+    market_data_module._handle_field_changes(state, ctx)
+    state.market_data_store.historical_fields_cache.clear()
+
+    fields = market_data_module.current_historical_fields_at(state, timestamp)
+
+    assert state.market_data_store.field_state_store["P1.CFE"]["VolumeMultiple"] == 20.0
+    assert fields[product]["VolumeMultiple"] == 20.0
 
 
 def test_order_event_current_prices_use_open_snapshot_not_close_snapshot():
@@ -512,6 +569,50 @@ def test_check_market_data_coverage_uses_resolved_frequency_not_first_available(
     _check_market_data_coverage(account, ctx)
 
     assert account.market_data_store.load_plan == [(product, DataFreq.MIN1, None)]
+    assert ctx.get(MarketDataModule.market_data_load_plan) == {
+        "type": "MarketDataLoadPlan",
+        "items": {"P1": {"frequency": "MIN1", "data_source": "auto"}},
+        "count": 1,
+    }
+    assert ctx.get(MarketDataModule.excluded_out_of_range_products) == {
+        "type": "MarketDataExcludedProducts",
+        "rows": [],
+        "count": 0,
+    }
+
+
+def test_check_market_data_coverage_declares_load_plan_outputs():
+    assert MarketDataModule.market_data_load_plan in MarketDataModule.check_market_data_coverage.outputs
+    assert MarketDataModule.excluded_out_of_range_products in MarketDataModule.check_market_data_coverage.outputs
+
+
+def test_causal_valuation_flow_description_names_forward_fill_semantics():
+    assert MarketDataModule.causal_valuation.description == "市场价格向前填充"
+
+
+def test_check_market_data_coverage_reports_raw_market_data_seed_as_load_plan():
+    account = BacktestRunState()
+    account.raw_market_data = {
+        "raw_prices": pd.DataFrame({"P1": [1.0], "P2": [2.0]}, index=pd.date_range("2024-01-01", periods=1)),
+        "excluded_out_of_range_products": ("P3",),
+    }
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _check_market_data_coverage(account, ctx)
+
+    assert ctx.get(MarketDataModule.market_data_load_plan) == {
+        "type": "MarketDataLoadPlan",
+        "items": {
+            "P1": {"frequency": "provided", "data_source": "raw_market_data"},
+            "P2": {"frequency": "provided", "data_source": "raw_market_data"},
+        },
+        "count": 2,
+    }
+    assert ctx.get(MarketDataModule.excluded_out_of_range_products) == {
+        "type": "MarketDataExcludedProducts",
+        "rows": [{"product": "P3"}],
+        "count": 1,
+    }
 
 
 def test_check_market_data_coverage_rejects_missing_resolved_frequency():
@@ -853,6 +954,9 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
     assert account.market_data_store.market_price_tables["close"][product].tolist() == [10.5, 20.5]
     assert account.market_data_store.market_price_tables["vwap"][product].tolist() == [10.25, 20.25]
     assert ctx.get(MarketDataModule.raw_prices)[product].tolist() == [10.5, 20.5]
+    price_tables = ctx.get(MarketDataModule.price_tables)
+    assert set(price_tables) >= {"open", "high", "low", "close", "vwap"}
+    assert price_tables["open"][product].tolist() == [10.0, 20.0]
 
 
 def test_load_raw_market_data_combines_disjoint_products_with_distinct_frequency():

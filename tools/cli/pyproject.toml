@@ -7,24 +7,14 @@ name = "factortester"
 version = "0.1.0"
 description = "HTTP command-line client for FactorTester"
 requires-python = ">=3.11"
-dependencies = ["click>=8", "plotext>=5.2"]
+dependencies = ["click>=8", "plotext>=5.2", "rich>=14"]
 
 [project.scripts]
 factortester = "tools.cli.app:cli"
 
 [tool.setuptools]
 package-dir = {"" = "../.."}
-packages = [
-  "tools.cli",
-  "tools.cli.commands",
-  "tools.cli.core",
-  "tools.cli.modules",
-  "tools.cli.modules.backtest",
-  "tools.cli.modules.backtest.shared",
-  "tools.cli.modules.custom_factors",
-  "tools.cli.modules.factor_evaluation",
-  "tools.cli.modules.factor_type_analysis",
-  "tools.cli.modules.ic_test",
-  "tools.cli.modules.products",
-  "tools.cli.modules.single_factor_family_test",
-]
+
+[tool.setuptools.packages.find]
+where = ["../.."]
+include = ["tools*"]

@@ -16,6 +16,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     contract_multiplier_from_fields,
@@ -30,7 +31,7 @@ from tools.testers.backtest.modules.strategy_book import (
 )
 from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetStrategyModule, TargetWeightIntent
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
-from tools.testers.backtest.modules.trading_rule import _resolve_use_int_position
+from tools.testers.backtest.modules.trading_rule import TradingRuleModule, _resolve_use_int_position
 
 _TARGET_WEIGHTS_REF: FieldRef[Any] = TargetStrategyModule.target_weights
 
@@ -46,10 +47,10 @@ class OrderConstructModule(ExecutableModule):
     quantity_rounding_policy: ClassVar[FieldRef[str]] = FieldRef("quantity_rounding_policy")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "raw_deltas": FieldDefinition(public=False),
-        "sized_deltas": FieldDefinition(public=False),
-        "deltas": FieldDefinition(public=False),
-        "orders": FieldDefinition(public=False),
+        "raw_deltas": FieldDefinition(public=False, display_value_kind="delta_table"),
+        "sized_deltas": FieldDefinition(public=False, display_value_kind="delta_table"),
+        "deltas": FieldDefinition(public=False, display_value_kind="delta_table"),
+        "orders": FieldDefinition(public=False, display_value_kind="order_table"),
         "quantity_rounding_policy": FieldDefinition(
             public=True, label="数量取整", default="floor_to_lot", control_template="select", tab="order",
             options=(("floor_to_lot", "按最小买入手数向下取整"), ("nearest_lot", "按最小买入手数四舍五入")),
@@ -74,7 +75,14 @@ class OrderConstructModule(ExecutableModule):
     )
     round_order_quantity: ClassVar[Flow] = Flow(
         "round_order_quantity",
-        inputs=(raw_deltas, MarketDataModule.lot_sizes, quantity_rounding_policy),
+        inputs=(
+            raw_deltas,
+            MarketDataModule.lot_sizes,
+            quantity_rounding_policy,
+            EngineModule.engine_mode,
+            TradingRuleModule.accounting_mode,
+            TradingRuleModule.use_int_position,
+        ),
         outputs=(sized_deltas, deltas),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,

@@ -48,6 +48,8 @@ def run_backtest_task(
     run_id: str,
     progress: Callable[[int, int, str], None] | None = None,
     activity_sink: ProgressSink | None = None,
+    step_mode: bool = False,
+    step_callback: "Callable[[dict[str, Any]], None] | None" = None,
 ) -> dict[str, Any]:
     """Fixed task: runs the engine against an already-built BacktestRunState,
     stores it on `state.account` for later snapshot/detail requests, and
@@ -71,7 +73,16 @@ def run_backtest_task(
         )
     registry = _build_registry()
     queue = EventQueue()
-    run(run_state, queue, registry.resolve(), progress=progress, activity_sink=activity_sink)
+    run(
+        run_state,
+        queue,
+        registry.resolve(),
+        progress=progress,
+        activity_sink=activity_sink,
+        audit_flow_contract=step_mode,
+        step_mode=step_mode,
+        step_callback=step_callback,
+    )
 
     by_alias = {strategy.alias: strategy for strategy in run_state.strategy_configs}
     portfolios: dict[str, Any] = {}

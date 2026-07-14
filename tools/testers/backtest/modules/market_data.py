@@ -1,12 +1,12 @@
-"""MarketDataModule — owns market data observations and the causal
-(no-lookahead) valuation series derived from them.
+"""MarketDataModule — owns market data observations and the forward-filled
+market price view derived from them.
 
 Market data can arrive either as an explicit `raw_market_data` payload (legacy
 test/adaptor path) or through this module's resolved load plan. The load plan
 is strategy-scoped up to the coverage stage and becomes a concrete
-product/frequency/source list before raw tables are read. `causal_valuation`
-then turns the already-loaded, possibly-gappy raw_prices frame into a ffill'd,
-gap-free `current_prices` lookup.
+product/frequency/source list before raw tables are read. The
+``causal_valuation`` flow then turns the already-loaded, possibly-gappy
+raw_prices frame into a forward-filled, no-lookahead market price lookup.
 
 The ffill'd table itself is stored in `state.market_data_store` (not `ctx`)
 because it's computed once in PRE_REPLAY but needs to survive into every later
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, ClassVar, cast
 
@@ -60,16 +61,31 @@ from tools.traderules import (
 
 @dataclass
 class MarketDataStore:
+    _guarded_write_fields: ClassVar[frozenset[str]] = frozenset({
+        "raw_prices_table",
+        "current_prices_table",
+        "market_price_tables",
+        "factor_field_tables",
+        "volume_table",
+        "included_products",
+        "historical_field_provider",
+        "historical_field_policy",
+        "historical_field_names",
+        "historical_field_frames",
+    })
+
     raw_input: dict[str, Any] = field(default_factory=dict)
     request: dict[str, Any] = field(default_factory=dict)
     load_plan: list[Any] = field(default_factory=list)
     required_data_source_by_strategy: dict[Any, tuple[str, ...]] = field(default_factory=dict)
     required_frequency_by_strategy: dict[Any, DataFreq] = field(default_factory=dict)
+    required_factor_columns_by_strategy: dict[Any, tuple[str, ...]] = field(default_factory=dict)
     excluded_out_of_range: tuple[Any, ...] = ()
     series_by_product: dict[Any, Any] = field(default_factory=dict)
     raw_prices_table: Any = None
     current_prices_table: Any = None
     market_price_tables: dict[str, Any] = field(default_factory=dict)
+    factor_field_tables: dict[str, Any] = field(default_factory=dict)
     volume_table: Any = None
     included_products: frozenset[Any] | None = None
     historical_field_provider: Any = None
@@ -88,20 +104,48 @@ class MarketDataStore:
     historical_field_latest_available_warning_keys: set[tuple[str, str, Any]] = field(default_factory=set)
     runtime_info_excluded_product_sets: list[tuple[Any, ...]] = field(default_factory=list)
     field_state_store: dict[str, dict[str, object]] = field(default_factory=dict)
+    _guarded_writes_enabled: bool = field(default=False, init=False, repr=False)
+    _guarded_write_depth: int = field(default=0, init=False, repr=False)
     """Current snapshot of market-rule field values, keyed by product_name then field_name.
     Populated by initialize_field_state (PRE_REPLAY) and updated by handle_field_changes
     (PER_EVENT/FIELD_CHANGE). Replaces the old per-timestamp historical_field_frames DataFrames.
     """
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if (
+            name in self._guarded_write_fields
+            and getattr(self, "_guarded_writes_enabled", False)
+            and getattr(self, "_guarded_write_depth", 0) <= 0
+        ):
+            raise RuntimeError(
+                f"MarketDataStore.{name} is guarded during step/audit runs; "
+                "write it through a named publish_* method and mirror the value "
+                "through a declared FlowContext output when it is flow-visible."
+            )
+        super().__setattr__(name, value)
+
+    @contextmanager
+    def _unguarded_write(self):
+        self._guarded_write_depth += 1
+        try:
+            yield
+        finally:
+            self._guarded_write_depth -= 1
+
+    def set_guarded_writes_enabled(self, enabled: bool) -> None:
+        self._guarded_writes_enabled = bool(enabled)
+
     def publish_raw(self, raw: dict[str, Any]) -> None:
-        self.raw_prices_table = raw.get("raw_prices")
-        self.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
-        self.historical_field_provider = raw.get("historical_field_provider")
-        included_products = raw.get("included_products")
-        self.included_products = frozenset(included_products) if included_products is not None else None
-        self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
-        self.historical_field_names = tuple(raw.get("historical_field_names", ()))
-        self.volume_table = raw.get("volume")
+        with self._unguarded_write():
+            self.raw_prices_table = raw.get("raw_prices")
+            self.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
+            self.factor_field_tables = raw.get("factor_field_tables") or {}
+            self.historical_field_provider = raw.get("historical_field_provider")
+            included_products = raw.get("included_products")
+            self.included_products = frozenset(included_products) if included_products is not None else None
+            self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+            self.historical_field_names = tuple(raw.get("historical_field_names", ()))
+            self.volume_table = raw.get("volume")
         self.market_snapshot_cache.clear()
         self.table_values_cache.clear()
         self.historical_fields_cache.clear()
@@ -112,12 +156,33 @@ class MarketDataStore:
         self.historical_field_frame_values_cache.clear()
         self.historical_field_latest_available_warning_keys.clear()
 
+    def publish_coverage_seed(self, raw: dict[str, Any]) -> None:
+        with self._unguarded_write():
+            raw_prices = raw.get("raw_prices")
+            self.series_by_product = {
+                product: raw_prices[product]
+                for product in getattr(raw_prices, "columns", [])
+            }
+            self.market_price_tables = raw.get("price_tables") or {"close": raw_prices}
+            self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+
+    def publish_historical_field_policy(self, policy: str) -> None:
+        with self._unguarded_write():
+            self.historical_field_policy = policy
+
+    def publish_causal_valuation(self, current_prices_table: Any) -> None:
+        with self._unguarded_write():
+            self.current_prices_table = current_prices_table
+        self.market_snapshot_cache.clear()
+        self.table_values_cache.clear()
+
 
 class MarketDataModule(ExecutableModule):
     key: ClassVar[str] = "market_data"
     label: ClassVar[str] = "市场数据"
 
-    raw_prices: ClassVar[FieldRef[Any]] = FieldRef("raw_prices")          # pd.DataFrame, index=ts, columns=Product, may have NaN gaps
+    raw_prices: ClassVar[FieldRef[Any]] = FieldRef("raw_prices")          # close pd.DataFrame, index=ts, columns=Product, may have NaN gaps
+    price_tables: ClassVar[FieldRef[Any]] = FieldRef("price_tables")      # dict[basis, pd.DataFrame] for open/high/low/close/vwap/settlement/etc.
     lot_sizes: ClassVar[FieldRef[Any]] = FieldRef("lot_sizes")            # dict[Product, float]
     margin_ratio: ClassVar[FieldRef[Any]] = FieldRef("margin_ratio")      # dict[Product, float]
     settlement_price: ClassVar[FieldRef[Any]] = FieldRef("settlement_price")  # pd.DataFrame, index=ts, columns=Product
@@ -125,6 +190,9 @@ class MarketDataModule(ExecutableModule):
     historical_field_provider: ClassVar[FieldRef[Any]] = FieldRef("historical_field_provider")
     trading_day_resolver: ClassVar[FieldRef[Any]] = FieldRef("trading_day_resolver")
     historical_field_policy: ClassVar[FieldRef[str]] = FieldRef("historical_field_policy")
+    field_state_baseline: ClassVar[FieldRef[Any]] = FieldRef("field_state_baseline")
+    field_change_events: ClassVar[FieldRef[Any]] = FieldRef("field_change_events")
+    causal_valuation_table: ClassVar[FieldRef[Any]] = FieldRef("causal_valuation_table")
     current_historical_fields: ClassVar[FieldRef[dict[Any, dict[str, object]]]] = FieldRef("current_historical_fields")
     current_prices: ClassVar[FieldRef[Any]] = FieldRef("current_prices")  # dict[Product, float], looked up per-timestamp
     current_market_snapshot: ClassVar[FieldRef[Any]] = FieldRef("current_market_snapshot")
@@ -150,19 +218,35 @@ class MarketDataModule(ExecutableModule):
     freq_fixed: ClassVar[FieldRef[str]] = FieldRef("freq_fixed")
     required_data_source: ClassVar[FieldRef[Any]] = FieldRef("required_data_source")
     required_frequency: ClassVar[FieldRef[DataFreq]] = FieldRef("required_frequency")
+    required_factor_columns: ClassVar[FieldRef[Any]] = FieldRef("required_factor_columns")
+    market_data_load_plan: ClassVar[FieldRef[Any]] = FieldRef("market_data_load_plan")
+    excluded_out_of_range_products: ClassVar[FieldRef[Any]] = FieldRef("excluded_out_of_range_products")
 
     _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
+    _fixed_fee_rate_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_fee_rate", owner="FeeModule")
     _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
+    _fixed_margin_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_margin_ratio", owner="MarginModule")
     _accounting_mode_ref: ClassVar[FieldRef[str]] = FieldRef("accounting_mode", owner="TradingRuleModule")
+    _cost_basis_method_ref: ClassVar[FieldRef[str]] = FieldRef("cost_basis_method", owner="TradingRuleModule")
+    _daily_mark_to_market_enabled_ref: ClassVar[FieldRef[bool]] = FieldRef("daily_mark_to_market_enabled", owner="TradingRuleModule")
+    _transaction_fee_source_ref: ClassVar[FieldRef[str]] = FieldRef("transaction_fee_source", owner="FeeModule")
+    _warmup_mode_ref: ClassVar[FieldRef[str]] = FieldRef("warmup_mode", owner="FactorSignalModule")
+    _warmup_window_ref: ClassVar[FieldRef[Any]] = FieldRef("warmup_window", owner="FactorSignalModule")
+    _execution_price_basis_ref: ClassVar[FieldRef[str]] = FieldRef("execution_price_basis", owner="OrderExecutionModule")
+    _allocation_policy_ref: ClassVar[FieldRef[str]] = FieldRef("allocation_policy", owner="GroupMembershipModule")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "raw_prices": FieldDefinition(public=False),
+        "raw_prices": FieldDefinition(public=False, display_value_kind="market_data_sample"),
+        "price_tables": FieldDefinition(public=False, display_value_kind="market_data_sample"),
         "lot_sizes": FieldDefinition(public=False),
         "margin_ratio": FieldDefinition(public=False),
-        "settlement_price": FieldDefinition(public=False),
-        "volume": FieldDefinition(public=False),
+        "settlement_price": FieldDefinition(public=False, display_value_kind="market_data_sample"),
+        "volume": FieldDefinition(public=False, display_value_kind="market_data_sample"),
         "historical_field_provider": FieldDefinition(public=False),
         "trading_day_resolver": FieldDefinition(public=False),
+        "field_state_baseline": FieldDefinition(public=False, display_value_kind="historical_field_state"),
+        "field_change_events": FieldDefinition(public=False),
+        "causal_valuation_table": FieldDefinition(public=False, display_value_kind="market_data_sample"),
         "historical_field_policy": FieldDefinition(
             public=True,
             label="历史字段",
@@ -185,10 +269,11 @@ class MarketDataModule(ExecutableModule):
                 (str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value), "缺失历史数据由时间差最近的数据向后填充"),
             ),
         ),
-        "current_historical_fields": FieldDefinition(public=False),
-        "current_market_snapshot": FieldDefinition(public=False),
-        "current_tradable_status": FieldDefinition(public=False),
-        "current_order_constraints": FieldDefinition(public=False),
+        "current_historical_fields": FieldDefinition(public=False, display_value_kind="market_snapshot"),
+        "current_prices": FieldDefinition(public=False, display_value_kind="market_snapshot"),
+        "current_market_snapshot": FieldDefinition(public=False, display_value_kind="market_snapshot"),
+        "current_tradable_status": FieldDefinition(public=False, display_value_kind="market_snapshot"),
+        "current_order_constraints": FieldDefinition(public=False, display_value_kind="market_snapshot"),
         "data_source_mode": FieldDefinition(
             public=True, label="数据源模式", default="auto", control_template="select", tab="data_source",
             options=(("auto", "自动选择"), ("list", "指定列表")),
@@ -219,13 +304,19 @@ class MarketDataModule(ExecutableModule):
             tab_order=36,
         ),
         "required_frequency": FieldDefinition(public=False),
-        "required_data_source": FieldDefinition(public=False),
+        "required_data_source": FieldDefinition(public=False, display_value_kind="auto_when_empty"),
+        "required_factor_columns": FieldDefinition(public=False),
+        "market_data_load_plan": FieldDefinition(public=False),
+        "excluded_out_of_range_products": FieldDefinition(public=False),
     }
 
     resolve_market_data_request: ClassVar[Flow] = Flow(
         "resolve_market_data_request",
-        inputs=(data_source_mode, data_source, freq_mode, freq_fixed, FactorModule.factor),
-        outputs=(required_data_source, required_frequency),
+        inputs=(
+            data_source_mode, data_source, freq_mode, freq_fixed,
+            FactorModule.factor, ProductSelectionModule.products,
+        ),
+        outputs=(required_data_source, required_frequency, required_factor_columns),
         phase=Phase.PRE_REPLAY, order=37,
         after=(RunWindowModule.resolve_run_window, ProductSelectionModule.resolve_product_selection),
         compute=lambda state, ctx: _resolve_market_data_request(state, ctx),
@@ -239,7 +330,7 @@ class MarketDataModule(ExecutableModule):
             required_data_source, required_frequency, ProductSelectionModule.products,
             TermStructureExpandModule.expanded_contracts, TermStructureExpandModule.contract_metadata,
         ),
-        outputs=(),
+        outputs=(market_data_load_plan, excluded_out_of_range_products),
         phase=Phase.PRE_REPLAY, order=38,
         after=(resolve_market_data_request, TermStructureExpandModule.expand_term_structure),
         description="检查产品覆盖期",
@@ -247,16 +338,36 @@ class MarketDataModule(ExecutableModule):
     )
     load_raw_market_data: ClassVar[Flow] = Flow(
         "load_raw_market_data",
-        inputs=(EngineModule.engine_mode, TermStructureExpandModule.contract_metadata),
+        inputs=(
+            EngineModule.engine_mode,
+            ProductSelectionModule.products,
+            required_data_source,
+            required_frequency,
+            required_factor_columns,
+            FactorModule.factor,
+            _warmup_mode_ref,
+            _warmup_window_ref,
+            _fee_mode_ref,
+            _fixed_fee_rate_ref,
+            _margin_mode_ref,
+            _fixed_margin_ratio_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
+            _transaction_fee_source_ref,
+            _allocation_policy_ref,
+            TermStructureExpandModule.contract_metadata,
+        ),
         outputs=(
-            raw_prices, lot_sizes, margin_ratio, settlement_price, volume, historical_field_provider,
+            raw_prices, price_tables, lot_sizes, margin_ratio, settlement_price, volume, historical_field_provider,
         ),
         phase=Phase.PRE_REPLAY, order=40, after=(check_market_data_coverage,),
         description="装载行情数据",
         compute=lambda state, ctx: _load_raw_market_data(state, ctx),
     )
     build_trading_day_resolver: ClassVar[Flow] = Flow(
-        "build_trading_day_resolver", inputs=(raw_prices,), outputs=(trading_day_resolver,),
+        "build_trading_day_resolver",
+        inputs=(raw_prices, historical_field_provider), outputs=(trading_day_resolver,),
         phase=Phase.PRE_REPLAY, order=43, after=(load_raw_market_data,),
         description="建立交易日映射",
         compute=lambda state, ctx: _build_trading_day_resolver(state, ctx),
@@ -269,8 +380,21 @@ class MarketDataModule(ExecutableModule):
     )
     initialize_field_state: ClassVar[Flow] = Flow(
         "initialize_field_state",
-        inputs=(raw_prices, trading_day_resolver),
-        outputs=(historical_field_policy,),
+        inputs=(
+            raw_prices,
+            trading_day_resolver,
+            historical_field_policy,
+            EngineModule.engine_mode,
+            _fee_mode_ref,
+            _fixed_fee_rate_ref,
+            _margin_mode_ref,
+            _fixed_margin_ratio_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
+            _allocation_policy_ref,
+        ),
+        outputs=(historical_field_policy, field_state_baseline, field_change_events),
         phase=Phase.PRE_REPLAY, order=44, after=(build_trading_day_resolver,),
         description="初始化字段状态缓存",
         compute=lambda state, ctx: _initialize_field_state(state, ctx),
@@ -281,19 +405,28 @@ class MarketDataModule(ExecutableModule):
         outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.FIELD_CHANGE, order=0,
         description="处理字段变更事件",
+        event_payload_inputs=("field_change",),
         compute=lambda state, ctx: _handle_field_changes(state, ctx),
     )
     causal_valuation: ClassVar[Flow] = Flow(
-        "causal_valuation", inputs=(raw_prices,), outputs=(),
+        "causal_valuation", inputs=(raw_prices,), outputs=(causal_valuation_table,),
         phase=Phase.PRE_REPLAY, order=45, after=(load_raw_market_data,),
-        description="生成因果估值序列",
+        description="市场价格向前填充",
         compute=lambda state, ctx: _causal_valuation(state, ctx),
     )
 
     lookup_market_snapshot: ClassVar[FlowDefinition] = FlowDefinition(
         "lookup_market_snapshot",
-        inputs=(),
-        outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints, volume),
+        inputs=(_execution_price_basis_ref, price_tables),
+        outputs=(
+            current_prices,
+            current_market_snapshot,
+            current_tradable_status,
+            current_order_constraints,
+            volume,
+            required_frequency,
+            required_factor_columns,
+        ),
         description="读取市场快照",
         input_materialization=True,
         compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
@@ -312,6 +445,7 @@ class MarketDataModule(ExecutableModule):
         name="lookup_current_prices_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
         description="读取订单时点市场快照",
+        event_payload_inputs=("order",),
     )
     lookup_current_prices_on_trade_intent: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
         name="lookup_current_prices_on_trade_intent",
@@ -325,7 +459,17 @@ class MarketDataModule(ExecutableModule):
     )
     lookup_historical_fields: ClassVar[FlowDefinition] = FlowDefinition(
         "lookup_historical_fields",
-        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
+        inputs=(
+            EngineModule.engine_mode,
+            _fee_mode_ref,
+            _fixed_fee_rate_ref,
+            _margin_mode_ref,
+            _fixed_margin_ratio_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
+            CustomProductModule.custom_product_fields,
+        ),
         outputs=(current_historical_fields,),
         description="读取交易规则字段",
         input_materialization=True,
@@ -340,6 +484,7 @@ class MarketDataModule(ExecutableModule):
         name="lookup_historical_fields_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=2,
         description="读取订单交易规则字段",
+        event_payload_inputs=("order",),
     )
     lookup_historical_fields_on_trade_intent: ClassVar[FlowBinding] = lookup_historical_fields.bind(
         name="lookup_historical_fields_on_trade_intent",
@@ -406,12 +551,17 @@ def market_price_tables_for(state) -> dict[str, Any]:
     return market_data_store_for(state).market_price_tables
 
 
+def factor_field_tables_for(state) -> dict[str, Any]:
+    return market_data_store_for(state).factor_field_tables
+
+
 def _resolve_market_data_request(state, ctx) -> None:
     request = _market_data_request(state)
     if "raw_market_data" in request:
         return
     frequencies_by_strategy: dict[Any, DataFreq] = {}
     sources_by_strategy: dict[Any, tuple[str, ...]] = {}
+    factor_columns_by_strategy: dict[Any, tuple[str, ...]] = {}
     for strategy in state.strategy_configs:
         products = list(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
         if not products:
@@ -419,14 +569,21 @@ def _resolve_market_data_request(state, ctx) -> None:
         config = state.config_for(strategy)
         source = _required_data_source_for_strategy(config)
         frequency = _required_frequency_for_strategy(config, products)
+        factor_columns = (
+            _factor_required_columns(config.get(FactorModule.factor))
+            if config.uses_flow("signal_live") else ()
+        )
         sources_by_strategy[strategy] = source
         frequencies_by_strategy[strategy] = frequency
+        factor_columns_by_strategy[strategy] = factor_columns
         ctx.set_for(MarketDataModule.required_data_source, strategy, source)
         ctx.set_for(MarketDataModule.required_frequency, strategy, frequency)
+        ctx.set_for(MarketDataModule.required_factor_columns, strategy, factor_columns)
 
     store = market_data_store_for(state)
     store.required_data_source_by_strategy = dict(sources_by_strategy)
     store.required_frequency_by_strategy = dict(frequencies_by_strategy)
+    store.required_factor_columns_by_strategy = dict(factor_columns_by_strategy)
     unique_sources = {source for source in sources_by_strategy.values()}
     if len(unique_sources) == 1:
         ctx.set(MarketDataModule.required_data_source, next(iter(unique_sources), ()))
@@ -525,14 +682,12 @@ def _infer_required_frequency_from_factor(factor: Any, products: list[Any]) -> D
 
 
 def _desired_factor_frequencies(factor: Any) -> set[DataFreq]:
-    factor_obj = getattr(factor, "underlying_factor", None) or getattr(factor, "_factor", None) or factor
     desired: set[DataFreq] = set()
-    signal_freq = getattr(factor_obj, "freq", None) or getattr(factor_obj, "_freq", None)
+    signal_freq = getattr(factor, "freq", None) or getattr(factor, "_freq", None)
     if signal_freq is not None:
         desired.add(DataFreq(signal_freq))
     expr = (
-        getattr(factor_obj, "_expr", None)
-        or getattr(factor_obj, "expression", None)
+        getattr(factor, "_expr", None)
         or getattr(factor, "expression", None)
     )
     for const_ref in getattr(expr, "const_refs", ()) or ():
@@ -560,12 +715,9 @@ def _check_market_data_coverage(state, ctx) -> None:
     store = market_data_store_for(state)
     if "raw_market_data" in request:
         raw = request["raw_market_data"]
-        store.series_by_product = {
-            product: raw.get("raw_prices")[product]
-            for product in getattr(raw.get("raw_prices"), "columns", [])
-        }
-        store.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
-        store.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+        store.publish_coverage_seed(raw)
+        ctx.set(MarketDataModule.market_data_load_plan, _market_data_coverage_seed_summary(raw))
+        ctx.set(MarketDataModule.excluded_out_of_range_products, _market_data_excluded_products_summary(store.excluded_out_of_range))
         return
     products_by_strategy = _products_by_strategy_from_selection_context(state, ctx)
     products = _products_from_selection_context(state, ctx) or list(request.get("products") or ())
@@ -682,7 +834,51 @@ def _check_market_data_coverage(state, ctx) -> None:
         )
     store.load_plan = load_plan
     store.excluded_out_of_range = tuple(_dedupe_products(excluded_out_of_range))
+    ctx.set(MarketDataModule.market_data_load_plan, _market_data_load_plan_summary(store.load_plan))
+    ctx.set(MarketDataModule.excluded_out_of_range_products, _market_data_excluded_products_summary(store.excluded_out_of_range))
     _record_excluded_out_of_range_products(state, store.excluded_out_of_range)
+
+
+def _market_data_load_plan_summary(load_plan: list[Any]) -> dict[str, Any]:
+    items: dict[str, dict[str, str]] = {}
+    for plan_item in load_plan:
+        product, freq, source = _unpack_market_data_load_plan_item(plan_item)
+        items[str(getattr(product, "name", product))] = {
+            "frequency": str(getattr(freq, "name", freq)),
+            "data_source": _data_source_instance_label(source),
+        }
+    return {"type": "MarketDataLoadPlan", "items": items, "count": len(items)}
+
+
+def _market_data_coverage_seed_summary(raw: dict[str, Any]) -> dict[str, Any]:
+    products: list[str] = []
+    raw_prices = raw.get("raw_prices")
+    raw_price_columns = getattr(raw_prices, "columns", None)
+    for product in list(raw_price_columns) if raw_price_columns is not None else []:
+        product_text = str(product)
+        if product_text not in products:
+            products.append(product_text)
+    price_tables = raw.get("price_tables")
+    if isinstance(price_tables, dict):
+        for table in price_tables.values():
+            table_columns = getattr(table, "columns", None)
+            for product in list(table_columns) if table_columns is not None else []:
+                product_text = str(product)
+                if product_text not in products:
+                    products.append(product_text)
+    items = {
+        product: {"frequency": "provided", "data_source": "raw_market_data"}
+        for product in products
+    }
+    return {"type": "MarketDataLoadPlan", "items": items, "count": len(items)}
+
+
+def _market_data_excluded_products_summary(products: tuple[Any, ...]) -> dict[str, Any]:
+    rows = [
+        {"product": str(getattr(product, "name", product))}
+        for product in products
+    ]
+    return {"type": "MarketDataExcludedProducts", "rows": rows, "count": len(rows)}
 
 
 def _select_required_product_frequency(
@@ -886,10 +1082,14 @@ def _load_raw_market_data(state, ctx) -> None:
         ("upper_limit", DataColumn.UPPER_LIMIT_PRICE.name),
         ("lower_limit", DataColumn.LOWER_LIMIT_PRICE.name),
     )
+    factor_columns = _live_factor_required_columns(state)
     price_series_by_basis: dict[str, dict[Any, pd.Series]] = {
         basis: {} for basis, _column in price_columns
     }
     volume_series_by_product: dict[Any, pd.Series] = {}
+    factor_series_by_column: dict[str, dict[Any, pd.Series]] = {
+        column: {} for column in factor_columns
+    }
     missing_products: list[str] = []
     store = market_data_store_for(state)
     term_structure_contracts = _term_structure_concrete_contracts(state, ctx)
@@ -906,8 +1106,11 @@ def _load_raw_market_data(state, ctx) -> None:
 
     for plan_item in store.load_plan:
         product, freq, source = _unpack_market_data_load_plan_item(plan_item)
+        required_columns = list(dict.fromkeys(
+            [column for _basis, column in price_columns] + list(factor_columns)
+        ))
         requested_columns = (
-            [column for _basis, column in price_columns]
+            required_columns
             + [column for _basis, column in optional_price_columns]
             + [DataColumn.VOLUME.name]
         )
@@ -925,7 +1128,7 @@ def _load_raw_market_data(state, ctx) -> None:
             try:
                 data_view = getattr(product, freq.name)
                 df = data_view.get_and_adjust_cols(
-                    [column for _basis, column in price_columns],
+                    required_columns,
                     copy=False,
                     start_dt=start_dt,
                     end_dt=end_dt,
@@ -955,6 +1158,13 @@ def _load_raw_market_data(state, ctx) -> None:
         for basis, column in optional_price_columns:
             if column in df.columns:
                 price_series_by_basis.setdefault(basis, {})[product] = df[column]
+        for column in factor_columns:
+            if column in df.columns:
+                factor_series_by_column[column][product] = df[column]
+            else:
+                missing_products.append(
+                    f"{getattr(product, 'name', product)}(缺少因子字段 {column})"
+                )
         if DataColumn.VOLUME.name in df.columns:
             volume_series_by_product[product] = df[DataColumn.VOLUME.name]
     if missing_products:
@@ -968,9 +1178,15 @@ def _load_raw_market_data(state, ctx) -> None:
     }
     if "close" not in price_tables:
         price_tables["close"] = raw_prices
+    factor_field_tables = {
+        column: pd.DataFrame(values)
+        for column, values in factor_series_by_column.items()
+        if values
+    }
     raw = {
         "raw_prices": raw_prices,
         "price_tables": price_tables,
+        "factor_field_tables": factor_field_tables,
         "settlement_price": price_tables.get("settlement"),
         "historical_field_provider": load_market_rule_field_provider(
             transaction_fee_source=_transaction_fee_source_for_state(state),
@@ -982,6 +1198,29 @@ def _load_raw_market_data(state, ctx) -> None:
         "volume": volume,
     }
     _publish_raw_market_data(state, ctx, raw)
+
+
+def _live_factor_required_columns(state) -> tuple[str, ...]:
+    """Return exact DataColumn names read by active incremental factors."""
+    columns: list[str] = []
+    for values in market_data_store_for(state).required_factor_columns_by_strategy.values():
+        columns.extend(values)
+    return tuple(dict.fromkeys(columns))
+
+
+def _factor_required_columns(factor: Any) -> tuple[str, ...]:
+    expression = getattr(factor, "_source_expr", factor)
+    column_refs = getattr(expression, "column_refs", None)
+    if column_refs is None:
+        return ()
+    refs = column_refs() if callable(column_refs) else column_refs
+    columns: list[str] = []
+    for ref in refs:
+        column = getattr(ref, "column", None)
+        name = getattr(column, "name", str(column or ""))
+        if name:
+            columns.append(str(name))
+    return tuple(dict.fromkeys(columns))
 
 
 def _unpack_market_data_load_plan_item(plan_item: Any) -> tuple[Any, Any, Any | None]:
@@ -1042,7 +1281,7 @@ def _initialize_field_state(state, ctx) -> None:
     raw_policy = getattr(store, "historical_field_policy", None) or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value
     policy = _historical_field_policy_for_engine(state, raw_policy)
     ctx.set(MarketDataModule.historical_field_policy, policy)
-    store.historical_field_policy = policy
+    store.publish_historical_field_policy(policy)
     field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
     instruments = list(raw_prices.columns)
     all_timestamps = signal_timestamps(raw_prices)
@@ -1094,8 +1333,14 @@ def _initialize_field_state(state, ctx) -> None:
         inst_name = str(getattr(instrument, "name", instrument) or "")
         pname = product_to_parent_key.get(inst_name, inst_name)
         store.field_state_store[inst_name] = dict(parent_baselines.get(pname, {}))
+    ctx.set(MarketDataModule.field_state_baseline, {
+        inst_name: dict(values)
+        for inst_name, values in store.field_state_store.items()
+        if inst_name in product_to_parent_key
+    })
     # Register FIELD_CHANGE events from FieldHistory provider's record frame
     # This replaces the old per-timestamp bulk query with incremental events
+    ctx.set(MarketDataModule.field_change_events, [])
     try:
         provider_frame = provider.frame
         if provider_frame is not None and not provider_frame.empty:
@@ -1138,6 +1383,7 @@ def _initialize_field_state(state, ctx) -> None:
                 mask &= (pf_ts >= run_start) & (pf_ts <= run_end)
                 
                 change_records = pf[mask]
+                field_change_drafts: list[dict[str, object]] = []
                 if not change_records.empty:
                     # Group by timestamp then by instrument
                     for (change_ts,), ts_group in change_records.groupby('effective_timestamp'):
@@ -1156,6 +1402,10 @@ def _initialize_field_state(state, ctx) -> None:
                                         changes[product_key] = {}
                                     changes[product_key][field] = value
                         if changes:
+                            field_change_drafts.append({
+                                "timestamp": str(_pd.Timestamp(change_ts)),
+                                "products": changes,
+                            })
                             for strategy in getattr(state, "strategy_configs", {}):
                                 ctx._event_queue.push_event(EventDraft(
                                     kind=EventKind.FIELD_CHANGE,
@@ -1163,6 +1413,7 @@ def _initialize_field_state(state, ctx) -> None:
                                     strategy=strategy,
                                     payload={"changes": changes},
                                 ))
+                ctx.set(MarketDataModule.field_change_events, field_change_drafts)
     except Exception:
         import traceback
         ctx.set(MarketDataModule.historical_field_policy, "fallback")
@@ -1173,8 +1424,7 @@ def _handle_field_changes(state, ctx) -> None:
     """Process FIELD_CHANGE events: update field_state_store with new values."""
     store = market_data_store_for(state)
     for strategy in ctx.active_strategies:
-        for draft in ctx.payloads_for(strategy):
-            payload = getattr(draft, "payload", None)
+        for payload in ctx.payloads_for(strategy, kind="field_change"):
             if not isinstance(payload, dict):
                 continue
             changes = payload.get("changes", {})
@@ -1222,6 +1472,7 @@ def _transaction_fee_source_for_ledger_config(ledger_config=None) -> str:
 
 def _publish_raw_market_data(state, ctx, raw: dict[str, Any]) -> None:
     ctx.set(MarketDataModule.raw_prices, raw.get("raw_prices"))
+    ctx.set(MarketDataModule.price_tables, raw.get("price_tables") or {"close": raw.get("raw_prices")})
     ctx.set(MarketDataModule.lot_sizes, raw.get("lot_sizes", {}))
     ctx.set(MarketDataModule.margin_ratio, raw.get("margin_ratio", {}))
     ctx.set(MarketDataModule.settlement_price, raw.get("settlement_price"))
@@ -1497,9 +1748,9 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
 def _causal_valuation(state, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
     store = market_data_store_for(state)
-    store.current_prices_table = raw_prices.ffill()
-    store.market_snapshot_cache.clear()
-    store.table_values_cache.clear()
+    causal_prices = raw_prices.ffill()
+    store.publish_causal_valuation(causal_prices)
+    ctx.set(MarketDataModule.causal_valuation_table, causal_prices)
 
 
 def _set_current_market_snapshot(state, ctx) -> None:
@@ -1508,6 +1759,14 @@ def _set_current_market_snapshot(state, ctx) -> None:
     ctx.set(MarketDataModule.current_market_snapshot, snapshot)
     ctx.set(MarketDataModule.current_prices, prices)
     ctx.set(MarketDataModule.volume, snapshot.get("volume", {}))
+    store = market_data_store_for(state)
+    for strategy in ctx.active_strategies:
+        frequency = store.required_frequency_by_strategy.get(strategy)
+        if frequency is not None:
+            ctx.set_for(MarketDataModule.required_frequency, strategy, frequency)
+        columns = store.required_factor_columns_by_strategy.get(strategy)
+        if columns is not None:
+            ctx.set_for(MarketDataModule.required_factor_columns, strategy, columns)
     if getattr(ctx, "event_kind", None) is EventKind.LEDGER:
         ctx.set(MarketDataModule.current_tradable_status, {})
         ctx.set(MarketDataModule.current_order_constraints, {})
@@ -1766,6 +2025,12 @@ def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict
         values = _table_values_at_cached(state, table, timestamp, asof=True)
         if values:
             snapshot[basis] = values
+    for column, table in factor_field_tables_for(state).items():
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        values = _table_values_at_cached(state, table, timestamp, asof=True)
+        if values:
+            snapshot[column] = values
     volume = current_volume_at(state, timestamp)
     if volume:
         snapshot["volume"] = volume
@@ -1790,6 +2055,12 @@ def market_snapshot_for_index_key(state, index_key: object) -> dict[str, dict[An
         values = _table_values_at_index_key(table, index_key)
         if values:
             snapshot[basis] = values
+    for column, table in factor_field_tables_for(state).items():
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        values = _table_values_at_index_key(table, index_key)
+        if values:
+            snapshot[column] = values
     volume_table = volume_table_for(state)
     if isinstance(volume_table, pd.DataFrame) and not volume_table.empty:
         values = _table_values_at_index_key(volume_table, index_key)

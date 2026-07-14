@@ -15,7 +15,6 @@ from .contracts import (
     TabMountPoint,
 )
 from .registry import ApplicationSettings, BacktestSettingRegistry
-from tools.products.product_path_selection import ProductPathSelection
 
 RUN_WINDOW_KEYS = (
     "start_date",
@@ -151,234 +150,6 @@ def register_run_window_base(
         module="run_window", chip_template="样本切分: {value}",
         serialization={"display_order": 70},
         **tab_kwargs,
-    ))
-
-
-def register_product_path_selection_base(
-    app: ApplicationSettings,
-    *,
-    tab: str = "product_path_selection",
-    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
-) -> None:
-    app.register_setting(SettingDefinition(
-        "product_path_selection",
-        "产品路径",
-        tab,
-        "select",
-        None,
-        scope_policy,
-        module="product_selection",
-        chip_template="产品路径: {value}",
-        help_text="选择或内联一组产品路径；若引用用户产品组模板，则保存产品组模板 id。",
-        info_overlay={"type": "product_path_selection_products"},
-        instance_class=ProductPathSelection,
-        serialization={
-            "kind": "product_path_selection",
-            "display_order": 20,
-            # 模块内单选为空时回退到页面共享的 product_path_selection。
-            "shared_page_field": "product_path_selection",
-            "product_group_reference_keys": (
-                "product_group_template_id",
-                "path_id",
-            ),
-            "product_group_source_type": "user_product_group_template",
-            "id_keys": (
-                "product_path_selection_id",
-                "selection_id",
-                "id",
-            ),
-            "manual_path_keys": (
-                "paths",
-                "selected_paths",
-            ),
-            "product_group_fields": (
-                "product_path_selection_id",
-            ),
-            "manual_fields": (
-                "product_path_selection_id",
-                "paths",
-            ),
-        },
-        tab_label="产品路径",
-        tab_order=30,
-    ))
-
-
-def register_product_path_selections_base(
-    app: ApplicationSettings,
-    *,
-    tab: str = "product_path_selection",
-    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
-) -> None:
-    app.register_setting(SettingDefinition(
-        "product_path_selections",
-        "产品路径选择",
-        tab,
-        "custom",
-        [],
-        scope_policy,
-        module="product_selection",
-        chip_template="产品路径选择: {value}",
-        help_text="从产品路径候选列表多选；为空时回退到候选列表（先本模块本地候选，再页面全局候选）。",
-        info_overlay={"type": "product_path_selection_products"},
-        instance_class=ProductPathSelection,
-        serialization={
-            "kind": "product_path_selection_list",
-            "display_order": 30,
-            "item_kind": "product_path_selection",
-            "multi": True,
-            "candidate_field": "product_path_candidates",
-            # 多选为空时回退到候选列表本身：先本地 candidate_field，再其页面全局候选
-            # （由 product_path_candidate_list 的 fallback_policy 声明 local→global）。
-            "fallback": "candidates",
-            "id_keys": (
-                "product_path_selection_id",
-                "selection_id",
-                "id",
-            ),
-        },
-    ))
-
-
-def register_product_path_candidate_list_base(
-    app: ApplicationSettings,
-    *,
-    tab: str = "product_path_selection",
-    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
-) -> None:
-    app.register_setting(SettingDefinition(
-        "product_path_candidates",
-        "产品路径候选列表",
-        tab,
-        "custom",
-        [],
-        scope_policy,
-        module="product_selection",
-        chip_template="产品路径候选: {value}",
-        help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场路径组。",
-        serialization={
-            "kind": "product_path_candidate_list",
-            "display_order": 10,
-            "item_kind": "product_path_selection",
-            "shared_page_field": "product_path_candidates",
-            "selection_field": "product_path_selection",
-            "product_group_source": "user_product_group_templates",
-            "manual_candidate_source": "runtime_manual_path_group",
-            "fallback_policy": (
-                "copy_page_candidates",
-                "load_user_product_groups_when_page_empty",
-            ),
-            "mutation_scope": {
-                "page": "page_candidates_only",
-                "module": "module_candidates_only",
-            },
-            "persist_manual_candidates": False,
-            "dedupe_product_groups": True,
-            "allow_duplicate_manual_candidates": True,
-        },
-        tab_label="产品路径",
-        tab_order=30,
-    ))
-
-
-def register_factor_candidate_list_base(
-    app: ApplicationSettings,
-    *,
-    tab: str = "factor",
-    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
-) -> None:
-    app.register_setting(SettingDefinition(
-        "factor_candidates",
-        "因子候选列表",
-        tab,
-        "custom",
-        [],
-        scope_policy,
-        module="factor_execution",
-        chip_template="因子候选: {value}",
-        help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场因子。",
-        serialization={
-            "kind": "factor_candidate_list",
-            "display_order": 10,
-            "item_kind": "factor",
-            "shared_page_field": "factor_candidates",
-            "selection_field": "factor",
-            "factor_library_source": "user_factor_library_overview",
-            "fallback_policy": (
-                "copy_page_candidates",
-                "load_factor_library_when_page_empty",
-            ),
-            "id_keys": ("alias", "name", "factor_alias"),
-            "label_keys": ("alias", "name", "label"),
-            "mutation_scope": {
-                "page": "page_candidates_only",
-                "module": "module_candidates_only",
-            },
-        },
-        tab_label="因子执行",
-        tab_order=20,
-    ))
-
-
-def register_factor_selection_base(
-    app: ApplicationSettings,
-    *,
-    tab: str = "factor",
-    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
-) -> None:
-    app.register_setting(SettingDefinition(
-        "factor",
-        "因子",
-        tab,
-        "select",
-        "",
-        scope_policy,
-        module="factor_execution",
-        chip_template="因子: {value}",
-        info_overlay={"type": "factor_info"},
-        serialization={
-            "kind": "factor_selection",
-            "display_order": 20,
-            "candidate_field": "factor_candidates",
-            # 模块内单选为空时回退到页面共享的 factor。
-            "shared_page_field": "factor",
-            "id_keys": ("alias", "name", "factor_alias"),
-            "label_keys": ("alias", "name", "label"),
-        },
-        tab_label="因子执行",
-        tab_order=20,
-    ))
-
-
-def register_factor_selections_base(
-    app: ApplicationSettings,
-    *,
-    tab: str = "factor",
-    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
-) -> None:
-    app.register_setting(SettingDefinition(
-        "factor_selections",
-        "因子选择",
-        tab,
-        "custom",
-        [],
-        scope_policy,
-        module="factor_execution",
-        chip_template="因子选择: {value}",
-        help_text="从因子候选列表多选；为空时回退到候选列表（先本模块本地候选，再页面全局候选）。",
-        info_overlay={"type": "factor_info"},
-        serialization={
-            "kind": "factor_selection_list",
-            "display_order": 30,
-            "item_kind": "factor",
-            "multi": True,
-            "candidate_field": "factor_candidates",
-            # 多选为空时回退到候选列表本身：先本地 candidate_field，再其页面全局候选
-            # （由 factor_candidate_list 的 fallback_policy 声明 local→global）。
-            "fallback": "candidates",
-            "id_keys": ("alias", "name", "factor_alias"),
-            "label_keys": ("alias", "name", "label"),
-        },
     ))
 
 
@@ -567,10 +338,25 @@ def single_factor_page_settings() -> ApplicationSettings:
         chip_template="模板: {value}",
         serialization={"kind": "setting_template"},
     ))
-    register_factor_candidate_list_base(app, tab="factors")
-    register_factor_selection_base(app, tab="factors")
-    register_product_path_candidate_list_base(app)
-    register_product_path_selection_base(app)
+    # Field schemas come from executable modules. This page only composes
+    # their page-specific tabs and local-only scope.
+    from tools.testers.backtest.modules.factor import FactorModule
+    from tools.testers.backtest.modules.product_selection import ProductSelectionModule
+    from tools.testers.backtest.modules.registry import register_module_field_settings
+
+    register_module_field_settings(
+        app,
+        (FactorModule, ProductSelectionModule),
+        setting_module_keys={FactorModule: "factor_execution"},
+        tab_keys={FactorModule: "factors"},
+        scope_policy_overrides={
+            "factor_candidates": ScopePolicy.LOCAL_ONLY.value,
+            "factor": ScopePolicy.LOCAL_ONLY.value,
+            "product_path_candidates": ScopePolicy.LOCAL_ONLY.value,
+            "product_path_selection": ScopePolicy.LOCAL_ONLY.value,
+        },
+        add_missing_modules=False,
+    )
     register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
     # 单因子页只有"因子家族测试设置"这一个扁平面板（无列表项）。

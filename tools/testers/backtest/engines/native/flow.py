@@ -17,9 +17,23 @@ from .fields import FieldRef
 
 
 class Phase(str, Enum):
-    PRE_REPLAY = "pre_replay"     # runs once before the replay loop, batched
-    PER_EVENT = "per_event"       # runs once per dispatched event of its event_kind
-    POST_REPLAY = "post_replay"   # runs once after the replay loop, batched
+    def __new__(cls, value: str, label: str):
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.label = label
+        return member
+
+    PRE_REPLAY = ("pre_replay", "回放准备")
+    PER_EVENT = ("per_event", "事件回放")
+    POST_REPLAY = ("post_replay", "结果整理")
+
+
+def phase_label(value: Phase | str) -> str:
+    """Return the label declared by ``Phase`` for a phase value."""
+    try:
+        return Phase(value).label
+    except ValueError:
+        return str(value)
 
 
 @dataclass(frozen=True)
@@ -37,6 +51,7 @@ class FlowDefinition:
     # FlowContext. It is still scheduler-visible for dependency ordering
     # and no-lookahead guarantees; UIs may group or hide it.
     input_materialization: bool = False
+    event_payload_inputs: tuple[str, ...] = ()
 
     @property
     def qualified_name(self) -> str:
@@ -58,6 +73,7 @@ class FlowDefinition:
         description: str | None = None,
         strategy_scoped: bool | None = None,
         input_materialization: bool | None = None,
+        event_payload_inputs: tuple[str, ...] | None = None,
     ) -> "FlowBinding":
         return FlowBinding(
             definition=self,
@@ -70,6 +86,7 @@ class FlowDefinition:
             description=description,
             strategy_scoped=strategy_scoped,
             input_materialization=input_materialization,
+            event_payload_inputs=event_payload_inputs,
         )
 
     def __repr__(self) -> str:
@@ -88,6 +105,7 @@ class FlowBinding:
     description: str | None = None
     strategy_scoped: bool | None = None
     input_materialization: bool | None = None
+    event_payload_inputs: tuple[str, ...] | None = None
 
     @property
     def definition_name(self) -> str:
@@ -133,6 +151,12 @@ class FlowBinding:
             return self.input_materialization
         return self.definition.input_materialization
 
+    @property
+    def effective_event_payload_inputs(self) -> tuple[str, ...]:
+        if self.event_payload_inputs is not None:
+            return self.event_payload_inputs
+        return self.definition.event_payload_inputs
+
     def __repr__(self) -> str:
         return self.qualified_name
 
@@ -163,6 +187,7 @@ class Flow:
     # Same meaning as FlowDefinition.input_materialization for legacy
     # single-binding Flow declarations.
     input_materialization: bool = False
+    event_payload_inputs: tuple[str, ...] = ()
 
     @property
     def definition_name(self) -> str:
@@ -187,6 +212,7 @@ class Flow:
         name: str | None = None,
         description: str | None = None,
         strategy_scoped: bool | None = None,
+        event_payload_inputs: tuple[str, ...] | None = None,
     ) -> FlowBinding:
         definition = FlowDefinition(
             self.name,
@@ -197,6 +223,7 @@ class Flow:
             description=self.description,
             strategy_scoped=self.strategy_scoped,
             input_materialization=self.input_materialization,
+            event_payload_inputs=self.event_payload_inputs,
         )
         return definition.bind(
             phase=phase or self.phase,
@@ -207,6 +234,7 @@ class Flow:
             name=name,
             description=description,
             strategy_scoped=strategy_scoped,
+            event_payload_inputs=event_payload_inputs,
         )
 
     def __repr__(self) -> str:

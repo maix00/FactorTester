@@ -51,33 +51,85 @@ class LedgerModule(ExecutableModule):
     initial_capital_major: ClassVar[FieldRef[float]] = CashPoolModule.initial_capital_major
     base_currency: ClassVar[FieldRef[str]] = CashPoolModule.base_currency
     currency_conversion_fee_rate: ClassVar[FieldRef[float]] = CashPoolModule.currency_conversion_fee_rate
+    _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
+    _fixed_fee_rate_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_fee_rate", owner="FeeModule")
+    _quantity_rounding_policy_ref: ClassVar[FieldRef[str]] = FieldRef("quantity_rounding_policy", owner="OrderConstructModule")
+    _engine_mode_ref: ClassVar[FieldRef[str]] = FieldRef("engine_mode", owner="EngineModule")
+    _accounting_mode_ref: ClassVar[FieldRef[str]] = FieldRef("accounting_mode", owner="TradingRuleModule")
+    _cost_basis_method_ref: ClassVar[FieldRef[str]] = FieldRef("cost_basis_method", owner="TradingRuleModule")
+    _daily_mark_to_market_enabled_ref: ClassVar[FieldRef[bool]] = FieldRef("daily_mark_to_market_enabled", owner="TradingRuleModule")
+    _use_int_position_ref: ClassVar[FieldRef[bool]] = FieldRef("use_int_position", owner="TradingRuleModule")
+    _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
+    _fixed_margin_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_margin_ratio", owner="MarginModule")
+    _margin_requirement_ref: ClassVar[FieldRef[float]] = FieldRef("margin_requirement", owner="MarginModule")
+    _margin_reserved_ref: ClassVar[FieldRef[float]] = FieldRef("margin_reserved", owner="MarginModule")
+    _margin_deficit_ref: ClassVar[FieldRef[float]] = FieldRef("margin_deficit", owner="MarginModule")
+    _margin_excess_ref: ClassVar[FieldRef[float]] = FieldRef("margin_excess", owner="MarginModule")
 
-    fields: ClassVar[dict[str, FieldDefinition]] = {}
+    fields: ClassVar[dict[str, FieldDefinition]] = {
+        "positions": FieldDefinition(public=False, display_value_kind="positions"),
+    }
 
     initialize_ledgers: ClassVar[Flow] = Flow(
         "initialize_ledgers",
-        inputs=(EngineModule.engine_mode, TradingRuleModule.accounting_mode, TradingRuleModule.cost_basis_method,
-                 TradingRuleModule.use_int_position, MinorUnitModule.use_minor_units, ProductSelectionModule.products,
-                 StrategyBookModule.strategy_book_mode),
-        outputs=(cash, positions),
+        inputs=(_engine_mode_ref, _accounting_mode_ref, _cost_basis_method_ref,
+                 _daily_mark_to_market_enabled_ref, _use_int_position_ref,
+                 MinorUnitModule.use_minor_units, initial_capital_major, base_currency,
+                 ProductSelectionModule.products, StrategyBookModule.strategy_book_mode, _margin_mode_ref),
+        outputs=(cash, positions, _margin_requirement_ref, _margin_reserved_ref, _margin_deficit_ref, _margin_excess_ref),
         phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
         description="初始化交易账本",
         compute=lambda state, ctx: _initialize_ledgers(state, ctx),
     )
     equity_on_signal: ClassVar[Flow] = Flow(
-        "equity_on_signal", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields, cash, positions),
+        "equity_on_signal",
+        inputs=(
+            MarketDataModule.current_prices,
+            MarketDataModule.current_historical_fields,
+            cash,
+            positions,
+            _engine_mode_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
+        ),
         outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         description="计算信号时点权益",
         order=10, compute=lambda state, ctx: _basic_equity(state, ctx),
     )
     apply_order_fill: ClassVar[Flow] = Flow(
-        "apply_order_fill", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields), outputs=(positions, cash),
+        "apply_order_fill",
+        inputs=(
+            MarketDataModule.current_prices,
+            MarketDataModule.current_historical_fields,
+            _engine_mode_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _use_int_position_ref,
+            _quantity_rounding_policy_ref,
+            _fee_mode_ref,
+            _fixed_fee_rate_ref,
+            _margin_mode_ref,
+            _fixed_margin_ratio_ref,
+        ),
+        outputs=(positions, cash, _margin_reserved_ref, _margin_deficit_ref, _margin_excess_ref),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
         description="成交落账",
+        event_payload_inputs=("order",),
         compute=lambda state, ctx: _apply_order_fill(state, ctx),
     )
     equity_on_order: ClassVar[Flow] = Flow(
-        "equity_on_order", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields, cash, positions),
+        "equity_on_order",
+        inputs=(
+            MarketDataModule.current_prices,
+            MarketDataModule.current_historical_fields,
+            cash,
+            positions,
+            _engine_mode_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
+        ),
         outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
         description="计算订单后权益",
         order=900, after=(apply_order_fill,), compute=lambda state, ctx: _basic_equity(state, ctx),

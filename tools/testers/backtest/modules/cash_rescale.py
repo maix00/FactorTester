@@ -22,8 +22,11 @@ from tools.testers.backtest.modules.market_data import MarketDataModule, contrac
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.cash_pool import cash_for_ledger
-from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
+from tools.testers.backtest.modules.strategy_book import StrategyBookModule, available_cash_for_ledger
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule
+from tools.testers.backtest.modules.margin import MarginModule
+from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 
 
 class LedgerCashConstraintModule(ExecutableModule):
@@ -32,7 +35,23 @@ class LedgerCashConstraintModule(ExecutableModule):
 
     constrain_to_ledger_cash: ClassVar[Flow] = Flow(
         "constrain_to_ledger_cash",
-        inputs=(OrderConstructModule.orders, MarketDataModule.current_prices, MarketDataModule.current_historical_fields),
+        inputs=(
+            OrderConstructModule.orders,
+            EngineModule.engine_mode,
+            MarketDataModule.current_prices,
+            MarketDataModule.current_historical_fields,
+            FeeModule.fee_mode,
+            FeeModule.fixed_fee_rate,
+            MarginModule.margin_mode,
+            MarginModule.fixed_margin_ratio,
+            TradingRuleModule.accounting_mode,
+            TradingRuleModule.cost_basis_method,
+            TradingRuleModule.daily_mark_to_market_enabled,
+            OrderConstructModule.quantity_rounding_policy,
+            TradingRuleModule.use_int_position,
+            StrategyBookModule.cash_reserve_ratio,
+            StrategyBookModule.cash_reserve_major,
+        ),
         outputs=(OrderConstructModule.orders,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=35,  # between construct_orders (30) and
@@ -45,13 +64,29 @@ class LedgerCashConstraintModule(ExecutableModule):
     )
     constrain_execution_to_ledger_cash: ClassVar[Flow] = Flow(
         "constrain_execution_to_ledger_cash",
-        inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields),
+        inputs=(
+            MarketDataModule.current_prices,
+            MarketDataModule.current_historical_fields,
+            EngineModule.engine_mode,
+            FeeModule.fee_mode,
+            FeeModule.fixed_fee_rate,
+            MarginModule.margin_mode,
+            MarginModule.fixed_margin_ratio,
+            TradingRuleModule.accounting_mode,
+            TradingRuleModule.cost_basis_method,
+            TradingRuleModule.daily_mark_to_market_enabled,
+            OrderConstructModule.quantity_rounding_policy,
+            TradingRuleModule.use_int_position,
+            StrategyBookModule.cash_reserve_ratio,
+            StrategyBookModule.cash_reserve_major,
+        ),
         outputs=(OrderConstructModule.orders,),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER,
         order=8,
         after=(FeeModule.resolve_fee_cost,),
         description="成交现金约束",
+        event_payload_inputs=("order",),
         compute=lambda state, ctx: constrain_order_batch_to_execution_cash(state, ctx),
     )
 

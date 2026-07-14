@@ -42,7 +42,7 @@ from tools.testers.backtest.modules.market_data import (
 )
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
-from tools.testers.backtest.modules.engine import bar_price_visibility_timestamp
+from tools.testers.backtest.modules.engine import EngineModule, bar_price_visibility_timestamp
 from tools.testers.backtest.modules.strategy_book import (
     StrategyIntentPolicy,
     strategy_book_store_for,
@@ -97,7 +97,7 @@ class GroupMembershipModule(TargetStrategyModule):
         "group_index": FieldDefinition(
             public=True, label="分组", default=1, frontend_only_default=True, control_template="number", tab="group_strategy",
             chip_template="分组: {value}", tab_label="分组数量", tab_order=90,
-            scope_policy="group_only",
+            scope_policy="group_only", display_offset=1,
         ),
         "execution_timing": FieldDefinition(
             public=False, label="成交时机", default="next_bar", control_template="select", tab="order",
@@ -136,6 +136,7 @@ class GroupMembershipModule(TargetStrategyModule):
             chip_template="预热: {value}", tab_label="目标分配", tab_order=60,
         ),
         "product_mask_names": FieldDefinition(public=False, label="品种范围", default=None),
+        "dispatched_order_events": FieldDefinition(public=False, display_value_kind="event_draft_table"),
     }
 
     group_quantile_membership: ClassVar[Flow] = Flow(
@@ -143,6 +144,14 @@ class GroupMembershipModule(TargetStrategyModule):
         inputs=(
             FactorSignalModule.signal_value, split_count, group_index,
             MarketDataModule.current_historical_fields,
+            MarketDataModule.current_prices,
+            MarketDataModule.current_tradable_status,
+            position_policy,
+            rebalance_trigger,
+            allocation_policy,
+            volatility_lookback,
+            volatility_warmup,
+            product_mask_names,
         ),
         outputs=(target_weights, TargetStrategyModule.trade_intent),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
@@ -150,7 +159,18 @@ class GroupMembershipModule(TargetStrategyModule):
         order=10, compute=lambda state, ctx: _group_quantile_membership(state, ctx),
     )
     schedule_order_execution: ClassVar[Flow] = Flow(
-        "schedule_order_execution", inputs=(OrderConstructModule.orders,), outputs=(),
+        "schedule_order_execution",
+        inputs=(
+            OrderConstructModule.orders,
+            execution_timing,
+            execution_delay_bars,
+            OrderExecutionModule.execution_price_basis,
+            EngineModule.engine_mode,
+            EngineModule.bar_open_visibility_delay,
+            MarketDataModule.required_frequency,
+            MarketDataModule.price_tables,
+        ),
+        outputs=(dispatched_order_events,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=40,
         after=(OrderConstructModule.construct_orders,),
         description="登记订单执行事件",

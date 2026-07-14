@@ -88,6 +88,8 @@ class FieldDefinition:
         # (optionally selected by `default_when`), not a user override.
     default_when: dict[str, dict[Any, Any]] | None = None
     options: tuple[tuple[str, str], ...] = ()  # (value, label) pairs for select controls
+    display_offset: int = 0  # presentation-only numeric offset declared by the field owner
+    display_value_kind: str | None = None  # Field-value display renderer hint owned by the field definition
 
 
 class ExecutableModule:

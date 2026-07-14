@@ -254,6 +254,43 @@ def _default_value_for_field(
     return fd.default
 
 
+def _field_visible_for_materialization(
+    fd: Any,
+    resolved: Mapping[str, Any],
+    materialized: Mapping[Any, Any],
+    entries: list[tuple[str, Any, Any, frozenset[str]]],
+) -> bool:
+    """Return whether a missing field's backend default should be materialized.
+
+    ``visible_when`` is not only a UI concern for ledger-owned fields.  Hidden
+    defaults such as fixed_fee_rate=0.0 when fee_mode=auto, or
+    fixed_margin_ratio=1.0 when margin_mode=auto, are stale control defaults,
+    not active ledger inputs.  Explicit values are handled before this helper;
+    this only gates automatic default materialization.
+    """
+    visible_when = getattr(fd, "visible_when", None)
+    if not visible_when:
+        return True
+    values_by_name = dict(resolved)
+    fields_by_name = {field_name: field_fd for field_name, _ref, field_fd, _flows in entries}
+    refs_by_name = {field_name: ref for field_name, ref, _field_fd, _flows in entries}
+    for field_name, ref in refs_by_name.items():
+        if ref in materialized:
+            values_by_name[field_name] = materialized[ref]
+    for dep_key, allowed_values in visible_when.items():
+        dep_name = str(dep_key)
+        if dep_name in values_by_name:
+            dep_value = values_by_name[dep_name]
+        elif dep_name in fields_by_name:
+            dep_value = _default_value_for_field(fields_by_name[dep_name], resolved, materialized, entries)
+        else:
+            dep_value = None
+        allowed = set(allowed_values) if isinstance(allowed_values, (list, tuple, set)) else {allowed_values}
+        if dep_value not in allowed and str(dep_value) not in {str(item) for item in allowed}:
+            return False
+    return True
+
+
 def build_strategy_configs(
     resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
     *,
@@ -315,7 +352,7 @@ def apply_strategy_configs(
     book = strategy_book or StrategyBookSimple()
     resolved = {str(alias): dict(settings) for alias, settings in resolved_settings_by_alias.items()}
     strategy_objects = {alias: Strategy(alias=alias) for alias in resolved}
-    materialize_strategy_book_store(state, book, strategy_objects)
+    materialize_strategy_book_store(state, book, strategy_objects, resolved)
     _resolve_cash_pool_configs(resolved, state=state, strategies_by_alias=strategy_objects, strategy_book=book)
     state.ledger_configs = _resolve_ledger_configs(
         resolved,
@@ -401,6 +438,7 @@ def _resolve_ledger_configs(
             key: settings[key]
             for key in _LEDGER_OWNED_SETTING_NAMES
             if key in settings
+            and _ledger_owned_setting_should_materialize(key, settings[key], settings, entries)
         }
         default_config = ledger_config_from_mapping({
             key: value
@@ -466,6 +504,14 @@ def _materialized_ledger_owned_settings(
         if field_name not in _LEDGER_OWNED_SETTING_NAMES:
             continue
         if field_name in resolved:
+            if not _ledger_owned_setting_should_materialize(
+                field_name,
+                resolved[field_name],
+                resolved,
+                entries,
+                materialized_refs,
+            ):
+                continue
             value = resolved[field_name]
         else:
             if field_name in _LEDGER_INFERRED_SETTING_NAMES:
@@ -478,10 +524,34 @@ def _materialized_ledger_owned_settings(
                 )
             if fd.frontend_only_default:
                 continue
+            if not _field_visible_for_materialization(fd, resolved, materialized_refs, entries):
+                continue
             value = _default_value_for_field(fd, resolved, materialized_refs, entries)
         values[field_name] = value
         materialized_refs[ref] = value
     return values
+
+
+def _ledger_owned_setting_should_materialize(
+    field_name: str,
+    value: Any,
+    resolved: Mapping[str, Any],
+    entries: list[tuple[str, Any, Any, frozenset[str]]],
+    materialized: Mapping[Any, Any] | None = None,
+) -> bool:
+    for candidate_name, _ref, fd, _owner_flow_names in entries:
+        if candidate_name == field_name:
+            materialized_values = materialized or {}
+            if _field_visible_for_materialization(fd, resolved, materialized_values, entries):
+                return True
+            if value == _default_value_for_field(fd, resolved, materialized_values, entries):
+                return False
+            visible_when = getattr(fd, "visible_when", None) or {}
+            raise ValueError(
+                f"ledger-owned field {field_name!r} is only valid when {visible_when!r}; "
+                f"got {value!r} under current settings"
+            )
+    return True
 
 
 def _raise_on_conflicting_ledger_config(left: LedgerConfig, right: LedgerConfig, *, ledger_id: str, source: str) -> None:

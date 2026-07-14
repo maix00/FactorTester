@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+import pytest
+
+from tools.data.types import DataColumn
+from tools.factors import FactorFamily
+from tools.factors.FactorExpr import ColumnRef
+from tools.parameters import FactorParam, WindowParam
+
+
+class _AliasFamily(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        window = WindowParam("AliasWindow", default_value="1d")
+        return ColumnRef(DataColumn.CLOSE).rolling(window).mean()
+
+
+class _NestedAliasFamily(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        nested = FactorParam("NestedFactor", default_value=None)
+        return nested + ColumnRef(DataColumn.CLOSE)
+
+
+def test_factor_family_parses_alias_and_creates_one_off_factor() -> None:
+    family = _AliasFamily()
+    alias = f"{family.alias}|AliasWindow:2m|$F:1m|$Rev"
+
+    params = family.parse_alias(alias)
+    factor = family.factor_from_alias(alias)
+
+    assert params["AliasWindow"].isoformat() == "P0DT0H2M0S"
+    assert params["$F"].isoformat() == "P0DT0H1M0S"
+    assert params["$Rev"] is True
+    assert factor.alias == alias
+
+
+def test_factor_family_parser_preserves_nested_factor_alias_pipes() -> None:
+    family = _NestedAliasFamily()
+    alias = f"{family.alias}|NestedFactor:[Child|N:2m|$Rev]|$F:1d"
+
+    assert family.parse_alias(alias)["NestedFactor"] == "Child|N:2m|$Rev"
+
+
+@pytest.mark.parametrize("alias", [
+    "Other|AliasWindow:2m",
+    "_AliasFamily|Unknown:2m",
+    "_AliasFamily|AliasWindow:2m|AliasWindow:3m",
+    "_AliasFamily|$Rev:0",
+])
+def test_factor_family_rejects_wrong_or_noncanonical_alias(alias: str) -> None:
+    with pytest.raises(ValueError):
+        _AliasFamily().parse_alias(alias)

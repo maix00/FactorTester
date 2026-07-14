@@ -1,8 +1,9 @@
 """Unified contract-lifecycle schema, normalization, and storage.
 
 Six CN futures exchanges each publish contract base info with different field
-names (see ``client.py``). This module maps all six shapes onto one schema
-and stores them in ``src_akshare_contract_lifecycle``, keyed by
+names through provider adapters such as ``sources.AKShare.client`` and
+``sources.DCE.portal``. This module maps those shapes onto one schema and
+stores them in ``src_contract_lifecycle``, keyed by
 ``(exchange, contract_code)``.
 
 Because a contract's list/last-trading/delivery dates are fixed at listing
@@ -26,7 +27,8 @@ from scripts.data_dir import CACHE_DB_PATH
 from sources.OpenCTP.client import normalise_instrument_code
 from tools.data.sqlite.db import connect_sqlite
 
-CONTRACT_LIFECYCLE_TABLE = "src_akshare_contract_lifecycle"
+CONTRACT_LIFECYCLE_TABLE = "src_contract_lifecycle"
+_LEGACY_CONTRACT_LIFECYCLE_TABLE = "src_akshare_contract_lifecycle"
 
 DATE_PARAM_EXCHANGES = ("SHFE", "INE", "CZCE", "CFFEX")
 ONE_SHOT_EXCHANGES = ("DCE", "GFEX")
@@ -37,6 +39,7 @@ _COLUMNS = (
     "product_code",
     "contract_code",
     "list_date",
+    "expiry_date",
     "last_trading_date",
     "delivery_start_date",
     "delivery_notice_date",
@@ -54,7 +57,23 @@ _COLUMNS = (
 _CZCE_LAST_TRADING_DAY_COLUMN = "最后交易日待国家公布2025年节假日安排后进行调整"
 
 
+def _source_function(df: pd.DataFrame, default: str) -> str:
+    value = df.attrs.get("source_function")
+    if value not in (None, ""):
+        return str(value)
+    return default
+
+
 def ensure_schema(conn) -> None:
+    existing_tables = {
+        str(row["name"])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?)",
+            (CONTRACT_LIFECYCLE_TABLE, _LEGACY_CONTRACT_LIFECYCLE_TABLE),
+        ).fetchall()
+    }
+    if _LEGACY_CONTRACT_LIFECYCLE_TABLE in existing_tables and CONTRACT_LIFECYCLE_TABLE not in existing_tables:
+        conn.execute(f"ALTER TABLE {_LEGACY_CONTRACT_LIFECYCLE_TABLE} RENAME TO {CONTRACT_LIFECYCLE_TABLE}")
     conn.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {CONTRACT_LIFECYCLE_TABLE} (
@@ -62,6 +81,7 @@ def ensure_schema(conn) -> None:
             product_code TEXT,
             contract_code TEXT NOT NULL,
             list_date TEXT,
+            expiry_date TEXT,
             last_trading_date TEXT,
             delivery_start_date TEXT,
             delivery_notice_date TEXT,
@@ -79,6 +99,12 @@ def ensure_schema(conn) -> None:
         f"CREATE INDEX IF NOT EXISTS idx_{CONTRACT_LIFECYCLE_TABLE}_product "
         f"ON {CONTRACT_LIFECYCLE_TABLE}(exchange, product_code)"
     )
+    existing = {
+        str(row["name"])
+        for row in conn.execute(f"PRAGMA table_info({CONTRACT_LIFECYCLE_TABLE})").fetchall()
+    }
+    if "expiry_date" not in existing:
+        conn.execute(f"ALTER TABLE {CONTRACT_LIFECYCLE_TABLE} ADD COLUMN expiry_date TEXT")
 
 
 def _col(row: pd.Series, name: str) -> Any:
@@ -114,7 +140,8 @@ def _base_row(
     raw_contract_code: Any,
     product_code: Any,
     list_date: Any,
-    last_trading_date: Any,
+    last_trading_date: Any = None,
+    expiry_date: Any = None,
     delivery_start_date: Any = None,
     delivery_notice_date: Any = None,
     last_delivery_date: Any = None,
@@ -131,6 +158,7 @@ def _base_row(
         "product_code": (str(product_code).strip().upper() if product_code not in (None, "") else _product_code(contract_code)),
         "contract_code": contract_code,
         "list_date": _to_iso(list_date),
+        "expiry_date": _to_iso(expiry_date),
         "last_trading_date": _to_iso(last_trading_date),
         "delivery_start_date": _to_iso(delivery_start_date),
         "delivery_notice_date": _to_iso(delivery_notice_date),
@@ -152,7 +180,8 @@ def _normalize_shfe_like(df: pd.DataFrame, *, exchange: str, source_function: st
             raw_contract_code=_col(row, "合约代码"),
             product_code=None,
             list_date=_col(row, "上市日"),
-            last_trading_date=_col(row, "到期日"),
+            expiry_date=_col(row, "到期日"),
+            last_trading_date=_col(row, "最后交易日"),
             delivery_start_date=_col(row, "开始交割日"),
             last_delivery_date=_col(row, "最后交割日"),
             listing_base_price=_col(row, "挂牌基准价"),
@@ -166,14 +195,25 @@ def _normalize_shfe_like(df: pd.DataFrame, *, exchange: str, source_function: st
 
 
 def normalize_shfe(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
-    return _normalize_shfe_like(df, exchange="SHFE", source_function="futures_contract_info_shfe", query_date=query_date)
+    return _normalize_shfe_like(
+        df,
+        exchange="SHFE",
+        source_function=_source_function(df, "futures_contract_info_shfe"),
+        query_date=query_date,
+    )
 
 
 def normalize_ine(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
-    return _normalize_shfe_like(df, exchange="INE", source_function="futures_contract_info_ine", query_date=query_date)
+    return _normalize_shfe_like(
+        df,
+        exchange="INE",
+        source_function=_source_function(df, "futures_contract_info_ine"),
+        query_date=query_date,
+    )
 
 
 def normalize_dce(df: pd.DataFrame) -> list[dict[str, Any]]:
+    source_function = _source_function(df, "futures_contract_info_dce")
     rows = []
     for _, row in df.iterrows():
         raw = row.to_dict()
@@ -185,7 +225,7 @@ def normalize_dce(df: pd.DataFrame) -> list[dict[str, Any]]:
             last_trading_date=_col(row, "最后交易日"),
             last_delivery_date=_col(row, "最后交割日"),
             source_query_date=None,
-            source_function="futures_contract_info_dce",
+            source_function=source_function,
             raw_row=raw,
         )
         if item is not None:
@@ -194,6 +234,7 @@ def normalize_dce(df: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 def normalize_gfex(df: pd.DataFrame) -> list[dict[str, Any]]:
+    source_function = _source_function(df, "futures_contract_info_gfex")
     rows = []
     for _, row in df.iterrows():
         raw = row.to_dict()
@@ -205,7 +246,7 @@ def normalize_gfex(df: pd.DataFrame) -> list[dict[str, Any]]:
             last_trading_date=_col(row, "最后交易日"),
             last_delivery_date=_col(row, "最后交割日"),
             source_query_date=None,
-            source_function="futures_contract_info_gfex",
+            source_function=source_function,
             raw_row=raw,
         )
         if item is not None:
@@ -214,6 +255,7 @@ def normalize_gfex(df: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 def normalize_czce(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
+    source_function = _source_function(df, "futures_contract_info_czce")
     rows = []
     for _, row in df.iterrows():
         raw = row.to_dict()
@@ -226,7 +268,7 @@ def normalize_czce(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
             delivery_notice_date=_col(row, "交割通知日"),
             last_delivery_date=_col(row, "最后交割日"),
             source_query_date=query_date,
-            source_function="futures_contract_info_czce",
+            source_function=source_function,
             raw_row=raw,
         )
         if item is not None:
@@ -235,6 +277,7 @@ def normalize_czce(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
 
 
 def normalize_cffex(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
+    source_function = _source_function(df, "futures_contract_info_cffex")
     rows = []
     for _, row in df.iterrows():
         raw = row.to_dict()
@@ -246,7 +289,7 @@ def normalize_cffex(df: pd.DataFrame, query_date: str) -> list[dict[str, Any]]:
             last_trading_date=_col(row, "最后交易日"),
             listing_base_price=_col(row, "挂盘基准价"),
             source_query_date=query_date,
-            source_function="futures_contract_info_cffex",
+            source_function=source_function,
             raw_row=raw,
         )
         if item is not None:
@@ -309,7 +352,7 @@ def upsert_contract_lifecycle(
         ensure_schema(conn)
         before = conn.total_changes
         for row in rows:
-            conn.execute(sql, tuple(row[col] for col in _COLUMNS))
+            conn.execute(sql, tuple(row.get(col) for col in _COLUMNS))
         applied = conn.total_changes - before
     return {"inserted": applied, "skipped_existing": len(rows) - applied}
 
@@ -376,7 +419,7 @@ def read_contract_lifecycle(
         params.append(normalise_instrument_code(contract_code))
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     sql = (
-        f"SELECT exchange, product_code, contract_code, list_date, last_trading_date, "
+        f"SELECT exchange, product_code, contract_code, list_date, expiry_date, last_trading_date, "
         f"delivery_start_date, delivery_notice_date, last_delivery_date, listing_base_price, "
         f"source_query_date, source_function, fetched_at "
         f"FROM {CONTRACT_LIFECYCLE_TABLE}{where} ORDER BY exchange, contract_code"

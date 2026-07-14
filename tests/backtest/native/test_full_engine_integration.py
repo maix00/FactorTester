@@ -43,7 +43,7 @@ class _FakeFactor:
     def __init__(self, table: pd.DataFrame) -> None:
         self._table = table
 
-    def evaluate(self) -> pd.DataFrame:
+    def evaluate(self, products, **kwargs) -> pd.DataFrame:
         return self._table
 
 
@@ -136,15 +136,8 @@ def test_full_engine_two_strategies_independent_results():
     assert curve_a1.iloc[-1] != curve_a2.iloc[-1]
 
 
-class _RollingMeanFactorAdapter:
-    """Wraps a real `FactorExpr` (ColumnRef(...).rolling(...).mean()) so it
-    matches the explicit-window `.evaluate(start_dt=..., end_dt=...)`
-    contract FactorSignalModule calls in the precomputed path -- the real
-    ApplicationSettings/candidate-resolution layer is what normally builds
-    this kind of adapter around a user-selected FactorExpr before it reaches
-    StrategyConfig; this test stands in for that layer, not for FactorExpr
-    itself (the rolling-mean computation below is the real expression
-    engine, not a stub)."""
+class _PreloadedFactorExprFixture:
+    """Injects the test-only preloaded data into a real FactorExpr call."""
 
     def __init__(self, expr, products: list[Product], freq: "DataFreq", preloaded: dict) -> None:
         self._expr = expr
@@ -152,9 +145,9 @@ class _RollingMeanFactorAdapter:
         self._freq = freq
         self._preloaded = preloaded
 
-    def evaluate(self, *, start_dt=None, end_dt=None) -> pd.DataFrame:
+    def evaluate(self, products, *, start_dt=None, end_dt=None, **kwargs) -> pd.DataFrame:
         return self._expr.evaluate(
-            self._products,
+            products,
             self._freq,
             preloaded=self._preloaded,
             start_dt=start_dt,
@@ -181,7 +174,7 @@ def test_full_engine_with_real_moving_average_factor_expression():
     preloaded = {(p1, "DAY1"): close_p1, (p2, "DAY1"): close_p2}
 
     moving_average = ColumnRef(DataColumn.CLOSE).rolling(5).mean()
-    factor = _RollingMeanFactorAdapter(moving_average, [p1, p2], DataFreq.DAY1, preloaded)
+    factor = _PreloadedFactorExprFixture(moving_average, [p1, p2], DataFreq.DAY1, preloaded)
 
     raw_prices = pd.DataFrame(
         {p1: close_p1["CLOSE"].to_numpy(), p2: close_p2["CLOSE"].to_numpy()}, index=idx)

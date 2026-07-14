@@ -13,7 +13,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
-from tools.testers.backtest.modules.engine import engine_mode_for
+from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, run_window_envelope_for_state
 from tools.testers.backtest.modules.target import TargetStrategyModule, target_weight_intent
@@ -21,6 +21,9 @@ from tools.testers.backtest.modules.target import TargetStrategyModule, target_w
 
 _POSITIONS_REF = FieldRef("positions", owner="LedgerModule")
 _TARGET_WEIGHTS_REF = TargetStrategyModule.target_weights
+_ROLLOVER_POLICY_REF = FieldRef("rollover_policy", owner="RolloverModule")
+_ROLLOVER_BEFORE_EXPIRY_REF = FieldRef("rollover_before_expiry", owner="RolloverModule")
+_FORCE_CLOSE_BEFORE_EXPIRY_REF = FieldRef("force_close_before_expiry", owner="DeliveryForceCloseModule")
 _LIFECYCLE_TS_KEYS = (
     "auto_close_ts",
     "last_trade_ts",
@@ -39,6 +42,22 @@ _LIFECYCLE_DATE_KEYS = (
     "delivery_date",
     "maturity_date",
 )
+_FORCE_CLOSE_LIFECYCLE_TS_KEYS = (
+    "last_trade_ts",
+    "expire_ts",
+    "delivery_ts",
+    "maturity_ts",
+)
+_FORCE_CLOSE_LIFECYCLE_DATE_KEYS = (
+    "last_trade_date",
+    "expire_date",
+    "delivery_date",
+    "maturity_date",
+)
+_DERIVED_LIFECYCLE_SOURCE_FUNCTIONS = frozenset({
+    "exchange_rule_dayk_calendar_derived",
+    "local_cnfutures_dayk_coverage",
+})
 
 
 @dataclass
@@ -88,7 +107,7 @@ class TermStructureExpandModule(ExecutableModule):
 
     expand_term_structure: ClassVar[Flow] = Flow(
         "expand_term_structure",
-        inputs=(ProductSelectionModule.products, RunWindowModule.run_window_envelope),
+        inputs=(ProductSelectionModule.products, RunWindowModule.run_window_envelope, EngineModule.engine_mode),
         outputs=(expanded_contracts, contract_metadata),
         # order=20, not grouped with the other market_data.py PRE_REPLAY flows
         # (37-45): MarketDataModule.check_market_data_coverage/load_raw_market_data
@@ -107,7 +126,14 @@ class TermStructureExpandModule(ExecutableModule):
     )
     resolve_tradable_target_weights: ClassVar[Flow] = Flow(
         "resolve_tradable_target_weights",
-        inputs=(contract_metadata, _TARGET_WEIGHTS_REF),
+        inputs=(
+            contract_metadata,
+            _TARGET_WEIGHTS_REF,
+            EngineModule.engine_mode,
+            _ROLLOVER_POLICY_REF,
+            _ROLLOVER_BEFORE_EXPIRY_REF,
+            _FORCE_CLOSE_BEFORE_EXPIRY_REF,
+        ),
         outputs=(_TARGET_WEIGHTS_REF, TargetStrategyModule.trade_intent),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
@@ -145,7 +171,13 @@ class DeliveryForceCloseModule(ExecutableModule):
 
     register_force_close_notices: ClassVar[Flow] = Flow(
         "register_force_close_notices",
-        inputs=(TermStructureExpandModule.contract_metadata, force_close_before_expiry),
+        inputs=(
+            TermStructureExpandModule.contract_metadata,
+            force_close_before_expiry,
+            EngineModule.engine_mode,
+            RunWindowModule.time_precision,
+            RunWindowModule.timezone,
+        ),
         outputs=(force_close_notices,),
         phase=Phase.PRE_REPLAY,
         order=46,
@@ -162,6 +194,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         event_kind=EventKind.TRADE_INTENT,
         order=15,
         description="处理交割强平通知",
+        event_payload_inputs=("force_close",),
         compute=lambda state, ctx: _handle_delivery_force_close_notice(state, ctx),
     )
 
@@ -211,7 +244,14 @@ class RolloverModule(ExecutableModule):
 
     register_rollover_notices: ClassVar[Flow] = Flow(
         "register_rollover_notices",
-        inputs=(TermStructureExpandModule.contract_metadata, rollover_policy, rollover_before_expiry),
+        inputs=(
+            TermStructureExpandModule.contract_metadata,
+            rollover_policy,
+            rollover_before_expiry,
+            EngineModule.engine_mode,
+            RunWindowModule.time_precision,
+            RunWindowModule.timezone,
+        ),
         outputs=(rollover_notices,),
         phase=Phase.PRE_REPLAY,
         order=46,
@@ -228,6 +268,7 @@ class RolloverModule(ExecutableModule):
         event_kind=EventKind.TRADE_INTENT,
         order=10,
         description="处理换月通知",
+        event_payload_inputs=("rollover",),
         compute=lambda state, ctx: _handle_rollover_notice(state, ctx),
     )
 
@@ -241,17 +282,18 @@ def _expand_term_structure(state, ctx) -> None:
     end_date = _datatime_date_text(end_dt)
     all_contracts: dict[Any, frozenset] = {}
     all_metadata: dict[Any, tuple[dict[str, Any], ...]] = {}
-    product_expansion_cache: dict[tuple[Any, str | None, str | None], tuple[list[Any], list[dict[str, Any]]]] = {}
+    product_expansion_cache: dict[tuple[Any, str | None, str | None, str], tuple[list[Any], list[dict[str, Any]]]] = {}
     strategies = ctx.active_strategies or frozenset(state.strategy_configs)
     for strategy in strategies:
+        engine_mode = engine_mode_for(state.config_for(strategy))
         products = ctx.get_for(ProductSelectionModule.products, strategy)
         expanded: list[Any] = []
         metadata: list[dict[str, Any]] = []
         for product in products:
-            cache_key = (product, start_date, end_date)
+            cache_key = (product, start_date, end_date, engine_mode)
             if cache_key not in product_expansion_cache:
                 product_expansion_cache[cache_key] = _expand_product_contracts(
-                    product, start_date=start_date, end_date=end_date,
+                    product, start_date=start_date, end_date=end_date, engine_mode=engine_mode,
                 )
             contracts, rows = product_expansion_cache[cache_key]
             expanded.extend(contracts)
@@ -278,6 +320,7 @@ def _register_force_close_notices(state, ctx) -> None:
             offset=offset, notice_type="force_close", notice_reason="auto_close_date",
             state=state, reference_tz=_reference_timezone(state, strategy),
             engine_mode=engine_mode_for(state.config_for(strategy)),
+            lifecycle_anchor="force_close",
         )
         drafts.extend(strategy_drafts)
         ctx.set_for(DeliveryForceCloseModule.force_close_notices, strategy, strategy_drafts)
@@ -365,7 +408,7 @@ def _handle_rollover_notice(state, ctx) -> None:
         ledger = state.ledger_for_strategy(strategy)
         positions = ledger.get(_POSITIONS_REF, {})
         orders: list[Order] = []
-        for raw_payload in ctx.payloads_for(strategy):
+        for raw_payload in ctx.payloads_for(strategy, kind="rollover"):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             if str(payload.get("notice_type") or "") != "rollover":
                 continue
@@ -414,7 +457,7 @@ def _handle_delivery_force_close_notice(state, ctx) -> None:
         ledger = state.ledger_for_strategy(strategy)
         positions = ledger.get(_POSITIONS_REF, {})
         orders: list[Order] = []
-        for raw_payload in ctx.payloads_for(strategy):
+        for raw_payload in ctx.payloads_for(strategy, kind="force_close"):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             notice_type = str(payload.get("notice_type") or "")
             if notice_type != "force_close":
@@ -486,7 +529,13 @@ def _datatime_date_text(value: Any) -> str | None:
     return cast(pd.Timestamp, pd.Timestamp(ts)).strftime("%Y-%m-%d")
 
 
-def _expand_product_contracts(product: Any, *, start_date: str | None, end_date: str | None) -> tuple[list[Any], list[dict[str, Any]]]:
+def _expand_product_contracts(
+    product: Any,
+    *,
+    start_date: str | None,
+    end_date: str | None,
+    engine_mode: str = "auto",
+) -> tuple[list[Any], list[dict[str, Any]]]:
     supports = getattr(product, "supports_term_structure", None)
     if not callable(supports) or not supports():
         return [product], [{
@@ -520,7 +569,7 @@ def _expand_product_contracts(product: Any, *, start_date: str | None, end_date:
             "contract_object": contract,
             "contract_product": getattr(contract, "name", str(contract)),
             "is_identity": False,
-        })
+        }, engine_mode=engine_mode)
         contracts.append(contract)
         metadata.append(metadata_row)
     return contracts, metadata
@@ -545,6 +594,9 @@ def _openctp_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
             normalise_instrument_code(spec.get("NormalizedInstrumentID")),
         }
         row = {
+            "lifecycle_source_type": "local_db",
+            "lifecycle_exchange": spec.get("ExchangeID"),
+            "lifecycle_source_function": "src_openctp_cnfutures_contract_specs",
             "open_date": spec.get("OpenDate"),
             "last_trade_date": spec.get("ExpireDate"),
             "delivery_date": spec.get("DeliveryDate"),
@@ -560,7 +612,7 @@ def _openctp_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
 @lru_cache(maxsize=1)
 def _akshare_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
     try:
-        from sources.AKShare.lifecycle import read_contract_lifecycle
+        from sources.ContractLifecycle.lifecycle import read_contract_lifecycle
         from sources.OpenCTP.client import normalise_instrument_code
     except Exception:
         return {}
@@ -571,23 +623,79 @@ def _akshare_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
     if not isinstance(specs, pd.DataFrame) or specs.empty:
         return {}
     out: dict[str, dict[str, Any]] = {}
+    product_exchange = _local_cnfutures_product_exchange_by_code()
     for _, spec in specs.iterrows():
         key = normalise_instrument_code(spec.get("contract_code"))
         if not key:
             continue
-        out[key] = {
+        exchange = str(spec.get("exchange") or "").upper()
+        candidate = {
+            "lifecycle_source_type": "local_db",
+            "lifecycle_exchange": exchange,
+            "lifecycle_source_function": spec.get("source_function"),
+            "lifecycle_source_query_date": spec.get("source_query_date"),
+            "lifecycle_fetched_at": spec.get("fetched_at"),
             "open_date": spec.get("list_date"),
             "last_trade_date": spec.get("last_trading_date"),
             "notice_date": spec.get("delivery_notice_date"),
             "delivery_date": spec.get("last_delivery_date"),
-            "lifecycle_source": f"AKShare {spec.get('exchange')} contract lifecycle",
+            "lifecycle_source": _contract_lifecycle_source_label(exchange, spec.get("source_function"), live=False),
         }
+        if spec.get("expiry_date") not in (None, ""):
+            candidate["expire_date"] = spec.get("expiry_date")
+        product_code = str(spec.get("product_code") or "").upper()
+        _select_akshare_lifecycle_spec(out, key, candidate, product_code, product_exchange)
     return out
+
+
+def _select_akshare_lifecycle_spec(
+    out: dict[str, dict[str, Any]],
+    key: str,
+    candidate: dict[str, Any],
+    product_code: str,
+    product_exchange: dict[str, str],
+) -> None:
+    expected_exchange = product_exchange.get(str(product_code or "").upper())
+    existing = out.get(key)
+    if existing is not None and expected_exchange:
+        candidate_exchange = str(candidate.get("lifecycle_exchange") or "").upper()
+        existing_exchange = str(existing.get("lifecycle_exchange") or "").upper()
+        if existing_exchange == expected_exchange and candidate_exchange != expected_exchange:
+            return
+        if candidate_exchange == expected_exchange and existing_exchange != expected_exchange:
+            out[key] = candidate
+            return
+    out[key] = candidate
+
+
+@lru_cache(maxsize=1)
+def _local_cnfutures_product_exchange_by_code() -> dict[str, str]:
+    try:
+        from scripts.data_dir import CACHE_DB_PATH
+        from tools.data.sqlite.db import connect_sqlite
+    except Exception:
+        return {}
+    try:
+        with connect_sqlite(CACHE_DB_PATH) as conn:
+            rows = conn.execute(
+                """
+                SELECT product_code, sector_exchange_code
+                FROM src_local_cnfutures_discovered_products
+                WHERE product_code IS NOT NULL AND sector_exchange_code IS NOT NULL
+                """
+            ).fetchall()
+    except Exception:
+        return {}
+    return {
+        str(row["product_code"]).upper(): str(row["sector_exchange_code"]).upper()
+        for row in rows
+        if row["product_code"] not in (None, "") and row["sector_exchange_code"] not in (None, "")
+    }
 
 
 # Local product/contract names are suffixed with these short exchange codes
 # (see sources.LocalCNFutures.product_catalog._EXCHANGE_TO_SECTOR_CODE), not
-# the AKShare exchange codes used by src_akshare_contract_lifecycle.
+# the exchange codes used by the unified contract-lifecycle store.
 _LOCAL_EXCHANGE_SUFFIX_TO_AKSHARE = {
     "DCE": "DCE",
     "CZC": "CZCE",
@@ -634,7 +742,7 @@ def _akshare_live_lookup(exchange: str, key: str) -> dict[str, Any] | None:
         return _akshare_live_cache.get(key)
     _akshare_live_attempted.add(exchange)
     try:
-        from sources.AKShare.lifecycle import fetch_and_store_live
+        from sources.ContractLifecycle.lifecycle import fetch_and_store_live
         from sources.OpenCTP.client import normalise_instrument_code
     except Exception:
         return None
@@ -647,16 +755,48 @@ def _akshare_live_lookup(exchange: str, key: str) -> dict[str, Any] | None:
         if not code:
             continue
         _akshare_live_cache[code] = {
+            "lifecycle_source_type": "live_official_or_akshare_then_local_db",
+            "lifecycle_exchange": exchange,
+            "lifecycle_source_function": live_row.get("source_function") or f"fetch_and_store_live:{exchange}",
+            "lifecycle_source_query_date": live_row.get("source_query_date"),
+            "lifecycle_fetched_at": live_row.get("fetched_at"),
             "open_date": live_row.get("list_date"),
             "last_trade_date": live_row.get("last_trading_date"),
             "notice_date": live_row.get("delivery_notice_date"),
             "delivery_date": live_row.get("last_delivery_date"),
-            "lifecycle_source": f"AKShare {exchange} live lookup",
+            "lifecycle_source": _contract_lifecycle_source_label(
+                exchange,
+                live_row.get("source_function") or f"fetch_and_store_live:{exchange}",
+                live=True,
+            ),
         }
+        if live_row.get("expiry_date") not in (None, ""):
+            _akshare_live_cache[code]["expire_date"] = live_row.get("expiry_date")
     return _akshare_live_cache.get(key)
 
 
-def _with_authoritative_lifecycle_fields(row: dict[str, Any]) -> dict[str, Any]:
+def _contract_lifecycle_source_label(exchange: str, source_function: Any, *, live: bool) -> str:
+    exchange_text = str(exchange or "").upper() or "unknown"
+    source_text = str(source_function or "")
+    suffix = " live lookup" if live else " contract lifecycle"
+    if source_text == "official_dce_portal_contract_info":
+        return f"DCE official portal{suffix}"
+    if source_text.startswith("official_contract_info_"):
+        return f"{exchange_text} official exchange endpoint{suffix}"
+    if source_text == "official_dce_portal_new_contract_info":
+        return f"DCE official portal new-contract listing{suffix}"
+    if source_text == "local_cnfutures_dayk_coverage":
+        return f"LocalCNFutures daily bars coverage{suffix}"
+    if source_text == "exchange_rule_dayk_calendar_derived":
+        return f"{exchange_text} product rule + trading calendar derived{suffix}"
+    if source_text == "exchange_contract_info_local_dayk_last_trade":
+        return f"{exchange_text} contract-info expiry + LocalCNFutures last-trade{suffix}"
+    if source_text.startswith("futures_contract_info_"):
+        return f"AKShare {exchange_text}{suffix}"
+    return f"{exchange_text} contract lifecycle source={source_text or 'unknown'}"
+
+
+def _with_authoritative_lifecycle_fields(row: dict[str, Any], *, engine_mode: str = "auto") -> dict[str, Any]:
     if any(row.get(key) not in (None, "") for key in _LIFECYCLE_TS_KEYS + _LIFECYCLE_DATE_KEYS):
         return row
     key = _normalised_contract_id(row)
@@ -679,11 +819,26 @@ def _with_authoritative_lifecycle_fields(row: dict[str, Any]) -> dict[str, Any]:
                 spec.update(live_spec)
     if not spec:
         return row
+    _reject_derived_lifecycle_in_exact_mode(row, spec, engine_mode=engine_mode)
     enriched = dict(row)
     for field, value in spec.items():
         if value not in (None, "") and enriched.get(field) in (None, ""):
             enriched[field] = value
     return enriched
+
+
+def _reject_derived_lifecycle_in_exact_mode(row: dict[str, Any], spec: dict[str, Any], *, engine_mode: str) -> None:
+    if str(engine_mode or "").lower() != "exact":
+        return
+    source_function = str(spec.get("lifecycle_source_function") or "")
+    if source_function not in _DERIVED_LIFECYCLE_SOURCE_FUNCTIONS:
+        return
+    contract = row.get("contract") or row.get("uid") or row.get("contract_product") or _normalised_contract_id(row)
+    raise ValueError(
+        "exact engine_mode does not accept derived lifecycle metadata "
+        f"for contract={contract!r}; lifecycle_source_function={source_function!r}. "
+        "Use official/external exact lifecycle rows or run a non-exact engine mode."
+    )
 
 
 def _normalised_contract_id(row: dict[str, Any]) -> str:
@@ -800,6 +955,7 @@ def _lifecycle_event_drafts(
     state: Any | None = None,
     reference_tz: str | None = None,
     engine_mode: str = "auto",
+    lifecycle_anchor: str | None = None,
 ) -> list[EventDraft]:
     drafts: list[EventDraft] = []
     start_key = _sort_key(start_dt)
@@ -809,7 +965,7 @@ def _lifecycle_event_drafts(
             continue
         ts = _event_timestamp_from_row(
             row, offset=offset, state=state, reference_tz=reference_tz,
-            peer_rows=metadata, engine_mode=engine_mode,
+            peer_rows=metadata, engine_mode=engine_mode, lifecycle_anchor=lifecycle_anchor,
         )
         if ts is None:
             continue
@@ -835,6 +991,7 @@ def _event_timestamp_from_row(
     reference_tz: str | None = None,
     peer_rows: list[dict[str, Any]] | None = None,
     engine_mode: str = "auto",
+    lifecycle_anchor: str | None = None,
 ) -> pd.Timestamp | None:
     # Deterministic given (row identity, offset) -- never depends on the
     # current event timestamp -- but resolve_tradable_target_weights calls
@@ -842,11 +999,12 @@ def _event_timestamp_from_row(
     # event_timestamp_cache for why this must be memoized, not recomputed.
     store = getattr(state, "term_structure_store", None) if state is not None else None
     cache = store.event_timestamp_cache if store is not None else None
-    cache_key = (id(row), offset)
+    cache_key = (id(row), offset, lifecycle_anchor)
     if cache is not None and cache_key in cache:
         return cache[cache_key]
     base = _lifecycle_base_timestamp(
         row, reference_tz=reference_tz, state=state, peer_rows=peer_rows, engine_mode=engine_mode,
+        lifecycle_anchor=lifecycle_anchor,
     )
     result = None if base is None else _apply_lifecycle_offset(base, offset, state=state)
     if cache is not None:
@@ -861,8 +1019,11 @@ def _lifecycle_base_timestamp(
     state: Any | None = None,
     peer_rows: list[dict[str, Any]] | None = None,
     engine_mode: str = "auto",
+    lifecycle_anchor: str | None = None,
 ) -> pd.Timestamp | None:
-    for key in _LIFECYCLE_TS_KEYS:
+    ts_keys = _FORCE_CLOSE_LIFECYCLE_TS_KEYS if lifecycle_anchor == "force_close" else _LIFECYCLE_TS_KEYS
+    date_keys = _FORCE_CLOSE_LIFECYCLE_DATE_KEYS if lifecycle_anchor == "force_close" else _LIFECYCLE_DATE_KEYS
+    for key in ts_keys:
         value = row.get(key)
         if value is None or value == "":
             continue
@@ -873,7 +1034,7 @@ def _lifecycle_base_timestamp(
             return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
         except Exception:
             pass
-    for key in _LIFECYCLE_DATE_KEYS:
+    for key in date_keys:
         value = row.get(key)
         if value in (None, ""):
             continue
@@ -894,9 +1055,10 @@ def _lifecycle_base_timestamp(
         raise ValueError(
             "exact engine_mode could not determine whether "
             f"{row.get('contract_product') or row.get('contract') or row.get('uid')} "
-            "has stopped trading: no authoritative lifecycle date, and local "
-            "coverage inference is inconclusive (either no market data to check, "
-            "or the contract may still be trading)"
+            "has stopped trading: no lifecycle date in contract metadata, "
+            "OpenCTP local SQLite snapshots, or AKShare local/live lifecycle store; "
+            "LocalCNFutures coverage inference is inconclusive (either no market "
+            "data to check, or the contract may still be trading)"
         )
     return None
 
@@ -928,6 +1090,8 @@ def _local_cnfutures_inferred_lifecycle(
     if pd.isna(ts):
         return None
     row.setdefault("lifecycle_source", result.get("source"))
+    row.setdefault("lifecycle_source_type", "inference")
+    row.setdefault("lifecycle_source_function", "sources.LocalCNFutures.lifecycle.infer_contract_end_from_coverage")
     row.setdefault("lifecycle_inference", result)
     _record_lifecycle_inference_fallback(state, row, ts, result)
     return cast(pd.Timestamp, ts)
@@ -1006,6 +1170,8 @@ def _shift_on_event_axis(base: pd.Timestamp, offset: pd.Timedelta, table: pd.Dat
     if events.empty:
         return None
     aligned_base = data_index.tz_align(base)
+    if aligned_base > events[-1]:
+        return None
     day_count = max(0, int(offset.days))
     subday = cast(pd.Timedelta, offset - pd.Timedelta(days=day_count))
     anchor = aligned_base

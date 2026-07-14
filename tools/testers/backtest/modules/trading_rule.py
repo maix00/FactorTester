@@ -77,8 +77,22 @@ class TradingRuleModule(ExecutableModule):
     use_int_position: ClassVar[FieldRef[bool]] = FieldRef("use_int_position")
     daily_mark_to_market_events: ClassVar[FieldRef[Any]] = FieldRef("daily_mark_to_market_events")
 
-    _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="LedgerModule")
+    _cash_pool_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="CashPoolModule")
     _ledger_positions_ref: ClassVar[FieldRef[Any]] = FieldRef("positions", owner="LedgerModule")
+    _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
+    _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
+    _margin_call_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_call_mode", owner="MarginModule")
+    _margin_deficit_ref: ClassVar[FieldRef[float]] = FieldRef("margin_deficit", owner="MarginModule")
+    _margin_liquidation_orders_ref: ClassVar[FieldRef[Any]] = FieldRef(
+        "margin_liquidation_orders",
+        owner="MarginModule",
+    )
+    _current_market_snapshot_ref: ClassVar[FieldRef[Any]] = FieldRef(
+        "current_market_snapshot", owner="MarketDataModule",
+    )
+    _current_historical_fields_ref: ClassVar[FieldRef[Any]] = FieldRef(
+        "current_historical_fields", owner="MarketDataModule",
+    )
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "accounting_mode": FieldDefinition(
@@ -129,12 +143,30 @@ class TradingRuleModule(ExecutableModule):
     )
     apply_daily_mark_to_market: ClassVar[Flow] = Flow(
         "apply_daily_mark_to_market",
-        inputs=(_ledger_cash_ref, _ledger_positions_ref),
-        outputs=(_ledger_cash_ref, _ledger_positions_ref),
+        inputs=(
+            _cash_pool_cash_ref,
+            _ledger_positions_ref,
+            _current_market_snapshot_ref,
+            _current_historical_fields_ref,
+            accounting_mode,
+            daily_mark_to_market_enabled,
+            cost_basis_method,
+            _fee_mode_ref,
+            _margin_mode_ref,
+            _margin_call_mode_ref,
+            _margin_deficit_ref,
+        ),
+        outputs=(
+            _cash_pool_cash_ref,
+            _ledger_positions_ref,
+            _margin_deficit_ref,
+            _margin_liquidation_orders_ref,
+        ),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,
         order=50,
         description="执行逐日盯市结算",
+        event_payload_inputs=("daily_mark_to_market",),
         compute=lambda state, ctx: _apply_daily_mark_to_market(state, ctx),
     )
 
@@ -511,13 +543,12 @@ def _trading_day_text(value: object) -> str:
 
 def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.market_data import (
-        MarketDataModule,
         historical_fields_for_product,
         contract_multiplier_from_fields,
     )
     from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
 
-    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {})
+    snapshot = ctx.get(TradingRuleModule._current_market_snapshot_ref, {})
     settlement_prices = snapshot.get("settlement") or {}
     close_prices = snapshot.get("close", {})
     for ledger in _ledger_targets(state, ctx):
@@ -526,7 +557,7 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
         if cash is None:
             raise KeyError(f"ledger {ledger.ledger_id!r} has no cash for daily mark-to-market")
         positions = ledger.get(TradingRuleModule._ledger_positions_ref, {})
-        historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
+        historical_fields = ctx.get(TradingRuleModule._current_historical_fields_ref, {}) or {}
         for product, entry in positions.items():
             quantity = float(entry.quantity or 0.0)
             if abs(quantity) <= 1e-12:
@@ -629,7 +660,11 @@ def _ledger_targets(state: Any, ctx: Any) -> list[Any]:
     seen: set[Any] = set()
     active_ledgers = ctx.active_ledgers or frozenset(getattr(state, "ledgers", {}))
     for ledger in active_ledgers:
-        payloads = [payload for payload in ctx.payloads_for_ledger(ledger) if isinstance(payload, dict)]
+        payloads = [
+            payload
+            for payload in ctx.payloads_for_ledger(ledger, kind="daily_mark_to_market")
+            if isinstance(payload, dict)
+        ]
         if not payloads:
             target_ledger = state.ledgers.get(ledger_identity(ledger))
             if target_ledger is not None:

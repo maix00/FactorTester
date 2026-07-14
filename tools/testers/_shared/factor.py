@@ -6,8 +6,8 @@ Used by: single_factor_page, group_test, ic_test, factor_evaluation,
 
 from __future__ import annotations
 
-from ..contracts import ScopePolicy, SettingDefinition, SettingOption
-from ..registry import ApplicationSettings
+from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingOption
+from tools.testers.settings.registry import ApplicationSettings
 
 FACTOR_CANDIDATE_KEYS = ("factor_candidates",)
 FACTOR_SELECTION_KEYS = ("factor",)

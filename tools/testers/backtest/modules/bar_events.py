@@ -11,6 +11,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import (
+    FactorSignalModule,
     _clip_table_to_strategy_warmup_window,
     _live_factor_state_key,
 )
@@ -19,7 +20,8 @@ from tools.testers.backtest.modules.market_data import (
     current_prices_table_for,
     resolved_bar_frequency_for_strategy,
 )
-from tools.testers.backtest.modules.engine import bar_price_visibility_timestamp
+from tools.testers.backtest.modules.engine import EngineModule, bar_price_visibility_timestamp
+from tools.testers.backtest.modules.run_window import RunWindowModule
 from tools.testers.backtest.modules.time_index_lookup import signal_event_times
 
 
@@ -42,7 +44,29 @@ class BarEventModule(ExecutableModule):
 
     schedule_bar_events: ClassVar[Flow] = Flow(
         "schedule_bar_events",
-        inputs=(),
+        inputs=(
+            FactorModule.factor,
+            bar_price_bases,
+            EngineModule.engine_mode,
+            EngineModule.bar_open_visibility_delay,
+            EngineModule.bar_end_visibility_delay,
+            RunWindowModule.start_date,
+            RunWindowModule.end_date,
+            RunWindowModule.start_time,
+            RunWindowModule.end_time,
+            RunWindowModule.timezone,
+            RunWindowModule.time_precision,
+            FactorSignalModule.warmup_mode,
+            FactorSignalModule.warmup_window,
+            FactorSignalModule.calendar_frequency,
+            FactorSignalModule.signal_freq,
+            FactorSignalModule.basepoint,
+            FactorSignalModule.daily_basepoint,
+            FactorSignalModule.end_session_skip,
+            FactorSignalModule.end_session_gap,
+            MarketDataModule.required_frequency,
+            MarketDataModule.causal_valuation_table,
+        ),
         outputs=(dispatched_bar_events,),
         phase=Phase.PRE_REPLAY,
         order=49,

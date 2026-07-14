@@ -20,9 +20,11 @@ EVENT_PHASE = "event_replay"
 class BacktestRunRenderer:
     """Render the web backtest progress protocol for terminal users."""
 
-    def __init__(self, *, verbose: bool = False, live: bool = False) -> None:
+    def __init__(self, *, verbose: bool = False, live: bool = False, step_mode: bool = False) -> None:
         self.verbose = verbose
         self.live = live
+        self.step_mode = step_mode
+        self._step_pending: list[dict[str, Any]] = []
         self._manifest_printed = False
         self._current_phase = ""
         self._last_percent: float | None = None
@@ -153,6 +155,8 @@ class BacktestRunRenderer:
             self._echo(f"[运行信息] {data}")
 
     def _print_activity(self, data: Any) -> None:
+        if self.step_mode:
+            return
         if not isinstance(data, dict):
             if data:
                 self._echo(f"[activity] {data}")
@@ -260,57 +264,24 @@ class BacktestRunRenderer:
         return max(0.0, min(100.0, self._overall_progress))
 
     def _print_live_chart(self, lines: list[str]) -> None:
-        if _is_tty():
-            self._latest_chart_lines = lines
-            self._render_status_region()
-            return
-        # Non-TTY logs and tests must remain readable and append-only.
-        self._echo("[live] 刷新净值曲线")
+        # Status-region ANSI repainting was intentionally removed from this
+        # renderer.  Keep both TTY and redirected output append-only; otherwise
+        # a final result on a real terminal calls a removed repaint method.
+        if not _is_tty():
+            self._echo("[live] 刷新净值曲线")
         for line in lines:
             self._echo(line)
 
     def _update_progress_line(self, key: str, line: str) -> None:
-        if not _is_tty():
-            if not self._should_log_progress(key):
-                return
-            click.echo(line)
-            return
         self._progress_lines[key] = line
-        self._render_status_region()
+        if not _is_tty() and self._should_log_progress(key):
+            click.echo(line)
 
     def _update_activity_line(self, line: str) -> None:
-        if not _is_tty():
-            self._echo(line)
-            return
-        previous = self._activity_line
-        if previous and line.startswith(previous):
-            self._type_activity_line(line, start=len(previous))
-            return
-        if len(line) <= 24:
-            self._activity_line = line
-            self._render_status_region()
-            return
-        self._activity_line = ""
-        for index in range(1, len(line) + 1):
-            self._activity_line = line[:index]
-            self._render_status_region()
-            time.sleep(self._activity_typewriter_delay)
-
-    def _type_activity_line(self, line: str, *, start: int) -> None:
-        for index in range(start + 1, len(line) + 1):
-            self._activity_line = line[:index]
-            self._render_status_region()
-            time.sleep(self._activity_typewriter_delay)
-        self._activity_line = line
-        self._render_status_region()
+        self._echo(line)
 
     def _update_mode_line(self, line: str, *, log_when_not_tty: bool) -> None:
-        if not _is_tty():
-            if log_when_not_tty:
-                self._echo(line)
-            return
-        self._mode_line = line
-        self._render_status_region()
+        self._echo(line)
 
     def _should_log_progress(self, key: str) -> bool:
         percent = self._phase_progress.get(key, self._overall_percent() if key == "total" else 0.0)
@@ -334,60 +305,47 @@ class BacktestRunRenderer:
         return True
 
     def _echo(self, message: str) -> None:
-        if _is_tty() and self._status_height:
-            self._clear_status_region(for_redraw=False)
-            click.echo(message)
-            self._render_status_region()
-            return
         click.echo(message)
 
-    def _status_lines(self) -> list[str]:
-        lines: list[str] = []
-        if "total" in self._progress_lines:
-            lines.append(self._progress_lines["total"])
-        if self._activity_line:
-            lines.append(self._activity_line)
-        if self._mode_line:
-            lines.append(self._mode_line)
-        for key in self._phase_order:
-            if key in self._progress_lines:
-                lines.append(self._progress_lines[key])
-        for key, line in self._progress_lines.items():
-            if key != "total" and key not in self._phase_order:
-                lines.append(line)
-        if self.live and self._latest_chart_lines:
-            if lines:
-                lines.append("")
-            lines.extend(self._latest_chart_lines)
-        return lines
-
-    def _render_status_region(self) -> None:
-        if not _is_tty():
+    def _step_prompt(self) -> None:
+        """Wait for user Enter between steps in step mode."""
+        if not self.step_mode:
             return
-        self._clear_status_region(for_redraw=True)
-        lines = self._status_lines()
-        width = _terminal_width()
-        for line in lines:
-            _write_tty_line("\x1b[2K" + line[:width])
-            sys.stdout.write("\n")
-        sys.stdout.flush()
-        self._status_height = len(lines)
+        click.echo("")
+        click.echo("─" * 60)
+        click.echo("Press Enter to continue...")
+        input()
+        click.echo("")
 
-    def _clear_status_region(self, *, for_redraw: bool) -> None:
-        if not self._status_height:
+    def _step_activity(self, data: dict[str, Any]) -> None:
+        """Show step info from activity event and pause."""
+        if not self.step_mode:
             return
-        height = self._status_height
-        sys.stdout.write(f"\x1b[{height}F")
-        for index in range(height):
-            sys.stdout.write("\r\x1b[2K")
-            if index < height - 1:
-                sys.stdout.write("\x1b[1B")
-        if height > 1:
-            sys.stdout.write(f"\x1b[{height - 1}F")
-        sys.stdout.write("\r")
-        sys.stdout.flush()
-        self._status_height = 0
-
+        flow_label = str(data.get("flow_label") or data.get("flow_name") or "")
+        phase = str(data.get("phase") or "")
+        phase_label = str(data.get("phase_label") or phase)
+        timestamp = str(data.get("timestamp") or "")
+        event_kind = str(data.get("event_kind") or "")
+        strategies = data.get("strategies")
+        mode_info = data.get("mode_info")
+        ts_display = timestamp if timestamp else "(无时间戳)"
+        click.echo(f"\n{'─'*60}")
+        click.echo(f"⏱  [{ts_display}]")
+        click.echo(f"📂  {flow_label}  ·  阶段: {phase_label}")
+        if event_kind:
+            click.echo(f"📌  事件: {event_kind}")
+        if strategies:
+            labels = [s.get("label",s.get("alias",s.get("name",str(s)))) for s in (strategies if isinstance(strategies,list) else [strategies])]
+            click.echo(f"🎯  策略: {', '.join(labels[:5])}" + (f" ... ({len(labels)} total)" if len(labels) > 5 else ""))
+        if isinstance(mode_info, dict) and mode_info:
+            click.echo(f"⚙️   模式: {' · '.join(f'{k}={v}' for k,v in mode_info.items())}")
+        click.echo(f"{'─'*60}")
+        # Auto-advance when piping (not a TTY)
+        import sys as _step_sys
+        if _step_sys.stdin.isatty():
+            click.echo("")
+            click.echo("Press Enter to continue...")
+            input()
 
 def _extract_phases(data: Any) -> list[dict[str, Any]]:
     if isinstance(data, dict):

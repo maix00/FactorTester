@@ -48,7 +48,7 @@ class OrderExecutionModule(ExecutableModule):
             ),
             chip_template="撮合: {value}", tab_label="订单执行", tab_order=120,
         ),
-        "execution_prices": FieldDefinition(public=False),
+        "execution_prices": FieldDefinition(public=False, display_value_kind="execution_price_table"),
     }
 
     resolve_execution_price: ClassVar[Flow] = Flow(
@@ -59,6 +59,7 @@ class OrderExecutionModule(ExecutableModule):
         event_kind=EventKind.ORDER,
         order=5,
         description="解析订单成交价",
+        event_payload_inputs=("order",),
         compute=lambda state, ctx: _resolve_execution_price(state, ctx),
     )
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ..contracts import ScopePolicy, SettingDefinition, SettingOption
-from ..registry import ApplicationSettings
+from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingOption
+from tools.testers.settings.registry import ApplicationSettings
 
 MARKET_DATA_SELECTION_KEYS = ("data_source", "frequency")
 

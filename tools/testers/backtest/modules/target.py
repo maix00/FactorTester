@@ -10,8 +10,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldRef
+from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+
+_SIGNAL_VALUE_REF: FieldRef[Any] = FieldRef("signal_value", owner="FactorSignalModule")
+_CURRENT_PRICES_REF: FieldRef[Any] = FieldRef("current_prices", owner="MarketDataModule")
+_CURRENT_HISTORICAL_FIELDS_REF: FieldRef[Any] = FieldRef("current_historical_fields", owner="MarketDataModule")
+_CAUSAL_VALUATION_TABLE_REF: FieldRef[Any] = FieldRef("causal_valuation_table", owner="MarketDataModule")
+_POSITION_POLICY_REF: FieldRef[str] = FieldRef("position_policy", owner="GroupMembershipModule")
+_REBALANCE_TRIGGER_REF: FieldRef[str] = FieldRef("rebalance_trigger", owner="GroupMembershipModule")
+_SPLIT_COUNT_REF: FieldRef[int] = FieldRef("split_count", owner="GroupMembershipModule")
+_GROUP_INDEX_REF: FieldRef[int] = FieldRef("group_index", owner="GroupMembershipModule")
+_ALLOCATION_POLICY_REF: FieldRef[str] = FieldRef("allocation_policy", owner="GroupMembershipModule")
+_VOLATILITY_LOOKBACK_REF: FieldRef[Any] = FieldRef("volatility_lookback", owner="GroupMembershipModule")
+_VOLATILITY_WARMUP_REF: FieldRef[int] = FieldRef("volatility_warmup", owner="GroupMembershipModule")
+_PRODUCT_MASK_NAMES_REF: FieldRef[Any] = FieldRef("product_mask_names", owner="GroupMembershipModule")
 
 
 @dataclass(frozen=True)
@@ -37,9 +50,27 @@ class TargetStrategyModule(ExecutableModule):
     target_weights: ClassVar[FieldRef[Any]] = FieldRef("target_weights")
     strategy_kind: ClassVar[FieldRef[str]] = FieldRef("strategy_kind")
 
+    fields: ClassVar[dict[str, FieldDefinition]] = {
+        "trade_intent": FieldDefinition(public=False, display_value_kind="trade_intent"),
+    }
+
     precompute_strategy_intents: ClassVar[Flow] = Flow(
         "precompute_strategy_intents",
-        inputs=(),
+        inputs=(
+            strategy_kind,
+            _SIGNAL_VALUE_REF,
+            _CURRENT_PRICES_REF,
+            _CURRENT_HISTORICAL_FIELDS_REF,
+            _CAUSAL_VALUATION_TABLE_REF,
+            _POSITION_POLICY_REF,
+            _REBALANCE_TRIGGER_REF,
+            _SPLIT_COUNT_REF,
+            _GROUP_INDEX_REF,
+            _ALLOCATION_POLICY_REF,
+            _VOLATILITY_LOOKBACK_REF,
+            _VOLATILITY_WARMUP_REF,
+            _PRODUCT_MASK_NAMES_REF,
+        ),
         outputs=(trade_intent, target_weights),
         phase=Phase.PRE_REPLAY,
         order=55,

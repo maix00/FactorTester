@@ -17,9 +17,13 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import (
     FactorSignalModule, _evaluate_signal_live, _evaluate_signal_precomputed, _observe_signal_live_bar,
     _schedule_signal_live_timestamps, _schedule_signal_precomputed_timestamps,
-    _factor_calculation_key, normalize_signal_timestamp,
+    _evaluate_factor_for_strategies, _factor_calculation_key,
+    _clip_scheduled_table_to_strategy_window, _factor_fields_by_product,
+    normalize_signal_timestamp,
 )
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import _factor_required_columns
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
@@ -92,6 +96,107 @@ def test_factor_calculation_key_separates_market_data_source_and_frequency():
     assert _factor_calculation_key(factor_key, base) != _factor_calculation_key(factor_key, different_frequency)
 
 
+def test_live_market_data_resolves_exact_factor_column_names():
+    factor = (ColumnRef(DataColumn.CLOSE_ADJUSTED) + ColumnRef(DataColumn.VOLUME)) / 2
+
+    assert set(_factor_required_columns(factor)) == {"CLOSE_ADJUSTED", "VOLUME"}
+
+
+def test_live_factor_compile_receives_strategy_resolved_bar_frequency():
+    strategy = Strategy(alias="live-frequency")
+
+    class _Executor:
+        def on_bar(self, timestamp, prices) -> None:
+            pass
+
+    class _Factor:
+        def __init__(self) -> None:
+            self.source_freq = None
+
+        def compile_incremental(self, *, factor_alias, products, source_freq):
+            self.source_freq = source_freq
+            return _Executor()
+
+    factor = _Factor()
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={FactorModule.factor: factor},
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    account.market_data_store.required_frequency_by_strategy[strategy] = DataFreq.MIN1
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-02 09:01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0},
+        "CLOSE_ADJUSTED": {"P1": 10.5},
+    })
+
+    _observe_signal_live_bar(account, ctx)
+
+    assert factor.source_freq == DataFreq.MIN1
+
+
+def test_live_factor_fields_keep_canonical_data_column_names_per_product():
+    assert _factor_fields_by_product({
+        "close": {"P1": 10.0},
+        "CLOSE": {"P1": 10.0, "P2": 20.0},
+        "CLOSE_ADJUSTED": {"P1": 11.0, "P2": 21.0},
+        "VOLUME": {"P1": 100.0, "P2": 200.0},
+    }) == {
+        "P1": {"CLOSE": 10.0, "CLOSE_ADJUSTED": 11.0, "VOLUME": 100.0},
+        "P2": {"CLOSE": 20.0, "CLOSE_ADJUSTED": 21.0, "VOLUME": 200.0},
+    }
+
+
+def test_precomputed_factor_uses_registered_products_and_runtime_window_without_wrapper():
+    strategy = Strategy(alias="A")
+
+    class _Selection:
+        selection_id = "selection-1"
+        products = ("P2", "P1")
+
+    class _Factor:
+        def __init__(self) -> None:
+            self.calls: list[tuple] = []
+
+        def evaluate(self, products, *, freq=None, start_dt=None, end_dt=None, warmup_window=None):
+            self.calls.append((tuple(products), freq, start_dt, end_dt, warmup_window))
+            return pd.DataFrame({"P1": [1.0]}, index=[pd.Timestamp("2024-01-02 09:00")])
+
+    factor = _Factor()
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            FactorModule.factor: factor,
+            ProductSelectionModule.product_path_selection: _Selection(),
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.timezone: "Asia/Shanghai",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2024-01-03",
+            RunWindowModule.end_time: "15:00",
+            FactorSignalModule.warmup_mode: "fixed",
+            FactorSignalModule.warmup_window: "2d",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({"P1", "P2"}))
+    ctx.set_for(MarketDataModule.required_frequency, strategy, DataFreq.DAY1)
+
+    _evaluate_factor_for_strategies(factor, [strategy], account, ctx)
+
+    products, freq, start_dt, end_dt, warmup_window = factor.calls[0]
+    assert products == ("P1", "P2")
+    assert freq == DataFreq.DAY1
+    assert start_dt.ts == pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai")
+    assert end_dt.ts == pd.Timestamp("2024-01-03 15:00", tz="Asia/Shanghai")
+    assert warmup_window == pd.Timedelta("2D")
+
+
 def test_signal_live_groups_by_shared_align_params_calls_once_per_group():
     s1, s2, s3 = Strategy(alias="A"), Strategy(alias="B"), Strategy(alias="C")
     configs = {
@@ -120,6 +225,36 @@ def test_signal_live_groups_by_shared_align_params_calls_once_per_group():
 
     assert calls.count("1d") == 1  # shared by s1, s2 -> called once
     assert calls.count("1h") == 1  # s3's own group
+
+
+def test_exact_window_clips_daily_signal_schedule_by_intraday_event_timestamp():
+    strategy = Strategy(alias="daily-exact")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.timezone: "Asia/Shanghai",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2024-01-02",
+            RunWindowModule.end_time: "15:00",
+        },
+    )
+    trading_days = pd.DatetimeIndex([
+        "2024-01-01", "2024-01-02", "2024-01-03",
+    ], name="_SIGNAL@DAY1")
+    event_times = pd.DatetimeIndex([
+        "2024-01-01 15:00", "2024-01-02 15:00", "2024-01-03 15:00",
+    ], tz="Asia/Shanghai", name="MIN1")
+    table = pd.DataFrame(
+        {"P1": [1.0, 2.0, 3.0]},
+        index=pd.MultiIndex.from_arrays([trading_days, event_times]),
+    )
+
+    clipped = _clip_scheduled_table_to_strategy_window(table, config)
+
+    assert list(clipped["P1"]) == [2.0]
+    assert list(clipped.index.get_level_values("MIN1")) == [event_times[1]]
 
 
 def test_signal_precomputed_groups_by_factor_identity():
@@ -715,16 +850,18 @@ def test_signal_live_observes_bars_then_signals_from_causal_price_table():
         s2: StrategyConfig(strategy=s2, field_values={FactorModule.factor: shared_factor}),
     }
     account = BacktestRunState(strategy_configs=configs)
-    prices_ref = FieldRef("current_prices", owner="MarketDataModule")
-
     bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                           active_strategies=frozenset({s1, s2}))
-    bar_ctx.set(prices_ref, {"P1": 41.0})
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 41.0}, "CLOSE": {"P1": 41.0},
+    })
     _observe_signal_live_bar(account, bar_ctx)
 
     bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02"), event_queue=EventQueue(),
                           active_strategies=frozenset({s1, s2}))
-    bar_ctx.set(prices_ref, {"P1": 42.0})
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 42.0}, "CLOSE": {"P1": 42.0},
+    })
     _observe_signal_live_bar(account, bar_ctx)
 
     signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02"), event_queue=EventQueue(),
@@ -776,12 +913,14 @@ def test_signal_live_compiles_factor_expr_executor_from_bar_events():
         strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
     }
     account = BacktestRunState(strategy_configs=configs)
-    prices_ref = FieldRef("current_prices", owner="MarketDataModule")
-
     bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                           active_strategies=frozenset({strategy}))
-    bar_ctx.set(prices_ref, {"P1": {"CLOSE": 10.0}})
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0}, "CLOSE": {"P1": 10.0},
+    })
     _observe_signal_live_bar(account, bar_ctx)
+
+    assert bar_ctx.get_for(FactorSignalModule.live_factor_state, strategy) == {"P1": 11.0}
 
     signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                              active_strategies=frozenset({strategy}))
