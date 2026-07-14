@@ -734,40 +734,6 @@ def _audit_order_sample_table_text(value: dict[str, Any]) -> str | None:
     )
 
 
-def _audit_is_order_list(value: list[Any]) -> bool:
-    return orders_formatter.is_order_list(value)
-
-
-def _looks_like_order_record(value: dict[str, Any]) -> bool:
-    return orders_formatter.looks_like_order_record(value)
-
-
-def _audit_order_table_lines(value: list[dict[str, Any]], *, indent: str = "") -> list[str]:
-    return orders_formatter.order_table_lines(
-        value,
-        table_lines=_audit_table_lines,
-        scalar_cell=_audit_scalar_cell,
-        indent=indent,
-    )
-
-
-def _audit_order_record_key(item: dict[str, Any], fallback_index: int) -> str:
-    return orders_formatter.order_record_key(item, fallback_index)
-
-
-def _audit_order_field_values(item: dict[str, Any] | None) -> dict[str, Any]:
-    return orders_formatter.order_field_values(item)
-
-
-def _audit_order_field_change_cell(before: Any, after: Any) -> str:
-    return orders_formatter.order_field_change_cell(
-        before,
-        after,
-        scalar_cell=_audit_scalar_cell,
-        change_cell=_audit_change_cell,
-    )
-
-
 def _audit_order_diff_text(before: Any, after: Any) -> str | None:
     return orders_formatter.order_diff_text(
         before,
