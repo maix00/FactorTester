@@ -614,20 +614,17 @@ def _audit_json_text(value: Any) -> str:
 
 
 def _audit_special_text(value: Any) -> str | None:
-    return display_value_formatter.special_text(
+    return display_value_formatter.backtest_special_text(
         value,
-        formatters={
-            "PositionsTable": _audit_positions_text,
-            "TargetWeightIntent": _audit_trade_intent_text,
-            "OrderDeltaIntent": _audit_trade_intent_text,
-            "TimestampTradingDayResolver": _audit_trading_day_resolver_text,
-            "ContractMetadataTable": _audit_contract_metadata_text,
-            "PriceTablesSummary": _audit_price_tables_text,
-            "MarketDataLoadPlan": _audit_market_data_load_plan_text,
-            "MarketDataExcludedProducts": _audit_market_data_excluded_products_text,
-            "RunWindowSummary": _audit_run_window_text,
-            "HistoricalFieldStateTable": _audit_historical_field_state_text,
-        },
+        positions_text=_audit_positions_text,
+        trade_intent_text=_audit_trade_intent_text,
+        trading_day_resolver_text=_audit_trading_day_resolver_text,
+        contract_metadata_text=_audit_contract_metadata_text,
+        price_tables_text=_audit_price_tables_text,
+        market_data_load_plan_text=_audit_market_data_load_plan_text,
+        market_data_excluded_products_text=_audit_market_data_excluded_products_text,
+        run_window_text=_audit_run_window_text,
+        historical_field_state_text=_audit_historical_field_state_text,
     )
 
 

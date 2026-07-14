@@ -211,6 +211,36 @@ def special_text(value: Any, *, formatters: Mapping[str, TextFormatter]) -> str 
     return runtime_object_text(value)
 
 
+def backtest_special_text(
+    value: Any,
+    *,
+    positions_text: TextFormatter,
+    trade_intent_text: TextFormatter,
+    trading_day_resolver_text: TextFormatter,
+    contract_metadata_text: TextFormatter,
+    price_tables_text: TextFormatter,
+    market_data_load_plan_text: TextFormatter,
+    market_data_excluded_products_text: TextFormatter,
+    run_window_text: TextFormatter,
+    historical_field_state_text: TextFormatter,
+) -> str | None:
+    return special_text(
+        value,
+        formatters={
+            "PositionsTable": positions_text,
+            "TargetWeightIntent": trade_intent_text,
+            "OrderDeltaIntent": trade_intent_text,
+            "TimestampTradingDayResolver": trading_day_resolver_text,
+            "ContractMetadataTable": contract_metadata_text,
+            "PriceTablesSummary": price_tables_text,
+            "MarketDataLoadPlan": market_data_load_plan_text,
+            "MarketDataExcludedProducts": market_data_excluded_products_text,
+            "RunWindowSummary": run_window_text,
+            "HistoricalFieldStateTable": historical_field_state_text,
+        },
+    )
+
+
 def parsed_literal_text(
     value: str,
     *,
