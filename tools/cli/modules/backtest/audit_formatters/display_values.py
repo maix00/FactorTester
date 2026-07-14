@@ -107,11 +107,11 @@ def display_field_value(
         summary = positions_summary(value)
         if summary is not None:
             return summary
-    if qualified_name in {"RunWindowModule.run_window_envelope", "RunWindowModule.strategy_windows"}:
+    if value_kind == "run_window" or qualified_name in {"RunWindowModule.run_window_envelope", "RunWindowModule.strategy_windows"}:
         summary = run_window_summary(value)
         if summary is not None:
             return summary
-    if qualified_name == "MarketDataModule.field_state_baseline":
+    if value_kind == "historical_field_state" or qualified_name == "MarketDataModule.field_state_baseline":
         summary = historical_field_state_summary(value)
         if summary is not None:
             return summary
