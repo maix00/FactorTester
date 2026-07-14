@@ -115,6 +115,7 @@ class LedgerModule(ExecutableModule):
         outputs=(positions, cash, _margin_reserved_ref, _margin_deficit_ref, _margin_excess_ref),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
         description="成交落账",
+        event_payload_inputs=("order",),
         compute=lambda state, ctx: _apply_order_fill(state, ctx),
     )
     equity_on_order: ClassVar[Flow] = Flow(

@@ -194,6 +194,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         event_kind=EventKind.TRADE_INTENT,
         order=15,
         description="处理交割强平通知",
+        event_payload_inputs=("force_close",),
         compute=lambda state, ctx: _handle_delivery_force_close_notice(state, ctx),
     )
 
@@ -267,6 +268,7 @@ class RolloverModule(ExecutableModule):
         event_kind=EventKind.TRADE_INTENT,
         order=10,
         description="处理换月通知",
+        event_payload_inputs=("rollover",),
         compute=lambda state, ctx: _handle_rollover_notice(state, ctx),
     )
 
@@ -406,7 +408,7 @@ def _handle_rollover_notice(state, ctx) -> None:
         ledger = state.ledger_for_strategy(strategy)
         positions = ledger.get(_POSITIONS_REF, {})
         orders: list[Order] = []
-        for raw_payload in ctx.payloads_for(strategy):
+        for raw_payload in ctx.payloads_for(strategy, kind="rollover"):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             if str(payload.get("notice_type") or "") != "rollover":
                 continue
@@ -455,7 +457,7 @@ def _handle_delivery_force_close_notice(state, ctx) -> None:
         ledger = state.ledger_for_strategy(strategy)
         positions = ledger.get(_POSITIONS_REF, {})
         orders: list[Order] = []
-        for raw_payload in ctx.payloads_for(strategy):
+        for raw_payload in ctx.payloads_for(strategy, kind="force_close"):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             notice_type = str(payload.get("notice_type") or "")
             if notice_type != "force_close":

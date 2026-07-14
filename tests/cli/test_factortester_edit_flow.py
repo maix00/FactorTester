@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 import click
+import pytest
 from click.testing import CliRunner
 from flask import Flask, Response, jsonify, request
 from werkzeug.serving import make_server
@@ -45,6 +46,16 @@ from tools.cli.modules.backtest.audit_formatters import display_values as displa
 from tools.cli.modules.backtest.audit_formatters.field_metadata import load_field_metadata
 from tools.cli.modules.registry import ControllerRegistry
 from tools.data.types.data_money import DataMoney
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.engines.native.scheduler import (
+    EventQueue,
+    FlowContext,
+    FlowRegistry,
+    ResolvedFlow,
+)
+
+import pandas as pd
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -77,6 +88,186 @@ def test_step_audit_field_metadata_loads_display_value_kind_from_field_definitio
     assert metadata.display_value_kind("GroupMembershipModule.dispatched_order_events") == "event_draft_table"
     assert metadata.display_value_kind("CashPoolModule.cash") == "cash"
     assert metadata.display_value_kind("MarketDataModule.required_data_source") == "auto_when_empty"
+
+
+def test_flow_registry_resolves_declared_event_payload_inputs() -> None:
+    def compute(_state, _ctx):
+        return None
+
+    flow = Flow(
+        name="consume_order_payload",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        order=1,
+        compute=compute,
+        owner="TestModule",
+        event_payload_inputs=("order",),
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+
+    [resolved] = registry.resolve()
+
+    assert resolved.event_payload_inputs == ("order",)
+
+
+def test_flow_binding_can_override_event_payload_inputs() -> None:
+    def compute(_state, _ctx):
+        return None
+
+    base = Flow(
+        name="consume_payload",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        order=1,
+        compute=compute,
+        owner="TestModule",
+        event_payload_inputs=("order",),
+    )
+    registry = FlowRegistry()
+    registry.register_flow(base.bind(name="consume_signal_payload", event_kind=EventKind.SIGNAL, event_payload_inputs=("signal",)))
+
+    [resolved] = registry.resolve()
+
+    assert resolved.name == "consume_signal_payload"
+    assert resolved.event_payload_inputs == ("signal",)
+
+
+def test_flow_contract_audit_flags_undeclared_event_payload_reads() -> None:
+    timestamp = pd.Timestamp("2026-01-05 09:01:00+08:00")
+    strategy = "A1"
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={
+            strategy: [
+                EventDraft(
+                    EventKind.ORDER,
+                    timestamp,
+                    strategy=strategy,
+                    payload={"kind": "order", "order_id": "O1"},
+                )
+            ]
+        },
+        audit_contract=True,
+        event_kind=EventKind.ORDER,
+    )
+    flow = ResolvedFlow(
+        name="missing_event_payload_contract",
+        owner="TestModule",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        order=1,
+        after=(),
+        before=(),
+        compute=lambda _state, _ctx: None,
+        event_payload_inputs=(),
+    )
+
+    ctx.enter_flow(flow)
+    try:
+        with pytest.warns(RuntimeWarning, match="undeclared read of event payload kind 'order'"):
+            ctx.payloads_for(strategy)
+    finally:
+        ctx.exit_flow()
+
+    assert any(
+        violation["access"] == "read" and violation["field"] == "event_payload:order"
+        for violation in ctx.contract_violations()
+    )
+
+
+def test_flow_contract_audit_accepts_declared_event_payload_reads() -> None:
+    timestamp = pd.Timestamp("2026-01-05 09:01:00+08:00")
+    strategy = "A1"
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={
+            strategy: [
+                EventDraft(
+                    EventKind.ORDER,
+                    timestamp,
+                    strategy=strategy,
+                    payload={"kind": "order", "order_id": "O1"},
+                )
+            ]
+        },
+        audit_contract=True,
+        event_kind=EventKind.ORDER,
+    )
+    flow = ResolvedFlow(
+        name="declared_event_payload_contract",
+        owner="TestModule",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        order=1,
+        after=(),
+        before=(),
+        compute=lambda _state, _ctx: None,
+        event_payload_inputs=("order",),
+    )
+
+    ctx.enter_flow(flow)
+    try:
+        ctx.payloads_for(strategy)
+    finally:
+        ctx.exit_flow()
+
+    assert ctx.contract_violations() == ()
+
+
+def test_flow_contract_audit_only_records_requested_event_payload_kind() -> None:
+    timestamp = pd.Timestamp("2026-01-05 09:01:00+08:00")
+    ledger = "L1"
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger}),
+        drafts_by_ledger={
+            ledger: [
+                EventDraft(
+                    EventKind.LEDGER,
+                    timestamp,
+                    ledger=ledger,
+                    payload={"kind": "margin_check", "ledger_id": ledger},
+                )
+            ]
+        },
+        audit_contract=True,
+        event_kind=EventKind.LEDGER,
+    )
+    flow = ResolvedFlow(
+        name="daily_mark_to_market",
+        owner="TestModule",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.LEDGER,
+        order=1,
+        after=(),
+        before=(),
+        compute=lambda _state, _ctx: None,
+        event_payload_inputs=("daily_mark_to_market",),
+    )
+
+    ctx.enter_flow(flow)
+    try:
+        assert ctx.payloads_for_ledger(ledger, kind="daily_mark_to_market") == []
+    finally:
+        ctx.exit_flow()
+
+    assert ctx.contract_violations() == ()
 
 
 def test_step_audit_does_not_repeat_changed_output_after_value() -> None:

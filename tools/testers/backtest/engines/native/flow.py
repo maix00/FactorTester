@@ -51,6 +51,7 @@ class FlowDefinition:
     # FlowContext. It is still scheduler-visible for dependency ordering
     # and no-lookahead guarantees; UIs may group or hide it.
     input_materialization: bool = False
+    event_payload_inputs: tuple[str, ...] = ()
 
     @property
     def qualified_name(self) -> str:
@@ -72,6 +73,7 @@ class FlowDefinition:
         description: str | None = None,
         strategy_scoped: bool | None = None,
         input_materialization: bool | None = None,
+        event_payload_inputs: tuple[str, ...] | None = None,
     ) -> "FlowBinding":
         return FlowBinding(
             definition=self,
@@ -84,6 +86,7 @@ class FlowDefinition:
             description=description,
             strategy_scoped=strategy_scoped,
             input_materialization=input_materialization,
+            event_payload_inputs=event_payload_inputs,
         )
 
     def __repr__(self) -> str:
@@ -102,6 +105,7 @@ class FlowBinding:
     description: str | None = None
     strategy_scoped: bool | None = None
     input_materialization: bool | None = None
+    event_payload_inputs: tuple[str, ...] | None = None
 
     @property
     def definition_name(self) -> str:
@@ -147,6 +151,12 @@ class FlowBinding:
             return self.input_materialization
         return self.definition.input_materialization
 
+    @property
+    def effective_event_payload_inputs(self) -> tuple[str, ...]:
+        if self.event_payload_inputs is not None:
+            return self.event_payload_inputs
+        return self.definition.event_payload_inputs
+
     def __repr__(self) -> str:
         return self.qualified_name
 
@@ -177,6 +187,7 @@ class Flow:
     # Same meaning as FlowDefinition.input_materialization for legacy
     # single-binding Flow declarations.
     input_materialization: bool = False
+    event_payload_inputs: tuple[str, ...] = ()
 
     @property
     def definition_name(self) -> str:
@@ -201,6 +212,7 @@ class Flow:
         name: str | None = None,
         description: str | None = None,
         strategy_scoped: bool | None = None,
+        event_payload_inputs: tuple[str, ...] | None = None,
     ) -> FlowBinding:
         definition = FlowDefinition(
             self.name,
@@ -211,6 +223,7 @@ class Flow:
             description=self.description,
             strategy_scoped=self.strategy_scoped,
             input_materialization=self.input_materialization,
+            event_payload_inputs=self.event_payload_inputs,
         )
         return definition.bind(
             phase=phase or self.phase,
@@ -221,6 +234,7 @@ class Flow:
             name=name,
             description=description,
             strategy_scoped=strategy_scoped,
+            event_payload_inputs=event_payload_inputs,
         )
 
     def __repr__(self) -> str:

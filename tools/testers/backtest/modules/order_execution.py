@@ -59,6 +59,7 @@ class OrderExecutionModule(ExecutableModule):
         event_kind=EventKind.ORDER,
         order=5,
         description="解析订单成交价",
+        event_payload_inputs=("order",),
         compute=lambda state, ctx: _resolve_execution_price(state, ctx),
     )
 

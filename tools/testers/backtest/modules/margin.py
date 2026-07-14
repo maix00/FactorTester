@@ -163,6 +163,7 @@ class MarginModule(ExecutableModule):
         event_kind=EventKind.LEDGER,
         order=60,
         description="处理保证金要求变化",
+        event_payload_inputs=("margin_check",),
         compute=lambda state, ctx: _apply_margin_requirement_change(state, ctx),
     )
     handle_margin_liquidation_notice: ClassVar[Flow] = Flow(
@@ -184,6 +185,7 @@ class MarginModule(ExecutableModule):
         event_kind=EventKind.TRADE_INTENT,
         order=70,
         description="处理保证金强平通知",
+        event_payload_inputs=("margin_liquidation",),
         compute=lambda state, ctx: _handle_margin_liquidation_notice(state, ctx),
     )
 
@@ -537,8 +539,8 @@ def _ledger_payloads(state: Any, ctx: Any, *, kind: str) -> list[tuple[Any, dict
         ledger = state.ledgers.get(ledger_identity(ledger_key))
         if ledger is None:
             continue
-        for payload in ctx.payloads_for_ledger(ledger_key):
-            if isinstance(payload, dict) and str(payload.get("kind") or "") == kind:
+        for payload in ctx.payloads_for_ledger(ledger_key, kind=kind):
+            if isinstance(payload, dict):
                 result.append((ledger, payload))
     return result
 

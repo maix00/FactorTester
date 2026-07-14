@@ -442,6 +442,7 @@ class ResolvedFlow:
     strategy_scoped: bool = False
     definition_name: str = ""
     input_materialization: bool = False
+    event_payload_inputs: tuple[str, ...] = ()
 
     @property
     def effective_description(self) -> str:
@@ -488,6 +489,7 @@ class FlowRegistry:
                 after=base.after, before=base.before, compute=compute,
                 description=base.effective_description, strategy_scoped=_flow_strategy_scoped(base),
                 input_materialization=_flow_input_materialization(base),
+                event_payload_inputs=_flow_event_payload_inputs(base),
             ))
         return resolved
 
@@ -512,6 +514,12 @@ def _flow_input_materialization(flow: Flow | FlowBinding) -> bool:
     if isinstance(flow, FlowBinding):
         return flow.effective_input_materialization
     return flow.input_materialization
+
+
+def _flow_event_payload_inputs(flow: Flow | FlowBinding) -> tuple[str, ...]:
+    if isinstance(flow, FlowBinding):
+        return flow.effective_event_payload_inputs
+    return flow.event_payload_inputs
 
 
 # ── sort_and_validate ─────────────────────────────────────────────
@@ -683,6 +691,50 @@ class FlowContext:
                 stacklevel=3,
             )
 
+    def _record_event_payload_read(self, payloads: list[Any]) -> None:
+        if not self._audit_contract and not self._enforce_contract:
+            return
+        flow = self._active_flow
+        if flow is None:
+            return
+        kinds = sorted({self._event_payload_kind(payload) for payload in payloads})
+        declared = {str(item) for item in flow.event_payload_inputs}
+        if "*" in declared or set(kinds) <= declared:
+            return
+        for kind in (item for item in kinds if item not in declared):
+            field = f"event_payload:{kind}"
+            violation = {
+                "flow": _flow_qualified_name(flow),
+                "phase": flow.phase.value,
+                "event_kind": flow.event_kind.name if flow.event_kind is not None else "",
+                "access": "read",
+                "field": field,
+            }
+            self._contract_violations.append(violation)
+            if self._enforce_contract:
+                raise SchedulerError(
+                    f"flow {_flow_qualified_name(flow)!r} performed undeclared read "
+                    f"of event payload kind {kind!r}"
+                )
+            warn_key = (_flow_qualified_name(flow), "read", field)
+            if warn_key not in self._warned_contract_violations:
+                self._warned_contract_violations.add(warn_key)
+                warnings.warn(
+                    f"flow {_flow_qualified_name(flow)!r} performed undeclared read "
+                    f"of event payload kind {kind!r}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+
+    def _event_payload_kind(self, payload: Any) -> str:
+        if isinstance(payload, Mapping):
+            kind = payload.get("kind")
+            if kind not in (None, ""):
+                return str(kind)
+        if self.event_kind is not None:
+            return self.event_kind.name.lower()
+        return "unknown"
+
     def _push_if_event(self, value: Any) -> None:
         if isinstance(value, EventDraft):
             self._event_queue.push_event(value)
@@ -705,9 +757,11 @@ class FlowContext:
                 f"payload_for expected exactly one draft for {strategy!r} in this "
                 f"batch, found {len(drafts)} -- use payloads_for for event kinds "
                 "that can carry multiple simultaneous drafts per strategy (e.g. ORDER)")
-        return drafts[0].payload
+        payload = drafts[0].payload
+        self._record_event_payload_read([payload])
+        return payload
 
-    def payloads_for(self, strategy: "Strategy") -> list[Any]:
+    def payloads_for(self, strategy: "Strategy", *, kind: str | None = None) -> list[Any]:
         """All payloads for this strategy in this dispatch batch, in the
         order they were popped off the EventQueue (stable for equal
         timestamp+kind, see EventQueue's counter tiebreak). A strategy can
@@ -718,9 +772,11 @@ class FlowContext:
         if cached is None:
             cached = [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
             self._payloads_by_strategy_cache[strategy] = cached
-        return cached
+        payloads = self._filter_event_payloads(cached, kind=kind)
+        self._record_event_payload_read(payloads)
+        return payloads
 
-    def payloads_for_ledger(self, ledger: "Ledger") -> list[Any]:
+    def payloads_for_ledger(self, ledger: "Ledger", *, kind: str | None = None) -> list[Any]:
         """All payloads for this ledger in this dispatch batch.
 
         Ledger-scoped events intentionally do not require a strategy carrier.
@@ -734,7 +790,14 @@ class FlowContext:
         if cached is None:
             cached = [draft.payload for draft in self._drafts_by_ledger.get(ledger_key, ())]
             self._payloads_by_ledger_cache[ledger_key] = cached
-        return cached
+        payloads = self._filter_event_payloads(cached, kind=kind)
+        self._record_event_payload_read(payloads)
+        return payloads
+
+    def _filter_event_payloads(self, payloads: list[Any], *, kind: str | None) -> list[Any]:
+        if kind is None:
+            return payloads
+        return [payload for payload in payloads if self._event_payload_kind(payload) == kind]
 
     def draft_for(self, strategy: "Strategy") -> EventDraft:
         drafts = self._drafts_by_strategy[strategy]

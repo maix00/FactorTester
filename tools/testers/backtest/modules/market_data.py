@@ -405,6 +405,7 @@ class MarketDataModule(ExecutableModule):
         outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.FIELD_CHANGE, order=0,
         description="处理字段变更事件",
+        event_payload_inputs=("field_change",),
         compute=lambda state, ctx: _handle_field_changes(state, ctx),
     )
     causal_valuation: ClassVar[Flow] = Flow(
@@ -444,6 +445,7 @@ class MarketDataModule(ExecutableModule):
         name="lookup_current_prices_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
         description="读取订单时点市场快照",
+        event_payload_inputs=("order",),
     )
     lookup_current_prices_on_trade_intent: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
         name="lookup_current_prices_on_trade_intent",
@@ -482,6 +484,7 @@ class MarketDataModule(ExecutableModule):
         name="lookup_historical_fields_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=2,
         description="读取订单交易规则字段",
+        event_payload_inputs=("order",),
     )
     lookup_historical_fields_on_trade_intent: ClassVar[FlowBinding] = lookup_historical_fields.bind(
         name="lookup_historical_fields_on_trade_intent",
@@ -1421,7 +1424,7 @@ def _handle_field_changes(state, ctx) -> None:
     """Process FIELD_CHANGE events: update field_state_store with new values."""
     store = market_data_store_for(state)
     for strategy in ctx.active_strategies:
-        for draft in ctx.payloads_for(strategy):
+        for draft in ctx.payloads_for(strategy, kind="field_change"):
             payload = getattr(draft, "payload", None)
             if not isinstance(payload, dict):
                 continue

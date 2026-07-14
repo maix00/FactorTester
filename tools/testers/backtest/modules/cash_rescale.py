@@ -86,6 +86,7 @@ class LedgerCashConstraintModule(ExecutableModule):
         order=8,
         after=(FeeModule.resolve_fee_cost,),
         description="成交现金约束",
+        event_payload_inputs=("order",),
         compute=lambda state, ctx: constrain_order_batch_to_execution_cash(state, ctx),
     )
 

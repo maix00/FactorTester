@@ -166,6 +166,7 @@ class TradingRuleModule(ExecutableModule):
         event_kind=EventKind.LEDGER,
         order=50,
         description="执行逐日盯市结算",
+        event_payload_inputs=("daily_mark_to_market",),
         compute=lambda state, ctx: _apply_daily_mark_to_market(state, ctx),
     )
 
@@ -659,7 +660,11 @@ def _ledger_targets(state: Any, ctx: Any) -> list[Any]:
     seen: set[Any] = set()
     active_ledgers = ctx.active_ledgers or frozenset(getattr(state, "ledgers", {}))
     for ledger in active_ledgers:
-        payloads = [payload for payload in ctx.payloads_for_ledger(ledger) if isinstance(payload, dict)]
+        payloads = [
+            payload
+            for payload in ctx.payloads_for_ledger(ledger, kind="daily_mark_to_market")
+            if isinstance(payload, dict)
+        ]
         if not payloads:
             target_ledger = state.ledgers.get(ledger_identity(ledger))
             if target_ledger is not None:
