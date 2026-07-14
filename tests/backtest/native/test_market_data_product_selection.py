@@ -10,7 +10,7 @@ from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.market_data import (
-    _check_market_data_coverage, _load_raw_market_data, _resolve_market_data_request,
+    MarketDataModule, _check_market_data_coverage, _load_raw_market_data, _resolve_market_data_request,
 )
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, strategy_run_window_datetimes
@@ -98,6 +98,48 @@ def test_market_data_coverage_plans_expanded_contracts_alongside_the_abstract_pr
     assert _Contract("P2601.DCE") in planned
     assert _Contract("P2602.DCE") in planned
     assert len(account.market_data_store.load_plan) == 3
+
+
+def test_market_data_coverage_allows_finer_expanded_contract_frequency_for_daily_required_bar():
+    strategy = Strategy(alias="A")
+    product = _TermProduct("P.DCE")
+    contract = _Contract("P2601.DCE")
+    account = BacktestRunState(strategy_configs={strategy: StrategyConfig(strategy=strategy)})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+    ctx.set_for(TermStructureExpandModule.expanded_contracts, strategy, frozenset({contract}))
+    ctx.set_for(TermStructureExpandModule.contract_metadata, strategy, ({
+        "contract_object": contract,
+        "is_identity": False,
+    },))
+    ctx.set_for(MarketDataModule.required_frequency, strategy, DataFreq.DAY1)
+    ctx.set_for(MarketDataModule.required_data_source, strategy, ())
+
+    _check_market_data_coverage(account, ctx)
+
+    assert (contract, DataFreq.MIN1, None) in account.market_data_store.load_plan
+
+
+def test_market_data_coverage_prefers_finer_frequency_for_daily_required_bar():
+    strategy = Strategy(alias="A")
+
+    @dataclass(frozen=True)
+    class _DualFreqProduct:
+        name: str
+
+        def list_available_freqs(self):
+            return [DataFreq.DAY1, DataFreq.MIN1]
+
+    product = _DualFreqProduct("P.DCE")
+    account = BacktestRunState(strategy_configs={strategy: StrategyConfig(strategy=strategy)})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+    ctx.set_for(MarketDataModule.required_frequency, strategy, DataFreq.DAY1)
+    ctx.set_for(MarketDataModule.required_data_source, strategy, ())
+
+    _check_market_data_coverage(account, ctx)
+
+    assert account.market_data_store.load_plan == [(product, DataFreq.MIN1, None)]
 
 
 @dataclass(frozen=True)

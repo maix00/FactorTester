@@ -18,7 +18,8 @@ from tools.testers.backtest.modules.factor_signal import (
     FactorSignalModule, _evaluate_signal_live, _evaluate_signal_precomputed, _observe_signal_live_bar,
     _schedule_signal_live_timestamps, _schedule_signal_precomputed_timestamps,
     _evaluate_factor_for_strategies, _factor_calculation_key,
-    _clip_scheduled_table_to_strategy_window, _factor_fields_by_product,
+    _clip_scheduled_table_to_strategy_window, _clip_signal_table_to_strategy_window,
+    _schedule_table_for_strategy, _factor_fields_by_product,
     normalize_signal_timestamp,
 )
 from tools.testers.backtest.modules.market_data import MarketDataModule
@@ -256,6 +257,39 @@ def test_exact_window_clips_daily_signal_schedule_by_intraday_event_timestamp():
     assert list(clipped["P1"]) == [2.0]
     assert list(clipped.index.get_level_values("MIN1")) == [event_times[1]]
 
+    raw_clipped = _clip_signal_table_to_strategy_window(table, config)
+
+    assert list(raw_clipped["P1"]) == [2.0]
+
+
+def test_schedule_table_maps_explicit_daily_signal_to_market_event_time():
+    strategy = Strategy(alias="daily-exact")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.timezone: "Asia/Shanghai",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2024-01-02",
+            RunWindowModule.end_time: "15:00",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    market_times = pd.DatetimeIndex([
+        "2024-01-02 09:00",
+        "2024-01-02 15:00",
+    ], tz="Asia/Shanghai")
+    account.market_data_store.current_prices_table = pd.DataFrame({"P1": [1.0, 2.0]}, index=market_times)
+    table = pd.DataFrame(
+        {"P1": [2.0]},
+        index=pd.DatetimeIndex(["2024-01-02"], name="_SIGNAL@DAY1"),
+    )
+
+    scheduled = _schedule_table_for_strategy(table, config, account)
+
+    assert list(scheduled.index) == [pd.Timestamp("2024-01-02 15:00", tz="Asia/Shanghai")]
+
 
 def test_signal_precomputed_groups_by_factor_identity():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
@@ -389,9 +423,9 @@ def test_signal_precomputed_clips_events_to_strategy_run_window():
     assert factor.calls == 2
     assert len(account.factor_signal_store.precomputed_tables) == 2
     assert seen == [
-        (pd.Timestamp("2024-01-01 09:00"), s1),
-        (pd.Timestamp("2024-01-02 09:00"), s1),
-        (pd.Timestamp("2024-01-03 09:00"), s2),
+        (pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai"), s1),
+        (pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai"), s1),
+        (pd.Timestamp("2024-01-03 09:00", tz="Asia/Shanghai"), s2),
     ]
 
 
@@ -637,9 +671,41 @@ def test_signal_precomputed_same_window_batches_strategies_by_timestamp():
 
     assert len(account.factor_signal_store.precomputed_tables) == 1
     assert batches == [
-        (pd.Timestamp("2024-01-01 09:00"), {s1, s2}),
-        (pd.Timestamp("2024-01-02 09:00"), {s1, s2}),
+        (pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai"), {s1, s2}),
+        (pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai"), {s1, s2}),
     ]
+
+
+def test_signal_precomputed_localizes_naive_subset_timestamps_before_event_queue_push():
+    strategy = Strategy(alias="A")
+
+    class _FakeFactor:
+        def evaluate(self):
+            return pd.DataFrame(
+                {"PT.GFE": [1.0], "PD.GFE": [2.0], "SI.GFE": [3.0]},
+                index=pd.DatetimeIndex([pd.Timestamp("2026-01-05 09:00")]),
+            )
+
+    fields = {
+        FactorModule.factor: _FakeFactor(),
+        RunWindowModule.time_precision: "exact",
+        RunWindowModule.timezone: "Asia/Shanghai",
+        RunWindowModule.start_date: "2026-01-05",
+        RunWindowModule.end_date: "2026-01-05",
+        RunWindowModule.start_time: "08:00",
+        RunWindowModule.end_time: "15:00",
+    }
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, active_flow_names=frozenset({"signal_precomputed"}), field_values=fields),
+    })
+    queue = EventQueue()
+    queue.push_event(EventDraft(EventKind.BAR, pd.Timestamp("2026-01-05 09:01", tz="Asia/Shanghai"), strategy))
+    ctx = FlowContext(timestamp=None, event_queue=queue)
+
+    _schedule_signal_precomputed_timestamps(account, ctx)
+
+    head = queue.snapshot_head()
+    assert all(draft.timestamp.tz is not None for draft in head)
 
 
 def test_signal_precomputed_uses_strategy_index_key_inside_same_timestamp_batch():
@@ -821,7 +887,9 @@ def test_signal_precomputed_calendar_frequency_aligns_schedule():
     assert align.call_args.args[1] == "5min"
     key = account.factor_signal_store.precomputed_table_keys[strategy]
     assert key in account.factor_signal_store.precomputed_tables
-    assert list(account.factor_signal_store.precomputed_tables[key].index) == [pd.Timestamp("2024-01-01 09:01")]
+    assert list(account.factor_signal_store.precomputed_tables[key].index) == [
+        pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    ]
 
 
 def test_signal_live_observes_bars_then_signals_from_causal_price_table():

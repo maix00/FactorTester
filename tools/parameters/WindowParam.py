@@ -13,7 +13,15 @@ class WindowParam(Parameter):
         if hasattr(self, '_initialized'):
             return
         td_space = ValueSpace.timedelta('pos')
-        int_space = ValueSpace(contains=lambda x: isinstance(x, int) and x > 0, alias=str)
+        int_space = ValueSpace(
+            contains=lambda x: (
+                isinstance(x, int) and not isinstance(x, bool) and x > 0
+            ) or (
+                isinstance(x, str) and x.strip().isdigit() and int(x.strip()) > 0
+            ),
+            rectify=lambda x: int(str(x).strip()),
+            alias=str,
+        )
         space = int_space.union(td_space)
         super().__init__(
             alias=alias,

@@ -111,6 +111,13 @@ def test_timedelta_window_can_drive_dynamic_truncation_offsets():
     assert not result.empty
 
 
+def test_window_param_numeric_string_is_bar_count_integer():
+    window = WindowParam("NumericStringWindow", default_value="10")
+
+    assert window.default_value == 10
+    assert window.rectify_value("3") == 3
+
+
 def test_window_bars_preserves_timedelta_dependency_for_frequency_inference():
     window = WindowParam("FrequencyWindow", default_value="9m")
     volume = _FrameExpr(pd.DataFrame({"P": [1.0]}))

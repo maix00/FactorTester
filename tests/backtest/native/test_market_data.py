@@ -17,7 +17,7 @@ import tools.testers.backtest.modules.market_data as market_data_module
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
-    MarketDataModule, _causal_valuation, _check_market_data_coverage,
+    MarketDataModule, _build_trading_day_resolver, _causal_valuation, _check_market_data_coverage,
     _apply_exchange_rule_defaults, _desired_factor_frequencies,
     _historical_fields_at_from_frames, _load_raw_market_data,
     _resolve_market_data_request, _set_current_market_snapshot,
@@ -792,7 +792,7 @@ def test_infer_market_data_request_uses_available_common_frequency_without_min1_
     assert ctx.get(MarketDataModule.required_frequency) is None
 
 
-def test_check_market_data_coverage_rejects_same_product_with_conflicting_frequency(monkeypatch):
+def test_check_market_data_coverage_unifies_compatible_frequency_requests(monkeypatch):
     class _Product:
         name = "P1"
 
@@ -818,8 +818,9 @@ def test_check_market_data_coverage_rejects_same_product_with_conflicting_freque
         lambda selected_product, freq, required_source: None,
     )
 
-    with pytest.raises(ValueError, match="多个行情请求"):
-        _check_market_data_coverage(account, ctx)
+    _check_market_data_coverage(account, ctx)
+
+    assert account.market_data_store.load_plan == [(product, DataFreq.MIN1, None)]
 
 
 def test_check_market_data_coverage_allows_disjoint_products_with_distinct_frequency(monkeypatch):
@@ -982,9 +983,13 @@ def test_load_raw_market_data_combines_disjoint_products_with_distinct_frequency
         "CLOSE": [10.5, 20.5],
         "VWAP": [10.25, 20.25],
     }
+    min1_times = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
     min1_frame = pd.DataFrame(
         price_columns,
-        index=pd.date_range("2024-01-01 09:01", periods=2, freq="1min"),
+        index=pd.MultiIndex.from_arrays(
+            [min1_times.normalize(), min1_times],
+            names=["DAY1", "MIN1"],
+        ),
     )
     day1_frame = pd.DataFrame(
         {
@@ -994,7 +999,7 @@ def test_load_raw_market_data_combines_disjoint_products_with_distinct_frequency
             "CLOSE": [105.0],
             "VWAP": [102.5],
         },
-        index=pd.DatetimeIndex([pd.Timestamp("2024-01-01 15:00")]),
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-01 15:00", tz="Asia/Shanghai")]),
     )
     p1 = _Product("P1", DataFreq.MIN1, min1_frame)
     p2 = _Product("P2", DataFreq.DAY1, day1_frame)
@@ -1011,6 +1016,11 @@ def test_load_raw_market_data_combines_disjoint_products_with_distinct_frequency
     assert list(raw_prices.columns) == [p1, p2]
     assert raw_prices[p1].dropna().tolist() == [10.5, 20.5]
     assert raw_prices[p2].dropna().tolist() == [105.0]
+    assert not isinstance(raw_prices.index, pd.MultiIndex)
+    assert str(raw_prices.index.tz) == "Asia/Shanghai"
+    _build_trading_day_resolver(account, ctx)
+    resolver = ctx.get(MarketDataModule.trading_day_resolver)
+    assert resolver.resolve_trading_day(pd.Timestamp("2024-01-01 09:01")) == pd.Timestamp("2024-01-01")
     assert account.market_data_store.market_price_tables["open"][p1].dropna().tolist() == [10.0, 20.0]
     assert account.market_data_store.market_price_tables["open"][p2].dropna().tolist() == [100.0]
 

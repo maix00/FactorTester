@@ -344,7 +344,7 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
         ).items():
             first_config = state.config_for(scheduled_strategies[0])
             if schedule_key not in tables:
-                store.put_precomputed_table(schedule_key, _schedule_table_for_strategy(table, first_config))
+                store.put_precomputed_table(schedule_key, _schedule_table_for_strategy(table, first_config, state))
             for strategy in scheduled_strategies:
                 store.bind_precomputed_table(strategy, schedule_key)
             _append_signal_drafts(drafts, signal_event_times(tables[schedule_key]), scheduled_strategies)
@@ -553,8 +553,9 @@ def _run_window_envelope_for_strategies(strategies: list, state) -> tuple[DataTi
     return run_window_envelope_for_strategies(strategies, state)
 
 
-def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
+def _schedule_table_for_strategy(table: pd.DataFrame, config, state=None) -> pd.DataFrame:
     calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
+    table = _table_with_exact_event_index(table, config, state)
     run_table = _clip_signal_table_to_strategy_window(table, config)
     if not calendar_frequency or str(calendar_frequency) == "auto":
         scheduled = run_table
@@ -567,14 +568,109 @@ def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
             end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h"))),
         )
-    return _clip_scheduled_table_to_strategy_window(scheduled, config)
+    clipped = _clip_scheduled_table_to_strategy_window(scheduled, config)
+    return _table_with_strategy_event_timezone(clipped, config)
+
+
+def _table_with_exact_event_index(table: pd.DataFrame, config, state=None) -> pd.DataFrame:
+    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    if table.empty or start_dt is None or end_dt is None:
+        return table
+    if start_dt.precision == "trading_day" or end_dt.precision == "trading_day":
+        return table
+    data_index = DataIndex(table.index)
+    explicit_day_level = bool(
+        data_index.signal_name
+        and "_SIGNAL@" in str(data_index.signal_name)
+        and DataFreq(str(data_index.signal_name).split("@", 1)[-1]).is_day_multiple()
+    )
+    inferred_day_level = (
+        not data_index.signal_name
+        and data_index.freq is not None
+        and DataFreq(data_index.freq).is_day_multiple()
+        and bool((data_index.signal_index == data_index.signal_index.normalize()).all())
+    )
+    if not explicit_day_level and not inferred_day_level:
+        return table
+    lookup = _last_market_event_lookup_by_trading_day(state)
+    if lookup is None:
+        raise ValueError("日级预计算信号在 exact 回测中需要已加载的日内 market-data 事件时间")
+    trading_days = DataIndex.trading_day_index_from_index(table.index)
+    start_day = _naive_trading_day(start_dt.ts)
+    end_day = _naive_trading_day(end_dt.ts)
+    day_mask = (trading_days >= start_day) & (trading_days <= end_day)
+    table = table.loc[day_mask]
+    trading_days = pd.DatetimeIndex(trading_days[day_mask])
+    mapped = [lookup.get(pd.Timestamp(day).normalize()) for day in trading_days]
+    if any(value is None for value in mapped):
+        missing = next(pd.Timestamp(day).date() for day, value in zip(trading_days, mapped) if value is None)
+        raise ValueError(f"日级预计算信号缺少 trading_day={missing} 的 market-data 事件时间")
+    result = table.copy(deep=False)
+    result.index = pd.DatetimeIndex(cast(list[pd.Timestamp], mapped))
+    return result
+
+
+def _naive_trading_day(value: Any) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_localize(None)
+    return ts.normalize()
+
+
+def _last_market_event_lookup_by_trading_day(state) -> dict[pd.Timestamp, pd.Timestamp] | None:
+    if state is None:
+        return None
+    table = current_prices_table_for(state)
+    if table is None or getattr(table, "empty", True):
+        return None
+    days = DataIndex.trading_day_index_from_index(table.index)
+    timestamps = DataIndex.event_timestamps_from_index(table.index)
+    lookup: dict[pd.Timestamp, pd.Timestamp] = {}
+    for day, timestamp in zip(days, timestamps):
+        if pd.isna(day) or pd.isna(timestamp):
+            continue
+        key = pd.Timestamp(day).normalize()
+        ts = pd.Timestamp(timestamp)
+        previous = lookup.get(key)
+        if previous is None or ts > previous:
+            lookup[key] = ts
+    return lookup
+
+
+def _table_with_strategy_event_timezone(table: pd.DataFrame, config) -> pd.DataFrame:
+    timezone = str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai")
+    if table.empty:
+        return table
+    index = table.index
+    if isinstance(index, pd.MultiIndex):
+        event_values = _timestamps_in_timezone(pd.DatetimeIndex(index.get_level_values(-1)), timezone)
+        arrays = [
+            event_values if pos == index.nlevels - 1 else index.get_level_values(pos)
+            for pos in range(index.nlevels)
+        ]
+        result = table.copy(deep=False)
+        result.index = pd.MultiIndex.from_arrays(arrays, names=index.names)
+        return result
+    result = table.copy(deep=False)
+    result.index = _timestamps_in_timezone(pd.DatetimeIndex(index), timezone)
+    return result
+
+
+def _timestamps_in_timezone(index: pd.DatetimeIndex, timezone: str) -> pd.DatetimeIndex:
+    if index.tz is None:
+        return pd.DatetimeIndex(index.tz_localize(timezone))
+    return pd.DatetimeIndex(index.tz_convert(timezone))
 
 
 def _clip_signal_table_to_strategy_window(table: pd.DataFrame, config) -> pd.DataFrame:
     start_dt, end_dt = _strategy_run_window_datetimes(config)
     if start_dt is None or end_dt is None:
         return table
-    mask = DataIndex(table.index).slice_by_datatime(start_dt, end_dt)
+    if start_dt.precision == "trading_day" or end_dt.precision == "trading_day":
+        mask = DataIndex(table.index).slice_by_datatime(start_dt, end_dt)
+    else:
+        event_index = DataIndex(table.index).finest_index
+        mask = DataIndex(event_index).slice_by_datatime(start_dt, end_dt)
     return table.loc[mask]
 
 

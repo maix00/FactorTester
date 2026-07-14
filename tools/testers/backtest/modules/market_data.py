@@ -42,6 +42,7 @@ from tools.data.field_history import (
     HistoricalFieldFallbackPolicy,
     FieldHistoryProvider,
     TradingDayResolver,
+    TimestampTradingDayResolver,
     TRANSACTION_FEE_FIELD_NAMES,
     TRANSACTION_FEE_SOURCE_EXCHANGE,
     _normalise_transaction_fee_source,
@@ -141,6 +142,7 @@ class MarketDataStore:
             self.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
             self.factor_field_tables = raw.get("factor_field_tables") or {}
             self.historical_field_provider = raw.get("historical_field_provider")
+            self.trading_day_resolver = raw.get("trading_day_resolver")
             included_products = raw.get("included_products")
             self.included_products = frozenset(included_products) if included_products is not None else None
             self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
@@ -895,6 +897,9 @@ def _select_required_product_frequency(
         return None
     required_name = required_frequency.name
     for freq in available_freqs:
+        if freq.name != required_name and _frequency_compatible(freq, {required_frequency}):
+            return freq
+    for freq in available_freqs:
         if freq.name == required_name:
             return freq
     return None
@@ -1091,8 +1096,10 @@ def _load_raw_market_data(state, ctx) -> None:
         column: {} for column in factor_columns
     }
     missing_products: list[str] = []
+    trading_day_mapping: dict[pd.Timestamp, pd.Timestamp] = {}
     store = market_data_store_for(state)
     term_structure_contracts = _term_structure_concrete_contracts(state, ctx)
+    event_timezone = _market_data_event_timezone(state)
 
     def outside_window(product: Any) -> bool:
         # Same reasoning as _check_market_data_coverage.outside_window: a
@@ -1151,22 +1158,23 @@ def _load_raw_market_data(state, ctx) -> None:
             else:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
-        series_by_product[product] = df[DataColumn.CLOSE.name]
+        trading_day_mapping.update(_trading_day_mapping_from_market_data(df))
+        series_by_product[product] = _series_on_event_index(df[DataColumn.CLOSE.name], timezone=event_timezone)
         for basis, column in price_columns:
             if column in df.columns:
-                price_series_by_basis[basis][product] = df[column]
+                price_series_by_basis[basis][product] = _series_on_event_index(df[column], timezone=event_timezone)
         for basis, column in optional_price_columns:
             if column in df.columns:
-                price_series_by_basis.setdefault(basis, {})[product] = df[column]
+                price_series_by_basis.setdefault(basis, {})[product] = _series_on_event_index(df[column], timezone=event_timezone)
         for column in factor_columns:
             if column in df.columns:
-                factor_series_by_column[column][product] = df[column]
+                factor_series_by_column[column][product] = _series_on_event_index(df[column], timezone=event_timezone)
             else:
                 missing_products.append(
                     f"{getattr(product, 'name', product)}(缺少因子字段 {column})"
                 )
         if DataColumn.VOLUME.name in df.columns:
-            volume_series_by_product[product] = df[DataColumn.VOLUME.name]
+            volume_series_by_product[product] = _series_on_event_index(df[DataColumn.VOLUME.name], timezone=event_timezone)
     if missing_products:
         _raise_missing_market_data(missing_products, start_dt, end_dt)
     raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
@@ -1191,6 +1199,7 @@ def _load_raw_market_data(state, ctx) -> None:
         "historical_field_provider": load_market_rule_field_provider(
             transaction_fee_source=_transaction_fee_source_for_state(state),
         ),
+        "trading_day_resolver": TimestampTradingDayResolver(trading_day_mapping) if trading_day_mapping else None,
         "historical_field_policy": request.get("policy", "latest_available"),
         "historical_field_names": _required_market_rule_field_names(state),
         "included_products": tuple(series_by_product.keys()),
@@ -1221,6 +1230,50 @@ def _factor_required_columns(factor: Any) -> tuple[str, ...]:
         if name:
             columns.append(str(name))
     return tuple(dict.fromkeys(columns))
+
+
+def _series_on_event_index(series: pd.Series, *, timezone: str | None = None) -> pd.Series:
+    result = series.copy(deep=False)
+    index = DataIndex.event_timestamps_from_index(series.index)
+    if timezone:
+        if index.tz is None:
+            index = pd.DatetimeIndex(index.tz_localize(timezone))
+        else:
+            index = pd.DatetimeIndex(index.tz_convert(timezone))
+    elif index.tz is not None:
+        index = pd.DatetimeIndex(index.tz_localize(None))
+    result.index = index
+    return result
+
+
+def _market_data_event_timezone(state) -> str | None:
+    values = {
+        str(state.config_for(strategy).get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai")
+        for strategy in getattr(state, "strategy_configs", {})
+    }
+    if len(values) == 1:
+        return next(iter(values))
+    return "Asia/Shanghai" if not values else None
+
+
+def _trading_day_mapping_from_market_data(frame: pd.DataFrame) -> dict[pd.Timestamp, pd.Timestamp]:
+    if isinstance(frame.index, pd.MultiIndex):
+        days = DataIndex.trading_day_index_from_index(frame.index)
+        timestamps = DataIndex.event_timestamps_from_index(frame.index)
+    elif "trading_day" in frame.columns:
+        days = pd.DatetimeIndex(pd.to_datetime(frame["trading_day"], errors="coerce"))
+        timestamps = pd.DatetimeIndex(frame.index)
+    else:
+        return {}
+    mapping: dict[pd.Timestamp, pd.Timestamp] = {}
+    for timestamp, day in zip(timestamps, days):
+        if pd.isna(timestamp) or pd.isna(day):
+            continue
+        ts = pd.Timestamp(cast(Any, timestamp))
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        mapping[ts] = pd.Timestamp(cast(Any, day)).normalize()
+    return mapping
 
 
 def _unpack_market_data_load_plan_item(plan_item: Any) -> tuple[Any, Any, Any | None]:
@@ -1259,6 +1312,9 @@ def _build_trading_day_resolver(state, ctx) -> None:
     if provider is None:
         ctx.set(MarketDataModule.trading_day_resolver, None)
         store.trading_day_resolver = None
+        return
+    if store.trading_day_resolver is not None:
+        ctx.set(MarketDataModule.trading_day_resolver, store.trading_day_resolver)
         return
     if raw_prices is None or raw_prices.empty:
         ctx.set(MarketDataModule.trading_day_resolver, None)

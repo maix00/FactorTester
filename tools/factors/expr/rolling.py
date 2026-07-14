@@ -651,10 +651,20 @@ def _rolling_argmaxmin(
     result = np.vstack([nan_rows, pos])
     return pd.DataFrame(result, index=df.index, columns=df.columns)
 
-def _resolve_windows(window: Any, freq: Any, products: Sequence[Product]) -> Tuple[bool, int, Dict[Product, int]]:
+def _resolve_windows(
+    window: Any,
+    freq: Any,
+    products: Sequence[Product],
+    *,
+    allow_zero: bool = False,
+    allow_negative: bool = False,
+) -> Tuple[bool, int, Dict[Product, int]]:
     """将 DataFreq 类型的窗口参数转为 bar 数量（整数）。"""
-    if isinstance(window, int):
-        return True, window, {}
+    bar_count = _coerce_bar_count_window(window, allow_zero=allow_zero, allow_negative=allow_negative)
+    if bar_count is not None:
+        if freq is None:
+            raise ValueError("裸数字滚动窗口需要先解析数据频率，无法在 freq=None 时解释 bar 数")
+        return True, bar_count, {}
     window = DataFreq(window)
     freq = DataFreq(freq)
     days = window.days
@@ -670,3 +680,26 @@ def _resolve_windows(window: Any, freq: Any, products: Sequence[Product]) -> Tup
         if product_periods.values() and len(set(product_periods.values())) == 1:
             return True, next(iter(product_periods.values())), {}
         return False, 0, product_periods
+
+
+def _coerce_bar_count_window(
+    window: Any,
+    *,
+    allow_zero: bool = False,
+    allow_negative: bool = False,
+) -> int | None:
+    if isinstance(window, bool):
+        return None
+    if isinstance(window, int):
+        if (window < 0 and not allow_negative) or (window == 0 and not allow_zero):
+            raise ValueError(f"滚动窗口 bar 数必须为正整数，收到 {window!r}")
+        return int(window)
+    if isinstance(window, str):
+        text = window.strip()
+        signed_text = text[1:] if text.startswith("-") else text
+        if signed_text.isdigit():
+            count = int(text)
+            if (count < 0 and not allow_negative) or (count == 0 and not allow_zero):
+                raise ValueError(f"滚动窗口 bar 数必须为正整数，收到 {window!r}")
+            return count
+    return None
