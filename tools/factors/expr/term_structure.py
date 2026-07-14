@@ -91,10 +91,20 @@ class TermStructureOp(OperandExpr):
     @staticmethod
     def _column_name(expr: FactorExpr) -> str:
         if isinstance(expr, ColumnRef):
-            return expr.column.name
+            return TermStructureOp._term_structure_column_name(expr.column)
         if isinstance(expr, ConstExpr):
-            return DataColumn(expr.value).name
+            return TermStructureOp._term_structure_column_name(DataColumn(expr.value))
         raise TypeError(f"TermStructureOp column operand must resolve to ConstExpr or ColumnRef, got {type(expr).__name__}")
+
+    @staticmethod
+    def _term_structure_column_name(column: DataColumn) -> str:
+        adjusted_to_raw = {
+            DataColumn.OPEN_ADJUSTED: DataColumn.OPEN,
+            DataColumn.HIGH_ADJUSTED: DataColumn.HIGH,
+            DataColumn.LOW_ADJUSTED: DataColumn.LOW,
+            DataColumn.CLOSE_ADJUSTED: DataColumn.CLOSE,
+        }
+        return adjusted_to_raw.get(column, column).name
 
     @staticmethod
     def _operand_latex_arg(expr: FactorExpr, *, column: bool = False) -> str:

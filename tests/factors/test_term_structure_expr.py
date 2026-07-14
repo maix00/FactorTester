@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from tools.data.types import DataColumn, DataFreq
-from tools.factors.FactorExpr import EvaluateContext, term_ratio, term_slope, term_spread
+from tools.factors.FactorExpr import CLOSE, ColumnRef, EvaluateContext, term_ratio, term_slope, term_spread
 from tools.products.AdjustableTermStructure import (
     AdjustableProductMixin,
     TERM_CONTRACT_COL,
@@ -63,12 +63,16 @@ def _raw_index(times: Iterable[str]) -> pd.MultiIndex:
     )
 
 
-def _term_rows(product: str) -> pd.DataFrame:
-    rows = []
-    for day, prices, days_to_maturity in [
+def _term_rows(
+    product: str,
+    curves: Iterable[tuple[str, list[float], list[int]]] | None = None,
+) -> pd.DataFrame:
+    curves = curves or [
         ("2024-01-02", [100.0, 95.0, 90.0], [10, 40, 70]),
         ("2024-01-03", [110.0, 100.0, 80.0], [9, 39, 69]),
-    ]:
+    ]
+    rows = []
+    for day, prices, days_to_maturity in curves:
         for rank, (price, maturity_days) in enumerate(zip(prices, days_to_maturity, strict=True)):
             rows.append({
                 TERM_PRODUCT_COL: product,
@@ -82,15 +86,17 @@ def _term_rows(product: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _fake_product() -> _FakeTermProduct:
-    product = "TERM_FAKE"
+def _fake_product(
+    product: str = "TERM_FAKE",
+    curves: Iterable[tuple[str, list[float], list[int]]] | None = None,
+) -> _FakeTermProduct:
     index = _raw_index([
         "2024-01-02 09:00",
         "2024-01-02 10:00",
         "2024-01-03 09:00",
     ])
     market_data = pd.DataFrame({DataColumn.CLOSE.name: [1.0, 2.0, 3.0]}, index=index)
-    return _FakeTermProduct(product, market_data, _MemoryTermStore(_term_rows(product)))
+    return _FakeTermProduct(product, market_data, _MemoryTermStore(_term_rows(product, curves)))
 
 
 def test_term_structure_ops_batch_evaluate_against_hand_calculated_curve_values() -> None:
@@ -119,6 +125,85 @@ def test_term_structure_ops_batch_evaluate_against_hand_calculated_curve_values(
         slope,
         pd.DataFrame({product: expected_slopes}, index=expected_index),
     )
+
+
+@pytest.mark.parametrize(
+    "column",
+    [
+        CLOSE,
+        ColumnRef(DataColumn.CLOSE_ADJUSTED),
+        DataColumn.CLOSE_ADJUSTED,
+    ],
+)
+def test_term_structure_adjusted_price_columns_use_raw_curve_prices(column) -> None:
+    product = _fake_product()
+    ctx = EvaluateContext(products=[product], freq=DataFreq.MIN1, cache={})
+
+    ratio = term_ratio(0, 1, column).evaluate(ctx=ctx)
+    slope = term_slope(3, column).evaluate(ctx=ctx)
+
+    expected_index = product._market_data.index
+    pd.testing.assert_frame_equal(
+        ratio,
+        pd.DataFrame({product: [100.0 / 95.0 - 1.0, 100.0 / 95.0 - 1.0, 0.1]}, index=expected_index),
+    )
+    expected_slopes = [
+        np.polyfit([10.0, 40.0, 70.0], [100.0, 95.0, 90.0], 1)[0],
+        np.polyfit([10.0, 40.0, 70.0], [100.0, 95.0, 90.0], 1)[0],
+        np.polyfit([9.0, 39.0, 69.0], [110.0, 100.0, 80.0], 1)[0],
+    ]
+    pd.testing.assert_frame_equal(
+        slope,
+        pd.DataFrame({product: expected_slopes}, index=expected_index),
+    )
+
+
+def test_term_structure_column_ref_describe_and_evaluate_minimal_path() -> None:
+    product = _fake_product()
+    ctx = EvaluateContext(products=[product], freq=DataFreq.MIN1, cache={})
+    expr = term_ratio(0, 1, CLOSE)
+
+    assert "TermRatio" in expr.to_latex()
+    assert expr._get_alias() == "term_ratio_CA_0_1"
+    result = expr.evaluate(ctx=ctx)
+
+    pd.testing.assert_frame_equal(
+        result,
+        pd.DataFrame(
+            {product: [100.0 / 95.0 - 1.0, 100.0 / 95.0 - 1.0, 0.1]},
+            index=product._market_data.index,
+        ),
+    )
+
+
+def test_term_structure_column_ref_output_feeds_cross_sectional_ops_with_multiindex() -> None:
+    near_flat = _fake_product(
+        "TERM_FLAT",
+        curves=[
+            ("2024-01-02", [100.0, 95.0, 90.0], [10, 40, 70]),
+            ("2024-01-03", [110.0, 100.0, 80.0], [9, 39, 69]),
+        ],
+    )
+    near_steep = _fake_product(
+        "TERM_STEEP",
+        curves=[
+            ("2024-01-02", [120.0, 90.0, 70.0], [10, 40, 70]),
+            ("2024-01-03", [130.0, 90.0, 65.0], [9, 39, 69]),
+        ],
+    )
+    ctx = EvaluateContext(products=[near_flat, near_steep], freq=DataFreq.MIN1, cache={})
+
+    zscore = term_ratio(0, 1, CLOSE).cs_zscore().evaluate(ctx=ctx)
+    rank = term_ratio(0, 1, CLOSE).cs_rank().evaluate(ctx=ctx)
+
+    expected_index = near_flat._market_data.index
+    assert isinstance(zscore.index, pd.MultiIndex)
+    assert zscore.index.names == expected_index.names
+    assert rank.index.names == expected_index.names
+    assert list(zscore.columns) == [near_flat, near_steep]
+    pd.testing.assert_series_equal(rank[near_flat], pd.Series([0.0, 0.0, 0.0], index=expected_index, name=near_flat))
+    pd.testing.assert_series_equal(rank[near_steep], pd.Series([0.5, 0.5, 0.5], index=expected_index, name=near_steep))
+    assert zscore.notna().all().all()
 
 
 def test_term_structure_ops_are_not_declared_live_incremental_until_streaming_curve_support_exists() -> None:
