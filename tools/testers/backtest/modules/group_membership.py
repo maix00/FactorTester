@@ -454,7 +454,7 @@ def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
                 ranked_cache=ranked_cache,
                 bucket_cache=bucket_cache,
             )
-            if reason not in {"buy_and_hold_established_target", "membership_unchanged"}:
+            if reason not in {"buy_and_hold_established_target", "membership_unchanged"} and weights:
                 established[strategy] = weights
                 last_membership[strategy] = members
             intent = target_weight_intent(weights, reason=f"precomputed_{reason}")
