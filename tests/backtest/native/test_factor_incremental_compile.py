@@ -6,7 +6,16 @@ import pytest
 
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
-from tools.factors.expr import ColumnRef, ConstExpr, CrossSectionalOp, EvaluateContext, RollingOp, WhereOp
+from tools.factors.expr import CLOSE, ColumnRef, ConstExpr, CrossSectionalOp, EvaluateContext, RollingOp, WhereOp, term_ratio, term_slope, term_spread
+from tools.products.AdjustableTermStructure import (
+    AdjustableProductMixin,
+    TERM_CONTRACT_COL,
+    TERM_CONTRACT_UID_COL,
+    TERM_DAYS_TO_MATURITY_COL,
+    TERM_PRODUCT_COL,
+    TERM_RANK_COL,
+    TERM_TRADING_DAY_COL,
+)
 from tools.testers.backtest.engines.factors.incremental import UnsupportedStreamingFactor
 
 
@@ -111,6 +120,88 @@ def _live_eval(expr, products: tuple[str, ...], rows: pd.DataFrame) -> pd.DataFr
     return pd.DataFrame(observed, index=rows.index)[list(products)]
 
 
+class _MemoryTermStore:
+    def __init__(self, rows: pd.DataFrame) -> None:
+        self._rows = rows.copy()
+
+    def load(self, product=None, trading_day=None, columns=None):
+        rows = self._rows
+        if product is not None:
+            rows = rows[rows[TERM_PRODUCT_COL] == product]
+        if trading_day is not None:
+            rows = rows[rows[TERM_TRADING_DAY_COL] == pd.Timestamp(trading_day).normalize()]
+        if columns is not None:
+            rows = rows[columns]
+        return rows.copy()
+
+    def contract_pool(self, product, trading_day, depth=None):
+        rows = self.load(product=product, trading_day=trading_day)
+        if rows.empty:
+            return rows
+        rows = rows.sort_values(TERM_RANK_COL)
+        return rows.head(int(depth)) if depth is not None else rows
+
+
+class _TermProduct(AdjustableProductMixin):
+    def __init__(self, name: str, index: pd.Index, curves: dict[str, list[float]]) -> None:
+        self.name = name
+        self._market_data = pd.DataFrame({DataColumn.CLOSE.name: np.arange(len(index), dtype=float)}, index=index)
+        rows = []
+        for day, prices in curves.items():
+            for rank, price in enumerate(prices):
+                rows.append({
+                    TERM_PRODUCT_COL: name,
+                    TERM_TRADING_DAY_COL: pd.Timestamp(day),
+                    TERM_CONTRACT_UID_COL: f"{name}{rank}",
+                    TERM_CONTRACT_COL: f"{name}{rank}",
+                    TERM_DAYS_TO_MATURITY_COL: [10, 40, 70][rank],
+                    TERM_RANK_COL: rank,
+                    DataColumn.CLOSE.name: price,
+                })
+        self._store = _MemoryTermStore(pd.DataFrame(rows))
+
+    def __repr__(self) -> str:
+        return self.name
+
+    def get_some_data(self, freq: DataFreq, copy: bool = False) -> pd.DataFrame:
+        return self._market_data.copy() if copy else self._market_data
+
+    def get_term_structure_store(self, curve_variant: str = "listed_contracts") -> _MemoryTermStore:
+        return self._store
+
+
+def _term_products() -> tuple[tuple[_TermProduct, ...], pd.DatetimeIndex]:
+    index = pd.DatetimeIndex([
+        pd.Timestamp("2024-01-02 09:00"),
+        pd.Timestamp("2024-01-02 10:00"),
+        pd.Timestamp("2024-01-03 09:00"),
+    ])
+    return (
+        _TermProduct("TERM_FLAT", index, {
+            "2024-01-02": [100.0, 95.0, 90.0],
+            "2024-01-03": [110.0, 100.0, 80.0],
+        }),
+        _TermProduct("TERM_STEEP", index, {
+            "2024-01-02": [120.0, 90.0, 70.0],
+            "2024-01-03": [130.0, 90.0, 65.0],
+        }),
+    ), index
+
+
+def _live_term_eval(expr, products: tuple[_TermProduct, ...], index: pd.Index) -> pd.DataFrame:
+    executor = expr.compile_incremental(factor_alias="term", products=products, source_freq=DataFreq.MIN1)
+    observed = []
+    for timestamp in index:
+        fields = {product: {DataColumn.CLOSE.name: 1.0} for product in products}
+        curves = {
+            product: product.get_term_structure(pd.Timestamp(timestamp).normalize())
+            for product in products
+        }
+        executor.on_bar(timestamp, fields, curves)
+        observed.append(pd.Series(executor.on_signal(timestamp), name=timestamp))
+    return pd.DataFrame(observed, index=index)[list(products)]
+
+
 @pytest.mark.parametrize(
     "expr",
     [
@@ -160,3 +251,32 @@ def test_incremental_factor_replay_matches_batch_evaluate_for_product_shaped_ops
 def test_incremental_factor_compile_rejects_non_product_shaped_or_non_scalar_nodes(expr, message):
     with pytest.raises(UnsupportedStreamingFactor, match=message):
         expr.compile_incremental(factor_alias="factor", products=("P1", "P2", "P3"))
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        term_spread(0, 2, DataColumn.CLOSE),
+        term_ratio(0, 1, CLOSE),
+        term_slope(3, CLOSE),
+        term_ratio(0, 1, CLOSE).cs_rank(),
+    ],
+)
+def test_incremental_term_structure_replay_matches_batch_evaluate(expr):
+    products, index = _term_products()
+    batch = expr.evaluate(ctx=EvaluateContext(products=products, freq=DataFreq.MIN1, cache={}))
+    live = _live_term_eval(expr, products, index)
+
+    pd.testing.assert_frame_equal(live, batch.reindex(index=live.index, columns=live.columns))
+
+
+def test_incremental_term_structure_requires_curve_snapshot():
+    products, _ = _term_products()
+    executor = term_ratio(0, 1, CLOSE).compile_incremental(
+        factor_alias="term_ratio",
+        products=products,
+        source_freq=DataFreq.MIN1,
+    )
+
+    with pytest.raises(KeyError, match="TERM_STRUCTURE snapshot is missing curve"):
+        executor.on_bar("2024-01-02 09:00", {product: {DataColumn.CLOSE.name: 1.0} for product in products})

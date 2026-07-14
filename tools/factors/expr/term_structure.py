@@ -52,10 +52,11 @@ class TermStructureOp(OperandExpr):
         return (type(self).__name__, self.op, tuple(op._structural_key() for op in self.operands))
 
     def supports_incremental(self) -> bool:
-        # Live support needs per-product term-structure snapshots in the BAR
-        # market slice plus a dedicated streaming node; the current incremental
-        # compiler only sees product-level OHLCV fields.
-        return False
+        try:
+            self._term_param_values()
+        except Exception:
+            return False
+        return True
 
     def _time_index_for_product(self, product: 'Product', freq: DataFreq) -> pd.Index:
         try:

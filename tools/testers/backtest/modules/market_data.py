@@ -37,6 +37,7 @@ from tools.testers.backtest.modules.run_window import RunWindowModule
 from tools.testers.backtest.modules.term_structure import TermStructureExpandModule
 from tools.testers.backtest.modules.time_index_lookup import row_at, row_at_index_key, signal_timestamps
 from tools.data.types.time_index import DataIndex
+from tools.products.AdjustableTermStructure import TERM_RANK_COL
 from tools.data.field_history import (
     HistoricalFieldLookupError,
     HistoricalFieldFallbackPolicy,
@@ -2034,6 +2035,9 @@ def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict
     volume = current_volume_at(state, timestamp)
     if volume:
         snapshot["volume"] = volume
+    term_curves = _term_structure_curves_for_snapshot(snapshot, timestamp)
+    if term_curves:
+        snapshot["TERM_STRUCTURE"] = term_curves
     store.market_snapshot_cache[cache_key] = snapshot
     return snapshot
 
@@ -2066,8 +2070,53 @@ def market_snapshot_for_index_key(state, index_key: object) -> dict[str, dict[An
         values = _table_values_at_index_key(volume_table, index_key)
         if values:
             snapshot["volume"] = values
+    term_curves = _term_structure_curves_for_snapshot(snapshot, _trading_day_from_index_key(index_key))
+    if term_curves:
+        snapshot["TERM_STRUCTURE"] = term_curves
     store.market_snapshot_cache[cache_key] = snapshot
     return snapshot
+
+
+def _term_structure_curves_for_snapshot(
+    snapshot: dict[str, dict[Any, Any]],
+    trading_day: Any,
+) -> dict[Any, pd.DataFrame]:
+    products = snapshot.get("close", {}) or {}
+    curves: dict[Any, pd.DataFrame] = {}
+    day = _normalize_term_structure_trading_day(trading_day)
+    for product in products:
+        supports = getattr(product, "supports_term_structure", None)
+        if callable(supports) and not supports():
+            continue
+        getter = getattr(product, "get_term_structure", None)
+        if not callable(getter):
+            continue
+        try:
+            curve = getter(day)
+        except Exception:
+            continue
+        if isinstance(curve, pd.DataFrame) and not curve.empty:
+            if TERM_RANK_COL in curve.columns:
+                curve = curve.sort_values(TERM_RANK_COL)
+            curves[product] = curve.reset_index(drop=True)
+    return curves
+
+
+def _normalize_term_structure_trading_day(value: Any) -> pd.Timestamp:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tz is not None:
+        timestamp = timestamp.tz_localize(None)
+    return timestamp.normalize()
+
+
+def _trading_day_from_index_key(index_key: object) -> pd.Timestamp:
+    if isinstance(index_key, tuple):
+        for part in index_key:
+            try:
+                return _normalize_term_structure_trading_day(part)
+            except Exception:
+                continue
+    return _normalize_term_structure_trading_day(index_key)
 
 
 def tradable_status_from_snapshot(snapshot: dict[str, dict[Any, float]]) -> dict[Any, bool]:

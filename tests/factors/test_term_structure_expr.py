@@ -18,7 +18,6 @@ from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
     TERM_TRADING_DAY_COL,
 )
-from tools.testers.backtest.engines.factors.incremental import UnsupportedStreamingFactor
 
 
 class _MemoryTermStore:
@@ -206,9 +205,10 @@ def test_term_structure_column_ref_output_feeds_cross_sectional_ops_with_multiin
     assert zscore.notna().all().all()
 
 
-def test_term_structure_ops_are_not_declared_live_incremental_until_streaming_curve_support_exists() -> None:
+def test_term_structure_ops_are_declared_live_incremental_with_streaming_curve_support() -> None:
     expr = term_spread(0, 1, DataColumn.CLOSE)
 
-    assert not expr.supports_incremental()
-    with pytest.raises(UnsupportedStreamingFactor, match="TermStructureOp does not support incremental execution"):
-        expr.compile_incremental(factor_alias="term_spread", products=(_fake_product(),))
+    assert expr.supports_incremental()
+    executor = expr.compile_incremental(factor_alias="term_spread", products=(_fake_product(),))
+
+    assert executor.factor_alias == "term_spread"

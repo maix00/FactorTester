@@ -719,7 +719,8 @@ def _observe_signal_live_bar(state, ctx) -> None:
     """Feed one bar of current market data into each active live factor."""
     snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
     fields_by_product = _factor_fields_by_product(snapshot)
-    if not fields_by_product:
+    term_curves_by_product = _factor_term_curves_by_product(snapshot)
+    if not fields_by_product and not term_curves_by_product:
         return
     store = state.factor_signal_store
     tables = store.live_price_tables
@@ -750,13 +751,18 @@ def _observe_signal_live_bar(state, ctx) -> None:
             executor = _compile_live_factor_executor(
                 factor,
                 by_factor[factor_key][0],
-                products if products else fields_by_product.keys(),
+                products if products else (set(fields_by_product) | set(term_curves_by_product)),
                 resolved_bar_frequency_for_strategy(state, by_factor[factor_key][0]),
             )
             if executor is not None:
                 executors[factor_key] = executor
         if executor is not None:
-            executor.on_bar(pd.Timestamp(ctx.timestamp), fields_by_product)
+            _call_live_executor_on_bar(
+                executor,
+                pd.Timestamp(ctx.timestamp),
+                fields_by_product,
+                term_curves_by_product,
+            )
             current_value = getattr(executor, "on_signal", None)
             if callable(current_value):
                 values = _row_to_signal_values(current_value(ctx.timestamp))
@@ -787,11 +793,36 @@ def _live_products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
 def _factor_fields_by_product(snapshot: dict[str, dict[Any, float]]) -> dict[Any, dict[str, float]]:
     fields: dict[Any, dict[str, float]] = defaultdict(dict)
     for column_name, values in snapshot.items():
+        if column_name == "TERM_STRUCTURE":
+            continue
         if not str(column_name).isupper() or not isinstance(values, dict):
             continue
         for product, value in values.items():
             fields[product][str(column_name)] = float(value)
     return dict(fields)
+
+
+def _factor_term_curves_by_product(snapshot: dict[str, dict[Any, Any]]) -> dict[Any, Any]:
+    values = snapshot.get("TERM_STRUCTURE", {})
+    return dict(values) if isinstance(values, dict) else {}
+
+
+def _call_live_executor_on_bar(
+    executor: Any,
+    timestamp: pd.Timestamp,
+    fields_by_product: dict[Any, dict[str, float]],
+    term_curves_by_product: dict[Any, Any],
+) -> None:
+    on_bar = executor.on_bar
+    signature = inspect.signature(on_bar)
+    accepts_varargs = any(
+        parameter.kind is inspect.Parameter.VAR_POSITIONAL
+        for parameter in signature.parameters.values()
+    )
+    if accepts_varargs or len(signature.parameters) >= 3:
+        on_bar(timestamp, fields_by_product, term_curves_by_product)
+    else:
+        on_bar(timestamp, fields_by_product)
 
 
 def _live_signal_values(factor: Any, timestamp: pd.Timestamp, price_table: pd.DataFrame | None) -> dict:
