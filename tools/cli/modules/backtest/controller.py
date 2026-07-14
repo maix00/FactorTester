@@ -852,10 +852,12 @@ def _print_delta_mapping_value_table(prefix: str, field_name: str, values: list[
     if result is None:
         return False
     headers, rows = result
-    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
-    for line in _audit_table_lines(headers, rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        headers,
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=[f"{prefix}{_audit_combined_single_field_label(field_name)}"],
+    )
 
 
 def _print_delta_mapping_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
@@ -874,10 +876,12 @@ def _print_delta_mapping_change_table(prefix: str, field_name: str, changes: lis
     if not rows:
         click.echo(f"{prefix}（无变化）")
         return True
-    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
-    for line in _audit_table_lines(headers, rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        headers,
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=[f"{prefix}{_audit_combined_single_field_label(field_name)}"],
+    )
 
 
 def _dedupe_audit_list(values: list[Any]) -> list[Any]:
@@ -923,10 +927,12 @@ def _print_combined_cash_pool_scalar_value_table(prefix: str, records: list[dict
     if combined is None:
         return False
     field_columns, rows = combined
-    _print_combined_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        ("cash pool", "ledgers", "strategies", *field_columns),
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
+    )
 
 
 def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
@@ -939,9 +945,7 @@ def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[
     if result is None:
         return False
     headers, rows = result
-    for line in _audit_table_lines(headers, rows, indent=prefix):
-        click.echo(line)
-    return True
+    return _print_audit_table(headers, rows, indent=prefix)
 
 
 def _print_strategy_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
@@ -954,9 +958,7 @@ def _print_strategy_scalar_value_table(prefix: str, field_name: str, values: lis
     if result is None:
         return False
     headers, rows = result
-    for line in _audit_table_lines(headers, rows, indent=prefix):
-        click.echo(line)
-    return True
+    return _print_audit_table(headers, rows, indent=prefix)
 
 
 def _print_strategy_record_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
@@ -971,10 +973,12 @@ def _print_strategy_record_value_table(prefix: str, field_name: str, values: lis
     if result is None:
         return False
     headers, rows = result
-    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
-    for line in _audit_table_lines(("strategies", *headers), rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        ("strategies", *headers),
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=[f"{prefix}{_audit_combined_single_field_label(field_name)}"],
+    )
 
 
 def _audit_strategy_table_cell(field_name: str, value: Any) -> Any:
@@ -1047,10 +1051,12 @@ def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[
     if combined is None:
         return False
     field_columns, rows = combined
-    _print_combined_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("strategies", *field_columns), rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        ("strategies", *field_columns),
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
+    )
 
 
 def _audit_annotated_strategy_row_values(field_columns: list[str], row_values: tuple[Any, ...]) -> tuple[Any, ...]:
@@ -1086,9 +1092,7 @@ def _print_positions_value_table(prefix: str, field_name: str, values: list[dict
     if result is None:
         return False
     headers, rows = result
-    for line in _audit_table_lines(headers, rows, indent=prefix, allow_transpose=False):
-        click.echo(line)
-    return True
+    return _print_audit_table(headers, rows, indent=prefix, allow_transpose=False)
 
 
 def _print_ledger_grouped_changes(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
@@ -1122,9 +1126,7 @@ def _print_positions_change_table(prefix: str, field_name: str, changes: list[di
     if not rows:
         click.echo(f"{prefix}（无变化）")
         return True
-    for line in _audit_table_lines(headers, rows, indent=prefix, allow_transpose=False):
-        click.echo(line)
-    return True
+    return _print_audit_table(headers, rows, indent=prefix, allow_transpose=False)
 
 
 def _ledger_scalar_record_table(record: dict[str, Any]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
@@ -1143,28 +1145,47 @@ def _print_combined_ledger_scalar_value_table(prefix: str, records: list[dict[st
     if combined is None:
         return False
     field_columns, rows = combined
-    _print_combined_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        ("ledger", "cash pool", "strategies", *field_columns),
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
+    )
 
 
 def _audit_combined_field_label(records: list[dict[str, Any]]) -> str:
     return audit_printer_helpers.combined_field_label(records)
 
 
-def _print_combined_field_label_lines(prefix: str, records: list[dict[str, Any]]) -> None:
-    for line in audit_printer_helpers.combined_field_label_lines(prefix, records):
-        click.echo(line, color=True)
-
-
-def _print_combined_change_field_label_lines(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> None:
-    for line in audit_printer_helpers.combined_change_field_label_lines(prefix, records):
-        click.echo(line, color=True)
-
-
 def _audit_combined_single_field_label(qualified_name: str) -> str:
     return audit_printer_helpers.combined_single_field_label(qualified_name)
+
+
+def _print_audit_table(
+    headers: tuple[str, ...] | list[str],
+    rows: list[tuple[Any, ...]] | list[list[Any]],
+    *,
+    prefix: str = "",
+    indent: str | None = None,
+    label_lines: list[str] | None = None,
+    title: str | None = None,
+    allow_transpose: bool = True,
+    allow_split: bool = True,
+) -> bool:
+    if label_lines:
+        for line in label_lines:
+            click.echo(line, color=True)
+    if title is not None:
+        click.echo(title)
+    for line in _audit_table_lines(
+        headers,
+        rows,
+        indent=prefix if indent is None else indent,
+        allow_transpose=allow_transpose,
+        allow_split=allow_split,
+    ):
+        click.echo(line)
+    return True
 
 
 _MARKET_DATA_SAMPLE_FIELDS = {
@@ -1174,41 +1195,40 @@ _MARKET_DATA_SAMPLE_PRODUCT_LIMIT = market_data_formatter.MARKET_DATA_SAMPLE_PRO
 
 
 def _is_market_data_sample_field(field_name: str) -> bool:
-    return market_data_formatter.is_market_data_sample_field(field_name)
+    return (
+        _field_metadata.value_kind(field_name) == "market_data_sample"
+        or market_data_formatter.is_market_data_sample_field(field_name)
+    )
 
 
 def _print_market_data_sample_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
     rows, time_columns = _market_data_sample_rows_from_value_records(records)
     if not rows or not time_columns:
         return False
-    _print_combined_field_label_lines(prefix, records)
-    click.echo(f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:")
-    for line in _audit_table_lines(
+    return _print_audit_table(
         ("field", "product", *time_columns),
         rows,
         indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
+        title=f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:",
         allow_transpose=False,
         allow_split=False,
-    ):
-        click.echo(line)
-    return True
+    )
 
 
 def _print_market_data_sample_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
     rows, time_columns = _market_data_sample_rows_from_change_records(records)
     if not rows or not time_columns:
         return False
-    _print_combined_change_field_label_lines(prefix, records)
-    click.echo(f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:")
-    for line in _audit_table_lines(
+    return _print_audit_table(
         ("field", "product", *time_columns),
         rows,
         indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_change_field_label_lines(prefix, records),
+        title=f"{prefix}市场数据 sample 总表（每个价格字段最多 {_MARKET_DATA_SAMPLE_PRODUCT_LIMIT} 个产品）:",
         allow_transpose=False,
         allow_split=False,
-    ):
-        click.echo(line)
-    return True
+    )
 
 
 def _market_data_sample_rows_from_value_records(records: list[dict[str, Any]]) -> tuple[list[tuple[Any, ...]], list[str]]:
@@ -1284,9 +1304,7 @@ def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: l
     if result is None:
         return False
     headers, rows = result
-    for line in _audit_table_lines(headers, rows, indent=prefix):
-        click.echo(line)
-    return True
+    return _print_audit_table(headers, rows, indent=prefix)
 
 
 def _print_cash_pool_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
@@ -1300,10 +1318,12 @@ def _print_cash_pool_scalar_change_table(prefix: str, field_name: str, changes: 
     if result is None:
         return False
     headers, rows = result
-    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
-    for line in _audit_table_lines(headers, rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        headers,
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=[f"{prefix}{_audit_combined_single_field_label(field_name)}"],
+    )
 
 
 def _strategy_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[list[str], dict[str, tuple[str, ...]]] | None:
@@ -1344,10 +1364,12 @@ def _print_combined_strategy_scalar_change_table(prefix: str, records: list[tupl
     if combined is None:
         return False
     field_columns, rows = combined
-    _print_combined_change_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("strategies", *field_columns), rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        ("strategies", *field_columns),
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_change_field_label_lines(prefix, records),
+    )
 
 
 def _print_combined_ledger_scalar_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
@@ -1358,10 +1380,12 @@ def _print_combined_ledger_scalar_change_table(prefix: str, records: list[tuple[
     if combined is None:
         return False
     field_columns, rows = combined
-    _print_combined_change_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        ("ledger", "cash pool", "strategies", *field_columns),
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_change_field_label_lines(prefix, records),
+    )
 
 
 def _print_combined_cash_pool_scalar_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
@@ -1372,10 +1396,12 @@ def _print_combined_cash_pool_scalar_change_table(prefix: str, records: list[tup
     if combined is None:
         return False
     field_columns, rows = combined
-    _print_combined_change_field_label_lines(prefix, records)
-    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), rows, indent=f"{prefix}  "):
-        click.echo(line)
-    return True
+    return _print_audit_table(
+        ("cash pool", "ledgers", "strategies", *field_columns),
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_change_field_label_lines(prefix, records),
+    )
 
 
 def _audit_combined_change_field_label(records: list[tuple[str, list[dict[str, Any]]]]) -> str:
@@ -1393,9 +1419,7 @@ def _print_ledger_scalar_change_table(prefix: str, field_name: str, changes: lis
     if result is None:
         return False
     headers, rows = result
-    for line in _audit_table_lines(headers, rows, indent=prefix):
-        click.echo(line)
-    return True
+    return _print_audit_table(headers, rows, indent=prefix)
 
 
 def _audit_mapping_table_text(value: Any) -> str | None:
@@ -1839,13 +1863,11 @@ def _print_audit_source_routes(
     status, rows = source_group_formatter.source_route_display(entries)
     if status == "empty":
         return False
-    for line in _audit_table_lines(
+    return _print_audit_table(
         ("ledger", "cash pool", "strategies"),
         rows,
         indent=prefix,
-    ):
-        click.echo(line)
-    return True
+    )
 
 
 def _drop_empty_non_ledger_entries_when_ledger_values_exist(

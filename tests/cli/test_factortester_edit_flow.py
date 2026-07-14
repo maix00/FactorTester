@@ -42,6 +42,7 @@ from tools.cli.modules.backtest.controller import (
     _display_field_value,
 )
 from tools.cli.modules.backtest.audit_formatters import display_values as display_value_formatter
+from tools.cli.modules.backtest.audit_formatters.field_metadata import load_field_metadata
 from tools.cli.modules.registry import ControllerRegistry
 from tools.data.types.data_money import DataMoney
 
@@ -51,6 +52,13 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
+
+
+def test_step_audit_field_metadata_loads_audit_value_kind_from_field_definitions() -> None:
+    metadata = load_field_metadata()
+
+    assert metadata.value_kind("MarketDataModule.raw_prices") == "market_data_sample"
+    assert metadata.value_kind("raw_prices") == "market_data_sample"
 
 
 def test_step_audit_does_not_repeat_changed_output_after_value() -> None:
