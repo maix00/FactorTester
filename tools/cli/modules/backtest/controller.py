@@ -74,14 +74,6 @@ def _audit_event_product_filter(data: dict[str, Any]) -> tuple[str, ...]:
     return events_formatter.event_product_filter(data)
 
 
-def _audit_payload_product_values(payload: dict[str, Any]) -> list[Any]:
-    return events_formatter.payload_product_values(payload)
-
-
-def _audit_product_filter_keys(value: Any) -> list[str]:
-    return events_formatter.product_filter_keys(value)
-
-
 def _pad_audit_cell(value: object, width: int) -> str:
     return table_render_formatter.pad_cell(value, width)
 
@@ -651,38 +643,6 @@ def _audit_event_draft_sample_table_text(value: dict[str, Any]) -> str | None:
     )
 
 
-def _audit_is_event_draft_list(value: list[Any]) -> bool:
-    return events_formatter.is_event_draft_list(value)
-
-
-def _audit_event_draft_table_lines(
-    value: list[dict[str, Any]],
-    *,
-    indent: str = "",
-) -> list[str]:
-    return events_formatter.event_draft_table_lines(
-        value,
-        table_lines=_audit_table_lines,
-        table_cell_is_complex=_audit_table_cell_is_complex,
-        notice_scalar=_audit_notice_scalar,
-        indent=indent,
-    )
-
-
-def _audit_lifecycle_notice_table_lines(
-    value: list[dict[str, Any]],
-    *,
-    indent: str = "",
-) -> list[str] | None:
-    return events_formatter.lifecycle_notice_table_lines(
-        value,
-        table_lines=_audit_table_lines,
-        table_cell_is_complex=_audit_table_cell_is_complex,
-        notice_scalar=_audit_notice_scalar,
-        indent=indent,
-    )
-
-
 def _audit_notice_scalar(value: Any) -> str:
     return events_formatter.notice_scalar(value, audit_text=_audit_text)
 
@@ -697,31 +657,12 @@ def _audit_trading_day_resolver_text(value: dict[str, Any]) -> str:
     )
 
 
-def _audit_event_payload_details(payload: Any) -> Any:
-    return events_formatter.event_payload_details(payload)
-
-
 def _audit_event_payload_table_text(value: Any) -> str | None:
     return events_formatter.event_payload_table_text(value, table_lines=_audit_table_lines)
 
 
-def _looks_like_event_payload(value: dict[str, Any]) -> bool:
-    return events_formatter.looks_like_event_payload(value)
-
-
 def _audit_order_table_text(value: Any) -> str | None:
     return orders_formatter.order_table_text(
-        value,
-        table_lines=_audit_table_lines,
-        scalar_cell=_audit_scalar_cell,
-        select_sample_part=_audit_select_sample_part,
-        sample_note_lines=_audit_sample_note_lines,
-        single_sample_sequence=_audit_single_sample_sequence,
-    )
-
-
-def _audit_order_sample_table_text(value: dict[str, Any]) -> str | None:
-    return orders_formatter.order_sample_table_text(
         value,
         table_lines=_audit_table_lines,
         scalar_cell=_audit_scalar_cell,
@@ -749,10 +690,6 @@ def _audit_trade_intent_text(value: dict[str, Any]) -> str:
     )
 
 
-def _audit_weight_rows(value: Any) -> list[tuple[str, str]]:
-    return trade_intent_formatter.weight_rows(value, scalar_cell=_audit_scalar_cell)
-
-
 def _audit_strategy_change_label(change: dict[str, Any]) -> str:
     strategy = change.get("strategy")
     if strategy not in (None, ""):
@@ -761,43 +698,6 @@ def _audit_strategy_change_label(change: dict[str, Any]) -> str:
     if isinstance(strategies, list) and strategies:
         return ", ".join(str(item) for item in strategies)
     return source_group_formatter.source_group_label([change])
-
-
-def _audit_weight_table_lines(
-    rows: list[tuple[str, dict[str, Any], str]],
-    *,
-    value_label: str,
-    include_reason: bool = False,
-    indent: str = "",
-) -> list[str]:
-    return trade_intent_formatter.weight_table_lines(
-        rows,
-        value_label=value_label,
-        table_lines=_audit_table_lines,
-        scalar_cell=_audit_scalar_cell,
-        display_key=_audit_display_key,
-        include_reason=include_reason,
-        indent=indent,
-    )
-
-
-def _audit_weight_change_table_lines(
-    rows: list[tuple[str, dict[str, Any], dict[str, Any], str, str]],
-    *,
-    value_label: str,
-    include_reason: bool = False,
-    indent: str = "",
-) -> list[str]:
-    return trade_intent_formatter.weight_change_table_lines(
-        rows,
-        value_label=value_label,
-        table_lines=_audit_table_lines,
-        scalar_cell=_audit_scalar_cell,
-        change_cell=_audit_change_cell,
-        display_key=_audit_display_key,
-        include_reason=include_reason,
-        indent=indent,
-    )
 
 
 def _print_weight_change_tables(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
