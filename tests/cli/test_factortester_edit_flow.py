@@ -2693,6 +2693,33 @@ def test_step_audit_combines_current_market_snapshot_fields(capsys, monkeypatch)
     assert "[共享]:" not in plain
 
 
+def test_step_audit_renders_single_current_prices_as_market_snapshot_table(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((120, 20)))
+
+    _print_audit_fields("输入字段", [
+        {
+            "field": "MarketDataModule.current_prices",
+            "values": [
+                {"scope": "context", "value": {"AP.CZC": 9103, "CJ.CZC": 8920}},
+                {"scope": "strategy_config", "strategy": "A1", "value": None},
+            ],
+        },
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "current_prices [MarketDataModule.current_prices]" in plain
+    assert "当前市场快照总表" in plain
+    assert "product" in plain
+    assert "selected_price" in plain
+    assert "AP.CZC" in plain
+    assert "9103" in plain
+    assert "CJ.CZC" in plain
+    assert "8920" in plain
+    assert "strategies" not in plain
+    assert "current_prices.shared" not in plain
+    assert "明细" not in plain
+
+
 def test_step_audit_combines_market_data_sample_changes(capsys, monkeypatch) -> None:
     monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((132, 20)))
     after = {
