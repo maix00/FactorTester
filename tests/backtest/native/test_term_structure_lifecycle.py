@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from typing import cast
 
 import pandas as pd
@@ -8,8 +9,8 @@ import pytest
 from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.state import BacktestRunState
-from tools.testers.backtest.engines.native.config import StrategyConfig
-from tools.testers.backtest.engines.native.position import ProductPosition
+from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
+from tools.testers.backtest.engines.native.position import Lot, ProductPosition
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext, FlowRegistry, make_dispatcher, sort_and_validate
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
@@ -17,6 +18,8 @@ from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.fee import FeeModule
+from tools.testers.backtest.modules.trading_rule import _apply_daily_mark_to_market
 from tools.testers.backtest.modules import term_structure
 from tools.testers.backtest.modules.term_structure import (
     DeliveryForceCloseModule,
@@ -50,6 +53,21 @@ class _Contract:
 
     def __hash__(self) -> int:
         return hash(self.name)
+
+
+class _IdentityOnlyContract:
+    point_value = 1
+    currency = "CNY"
+    is_margin_traded = True
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def __repr__(self) -> str:
+        return self.name
+
+    def __hash__(self) -> int:
+        return id(self)
 
 
 class _TermProduct:
@@ -924,6 +942,115 @@ def test_force_close_order_dispatch_fills_and_clears_position_before_settlement(
     assert order.get("price_timestamp") == ts
     assert order.status.value == "filled"
     assert ledger.get(LedgerModule.positions)[contract].quantity == 0
+
+
+@pytest.mark.parametrize("contract_name,event_time", [
+    ("DCE|F|FB|2402", pd.Timestamp("2024-02-23 09:01:00.000000002", tz="Asia/Shanghai")),
+    ("DCE|F|LH|2403", pd.Timestamp("2024-03-27 09:01:00.000000002", tz="Asia/Shanghai")),
+])
+def test_force_close_matches_held_contract_by_identity_before_strict_dmtm(contract_name, event_time):
+    strategy = Strategy(alias="A")
+    held_contract = _IdentityOnlyContract(contract_name)
+    notice_contract = _IdentityOnlyContract(contract_name)
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                EngineModule.engine_mode: "exact",
+                FeeModule.fee_mode: "exact",
+            },
+        ),
+    })
+    ledger = account.ledger_for_strategy(strategy)
+    ledger.set(LedgerModule.positions, {
+        held_contract: ProductPosition(
+            quantity=3,
+            lots=deque([Lot(quantity=3, entry_price=10.0, multiplier=1.0, is_today=False)]),
+        )
+    })
+    account.ledger_configs[ledger.ledger] = LedgerConfig(
+        accounting_mode="Auto",
+        cost_basis_method="FIFO",
+        daily_mark_to_market_enabled=True,
+        fee_mode="exact",
+    )
+    set_cash_for_ledger_pool(
+        account,
+        ledger,
+        DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False),
+    )
+
+    queue = EventQueue()
+
+    def dispatch_trade_intent(batch):
+        ctx = FlowContext(
+            timestamp=event_time,
+            event_queue=queue,
+            active_strategies=frozenset({strategy}),
+            drafts_by_strategy={strategy: batch},
+            event_kind=EventKind.TRADE_INTENT,
+        )
+        _handle_delivery_force_close_notice(account, ctx)
+
+    def dispatch_order(batch):
+        ctx = FlowContext(
+            timestamp=event_time,
+            event_queue=queue,
+            active_strategies=frozenset({strategy}),
+            drafts_by_strategy={strategy: batch},
+            event_kind=EventKind.ORDER,
+        )
+        ctx.set(MarketDataModule.current_prices, {held_contract: 11.0})
+        ctx.set(MarketDataModule.current_historical_fields, {
+            held_contract: {
+                "VolumeMultiple": 1.0,
+                "CloseTodayRatioByMoney": 0.0001,
+                "CostBasisMethod": "FIFO",
+            }
+        })
+        LedgerModule.apply_order_fill.compute(account, ctx)
+
+    def dispatch_ledger(batch):
+        ctx = FlowContext(
+            timestamp=event_time,
+            event_queue=queue,
+            active_ledgers=frozenset({ledger.ledger}),
+            drafts_by_ledger={ledger.ledger: batch},
+            event_kind=EventKind.LEDGER,
+        )
+        ctx.set(MarketDataModule.current_market_snapshot, {
+            "settlement": {},
+            "close": {held_contract: 11.0},
+        })
+        ctx.set(MarketDataModule.current_historical_fields, {
+            held_contract: {
+                "VolumeMultiple": 1.0,
+                "CloseTodayRatioByMoney": 0.0001,
+                "CostBasisMethod": "FIFO",
+            }
+        })
+        _apply_daily_mark_to_market(account, ctx)
+
+    queue.set_dispatcher(EventKind.TRADE_INTENT, dispatch_trade_intent)
+    queue.set_dispatcher(EventKind.ORDER, dispatch_order)
+    queue.set_dispatcher(EventKind.LEDGER, dispatch_ledger)
+    queue.push_event(EventDraft(EventKind.TRADE_INTENT, event_time, strategy, payload={
+        "kind": "force_close",
+        "notice_type": "force_close",
+        "contract_object": notice_contract,
+        "contract_product": contract_name,
+        "uid": contract_name,
+    }))
+    queue.push_event(EventDraft(
+        EventKind.LEDGER,
+        event_time,
+        payload={"kind": "daily_mark_to_market", "ledger_id": ledger.ledger_id},
+        ledger=ledger.ledger,
+    ))
+
+    queue.run_until_drained()
+
+    assert ledger.get(LedgerModule.positions)[held_contract].quantity == 0
 
 
 def test_signal_target_weights_map_abstract_product_to_current_contract():

@@ -417,12 +417,14 @@ def _handle_rollover_notice(state, ctx) -> None:
             next_contract = _next_contract_object_for_notice(state, strategy, payload)
             if old_contract is None or next_contract is None:
                 continue
-            entry = positions.get(old_contract)
+            held_contract, entry = _held_position_item_for_notice(positions, old_contract, payload)
+            if held_contract is None:
+                continue
             quantity = getattr(entry, "quantity", 0) if entry is not None else 0
             if not quantity:
                 continue
             close_order = Order(
-                instrument=old_contract,
+                instrument=held_contract,
                 timestamp=ctx.timestamp,
                 quantity=-quantity,
                 intent_quantity=-quantity,
@@ -471,12 +473,14 @@ def _handle_delivery_force_close_notice(state, ctx) -> None:
             contract = payload.get("contract_object")
             if contract is None:
                 continue
-            entry = positions.get(contract)
+            held_contract, entry = _held_position_item_for_notice(positions, contract, payload)
+            if held_contract is None:
+                continue
             quantity = getattr(entry, "quantity", 0) if entry is not None else 0
             if not quantity:
                 continue
             order = Order(
-                instrument=contract,
+                instrument=held_contract,
                 timestamp=ctx.timestamp,
                 quantity=-quantity,
                 intent_quantity=-quantity,
@@ -511,12 +515,65 @@ def _next_contract_object_for_notice(state, strategy: Any, payload: dict[str, An
         return None
     rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
     for idx, row in enumerate(rows):
-        if row.get("contract_object") != current:
+        if not _contracts_match(row.get("contract_object"), current, payload):
             continue
         if idx + 1 >= len(rows):
             return None
         return rows[idx + 1].get("contract_object")
     return None
+
+
+def _held_position_item_for_notice(
+    positions: dict[Any, Any],
+    contract: Any,
+    payload: dict[str, Any],
+) -> tuple[Any | None, Any | None]:
+    if contract in positions:
+        return contract, positions[contract]
+    wanted = _contract_identity_keys(contract, payload)
+    if not wanted:
+        return None, None
+    for held_contract, entry in positions.items():
+        if wanted & _contract_identity_keys(held_contract):
+            return held_contract, entry
+    return None, None
+
+
+def _contracts_match(left: Any, right: Any, payload: dict[str, Any] | None = None) -> bool:
+    if left == right:
+        return True
+    left_keys = _contract_identity_keys(left)
+    right_keys = _contract_identity_keys(right, payload)
+    return bool(left_keys and right_keys and left_keys & right_keys)
+
+
+def _contract_identity_keys(value: Any, payload: dict[str, Any] | None = None) -> set[str]:
+    values: list[Any] = []
+    if _has_contract_identity_value(value):
+        values.append(value)
+    if payload:
+        values.extend(payload.get(key) for key in ("contract_object", "contract_product", "uid", "contract"))
+    keys: set[str] = set()
+    for item in values:
+        if not _has_contract_identity_value(item):
+            continue
+        for raw in (getattr(item, "name", None), str(item)):
+            text = str(raw or "").strip()
+            if not text:
+                continue
+            keys.add(text)
+            normalised = _normalised_contract_id({"contract_product": text})
+            if normalised:
+                keys.add(normalised)
+    return keys
+
+
+def _has_contract_identity_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str) and value == "":
+        return False
+    return True
 
 
 def _reference_timezone(state, strategy: Any) -> str | None:
