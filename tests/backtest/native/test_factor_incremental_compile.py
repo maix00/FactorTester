@@ -25,6 +25,32 @@ def test_factor_expr_compile_incremental_returns_run_scoped_executor():
     assert executor.on_signal("2024-01-02") == {"P1": 13.0}
 
 
+def test_factor_expr_incremental_executor_ignores_extra_snapshot_products():
+    expr = ColumnRef(DataColumn.CLOSE) + 1.0
+    executor = expr.compile_incremental(
+        factor_alias="close_plus_one",
+        products=("P1",),
+    )
+
+    executor.on_bar("2024-01-01", {
+        "P1": {"CLOSE": 10.0},
+        "CONTRACT_EXTRA": {"CLOSE": 99.0},
+    })
+
+    assert executor.on_signal("2024-01-01") == {"P1": 11.0}
+
+
+def test_factor_expr_incremental_executor_rejects_missing_planned_products():
+    expr = ColumnRef(DataColumn.CLOSE) + 1.0
+    executor = expr.compile_incremental(
+        factor_alias="close_plus_one",
+        products=("P1",),
+    )
+
+    with pytest.raises(ValueError, match="missing streaming products"):
+        executor.on_bar("2024-01-01", {"CONTRACT_EXTRA": {"CLOSE": 99.0}})
+
+
 def test_vectorizable_factor_expr_defaults_to_incremental_capable():
     expr = ColumnRef(DataColumn.CLOSE) + 1.0
 

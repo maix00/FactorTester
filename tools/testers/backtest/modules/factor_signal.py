@@ -746,10 +746,11 @@ def _observe_signal_live_bar(state, ctx) -> None:
             tables[factor_key] = updated.iloc[~updated.index.duplicated(keep="last")]
         executor = executors.get(factor_key)
         if executor is None:
+            products = _live_products_for_strategies(by_factor[factor_key], ctx)
             executor = _compile_live_factor_executor(
                 factor,
                 by_factor[factor_key][0],
-                fields_by_product.keys(),
+                products if products else fields_by_product.keys(),
                 resolved_bar_frequency_for_strategy(state, by_factor[factor_key][0]),
             )
             if executor is not None:
@@ -768,6 +769,19 @@ def _observe_signal_live_bar(state, ctx) -> None:
             # the scalar close-price map. Compiled FactorExpr executors consume
             # the richer canonical DataColumn mapping above.
             on_bar(pd.Timestamp(ctx.timestamp), dict(close_prices))
+
+
+def _live_products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
+    products_by_strategy = {
+        strategy: tuple(sorted(ctx.get_for(ProductSelectionModule.products, strategy) or (), key=str))
+        for strategy in strategies
+    }
+    distinct = {products for products in products_by_strategy.values() if products}
+    if not distinct:
+        return ()
+    if len(distinct) != 1:
+        raise ValueError("共享 live FactorExpr executor 要求策略使用相同的产品集合")
+    return next(iter(distinct))
 
 
 def _factor_fields_by_product(snapshot: dict[str, dict[Any, float]]) -> dict[Any, dict[str, float]]:

@@ -980,3 +980,27 @@ def test_signal_live_shared_factor_expr_executor_updates_once_across_strategies(
     assert len(account.factor_signal_store.live_executors) == 1
     assert signal_ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 11.0, "P2": 19.0}
     assert signal_ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 11.0, "P2": 19.0}
+
+
+def test_signal_live_factor_expr_uses_strategy_products_not_extra_snapshot_products():
+    strategy = Strategy(alias="A")
+    factor = ColumnRef(DataColumn.CLOSE) + 1.0
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({"P1"}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0, "CONTRACT_EXTRA": 99.0},
+        "CLOSE": {"P1": 10.0, "CONTRACT_EXTRA": 99.0},
+    })
+
+    _observe_signal_live_bar(account, bar_ctx)
+
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({strategy}))
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 11.0}

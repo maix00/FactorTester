@@ -257,9 +257,13 @@ class IncrementalFactorExecutor:
         self._latest: dict[Any, float] = {}
 
     def on_bar(self, timestamp: pd.Timestamp, fields_by_product: Mapping[Any, Any]) -> None:
+        missing = [product for product in self._plan.products if product not in fields_by_product]
+        if missing:
+            raise ValueError(f"market slice is missing streaming products: {missing!r}")
         market = _StreamingMarketSlice({
             product: _StreamingBarPrice(_normalize_bar_fields(fields))
             for product, fields in fields_by_product.items()
+            if product in self._plan.products
         })
         self._latest = {
             product: float(value)
