@@ -1821,9 +1821,7 @@ def _print_audit_value(prefix: str, label: str, value: Any) -> None:
     if len(lines) == 1:
         _print_key_value_line(prefix, label, lines[0])
         return
-    click.echo(f"{prefix}{label} =")
-    for line in lines:
-        _print_audit_block_line(f"{prefix}  ", line)
+    _print_audit_text_block(prefix, label, lines, separator=" =")
 
 
 def _step_section_title(title: str) -> str:
@@ -1840,6 +1838,12 @@ def _print_key_value_line(prefix: str, label: str, value: str) -> None:
         f"{line_prefix}{value}",
         continuation_indent=" " * _audit_display_width(line_prefix),
     )
+
+
+def _print_audit_text_block(prefix: str, label: str, lines: list[str], *, separator: str = ":") -> None:
+    click.echo(f"{prefix}{label}{separator}")
+    for line in lines or [""]:
+        _print_audit_block_line(f"{prefix}  ", line)
 
 
 def _print_audit_block_line(prefix: str, line: str) -> None:
@@ -1920,21 +1924,15 @@ def _drop_empty_non_ledger_entries_when_ledger_values_exist(
 def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
     order_diff_text = _audit_order_diff_text(before, after)
     if order_diff_text is not None:
-        click.echo(f"{prefix}{label}:")
-        for line in order_diff_text.splitlines() or [""]:
-            _print_audit_block_line(f"{prefix}  ", line)
+        _print_audit_text_block(prefix, label, order_diff_text.splitlines())
         return
     positions_diff_text = _audit_positions_diff_text(before, after)
     if positions_diff_text is not None:
-        click.echo(f"{prefix}{label}:")
-        for line in positions_diff_text.splitlines() or [""]:
-            _print_audit_block_line(f"{prefix}  ", line)
+        _print_audit_text_block(prefix, label, positions_diff_text.splitlines())
         return
     diff_text = _audit_historical_field_state_diff_text(before, after)
     if diff_text is not None:
-        click.echo(f"{prefix}{label}:")
-        for line in diff_text.splitlines() or [""]:
-            _print_audit_block_line(f"{prefix}  ", line)
+        _print_audit_text_block(prefix, label, diff_text.splitlines())
         return
     if _audit_repeated_owner_groups(before) or _audit_repeated_owner_groups(after):
         click.echo(f"{prefix}{label}:")
