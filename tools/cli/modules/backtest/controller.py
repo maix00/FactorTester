@@ -1191,10 +1191,6 @@ def _print_audit_table(
 _MARKET_DATA_SAMPLE_PRODUCT_LIMIT = market_data_formatter.MARKET_DATA_SAMPLE_PRODUCT_LIMIT
 
 
-def _is_market_data_sample_field(field_name: str) -> bool:
-    return _field_metadata.display_value_kind(field_name) == "market_data_sample"
-
-
 def _print_market_data_sample_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
     rows, time_columns = _market_data_sample_rows_from_value_records(records)
     if not rows or not time_columns:
@@ -1933,7 +1929,7 @@ def _audit_section_printer() -> audit_sections.StepAuditSectionPrinter:
     return audit_sections.StepAuditSectionPrinter(
         print_step_section=_print_step_section,
         field_sort_key=_audit_field_sort_key,
-        is_market_data_sample_field=_is_market_data_sample_field,
+        field_display_value_kind=_field_metadata.display_value_kind,
         print_market_data_sample_value_table=_print_market_data_sample_value_table,
         print_market_data_sample_change_table=_print_market_data_sample_change_table,
         print_delta_mapping_value_table=_print_delta_mapping_value_table,
