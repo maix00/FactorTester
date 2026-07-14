@@ -7,6 +7,7 @@ from typing import Any
 
 import click
 
+from tools.cli.field_help import render_settings_help
 from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest import config_state as config_state_helpers
 from tools.cli.modules.backtest import config_views as config_view_formatter
@@ -50,7 +51,7 @@ def handle_local_settings_command(
     print_local_settings: PrintLocalSettings,
 ) -> bool:
     if not args or args[0] in {"show", "list", "ls"}:
-        print_local_settings(state)
+        print_local_settings(state, validate_registered_settings=validate_registered_settings)
         return False
     show_help = config_arg_helpers.has_context_help(args)
     setting_args = config_arg_helpers.strip_context_help(args)
@@ -61,7 +62,7 @@ def handle_local_settings_command(
         print_settings_help(state)
         return False
     click.echo("已更新 local-settings")
-    print_local_settings(state, validate=False)
+    print_local_settings(state, validate=False, validate_registered_settings=validate_registered_settings)
     return True
 
 
@@ -130,6 +131,88 @@ def print_ledger_config_payload(configs: dict[str, Any]) -> None:
 
 def print_ledger_config_help() -> None:
     for line in config_view_formatter.LEDGER_CONFIG_HELP_LINES:
+        click.echo(line)
+
+
+def print_settings_help(state, *, values: dict[str, Any] | None = None) -> None:
+    _, store = config_state_helpers.stores_for_backtest(state)
+    for key, value in (values or {}).items():
+        store.set(key, value)
+    for line in render_settings_help(store, title="回测设置上下文"):
+        click.echo(line)
+
+
+def print_local_settings(
+    state,
+    *,
+    validate: bool = True,
+    validate_registered_settings: StateAction | None = None,
+) -> None:
+    if validate and validate_registered_settings is not None:
+        validate_registered_settings(state)
+    _, store = config_state_helpers.stores_for_backtest(state)
+    for line in config_view_formatter.local_settings_lines(state.backtest_local_settings, store):
+        click.echo(line)
+
+
+def print_group_field_help(state, option: str, *, batch: bool = False) -> None:
+    if option == "--add":
+        print_group_add_help()
+        return
+    if option == "--batch":
+        print_group_batch_help()
+        return
+    print_add_group_field_help(state, option)
+    if batch:
+        click.echo("  批量新增中 --group-index 由 --group-names 的顺序自动生成。")
+
+
+def print_group_add_help() -> None:
+    for line in config_view_formatter.GROUP_ADD_HELP_LINES:
+        click.echo(line)
+
+
+def print_group_batch_help() -> None:
+    for line in config_view_formatter.GROUP_BATCH_HELP_LINES:
+        click.echo(line)
+
+
+def print_add_group_field_help(state, option: str) -> None:
+    field_key = config_view_formatter.group_field_key_for_option(option)
+    if field_key is None:
+        raise click.ClickException(f"无法识别 group 字段: {option}")
+    _, store = config_state_helpers.stores_for_backtest(state)
+    lines = config_view_formatter.add_group_field_help_lines(option, field_key, store)
+    if lines is None:
+        raise click.ClickException(f"字段尚未由后端注册: {field_key}")
+    for line in lines:
+        click.echo(line)
+
+
+def print_group_list(state) -> None:
+    click.echo("分组列表")
+    for line in config_view_formatter.group_list_lines(state.backtest_groups):
+        click.echo(line)
+
+
+def print_long_short_list(state) -> None:
+    click.echo("Long-Short 列表")
+    for line in config_view_formatter.long_short_list_lines(state.backtest_ls_configs):
+        click.echo(line)
+
+
+def print_group_detail(group: dict[str, Any]) -> None:
+    for line in config_view_formatter.group_detail_lines(group):
+        click.echo(line)
+
+
+def print_result_hints() -> None:
+    for line in config_view_formatter.RESULT_HINT_LINES:
+        click.echo(line)
+
+
+def print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict[str, Any]]) -> None:
+    for line in config_view_formatter.run_strategy_info_lines(groups, ls_configs):
         click.echo(line)
 
 

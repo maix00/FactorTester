@@ -15,7 +15,6 @@ import click
 
 from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.errors import friendly_errors
-from tools.cli.field_help import render_settings_help
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.backtest.audit_formatters import delta_tables as delta_table_formatter
 from tools.cli.modules.backtest.audit_formatters import display_values as display_value_formatter
@@ -142,7 +141,6 @@ from tools.cli.modules.backtest import results_commands as results_command_handl
 from tools.cli.modules.backtest import root_command as root_command_handler
 from tools.cli.modules.backtest import run_payloads as run_payload_formatter
 from tools.cli.modules.backtest import run_config as run_config_helpers
-from tools.cli.modules.backtest import config_views as config_view_formatter
 from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest import config_state as config_state_helpers
 from tools.cli.modules.backtest import config_commands as config_command_handlers
@@ -253,8 +251,8 @@ def local_settings(ctx: click.Context) -> None:
         tuple(ctx.args),
         apply_raw_settings=_apply_raw_local_settings,
         validate_registered_settings=_validate_registered_local_settings,
-        print_settings_help=_print_backtest_settings_help,
-        print_local_settings=_print_backtest_local_settings,
+        print_settings_help=config_command_handlers.print_settings_help,
+        print_local_settings=config_command_handlers.print_local_settings,
     )
     if changed:
         save_state(state)
@@ -430,17 +428,17 @@ def group(
         state,
         tuple(ctx.args),
         selector_roots=_ADD_GROUP_SELECTOR_ROOTS,
-        print_group_list=_print_group_list,
-        print_group_field_help=_print_group_field_help,
-        print_group_batch_help=_print_group_batch_help,
+        print_group_list=config_command_handlers.print_group_list,
+        print_group_field_help=config_command_handlers.print_group_field_help,
+        print_group_batch_help=config_command_handlers.print_group_batch_help,
         validate_settings=_validate_settings_dict,
-        print_settings_help=_print_backtest_settings_help,
+        print_settings_help=config_command_handlers.print_settings_help,
         parse_group_add_selectors=group_state_helpers.parse_group_add_selectors,
         append_group=group_state_helpers.append_group,
         selected_groups=group_state_helpers.selected_groups,
         edit_group=group_state_helpers.edit_group,
         derive_or_copy_groups=group_state_helpers.derive_or_copy_groups,
-        print_group=_print_group,
+        print_group=config_command_handlers.print_group_detail,
         run_backtest=_run_backtest,
     )
     if changed:
@@ -460,9 +458,9 @@ def long_short(ctx: click.Context) -> None:
         resolve_long_leg=lambda current_state, leg: group_state_helpers.resolve_ls_leg(current_state, leg, side="long"),
         resolve_short_leg=lambda current_state, leg: group_state_helpers.resolve_ls_leg(current_state, leg, side="short"),
         group_ref=group_state_helpers.group_ref,
-        print_list=_print_long_short_list,
+        print_list=config_command_handlers.print_long_short_list,
         validate_settings=_validate_registered_local_settings,
-        print_settings_help=_print_backtest_settings_help,
+        print_settings_help=config_command_handlers.print_settings_help,
     )
     if changed:
         save_state(state)
@@ -498,75 +496,8 @@ def _validate_settings_dict(state, values: dict[str, Any], *, prefix: str = "设
             raise click.ClickException(str(exc)) from None
 
 
-def _print_backtest_settings_help(state, *, values: dict[str, Any] | None = None) -> None:
-    _, store = config_state_helpers.stores_for_backtest(state)
-    for key, value in (values or {}).items():
-        store.set(key, value)
-    for line in render_settings_help(store, title="回测设置上下文"):
-        click.echo(line)
-
-
-def _print_backtest_local_settings(state, *, validate: bool = True) -> None:
-    if validate:
-        _validate_registered_local_settings(state)
-    _, store = config_state_helpers.stores_for_backtest(state)
-    for line in config_view_formatter.local_settings_lines(state.backtest_local_settings, store):
-        click.echo(line)
-
-
-def _print_group_field_help(state, option: str, *, batch: bool = False) -> None:
-    if option == "--add":
-        _print_group_add_help()
-        return
-    if option == "--batch":
-        _print_group_batch_help()
-        return
-    _print_add_group_field_help(state, option)
-    if batch:
-        click.echo("  批量新增中 --group-index 由 --group-names 的顺序自动生成。")
-
-
-def _print_group_add_help() -> None:
-    for line in config_view_formatter.GROUP_ADD_HELP_LINES:
-        click.echo(line)
-
-
-def _print_group_batch_help() -> None:
-    for line in config_view_formatter.GROUP_BATCH_HELP_LINES:
-        click.echo(line)
-
-
-def _print_add_group_field_help(state, option: str) -> None:
-    field_key = config_view_formatter.group_field_key_for_option(option)
-    if field_key is None:
-        raise click.ClickException(f"无法识别 group 字段: {option}")
-    _, store = config_state_helpers.stores_for_backtest(state)
-    lines = config_view_formatter.add_group_field_help_lines(option, field_key, store)
-    if lines is None:
-        raise click.ClickException(f"字段尚未由后端注册: {field_key}")
-    for line in lines:
-        click.echo(line)
-
-
-def _print_group_list(state) -> None:
-    click.echo("分组列表")
-    for line in config_view_formatter.group_list_lines(state.backtest_groups):
-        click.echo(line)
-
-
-def _print_long_short_list(state) -> None:
-    click.echo("Long-Short 列表")
-    for line in config_view_formatter.long_short_list_lines(state.backtest_ls_configs):
-        click.echo(line)
-
-
 def _strategy_book_payload(state) -> dict[str, Any]:
     return config_state_helpers.strategy_book_payload(state)
-
-
-def _print_group(group: dict[str, Any]) -> None:
-    for line in config_view_formatter.group_detail_lines(group):
-        click.echo(line)
 
 
 def _audit_text(value: Any) -> str:
@@ -1856,13 +1787,11 @@ def _arg_value(args: tuple[str, ...], flag: str) -> str:
 
 
 def _print_backtest_result_hints() -> None:
-    for line in config_view_formatter.RESULT_HINT_LINES:
-        click.echo(line)
+    config_command_handlers.print_result_hints()
 
 
 def _print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict[str, Any]]) -> None:
-    for line in config_view_formatter.run_strategy_info_lines(groups, ls_configs):
-        click.echo(line)
+    config_command_handlers.print_run_strategy_info(groups, ls_configs)
 
 
 def _equity_curve_live_enabled(state, *, client=None) -> bool:
