@@ -26,6 +26,41 @@ if TYPE_CHECKING:
 from .core import FactorExpr, EvaluateContext
 from .composite import CompositeExpr
 
+
+def _positive_index_level_freq(index: pd.Index, level: int, name: str) -> DataFreq | None:
+    """Return a positive frequency candidate for an index level, or None."""
+    try:
+        freq = DataFreq(name)
+    except Exception:
+        freq = None
+    if freq is not None and freq.value > pd.Timedelta(0):
+        return freq
+
+    values = (
+        index.get_level_values(level)
+        if isinstance(index, pd.MultiIndex)
+        else index
+    )
+    try:
+        timestamps = pd.DatetimeIndex(pd.to_datetime(values)).dropna()
+    except Exception:
+        return None
+    if len(timestamps) < 2:
+        return None
+
+    unique_ts = pd.DatetimeIndex(pd.unique(timestamps))
+    if len(unique_ts) < 2:
+        return None
+    diffs = unique_ts[1:] - unique_ts[:-1]
+    positive_diffs = diffs[diffs > pd.Timedelta(0)]
+    if len(positive_diffs) == 0:
+        return None
+    mode_diff = cast(pd.Timedelta, positive_diffs.value_counts().index[0])
+    if mode_diff <= pd.Timedelta(0):
+        return None
+    return DataFreq(mode_diff)
+
+
 def signal_align(
     data: pd.DataFrame,
     freq: Any,
@@ -56,15 +91,21 @@ def signal_align(
 
     # 找到 freq 是其整数倍的索引层级（第一个匹配的）
     index_names = [str(n) for n in data.index.names]
-    index_freqs = [DataFreq(n) for n in index_names]
+    index_freqs = [
+        _positive_index_level_freq(data.index, i, n)
+        for i, n in enumerate(index_names)
+    ]
     try:
         first_true_idx = next(
             (i for i, f in enumerate(index_freqs)
-             if freq_dc.value.total_seconds() % f.value.total_seconds() == 0))
+             if f is not None and freq_dc.value.total_seconds() % f.value.total_seconds() == 0))
     except StopIteration:
         raise ValueError(
-            f"频率 {freq_dc} 不是任何数据索引频率的整数倍")
-    multiple = int(freq_dc.value.total_seconds() / index_freqs[first_true_idx].value.total_seconds())
+            f"频率 {freq_dc} 不是任何可推断的正数据索引频率的整数倍")
+    index_freq = index_freqs[first_true_idx]
+    if index_freq is None or index_freq.value <= pd.Timedelta(0):
+        raise ValueError(f"数据索引层级 {index_names[first_true_idx]!r} 无法推断出正频率")
+    multiple = int(freq_dc.value.total_seconds() / index_freq.value.total_seconds())
 
     idx_name = index_names[first_true_idx]
     idx_series = data.index.get_level_values(idx_name).to_series().reset_index(drop=True)

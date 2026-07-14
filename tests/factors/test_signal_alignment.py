@@ -39,3 +39,34 @@ def test_signal_align_daily_basepoint_selects_specific_time():
 
     aligned = signal_align(raw, "1d", daily_basepoint="10:00:00", end_session_skip=False)
     assert list(aligned["A"]) == [1, 4]
+
+
+def test_signal_align_infers_business_named_multiindex_frequency():
+    times = pd.DatetimeIndex([
+        "2026-01-01 09:00",
+        "2026-01-01 10:00",
+        "2026-01-02 09:00",
+        "2026-01-02 10:00",
+    ])
+    days = pd.DatetimeIndex(times.normalize())
+    idx = pd.MultiIndex.from_arrays([days, times], names=["交易日", "数据源时间"])
+    raw = pd.DataFrame({"A": range(4)}, index=idx)
+
+    aligned = signal_align(raw, "1d", basepoint="last", end_session_skip=False)
+
+    assert list(aligned["A"]) == [1, 3]
+    assert list(aligned.index.get_level_values("_SIGNAL@DAY1")) == [
+        pd.Timestamp("2026-01-01"),
+        pd.Timestamp("2026-01-02"),
+    ]
+
+
+def test_signal_align_skips_zero_frequency_candidates_without_dividing_by_zero():
+    times = pd.DatetimeIndex(["2026-01-01", "2026-01-02"], name="1d")
+    zero_level = pd.DatetimeIndex(["2026-01-01", "2026-01-01"], name="0")
+    idx = pd.MultiIndex.from_arrays([zero_level, times], names=["0", "1d"])
+    raw = pd.DataFrame({"A": [10, 20]}, index=idx)
+
+    aligned = signal_align(raw, "1d", basepoint="last", end_session_skip=False)
+
+    assert list(aligned["A"]) == [10, 20]
