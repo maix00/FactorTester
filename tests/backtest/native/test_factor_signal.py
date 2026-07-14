@@ -946,3 +946,37 @@ def test_signal_live_factor_expr_requires_canonical_data_column_snapshot_fields(
 
     assert account.factor_signal_store.live_executors == {}
     assert bar_ctx.get_for(FactorSignalModule.live_factor_state, strategy) is None
+
+
+def test_signal_live_shared_factor_expr_executor_updates_once_across_strategies():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    factor = ColumnRef(DataColumn.CLOSE).rolling_mean(2)
+    configs = {
+        s1: StrategyConfig(strategy=s1, field_values={FactorModule.factor: factor}),
+        s2: StrategyConfig(strategy=s2, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+
+    first_bar = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:00"), event_queue=EventQueue(),
+                            active_strategies=frozenset({s1, s2}))
+    first_bar.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0, "P2": 20.0},
+        "CLOSE": {"P1": 10.0, "P2": 20.0},
+    })
+    _observe_signal_live_bar(account, first_bar)
+
+    second_bar = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({s1, s2}))
+    second_bar.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 12.0, "P2": 18.0},
+        "CLOSE": {"P1": 12.0, "P2": 18.0},
+    })
+    _observe_signal_live_bar(account, second_bar)
+
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({s1, s2}))
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert len(account.factor_signal_store.live_executors) == 1
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 11.0, "P2": 19.0}
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 11.0, "P2": 19.0}
