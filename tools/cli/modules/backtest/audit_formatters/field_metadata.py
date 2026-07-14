@@ -11,7 +11,7 @@ class AuditFieldMetadata:
     tab_order: dict[str, int] = field(default_factory=dict)
     display_order: dict[str, int] = field(default_factory=dict)
     display_offsets: dict[str, int] = field(default_factory=dict)
-    value_kinds: dict[str, str] = field(default_factory=dict)
+    display_value_kinds: dict[str, str] = field(default_factory=dict)
 
     def label(self, name: str) -> str:
         """Return field name with Chinese label: ``margin_mode (保证金模式)``."""
@@ -32,9 +32,9 @@ class AuditFieldMetadata:
             qualified_name,
         )
 
-    def value_kind(self, qualified_name: str) -> str | None:
+    def display_value_kind(self, qualified_name: str) -> str | None:
         field_name = qualified_name.rsplit(".", 1)[-1]
-        return self.value_kinds.get(qualified_name) or self.value_kinds.get(field_name)
+        return self.display_value_kinds.get(qualified_name) or self.display_value_kinds.get(field_name)
 
 
 def load_field_metadata() -> AuditFieldMetadata:
@@ -48,7 +48,7 @@ def load_field_metadata() -> AuditFieldMetadata:
     tab_order: dict[str, int] = {}
     display_order: dict[str, int] = {}
     display_offsets: dict[str, int] = {}
-    value_kinds: dict[str, str] = {}
+    display_value_kinds: dict[str, str] = {}
     try:
         from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
@@ -76,8 +76,8 @@ def load_field_metadata() -> AuditFieldMetadata:
                     display_offsets[qualified] = int(offset)
                 display_value_kind = getattr(field_definition, "display_value_kind", None)
                 if display_value_kind:
-                    value_kinds[field_name] = str(display_value_kind)
-                    value_kinds[qualified] = str(display_value_kind)
+                    display_value_kinds[field_name] = str(display_value_kind)
+                    display_value_kinds[qualified] = str(display_value_kind)
     except Exception:
         pass
     return AuditFieldMetadata(
@@ -85,5 +85,5 @@ def load_field_metadata() -> AuditFieldMetadata:
         tab_order=tab_order,
         display_order=display_order,
         display_offsets=display_offsets,
-        value_kinds=value_kinds,
+        display_value_kinds=display_value_kinds,
     )

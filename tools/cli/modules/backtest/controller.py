@@ -1196,7 +1196,7 @@ _MARKET_DATA_SAMPLE_PRODUCT_LIMIT = market_data_formatter.MARKET_DATA_SAMPLE_PRO
 
 def _is_market_data_sample_field(field_name: str) -> bool:
     return (
-        _field_metadata.value_kind(field_name) == "market_data_sample"
+        _field_metadata.display_value_kind(field_name) == "market_data_sample"
         or market_data_formatter.is_market_data_sample_field(field_name)
     )
 
@@ -1762,7 +1762,7 @@ def _display_field_value(qualified_name: str, value: Any) -> Any:
     return display_value_formatter.display_field_value(
         qualified_name,
         value,
-        field_value_kind=_field_metadata.value_kind,
+        field_display_value_kind=_field_metadata.display_value_kind,
         trade_intent_summary=_audit_trade_intent_summary,
         positions_summary=_audit_positions_summary,
         run_window_summary=_audit_run_window_summary,

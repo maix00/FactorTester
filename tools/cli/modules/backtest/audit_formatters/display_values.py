@@ -89,7 +89,7 @@ def display_field_value(
     qualified_name: str,
     value: Any,
     *,
-    field_value_kind: FieldValueKind | None = None,
+    field_display_value_kind: FieldValueKind | None = None,
     trade_intent_summary: Summary,
     positions_summary: Summary,
     run_window_summary: Summary,
@@ -98,7 +98,7 @@ def display_field_value(
     scalar_sequence_text: ScalarSequenceText,
     field_display_offsets: Mapping[str, int],
 ) -> Any:
-    value_kind = field_value_kind(qualified_name) if field_value_kind is not None else None
+    value_kind = field_display_value_kind(qualified_name) if field_display_value_kind is not None else None
     if value_kind == "trade_intent" or qualified_name.rsplit(".", 1)[-1] == "trade_intent":
         summary = trade_intent_summary(value)
         if summary is not None:
