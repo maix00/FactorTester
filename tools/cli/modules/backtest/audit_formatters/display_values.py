@@ -99,25 +99,25 @@ def display_field_value(
     field_display_offsets: Mapping[str, int],
 ) -> Any:
     value_kind = field_display_value_kind(qualified_name) if field_display_value_kind is not None else None
-    if value_kind == "trade_intent" or qualified_name.rsplit(".", 1)[-1] == "trade_intent":
+    if value_kind == "trade_intent":
         summary = trade_intent_summary(value)
         if summary is not None:
             return summary
-    if value_kind == "positions" or qualified_name == "LedgerModule.positions" or qualified_name.rsplit(".", 1)[-1] == "positions":
+    if value_kind == "positions":
         summary = positions_summary(value)
         if summary is not None:
             return summary
-    if value_kind == "run_window" or qualified_name in {"RunWindowModule.run_window_envelope", "RunWindowModule.strategy_windows"}:
+    if value_kind == "run_window":
         summary = run_window_summary(value)
         if summary is not None:
             return summary
-    if value_kind == "historical_field_state" or qualified_name == "MarketDataModule.field_state_baseline":
+    if value_kind == "historical_field_state":
         summary = historical_field_state_summary(value)
         if summary is not None:
             return summary
     if qualified_name == "MarketDataModule.required_data_source" and value in ((), []):
         return "auto（自动选择）"
-    if value_kind == "cash" or qualified_name.rsplit(".", 1)[-1] == "cash":
+    if value_kind == "cash":
         return cash_summary(value)
     if isinstance(value, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in value):
         return scalar_sequence_text(value)
