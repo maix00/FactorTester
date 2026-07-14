@@ -762,8 +762,10 @@ def run_ic_test_stream():
         page_uuid_str = str(data.get('page_uuid') or '')
         _populate_family_factors_from_page(factor_family, page_uuid_str)
     except Exception as e:
+        error = str(e)
+        tb = traceback.format_exc()
         def _early_err():
-            yield f"event: error\ndata: {json.dumps({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}, default=str)}\n\n"
+            yield f"event: error\ndata: {json.dumps({'success': False, 'error': error, 'traceback': tb}, default=str)}\n\n"
         return Response(_early_err(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
