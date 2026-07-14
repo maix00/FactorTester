@@ -804,10 +804,6 @@ def _audit_ledger_scalar_text(value: Any) -> str | None:
     )
 
 
-def _audit_bracket_scalar_list_text(value: Any) -> str | None:
-    return ledger_formatter.bracket_scalar_list_text(value, scalar_sequence_text=_audit_scalar_sequence_text)
-
-
 def _cash_pool_scalar_record_table(record: dict[str, Any]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
     return ledger_formatter.cash_pool_scalar_record_table(
         record,
@@ -878,20 +874,6 @@ def _print_strategy_record_value_table(prefix: str, field_name: str, values: lis
     )
 
 
-def _audit_strategy_table_cell(field_name: str, value: Any) -> Any:
-    return strategy_formatter.strategy_table_cell(
-        field_name,
-        value,
-        display_field_value=_display_field_value,
-        table_cell_is_complex=_audit_table_cell_is_complex,
-        scalar_cell=_audit_scalar_cell,
-    )
-
-
-def _audit_scope_column_label(scope: str) -> str:
-    return strategy_formatter.scope_column_label(scope)
-
-
 _AUDIT_MISSING = object()
 
 
@@ -904,36 +886,6 @@ def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[list[str], di
         scalar_cell=_audit_scalar_cell,
         table_cell_is_complex=_audit_table_cell_is_complex,
     )
-
-
-def _audit_strategy_subfield_columns(short_name: str, base_column: str, values: list[Any]) -> list[str] | None:
-    return strategy_formatter.strategy_subfield_columns(
-        short_name,
-        base_column,
-        values,
-        normalize=_audit_normalized_value,
-    )
-
-
-def _audit_strategy_subfield_values(value: Any, expected_count: int) -> list[str]:
-    return strategy_formatter.strategy_subfield_values(
-        value,
-        expected_count,
-        normalize=_audit_normalized_value,
-        scalar_cell=_audit_scalar_cell,
-    )
-
-
-def _audit_single_mapping_sequence_keys(value: Any) -> list[str] | None:
-    return strategy_formatter.single_mapping_sequence_keys(value, normalize=_audit_normalized_value)
-
-
-def _audit_single_mapping_sequence_item(value: Any) -> dict[str, Any] | None:
-    return strategy_formatter.single_mapping_sequence_item(value, normalize=_audit_normalized_value)
-
-
-def _audit_scope_suffix(scope: str) -> str:
-    return strategy_formatter.scope_suffix(scope)
 
 
 def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
@@ -1048,10 +1000,6 @@ def _print_combined_ledger_scalar_value_table(prefix: str, records: list[dict[st
         indent=f"{prefix}  ",
         label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
     )
-
-
-def _audit_combined_field_label(records: list[dict[str, Any]]) -> str:
-    return audit_printer_helpers.combined_field_label(records)
 
 
 def _audit_combined_single_field_label(qualified_name: str) -> str:
@@ -1291,10 +1239,6 @@ def _print_combined_cash_pool_scalar_change_table(prefix: str, records: list[tup
     )
 
 
-def _audit_combined_change_field_label(records: list[tuple[str, list[dict[str, Any]]]]) -> str:
-    return audit_printer_helpers.combined_change_field_label(records)
-
-
 def _print_ledger_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
     result = ledger_formatter.ledger_scalar_change_rows(
         field_name,
@@ -1385,26 +1329,6 @@ def _audit_market_data_excluded_products_text(value: dict[str, Any]) -> str:
     )
 
 
-def _audit_index_cell(value: Any) -> str:
-    return market_data_formatter.index_cell(value)
-
-
-def _audit_price_sample_edge_frames(sample: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    return market_data_formatter.price_sample_edge_frames(sample, normalize=_audit_normalized_value)
-
-
-def _audit_index_parts(value: Any) -> list[str]:
-    return market_data_formatter.index_parts(value)
-
-
-def _audit_sample_time_label(parts: list[str]) -> str:
-    return market_data_formatter.sample_time_label(parts)
-
-
-def _audit_columns_summary(columns: Any) -> str:
-    return market_data_formatter.columns_summary(columns)
-
-
 def _audit_run_window_text(value: dict[str, Any]) -> str:
     return run_window_formatter.run_window_text(
         value,
@@ -1412,24 +1336,6 @@ def _audit_run_window_text(value: dict[str, Any]) -> str:
         scalar_cell=_audit_scalar_cell,
         normalize=_audit_normalized_value,
     )
-
-
-def _audit_datatime_text(value: Any) -> str:
-    return run_window_formatter.datatime_text(value, normalize=_audit_normalized_value)
-
-
-def _audit_datatime_parts(value: Any) -> dict[str, str] | None:
-    return run_window_formatter.datatime_parts(value, normalize=_audit_normalized_value)
-
-
-def _audit_timestamp_text(value: Any) -> str | None:
-    if isinstance(value, dict):
-        ts = value.get("ts")
-        if ts not in (None, ""):
-            return str(ts)
-    if value not in (None, ""):
-        return str(value)
-    return None
 
 
 def _audit_run_window_summary(value: Any) -> dict[str, Any] | None:
@@ -1470,35 +1376,8 @@ def _audit_historical_field_state_diff_text(before: Any, after: Any) -> str | No
     )
 
 
-def _audit_field_state_transposed_lines(
-    fields: list[str],
-    rows: list[dict[str, Any]],
-    *,
-    product_filter: tuple[str, ...] = (),
-) -> list[str]:
-    return market_data_formatter.field_state_transposed_lines(
-        fields,
-        rows,
-        product_filter=product_filter,
-        table_lines=_audit_table_lines,
-        scalar_cell=_audit_scalar_cell,
-    )
-
-
-def _audit_sample_field_state_products(rows: list[dict[str, Any]], *, max_products: int = 6) -> tuple[list[dict[str, Any]], str | None]:
-    return market_data_formatter.sample_field_state_products(rows, max_products=max_products)
-
-
 def _audit_positions_summary(value: Any) -> dict[str, Any] | None:
     return ledger_formatter.positions_summary(value, normalize=_audit_normalized_value)
-
-
-def _audit_normalized_positions(value: Any) -> dict[str, dict[str, Any]] | None:
-    return ledger_formatter.normalized_positions(value, normalize=_audit_normalized_value)
-
-
-def _audit_lots_count(value: Any) -> int | str:
-    return ledger_formatter.lots_count(value)
 
 
 def _audit_positions_text(value: dict[str, Any]) -> str:
@@ -1512,25 +1391,8 @@ def _audit_positions_text(value: dict[str, Any]) -> str:
     return text or json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
 
 
-def _audit_grouped_position_rows(positions: dict[str, dict[str, Any]]) -> list[tuple[Any, ...]]:
-    return ledger_formatter.grouped_position_rows(
-        positions,
-        scalar_cell=_audit_scalar_cell,
-        cash_summary=_audit_cash_summary,
-    )
-
-
 def _audit_product_list_cell(products: list[str], *, all_products: list[str] | None = None) -> str:
     return ledger_formatter.product_list_cell(products, all_products=all_products)
-
-
-def _audit_position_scalar(payload: dict[str, Any], column: str) -> str:
-    return ledger_formatter.position_scalar(
-        payload,
-        column,
-        scalar_cell=_audit_scalar_cell,
-        cash_summary=_audit_cash_summary,
-    )
 
 
 def _audit_positions_diff_text(before: Any, after: Any) -> str | None:
@@ -1543,46 +1405,6 @@ def _audit_positions_diff_text(before: Any, after: Any) -> str | None:
         cash_summary=_audit_cash_summary,
         change_cell=_audit_change_cell,
     )
-
-
-def _audit_positions_diff_rows(before: Any, after: Any) -> list[tuple[str, ...]] | None:
-    return ledger_formatter.positions_diff_rows(
-        before,
-        after,
-        scalar_cell=_audit_scalar_cell,
-        normalize=_audit_normalized_value,
-        cash_summary=_audit_cash_summary,
-        change_cell=_audit_change_cell,
-    )
-
-
-def _audit_position_diff_values(
-    before_payload: dict[str, Any] | None,
-    after_payload: dict[str, Any] | None,
-) -> tuple[str, ...]:
-    return ledger_formatter.position_diff_values(
-        before_payload,
-        after_payload,
-        scalar_cell=_audit_scalar_cell,
-        cash_summary=_audit_cash_summary,
-        change_cell=_audit_change_cell,
-    )
-
-
-def _audit_lot_change_summary(before_payload: dict[str, Any] | None, after_payload: dict[str, Any] | None) -> str:
-    return ledger_formatter.lot_change_summary(
-        before_payload,
-        after_payload,
-        change_cell=_audit_change_cell,
-    )
-
-
-def _audit_lot_sequence(value: Any) -> list[Any] | None:
-    return ledger_formatter.lot_sequence(value)
-
-
-def _audit_changed_lot_count(before_lots: list[Any], after_lots: list[Any]) -> int:
-    return ledger_formatter.changed_lot_count(before_lots, after_lots)
 
 
 def _audit_pandas_text(value: Any) -> str | None:
@@ -1621,24 +1443,12 @@ def _audit_series_text(value: dict[str, Any]) -> str:
     )
 
 
-def _audit_series_table_lines(value: dict[str, Any], *, indent: str = "") -> list[str]:
-    return market_data_formatter.series_table_lines(
-        value,
-        table_lines=_audit_table_lines,
-        indent=indent,
-    )
-
-
 def _parse_audit_literal(value: str) -> Any | None:
     return display_value_formatter.parse_literal(value)
 
 
 def _compact_audit_display_aliases(value: Any) -> Any:
     return display_value_formatter.compact_aliases(value)
-
-
-def _looks_like_product_path_selection(value: dict[str, Any]) -> bool:
-    return display_value_formatter.looks_like_product_path_selection(value)
 
 
 def _compact_product_path_selection_for_audit(value: dict[str, Any]) -> dict[str, Any]:
@@ -1736,14 +1546,6 @@ def _audit_repeated_owner_groups(value: Any) -> list[tuple[str, Any]]:
     )
 
 
-def _audit_group_keys_text(keys: list[str]) -> str:
-    return display_value_formatter.group_keys_text(keys, product_list_cell=lambda items: _audit_product_list_cell(items))
-
-
-def _audit_group_key_label(keys: list[str]) -> str:
-    return display_value_formatter.group_key_label(keys)
-
-
 def _print_audit_source_routes(
     prefix: str,
     entries: list[dict[str, Any]],
@@ -1812,10 +1614,6 @@ def _audit_inline_summary(value: Any) -> str:
         audit_text=_audit_text,
         display_width=_audit_display_width,
     )
-
-
-def _audit_field_label(qualified_name: str) -> str:
-    return _field_metadata.field_label(qualified_name)
 
 
 def _audit_field_sort_key(qualified_name: str) -> tuple[int, int, str]:
