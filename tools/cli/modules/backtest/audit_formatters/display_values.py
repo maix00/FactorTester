@@ -268,3 +268,30 @@ def first_available_text(value: Any, formatters: list[AnyTextFormatter]) -> str 
         if text is not None:
             return text
     return None
+
+
+def audit_text(
+    value: Any,
+    *,
+    compact: Callable[[Any], Any],
+    special: AnyTextFormatter,
+    pandas: AnyTextFormatter,
+    table_formatters: list[AnyTextFormatter],
+    json_dumps: Callable[[Any], str],
+) -> str:
+    if isinstance(value, str):
+        parsed_text = parsed_literal_text(
+            value,
+            compact=compact,
+            special=special,
+            pandas=pandas,
+            json_dumps=json_dumps,
+        )
+        if parsed_text is not None:
+            return parsed_text
+        return value
+    value = compact(value)
+    available = first_available_text(value, [*table_formatters, special, pandas])
+    if available is not None:
+        return available
+    return json_dumps(value)
