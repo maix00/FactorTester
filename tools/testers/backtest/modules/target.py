@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldRef
+from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 
 _SIGNAL_VALUE_REF: FieldRef[Any] = FieldRef("signal_value", owner="FactorSignalModule")
@@ -49,6 +49,10 @@ class TargetStrategyModule(ExecutableModule):
     trade_intent: ClassVar[FieldRef[Any]] = FieldRef("trade_intent")
     target_weights: ClassVar[FieldRef[Any]] = FieldRef("target_weights")
     strategy_kind: ClassVar[FieldRef[str]] = FieldRef("strategy_kind")
+
+    fields: ClassVar[dict[str, FieldDefinition]] = {
+        "trade_intent": FieldDefinition(public=False, display_value_kind="trade_intent"),
+    }
 
     precompute_strategy_intents: ClassVar[Flow] = Flow(
         "precompute_strategy_intents",

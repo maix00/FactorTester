@@ -60,6 +60,7 @@ def test_step_audit_field_metadata_loads_display_value_kind_from_field_definitio
     assert metadata.display_value_kind("MarketDataModule.raw_prices") == "market_data_sample"
     assert metadata.display_value_kind("raw_prices") == "market_data_sample"
     assert metadata.display_value_kind("LedgerModule.positions") == "positions"
+    assert metadata.display_value_kind("TargetStrategyModule.trade_intent") == "trade_intent"
 
 
 def test_step_audit_does_not_repeat_changed_output_after_value() -> None:
