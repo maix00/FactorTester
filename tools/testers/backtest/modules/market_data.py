@@ -270,9 +270,10 @@ class MarketDataModule(ExecutableModule):
             ),
         ),
         "current_historical_fields": FieldDefinition(public=False),
-        "current_market_snapshot": FieldDefinition(public=False),
-        "current_tradable_status": FieldDefinition(public=False),
-        "current_order_constraints": FieldDefinition(public=False),
+        "current_prices": FieldDefinition(public=False, display_value_kind="market_snapshot"),
+        "current_market_snapshot": FieldDefinition(public=False, display_value_kind="market_snapshot"),
+        "current_tradable_status": FieldDefinition(public=False, display_value_kind="market_snapshot"),
+        "current_order_constraints": FieldDefinition(public=False, display_value_kind="market_snapshot"),
         "data_source_mode": FieldDefinition(
             public=True, label="数据源模式", default="auto", control_template="select", tab="data_source",
             options=(("auto", "自动选择"), ("list", "指定列表")),

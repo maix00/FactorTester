@@ -21,6 +21,26 @@ SingleSampleSeries = Callable[[dict[str, Any]], tuple[dict[str, Any], list[str]]
 
 
 MARKET_DATA_SAMPLE_PRODUCT_LIMIT = 3
+MARKET_SNAPSHOT_BASIS_ORDER = (
+    "close",
+    "open",
+    "high",
+    "low",
+    "vwap",
+    "settlement",
+    "pre_settlement",
+    "upper_limit",
+    "lower_limit",
+    "volume",
+)
+MARKET_SNAPSHOT_CONSTRAINT_COLUMNS = (
+    "constraint_tradable",
+    "can_buy",
+    "can_sell",
+    "reason",
+    "limit_up_price",
+    "limit_down_price",
+)
 
 
 def sample_rows_from_value_records(
@@ -93,6 +113,247 @@ def sample_rows_from_change_records(
                     if time_label not in time_columns:
                         time_columns.append(time_label)
     return sample_rows(samples, time_columns), time_columns
+
+
+def snapshot_rows_from_value_records(
+    records: list[dict[str, Any]],
+    *,
+    display_field_value: DisplayValue,
+    scalar_cell: ScalarCell,
+    normalize: Normalize,
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    values: dict[str, Any] = {}
+    for record in records:
+        field_name = str(record.get("field") or "")
+        short_name = field_name.rsplit(".", 1)[-1]
+        for entry in record.get("values") or []:
+            values[short_name] = display_field_value(field_name, entry.get("value"))
+    return snapshot_rows(values, scalar_cell=scalar_cell, normalize=normalize)
+
+
+def snapshot_rows_from_change_records(
+    records: list[tuple[str, list[dict[str, Any]]]],
+    *,
+    display_field_value: DisplayValue,
+    scalar_cell: ScalarCell,
+    normalize: Normalize,
+    change_cell: ChangeCell,
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    before_values: dict[str, Any] = {}
+    after_values: dict[str, Any] = {}
+    for field_name, changes in records:
+        short_name = field_name.rsplit(".", 1)[-1]
+        for change in changes:
+            before_values[short_name] = display_field_value(field_name, change.get("before"))
+            after_values[short_name] = display_field_value(field_name, change.get("after"))
+    return snapshot_change_rows(
+        before_values,
+        after_values,
+        scalar_cell=scalar_cell,
+        normalize=normalize,
+        change_cell=change_cell,
+    )
+
+
+def snapshot_rows(
+    values: Mapping[str, Any],
+    *,
+    scalar_cell: ScalarCell,
+    normalize: Normalize,
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    parsed = snapshot_components(values, normalize=normalize)
+    products = snapshot_products(parsed)
+    if not products:
+        return None
+    basis_columns = snapshot_basis_columns(parsed["current_market_snapshot"])
+    headers = snapshot_headers(basis_columns)
+    rows = [
+        snapshot_row(
+            product,
+            parsed,
+            basis_columns,
+            scalar_cell=scalar_cell,
+            missing="",
+        )
+        for product in products
+    ]
+    return headers, rows
+
+
+def snapshot_change_rows(
+    before_values: Mapping[str, Any],
+    after_values: Mapping[str, Any],
+    *,
+    scalar_cell: ScalarCell,
+    normalize: Normalize,
+    change_cell: ChangeCell,
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    before = snapshot_components(before_values, normalize=normalize)
+    after = snapshot_components(after_values, normalize=normalize)
+    products = sorted(
+        set(snapshot_products(before)) | set(snapshot_products(after)),
+        key=str,
+    )
+    if not products:
+        return None
+    basis_columns = snapshot_basis_columns({
+        **before["current_market_snapshot"],
+        **after["current_market_snapshot"],
+    })
+    headers = snapshot_headers(basis_columns)
+    rows = []
+    for product in products:
+        before_row = snapshot_row(product, before, basis_columns, scalar_cell=scalar_cell, missing="null")
+        after_row = snapshot_row(product, after, basis_columns, scalar_cell=scalar_cell, missing="null")
+        rows.append(tuple([
+            str(product),
+            *[
+                change_cell(before_cell, after_cell)
+                for before_cell, after_cell in zip(before_row[1:], after_row[1:], strict=False)
+            ],
+        ]))
+    return headers, rows
+
+
+def snapshot_components(values: Mapping[str, Any], *, normalize: Normalize) -> dict[str, Any]:
+    return {
+        "current_market_snapshot": snapshot_mapping(values.get("current_market_snapshot"), normalize=normalize),
+        "current_prices": flat_mapping(values.get("current_prices"), normalize=normalize),
+        "current_tradable_status": flat_mapping(values.get("current_tradable_status"), normalize=normalize),
+        "current_order_constraints": constraint_mapping(values.get("current_order_constraints"), normalize=normalize),
+    }
+
+
+def snapshot_mapping(value: Any, *, normalize: Normalize) -> dict[str, dict[str, Any]]:
+    normalized = normalize(value)
+    if not isinstance(normalized, Mapping):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for basis, basis_values in normalized.items():
+        if not isinstance(basis_values, Mapping):
+            continue
+        out[str(basis)] = {str(product): item for product, item in basis_values.items()}
+    return out
+
+
+def flat_mapping(value: Any, *, normalize: Normalize) -> dict[str, Any]:
+    normalized = normalize(value)
+    if not isinstance(normalized, Mapping):
+        return {}
+    return {str(product): item for product, item in normalized.items()}
+
+
+def constraint_mapping(value: Any, *, normalize: Normalize) -> dict[str, dict[str, Any]]:
+    normalized = normalize(value)
+    if not isinstance(normalized, Mapping):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for product, constraint in normalized.items():
+        item = constraint_item(constraint, normalize=normalize)
+        if item:
+            out[str(product)] = item
+    return out
+
+
+def constraint_item(value: Any, *, normalize: Normalize) -> dict[str, Any]:
+    normalized = normalize(value)
+    if isinstance(normalized, Mapping):
+        return {str(key): item for key, item in normalized.items()}
+    result: dict[str, Any] = {}
+    for attr in ("tradable", "can_buy", "can_sell", "reason", "limit_up_price", "limit_down_price"):
+        if hasattr(value, attr):
+            result[attr] = getattr(value, attr)
+    return result
+
+
+def snapshot_products(parsed: Mapping[str, Any]) -> list[str]:
+    products: set[str] = set()
+    snapshot = parsed.get("current_market_snapshot") or {}
+    if isinstance(snapshot, Mapping):
+        for basis_values in snapshot.values():
+            if isinstance(basis_values, Mapping):
+                products.update(str(product) for product in basis_values)
+    for key in ("current_prices", "current_tradable_status", "current_order_constraints"):
+        values = parsed.get(key) or {}
+        if isinstance(values, Mapping):
+            products.update(str(product) for product in values)
+    return sorted(products, key=str)
+
+
+def snapshot_basis_columns(snapshot: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    available = {str(basis) for basis, values in snapshot.items() if isinstance(values, Mapping) and values}
+    ordered = [basis for basis in MARKET_SNAPSHOT_BASIS_ORDER if basis in available]
+    ordered.extend(sorted(available - set(ordered)))
+    return ordered
+
+
+def snapshot_headers(basis_columns: Sequence[str]) -> tuple[str, ...]:
+    return (
+        "product",
+        *basis_columns,
+        "selected_price",
+        "tradable_status",
+        *MARKET_SNAPSHOT_CONSTRAINT_COLUMNS,
+    )
+
+
+def snapshot_row(
+    product: str,
+    parsed: Mapping[str, Any],
+    basis_columns: Sequence[str],
+    *,
+    scalar_cell: ScalarCell,
+    missing: str,
+) -> tuple[Any, ...]:
+    snapshot = parsed.get("current_market_snapshot") or {}
+    prices = parsed.get("current_prices") or {}
+    tradable_status = parsed.get("current_tradable_status") or {}
+    constraints = parsed.get("current_order_constraints") or {}
+    constraint = constraints.get(product, {}) if isinstance(constraints, Mapping) else {}
+    return tuple([
+        str(product),
+        *[
+            snapshot_value(snapshot, basis, product, scalar_cell=scalar_cell, missing=missing)
+            for basis in basis_columns
+        ],
+        mapping_value(prices, product, scalar_cell=scalar_cell, missing=missing),
+        mapping_value(tradable_status, product, scalar_cell=scalar_cell, missing=missing),
+        *[
+            constraint_value(constraint, column, scalar_cell=scalar_cell, missing=missing)
+            for column in MARKET_SNAPSHOT_CONSTRAINT_COLUMNS
+        ],
+    ])
+
+
+def snapshot_value(
+    snapshot: Any,
+    basis: str,
+    product: str,
+    *,
+    scalar_cell: ScalarCell,
+    missing: str,
+) -> str:
+    if not isinstance(snapshot, Mapping):
+        return missing
+    basis_values = snapshot.get(basis)
+    if not isinstance(basis_values, Mapping):
+        return missing
+    return mapping_value(basis_values, product, scalar_cell=scalar_cell, missing=missing)
+
+
+def mapping_value(mapping: Any, product: str, *, scalar_cell: ScalarCell, missing: str) -> str:
+    if not isinstance(mapping, Mapping) or product not in mapping:
+        return missing
+    return scalar_cell(mapping.get(product))
+
+
+def constraint_value(constraint: Any, column: str, *, scalar_cell: ScalarCell, missing: str) -> str:
+    if not isinstance(constraint, Mapping):
+        return missing
+    source_column = "tradable" if column == "constraint_tradable" else column
+    if source_column not in constraint:
+        return missing
+    return scalar_cell(constraint.get(source_column))
 
 
 def sample_rows(samples: list[tuple[str, str, dict[str, str]]], time_columns: list[str]) -> list[tuple[Any, ...]]:

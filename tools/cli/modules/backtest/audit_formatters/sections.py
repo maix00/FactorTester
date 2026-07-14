@@ -17,10 +17,16 @@ class StepAuditSectionPrinter:
     print_step_section: Callable[[str], None]
     field_sort_key: Callable[[str], tuple[int, int, str]]
     field_display_value_kind: Callable[[str], str | None]
+    print_market_snapshot_value_table: Callable[[str, list[dict[str, Any]]], bool]
+    print_market_snapshot_change_table: Callable[[str, list[tuple[str, list[dict[str, Any]]]]], bool]
     print_market_data_sample_value_table: Callable[[str, list[dict[str, Any]]], bool]
     print_market_data_sample_change_table: Callable[[str, list[tuple[str, list[dict[str, Any]]]]], bool]
+    print_delta_mapping_value_tables: Callable[[str, list[dict[str, Any]]], bool]
+    print_delta_mapping_change_tables: Callable[[str, list[tuple[str, list[dict[str, Any]]]]], bool]
     print_delta_mapping_value_table: Callable[[str, str, list[dict[str, Any]]], bool]
     print_delta_mapping_change_table: Callable[[str, str, list[dict[str, Any]]], bool]
+    print_order_value_table: Callable[[str, str, list[dict[str, Any]]], bool]
+    print_order_change_table: Callable[[str, str, list[dict[str, Any]]], bool]
     scalar_value_record_group: Callable[[dict[str, Any]], tuple[Any, Any, Any]]
     scalar_value_group_key: Callable[[dict[str, Any]], Any]
     scalar_change_record_group: Callable[[str, list[dict[str, Any]]], tuple[Any, Any, Any]]
@@ -64,6 +70,19 @@ class StepAuditSectionPrinter:
             record = sorted_records[index]
             field_name = str(record.get("field") or "")
             values = record.get("values") or []
+            if self._is_market_snapshot_field(field_name):
+                combined_snapshot = [
+                    item for item_index, item in enumerate(sorted_records)
+                    if item_index not in consumed_indexes
+                    and self._is_market_snapshot_field(str(item.get("field") or ""))
+                ]
+                if self.print_market_snapshot_value_table("    ", combined_snapshot):
+                    consumed_indexes.update(
+                        item_index for item_index, item in enumerate(sorted_records)
+                        if self._is_market_snapshot_field(str(item.get("field") or ""))
+                    )
+                    index += 1
+                    continue
             if self._is_market_data_sample_field(field_name):
                 combined = [
                     item for item_index, item in enumerate(sorted_records)
@@ -77,6 +96,22 @@ class StepAuditSectionPrinter:
                     )
                     index += 1
                     continue
+            if self._is_delta_table_field(field_name):
+                combined_delta = [
+                    item for item_index, item in enumerate(sorted_records)
+                    if item_index not in consumed_indexes
+                    and self._is_delta_table_field(str(item.get("field") or ""))
+                ]
+                if self.print_delta_mapping_value_tables("    ", combined_delta):
+                    consumed_indexes.update(
+                        item_index for item_index, item in enumerate(sorted_records)
+                        if self._is_delta_table_field(str(item.get("field") or ""))
+                    )
+                    index += 1
+                    continue
+            if self._is_order_table_field(field_name) and self.print_order_value_table("    ", field_name, values):
+                index += 1
+                continue
             if self.print_delta_mapping_value_table("    ", field_name, values):
                 index += 1
                 continue
@@ -137,6 +172,19 @@ class StepAuditSectionPrinter:
                 index += 1
                 continue
             field_name, field_changes = sorted_items[index]
+            if self._is_market_snapshot_field(field_name):
+                combined_snapshot = [
+                    item for item_index, item in enumerate(sorted_items)
+                    if item_index not in consumed_indexes
+                    and self._is_market_snapshot_field(item[0])
+                ]
+                if self.print_market_snapshot_change_table("  ", combined_snapshot):
+                    consumed_indexes.update(
+                        item_index for item_index, item in enumerate(sorted_items)
+                        if self._is_market_snapshot_field(item[0])
+                    )
+                    index += 1
+                    continue
             if self._is_market_data_sample_field(field_name):
                 combined_market = [
                     item for item_index, item in enumerate(sorted_items)
@@ -150,6 +198,22 @@ class StepAuditSectionPrinter:
                     )
                     index += 1
                     continue
+            if self._is_delta_table_field(field_name):
+                combined_delta = [
+                    item for item_index, item in enumerate(sorted_items)
+                    if item_index not in consumed_indexes
+                    and self._is_delta_table_field(item[0])
+                ]
+                if self.print_delta_mapping_change_tables("    ", combined_delta):
+                    consumed_indexes.update(
+                        item_index for item_index, item in enumerate(sorted_items)
+                        if self._is_delta_table_field(item[0])
+                    )
+                    index += 1
+                    continue
+            if self._is_order_table_field(field_name) and self.print_order_change_table("    ", field_name, field_changes):
+                index += 1
+                continue
             if self.print_delta_mapping_change_table("    ", field_name, field_changes):
                 index += 1
                 continue
@@ -198,6 +262,15 @@ class StepAuditSectionPrinter:
 
     def _is_market_data_sample_field(self, field_name: str) -> bool:
         return self.field_display_value_kind(field_name) == "market_data_sample"
+
+    def _is_market_snapshot_field(self, field_name: str) -> bool:
+        return self.field_display_value_kind(field_name) == "market_snapshot"
+
+    def _is_delta_table_field(self, field_name: str) -> bool:
+        return self.field_display_value_kind(field_name) == "delta_table"
+
+    def _is_order_table_field(self, field_name: str) -> bool:
+        return self.field_display_value_kind(field_name) == "order_table"
 
     def _print_value_buckets(
         self,

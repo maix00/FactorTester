@@ -377,8 +377,9 @@ def wrapped_table_cell(
 ) -> list[str]:
     if not value:
         return [value]
-    has_change_highlight = "\x1b[" in value and " -> " in click.unstyle(value)
-    wrap_value = click.unstyle(value) if has_change_highlight else value
+    has_ansi_highlight = "\x1b[" in value
+    has_change_highlight = has_ansi_highlight and " -> " in click.unstyle(value)
+    wrap_value = click.unstyle(value) if has_ansi_highlight else value
     subsequent_indent = "  "
     wrapped: list[str] = []
     for physical_line in wrap_value.splitlines() or [""]:
@@ -388,7 +389,7 @@ def wrapped_table_cell(
     else:
         kept = wrapped[: max_lines - 1]
         kept.append(f"{subsequent_indent}...（已截断 {len(wrapped) - len(kept)} 行）")
-    if has_change_highlight and change_highlight_content is not None:
+    if has_ansi_highlight and change_highlight_content is not None:
         return [change_highlight_content(line) for line in kept]
     return kept
 

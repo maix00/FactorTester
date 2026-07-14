@@ -47,10 +47,10 @@ class OrderConstructModule(ExecutableModule):
     quantity_rounding_policy: ClassVar[FieldRef[str]] = FieldRef("quantity_rounding_policy")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "raw_deltas": FieldDefinition(public=False),
-        "sized_deltas": FieldDefinition(public=False),
-        "deltas": FieldDefinition(public=False),
-        "orders": FieldDefinition(public=False),
+        "raw_deltas": FieldDefinition(public=False, display_value_kind="delta_table"),
+        "sized_deltas": FieldDefinition(public=False, display_value_kind="delta_table"),
+        "deltas": FieldDefinition(public=False, display_value_kind="delta_table"),
+        "orders": FieldDefinition(public=False, display_value_kind="order_table"),
         "quantity_rounding_policy": FieldDefinition(
             public=True, label="数量取整", default="floor_to_lot", control_template="select", tab="order",
             options=(("floor_to_lot", "按最小买入手数向下取整"), ("nearest_lot", "按最小买入手数四舍五入")),

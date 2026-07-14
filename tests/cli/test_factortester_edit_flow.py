@@ -64,6 +64,14 @@ def test_step_audit_field_metadata_loads_display_value_kind_from_field_definitio
     assert metadata.display_value_kind("TargetStrategyModule.trade_intent") == "trade_intent"
     assert metadata.display_value_kind("RunWindowModule.strategy_windows") == "strategy_scoped_mapping"
     assert metadata.display_value_kind("MarketDataModule.field_state_baseline") == "historical_field_state"
+    assert metadata.display_value_kind("MarketDataModule.current_market_snapshot") == "market_snapshot"
+    assert metadata.display_value_kind("MarketDataModule.current_prices") == "market_snapshot"
+    assert metadata.display_value_kind("MarketDataModule.current_tradable_status") == "market_snapshot"
+    assert metadata.display_value_kind("MarketDataModule.current_order_constraints") == "market_snapshot"
+    assert metadata.display_value_kind("OrderConstructModule.raw_deltas") == "delta_table"
+    assert metadata.display_value_kind("OrderConstructModule.sized_deltas") == "delta_table"
+    assert metadata.display_value_kind("OrderConstructModule.deltas") == "delta_table"
+    assert metadata.display_value_kind("OrderConstructModule.orders") == "order_table"
     assert metadata.display_value_kind("CashPoolModule.cash") == "cash"
     assert metadata.display_value_kind("MarketDataModule.required_data_source") == "auto_when_empty"
 
@@ -947,7 +955,8 @@ def test_step_audit_combines_strategy_and_ledger_tables_across_interleaved_sort_
         {"field": "GroupMembershipModule.allocation_policy", "values": [{**entry, "value": "rank"} for entry in strategy_values]},
     ])
 
-    plain = _strip_ansi(capsys.readouterr().out)
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
     strategy_headers = [line for line in plain.splitlines() if line.strip().startswith("strategies")]
     ledger_headers = [line for line in plain.splitlines() if line.strip().startswith("ledger")]
     assert len(strategy_headers) == 1
@@ -973,7 +982,8 @@ def test_step_audit_transposes_after_combining_strategy_total_table(capsys, monk
 
     _print_audit_fields("输入字段", records)
 
-    plain = _strip_ansi(capsys.readouterr().out)
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
     assert plain.count("strategy_field_") >= 8
     assert "表格已转置" in plain
     assert "原列数 9" in plain
@@ -1272,6 +1282,44 @@ def test_step_audit_maps_strategy_deltas_to_same_ledger_product_table(capsys) ->
     assert "A1" in out
     assert "CJ.CZC" in out
     assert "其余 1 个产品" in out
+
+
+def test_step_audit_combines_sized_and_final_deltas(capsys) -> None:
+    with _audit_step_event_context({
+        "ledgers_before": [
+            {"ledger": "private:L1", "cash_pool": "private:P1", "strategies": ["A1"]},
+        ]
+    }):
+        _print_audit_changes("声明输出的变化", [
+            {
+                "field": "OrderConstructModule.sized_deltas",
+                "scope": "strategy_context",
+                "strategy": "A1",
+                "before": None,
+                "after": {"CJ.CZC": 2, "SF.CZC": -1},
+            },
+            {
+                "field": "OrderConstructModule.deltas",
+                "scope": "strategy_context",
+                "strategy": "A1",
+                "before": None,
+                "after": {"CJ.CZC": 2, "SF.CZC": -1},
+            },
+        ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "sized_deltas [OrderConstructModule.sized_deltas]" in plain
+    assert "deltas [OrderConstructModule.deltas]" in plain
+    assert plain.count("ledger") == 1
+    assert "sized_deltas" in plain
+    assert "deltas" in plain
+    assert "private:L1" in plain
+    assert "private:P1" in plain
+    assert "A1" in plain
+    assert "CJ.CZC" in plain
+    assert "SF.CZC" in plain
+    assert "null -> 2" in plain
+    assert "null -> -1" in plain
 
 
 def test_step_audit_reuses_identical_detail_refs() -> None:
@@ -1819,7 +1867,7 @@ def test_step_audit_renders_orders_as_table_with_field_details() -> None:
 
     assert "timestamp" in text
     assert "instrument" in text
-    assert "intent_qty" in text
+    assert "intent_quantity" in text
     assert "CZCE|F|SM|2603" in text
     assert "filled" in text
     assert "明细 1 (fields):" not in text
@@ -1846,6 +1894,175 @@ def test_step_audit_renders_single_order_detail_as_table() -> None:
     assert "scheduled" in text
     assert "price_timestamp" in text
     assert '"instrument"' not in text
+
+
+def test_step_audit_prints_orders_without_shared_bucket_or_details(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((100, 20)))
+
+    _print_audit_changes("声明输出的变化", [{
+        "field": "OrderConstructModule.orders",
+        "scope": "context",
+        "before": None,
+        "after": [
+            {
+                "fields": {"price_timestamp": "2026-01-05 09:02:00+08:00"},
+                "instrument": "CZCE|F|SM|2603",
+                "intent_quantity": 421.0,
+                "order_id": "order-1",
+                "quantity": 421.0,
+                "reject_reason": None,
+                "status": "draft",
+                "strategy": "A1",
+                "timestamp": "2026-01-05 09:01:00+08:00",
+            },
+        ],
+    }])
+
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
+    assert "orders [OrderConstructModule.orders]" in plain
+    assert "订单变化表 rows=1" in plain
+    assert "[共享]" not in plain
+    assert "columns 1/" not in plain
+    assert "明细" not in plain
+    assert "op" in plain
+    assert "timestamp" in plain
+    assert "strategy" in plain
+    assert "instrument" in plain
+    assert "intent_quantity" in plain
+    assert "quantity" in plain
+    assert "status" in plain
+    assert "price_timestamp" in plain
+    assert "CZCE|F|SM|2603" in plain
+    assert "order-1" in plain
+    assert re.search(r"\x1b\[[0-9;]*m新增", out)
+
+
+def test_step_audit_prints_order_inputs_as_order_table_not_strategy_table(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((140, 20)))
+
+    _print_audit_fields("输入字段", [
+        {
+            "field": "EngineModule.engine_mode",
+            "values": [{"scope": "strategy_config", "strategy": "A1", "value": "auto"}],
+        },
+        {
+            "field": "OrderConstructModule.orders",
+            "values": [{
+                "scope": "strategy_context",
+                "strategy": "A1",
+                "value": [
+                    {
+                        "fields": {"price_timestamp": "2026-01-05 09:02:00+08:00", "effective_price": 5924.0},
+                        "instrument": "CZCE|F|SM|2603",
+                        "intent_quantity": 421.0,
+                        "order_id": "order-1",
+                        "quantity": 421.0,
+                        "reject_reason": None,
+                        "status": "draft",
+                        "strategy": "A1",
+                        "timestamp": "2026-01-05 09:01:00+08:00",
+                    },
+                ],
+            }],
+        },
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "orders [OrderConstructModule.orders]" in plain
+    assert "timestamp" in plain
+    assert "instrument" in plain
+    assert "intent_quantity" in plain
+    assert "effective_price" in plain
+    assert "CZCE|F|SM|2603" in plain
+    assert "[共享]" not in plain
+    assert "orders.context" not in plain
+    assert "orders.config" not in plain
+    assert "明细" not in plain
+    assert "columns 1/" not in plain
+
+
+def test_step_audit_order_table_uses_order_id_index_and_short_alias(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((160, 20)))
+    data = {
+        "ledgers_before": [{
+            "ledger": "private:bg_mpuvbhda_1",
+            "cash_pool": "private:bg_mpuvbhda_1",
+            "strategies": ["A1"],
+        }],
+        "strategies": [{"id": "strategy-a1", "shortAlias": "A1"}],
+    }
+
+    with _audit_step_event_context(data, short_alias_map={"strategy-a1": "A1"}):
+        _print_audit_fields("输入字段", [{
+            "field": "OrderConstructModule.orders",
+            "values": [{
+                "scope": "strategy_context",
+                "strategy": "A1",
+                "value": [{
+                    "instrument": "CZCE|F|SM|2603",
+                    "intent_quantity": 421.0,
+                    "order_id": "bg_mpuvbhda_1-2026-01-05T09:01:00+08:00-1",
+                    "quantity": 421.0,
+                    "reject_reason": None,
+                    "status": "draft",
+                    "strategy": "bg_mpuvbhda_1:c67e88f002d04aeca92451053e71e665",
+                    "timestamp": "2026-01-05 09:01:00+08:00",
+                }],
+            }],
+        }])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    header_line = next(line for line in plain.splitlines() if line.strip().startswith("order_id"))
+    assert header_line.index("order_id") < header_line.index("strategy") < header_line.index("timestamp")
+    assert "A1" in plain
+    assert "bg_mpuvbhda_1:c67e88f002d04aeca92451053e71e665" not in plain
+
+
+def test_step_audit_order_change_highlights_added_rows_and_changed_cells(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((160, 20)))
+    existing_before = {
+        "fields": {"effective_price": 5924.0},
+        "instrument": "CZCE|F|SM|2603",
+        "intent_quantity": 421.0,
+        "order_id": "order-1",
+        "quantity": 421.0,
+        "reject_reason": None,
+        "status": "draft",
+        "strategy": "A1",
+        "timestamp": "2026-01-05 09:01:00+08:00",
+    }
+    existing_after = dict(existing_before)
+    existing_after["quantity"] = 400.0
+
+    _print_audit_changes("声明输出的变化", [{
+        "field": "OrderConstructModule.orders",
+        "scope": "context",
+        "before": [existing_before],
+        "after": [
+            existing_after,
+            {
+                "fields": {"effective_price": 6031.0},
+                "instrument": "GFEX|F|SI|2605",
+                "intent_quantity": 759.0,
+                "order_id": "order-2",
+                "quantity": 759.0,
+                "reject_reason": None,
+                "status": "draft",
+                "strategy": "A1",
+                "timestamp": "2026-01-05 09:01:00+08:00",
+            },
+        ],
+    }])
+
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
+    assert "修改" in plain
+    assert "421 -> 400" in plain
+    assert "新增" in plain
+    assert "GFEX|F|SI|2605" in plain
+    assert re.search(r"\x1b\[[0-9;]*m新增", out)
+    assert re.search(r"\x1b\[[0-9;]*m421 -> 400", out)
 
 
 def test_step_audit_renders_trading_day_resolver_summary() -> None:
@@ -2417,6 +2634,62 @@ def test_step_audit_market_sample_field_without_sample_does_not_fallback_to_stra
     assert "市场数据 sample 总表（每个价格字段最多 3 个产品）" in plain
     assert "（无可采样值）" in plain
     assert "execution_price_basis  price_tables" not in plain
+    assert "[共享]:" not in plain
+
+
+def test_step_audit_combines_current_market_snapshot_fields(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((160, 20)))
+
+    _print_audit_changes("声明输出的变化", [
+        {
+            "field": "MarketDataModule.current_market_snapshot",
+            "before": None,
+            "after": {
+                "close": {"AP.CZC": 9103, "CJ.CZC": 8920},
+                "open": {"AP.CZC": 9100, "CJ.CZC": 8910},
+                "volume": {"AP.CZC": 7077, "CJ.CZC": 5757},
+            },
+        },
+        {
+            "field": "MarketDataModule.current_prices",
+            "before": None,
+            "after": {"AP.CZC": 9103, "CJ.CZC": 8920},
+        },
+        {
+            "field": "MarketDataModule.current_tradable_status",
+            "before": None,
+            "after": {"AP.CZC": True, "CJ.CZC": False},
+        },
+        {
+            "field": "MarketDataModule.current_order_constraints",
+            "before": None,
+            "after": {
+                "AP.CZC": {"tradable": True, "can_buy": True, "can_sell": True, "reason": "", "limit_up_price": 0, "limit_down_price": 0},
+                "CJ.CZC": {"tradable": False, "can_buy": False, "can_sell": False, "reason": "no_close", "limit_up_price": 0, "limit_down_price": 0},
+            },
+        },
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "current_market_snapshot [MarketDataModule.current_market_snapshot]" in plain
+    assert "current_prices [MarketDataModule.current_prices]" in plain
+    assert "current_tradable_status [MarketDataModule.current_tradable_status]" in plain
+    assert "current_order_constraints [MarketDataModule.current_order_constraints]" in plain
+    assert plain.count("当前市场快照总表") == 1
+    assert "product" in plain
+    assert "close" in plain
+    assert "open" in plain
+    assert "volume" in plain
+    assert "selected_price" in plain
+    assert "tradable_status" in plain
+    assert "constraint_tradable" in plain
+    assert "can_buy" in plain
+    assert "can_sell" in plain
+    assert "limit_up_price" in plain
+    assert "AP.CZC" in plain
+    assert "null -> 9103" in plain
+    assert "null -> True" in plain
+    assert "null -> no_close" in plain
     assert "[共享]:" not in plain
 
 

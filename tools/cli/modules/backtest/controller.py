@@ -39,6 +39,8 @@ from tools.testers.backtest.engines.native.flow import phase_label
 
 _audit_field_state_product_filter: tuple[str, ...] = ()
 _audit_strategy_ledger_routes: dict[str, tuple[tuple[str, str], ...]] = {}
+_audit_short_alias_map: dict[str, str] = {}
+_audit_runtime_strategy_aliases: dict[str, str] = {}
 
 
 def _strip_ansi(value: object) -> str:
@@ -50,17 +52,24 @@ def _audit_display_width(value: object) -> int:
 
 
 @contextlib.contextmanager
-def _audit_step_event_context(data: dict[str, Any]):
+def _audit_step_event_context(data: dict[str, Any], short_alias_map: dict[str, str] | None = None):
     global _audit_field_state_product_filter, _audit_strategy_ledger_routes
+    global _audit_short_alias_map, _audit_runtime_strategy_aliases
     previous_filter = _audit_field_state_product_filter
     previous_routes = _audit_strategy_ledger_routes
+    previous_alias_map = _audit_short_alias_map
+    previous_runtime_aliases = _audit_runtime_strategy_aliases
     _audit_field_state_product_filter = _audit_event_product_filter(data)
     _audit_strategy_ledger_routes = _audit_strategy_routes(data)
+    _audit_short_alias_map = short_alias_map or {}
+    _audit_runtime_strategy_aliases = _audit_runtime_strategy_aliases_for_event(data, _audit_short_alias_map)
     try:
         yield
     finally:
         _audit_field_state_product_filter = previous_filter
         _audit_strategy_ledger_routes = previous_routes
+        _audit_short_alias_map = previous_alias_map
+        _audit_runtime_strategy_aliases = previous_runtime_aliases
 
 
 def _audit_strategy_routes(data: dict[str, Any]) -> dict[str, tuple[tuple[str, str], ...]]:
@@ -69,6 +78,47 @@ def _audit_strategy_routes(data: dict[str, Any]) -> dict[str, tuple[tuple[str, s
 
 def _audit_event_product_filter(data: dict[str, Any]) -> tuple[str, ...]:
     return events_formatter.event_product_filter(data)
+
+
+def _audit_runtime_strategy_aliases_for_event(
+    data: dict[str, Any],
+    short_alias_map: dict[str, str],
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for strategy in data.get("strategies") or []:
+        if not isinstance(strategy, dict):
+            continue
+        label = step_display_formatter.active_strategy_short_alias(strategy, short_alias_map=short_alias_map)
+        for key in ("strategy", "id", "strategy_id", "group_id", "alias", "name", "shortAlias", "short_alias"):
+            raw = str(strategy.get(key) or "").strip()
+            if raw:
+                aliases[raw] = label
+    for strategy_label, routes in _audit_strategy_ledger_routes.items():
+        label = short_alias_map.get(strategy_label, strategy_label)
+        aliases[strategy_label] = label
+        for ledger_id, cash_pool in routes:
+            for route_part in (ledger_id, cash_pool):
+                text = str(route_part or "").strip()
+                if not text:
+                    continue
+                aliases[text] = label
+                if ":" in text:
+                    aliases[text.split(":", 1)[1]] = label
+    return aliases
+
+
+def _audit_order_strategy_label(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text in _audit_runtime_strategy_aliases:
+        return _audit_runtime_strategy_aliases[text]
+    if text in _audit_short_alias_map:
+        return _audit_short_alias_map[text]
+    prefix = text.split(":", 1)[0]
+    if prefix in _audit_runtime_strategy_aliases:
+        return _audit_runtime_strategy_aliases[prefix]
+    return text
 
 
 def _pad_audit_cell(value: object, width: int) -> str:
@@ -582,6 +632,7 @@ def _audit_order_table_text(value: Any) -> str | None:
         value,
         table_lines=_audit_table_lines,
         scalar_cell=_audit_scalar_cell,
+        strategy_label=_audit_order_strategy_label,
         select_sample_part=_audit_select_sample_part,
         sample_note_lines=_audit_sample_note_lines,
         single_sample_sequence=_audit_single_sample_sequence,
@@ -595,6 +646,8 @@ def _audit_order_diff_text(before: Any, after: Any) -> str | None:
         table_lines=_audit_table_lines,
         scalar_cell=_audit_scalar_cell,
         change_cell=_audit_change_cell,
+        highlight_cell=_audit_change_highlight_content,
+        strategy_label=_audit_order_strategy_label,
     )
 
 
@@ -673,6 +726,25 @@ def _print_delta_mapping_value_table(prefix: str, field_name: str, values: list[
     )
 
 
+def _print_delta_mapping_value_tables(prefix: str, records: list[dict[str, Any]]) -> bool:
+    result = delta_table_formatter.combined_delta_value_table(
+        records,
+        display_field_value=_display_field_value,
+        normalize=_audit_normalized_value,
+        strategy_ledger_routes=_audit_strategy_ledger_routes,
+        scalar_cell=_audit_scalar_cell,
+    )
+    if result is None:
+        return False
+    headers, rows = result
+    return _print_audit_table(
+        headers,
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
+    )
+
+
 def _print_delta_mapping_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
     result = delta_table_formatter.delta_change_table(
         field_name,
@@ -695,6 +767,69 @@ def _print_delta_mapping_change_table(prefix: str, field_name: str, changes: lis
         indent=f"{prefix}  ",
         label_lines=[f"{prefix}{_audit_combined_single_field_label(field_name)}"],
     )
+
+
+def _print_delta_mapping_change_tables(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
+    result = delta_table_formatter.combined_delta_change_table(
+        records,
+        display_field_value=_display_field_value,
+        normalize=_audit_normalized_value,
+        strategy_ledger_routes=_audit_strategy_ledger_routes,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+    )
+    if result is None:
+        return False
+    headers, rows = result
+    if not rows:
+        click.echo(f"{prefix}（无变化）")
+        return True
+    return _print_audit_table(
+        headers,
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_change_field_label_lines(prefix, records),
+    )
+
+
+def _print_order_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
+    orders: list[Any] = []
+    for entry in values:
+        value = _display_field_value(field_name, entry.get("value"))
+        if isinstance(value, list):
+            orders.extend(value)
+        elif value not in (None, ""):
+            orders.append(value)
+    text = _audit_order_table_text(orders)
+    if text is None:
+        return False
+    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
+    for line in text.splitlines():
+        click.echo(f"{prefix}  {line}", color=True)
+    return True
+
+
+def _print_order_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    before_orders: list[Any] = []
+    after_orders: list[Any] = []
+    for change in changes:
+        before = _display_field_value(field_name, change.get("before"))
+        after = _display_field_value(field_name, change.get("after"))
+        if isinstance(before, list):
+            before_orders.extend(before)
+        elif before not in (None, ""):
+            before_orders.append(before)
+        if isinstance(after, list):
+            after_orders.extend(after)
+        elif after not in (None, ""):
+            after_orders.append(after)
+    text = _audit_order_diff_text(before_orders, after_orders)
+    if text is None:
+        return False
+    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
+    for line in text.splitlines():
+        click.echo(f"{prefix}  {line}", color=True)
+    return True
 
 
 def _dedupe_audit_list(values: list[Any]) -> list[Any]:
@@ -951,6 +1086,49 @@ def _print_audit_table(
 
 
 _MARKET_DATA_SAMPLE_PRODUCT_LIMIT = market_data_formatter.MARKET_DATA_SAMPLE_PRODUCT_LIMIT
+
+
+def _print_market_snapshot_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
+    if not records:
+        return False
+    result = market_data_formatter.snapshot_rows_from_value_records(
+        records,
+        display_field_value=_display_field_value,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+    )
+    if result is None:
+        return False
+    headers, rows = result
+    return _print_audit_table(
+        headers,
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
+        title=f"{prefix}当前市场快照总表（source=current_market_snapshot；selected_price=current_prices）:",
+    )
+
+
+def _print_market_snapshot_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
+    if not records:
+        return False
+    result = market_data_formatter.snapshot_rows_from_change_records(
+        records,
+        display_field_value=_display_field_value,
+        scalar_cell=_audit_scalar_cell,
+        normalize=_audit_normalized_value,
+        change_cell=_audit_change_cell,
+    )
+    if result is None:
+        return False
+    headers, rows = result
+    return _print_audit_table(
+        headers,
+        rows,
+        indent=f"{prefix}  ",
+        label_lines=audit_printer_helpers.combined_change_field_label_lines(prefix, records),
+        title=f"{prefix}当前市场快照总表（source=current_market_snapshot；selected_price=current_prices）:",
+    )
 
 
 def _print_market_data_sample_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
@@ -1558,10 +1736,16 @@ def _audit_section_printer() -> audit_sections.StepAuditSectionPrinter:
         print_step_section=_print_step_section,
         field_sort_key=_audit_field_sort_key,
         field_display_value_kind=_field_metadata.display_value_kind,
+        print_market_snapshot_value_table=_print_market_snapshot_value_table,
+        print_market_snapshot_change_table=_print_market_snapshot_change_table,
         print_market_data_sample_value_table=_print_market_data_sample_value_table,
         print_market_data_sample_change_table=_print_market_data_sample_change_table,
+        print_delta_mapping_value_tables=_print_delta_mapping_value_tables,
+        print_delta_mapping_change_tables=_print_delta_mapping_change_tables,
         print_delta_mapping_value_table=_print_delta_mapping_value_table,
         print_delta_mapping_change_table=_print_delta_mapping_change_table,
+        print_order_value_table=_print_order_value_table,
+        print_order_change_table=_print_order_change_table,
         scalar_value_record_group=_scalar_value_record_group,
         scalar_value_group_key=_scalar_value_group_key,
         scalar_change_record_group=_scalar_change_record_group,
@@ -1600,7 +1784,12 @@ def _print_audit_fields(
 
 
 def _scalar_value_record_group(record: dict[str, Any]) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
-    if _field_metadata.display_value_kind(str(record.get("field") or "")) == "market_data_sample":
+    if _field_metadata.display_value_kind(str(record.get("field") or "")) in {
+        "market_data_sample",
+        "market_snapshot",
+        "delta_table",
+        "order_table",
+    }:
         return None, None, None
     return audit_printer_helpers.scalar_record_group([
         (_cash_pool_scalar_record_table(record), _print_combined_cash_pool_scalar_value_table, False),
@@ -1620,7 +1809,12 @@ def _scalar_change_record_group(
     field_name: str,
     field_changes: list[dict[str, Any]],
 ) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
-    if _field_metadata.display_value_kind(field_name) == "market_data_sample":
+    if _field_metadata.display_value_kind(field_name) in {
+        "market_data_sample",
+        "market_snapshot",
+        "delta_table",
+        "order_table",
+    }:
         return None, None, None
     return audit_printer_helpers.scalar_record_group([
         (_cash_pool_scalar_change_record_table(field_name, field_changes), _print_combined_cash_pool_scalar_change_table, False),
@@ -1698,7 +1892,7 @@ def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
 def _step_event_renderer(short_alias_map: dict[str, str]) -> step_runtime.StepEventRenderer:
     return step_runtime.StepEventRenderer(
         phase_label=phase_label,
-        audit_context=_audit_step_event_context,
+        audit_context=lambda data: _audit_step_event_context(data, short_alias_map=short_alias_map),
         print_badge_box=_print_step_badge_box,
         print_strategy_context=_print_strategy_context,
         print_event_payloads=_print_event_payloads,

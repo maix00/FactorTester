@@ -15,6 +15,7 @@ DisplayFieldValue = Callable[[str, Any], Any]
 
 
 DeltaTable = tuple[tuple[str, ...], list[tuple[str, str, str, str, str]]]
+CombinedDeltaTable = tuple[tuple[str, ...], list[tuple[str, ...]]]
 
 ORDER_DELTA_FIELD_NAMES = {"raw_deltas", "sized_deltas", "deltas"}
 
@@ -148,6 +149,30 @@ def delta_value_table(
     return ("ledger", "cash pool", "strategies", "product", short_name), rows
 
 
+def combined_delta_value_table(
+    records: list[dict[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    normalize: Normalize,
+    strategy_ledger_routes: Mapping[str, tuple[tuple[str, str], ...]],
+    scalar_cell: ScalarCell,
+) -> CombinedDeltaTable | None:
+    tables = [
+        delta_value_table(
+            str(record.get("field") or ""),
+            list(record.get("values") or []),
+            display_field_value=display_field_value,
+            normalize=normalize,
+            strategy_ledger_routes=strategy_ledger_routes,
+            scalar_cell=scalar_cell,
+        )
+        for record in records
+    ]
+    if any(table is None for table in tables) or not tables:
+        return None
+    return combine_delta_tables([table for table in tables if table is not None])
+
+
 def delta_change_table(
     field_name: str,
     changes: list[dict[str, Any]],
@@ -175,6 +200,57 @@ def delta_change_table(
             change_cell=change_cell,
         ))
     return ("ledger", "cash pool", "strategies", "product", short_name), rows
+
+
+def combined_delta_change_table(
+    records: list[tuple[str, list[dict[str, Any]]]],
+    *,
+    display_field_value: DisplayFieldValue,
+    normalize: Normalize,
+    strategy_ledger_routes: Mapping[str, tuple[tuple[str, str], ...]],
+    scalar_cell: ScalarCell,
+    change_cell: ChangeCell,
+) -> CombinedDeltaTable | None:
+    tables = [
+        delta_change_table(
+            field_name,
+            changes,
+            display_field_value=display_field_value,
+            normalize=normalize,
+            strategy_ledger_routes=strategy_ledger_routes,
+            scalar_cell=scalar_cell,
+            change_cell=change_cell,
+        )
+        for field_name, changes in records
+    ]
+    if any(table is None for table in tables) or not tables:
+        return None
+    return combine_delta_tables([table for table in tables if table is not None])
+
+
+def combine_delta_tables(tables: list[DeltaTable]) -> CombinedDeltaTable | None:
+    if not tables:
+        return None
+    value_columns: list[str] = []
+    row_values: dict[tuple[str, str, str, str], dict[str, str]] = {}
+    row_order: list[tuple[str, str, str, str]] = []
+    for headers, rows in tables:
+        if len(headers) != 5 or tuple(headers[:4]) != ("ledger", "cash pool", "strategies", "product"):
+            return None
+        value_column = headers[4]
+        if value_column not in value_columns:
+            value_columns.append(value_column)
+        for row in rows:
+            key = tuple(row[:4])
+            if key not in row_values:
+                row_values[key] = {}
+                row_order.append(key)
+            row_values[key][value_column] = row[4]
+    combined_rows = [
+        tuple([*key, *[row_values[key].get(column, "") for column in value_columns]])
+        for key in row_order
+    ]
+    return ("ledger", "cash pool", "strategies", "product", *value_columns), combined_rows
 
 
 def is_zero_value(value: Any) -> bool:
