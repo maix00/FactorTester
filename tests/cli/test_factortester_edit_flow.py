@@ -73,6 +73,7 @@ def test_step_audit_field_metadata_loads_display_value_kind_from_field_definitio
     assert metadata.display_value_kind("OrderConstructModule.deltas") == "delta_table"
     assert metadata.display_value_kind("OrderConstructModule.orders") == "order_table"
     assert metadata.display_value_kind("OrderExecutionModule.execution_prices") == "execution_price_table"
+    assert metadata.display_value_kind("GroupMembershipModule.dispatched_order_events") == "event_draft_table"
     assert metadata.display_value_kind("CashPoolModule.cash") == "cash"
     assert metadata.display_value_kind("MarketDataModule.required_data_source") == "auto_when_empty"
 
@@ -2105,6 +2106,50 @@ def test_step_audit_combines_execution_prices_without_context_duplicates(capsys,
     assert "CZCE|F|CJ|2605" in plain
     assert "null -> 8920" in plain
     assert plain.count("CZCE|F|CJ|2605") == 1
+    assert "[共享]" not in plain
+    assert "明细" not in plain
+
+
+def test_step_audit_dispatched_order_events_render_as_event_add_table(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((180, 20)))
+
+    _print_audit_changes("声明输出的变化", [{
+        "field": "GroupMembershipModule.dispatched_order_events",
+        "scope": "context",
+        "before": None,
+        "after": [
+            {
+                "type": "EventDraft",
+                "kind": "order",
+                "timestamp": "2026-01-05 09:01:00.000001+08:00",
+                "strategy": "A1",
+                "payload": {
+                    "instrument": "CZCE|F|SM|2603",
+                    "intent_quantity": 438,
+                    "order_id": "A1-1",
+                    "quantity": 438,
+                    "reject_reason": None,
+                    "status": "scheduled",
+                    "strategy": "A1",
+                    "timestamp": "2026-01-05 09:01:00.000001+08:00",
+                    "price_timestamp": "2026-01-05 09:02:00+08:00",
+                },
+                "index_key": None,
+            },
+        ],
+    }])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "dispatched_order_events [GroupMembershipModule.dispatched_order_events]" in plain
+    assert "事件新增表 rows=1" in plain
+    assert "op" in plain
+    assert "新增" in plain
+    assert "event_time" in plain
+    assert "event_kind" in plain
+    assert "order_id" in plain
+    assert "instrument" in plain
+    assert "CZCE|F|SM|2603" in plain
+    assert "A1-1" in plain
     assert "[共享]" not in plain
     assert "明细" not in plain
 

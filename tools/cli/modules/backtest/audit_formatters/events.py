@@ -212,6 +212,9 @@ def event_draft_table_lines(
     )
     if lifecycle_notice_lines is not None:
         return lifecycle_notice_lines
+    order_lines = order_event_draft_table_lines(value, table_lines=table_lines, indent=indent)
+    if order_lines is not None:
+        return order_lines
     rows = []
     for item in value:
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
@@ -231,6 +234,63 @@ def event_draft_table_lines(
         rows,
         indent=indent,
     )
+
+
+def order_event_draft_table_lines(
+    value: Sequence[Mapping[str, Any]],
+    *,
+    table_lines: TableLines,
+    indent: str = "",
+) -> list[str] | None:
+    rows = []
+    for item in value:
+        payload = item.get("payload") if isinstance(item.get("payload"), Mapping) else {}
+        if str(item.get("kind") or payload.get("kind") or "").lower() != "order":
+            return None
+        if not looks_like_order_payload(payload):
+            return None
+        rows.append((
+            "新增",
+            item.get("timestamp") or payload.get("timestamp") or "",
+            item.get("kind") or payload.get("kind") or "",
+            item.get("strategy") or payload.get("strategy") or "",
+            payload.get("order_id") or "",
+            payload.get("instrument") or "",
+            payload.get("intent_quantity"),
+            payload.get("quantity"),
+            payload.get("status") or "",
+            payload.get("reject_reason") or "",
+            payload.get("price_timestamp") or "",
+        ))
+    if not rows:
+        return None
+    return [
+        f"{indent}事件新增表 rows={len(rows)}",
+        *table_lines(
+            (
+                "op",
+                "event_time",
+                "event_kind",
+                "strategy",
+                "order_id",
+                "instrument",
+                "intent_quantity",
+                "quantity",
+                "status",
+                "reject_reason",
+                "price_timestamp",
+            ),
+            rows,
+            indent=indent,
+            allow_transpose=False,
+            allow_split=False,
+        ),
+    ]
+
+
+def looks_like_order_payload(value: Mapping[str, Any]) -> bool:
+    required = {"instrument", "quantity", "intent_quantity", "status", "strategy", "timestamp", "order_id"}
+    return required <= set(value)
 
 
 def lifecycle_notice_table_lines(

@@ -872,6 +872,40 @@ def _print_execution_price_change_table(prefix: str, field_name: str, changes: l
     )
 
 
+def _print_event_draft_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
+    drafts: list[Any] = []
+    for entry in values:
+        value = _display_field_value(field_name, entry.get("value"))
+        if isinstance(value, list):
+            drafts.extend(value)
+        elif value not in (None, ""):
+            drafts.append(value)
+    text = _audit_event_draft_table_text(drafts)
+    if text is None:
+        return False
+    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
+    for line in text.splitlines():
+        click.echo(f"{prefix}  {line}", color=True)
+    return True
+
+
+def _print_event_draft_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    drafts: list[Any] = []
+    for change in changes:
+        after = _display_field_value(field_name, change.get("after"))
+        if isinstance(after, list):
+            drafts.extend(after)
+        elif after not in (None, ""):
+            drafts.append(after)
+    text = _audit_event_draft_table_text(drafts)
+    if text is None:
+        return False
+    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
+    for line in text.splitlines():
+        click.echo(f"{prefix}  {line}", color=True)
+    return True
+
+
 def _dedupe_audit_list(values: list[Any]) -> list[Any]:
     seen: set[str] = set()
     result: list[Any] = []
@@ -1788,6 +1822,8 @@ def _audit_section_printer() -> audit_sections.StepAuditSectionPrinter:
         print_order_change_table=_print_order_change_table,
         print_execution_price_value_table=_print_execution_price_value_table,
         print_execution_price_change_table=_print_execution_price_change_table,
+        print_event_draft_value_table=_print_event_draft_value_table,
+        print_event_draft_change_table=_print_event_draft_change_table,
         scalar_value_record_group=_scalar_value_record_group,
         scalar_value_group_key=_scalar_value_group_key,
         scalar_change_record_group=_scalar_change_record_group,
@@ -1832,6 +1868,7 @@ def _scalar_value_record_group(record: dict[str, Any]) -> tuple[tuple[Any, ...] 
         "delta_table",
         "order_table",
         "execution_price_table",
+        "event_draft_table",
     }:
         return None, None, None
     return audit_printer_helpers.scalar_record_group([
@@ -1858,6 +1895,7 @@ def _scalar_change_record_group(
         "delta_table",
         "order_table",
         "execution_price_table",
+        "event_draft_table",
     }:
         return None, None, None
     return audit_printer_helpers.scalar_record_group([

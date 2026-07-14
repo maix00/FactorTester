@@ -136,6 +136,7 @@ class GroupMembershipModule(TargetStrategyModule):
             chip_template="预热: {value}", tab_label="目标分配", tab_order=60,
         ),
         "product_mask_names": FieldDefinition(public=False, label="品种范围", default=None),
+        "dispatched_order_events": FieldDefinition(public=False, display_value_kind="event_draft_table"),
     }
 
     group_quantile_membership: ClassVar[Flow] = Flow(
