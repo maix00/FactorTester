@@ -9,6 +9,14 @@
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
 
     var EVENT_PHASE = 'event_replay';
+    // Keep protocol keys stable, but never make them the primary UI language.
+    // These keys are emitted by the backend progress stream and are useful when
+    // diagnosing a run, so render them only as a secondary parenthetical hint.
+    var PHASE_LABELS = {
+        pre_replay: '回放准备',
+        event_replay: '事件回放',
+        post_replay: '结果整理'
+    };
 
     function escapeHtml(value) {
         return String(value == null ? '' : value)
@@ -21,6 +29,20 @@
 
     function normalizePhaseKey(value) {
         return String(value || '').trim();
+    }
+
+    function displayPhaseLabel(key, label) {
+        var protocolKey = normalizePhaseKey(key);
+        var primary = PHASE_LABELS[protocolKey] || String(label || protocolKey);
+        if (!protocolKey || primary === protocolKey) return primary;
+        return primary + '（' + protocolKey + '）';
+    }
+
+    function displayFlowLabel(flow) {
+        var label = String(flow.flow_label || flow.flow_name || flow.flow_key || '未命名流程');
+        // "Long-Short" is the technical strategy name.  The translated term
+        // comes first so it remains understandable in a compact flow card.
+        return label.replace(/Long-Short/g, '多空组合（Long-Short）');
     }
 
     function createProductCoverageBatchManager(opts) {
@@ -125,8 +147,11 @@
             if (done || !payload || !payload.phase) return;
             var phase = normalizePhaseKey(payload.phase);
             if (!phase) return;
+            var phaseChanged = currentPhase !== phase;
+            var activeFlowChanged = activeFlowKey !== (payload.flow_key || '');
             currentPhase = phase;
             activeFlowKey = payload.flow_key || '';
+            var flowAdded = false;
             if (phase === EVENT_PHASE) {
                 eventReplayActive = true;
                 row.root.classList.add('is-event-replaying');
@@ -141,9 +166,18 @@
                     label: payload.flow_label || payload.flow_name || payload.flow_key,
                     message: payload.message || ''
                 };
-                ensureFlowInPhase(phase, payload);
+                flowAdded = ensureFlowInPhase(phase, payload);
             }
-            renderDiagram();
+            // Event replay can produce a dense SSE stream. Replacing
+            // diagram.innerHTML on every packet recreates the animated line,
+            // which makes its CSS animation perpetually restart. The running
+            // class already drives the flow animation, so rebuild only when
+            // the displayed structure actually changes.
+            if (phase === EVENT_PHASE) {
+                if (phaseChanged || flowAdded) renderDiagram();
+            } else if (phaseChanged || activeFlowChanged || flowAdded) {
+                renderDiagram();
+            }
             if (phase === EVENT_PHASE) {
                 ensureEventRotation();
                 if (!lastMessageText) rotateEventFlow();
@@ -157,7 +191,7 @@
         function ensureFlowInPhase(phase, payload) {
             var phaseSpec = phaseByKey[phase];
             for (var i = 0; i < phaseSpec.flows.length; i++) {
-                if (phaseSpec.flows[i].flow_key === payload.flow_key) return;
+                if (phaseSpec.flows[i].flow_key === payload.flow_key) return false;
             }
             phaseSpec.flows.push({
                 phase: phase,
@@ -168,6 +202,7 @@
                 event_kind: payload.event_kind || ''
             });
             phaseSpec.flows.sort(sortFlows);
+            return true;
         }
 
         function ensureEventRotation() {
@@ -224,9 +259,13 @@
         function updateSignalProgress(payload) {
             if (done) return;
             if (payload && normalizePhaseKey(payload.phase) === EVENT_PHASE) {
+                var becameEventReplay = !eventReplayActive;
                 eventReplayActive = true;
                 row.root.classList.add('is-event-replaying');
-                renderDiagram();
+                // Render once for a legacy progress stream which did not send
+                // an activity manifest. Subsequent percentage packets must
+                // not replace the animation's DOM nodes.
+                if (becameEventReplay) renderDiagram();
             }
             var percent = Number(payload && payload.percent);
             if (!isFinite(percent)) {
@@ -250,7 +289,7 @@
                 var active = phase.key === currentPhase || (phase.key === EVENT_PHASE && eventReplayActive);
                 html.push(
                     '<div class="gt-flow-line-phase' + (active ? ' is-active' : '') + (phase.key === EVENT_PHASE ? ' is-event-phase' : '') + '" data-phase="' + escapeHtml(phase.key) + '">'
-                    + '<div class="gt-flow-phase-title">' + escapeHtml(phase.label || phase.key) + '</div>'
+                    + '<div class="gt-flow-phase-title">' + escapeHtml(displayPhaseLabel(phase.key, phase.label)) + '</div>'
                 );
                 var flows = phase.flows || [];
                 if (phase.key === EVENT_PHASE) {
@@ -275,7 +314,7 @@
                 html.push(
                     '<div class="gt-flow-line-node' + (nodeActive ? ' is-current' : '') + '">'
                     + '<span class="gt-flow-dot"></span>'
-                    + '<div class="gt-flow-node-label">' + escapeHtml(flow.flow_label || flow.flow_name || flow.flow_key) + '</div>'
+                    + '<div class="gt-flow-node-label">' + escapeHtml(displayFlowLabel(flow)) + '</div>'
                     + '</div>'
                 );
             }
@@ -323,31 +362,32 @@
             style.id = 'gt-flow-line-style';
             style.textContent = [
                 '@keyframes gtFlowLineMove{0%{background-position:0 0}100%{background-position:28px 0}}',
-                '.gt-flow-line-root{display:flex;flex-direction:column;gap:8px;min-width:0;padding:0 2px 2px;}',
-                '.gt-flow-line-phase{position:relative;display:grid;grid-template-columns:72px minmax(0,1fr);align-items:start;gap:10px;min-width:0;padding:4px 0;}',
-                '.gt-flow-phase-title{text-align:right;font-size:11px;font-weight:600;color:#64748b;line-height:1.2;padding-top:8px;white-space:nowrap;}',
-                '.gt-flow-line-track{position:relative;display:flex;align-items:flex-start;gap:clamp(5px,1.15vw,14px);min-width:0;width:100%;padding:8px 2px 0;}',
+                '.gt-flow-line-root{display:flex;flex-direction:column;gap:12px;min-width:0;padding:0 2px 2px;}',
+                '.gt-flow-line-phase{position:relative;display:grid;grid-template-columns:112px minmax(0,1fr);align-items:start;gap:10px;min-width:0;padding:5px 0;}',
+                '.gt-flow-phase-title{text-align:right;font-size:11px;font-weight:600;color:#64748b;line-height:1.35;padding-top:10px;white-space:normal;}',
+                '.gt-flow-line-track{position:relative;display:flex;align-items:flex-start;gap:10px;min-width:100%;width:max-content;padding:8px 2px 0;}',
                 '.gt-flow-line-track:before{content:"";position:absolute;left:0;right:0;top:14px;height:2px;background:#d0d5dd;}',
                 '.gt-flow-line-track:after{content:"";position:absolute;left:0;right:0;top:13px;height:4px;border-radius:999px;opacity:0;pointer-events:none;}',
                 '.gt-flow-line-phase.is-active .gt-flow-phase-title{color:#0f766e;}',
                 '.gt-flow-line-phase.is-event-phase.is-active .gt-flow-line-track:before{background:#99f6e4;}',
                 '.gt-activity-progress.is-event-replaying .gt-flow-line-phase.is-event-phase .gt-flow-line-track:before{background:#99f6e4;}',
                 '.gt-activity-progress.is-event-replaying .gt-flow-line-phase.is-event-phase .gt-flow-line-track:after{opacity:1;background:linear-gradient(90deg,transparent 0,rgba(20,184,166,.12) 18%,#14b8a6 48%,rgba(20,184,166,.12) 78%,transparent 100%);background-size:56px 4px;animation:gtFlowLineMove .75s linear infinite;}',
-                '.gt-flow-event-root{display:grid;grid-template-columns:minmax(0,1fr) clamp(18px,3vw,30px) minmax(0,1fr);align-items:center;gap:clamp(4px,1vw,8px);min-width:0;width:100%;}',
-                '.gt-flow-producer-branches{display:flex;flex-direction:column;gap:8px;min-width:0;}',
-                '.gt-flow-event-branch,.gt-flow-order-branch{position:relative;display:grid;grid-template-columns:40px minmax(0,1fr);align-items:start;gap:clamp(4px,1vw,8px);min-width:0;}',
-                '.gt-flow-event-branch:after{content:"";position:absolute;left:calc(40px + clamp(4px,1vw,8px));right:-9px;top:14px;height:2px;background:#99f6e4;}',
-                '.gt-flow-branch-title{font-size:10px;line-height:1.12;color:#667085;text-align:right;padding-top:8px;white-space:nowrap;}',
+                '.gt-flow-event-root{display:grid;grid-template-columns:max-content 34px max-content;align-items:center;gap:8px;min-width:100%;width:max-content;}',
+                '.gt-flow-producer-branches{display:flex;flex-direction:column;gap:12px;min-width:max-content;}',
+                '.gt-flow-event-branch,.gt-flow-order-branch{position:relative;display:grid;grid-template-columns:52px max-content;align-items:start;gap:8px;min-width:max-content;}',
+                '.gt-flow-event-branch:after{content:"";position:absolute;left:60px;right:-12px;top:14px;height:2px;background:#99f6e4;}',
+                '.gt-flow-branch-title{font-size:10px;line-height:1.25;color:#667085;text-align:right;padding-top:9px;white-space:normal;}',
                 '.gt-flow-merge-junction{position:relative;align-self:stretch;min-height:60px;}',
                 '.gt-flow-merge-vertical{position:absolute;left:50%;top:14px;bottom:14px;width:2px;transform:translateX(-50%);background:#99f6e4;border-radius:999px;}',
                 '.gt-flow-merge-horizontal{position:absolute;left:50%;right:-50%;top:50%;height:2px;transform:translateY(-50%);background:linear-gradient(90deg,#99f6e4,#14b8a6);border-radius:999px;}',
-                '.gt-flow-order-branch:before{content:"";position:absolute;left:-18px;top:14px;width:18px;height:2px;background:#14b8a6;}',
-                '.gt-flow-line-node{position:relative;z-index:1;display:flex;flex:1 1 18px;flex-direction:column;align-items:center;min-width:14px;max-width:34px;}',
+                '.gt-flow-order-branch:before{content:"";position:absolute;left:-22px;top:14px;width:22px;height:2px;background:#14b8a6;}',
+                '.gt-flow-line-node{position:relative;z-index:1;display:flex;flex:0 0 108px;flex-direction:column;align-items:center;width:108px;min-width:108px;}',
                 '.gt-flow-dot{width:12px;height:12px;border-radius:999px;background:#fff;border:2px solid #cbd5e1;box-sizing:border-box;}',
                 '.gt-flow-line-node.is-current .gt-flow-dot{border-color:#0f766e;background:#14b8a6;box-shadow:0 0 0 4px rgba(20,184,166,.16);}',
-                '.gt-flow-node-label{margin-top:5px;font-size:10px;line-height:1.08;color:#475467;writing-mode:vertical-rl;text-orientation:mixed;white-space:nowrap;}',
+                '.gt-flow-node-label{box-sizing:border-box;margin-top:6px;padding:4px 6px;width:108px;min-height:38px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;font-size:10px;line-height:1.35;color:#475467;text-align:center;white-space:normal;overflow-wrap:anywhere;}',
                 '.gt-flow-line-node.is-current .gt-flow-node-label{color:#0f766e;font-weight:600;}',
-                '.gt-flow-empty{font-size:11px;color:#98a2b3;padding:4px 0 0;}'
+                '.gt-flow-empty{font-size:11px;color:#98a2b3;padding:4px 0 0;}',
+                '@media (max-width:640px){.gt-flow-line-phase{grid-template-columns:92px minmax(0,1fr);gap:6px;}.gt-flow-phase-title{font-size:10px;}.gt-flow-line-node{flex-basis:92px;width:92px;min-width:92px;}.gt-flow-node-label{width:92px;font-size:9px;}.gt-flow-event-root{gap:6px;}.gt-flow-event-branch,.gt-flow-order-branch{grid-template-columns:44px max-content;gap:6px;}.gt-flow-event-branch:after{left:50px;}}'
             ].join('');
             (document.head || document.body || document.documentElement).appendChild(style);
         }
