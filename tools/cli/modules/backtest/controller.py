@@ -790,10 +790,6 @@ def _audit_weight_rows(value: Any) -> list[tuple[str, str]]:
     return trade_intent_formatter.weight_rows(value, scalar_cell=_audit_scalar_cell)
 
 
-def _audit_weight_change_field(field_name: str) -> str | None:
-    return trade_intent_formatter.weight_change_field(field_name)
-
-
 def _audit_strategy_change_label(change: dict[str, Any]) -> str:
     strategy = change.get("strategy")
     if strategy not in (None, ""):
@@ -802,18 +798,6 @@ def _audit_strategy_change_label(change: dict[str, Any]) -> str:
     if isinstance(strategies, list) and strategies:
         return ", ".join(str(item) for item in strategies)
     return source_group_formatter.source_group_label([change])
-
-
-def _audit_weight_mapping(value: Any) -> dict[str, Any]:
-    return trade_intent_formatter.weight_mapping(value, normalize=_audit_normalized_value)
-
-
-def _audit_intent_reason(value: Any) -> str:
-    return trade_intent_formatter.intent_reason(value, normalize=_audit_normalized_value)
-
-
-def _audit_compact_identical_weight_rows(rows: list[tuple[str, dict[str, Any], str]]) -> list[tuple[str, dict[str, Any], str]]:
-    return trade_intent_formatter.compact_identical_weight_rows(rows, display_key=_audit_display_key)
 
 
 def _audit_weight_table_lines(
@@ -853,30 +837,22 @@ def _audit_weight_change_table_lines(
     )
 
 
-def _audit_compact_weight_change_rows(
-    rows: list[tuple[str, dict[str, Any], dict[str, Any], str, str]]
-) -> list[tuple[str, dict[str, Any], dict[str, Any], str, str]]:
-    return trade_intent_formatter.compact_weight_change_rows(rows, display_key=_audit_display_key)
-
-
 def _print_weight_change_tables(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    value_label = _audit_weight_change_field(field_name)
-    if value_label is None:
+    lines = trade_intent_formatter.weight_change_lines_from_changes(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        normalize=_audit_normalized_value,
+        strategy_label=_audit_strategy_change_label,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+        display_key=_audit_display_key,
+        indent=prefix,
+    )
+    if lines is None:
         return False
-    rows: list[tuple[str, dict[str, Any], dict[str, Any], str, str]] = []
-    include_reason = False
-    for change in changes:
-        strategy = _audit_strategy_change_label(change)
-        before = _display_field_value(field_name, change.get("before"))
-        after = _display_field_value(field_name, change.get("after"))
-        before_weights = _audit_weight_mapping(before)
-        after_weights = _audit_weight_mapping(after)
-        before_reason = _audit_intent_reason(before)
-        after_reason = _audit_intent_reason(after)
-        include_reason = include_reason or bool(before_reason or after_reason)
-        rows.append((strategy, before_weights, after_weights, before_reason, after_reason))
-
-    for line in _audit_weight_change_table_lines(rows, value_label=value_label, include_reason=include_reason, indent=prefix):
+    for line in lines:
         click.echo(line)
     return True
 

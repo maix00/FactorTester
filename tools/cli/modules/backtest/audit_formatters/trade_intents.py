@@ -12,6 +12,8 @@ ScalarCell = Callable[[Any], str]
 ChangeCell = Callable[[Any, Any], str]
 DisplayKey = Callable[[Any], str]
 Normalize = Callable[[Any], Any]
+DisplayFieldValue = Callable[[str, Any], Any]
+StrategyLabel = Callable[[Mapping[str, Any]], str]
 
 
 def trade_intent_text(value: Mapping[str, Any], *, table_lines: TableLines, scalar_cell: ScalarCell) -> str:
@@ -175,6 +177,51 @@ def weight_change_table_lines(
     if not table_rows:
         return [f"{indent}（无变化）"]
     return table_lines(headers, table_rows, indent=indent)
+
+
+def weight_change_lines_from_changes(
+    field_name: str,
+    changes: Sequence[Mapping[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    normalize: Normalize,
+    strategy_label: StrategyLabel,
+    table_lines: TableLines,
+    scalar_cell: ScalarCell,
+    change_cell: ChangeCell,
+    display_key: DisplayKey,
+    indent: str = "",
+) -> list[str] | None:
+    value_label = weight_change_field(field_name)
+    if value_label is None:
+        return None
+    rows: list[tuple[str, dict[str, Any], dict[str, Any], str, str]] = []
+    include_reason = False
+    for change in changes:
+        before = display_field_value(field_name, change.get("before"))
+        after = display_field_value(field_name, change.get("after"))
+        before_weights = weight_mapping(before, normalize=normalize)
+        after_weights = weight_mapping(after, normalize=normalize)
+        before_reason = intent_reason(before, normalize=normalize)
+        after_reason = intent_reason(after, normalize=normalize)
+        include_reason = include_reason or bool(before_reason or after_reason)
+        rows.append((
+            strategy_label(change),
+            before_weights,
+            after_weights,
+            before_reason,
+            after_reason,
+        ))
+    return weight_change_table_lines(
+        rows,
+        value_label=value_label,
+        table_lines=table_lines,
+        scalar_cell=scalar_cell,
+        change_cell=change_cell,
+        display_key=display_key,
+        include_reason=include_reason,
+        indent=indent,
+    )
 
 
 def compact_weight_change_rows(
