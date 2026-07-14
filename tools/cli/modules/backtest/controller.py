@@ -1188,17 +1188,11 @@ def _print_audit_table(
     return True
 
 
-_MARKET_DATA_SAMPLE_FIELDS = {
-    *market_data_formatter.MARKET_DATA_SAMPLE_FIELDS,
-}
 _MARKET_DATA_SAMPLE_PRODUCT_LIMIT = market_data_formatter.MARKET_DATA_SAMPLE_PRODUCT_LIMIT
 
 
 def _is_market_data_sample_field(field_name: str) -> bool:
-    return (
-        _field_metadata.display_value_kind(field_name) == "market_data_sample"
-        or market_data_formatter.is_market_data_sample_field(field_name)
-    )
+    return _field_metadata.display_value_kind(field_name) == "market_data_sample"
 
 
 def _print_market_data_sample_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:

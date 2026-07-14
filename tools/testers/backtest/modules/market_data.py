@@ -246,7 +246,7 @@ class MarketDataModule(ExecutableModule):
         "trading_day_resolver": FieldDefinition(public=False),
         "field_state_baseline": FieldDefinition(public=False, display_value_kind="historical_field_state"),
         "field_change_events": FieldDefinition(public=False),
-        "causal_valuation_table": FieldDefinition(public=False),
+        "causal_valuation_table": FieldDefinition(public=False, display_value_kind="market_data_sample"),
         "historical_field_policy": FieldDefinition(
             public=True,
             label="历史字段",
