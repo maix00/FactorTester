@@ -252,7 +252,7 @@ def _products_for_backtest_window(state, ctx, strategy) -> frozenset:
 
 
 def _basic_equity(state, ctx) -> None:
-    prices = ctx.get(MarketDataModule.current_prices)
+    prices = _valuation_prices_for_equity(ctx)
     equity_by_ledger: dict[int, float] = {}
     for strategy in ctx.active_strategies:
         ledger = state.ledger_for_strategy(strategy)
@@ -264,6 +264,15 @@ def _basic_equity(state, ctx) -> None:
         value = _ledger_equity(state, ctx, strategy, ledger, prices)
         equity_by_ledger[cache_key] = value
         ctx.set_for(LedgerModule.equity, strategy, value)
+
+
+def _valuation_prices_for_equity(ctx) -> dict:
+    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
+    if isinstance(snapshot, dict):
+        close = snapshot.get("close")
+        if isinstance(close, dict):
+            return close
+    return ctx.get(MarketDataModule.current_prices)
 
 
 def _ledger_equity(state, ctx, strategy, ledger, prices: dict) -> float:
@@ -295,6 +304,7 @@ def _ledger_equity(state, ctx, strategy, ledger, prices: dict) -> float:
     market_value = sum(
         contract_notional(_required_current_price(prices, product, ctx.timestamp), entry.quantity, historical_fields, product)
         for product, entry in positions.items()
+        if abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12
     )
     return cash.to_major() + market_value
 

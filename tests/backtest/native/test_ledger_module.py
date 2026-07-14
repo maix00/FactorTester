@@ -237,6 +237,28 @@ def test_equity_on_signal_and_on_order_recompute_after_fill():
     assert cash_after == pytest.approx(1_000_000.0 - 10_000.0)
 
 
+def test_equity_on_order_marks_held_positions_from_snapshot_close_not_execution_prices():
+    s = Strategy(alias="S")
+    held = _product()
+    traded = _product()
+    config = _strategy_config(s, engine_mode="basic")
+    account = _state_with_ledger_configs({s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({held, traded}))
+    _initialize_ledgers(account, ctx)
+    ledger = account.ledger_for_strategy(s)
+    ledger.get(LedgerModule.positions)[held] = ProductPosition(quantity=10.0)
+
+    t = pd.Timestamp("2024-01-01 09:30", tz="Asia/Shanghai")
+    order_ctx = FlowContext(timestamp=t, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    order_ctx.set(MarketDataModule.current_prices, {traded: 20.0})
+    order_ctx.set(MarketDataModule.current_market_snapshot, {"close": {held: 7.0, traded: 21.0}})
+
+    _basic_equity(account, order_ctx)
+
+    assert order_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_000.0 + 70.0)
+
+
 def test_equity_requires_ffilled_price_for_held_position():
     s = Strategy(alias="S")
     p = _product()
@@ -257,6 +279,27 @@ def test_equity_requires_ffilled_price_for_held_position():
 
     with pytest.raises(KeyError, match="current price missing for held product"):
         _basic_equity(account, signal_ctx)
+
+
+def test_equity_ignores_zero_position_without_price():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(s, engine_mode="basic")
+    account = _state_with_ledger_configs({s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    signal_ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01 09:01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    signal_ctx.set(MarketDataModule.current_prices, {})
+
+    _basic_equity(account, signal_ctx)
+
+    assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_000.0)
 
 
 def test_apply_order_fill_skips_rejected_order_without_ledger_effect():

@@ -169,7 +169,7 @@ def exchange_order_constraints_for_snapshot(
     snapshot: Mapping[str, Mapping[Any, object]],
 ) -> dict[Any, OrderTradeConstraint]:
     """Resolve side-aware order constraints from exchange trading rules."""
-    close_prices = snapshot.get("close") or {}
+    close_prices = snapshot["tradable_close"] if "tradable_close" in snapshot else snapshot.get("close", {})
     constraints: dict[Any, OrderTradeConstraint] = {}
     for product, close_price in close_prices.items():
         rule = exchange_trading_rule_for_product(product)

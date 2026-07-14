@@ -471,6 +471,7 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
         "settlement": {product: 12.0},
         "close": {product: 11.5},
     })
+    ctx.set(MarketDataModule.current_prices, {})
     ctx.set(MarketDataModule.current_historical_fields, {
         product: {
             "VolumeMultiple": 10.0,

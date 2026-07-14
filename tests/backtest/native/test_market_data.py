@@ -288,6 +288,7 @@ def test_order_event_current_prices_use_open_snapshot_not_close_snapshot():
 def test_order_event_uses_order_price_timestamp_for_market_snapshot():
     product = object()
     idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min", tz="Asia/Shanghai")
+    event_timestamp = idx[0] + pd.Timedelta(microseconds=1)
     strategy = Strategy(alias="order")
     account = BacktestRunState(strategy_configs={strategy: StrategyConfig(strategy=strategy)})
     account.market_data_store.current_prices_table = pd.DataFrame(
@@ -304,22 +305,23 @@ def test_order_event_uses_order_price_timestamp_for_market_snapshot():
 
     order = OrderLike()
     ctx = FlowContext(
-        timestamp=idx[0] + pd.Timedelta(microseconds=1),
+        timestamp=event_timestamp,
         event_queue=EventQueue(),
         event_kind=EventKind.ORDER,
         active_strategies=frozenset((strategy,)),
-        drafts_by_strategy={strategy: [EventDraft(EventKind.ORDER, idx[0] + pd.Timedelta(microseconds=1), strategy, order)]},
+        drafts_by_strategy={strategy: [EventDraft(EventKind.ORDER, event_timestamp, strategy, order)]},
     )
 
     _set_current_market_snapshot(account, ctx)
 
     assert ctx.get(MarketDataModule.current_prices)[product] == 20.0
-    assert ctx.get(MarketDataModule.current_market_snapshot)["close"][product] == 21.0
+    assert ctx.get(MarketDataModule.current_market_snapshot)["close"][product] == 11.0
 
 
 def test_order_event_minimal_snapshot_uses_policy_price_basis_and_limit_fields():
     product = object()
     idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min", tz="Asia/Shanghai")
+    event_timestamp = idx[0] + pd.Timedelta(microseconds=1)
     strategy = Strategy(alias="order")
     account = BacktestRunState(strategy_configs={
         strategy: StrategyConfig(strategy=strategy, field_values={
@@ -341,11 +343,11 @@ def test_order_event_minimal_snapshot_uses_policy_price_basis_and_limit_fields()
             return idx[1] if key == "price_timestamp" else default
 
     ctx = FlowContext(
-        timestamp=idx[0] + pd.Timedelta(microseconds=1),
+        timestamp=event_timestamp,
         event_queue=EventQueue(),
         event_kind=EventKind.ORDER,
         active_strategies=frozenset((strategy,)),
-        drafts_by_strategy={strategy: [EventDraft(EventKind.ORDER, idx[0] + pd.Timedelta(microseconds=1), strategy, OrderLike())]},
+        drafts_by_strategy={strategy: [EventDraft(EventKind.ORDER, event_timestamp, strategy, OrderLike())]},
     )
 
     _set_current_market_snapshot(account, ctx)
@@ -353,7 +355,7 @@ def test_order_event_minimal_snapshot_uses_policy_price_basis_and_limit_fields()
 
     assert ctx.get(MarketDataModule.current_prices)[product] == 20.5
     assert snapshot["vwap"][product] == 20.5
-    assert snapshot["close"][product] == 21.0
+    assert snapshot["close"][product] == 11.0
     assert snapshot["upper_limit"][product] == 22.0
     assert snapshot["lower_limit"][product] == 19.0
     assert "settlement" not in snapshot
@@ -1156,6 +1158,28 @@ def test_causal_valuation_ffills_gaps_and_never_looks_ahead():
     assert current_prices_at(account, cast(pd.Timestamp, idx[0]))["P1"] == 10.0
 
 
+def test_signal_tradability_uses_exact_observed_bar_not_causal_ffill():
+    product = object()
+    account = BacktestRunState()
+    idx = pd.date_range("2024-01-01 09:30", periods=2, freq="1D", tz="Asia/Shanghai")
+    raw_prices = pd.DataFrame({product: [10.0, np.nan]}, index=idx)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set(MarketDataModule.raw_prices, raw_prices)
+    account.market_data_store.publish_raw({"raw_prices": raw_prices})
+    _causal_valuation(account, ctx)
+
+    stale_timestamp = cast(pd.Timestamp, idx[1])
+    signal_ctx = FlowContext(
+        timestamp=stale_timestamp,
+        event_queue=EventQueue(),
+        event_kind=EventKind.SIGNAL,
+    )
+    _set_current_market_snapshot(account, signal_ctx)
+
+    assert signal_ctx.get(MarketDataModule.current_prices)[product] == 10.0
+    assert product not in signal_ctx.get(MarketDataModule.current_tradable_status)
+
+
 def test_historical_fields_for_product_matches_product_and_string_keys():
     class _Product:
         name = "RU.SHF"
@@ -1446,6 +1470,61 @@ def test_historical_field_frames_for_market_data_reuses_identical_run_cache(monk
 
     assert first is second is expected
     assert calls["frames"] == 1
+
+
+def test_initialize_field_state_uses_product_first_observed_timestamp_for_baseline():
+    class Product:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __str__(self) -> str:
+            return self.name
+
+    early = Product("A.DCE")
+    listed_later = Product("LG.DCE")
+    index = pd.DatetimeIndex([
+        pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2024-11-18 09:00", tz="Asia/Shanghai"),
+    ])
+    raw_prices = pd.DataFrame({
+        early: [1.0, 2.0],
+        listed_later: [np.nan, 3.0],
+    }, index=index)
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/a",
+            "instrument": "A",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByMoney",
+            "effective_trading_day": "2024-01-01",
+            "value": 0.0002,
+        },
+        {
+            "provider": "test",
+            "source_key": "test/lg-listing",
+            "instrument": "LG",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByMoney",
+            "effective_trading_day": "2024-11-18",
+            "effective_timestamp": "2024-11-18 09:00:00",
+            "value": 0.0001,
+        },
+    ])
+    account = BacktestRunState()
+    account.market_data_store.historical_field_provider = provider
+    account.market_data_store.historical_field_names = ("OpenRatioByMoney",)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set(MarketDataModule.raw_prices, raw_prices)
+    ctx.set(MarketDataModule.trading_day_resolver, TimestampTradingDayResolver({
+        pd.Timestamp("2024-01-02 09:00"): pd.Timestamp("2024-01-02"),
+        pd.Timestamp("2024-11-18 09:00"): pd.Timestamp("2024-11-18"),
+    }))
+
+    market_data_module._initialize_field_state(account, ctx)
+
+    assert account.market_data_store.field_state_store["A.DCE"]["OpenRatioByMoney"] == pytest.approx(0.0002)
+    assert account.market_data_store.field_state_store["LG.DCE"]["OpenRatioByMoney"] == pytest.approx(0.0001)
 
 
 def test_set_current_historical_fields_skips_per_strategy_write_when_nothing_customizes():

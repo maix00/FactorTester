@@ -1347,8 +1347,13 @@ def _initialize_field_state(state, ctx) -> None:
     first_ts = all_timestamps[0]
     
     # Collect parent product objects (contracts resolve to parent, base products stay)
+    # and initialize each parent at its first observed market-data timestamp.
+    # Newly listed products can appear inside a long run after the run's first
+    # timestamp; querying FieldHistory for them at global run start would create
+    # a false missing-baseline error.
     parent_objects: dict[str, Any] = {}
     product_to_parent_key: dict[str, str] = {}
+    parent_first_timestamps: dict[str, pd.Timestamp] = {}
     for instrument in instruments:
         inst_name = str(getattr(instrument, "name", instrument) or "")
         parent = getattr(instrument, "parent_product", None)
@@ -1361,29 +1366,38 @@ def _initialize_field_state(state, ctx) -> None:
             product_to_parent_key[inst_name] = inst_name
             if inst_name not in parent_objects:
                 parent_objects[inst_name] = instrument
+        first_observed = _first_valid_market_data_timestamp(raw_prices, instrument)
+        if first_observed is not None:
+            existing = parent_first_timestamps.get(product_to_parent_key[inst_name])
+            if existing is None or first_observed < existing:
+                parent_first_timestamps[product_to_parent_key[inst_name]] = first_observed
     
-    # Single batch query with one timestamp
-    single_ts_index = pd.DatetimeIndex([pd.Timestamp(first_ts)])
-    frame_result = historical_fields_frame_for_products(
-        list(parent_objects.values()),
-        single_ts_index,
-        provider=provider,
-        trading_day_resolver=resolver,
-        field_names=field_names,
-        fallback=policy,
-    )
-    
-    # Extract values from the batch result
     parent_baselines: dict[str, dict[str, object]] = {}
     for pname in parent_objects:
         parent_baselines[pname] = {}
-        for fname in field_names:
-            fn = str(fname)
-            fdf = frame_result.get(fn)
-            if fdf is not None and not fdf.empty:
-                val = fdf.iloc[0].get(pname)
-                if val is not None and not (isinstance(val, float) and (pd.isna(val) or val == float("inf") or val == float("-inf"))):
-                    parent_baselines[pname][fn] = val
+    parents_by_timestamp: dict[pd.Timestamp, list[str]] = {}
+    for pname in parent_objects:
+        ts = parent_first_timestamps.get(pname)
+        if ts is not None:
+            parents_by_timestamp.setdefault(ts, []).append(pname)
+    for timestamp, parent_names in parents_by_timestamp.items():
+        products_for_timestamp = [parent_objects[pname] for pname in parent_names]
+        frame_result = historical_fields_frame_for_products(
+            products_for_timestamp,
+            pd.DatetimeIndex([timestamp]),
+            provider=provider,
+            trading_day_resolver=resolver,
+            field_names=field_names,
+            fallback=policy,
+        )
+        for pname in parent_names:
+            for fname in field_names:
+                fn = str(fname)
+                fdf = frame_result.get(fn)
+                if fdf is not None and not fdf.empty:
+                    val = fdf.iloc[0].get(pname)
+                    if val is not None and not (isinstance(val, float) and (pd.isna(val) or val == float("inf") or val == float("-inf"))):
+                        parent_baselines[pname][fn] = val
     
     # Populate store  
     for instrument in instruments:
@@ -1474,6 +1488,23 @@ def _initialize_field_state(state, ctx) -> None:
     except Exception:
         import traceback
         ctx.set(MarketDataModule.historical_field_policy, "fallback")
+
+
+def _first_valid_market_data_timestamp(raw_prices: pd.DataFrame, instrument: Any) -> pd.Timestamp | None:
+    try:
+        values = raw_prices[instrument]
+    except Exception:
+        return None
+    if isinstance(values, pd.DataFrame):
+        valid_index = values.index[values.notna().any(axis=1)]
+    else:
+        valid_index = cast(pd.Series, values).dropna().index
+    if len(valid_index) == 0:
+        return None
+    events = DataIndex(valid_index).event_timestamps()
+    if len(events) == 0:
+        return None
+    return pd.Timestamp(events[0])
 
 
 
@@ -1876,8 +1907,12 @@ def _market_snapshot_for_event(state, ctx) -> dict[str, dict[Any, float]]:
                 return market_snapshot_for_index_key(state, draft.index_key)
     if getattr(ctx, "event_kind", None) is EventKind.ORDER:
         price_timestamp = _order_event_price_timestamp(ctx)
-        if price_timestamp is not None:
-            return order_market_snapshot_at(state, price_timestamp, bases=_order_event_price_bases(state, ctx))
+        return order_market_snapshot_at(
+            state,
+            ctx.timestamp,
+            price_timestamp=price_timestamp,
+            bases=_order_event_price_bases(state, ctx),
+        )
     if getattr(ctx, "event_kind", None) is EventKind.SIGNAL:
         return signal_market_snapshot_at(state, ctx.timestamp)
     if getattr(ctx, "event_kind", None) is EventKind.LEDGER:
@@ -1913,18 +1948,26 @@ def order_market_snapshot_at(
     state,
     timestamp: pd.Timestamp,
     *,
+    price_timestamp: pd.Timestamp | None = None,
     bases: tuple[str, ...] = ("open",),
 ) -> dict[str, dict[Any, float]]:
     """Minimal ORDER snapshot.
 
-    ORDER handling consumes the execution price basis selected by policy plus
-    close/limit fields for exchange trading constraints. Building the full
-    market snapshot for every ORDER event scans settlement/etc. tables that do
-    not affect the current order policy.
+    ORDER handling consumes two distinct market-data views: event-time causal
+    close for ledger/equity valuation, and the selected execution price basis
+    at each order's price timestamp. Building the full market snapshot for
+    every ORDER event scans settlement/etc. tables that do not affect the
+    current order policy.
     """
     store = market_data_store_for(state)
     normalized_bases = tuple(dict.fromkeys(str(basis).lower() for basis in bases if basis))
-    cache_key = ("order", normalized_bases, _event_lookup_cache_key(timestamp))
+    basis_timestamp = price_timestamp if price_timestamp is not None else timestamp
+    cache_key = (
+        "order",
+        normalized_bases,
+        _event_lookup_cache_key(timestamp),
+        _event_lookup_cache_key(basis_timestamp),
+    )
     cached = store.market_snapshot_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -1935,7 +1978,7 @@ def order_market_snapshot_at(
             continue
         table = tables.get(basis) if isinstance(tables, dict) else None
         if isinstance(table, pd.DataFrame) and not table.empty:
-            values = _table_values_at_cached(state, table, timestamp, asof=True)
+            values = _table_values_at_cached(state, table, basis_timestamp, asof=True)
             if values:
                 snapshot[basis] = values
     store.market_snapshot_cache[cache_key] = snapshot
@@ -1946,8 +1989,9 @@ def signal_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[
     """Minimal SIGNAL snapshot.
 
     Signal-time flows consume the causal close view for valuation/membership,
-    volume for liquidity caps, and limit fields for tradable status. Other
-    price bases are only needed by BAR/ORDER/LEDGER policies.
+    exact observed close for orderability, volume for liquidity caps, and limit
+    fields for tradable status. Other price bases are only needed by
+    BAR/ORDER/LEDGER policies.
     """
     store = market_data_store_for(state)
     cache_key = ("signal", _event_lookup_cache_key(timestamp))
@@ -1955,7 +1999,19 @@ def signal_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[
     if cached is not None:
         return cached
     snapshot: dict[str, dict[Any, float]] = {"close": current_prices_at(state, timestamp)}
+    close_table = None
     tables = market_price_tables_for(state)
+    if isinstance(tables, dict):
+        candidate = tables.get("close")
+        if isinstance(candidate, pd.DataFrame) and not candidate.empty:
+            close_table = candidate
+    if close_table is None:
+        candidate = raw_prices_table_for(state)
+        if isinstance(candidate, pd.DataFrame) and not candidate.empty:
+            close_table = candidate
+    if isinstance(close_table, pd.DataFrame) and not close_table.empty:
+        exact_close = _table_values_at_cached(state, close_table, timestamp, asof=False)
+        snapshot["tradable_close"] = exact_close
     for basis in ("upper_limit", "lower_limit"):
         table = tables.get(basis) if isinstance(tables, dict) else None
         if isinstance(table, pd.DataFrame) and not table.empty:
