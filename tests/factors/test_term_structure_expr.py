@@ -8,7 +8,20 @@ import pandas as pd
 import pytest
 
 from tools.data.types import DataColumn, DataFreq
-from tools.factors.FactorExpr import CLOSE, ColumnRef, EvaluateContext, term_ratio, term_slope, term_spread
+from tools.factors.FactorExpr import (
+    CLOSE,
+    ColumnRef,
+    EvaluateContext,
+    term_carry_annualized,
+    term_contango,
+    term_curvature,
+    term_log_ratio,
+    term_rank_value,
+    term_ratio,
+    term_slope,
+    term_slope_segment,
+    term_spread,
+)
 from tools.products.AdjustableTermStructure import (
     AdjustableProductMixin,
     TERM_CONTRACT_COL,
@@ -39,6 +52,13 @@ class _MemoryTermStore:
         if columns is not None:
             rows = rows[columns]
         return rows.copy()
+
+    def contract_pool(self, product: str, trading_day: Any, depth: int | None = None) -> pd.DataFrame:
+        rows = self.load(product=product, trading_day=trading_day)
+        if rows.empty:
+            return rows
+        rows = rows.sort_values(TERM_RANK_COL)
+        return rows.head(int(depth)) if depth is not None else rows
 
 
 @dataclass(eq=False)
@@ -124,6 +144,41 @@ def test_term_structure_ops_batch_evaluate_against_hand_calculated_curve_values(
         slope,
         pd.DataFrame({product: expected_slopes}, index=expected_index),
     )
+
+
+def test_extended_term_structure_ops_batch_evaluate_against_hand_calculated_curve_values() -> None:
+    product = _fake_product()
+    ctx = EvaluateContext(products=[product], freq=DataFreq.MIN1, cache={})
+
+    log_ratio = term_log_ratio(0, 1, DataColumn.CLOSE).evaluate(ctx=ctx)
+    contango = term_contango(0, 1, DataColumn.CLOSE).evaluate(ctx=ctx)
+    carry = term_carry_annualized(0, 1, DataColumn.CLOSE).evaluate(ctx=ctx)
+    curvature = term_curvature(3, DataColumn.CLOSE).evaluate(ctx=ctx)
+    segment = term_slope_segment(1, 2, DataColumn.CLOSE).evaluate(ctx=ctx)
+    rank_value = term_rank_value(2, DataColumn.CLOSE).evaluate(ctx=ctx)
+
+    expected_index = product._market_data.index
+    expected_log_ratio = [np.log(100.0 / 95.0), np.log(100.0 / 95.0), np.log(110.0 / 100.0)]
+    pd.testing.assert_frame_equal(log_ratio, pd.DataFrame({product: expected_log_ratio}, index=expected_index))
+    pd.testing.assert_frame_equal(
+        contango,
+        pd.DataFrame({product: [95.0 / 100.0 - 1.0, 95.0 / 100.0 - 1.0, 100.0 / 110.0 - 1.0]}, index=expected_index),
+    )
+    pd.testing.assert_frame_equal(
+        carry,
+        pd.DataFrame({product: [(100.0 / 95.0 - 1.0) * 365 / 30, (100.0 / 95.0 - 1.0) * 365 / 30, (110.0 / 100.0 - 1.0) * 365 / 30]}, index=expected_index),
+    )
+    expected_curvature = [
+        np.polyfit([10.0, 40.0, 70.0], [100.0, 95.0, 90.0], 2)[0],
+        np.polyfit([10.0, 40.0, 70.0], [100.0, 95.0, 90.0], 2)[0],
+        np.polyfit([9.0, 39.0, 69.0], [110.0, 100.0, 80.0], 2)[0],
+    ]
+    pd.testing.assert_frame_equal(curvature, pd.DataFrame({product: expected_curvature}, index=expected_index))
+    pd.testing.assert_frame_equal(
+        segment,
+        pd.DataFrame({product: [(90.0 - 95.0) / 30, (90.0 - 95.0) / 30, (80.0 - 100.0) / 30]}, index=expected_index),
+    )
+    pd.testing.assert_frame_equal(rank_value, pd.DataFrame({product: [90.0, 90.0, 80.0]}, index=expected_index))
 
 
 @pytest.mark.parametrize(

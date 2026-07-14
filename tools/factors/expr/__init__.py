@@ -15,7 +15,18 @@ if FACTOR_WORKSPACE:
     from .cross_sectional import CrossSectionalOp
     from .composite import CompositeExpr, _reduce_biop, expr_max, expr_min
     from .conditional import WhereOp
-    from .term_structure import TermStructureOp, term_spread, term_ratio, term_slope
+    from .term_structure import (
+        TermStructureOp,
+        term_carry_annualized,
+        term_contango,
+        term_curvature,
+        term_log_ratio,
+        term_rank_value,
+        term_ratio,
+        term_slope,
+        term_slope_segment,
+        term_spread,
+    )
     from .signal_align import SignalAlign, signal_align
     from .visual_groups import (
         VISUAL_OPERATOR_GROUPS,

@@ -6,7 +6,24 @@ import pytest
 
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
-from tools.factors.expr import CLOSE, ColumnRef, ConstExpr, CrossSectionalOp, EvaluateContext, RollingOp, WhereOp, term_ratio, term_slope, term_spread
+from tools.factors.expr import (
+    CLOSE,
+    ColumnRef,
+    ConstExpr,
+    CrossSectionalOp,
+    EvaluateContext,
+    RollingOp,
+    WhereOp,
+    term_carry_annualized,
+    term_contango,
+    term_curvature,
+    term_log_ratio,
+    term_rank_value,
+    term_ratio,
+    term_slope,
+    term_slope_segment,
+    term_spread,
+)
 from tools.products.AdjustableTermStructure import (
     AdjustableProductMixin,
     TERM_CONTRACT_COL,
@@ -260,6 +277,12 @@ def test_incremental_factor_compile_rejects_non_product_shaped_or_non_scalar_nod
         term_ratio(0, 1, CLOSE),
         term_slope(3, CLOSE),
         term_ratio(0, 1, CLOSE).cs_rank(),
+        term_log_ratio(0, 1, CLOSE),
+        term_contango(0, 1, CLOSE),
+        term_carry_annualized(0, 1, CLOSE),
+        term_curvature(3, CLOSE),
+        term_slope_segment(1, 2, CLOSE),
+        term_rank_value(2, CLOSE),
     ],
 )
 def test_incremental_term_structure_replay_matches_batch_evaluate(expr):

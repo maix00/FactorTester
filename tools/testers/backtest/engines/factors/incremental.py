@@ -21,8 +21,8 @@ from tools.factors.expr import (
     TermStructureOp,
     WhereOp,
 )
+from tools.factors.expr.term_structure_math import evaluate_term_curve, normalize_term_curve
 from tools.products.AdjustableTermStructure import (
-    TERM_DAYS_TO_MATURITY_COL,
     TERM_RANK_COL,
 )
 
@@ -232,28 +232,17 @@ class TermStructureNode:
             raise KeyError(f"TERM_STRUCTURE curve for product {product!r} is missing column {self.column_name!r}")
         if TERM_RANK_COL not in curve.columns:
             raise KeyError(f"TERM_STRUCTURE curve for product {product!r} is missing column {TERM_RANK_COL!r}")
-        ordered = curve.sort_values(TERM_RANK_COL)
-        if self.op in {"term_spread", "term_ratio"}:
-            max_rank = max(self.near_rank, self.far_rank)
-            if len(ordered) <= max_rank:
-                return float("nan")
-            near = float(ordered.iloc[self.near_rank][self.column_name])
-            far = float(ordered.iloc[self.far_rank][self.column_name])
-            if self.op == "term_spread":
-                return near - far
-            return near / far - 1.0 if far else float("nan")
-        if self.op == "term_slope":
-            if TERM_DAYS_TO_MATURITY_COL not in ordered.columns:
-                raise KeyError(
-                    f"TERM_STRUCTURE curve for product {product!r} is missing column {TERM_DAYS_TO_MATURITY_COL!r}"
-                )
-            frame = ordered.head(self.depth)[[TERM_DAYS_TO_MATURITY_COL, self.column_name]].dropna()
-            if len(frame) < 2:
-                return float("nan")
-            x = frame[TERM_DAYS_TO_MATURITY_COL].to_numpy(dtype=float)
-            y = frame[self.column_name].to_numpy(dtype=float)
-            return float(np.polyfit(x, y, 1)[0])
-        raise UnsupportedStreamingFactor(f"unsupported term structure op: {self.op}")
+        try:
+            return evaluate_term_curve(
+                self.op,
+                curve,
+                near_rank=self.near_rank,
+                far_rank=self.far_rank,
+                depth=self.depth,
+                column=self.column_name,
+            )
+        except KeyError as exc:
+            raise KeyError(f"TERM_STRUCTURE curve for product {product!r} is missing required field: {exc}") from exc
 
 
 @dataclass(slots=True)
@@ -458,31 +447,29 @@ def _normalize_bar_fields(fields: Any) -> dict[str, float]:
 
 
 def _normalize_term_curve(curve: Any) -> pd.DataFrame:
-    if isinstance(curve, pd.DataFrame):
-        frame = curve.copy()
-    else:
-        frame = pd.DataFrame(curve)
-    if frame.empty:
-        return frame
-    if TERM_RANK_COL in frame.columns:
-        frame = frame.sort_values(TERM_RANK_COL)
-    return frame.reset_index(drop=True)
+    return normalize_term_curve(curve)
 
 
 def _term_structure_params(expr: TermStructureOp) -> tuple[int, int, int, str]:
-    if expr.op in {"term_spread", "term_ratio"}:
+    if expr.op in TermStructureOp._PAIR_OPS:
         if len(expr.operands) != 3:
             raise UnsupportedStreamingFactor(f"{expr.op} expects near_rank, far_rank, and column operands")
         near_rank = _term_structure_int_operand(expr.operands[0], "near_rank")
         far_rank = _term_structure_int_operand(expr.operands[1], "far_rank")
         column = _term_structure_column_operand(expr.operands[2])
         return near_rank, far_rank, 0, column
-    if expr.op == "term_slope":
+    if expr.op in TermStructureOp._DEPTH_OPS:
         if len(expr.operands) != 2:
-            raise UnsupportedStreamingFactor("term_slope expects depth and column operands")
+            raise UnsupportedStreamingFactor(f"{expr.op} expects depth and column operands")
         depth = _term_structure_int_operand(expr.operands[0], "depth")
         column = _term_structure_column_operand(expr.operands[1])
         return 0, 1, depth, column
+    if expr.op in TermStructureOp._RANK_OPS:
+        if len(expr.operands) != 2:
+            raise UnsupportedStreamingFactor(f"{expr.op} expects rank and column operands")
+        rank = _term_structure_int_operand(expr.operands[0], "rank")
+        column = _term_structure_column_operand(expr.operands[1])
+        return rank, 0, 0, column
     raise UnsupportedStreamingFactor(f"unsupported term structure op: {expr.op}")
 
 
