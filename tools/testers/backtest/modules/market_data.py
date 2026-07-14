@@ -269,7 +269,7 @@ class MarketDataModule(ExecutableModule):
                 (str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value), "缺失历史数据由时间差最近的数据向后填充"),
             ),
         ),
-        "current_historical_fields": FieldDefinition(public=False),
+        "current_historical_fields": FieldDefinition(public=False, display_value_kind="market_snapshot"),
         "current_prices": FieldDefinition(public=False, display_value_kind="market_snapshot"),
         "current_market_snapshot": FieldDefinition(public=False, display_value_kind="market_snapshot"),
         "current_tradable_status": FieldDefinition(public=False, display_value_kind="market_snapshot"),

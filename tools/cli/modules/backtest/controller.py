@@ -736,7 +736,11 @@ def _print_delta_mapping_value_tables(prefix: str, records: list[dict[str, Any]]
         scalar_cell=_audit_scalar_cell,
     )
     if result is None:
-        return False
+        click.echo(f"{prefix}当前市场快照总表:")
+        for line in audit_printer_helpers.combined_field_label_lines(prefix, records):
+            click.echo(line, color=True)
+        click.echo(f"{prefix}  （当前无市场快照值）")
+        return True
     headers, rows = result
     return _print_audit_table(
         headers,
@@ -904,6 +908,39 @@ def _print_event_draft_change_table(prefix: str, field_name: str, changes: list[
     for line in text.splitlines():
         click.echo(f"{prefix}  {line}", color=True)
     return True
+
+
+def _print_historical_field_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
+    selected: Any = None
+    for entry in values:
+        value = _display_field_value(field_name, entry.get("value"))
+        if isinstance(value, dict) and _audit_is_historical_field_state_summary(value):
+            selected = value
+            break
+    if selected is None:
+        return False
+    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
+    for line in _audit_historical_field_state_text(selected).splitlines():
+        click.echo(f"{prefix}  {line}", color=True)
+    return True
+
+
+def _print_historical_field_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    for change in changes:
+        before = _display_field_value(field_name, change.get("before"))
+        after = _display_field_value(field_name, change.get("after"))
+        before_is_summary = isinstance(before, dict) and _audit_is_historical_field_state_summary(before)
+        after_is_summary = isinstance(after, dict) and _audit_is_historical_field_state_summary(after)
+        if not (before_is_summary or after_is_summary):
+            continue
+        diff = _audit_historical_field_state_diff_text(before, after)
+        if diff is None:
+            continue
+        click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
+        for line in diff.splitlines():
+            click.echo(f"{prefix}  {line}", color=True)
+        return True
+    return False
 
 
 def _dedupe_audit_list(values: list[Any]) -> list[Any]:
@@ -1172,14 +1209,18 @@ def _print_market_snapshot_value_table(prefix: str, records: list[dict[str, Any]
         normalize=_audit_normalized_value,
     )
     if result is None:
-        return False
+        click.echo(f"{prefix}当前市场快照总表:")
+        for line in audit_printer_helpers.combined_field_label_lines(prefix, records):
+            click.echo(line, color=True)
+        click.echo(f"{prefix}  （当前无市场快照值）")
+        return True
     headers, rows = result
     return _print_audit_table(
         headers,
         rows,
         indent=f"{prefix}  ",
         label_lines=audit_printer_helpers.combined_field_label_lines(prefix, records),
-        title=f"{prefix}当前市场快照总表（source=current_market_snapshot；selected_price=current_prices）:",
+        title=f"{prefix}当前市场快照总表:",
     )
 
 
@@ -1194,14 +1235,18 @@ def _print_market_snapshot_change_table(prefix: str, records: list[tuple[str, li
         change_cell=_audit_change_cell,
     )
     if result is None:
-        return False
+        click.echo(f"{prefix}当前市场快照总表:")
+        for line in audit_printer_helpers.combined_change_field_label_lines(prefix, records):
+            click.echo(line, color=True)
+        click.echo(f"{prefix}  （无市场快照变化）")
+        return True
     headers, rows = result
     return _print_audit_table(
         headers,
         rows,
         indent=f"{prefix}  ",
         label_lines=audit_printer_helpers.combined_change_field_label_lines(prefix, records),
-        title=f"{prefix}当前市场快照总表（source=current_market_snapshot；selected_price=current_prices）:",
+        title=f"{prefix}当前市场快照总表:",
     )
 
 
@@ -1824,6 +1869,8 @@ def _audit_section_printer() -> audit_sections.StepAuditSectionPrinter:
         print_execution_price_change_table=_print_execution_price_change_table,
         print_event_draft_value_table=_print_event_draft_value_table,
         print_event_draft_change_table=_print_event_draft_change_table,
+        print_historical_field_value_table=_print_historical_field_value_table,
+        print_historical_field_change_table=_print_historical_field_change_table,
         scalar_value_record_group=_scalar_value_record_group,
         scalar_value_group_key=_scalar_value_group_key,
         scalar_change_record_group=_scalar_change_record_group,
@@ -1869,6 +1916,8 @@ def _scalar_value_record_group(record: dict[str, Any]) -> tuple[tuple[Any, ...] 
         "order_table",
         "execution_price_table",
         "event_draft_table",
+        "positions",
+        "historical_field_state",
     }:
         return None, None, None
     return audit_printer_helpers.scalar_record_group([
@@ -1896,6 +1945,8 @@ def _scalar_change_record_group(
         "order_table",
         "execution_price_table",
         "event_draft_table",
+        "positions",
+        "historical_field_state",
     }:
         return None, None, None
     return audit_printer_helpers.scalar_record_group([

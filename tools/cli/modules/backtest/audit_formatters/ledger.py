@@ -620,10 +620,12 @@ def positions_value_rows(
 ) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
     if field_name != "LedgerModule.positions" and field_name.rsplit(".", 1)[-1] != "positions":
         return None
-    if not is_ledger_entries(values):
+    ledger_values = [entry for entry in values if str(entry.get("scope") or "") in {"ledger", "ledger_config"}]
+    selected_values = ledger_values or list(values)
+    if not is_ledger_entries(selected_values):
         return None
     rows: list[tuple[Any, ...]] = []
-    for entry in values:
+    for entry in selected_values:
         display_value = display_field_value(field_name, entry.get("value"))
         positions = normalized_positions(display_value, normalize=normalize)
         if positions is None:

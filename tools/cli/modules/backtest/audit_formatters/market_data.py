@@ -172,17 +172,20 @@ def snapshot_rows(
     if not products:
         return None
     basis_columns = snapshot_basis_columns(parsed["current_market_snapshot"])
-    headers = snapshot_headers(parsed, basis_columns)
+    historical_field_columns = snapshot_historical_field_columns(parsed["current_historical_fields"])
+    headers = snapshot_headers(parsed, basis_columns, historical_field_columns)
     rows = [
         snapshot_row(
             product,
             parsed,
             basis_columns,
+            historical_field_columns,
             scalar_cell=scalar_cell,
             missing="",
             include_selected_price=bool(parsed.get("current_prices")),
             include_tradable_status=bool(parsed.get("current_tradable_status")),
             include_constraints=bool(parsed.get("current_order_constraints")),
+            include_historical_fields=bool(parsed.get("current_historical_fields")),
         )
         for product in products
     ]
@@ -210,31 +213,37 @@ def snapshot_change_rows(
         **after["current_market_snapshot"],
     })
     union = snapshot_union_components(before, after)
-    headers = snapshot_headers(union, basis_columns)
+    historical_field_columns = snapshot_historical_field_columns(union["current_historical_fields"])
+    headers = snapshot_headers(union, basis_columns, historical_field_columns)
     include_selected_price = bool(union.get("current_prices"))
     include_tradable_status = bool(union.get("current_tradable_status"))
     include_constraints = bool(union.get("current_order_constraints"))
+    include_historical_fields = bool(union.get("current_historical_fields"))
     rows = []
     for product in products:
         before_row = snapshot_row(
             product,
             before,
             basis_columns,
+            historical_field_columns,
             scalar_cell=scalar_cell,
             missing="null",
             include_selected_price=include_selected_price,
             include_tradable_status=include_tradable_status,
             include_constraints=include_constraints,
+            include_historical_fields=include_historical_fields,
         )
         after_row = snapshot_row(
             product,
             after,
             basis_columns,
+            historical_field_columns,
             scalar_cell=scalar_cell,
             missing="null",
             include_selected_price=include_selected_price,
             include_tradable_status=include_tradable_status,
             include_constraints=include_constraints,
+            include_historical_fields=include_historical_fields,
         )
         rows.append(tuple([
             str(product),
@@ -252,6 +261,7 @@ def snapshot_components(values: Mapping[str, Any], *, normalize: Normalize) -> d
         "current_prices": flat_mapping(values.get("current_prices"), normalize=normalize),
         "current_tradable_status": flat_mapping(values.get("current_tradable_status"), normalize=normalize),
         "current_order_constraints": constraint_mapping(values.get("current_order_constraints"), normalize=normalize),
+        "current_historical_fields": historical_field_mapping(values.get("current_historical_fields"), normalize=normalize),
     }
 
 
@@ -277,6 +287,7 @@ def snapshot_union_components(before: Mapping[str, Any], after: Mapping[str, Any
             "current_prices",
             "current_tradable_status",
             "current_order_constraints",
+            "current_historical_fields",
         )
     }
 
@@ -312,6 +323,24 @@ def constraint_mapping(value: Any, *, normalize: Normalize) -> dict[str, dict[st
     return out
 
 
+def historical_field_mapping(value: Any, *, normalize: Normalize) -> dict[str, dict[str, Any]]:
+    normalized = normalize(value)
+    if not isinstance(normalized, Mapping):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for product, fields in normalized.items():
+        if not isinstance(fields, Mapping):
+            continue
+        item = {
+            str(field): field_value
+            for field, field_value in fields.items()
+            if not isinstance(field_value, (Mapping, list, tuple))
+        }
+        if item:
+            out[str(product)] = item
+    return out
+
+
 def constraint_item(value: Any, *, normalize: Normalize) -> dict[str, Any]:
     normalized = normalize(value)
     if isinstance(normalized, Mapping):
@@ -330,7 +359,7 @@ def snapshot_products(parsed: Mapping[str, Any]) -> list[str]:
         for basis_values in snapshot.values():
             if isinstance(basis_values, Mapping):
                 products.update(str(product) for product in basis_values)
-    for key in ("current_prices", "current_tradable_status", "current_order_constraints"):
+    for key in ("current_prices", "current_tradable_status", "current_order_constraints", "current_historical_fields"):
         values = parsed.get(key) or {}
         if isinstance(values, Mapping):
             products.update(str(product) for product in values)
@@ -344,7 +373,23 @@ def snapshot_basis_columns(snapshot: Mapping[str, Mapping[str, Any]]) -> list[st
     return ordered
 
 
-def snapshot_headers(parsed: Mapping[str, Any], basis_columns: Sequence[str]) -> tuple[str, ...]:
+def snapshot_historical_field_columns(historical_fields: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    columns: list[str] = []
+    for fields in historical_fields.values():
+        if not isinstance(fields, Mapping):
+            continue
+        for field_name in fields:
+            field = str(field_name)
+            if field not in columns:
+                columns.append(field)
+    return columns
+
+
+def snapshot_headers(
+    parsed: Mapping[str, Any],
+    basis_columns: Sequence[str],
+    historical_field_columns: Sequence[str],
+) -> tuple[str, ...]:
     headers: list[str] = ["product", *basis_columns]
     if parsed.get("current_prices"):
         headers.append("selected_price")
@@ -352,6 +397,8 @@ def snapshot_headers(parsed: Mapping[str, Any], basis_columns: Sequence[str]) ->
         headers.append("tradable_status")
     if parsed.get("current_order_constraints"):
         headers.extend(MARKET_SNAPSHOT_CONSTRAINT_COLUMNS)
+    if parsed.get("current_historical_fields"):
+        headers.extend(historical_field_columns)
     return tuple(headers)
 
 
@@ -359,18 +406,22 @@ def snapshot_row(
     product: str,
     parsed: Mapping[str, Any],
     basis_columns: Sequence[str],
+    historical_field_columns: Sequence[str],
     *,
     scalar_cell: ScalarCell,
     missing: str,
     include_selected_price: bool,
     include_tradable_status: bool,
     include_constraints: bool,
+    include_historical_fields: bool,
 ) -> tuple[Any, ...]:
     snapshot = parsed.get("current_market_snapshot") or {}
     prices = parsed.get("current_prices") or {}
     tradable_status = parsed.get("current_tradable_status") or {}
     constraints = parsed.get("current_order_constraints") or {}
+    historical_fields = parsed.get("current_historical_fields") or {}
     constraint = constraints.get(product, {}) if isinstance(constraints, Mapping) else {}
+    product_fields = historical_fields.get(product, {}) if isinstance(historical_fields, Mapping) else {}
     row: list[Any] = [
         str(product),
         *[
@@ -386,6 +437,11 @@ def snapshot_row(
         row.extend(
             constraint_value(constraint, column, scalar_cell=scalar_cell, missing=missing)
             for column in MARKET_SNAPSHOT_CONSTRAINT_COLUMNS
+        )
+    if include_historical_fields:
+        row.extend(
+            constraint_value(product_fields, column, scalar_cell=scalar_cell, missing=missing)
+            for column in historical_field_columns
         )
     return tuple(row)
 

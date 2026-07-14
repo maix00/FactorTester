@@ -64,6 +64,7 @@ def test_step_audit_field_metadata_loads_display_value_kind_from_field_definitio
     assert metadata.display_value_kind("TargetStrategyModule.trade_intent") == "trade_intent"
     assert metadata.display_value_kind("RunWindowModule.strategy_windows") == "strategy_scoped_mapping"
     assert metadata.display_value_kind("MarketDataModule.field_state_baseline") == "historical_field_state"
+    assert metadata.display_value_kind("MarketDataModule.current_historical_fields") == "market_snapshot"
     assert metadata.display_value_kind("MarketDataModule.current_market_snapshot") == "market_snapshot"
     assert metadata.display_value_kind("MarketDataModule.current_prices") == "market_snapshot"
     assert metadata.display_value_kind("MarketDataModule.current_tradable_status") == "market_snapshot"
@@ -644,6 +645,37 @@ def test_step_audit_positions_changes_render_as_one_ledger_product_table(capsys)
     assert "RB.SHF" in out
     assert out.count("private:L1") == 1
     assert out.count("private:L2") == 1
+
+
+def test_step_audit_positions_values_ignore_empty_strategy_config_when_ledger_values_exist(capsys) -> None:
+    _print_audit_fields("输入字段", [
+        {
+            "field": "LedgerModule.positions",
+            "values": [
+                {"scope": "strategy_config", "strategy": "A1", "value": None},
+                {
+                    "scope": "ledger",
+                    "ledger": "private:L1",
+                    "cash_pool": "pool-1",
+                    "strategies": ["A1"],
+                    "value": {
+                        "AP.CZC": {"quantity": 0, "average_cost": 0.0, "lots": []},
+                    },
+                },
+            ],
+        }
+    ])
+
+    out = capsys.readouterr().out
+    assert "positions [LedgerModule.positions]" in out
+    assert "ledger" in out
+    assert "cash pool" in out
+    assert "products" in out
+    assert "private:L1" in out
+    assert "AP.CZC" in out
+    assert "策略配置 A1" not in out
+    assert "positions: (empty)" not in out
+    assert "合并 1 个账本" not in out
 
 
 def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
@@ -2300,14 +2332,96 @@ def test_step_audit_current_historical_fields_samples_and_transposes(capsys) -> 
 
     out = capsys.readouterr().out
     assert "current_historical_fields [MarketDataModule.current_historical_fields]" in out
-    assert "sample products: 6/10" in out
-    assert "field" in out
+    assert "当前市场快照总表" in out
+    assert "product" in out
     assert "VolumeMultiple" in out
     assert "LongMarginRatioByMoney" in out
     assert "CostBasisMethod" in out
     assert "P0.EX" in out
     assert "P9.EX" in out
-    assert "P4.EX" not in out
+    assert "sample products" not in out
+
+
+def test_step_audit_current_historical_fields_value_uses_product_field_table(capsys) -> None:
+    _print_audit_fields("输入字段", [
+        {
+            "field": "GroupMembershipModule.allocation_policy",
+            "values": [{"scope": "strategy_config", "strategy": "A1", "value": "equal_notional"}],
+        },
+        {
+            "field": "MarketDataModule.current_historical_fields",
+            "values": [
+                {
+                    "scope": "context",
+                    "value": {
+                        "AP.CZC": {"VolumeMultiple": 10, "LongMarginRatioByMoney": 0.1},
+                        "CJ.CZC": {"VolumeMultiple": 5, "LongMarginRatioByMoney": 0.15},
+                    },
+                },
+                {"scope": "strategy_config", "strategy": "A1", "value": None},
+            ],
+        },
+    ])
+
+    out = capsys.readouterr().out
+    assert "current_historical_fields [MarketDataModule.current_historical_fields]" in out
+    assert "VolumeMultiple" in out
+    assert "LongMarginRatioByMoney" in out
+    assert "AP.CZC" in out
+    assert "CJ.CZC" in out
+    assert "current_historical_fields.shared" not in out
+    assert "current_historical_fields.config" not in out
+
+
+def test_step_audit_combines_current_prices_and_historical_fields(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((160, 20)))
+
+    _print_audit_fields("输入字段", [
+        {
+            "field": "MarketDataModule.current_prices",
+            "values": [{"scope": "context", "value": {"AP.CZC": 9103, "CJ.CZC": 8920}}],
+        },
+        {
+            "field": "MarketDataModule.current_historical_fields",
+            "values": [{
+                "scope": "context",
+                "value": {
+                    "AP.CZC": {"VolumeMultiple": 10, "LongMarginRatioByMoney": 0.1},
+                    "CJ.CZC": {"VolumeMultiple": 5, "LongMarginRatioByMoney": 0.15},
+                },
+            }],
+        },
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert plain.count("当前市场快照总表") == 1
+    assert "current_prices [MarketDataModule.current_prices]" in plain
+    assert "current_historical_fields [MarketDataModule.current_historical_fields]" in plain
+    assert "product" in plain
+    assert "selected_price" in plain
+    assert "VolumeMultiple" in plain
+    assert "LongMarginRatioByMoney" in plain
+    assert "AP.CZC" in plain
+    assert "9103" in plain
+    assert "strategies" not in plain
+
+
+def test_step_audit_empty_current_historical_fields_does_not_use_strategy_table(capsys) -> None:
+    _print_audit_fields("输入字段", [
+        {
+            "field": "MarketDataModule.current_historical_fields",
+            "values": [
+                {"scope": "strategy_context", "strategy": "A1", "value": None},
+                {"scope": "strategy_context", "strategy": "A2", "value": None},
+            ],
+        },
+    ])
+
+    plain = _strip_ansi(capsys.readouterr().out)
+    assert "current_historical_fields [MarketDataModule.current_historical_fields]" in plain
+    assert "当前无市场快照值" in plain
+    assert "strategies" not in plain
+    assert "A1" not in plain
 
 
 def test_step_audit_formats_python_literal_strings_as_json() -> None:
