@@ -205,7 +205,7 @@ def list_factors(
     if not factors:
         click.echo("暂无因子参数候选")
         return
-    research_by_alias = _latest_research_by_alias(factor_family, product_group) if with_research else {}
+    research_by_alias = _latest_research_by_alias(factor_family, product_group, include_subordinates=include_subordinates) if with_research else {}
     for factor in factors:
         line = factor_line(factor, default_family=factor_family, default_product_group=product_group)
         summary = research_by_alias.get(str(factor.get("factor_alias") or factor.get("alias") or factor.get("name") or ""))
@@ -717,10 +717,11 @@ def current_user_params(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def _latest_research_by_alias(factor_family: str, product_group: str) -> dict[str, str]:
+def _latest_research_by_alias(factor_family: str, product_group: str, *, include_subordinates: bool) -> dict[str, str]:
     data = client_from_config().list_factor_research_runs(
         factor_family=factor_family,
         product_group=product_group,
+        include_subordinates="1" if include_subordinates else "",
         limit=200,
     )
     out: dict[str, str] = {}

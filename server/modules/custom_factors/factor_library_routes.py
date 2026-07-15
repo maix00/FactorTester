@@ -26,9 +26,11 @@ from tools.data.account_manage import (
     delete_factor_research_run,
     list_factor_research_runs,
     save_factor_research_run,
+    visible_usernames_for,
 )
 from tools.data.factor_research_registry import (
     RESEARCH_METRIC_REGISTRY,
+    metric_float,
     parse_metric_thresholds,
     research_stability_rows,
     resolve_research_rank_preset,
@@ -257,35 +259,67 @@ def _metric_thresholds(prefix: str) -> dict[str, float]:
     return result
 
 
+def _research_query_limit() -> int | None:
+    limit_arg = request.args.get('limit')
+    try:
+        return int(limit_arg) if limit_arg not in (None, '') else None
+    except ValueError:
+        return None
+
+
+def _list_visible_research_runs(
+    username: str,
+    *,
+    limit: int | None = None,
+    resolved_test_type: str | None = None,
+    apply_metric_filters: bool = True,
+) -> list[dict]:
+    include_subordinates = request.args.get('include_subordinates') == '1'
+    usernames = visible_usernames_for(username) if include_subordinates else [username]
+    runs: list[dict] = []
+    for visible_username in usernames:
+        runs.extend(
+            list_factor_research_runs(
+                visible_username,
+                ff_alias=request.args.get('factor_family') or request.args.get('ff_alias') or None,
+                factor_alias=request.args.get('factor_alias') or None,
+                product_group=request.args.get('product_group') or None,
+                test_type=resolved_test_type if resolved_test_type is not None else (request.args.get('test_type') or None),
+                sample_role=request.args.get('sample_role') or None,
+                regime_label=request.args.get('regime_label') or None,
+                slice_name=request.args.get('slice_name') or None,
+                start_date=request.args.get('start_date') or None,
+                end_date=request.args.get('end_date') or None,
+                overlap=request.args.get('overlap', '1') != '0',
+                min_metrics=(_metric_thresholds('min_metric') or None) if apply_metric_filters else None,
+                max_metrics=(_metric_thresholds('max_metric') or None) if apply_metric_filters else None,
+                order_by_metric=None,
+                descending=True,
+                limit=None,
+            )
+        )
+    order_by_metric = request.args.get('order_by_metric') or request.args.get('metric') or None
+    descending = request.args.get('ascending') != '1'
+    if order_by_metric:
+        missing_rank = float('-inf') if descending else float('inf')
+        runs.sort(
+            key=lambda run: metric_float((run.get('metrics') or {}).get(order_by_metric)) if metric_float((run.get('metrics') or {}).get(order_by_metric)) is not None else missing_rank,
+            reverse=descending,
+        )
+    else:
+        runs.sort(key=lambda run: float(run.get('updated_at') or 0), reverse=True)
+    if limit is not None and limit >= 0:
+        runs = runs[:limit]
+    return runs
+
+
 @cf_bp.route('/api/factor-library-research-runs', methods=['GET'])
 @login_required
 def api_list_factor_research_runs():
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    limit_arg = request.args.get('limit')
-    try:
-        limit = int(limit_arg) if limit_arg not in (None, '') else None
-    except ValueError:
-        limit = None
-    runs = list_factor_research_runs(
-        username,
-        ff_alias=request.args.get('factor_family') or request.args.get('ff_alias') or None,
-        factor_alias=request.args.get('factor_alias') or None,
-        product_group=request.args.get('product_group') or None,
-        test_type=request.args.get('test_type') or None,
-        sample_role=request.args.get('sample_role') or None,
-        regime_label=request.args.get('regime_label') or None,
-        slice_name=request.args.get('slice_name') or None,
-        start_date=request.args.get('start_date') or None,
-        end_date=request.args.get('end_date') or None,
-        overlap=request.args.get('overlap', '1') != '0',
-        min_metrics=_metric_thresholds('min_metric') or None,
-        max_metrics=_metric_thresholds('max_metric') or None,
-        order_by_metric=request.args.get('order_by_metric') or request.args.get('metric') or None,
-        descending=request.args.get('ascending') != '1',
-        limit=limit,
-    )
+    runs = _list_visible_research_runs(username, limit=_research_query_limit())
     return jsonify({'success': True, 'runs': runs})
 
 
@@ -345,11 +379,6 @@ def api_factor_research_stability():
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    limit_arg = request.args.get('limit')
-    try:
-        limit = int(limit_arg) if limit_arg not in (None, '') else None
-    except ValueError:
-        limit = None
     resolved = resolve_research_rank_preset(
         preset=request.args.get('preset') or '',
         test_type=request.args.get('test_type') or '',
@@ -362,19 +391,11 @@ def api_factor_research_stability():
         max_metrics = parse_metric_thresholds(resolved['max_metrics'])
     except ValueError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
-    runs = list_factor_research_runs(
+    runs = _list_visible_research_runs(
         username,
-        ff_alias=request.args.get('factor_family') or request.args.get('ff_alias') or None,
-        factor_alias=request.args.get('factor_alias') or None,
-        product_group=request.args.get('product_group') or None,
-        test_type=resolved['test_type'] or None,
-        sample_role=request.args.get('sample_role') or None,
-        regime_label=request.args.get('regime_label') or None,
-        slice_name=request.args.get('slice_name') or None,
-        start_date=request.args.get('start_date') or None,
-        end_date=request.args.get('end_date') or None,
-        overlap=True,
-        limit=limit,
+        limit=_research_query_limit(),
+        resolved_test_type=resolved['test_type'] or None,
+        apply_metric_filters=False,
     )
     rows = research_stability_rows(
         runs,
