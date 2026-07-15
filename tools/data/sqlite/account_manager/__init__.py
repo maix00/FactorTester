@@ -33,6 +33,13 @@ from .factor_param_config import (
     save_factor_param_config,
     save_factor_param_config_payload,
 )
+from .factor_research_result import (
+    config_hash as factor_research_config_hash,
+    delete_factor_research_run,
+    ensure_factor_research_result_schema,
+    list_factor_research_runs,
+    save_factor_research_run,
+)
 from .user_template import (
     delete_user_template_collections,
     delete_user_template_collection,
@@ -52,6 +59,7 @@ def ensure_account_manager_sqlite_store() -> str:
         ensure_user_level_schema(conn)
         ensure_product_group_schema(conn)
         ensure_factor_param_config_schema(conn)
+        ensure_factor_research_result_schema(conn)
         ensure_user_template_schema(conn)
     return str(Settings.CACHE_DB_PATH)
 

@@ -14,7 +14,10 @@ from tools.data.sqlite.account_manager import (
     delete_user_template_collections,
     delete_user_template_collection,
     ensure_account_manager_sqlite_store,
+    factor_research_config_hash as _factor_research_config_hash,
+    delete_factor_research_run as _delete_factor_research_run,
     iter_user_template_collections,
+    list_factor_research_runs as _list_factor_research_runs,
     list_user_template_metadata as _list_user_template_metadata,
     load_user_template as _load_user_template,
     ensure_scope_exists as _ensure_scope_exists,
@@ -30,6 +33,7 @@ from tools.data.sqlite.account_manager import (
     normalize_product_group as _normalize_product_group,
     rename_scope as _rename_scope,
     save_accounts as _save_accounts,
+    save_factor_research_run as _save_factor_research_run,
     save_levels as _save_levels,
     save_organizations as _save_organizations,
     save_factor_param_config as _save_factor_param_config,
@@ -515,6 +519,87 @@ def rename_scope(username: str, old_scope_key: str, new_scope_key: str) -> bool:
 def delete_scope(username: str, scope_key: str) -> bool:
     ensure_account_manager_sqlite_store()
     return _delete_scope(username, scope_key)
+
+
+def factor_research_config_hash(config: dict | None) -> str:
+    return _factor_research_config_hash(config)
+
+
+def save_factor_research_run(
+    username: str,
+    *,
+    ff_alias: str,
+    factor_alias: str,
+    start_date: str,
+    end_date: str,
+    test_type: str,
+    metrics: dict,
+    product_group: str = "",
+    factor_source: str = "",
+    config: dict | None = None,
+    config_hash_value: str | None = None,
+    report_path: str = "",
+    artifact_path: str = "",
+    note: str = "",
+    run_id: str | None = None,
+) -> dict:
+    ensure_account_manager_sqlite_store()
+    return _save_factor_research_run(
+        username,
+        ff_alias=ff_alias,
+        factor_alias=factor_alias,
+        start_date=start_date,
+        end_date=end_date,
+        test_type=test_type,
+        metrics=metrics,
+        product_group=product_group,
+        factor_source=factor_source,
+        config=config,
+        config_hash_value=config_hash_value,
+        report_path=report_path,
+        artifact_path=artifact_path,
+        note=note,
+        run_id=run_id,
+    )
+
+
+def list_factor_research_runs(
+    username: str,
+    *,
+    ff_alias: str | None = None,
+    factor_alias: str | None = None,
+    product_group: str | None = None,
+    test_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    overlap: bool = True,
+    min_metrics: dict[str, float] | None = None,
+    max_metrics: dict[str, float] | None = None,
+    order_by_metric: str | None = None,
+    descending: bool = True,
+    limit: int | None = None,
+) -> list[dict]:
+    ensure_account_manager_sqlite_store()
+    return _list_factor_research_runs(
+        username,
+        ff_alias=ff_alias,
+        factor_alias=factor_alias,
+        product_group=product_group,
+        test_type=test_type,
+        start_date=start_date,
+        end_date=end_date,
+        overlap=overlap,
+        min_metrics=min_metrics,
+        max_metrics=max_metrics,
+        order_by_metric=order_by_metric,
+        descending=descending,
+        limit=limit,
+    )
+
+
+def delete_factor_research_run(username: str, run_id: str) -> bool:
+    ensure_account_manager_sqlite_store()
+    return _delete_factor_research_run(username, run_id)
 
 
 def new_template_id() -> str:
