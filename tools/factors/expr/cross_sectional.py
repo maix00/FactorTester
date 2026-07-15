@@ -87,6 +87,8 @@ class CrossSectionalOp(OperandExpr):
         if isinstance(source_index, pd.MultiIndex):
             if isinstance(result.index, pd.MultiIndex) and result.index.nlevels == source_index.nlevels:
                 result.index.names = source_index.names
+            elif len(result.index) > 0 and all(isinstance(v, tuple) and len(v) == source_index.nlevels for v in result.index):
+                result.index = pd.MultiIndex.from_tuples(result.index, names=source_index.names)
             return result
         if not isinstance(result.index, pd.MultiIndex):
             result.index.name = source_index.name
