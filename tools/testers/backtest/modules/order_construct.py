@@ -24,6 +24,11 @@ from tools.testers.backtest.modules.market_data import (
     market_data_store_for,
 )
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
+from tools.testers.backtest.modules.runtime_info import (
+    product_display,
+    product_display_text,
+    record_runtime_info,
+)
 from tools.testers.backtest.modules.strategy_book import (
     apply_order_sizing_policy,
     ledger_for_strategy_product,
@@ -225,38 +230,76 @@ def _construct_orders(state, ctx) -> None:
 
 
 def _record_untradable_target_skip(state, strategy, product, timestamp) -> None:
-    product_name = str(getattr(product, "name", product))
-    product_desc = str(getattr(product, "desc", "") or "")
-    display = f"{product_name}({product_desc})" if product_desc else product_name
-    row = {
-        "type": "订单",
-        "status": "未生成",
-        "level": "warning",
-        "code": "order_target_skipped_untradable",
-        "message": f"{display} 当前不可交易，目标调整未生成订单",
-        "detail": (
-            f"{display} 在 {timestamp} 缺少有效可交易价格或被可交易状态过滤；"
-            "本次目标调整不生成订单，既有持仓保留，等待后续可交易时点。"
-        ),
-        "details": {
-            "strategy": str(getattr(strategy, "alias", strategy)),
-            "product": product_name,
-            "timestamp": str(timestamp),
-        },
+    strategy_name = str(getattr(strategy, "alias", strategy))
+    product_info = product_display(product)
+    display = product_display_text(product_info)
+    reason = "缺少有效可交易价格或被可交易状态过滤"
+    aggregation_key = f"{strategy_name}|{product_info['name']}|{reason}"
+    ts_text = str(timestamp)
+    start, end, count, seen_timestamps = _existing_untradable_target_skip_interval(
+        state,
+        aggregation_key,
+    )
+    start = min(start, ts_text) if start else ts_text
+    end = max(end, ts_text) if end else ts_text
+    if ts_text not in seen_timestamps:
+        seen_timestamps.add(ts_text)
+        count += 1
+    details = {
+        "strategy": strategy_name,
+        "product": product_info["name"],
+        "product_desc": product_info["desc"],
+        "reason": reason,
+        "start": start,
+        "end": end,
+        "timestamp": end,
+        "count": count,
+        "_seen_timestamps": sorted(seen_timestamps),
     }
-    runtime_rows = getattr(state, "runtime_info_rows", None)
-    if isinstance(runtime_rows, list):
-        if not any(
-            isinstance(existing, dict)
-            and existing.get("code") == row["code"]
-            and existing.get("details") == row["details"]
-            for existing in runtime_rows[-50:]
+    record_runtime_info(
+        state,
+        code="order_target_skipped_untradable",
+        type="订单",
+        status="未生成",
+        level="warning",
+        message=f"{display} 当前不可交易，目标调整未生成订单",
+        detail=(
+            f"{display} 在 {start} 到 {end} 期间 {reason}；"
+            f"目标调整未生成订单，既有持仓保留，等待后续可交易时点；累计 {count} 次。"
+        ),
+        details=details,
+        aggregation_key=aggregation_key,
+    )
+
+
+def _existing_untradable_target_skip_interval(
+    state,
+    aggregation_key: str,
+) -> tuple[str | None, str | None, int, set[str]]:
+    rows = getattr(state, "runtime_info_rows", None)
+    if not isinstance(rows, list):
+        return None, None, 0, set()
+    for row in rows:
+        if (
+            isinstance(row, dict)
+            and row.get("code") == "order_target_skipped_untradable"
+            and row.get("aggregation_key") == aggregation_key
         ):
-            runtime_rows.append(row)
-    sink = getattr(state, "runtime_info_sink", None)
-    emit = getattr(sink, "emit_runtime_info", None)
-    if callable(emit):
-        emit(row["message"], level=row["level"], code=row["code"], details=row["details"], row=row)
+            details = row.get("details") if isinstance(row.get("details"), dict) else {}
+            seen_raw = details.get("_seen_timestamps")
+            if isinstance(seen_raw, (list, tuple, set)):
+                seen = {str(value) for value in seen_raw}
+            else:
+                seen = set()
+                if details.get("start"):
+                    seen.add(str(details["start"]))
+            return (
+                str(details.get("start")) if details.get("start") else None,
+                str(details.get("end")) if details.get("end") else None,
+                int(details.get("count") or 0),
+                seen,
+            )
+    return None, None, 0, set()
 
 
 def _stringify_deltas(deltas: dict) -> dict[str, float]:

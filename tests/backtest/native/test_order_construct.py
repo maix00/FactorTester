@@ -195,6 +195,54 @@ def test_basic_size_order_keeps_untradable_position_and_records_runtime_info():
     assert account.runtime_info_rows[0]["code"] == "order_target_skipped_untradable"
 
 
+def test_basic_size_order_aggregates_repeated_untradable_target_warnings():
+    s = Strategy(alias="S")
+    p = _product()
+
+    class _FakeLedger:
+        def get(self, ref, default=None):
+            return {p: ProductPosition(quantity=30.0)}
+
+    class _FakeSink:
+        def __init__(self):
+            self.events = []
+
+        def emit_runtime_info(self, message, **kwargs):
+            self.events.append({"message": message, **kwargs})
+
+    class _FakeAccount:
+        def __init__(self):
+            self.ledgers = {s: _FakeLedger()}
+            self.runtime_info_rows = []
+            self.runtime_info_sink = _FakeSink()
+
+        def ledger_for_strategy(self, strategy):
+            return self.ledgers[strategy]
+
+    account = _FakeAccount()
+
+    for timestamp in (
+        pd.Timestamp("2024-01-01 09:01"),
+        pd.Timestamp("2024-01-01 09:02"),
+    ):
+        ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), active_strategies=frozenset({s}))
+        ctx.set(MarketDataModule.current_prices, {})
+        ctx.set(MarketDataModule.current_tradable_status, {p: False})
+        ctx.set_for(LedgerModule.equity, s, 1000.0)
+        ctx.set_for(GroupMembershipModule.target_weights, s, {})
+
+        _basic_size_order(account, ctx)
+
+        assert ctx.get_for(OrderConstructModule.raw_deltas, s) == {}
+
+    rows = [row for row in account.runtime_info_rows if row.get("code") == "order_target_skipped_untradable"]
+    assert len(rows) == 1
+    assert rows[0]["details"]["count"] == 2
+    assert rows[0]["details"]["start"] == "2024-01-01 09:01:00"
+    assert rows[0]["details"]["end"] == "2024-01-01 09:02:00"
+    assert len(account.runtime_info_sink.events) == 1
+
+
 def test_basic_size_order_uses_coarse_tradability_not_side_constraints_for_closeout():
     s = Strategy(alias="S")
     p = _product()
