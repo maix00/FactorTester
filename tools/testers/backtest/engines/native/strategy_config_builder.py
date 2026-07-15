@@ -48,6 +48,7 @@ _TERM_STRUCTURE_FLOWS = {
     "handle_rollover_notice",
 }
 _GROUP_STRATEGY_FLOWS = {"group_quantile_membership"}
+_THRESHOLD_STRATEGY_FLOWS = {"threshold_signal_target"}
 _LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
 _DAILY_MARK_TO_MARKET_FLOWS = {
     "register_daily_mark_to_market_notices",
@@ -118,12 +119,22 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
         excluded |= _MARGIN_NOTICE_FLOWS
     if not (uses_dmtm or uses_margin_notice):
         excluded |= _LEDGER_LOOKUP_FLOWS
-    strategy_kind = str(resolved_settings.get("strategy_kind") or "group")
+    strategy_kind = _strategy_intent_mode(resolved_settings)
     if strategy_kind == "long_short":
-        excluded |= _GROUP_STRATEGY_FLOWS
+        excluded |= _GROUP_STRATEGY_FLOWS | _THRESHOLD_STRATEGY_FLOWS
+    elif strategy_kind == "threshold":
+        excluded |= _GROUP_STRATEGY_FLOWS | _LONG_SHORT_STRATEGY_FLOWS
     else:
-        excluded |= _LONG_SHORT_STRATEGY_FLOWS
+        excluded |= _THRESHOLD_STRATEGY_FLOWS | _LONG_SHORT_STRATEGY_FLOWS
     return frozenset(names - excluded)
+
+
+def _strategy_intent_mode(resolved_settings: Mapping[str, Any]) -> str:
+    return str(
+        resolved_settings.get("strategy_intent_mode")
+        or resolved_settings.get("strategy_kind")
+        or "group"
+    )
 
 
 def _uses_daily_mark_to_market_flow(resolved_settings: Mapping[str, Any]) -> bool:
@@ -154,7 +165,7 @@ def _uses_margin_notice_flow(resolved_settings: Mapping[str, Any]) -> bool:
 def _has_strategy_intent_precompute_policy(resolved_settings: Mapping[str, Any]) -> bool:
     from tools.testers.backtest.modules.target import strategy_intent_policy_for
 
-    strategy_kind = str(resolved_settings.get("strategy_kind") or "group")
+    strategy_kind = _strategy_intent_mode(resolved_settings)
     return strategy_intent_policy_for(strategy_kind) is not None
 
 
@@ -318,6 +329,9 @@ def build_strategy_configs(
         active_flow_names = _resolve_active_flow_names(flow_resolved)
         field_values: dict[Any, Any] = {}
         for field_name, ref, fd, owner_flow_names in entries:
+            if field_name == "strategy_intent_mode" and "strategy_kind" in resolved and field_name not in resolved:
+                field_values[ref] = resolved["strategy_kind"]
+                continue
             if field_name in resolved:
                 if field_name in _LEDGER_OWNED_SETTING_NAMES:
                     continue

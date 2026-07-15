@@ -49,8 +49,20 @@ class TargetStrategyModule(ExecutableModule):
     trade_intent: ClassVar[FieldRef[Any]] = FieldRef("trade_intent")
     target_weights: ClassVar[FieldRef[Any]] = FieldRef("target_weights")
     strategy_kind: ClassVar[FieldRef[str]] = FieldRef("strategy_kind")
+    strategy_intent_mode: ClassVar[FieldRef[str]] = strategy_kind
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
+        "strategy_intent_mode": FieldDefinition(
+            public=True,
+            label="策略意图",
+            default="group",
+            control_template="select",
+            tab="group_strategy",
+            options=(("group", "分组"), ("threshold", "阈值")),
+            chip_template="策略意图: {value}",
+            tab_label="分组数量",
+            tab_order=90,
+        ),
         "trade_intent": FieldDefinition(public=False, display_value_kind="trade_intent"),
     }
 

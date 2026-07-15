@@ -12,6 +12,8 @@ from tools.testers.backtest.modules.group_membership import GroupMembershipModul
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.strategy_book import StrategyBook
+from tools.testers.backtest.modules.target import TargetStrategyModule
+from tools.testers.backtest.modules.threshold_signal import ThresholdSignalModule
 
 # GroupMembershipModule's core Flows are unconditionally active for every
 # strategy this round (no second SignalToOrderModule exists yet to opt out
@@ -141,7 +143,42 @@ def test_non_variant_flows_are_always_active():
     configs = build_strategy_configs({"A1": _GROUP_FIELDS})
     config = next(iter(configs.values()))
     assert config.uses_flow("group_quantile_membership")
+    assert not config.uses_flow("threshold_signal_target")
     assert config.uses_flow("initialize_ledgers")
+
+
+def test_threshold_strategy_activates_threshold_flow_without_group_defaults():
+    configs = build_strategy_configs({
+        "T1": {
+            "strategy_intent_mode": "threshold",
+            "threshold_mode": "absolute",
+            "entry_threshold": 0.5,
+            "exit_threshold": 0.2,
+            "side_mode": "long_only",
+        },
+    })
+    config = next(iter(configs.values()))
+    assert config.get(TargetStrategyModule.strategy_kind) == "threshold"
+    assert config.get(ThresholdSignalModule.entry_threshold) == 0.5
+    assert config.uses_flow("threshold_signal_target")
+    assert config.uses_flow("precompute_strategy_intents")
+    assert not config.uses_flow("group_quantile_membership")
+
+
+def test_threshold_strategy_kind_alias_materializes_target_strategy_kind():
+    configs = build_strategy_configs({
+        "T1": {
+            "strategy_kind": "threshold",
+            "threshold_mode": "absolute",
+            "entry_threshold": 0.5,
+            "exit_threshold": 0.2,
+            "side_mode": "long_only",
+        },
+    })
+    config = next(iter(configs.values()))
+    assert config.get(TargetStrategyModule.strategy_kind) == "threshold"
+    assert config.uses_flow("threshold_signal_target")
+    assert not config.uses_flow("group_quantile_membership")
 
 
 def test_long_short_strategy_does_not_require_group_membership_fields():

@@ -19,6 +19,7 @@ from .slippage import SlippageModule
 from .volume_capacity import VolumeCapacityMode
 from .margin import MarginModule
 from .order_construct import OrderConstructModule
+from .threshold_signal import ThresholdSignalModule
 from .cash_rescale import LedgerCashConstraintModule
 from .registry import (
     BacktestModuleRegistry,
@@ -33,6 +34,7 @@ __all__ = [
     "VolumeCapacityMode",
     "MarginModule",
     "OrderConstructModule",
+    "ThresholdSignalModule",
     "LedgerCashConstraintModule",
     "ModuleRegistry",
     "BacktestModuleRegistry",

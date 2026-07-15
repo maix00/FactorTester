@@ -47,6 +47,7 @@ from .factor import FactorModule
 from .factor_signal import FactorSignalModule
 from .target import TargetStrategyModule
 from .group_membership import GroupMembershipModule
+from .threshold_signal import ThresholdSignalModule
 from .long_short import LongShortCompositionModule
 from .order_flow import OrderFlowModule
 from .equity_curve import EquityCurveModule
@@ -74,6 +75,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     FactorSignalModule,
     TargetStrategyModule,
     GroupMembershipModule,
+    ThresholdSignalModule,
     LongShortCompositionModule,
     FeeModule,
     SlippageModule,
