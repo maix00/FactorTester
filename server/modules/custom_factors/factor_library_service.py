@@ -108,6 +108,8 @@ def build_factor_library_config_factors(current_username: str, owner_account: di
             ))
             factors[-1]['scope_key'] = config.get('scope_key') or config.get('product_group') or DEFAULT_SCOPE_KEY
             factors[-1]['product_group'] = config.get('product_group') or config.get('scope_key') or DEFAULT_SCOPE_KEY
+            if isinstance(config.get('metadata'), dict):
+                factors[-1]['metadata'] = config.get('metadata')
         except Exception:
             continue
     return factors
@@ -265,6 +267,7 @@ def list_factor_library_config_users(current_username: str, ff_alias: str, produ
                 'updated_at': template_time_from_id(config) if config else '',
                 'factor_count': len(config.get('params_list') or []) if config else 0,
                 'params_list': config.get('params_list') if config else [],
+                'metadata': config.get('metadata') if config and isinstance(config.get('metadata'), dict) else {},
             } if config else None,
             'factors': factors,
         })
@@ -276,11 +279,85 @@ def list_factor_library_config_users(current_username: str, ff_alias: str, produ
     }
 
 
-def save_current_user_library_config(current_username: str, ff_alias: str, params_list: list, product_group: str = DEFAULT_SCOPE_KEY) -> tuple[dict, list]:
+def _clean_library_metadata(metadata: dict | None) -> dict:
+    if not isinstance(metadata, dict):
+        return {}
+    cleaned = {}
+    for key in (
+        'note',
+        'research_report',
+        'product_group_id',
+        'product_group_name',
+        'product_group_paths',
+        'product_names',
+        'product_count',
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str):
+            value = value.strip()
+        if isinstance(value, list):
+            value = [str(item).strip() for item in value if str(item).strip()]
+        if value not in (None, '', []):
+            cleaned[key] = value
+    return cleaned
+
+
+def _product_group_metadata(username: str, product_group: str) -> dict:
+    product_group = normalize_product_group(product_group)
+    if product_group == DEFAULT_SCOPE_KEY:
+        return {}
+    try:
+        for group in load_product_groups(username):
+            if str(group.get('name') or '').strip() != product_group:
+                continue
+            metadata = {
+                'product_group_name': product_group,
+                'product_group_id': group.get('id') or '',
+                'product_group_paths': group.get('paths') or [],
+                'product_names': group.get('product_names') or [],
+                'product_count': group.get('product_count') or len(group.get('product_names') or []),
+            }
+            return _clean_library_metadata(metadata)
+    except Exception:
+        return {}
+    return {}
+
+
+def _merged_library_metadata(
+    current_username: str,
+    ff_alias: str,
+    product_group: str,
+    metadata: dict | None,
+) -> dict:
+    existing = load_factor_param_config(current_username, ff_alias, product_group) or {}
+    merged = _clean_library_metadata(existing.get('metadata') if isinstance(existing, dict) else {})
+    group_metadata = _product_group_metadata(current_username, product_group)
+    for key, value in group_metadata.items():
+        merged[key] = value
+    provided = _clean_library_metadata(metadata)
+    for key, value in provided.items():
+        merged[key] = value
+    return merged
+
+
+def save_current_user_library_config(
+    current_username: str,
+    ff_alias: str,
+    params_list: list,
+    product_group: str = DEFAULT_SCOPE_KEY,
+    metadata: dict | None = None,
+) -> tuple[dict, list]:
     product_group = normalize_product_group(product_group)
     factor_family = get_factor_family_instance(ff_alias, username=current_username)
     serialized_rows = serialize_factor_param_rows(factor_family, params_list)
-    config = save_factor_param_config(current_username, ff_alias, serialized_rows, product_group)
+    config_metadata = _merged_library_metadata(current_username, ff_alias, product_group, metadata)
+    config = save_factor_param_config(
+        current_username,
+        ff_alias,
+        serialized_rows,
+        product_group,
+        metadata=config_metadata,
+    )
     account = get_account(current_username) or {'username': current_username}
     factors = build_factor_library_config_factors(current_username, account, ff_alias, config)
     return config, factors

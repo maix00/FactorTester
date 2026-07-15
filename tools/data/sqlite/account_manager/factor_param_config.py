@@ -82,7 +82,14 @@ def load_factor_param_config(username: str, ff_alias: str, scope_key: str = DEFA
     return payload if isinstance(payload, dict) else None
 
 
-def save_factor_param_config(username: str, ff_alias: str, params_list: list, scope_key: str = DEFAULT_SCOPE_KEY) -> dict[str, Any]:
+def save_factor_param_config(
+    username: str,
+    ff_alias: str,
+    params_list: list,
+    scope_key: str = DEFAULT_SCOPE_KEY,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     scope_key = ensure_scope_exists(username, scope_key)
     config = {
         "id": username,
@@ -94,6 +101,8 @@ def save_factor_param_config(username: str, ff_alias: str, params_list: list, sc
         "params_list": params_list,
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
     }
+    if metadata:
+        config["metadata"] = metadata
     save_factor_param_config_payload(username, ff_alias, config, scope_key)
     return config
 

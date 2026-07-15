@@ -86,10 +86,20 @@ def api_save_factor_library_config(ff_alias):
     data = request.get_json() or {}
     params_list = data.get('params_list', [])
     product_group = data.get('product_group') or data.get('scope_key') or DEFAULT_SCOPE_KEY
+    metadata = data.get('metadata') if isinstance(data.get('metadata'), dict) else {}
+    for key in ('note', 'research_report', 'product_group_paths'):
+        if key in data and key not in metadata:
+            metadata[key] = data.get(key)
     if not isinstance(params_list, list):
         return jsonify({'success': False, 'error': '参数列表格式无效'})
     with get_user_file_lock(username):
-        config, factors = save_current_user_library_config(username, ff_alias, params_list, product_group=product_group)
+        config, factors = save_current_user_library_config(
+            username,
+            ff_alias,
+            params_list,
+            product_group=product_group,
+            metadata=metadata,
+        )
     return api_ok({'config': config, 'factors': factors})
 
 

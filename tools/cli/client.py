@@ -156,11 +156,15 @@ class FactorTesterClient:
         *,
         product_group: str,
         params_list: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"product_group": product_group, "params_list": params_list}
+        if metadata:
+            payload["metadata"] = metadata
         return self._expect_success(
             self.session.put(
                 f"/api/factor-library-configs/{factor_family}",
-                {"product_group": product_group, "params_list": params_list},
+                payload,
             )
         )
 

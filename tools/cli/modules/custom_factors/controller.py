@@ -201,17 +201,33 @@ def list_factors(
 @click.option("--factor-family", "--factor_family", required=True, help="因子家族。")
 @click.option("--product-group", "--product_group", default="", help="可选产品组 scope。")
 @click.option("--param", "params", multiple=True, required=True, metavar="KEY=VALUE", help="参数键值，可重复传入。")
+@click.option("--note", default="", help="保存到因子库配置的研究备注。")
+@click.option("--research-report", "--research_report", default="", help="关联的研究报告路径或标识。")
+@click.option("--product-path", "--product_path", "product_paths", multiple=True, help="当场产品组路径，可重复；默认按产品组库同名 scope 自动快照。")
 @friendly_errors
-def add_factor_params(factor_family: str, product_group: str, params: tuple[str, ...]) -> None:
+def add_factor_params(
+    factor_family: str,
+    product_group: str,
+    params: tuple[str, ...],
+    note: str,
+    research_report: str,
+    product_paths: tuple[str, ...],
+) -> None:
     """Append one parameter row to the factor library."""
     client = client_from_config()
     current_rows = current_user_params(client.factor_library_configs(factor_family, product_group=product_group))
     row = dict(parse_key_value(item) for item in params)
     current_rows.append(row)
+    metadata = {
+        "note": note,
+        "research_report": research_report,
+        "product_group_paths": list(product_paths),
+    }
     data = client.save_factor_library_config(
         factor_family,
         product_group=product_group,
         params_list=current_rows,
+        metadata={key: value for key, value in metadata.items() if value},
     )
     factors = data.get("factors") or []
     click.echo("已新增因子参数")
@@ -558,6 +574,7 @@ def factor_line(factor: dict[str, Any], *, default_family: str = "", default_pro
     family = factor.get("factor_family_alias") or factor.get("factor_family_name") or default_family
     scope = factor.get("product_group") or factor.get("scope_key") or default_product_group or "默认"
     owner = factor.get("owner_alias") or factor.get("owner_username") or ""
+    metadata = factor.get("metadata") if isinstance(factor.get("metadata"), dict) else {}
     parts = [str(alias)]
     if family:
         parts.append(f"因子家族={family}")
@@ -565,6 +582,10 @@ def factor_line(factor: dict[str, Any], *, default_family: str = "", default_pro
         parts.append(f"产品组={scope}")
     if owner:
         parts.append(f"所有者={owner}")
+    if metadata.get("note"):
+        parts.append(f"备注={metadata.get('note')}")
+    if metadata.get("product_group_paths"):
+        parts.append(f"路径数={len(metadata.get('product_group_paths') or [])}")
     return " · ".join(parts)
 
 
