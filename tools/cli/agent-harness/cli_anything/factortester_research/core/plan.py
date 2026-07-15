@@ -132,7 +132,7 @@ def build_factor_research_plan(
                 "command": (
                     "factortester custom_factors factor-library rank "
                     "--start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> "
-                    "--test-type ic --metric ic_mean --min-metric ic_t_stat=2"
+                    "--preset ic-stable"
                 ),
                 "required_outputs": ["factor_family", "product_group", "metrics", "run_id", "report_path"],
             },
