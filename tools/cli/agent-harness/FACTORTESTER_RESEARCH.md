@@ -26,8 +26,9 @@ The harness adapts two research skill systems:
 4. Run cheap diagnostics first: factor sequence sanity, IC/IR, IC decay, factor
    type analysis, product-group coverage, and transaction-cost feasibility.
 5. Query the factor research result store before repeating runs. Import existing
-   report artifacts with `factor-library import-result`, then use
-   `factor-library history` and `factor-library rank` to find candidates that
+   report artifacts with `factor-library import-result`, use
+   `factor-library metrics` for canonical metric names, and use
+   `factor-library history` / `rank` / `stability` to find candidates that
    deserve revalidation.
 6. Run group/backtest grids only after diagnostics pass.
 7. Audit order flow, snapshots, ledger results, volume-capacity constraints,

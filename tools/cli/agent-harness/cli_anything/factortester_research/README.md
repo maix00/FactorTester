@@ -72,6 +72,8 @@ artifacts when they become relevant:
 ```bash
 factortester custom_factors factor-library history --factor-family SgCCS --product-group 中国期货日盘
 
+factortester custom_factors factor-library metrics
+
 factortester custom_factors factor-library rank \
   --start-date 2024-01-01 --end-date 2025-12-31 \
   --preset ic-stable
@@ -84,11 +86,18 @@ factortester custom_factors factor-library import-result \
   --dir /path/to/research_reports/factors/MyFamily \
   --report-path /path/to/research_reports/factors/MyFamily/report.md \
   --note "backfill existing artifacts before candidate ranking"
+
+factortester custom_factors factor-library stability \
+  --factor-family SgCCS \
+  --preset ic-stable \
+  --by quarter
 ```
 
-`rank` is a candidate-generation query. A ranked factor still needs validation
-slices, cost/capacity checks, and OOS review before it can be treated as a
-research result. Product-group names in result records are labels for the tested
+`metrics` is the canonical metric-name registry. `rank` is a
+candidate-generation query. `stability` checks whether the same candidate keeps
+passing across time slices. A ranked factor still needs validation slices,
+cost/capacity checks, and OOS review before it can be treated as a research
+result. Product-group names in result records are labels for the tested
 configuration; they are not automatically product-group candidates for future
 runs unless the product group exists in the product-group library.
 

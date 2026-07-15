@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 
 from tools.cli.modules.custom_factors.controller import (
+    _RESEARCH_METRIC_REGISTRY,
     _research_payloads_from_artifact,
+    _research_stability_rows,
     _resolve_research_rank_preset,
 )
 
@@ -38,6 +40,7 @@ def test_research_payloads_from_backtest_artifact(tmp_path):
         test_type="auto",
         report_path="/tmp/report.md",
         note="note",
+        metadata={},
     )
 
     assert len(payloads) == 1
@@ -77,6 +80,7 @@ def test_research_payloads_from_ic_artifact_with_multiple_aliases(tmp_path):
         test_type="auto",
         report_path="",
         note="",
+        metadata={},
     )
 
     assert [payload["factor_alias"] for payload in payloads] == ["MmRet|N:10d", "MmRet|N:20d"]
@@ -111,6 +115,7 @@ def test_research_payloads_from_bucket_label_artifact(tmp_path):
         test_type="auto",
         report_path="",
         note="",
+        metadata={"sample_role": "oos", "regime_label": "low-vol"},
     )[0]
 
     assert payload["test_type"] == "bucket_label"
@@ -118,6 +123,8 @@ def test_research_payloads_from_bucket_label_artifact(tmp_path):
     assert payload["metrics"]["a1_label_return"] == 0.01
     assert payload["metrics"]["a5_label_return"] == -0.02
     assert payload["metrics"]["a1_a5_label_return_spread"] == 0.03
+    assert payload["config"]["research_meta"]["sample_role"] == "oos"
+    assert payload["config"]["research_meta"]["regime_label"] == "low-vol"
 
 
 def test_research_rank_preset_expands_default_filters():
@@ -147,3 +154,49 @@ def test_research_rank_preset_respects_explicit_metric_and_test_type():
     assert resolved["metric"] == "a1_a5_label_return_spread"
     assert resolved["min_metrics"] == ["ls_return=0"]
     assert resolved["max_metrics"] == ["max_drawdown=0"]
+
+
+def test_research_rank_preset_supports_aliases():
+    resolved = _resolve_research_rank_preset(
+        preset="costed-good",
+        test_type="",
+        metric="",
+        min_metrics=(),
+        max_metrics=(),
+    )
+
+    assert resolved["test_type"] == "backtest"
+    assert resolved["metric"] == "ls_return"
+    assert resolved["min_metrics"] == ["ls_return=0"]
+
+
+def test_research_stability_rows_aggregates_periods_and_failures():
+    rows = _research_stability_rows(
+        [
+            {
+                "factor_alias": "F|N:1",
+                "test_type": "ic",
+                "product_group": "core",
+                "start_date": "2026-01-01",
+                "metrics": {"ic_mean": 0.03, "ic_t_stat": 2.4},
+            },
+            {
+                "factor_alias": "F|N:1",
+                "test_type": "ic",
+                "product_group": "core",
+                "start_date": "2026-04-01",
+                "metrics": {"ic_mean": -0.01, "ic_t_stat": -0.5},
+            },
+        ],
+        metric="ic_mean",
+        min_metrics={"ic_mean": 0.0, "ic_t_stat": 2.0},
+        max_metrics={},
+        bucket="quarter",
+    )
+
+    assert rows == [("F|N:1", "ic", "core", 2, "1/2", "0.01", "-0.01", "0.03", 1)]
+
+
+def test_research_metric_registry_has_core_metrics():
+    assert _RESEARCH_METRIC_REGISTRY["ic_mean"]["default_test_type"] == "ic"
+    assert _RESEARCH_METRIC_REGISTRY["ls_return"]["direction"] == "higher"

@@ -22,8 +22,11 @@ factortester ic_test grid --factor-family SgCCS --product-group 中国期货日�
 factortester factor_type_analysis grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m
 factortester backtest compare factor-grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --volume-capacity-mode infinite
 factortester custom_factors factor-library history --factor-family SgCCS --product-group 中国期货日盘
+factortester custom_factors factor-library metrics
 factortester custom_factors factor-library rank --preset ic-stable --start-date 2024-01-01 --end-date 2025-12-31
 factortester custom_factors factor-library rank --preset costed-backtest --start-date 2024-01-01 --end-date 2025-12-31
+factortester custom_factors factor-library stability --preset ic-stable --factor-family SgCCS --by quarter
+factortester custom_factors factor-library import-result --dir /path/to/research_reports/factors/SgCCS --sample-role oos --regime-label low_vol
 factortester backtest --run --verbose
 factortester backtest results summary
 factortester backtest results order-flow --group-name A1 --output orders.csv
@@ -37,7 +40,7 @@ factortester backtest results order-flow --group-name A1 --output orders.csv
 - IC/IR：至少检查 RankIC、ICIR、样本数、滚动稳定性和 IC 衰减。
 - 类型分析：检查趋势/波动率等参照类型相关性，以及产品组内相关性来源。
 - 多重检验：参数/产品组网格越大，越要报告候选数量和样本外验证。
-- 结果库：`rank` 只用于候选生成，`ic-stable` / `costed-backtest` / `bucket-monotonic` 预设不能替代样本切片和样本外复核。
+- 结果库：`rank` 只用于候选生成，`metrics` 是指标命名来源，`stability` 用来检查跨时间段稳定性；`ic-stable` / `costed-backtest` / `costed-good` / `bucket-monotonic` / `monotonic-long-short` 预设不能替代样本切片和样本外复核。
 - 交易成本：费率、滑点、成交量容量和换手率必须进入回测解释。
 - 容量：成交量容量限制与不限制至少做一次对照。
 - 结果核查：保存统计、净值、订单流、snapshot；异常跳变要定位到 flow 或数据。

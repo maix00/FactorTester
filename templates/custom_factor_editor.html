@@ -56,6 +56,22 @@
                 <span>从左侧选择因子查看源码与语法高亮。</span>
             </div>
             <pre id="source-view" class="source-view" hidden><code id="source-code" class="language-python"></code></pre>
+            <section id="research-panel" class="research-panel" hidden>
+                <div class="research-panel-header">
+                    <div>
+                        <span class="eyebrow">RESEARCH RESULTS</span>
+                        <h3>研究结果</h3>
+                    </div>
+                    <div class="research-controls">
+                        <input id="research-start-date" type="date" aria-label="开始日期">
+                        <input id="research-end-date" type="date" aria-label="结束日期">
+                        <input id="research-metric" type="text" value="ls_return" aria-label="排序指标">
+                        <button id="research-refresh" type="button">刷新</button>
+                    </div>
+                </div>
+                <div id="research-status" class="research-status">选择因子后加载研究结果。</div>
+                <div id="research-results" class="research-results"></div>
+            </section>
         </section>
     </main>
 

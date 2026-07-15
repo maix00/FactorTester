@@ -1,6 +1,7 @@
 (function() {
     var factors = [];
     var selectedKey = null;
+    var selectedFactor = null;
 
     function status(message, error) {
         var node = document.getElementById('workspace-status');
@@ -82,7 +83,7 @@
     }
 
     async function viewFactor(item, key) {
-        selectedKey = key; renderList();
+        selectedKey = key; selectedFactor = item; renderList();
         try {
             var url = item.type === 'public'
                 ? '/custom-factors/api/public-factor/' + encodeURIComponent(item.name || item.id)
@@ -97,7 +98,86 @@
             code.textContent = detail.source_code || '';
             code.removeAttribute('data-highlighted');
             if (window.hljs) window.hljs.highlightElement(code);
+            loadResearchResults(detail);
         } catch (error) { status(error.message, true); }
+    }
+
+    function escapeHTML(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch) {
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
+        });
+    }
+
+    function factorFamilyName(detail) {
+        return String((detail && (detail.name || detail.factor_family || detail.id)) || (selectedFactor && (selectedFactor.name || selectedFactor.id)) || '');
+    }
+
+    async function loadResearchResults(detail) {
+        var panel = document.getElementById('research-panel');
+        var statusEl = document.getElementById('research-status');
+        var resultsEl = document.getElementById('research-results');
+        var family = factorFamilyName(detail);
+        if (!family) return;
+        panel.hidden = false;
+        statusEl.textContent = '正在加载研究结果...';
+        resultsEl.innerHTML = '';
+        var params = new URLSearchParams();
+        params.set('factor_family_alias', family);
+        params.set('factor_family', family);
+        params.set('limit', '30');
+        var start = document.getElementById('research-start-date').value;
+        var end = document.getElementById('research-end-date').value;
+        var metric = document.getElementById('research-metric').value.trim();
+        if (start) params.set('start_date', start);
+        if (end) params.set('end_date', end);
+        if (metric) params.set('metric', metric);
+        try {
+            var payload = await json('/custom-factors/api/factor-library-research-runs?' + params.toString());
+            var runs = payload.runs || [];
+            statusEl.textContent = runs.length ? ('共 ' + runs.length + ' 条结果') : '暂无研究结果';
+            renderResearchRuns(runs, metric);
+        } catch (error) {
+            statusEl.textContent = error.message;
+            resultsEl.innerHTML = '';
+        }
+    }
+
+    function renderResearchRuns(runs, metric) {
+        var resultsEl = document.getElementById('research-results');
+        if (!runs.length) {
+            resultsEl.innerHTML = '<div class="empty">暂无匹配研究结果</div>';
+            return;
+        }
+        var rows = runs.map(function(run) {
+            var metrics = run.metrics || {};
+            var displayMetric = metric || defaultResearchMetric(run, metrics);
+            return '<tr>'
+                + '<td>' + escapeHTML(run.factor_alias || '') + '</td>'
+                + '<td>' + escapeHTML(run.test_type || '') + '</td>'
+                + '<td>' + escapeHTML(run.product_group || '') + '</td>'
+                + '<td>' + escapeHTML((run.start_date || '') + '..' + (run.end_date || '')) + '</td>'
+                + '<td>' + escapeHTML(formatMetric(metrics[displayMetric])) + '</td>'
+                + '<td>' + escapeHTML(run.report_path || run.artifact_path || '') + '</td>'
+                + '</tr>';
+        }).join('');
+        resultsEl.innerHTML = '<table class="research-table"><thead><tr>'
+            + '<th>因子</th><th>类型</th><th>产品组</th><th>时间段</th><th>指标</th><th>报告</th>'
+            + '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    function defaultResearchMetric(run, metrics) {
+        if ((run.test_type || '') === 'ic') return 'ic_mean';
+        if ((run.test_type || '') === 'factor_type') return metrics.best_type_score != null ? 'best_type_score' : 'best_type';
+        if ((run.test_type || '') === 'factor_evaluation') return metrics.product_count != null ? 'product_count' : 'series_count';
+        if ((run.test_type || '') === 'bucket_label') return metrics.a1_a5_label_return_spread != null ? 'a1_a5_label_return_spread' : 'ic_mean';
+        return metrics.ls_return != null ? 'ls_return' : 'a1_return';
+    }
+
+    function formatMetric(value) {
+        if (value == null || value === '') return '';
+        var num = Number(value);
+        if (Number.isFinite(num)) return Math.abs(num) >= 100 ? num.toFixed(1) : num.toPrecision(4);
+        return String(value);
     }
 
     document.querySelectorAll('[data-workspace-action]').forEach(function(button) {
@@ -105,5 +185,6 @@
     });
     document.getElementById('factor-filter').addEventListener('input', renderList);
     document.getElementById('include-subordinates').addEventListener('change', loadFactors);
+    document.getElementById('research-refresh').addEventListener('click', function() { loadResearchResults(selectedFactor); });
     loadWorkspace(); loadFactors();
 })();

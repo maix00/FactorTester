@@ -137,6 +137,17 @@ def build_factor_research_plan(
                 "required_outputs": ["factor_family", "product_group", "metrics", "run_id", "report_path"],
             },
             {
+                "phase": "stability_research_library",
+                "skill_basis": ["quantitative-research:validation", "longbridge-quant:factor-research"],
+                "purpose": "检查候选因子是否跨月份/季度/年份稳定，而不是只在单个切片里表现好；先用 metrics 查看指标定义。",
+                "command": (
+                    "factortester custom_factors factor-library metrics && "
+                    "factortester custom_factors factor-library stability "
+                    "--factor-family <NAME> --preset ic-stable --by quarter"
+                ),
+                "required_outputs": ["periods", "pass_rate", "avg", "worst", "failures"],
+            },
+            {
                 "phase": "factor_improvement_loop",
                 "skill_basis": ["quantitative-research:validations"],
                 "purpose": "若 IC/类型/成本/回测表现不好，进入因子工作区修改源码或候选参数，commit、push 入库，然后回到诊断阶段。",
