@@ -2047,6 +2047,12 @@ def _resolve_long_short_leg_ids(config: dict[str, Any], key: str, legacy_key: st
     raw = config.get(key)
     if not raw and config.get(legacy_key):
         raw = [{"group_id": config.get(legacy_key), "weight": 1.0}]
+    snake_key = {
+        "longGroupId": "long_group_id",
+        "shortGroupId": "short_group_id",
+    }.get(legacy_key)
+    if not raw and snake_key and config.get(snake_key):
+        raw = [{"group_id": config.get(snake_key), "weight": 1.0}]
     if not isinstance(raw, list):
         return []
     result: list[dict[str, Any]] = []
@@ -2099,8 +2105,18 @@ def _resolve_long_short_strategy_settings(
         key: value
         for key, value in config.items()
         if value not in (None, "")
-        and key not in {"id", "strategy_id", "name", "long", "short", "longGroupId", "shortGroupId"}
+        and key not in {
+            "id", "strategy_id", "name",
+            "long", "short",
+            "longGroupId", "shortGroupId",
+            "long_group_id", "short_group_id",
+        }
     })
+    # first_source is usually a normal group strategy and can carry
+    # strategy_intent_mode="group". Long-short must override both aliases of
+    # the shared FieldRef; otherwise active-flow selection treats it as A1/A5
+    # group membership and the LS curve becomes a copy of the long leg.
+    settings["strategy_intent_mode"] = "long_short"
     settings["strategy_kind"] = "long_short"
     settings["strategy_id"] = strategy_id
     settings["display_name"] = str(config.get("shortAlias") or config.get("name") or strategy_id)
