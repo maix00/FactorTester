@@ -201,14 +201,19 @@ def _resolve_margin_mode(strategy_config, ledger_config=None) -> str:
     if engine_mode == "basic":
         return "none"
     if engine_mode == "auto":
-        return str(getattr(ledger_config, "margin_mode", None) or "auto")
+        return _normalize_margin_mode(getattr(ledger_config, "margin_mode", None) or "auto")
     if engine_mode == "exact":
         return "exact"
-    return str(getattr(ledger_config, "margin_mode", None) or "auto")
+    return _normalize_margin_mode(getattr(ledger_config, "margin_mode", None) or "auto")
 
 
 def _resolve_margin_mode_from_ledger_config(ledger_config=None) -> str:
-    return str(getattr(ledger_config, "margin_mode", None) or "auto")
+    return _normalize_margin_mode(getattr(ledger_config, "margin_mode", None) or "auto")
+
+
+def _normalize_margin_mode(value: object) -> str:
+    mode = str(value or "auto").lower()
+    return "none" if mode == "off" else mode
 
 
 def _resolve_margin_ratio(strategy_config, market_margin_ratio: float | None, ledger_config=None) -> float:

@@ -226,6 +226,49 @@ def test_daily_mark_to_market_flow_gating_by_engine_and_custom_field():
         assert not config.uses_flow("apply_daily_mark_to_market")
 
 
+def test_ledger_daily_mark_to_market_disabled_removes_dmtm_and_ledger_lookup_flows():
+    account = BacktestRunState()
+
+    apply_strategy_configs(
+        account,
+        {"A1": {"engine_mode": "auto", **_GROUP_FIELDS}},
+        ledger_configs={"private:A1": {"daily_mark_to_market_enabled": False, "margin_mode": "none"}},
+    )
+
+    config = next(iter(account.strategy_configs.values()))
+    assert not config.uses_flow("register_daily_mark_to_market_notices")
+    assert not config.uses_flow("apply_daily_mark_to_market")
+    assert not config.uses_flow("lookup_current_prices_on_ledger")
+    assert not config.uses_flow("lookup_historical_fields_on_ledger")
+
+
+def test_margin_mode_off_ignores_margin_call_and_disables_ledger_flows():
+    account = BacktestRunState()
+
+    apply_strategy_configs(
+        account,
+        {
+            "A1": {
+                "engine_mode": "auto",
+                "margin_mode": "off",
+                "margin_call_mode": "liquidate",
+                **_GROUP_FIELDS,
+            }
+        },
+    )
+
+    config = next(iter(account.strategy_configs.values()))
+    strategy = next(iter(account.strategy_configs))
+    ledger_config = account.ledger_config_for(f"private:{strategy.alias}")
+    assert ledger_config.margin_mode == "off"
+    assert ledger_config.margin_call_mode is None
+    assert not config.uses_flow("register_daily_mark_to_market_notices")
+    assert not config.uses_flow("apply_daily_mark_to_market")
+    assert not config.uses_flow("register_margin_check_notices")
+    assert not config.uses_flow("lookup_current_prices_on_ledger")
+    assert not config.uses_flow("lookup_historical_fields_on_ledger")
+
+
 def test_fixed_fee_rate_without_fixed_fee_mode_raises():
     account = BacktestRunState()
 

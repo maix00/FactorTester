@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, ClassVar, cast
 
+import numpy as np
 import pandas as pd
 
 from tools.data.types import DataColumn
@@ -1166,7 +1167,14 @@ def _load_raw_market_data(state, ctx) -> None:
                 price_series_by_basis[basis][product] = _series_on_event_index(df[column], timezone=event_timezone)
         for basis, column in optional_price_columns:
             if column in df.columns:
-                price_series_by_basis.setdefault(basis, {})[product] = _series_on_event_index(df[column], timezone=event_timezone)
+                if basis == "settlement":
+                    price_series_by_basis.setdefault(basis, {})[product] = _settlement_series_on_last_event(
+                        df,
+                        column,
+                        timezone=event_timezone,
+                    )
+                else:
+                    price_series_by_basis.setdefault(basis, {})[product] = _series_on_event_index(df[column], timezone=event_timezone)
         for column in factor_columns:
             if column in df.columns:
                 factor_series_by_column[column][product] = _series_on_event_index(df[column], timezone=event_timezone)
@@ -1245,6 +1253,34 @@ def _series_on_event_index(series: pd.Series, *, timezone: str | None = None) ->
         index = pd.DatetimeIndex(index.tz_localize(None))
     result.index = index
     return result
+
+
+def _settlement_series_on_last_event(frame: pd.DataFrame, column: str, *, timezone: str | None = None) -> pd.Series:
+    source = pd.to_numeric(frame[column], errors="coerce")
+    trading_days = _trading_days_for_frame(frame)
+    event_times = DataIndex.event_timestamps_from_index(frame.index)
+    visible = pd.Series(np.nan, index=frame.index, dtype="float64")
+    groups = pd.Series(range(len(frame)), index=frame.index).groupby(trading_days)
+    for _key, positions in groups:
+        pos = list(positions.to_numpy())
+        if not pos:
+            continue
+        values = source.iloc[pos]
+        valid = values[(values.notna()) & (values != 0)]
+        if valid.empty:
+            continue
+        day_event_times = event_times.take(pos)
+        last_position = pos[int(np.argmax(day_event_times.to_numpy(dtype="datetime64[ns]").astype("int64", copy=False)))]
+        visible.iloc[last_position] = valid.iloc[-1]
+    return _series_on_event_index(visible, timezone=timezone)
+
+
+def _trading_days_for_frame(frame: pd.DataFrame) -> pd.Series:
+    if "trading_day" in frame.columns:
+        values = pd.to_datetime(frame["trading_day"], errors="coerce").dt.normalize()
+        return pd.Series(values.to_numpy(), index=frame.index)
+    days = DataIndex.trading_day_index_from_index(frame.index)
+    return pd.Series(days.to_numpy(), index=frame.index)
 
 
 def _market_data_event_timezone(state) -> str | None:

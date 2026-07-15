@@ -21,6 +21,7 @@ from tools.testers.backtest.modules.market_data import (
     _apply_exchange_rule_defaults, _desired_factor_frequencies,
     _historical_fields_at_from_frames, _load_raw_market_data,
     _resolve_market_data_request, _set_current_market_snapshot,
+    _settlement_series_on_last_event,
     contract_multiplier_from_fields,
     current_market_snapshot_at, current_prices_at, historical_fields_for_product,
     market_snapshot_for_index_key,
@@ -68,6 +69,24 @@ def test_market_data_store_guard_blocks_direct_runtime_writes_but_allows_publish
     replacement = pd.DataFrame({"P1": [2.0]}, index=pd.date_range("2024-01-02", periods=1))
     store.current_prices_table = replacement
     assert store.current_prices_table is replacement
+
+
+def test_settlement_series_is_visible_only_on_trading_day_last_event():
+    index = pd.DatetimeIndex([
+        pd.Timestamp("2025-12-31 09:01", tz="Asia/Shanghai"),
+        pd.Timestamp("2025-12-31 15:00", tz="Asia/Shanghai"),
+    ])
+    frame = pd.DataFrame({
+        "trading_day": [pd.Timestamp("2025-12-31"), pd.Timestamp("2025-12-31")],
+        "settlement_price": [7180.0, 0.0],
+    }, index=index)
+
+    result = _settlement_series_on_last_event(frame, "settlement_price", timezone="Asia/Shanghai")
+
+    assert pd.isna(result.iloc[0])
+    assert result.index[0] == index[0]
+    assert result.iloc[1] == pytest.approx(7180.0)
+    assert result.index[1] == index[1]
 
 
 def test_load_raw_market_data_carries_price_limit_columns_into_order_constraints():

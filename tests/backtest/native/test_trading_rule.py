@@ -126,6 +126,17 @@ def test_ledger_auto_daily_mark_to_market_infers_from_historical_fields_only():
     ) is True
 
 
+def test_ledger_margin_mode_off_disables_auto_daily_mark_to_market_even_with_exact_fee():
+    product = _product()
+    ledger_config = _ledger_config(accounting_mode="Auto", fee_mode="exact", margin_mode="off")
+
+    assert _resolve_daily_mark_to_market_enabled_for_ledger(
+        product,
+        {"SettlementPrice": 10.0, "DailyMarkToMarketEnabled": True},
+        ledger_config=ledger_config,
+    ) is False
+
+
 def test_ledger_auto_daily_mark_to_market_ignores_ui_default_false():
     product = _product()
     ledger_config = _ledger_config(
@@ -433,6 +444,44 @@ def test_daily_mark_to_market_notice_uses_trading_day_last_bar_not_calendar_day(
     }
 
 
+def test_daily_mark_to_market_notice_uses_market_close_table_not_intraday_signal_table():
+    strategy = Strategy(alias="S")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"register_daily_mark_to_market_notices"}),
+            field_values={
+                EngineModule.engine_mode: "auto",
+                TradingRuleModule.accounting_mode: "Auto",
+            },
+        )
+    })
+    trading_days = pd.DatetimeIndex(["2025-12-31", "2025-12-31"])
+    market_times = pd.DatetimeIndex([
+        pd.Timestamp("2025-12-31 09:01:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2025-12-31 15:00:00", tz="Asia/Shanghai"),
+    ])
+    close_index = pd.MultiIndex.from_arrays([trading_days, market_times], names=["trading_day", "_SIGNAL@MIN1"])
+    account.market_data_store.market_price_tables = {
+        "close": pd.DataFrame({"P1": [10.0, 12.0]}, index=close_index)
+    }
+    signal_index = pd.MultiIndex.from_arrays(
+        [trading_days[:1], market_times[:1]],
+        names=["trading_day", "_SIGNAL@MIN1"],
+    )
+    account.market_data_store.current_prices_table = pd.DataFrame({"P1": [10.0]}, index=signal_index)
+    queue = EventQueue()
+    captured = []
+    queue.set_dispatcher(EventKind.LEDGER, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+
+    _register_daily_mark_to_market_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert len(captured) == 1
+    assert captured[0].timestamp == pd.Timestamp("2025-12-31 15:00:00.000000001", tz="Asia/Shanghai")
+
+
 def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     product = _product()
     strategy = Strategy(alias="S")
@@ -491,6 +540,145 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     assert updated_position.margin_reserved.to_major() == pytest.approx(2.0)
     assert updated_position.settlement_price == pytest.approx(12.0)
     assert updated_position.average_cost is None
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 12.0, False)]
+
+
+def test_exact_daily_mark_to_market_missing_settlement_at_notice_raises():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger_id=f"private:{strategy.alias}")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+            settlement_price=10.0,
+        )
+    })
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={ledger.ledger: ledger})
+    _set_cash(account, ledger, 1000.0)
+    account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="exact")
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger.ledger}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {"close": {product: 12.0}})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "PreSettlementPrice": 10.0,
+            "DailyMarkToMarketEnabled": True,
+        }
+    })
+
+    with pytest.raises(KeyError, match="exact daily mark-to-market requires settlement price"):
+        _apply_daily_mark_to_market(account, ctx)
+
+
+def test_non_dmtm_ledger_event_does_not_apply_daily_mark_to_market_or_require_settlement():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger_id=f"private:{strategy.alias}")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+            settlement_price=10.0,
+        )
+    })
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={ledger.ledger: ledger})
+    _set_cash(account, ledger, 1000.0)
+    account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="exact")
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 09:01:00.000000002", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger.ledger}),
+        drafts_by_ledger={
+            ledger.ledger: [EventDraft(
+                EventKind.LEDGER,
+                pd.Timestamp("2026-03-10 09:01:00.000000002", tz="Asia/Shanghai"),
+                payload={"kind": "margin_check", "ledger_id": ledger.ledger.name},
+                ledger=ledger.ledger,
+            )],
+        },
+        event_kind=EventKind.LEDGER,
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {"close": {product: 12.0}})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "PreSettlementPrice": 10.0,
+            "DailyMarkToMarketEnabled": True,
+        }
+    })
+
+    _apply_daily_mark_to_market(account, ctx)
+
+    assert _cash_major(account, ledger) == pytest.approx(1000.0)
+    assert ledger.get(_positions_ref())[product].settlement_price == pytest.approx(10.0)
+
+
+def test_exact_daily_mark_to_market_settlement_notice_updates_ledger():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger_id=f"private:{strategy.alias}")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+            settlement_price=10.0,
+        )
+    })
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={ledger.ledger: ledger})
+    _set_cash(account, ledger, 1000.0)
+    account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="exact")
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger.ledger}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "settlement": {product: 12.0},
+        "close": {product: 11.5},
+    })
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "PreSettlementPrice": 10.0,
+            "SettlementPrice": 12.0,
+            "DailyMarkToMarketEnabled": True,
+        }
+    })
+
+    _apply_daily_mark_to_market(account, ctx)
+
+    assert _cash_major(account, ledger) == pytest.approx(1040.0)
+    updated_position = ledger.get(_positions_ref())[product]
+    assert updated_position.settlement_price == pytest.approx(12.0)
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 12.0, False)]
 
 

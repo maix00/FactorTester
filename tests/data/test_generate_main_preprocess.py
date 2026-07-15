@@ -62,12 +62,12 @@ def test_preprocess_minute_data_appends_changed_raw_files(tmp_path):
     assert pd.to_datetime(updated["trade_time"]).max() == pd.Timestamp("2026-01-06 09:02")
 
 
-def test_fill_minute_settlement_from_dayk_fills_zero_placeholders():
+def test_fill_minute_settlement_from_dayk_keeps_current_settlement_on_last_bar_only():
     minute = pd.DataFrame({
         "contract_uid": ["GFEX|F|LC|2605", "GFEX|F|LC|2605"],
         "trading_day": [pd.Timestamp("2026-01-09"), pd.Timestamp("2026-01-09")],
         "trade_time": [pd.Timestamp("2026-01-09 14:59"), pd.Timestamp("2026-01-09 15:00")],
-        "settlement_price": [0.0, 143000.0],
+        "settlement_price": [143000.0, 0.0],
         "pre_settlement_price": [0.0, 142000.0],
     })
     dayk = pd.DataFrame({
@@ -79,7 +79,8 @@ def test_fill_minute_settlement_from_dayk_fills_zero_placeholders():
 
     filled = fill_minute_settlement_from_dayk(minute, dayk)
 
-    assert filled["settlement_price"].to_list() == [143180.0, 143000.0]
+    assert pd.isna(filled["settlement_price"].iloc[0])
+    assert filled["settlement_price"].iloc[1] == 143180.0
     assert filled["pre_settlement_price"].to_list() == [143400.0, 142000.0]
 
 

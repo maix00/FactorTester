@@ -64,8 +64,8 @@ def fill_minute_settlement_from_dayk(minute_df: pd.DataFrame, dayk_lookup: pd.Da
 
     Local minute files currently contain settlement-related columns, but many
     historical slices use ``0`` as a placeholder. Daily bars are the canonical
-    settlement source; main MinK should carry those values by contract/trading
-    day so daily mark-to-market never has to use close as a fake settlement.
+    settlement source. Current-day settlement is only visible on the last bar
+    of each trading day; previous settlement may remain visible intraday.
     """
     if minute_df.empty or dayk_lookup.empty:
         return minute_df
@@ -87,6 +87,7 @@ def fill_minute_settlement_from_dayk(minute_df: pd.DataFrame, dayk_lookup: pd.Da
         columns={col: f'__dayk_{col}' for col in SETTLEMENT_FILL_COLUMNS if col in dayk_lookup.columns}
     )
     filled = filled.merge(lookup, on=['contract_uid', 'trading_day'], how='left')
+    last_bar_mask = _trading_day_last_bar_mask(filled)
     for col in SETTLEMENT_FILL_COLUMNS:
         day_col = f'__dayk_{col}'
         if day_col not in filled.columns:
@@ -95,10 +96,26 @@ def fill_minute_settlement_from_dayk(minute_df: pd.DataFrame, dayk_lookup: pd.Da
             filled[col] = np.nan
         target = pd.to_numeric(filled[col], errors='coerce')
         source = pd.to_numeric(filled[day_col], errors='coerce')
-        mask = (target.isna() | (target == 0)) & source.notna() & (source != 0)
+        if col == 'settlement_price':
+            filled.loc[~last_bar_mask, col] = np.nan
+            target = pd.to_numeric(filled[col], errors='coerce')
+            mask = last_bar_mask & (target.isna() | (target == 0)) & source.notna() & (source != 0)
+        else:
+            mask = (target.isna() | (target == 0)) & source.notna() & (source != 0)
         filled.loc[mask, col] = source[mask]
         filled.drop(columns=[day_col], inplace=True)
     return filled
+
+
+def _trading_day_last_bar_mask(frame: pd.DataFrame) -> pd.Series:
+    if 'trade_time' in frame.columns:
+        event_time = pd.to_datetime(frame['trade_time'], errors='coerce')
+    elif 'trade_timestamp' in frame.columns:
+        event_time = pd.to_datetime(frame['trade_timestamp'], unit='ms', errors='coerce')
+    else:
+        event_time = pd.Series(frame.index, index=frame.index)
+    grouped_max = event_time.groupby([frame['contract_uid'], frame['trading_day']]).transform('max')
+    return event_time.eq(grouped_max).fillna(False)
 
 
 def preprocess_minute_data(

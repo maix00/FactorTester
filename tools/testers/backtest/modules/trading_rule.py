@@ -93,6 +93,9 @@ class TradingRuleModule(ExecutableModule):
     _current_historical_fields_ref: ClassVar[FieldRef[Any]] = FieldRef(
         "current_historical_fields", owner="MarketDataModule",
     )
+    _market_price_tables_ref: ClassVar[FieldRef[Any]] = FieldRef(
+        "price_tables", owner="MarketDataModule",
+    )
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "accounting_mode": FieldDefinition(
@@ -134,7 +137,7 @@ class TradingRuleModule(ExecutableModule):
 
     register_daily_mark_to_market_notices: ClassVar[Flow] = Flow(
         "register_daily_mark_to_market_notices",
-        inputs=(EngineModule.engine_mode, accounting_mode),
+        inputs=(EngineModule.engine_mode, accounting_mode, _market_price_tables_ref),
         outputs=(daily_mark_to_market_events,),
         phase=Phase.PRE_REPLAY,
         order=47,
@@ -249,6 +252,8 @@ def _resolve_daily_mark_to_market_enabled_for_ledger(
     if mode == "Basic":
         return False
     fields = historical_fields or {}
+    if _ledger_config_disables_daily_mark_to_market(ledger_config):
+        return False
     if mode == "Custom":
         enabled = bool(getattr(ledger_config, "daily_mark_to_market_enabled", False))
         if enabled:
@@ -266,11 +271,15 @@ def _resolve_daily_mark_to_market_enabled_for_ledger(
     return False
 
 
+def _ledger_config_disables_daily_mark_to_market(ledger_config=None) -> bool:
+    if bool(getattr(ledger_config, "daily_mark_to_market_enabled", False)):
+        return False
+    margin_mode = str(getattr(ledger_config, "margin_mode", "") or "").lower()
+    return margin_mode in {"off", "none", "zero"}
+
+
 def _ledger_requires_exact(ledger_config=None) -> bool:
-    return any(
-        str(getattr(ledger_config, name, "") or "").lower() == "exact"
-        for name in ("fee_mode", "margin_mode")
-    )
+    return str(getattr(ledger_config, "margin_mode", "") or "").lower() == "exact"
 
 
 def _validate_daily_mark_to_market_cost_basis(
@@ -506,9 +515,7 @@ def mark_to_market(
 
 
 def _register_daily_mark_to_market_notices(state: Any, ctx: Any) -> None:
-    from tools.testers.backtest.modules.market_data import current_prices_table_for
-
-    table = current_prices_table_for(state)
+    table = _daily_mark_to_market_notice_table(state)
     if table is None or getattr(table, "empty", True):
         return
     last_rows = DataIndex.trading_day_last_event_times_from_index(table.index)
@@ -534,6 +541,17 @@ def _register_daily_mark_to_market_notices(state: Any, ctx: Any) -> None:
                 )
             )
     ctx.set(TradingRuleModule.daily_mark_to_market_events, drafts)
+
+
+def _daily_mark_to_market_notice_table(state: Any) -> Any:
+    from tools.testers.backtest.modules.market_data import current_prices_table_for, market_price_tables_for
+
+    tables = market_price_tables_for(state)
+    if isinstance(tables, Mapping):
+        close_table = tables.get("close")
+        if close_table is not None and not getattr(close_table, "empty", True):
+            return close_table
+    return current_prices_table_for(state)
 
 
 def _trading_day_text(value: object) -> str:
@@ -668,6 +686,8 @@ def _ledger_targets(state: Any, ctx: Any) -> list[Any]:
             if isinstance(payload, dict)
         ]
         if not payloads:
+            if getattr(ctx, "event_kind", None) is EventKind.LEDGER:
+                continue
             target_ledger = state.ledgers.get(ledger_identity(ledger))
             if target_ledger is not None:
                 key = target_ledger.ledger
