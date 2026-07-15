@@ -25,10 +25,14 @@ The harness adapts two research skill systems:
    testing it.
 4. Run cheap diagnostics first: factor sequence sanity, IC/IR, IC decay, factor
    type analysis, product-group coverage, and transaction-cost feasibility.
-5. Run group/backtest grids only after diagnostics pass.
-6. Audit order flow, snapshots, ledger results, volume-capacity constraints,
+5. Query the factor research result store before repeating runs. Import existing
+   report artifacts with `factor-library import-result`, then use
+   `factor-library history` and `factor-library rank` to find candidates that
+   deserve revalidation.
+6. Run group/backtest grids only after diagnostics pass.
+7. Audit order flow, snapshots, ledger results, volume-capacity constraints,
    margin mode, fee mode, and runtime summaries.
-7. If a CLI/backend feature is missing, a FactorExpr operator is missing, an
+8. If a CLI/backend feature is missing, a FactorExpr operator is missing, an
    operator semantic is wrong, or calculations are incorrect, stop research,
    record a gap, fix the codebase in the owning branch/worktree, validate
    thoroughly, merge only through the approved workflow, restart the service, and
@@ -55,4 +59,8 @@ ignored.
   research evidence.
 - Product groups are point-in-time enough for the requested research question.
 - Parameter grids record how many hypotheses were tried.
+- New IC/type/backtest runs are queryable through `factor-library history` and
+  old artifacts are backfilled through `factor-library import-result`.
+- `factor-library rank` is a candidate-generation query only; it never replaces
+  sliced validation, cost/capacity checks, or OOS review.
 - Final claims are out-of-sample or explicitly marked exploratory.

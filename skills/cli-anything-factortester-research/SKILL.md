@@ -29,6 +29,10 @@ factortester custom_factors operators
 cli-anything-factortester-research workspace prepare --build --sync --json
 cli-anything-factortester-research workspace inspect --factor-family SgCCS --json
 cli-anything-factortester-research run-step -- ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --rev
+factortester custom_factors factor-library history --factor-family SgCCS --product-group 中国期货日盘
+factortester custom_factors factor-library rank --start-date 2024-01-01 --end-date 2025-12-31 --test-type ic --metric ic_mean --min-metric ic_t_stat=2
+factortester custom_factors factor-library rank --start-date 2024-01-01 --end-date 2025-12-31 --test-type backtest --metric ls_return --min-metric ls_return=0
+factortester custom_factors factor-library import-result --dir /path/to/research_reports/factors/MyFamily --report-path /path/to/report.md --note 'backfill existing artifacts'
 cli-anything-factortester-research decision poor-result --reason 'IC/cost diagnostics failed'
 cli-anything-factortester-research operator set --mode client_only
 cli-anything-factortester-research operator set --mode source_owner --admin-port 7998
@@ -51,6 +55,14 @@ cli-anything-factortester-research checklist
   workspace. If no workspace exists, build it first with
   `workspace prepare --build --sync`.
 - Treat missing CLI/backend features as codebase gaps, not research conclusions.
+- Before repeating expensive diagnostics, query `factor-library history` and
+  `factor-library rank`. Backfill old JSON artifacts with
+  `factor-library import-result --artifact ...` or `--dir ...`.
+- Result-library ranking is candidate generation only. Ranked factors still need
+  validation slices, transaction costs, capacity, and OOS review.
+- Product-group labels stored in research results are not automatically product
+  group candidates; create or import real product groups before using them in new
+  tests.
 - Track the number of hypotheses tested when sweeping factor/product grids.
 - Include transaction costs, capacity, and explicit margin mode before claiming a
   factor is profitable.

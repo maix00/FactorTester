@@ -24,6 +24,10 @@ factortester custom_factors operators
 cli-anything-factortester-research workspace prepare --build --sync --json
 cli-anything-factortester-research workspace inspect --factor-family SgCCS --json
 cli-anything-factortester-research run-step -- ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m
+factortester custom_factors factor-library history --factor-family SgCCS --product-group 中国期货日盘
+factortester custom_factors factor-library rank --start-date 2024-01-01 --end-date 2025-12-31 --test-type ic --metric ic_mean --min-metric ic_t_stat=2
+factortester custom_factors factor-library rank --start-date 2024-01-01 --end-date 2025-12-31 --test-type backtest --metric ls_return --min-metric ls_return=0
+factortester custom_factors factor-library import-result --dir /path/to/research_reports/factors/MyFamily --report-path /path/to/report.md --note 'backfill existing artifacts'
 cli-anything-factortester-research operator set --mode source_owner --admin-port 7998
 cli-anything-factortester-research service restart --target-port 8123 --dry-run --json
 cli-anything-factortester-research gap list --json
@@ -46,3 +50,8 @@ Factor-source rule:
   with `factortester custom_factors operators`.
 - Before IC/type/backtest diagnostics, run `workspace prepare --build --sync` and
   then `workspace inspect --factor-family <NAME>`.
+- Before repeating expensive diagnostics, query `factor-library history` and
+  `factor-library rank`. Backfill old JSON artifacts with
+  `factor-library import-result --artifact ...` or `--dir ...`.
+- Result-library ranking is candidate generation only; still run validation
+  slices, transaction costs, capacity, and OOS review.

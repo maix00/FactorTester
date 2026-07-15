@@ -21,6 +21,7 @@ def test_plan_orders_diagnostics_before_backtest() -> None:
     assert phases.index("prepare_factor_workspace") < phases.index("understand_factor_source")
     assert phases.index("understand_factor_source") < phases.index("diagnose_ic")
     assert phases.index("build_validation_slices") < phases.index("diagnose_ic")
+    assert phases.index("query_research_library") < phases.index("diagnose_ic")
     assert phases.index("diagnose_ic") < phases.index("backtest")
     assert phases.index("diagnose_type") < phases.index("backtest")
     assert phases.index("cost_capacity_screen") < phases.index("backtest")
@@ -30,6 +31,9 @@ def test_plan_orders_diagnostics_before_backtest() -> None:
     assert any("workspace prepare --build --sync" in item["command"] for item in plan)
     assert any("slice-plan --json" in item["command"] for item in plan)
     assert any("--volume-capacity-mode volume_participation" in item["command"] for item in plan)
+    assert any("factor-library history" in item["command"] for item in plan)
+    assert any("factor-library import-result" in item["command"] for item in plan)
+    assert any("factor-library rank" in item["command"] for item in plan)
     assert any(item["phase"] == "platform_gap_loop" for item in plan)
 
 
@@ -54,6 +58,8 @@ def test_validation_checklist_encodes_quant_research_guardrails() -> None:
     assert "7998" in text
     assert "client_only" in text
     assert "branch/worktree" in text
+    assert "factor-library import-result" in text
+    assert "factor-library history/rank" in text
 
 
 def test_platform_gap_plan_requires_owner_worktree_before_cli_merge() -> None:

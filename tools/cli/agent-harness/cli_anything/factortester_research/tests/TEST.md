@@ -43,6 +43,8 @@ Verified:
 
 - Research plans include FactorExpr operator inspection and factor source
   inspection before diagnostics.
+- Research plans query the factor-library result store before diagnostics and
+  include `history`, `rank`, and `import-result` commands.
 - Research plans include the source-owner platform gap loop.
 - `client_only` users cannot restart managed server worktrees.
 - `source_owner` persists the 7998 admin port used for service restart.
@@ -61,8 +63,8 @@ python -m pytest cli_anything/factortester_research/tests -v --tb=no
 Validated in GTHT environment:
 
 ```text
-...........                                                              [100%]
-11 passed in 1.44s
+..............                                                           [100%]
+14 passed in 2.34s
 ```
 
 Installed-command validation:

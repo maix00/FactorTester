@@ -69,6 +69,16 @@ def build_factor_research_plan(
             "command": "cli-anything-factortester-research slice-plan --json",
             "required_outputs": ["calendar_quarterly", "rolling_63d_step21d", "oos_annotation", "selection_policy"],
         },
+        {
+            "phase": "query_research_library",
+            "skill_basis": ["quantitative-research:multiple-testing", "longbridge-quant:factor-research"],
+            "purpose": "测试前先查询已有结构化研究结果，避免重复跑同一时间段/产品组/参数，并用历史表现确定需要复核而不是盲目继续网格搜索。",
+            "command": (
+                "factortester custom_factors factor-library history "
+                f"--factor-family {shlex.quote(factor_family)}"
+            ),
+            "required_outputs": ["existing_runs", "metrics", "config_hash", "artifact_paths"],
+        },
     ]
     if template:
         plan.extend(
@@ -90,21 +100,41 @@ def build_factor_research_plan(
             {
                 "phase": "diagnose_ic",
                 "skill_basis": ["longbridge-quant:factor-research"],
-                "purpose": "先用 IC/IR、t-stat、hit rate、decay 预筛选，避免直接过拟合回测。",
+                "purpose": "先用 IC/IR、t-stat、hit rate、decay 预筛选，避免直接过拟合回测；CLI 运行结果会写入 factor-library。",
                 "command": f"factortester ic_test grid {grid}",
                 "required_outputs": ["mean_ic", "ir", "t_stat", "hit_rate", "decay", "sample_count"],
             },
             {
                 "phase": "diagnose_type",
                 "skill_basis": ["longbridge-quant:correlation", "quantitative-research:regime-blindness"],
-                "purpose": "检查因子风格暴露和相似参照因子，防止只是伪装 beta 或趋势/波动率暴露。",
+                "purpose": "检查因子风格暴露和相似参照因子，防止只是伪装 beta 或趋势/波动率暴露；CLI 运行结果会写入 factor-library。",
                 "command": f"factortester factor_type_analysis grid {grid}",
             },
             {
                 "phase": "cost_capacity_screen",
                 "skill_basis": ["longbridge-quant:execution-model"],
-                "purpose": "用费用、成交量容量和产品组覆盖情况筛掉平均收益无法覆盖有效费率的组合。",
+                "purpose": "用费用、成交量容量和产品组覆盖情况筛掉平均收益无法覆盖有效费率的组合；CLI 回测结果会写入 factor-library。",
                 "command": f"factortester backtest compare factor-grid {grid} --volume-capacity-mode volume_participation",
+            },
+            {
+                "phase": "backfill_research_library",
+                "skill_basis": ["quantitative-research:record-keeping"],
+                "purpose": "如果已有报告或 artifact 尚未结构化入库，用 import-result 回填；目录导入可批量索引同一因子工作区下的历史研究结果。",
+                "command": (
+                    "factortester custom_factors factor-library import-result "
+                    "--dir <research_report_dir> --report-path <report.md> --note '<why imported>'"
+                ),
+            },
+            {
+                "phase": "rank_research_library",
+                "skill_basis": ["quantitative-research:validation", "longbridge-quant:factor-research"],
+                "purpose": "用结构化结果库查询某个时间段内表现较好的因子/产品组；rank 只能作为候选生成，不能替代 OOS 复核。",
+                "command": (
+                    "factortester custom_factors factor-library rank "
+                    "--start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> "
+                    "--test-type ic --metric ic_mean --min-metric ic_t_stat=2"
+                ),
+                "required_outputs": ["factor_family", "product_group", "metrics", "run_id", "report_path"],
             },
             {
                 "phase": "factor_improvement_loop",
@@ -147,6 +177,8 @@ def validation_checklist() -> list[str]:
         "无未来函数：信号使用 close 时只能在下一可见 open 或更晚成交。",
         "发现 CLI/API/后端能力缺口时先记录 gap，修复代码并验证后再继续研究。",
         "发现因子算子缺失、算子语义错误或计算结果错误时，必须进入平台代码修复流程，不能把错误结果当作因子结论。",
+        "已有 artifact 或报告必须用 factor-library import-result 入库；新跑的 IC/类型/回测结果应能在 factor-library history/rank 中查到。",
+        "从 factor-library rank 得到的好因子只表示候选，必须经过切片、成本、容量和 OOS 复核后才能形成结论。",
         "只有 source_owner 可以修 FactorTester 服务代码；client_only 用户只能提交 gap 证据，不能假装能修改服务器源码。",
         "source_owner 修平台代码前必须确认所属 issue/task 范围，并在对应 branch/worktree 修改；CLI worktree 只能接收 merge 后的平台改动。",
         "平台代码修复后必须通过 7998 管理端口重启目标服务，再重新运行失败步骤。",

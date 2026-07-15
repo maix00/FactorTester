@@ -62,6 +62,36 @@ factortester custom_factors workspace git diff
 factortester custom_factors workspace push
 ```
 
+## Research Result Store
+
+The FactorTester CLI writes new IC, factor type, factor evaluation, and backtest
+research runs into the factor-library result store. Agents should query this
+store before repeating expensive diagnostics, and should backfill older report
+artifacts when they become relevant:
+
+```bash
+factortester custom_factors factor-library history --factor-family SgCCS --product-group 中国期货日盘
+
+factortester custom_factors factor-library rank \
+  --start-date 2024-01-01 --end-date 2025-12-31 \
+  --test-type ic --metric ic_mean --min-metric ic_t_stat=2
+
+factortester custom_factors factor-library rank \
+  --start-date 2024-01-01 --end-date 2025-12-31 \
+  --test-type backtest --metric ls_return --min-metric ls_return=0
+
+factortester custom_factors factor-library import-result \
+  --dir /path/to/research_reports/factors/MyFamily \
+  --report-path /path/to/research_reports/factors/MyFamily/report.md \
+  --note "backfill existing artifacts before candidate ranking"
+```
+
+`rank` is a candidate-generation query. A ranked factor still needs validation
+slices, cost/capacity checks, and OOS review before it can be treated as a
+research result. Product-group names in result records are labels for the tested
+configuration; they are not automatically product-group candidates for future
+runs unless the product group exists in the product-group library.
+
 If the gap is platform/server code rather than factor source, including missing
 FactorExpr operators, wrong operator semantics, or incorrect factor/backtest
 calculation, distinguish the operator mode:
