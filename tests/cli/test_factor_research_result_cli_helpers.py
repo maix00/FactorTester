@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 
-from tools.cli.modules.custom_factors.controller import _research_payloads_from_artifact
+from tools.cli.modules.custom_factors.controller import (
+    _research_payloads_from_artifact,
+    _resolve_research_rank_preset,
+)
 
 
 def test_research_payloads_from_backtest_artifact(tmp_path):
@@ -115,3 +118,32 @@ def test_research_payloads_from_bucket_label_artifact(tmp_path):
     assert payload["metrics"]["a1_label_return"] == 0.01
     assert payload["metrics"]["a5_label_return"] == -0.02
     assert payload["metrics"]["a1_a5_label_return_spread"] == 0.03
+
+
+def test_research_rank_preset_expands_default_filters():
+    resolved = _resolve_research_rank_preset(
+        preset="ic-stable",
+        test_type="",
+        metric="",
+        min_metrics=("sample_count=100",),
+        max_metrics=(),
+    )
+
+    assert resolved["test_type"] == "ic"
+    assert resolved["metric"] == "ic_mean"
+    assert resolved["min_metrics"] == ["ic_mean=0", "ic_t_stat=2", "sample_count=100"]
+
+
+def test_research_rank_preset_respects_explicit_metric_and_test_type():
+    resolved = _resolve_research_rank_preset(
+        preset="costed-backtest",
+        test_type="bucket_label",
+        metric="a1_a5_label_return_spread",
+        min_metrics=(),
+        max_metrics=("max_drawdown=0",),
+    )
+
+    assert resolved["test_type"] == "bucket_label"
+    assert resolved["metric"] == "a1_a5_label_return_spread"
+    assert resolved["min_metrics"] == ["ls_return=0"]
+    assert resolved["max_metrics"] == ["max_drawdown=0"]

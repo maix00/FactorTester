@@ -74,11 +74,11 @@ factortester custom_factors factor-library history --factor-family SgCCS --produ
 
 factortester custom_factors factor-library rank \
   --start-date 2024-01-01 --end-date 2025-12-31 \
-  --test-type ic --metric ic_mean --min-metric ic_t_stat=2
+  --preset ic-stable
 
 factortester custom_factors factor-library rank \
   --start-date 2024-01-01 --end-date 2025-12-31 \
-  --test-type backtest --metric ls_return --min-metric ls_return=0
+  --preset costed-backtest
 
 factortester custom_factors factor-library import-result \
   --dir /path/to/research_reports/factors/MyFamily \

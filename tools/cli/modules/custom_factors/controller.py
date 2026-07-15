@@ -298,7 +298,13 @@ def import_factor_research_result(
 @click.option("--start-date", "--start_date", default="", help="查询开始日期。")
 @click.option("--end-date", "--end_date", default="", help="查询结束日期。")
 @click.option("--contained", is_flag=True, help="要求结果区间完全落在查询区间内；默认只要求 overlap。")
-@click.option("--metric", default="ls_return", help="排序指标。")
+@click.option(
+    "--preset",
+    type=click.Choice(["ic-stable", "costed-backtest", "bucket-monotonic"]),
+    default="",
+    help="常用筛选预设；显式 --test-type/--metric 会覆盖预设。",
+)
+@click.option("--metric", default="", help="排序指标；未指定时默认 ls_return，使用 --preset 时默认取预设指标。")
 @click.option("--min-metric", "--min_metric", "min_metrics", multiple=True, metavar="KEY=VALUE", help="最小指标过滤，可重复。")
 @click.option("--max-metric", "--max_metric", "max_metrics", multiple=True, metavar="KEY=VALUE", help="最大指标过滤，可重复。")
 @click.option("--ascending", is_flag=True, help="升序排序。")
@@ -312,6 +318,7 @@ def rank_factor_research_results(
     start_date: str,
     end_date: str,
     contained: bool,
+    preset: str,
     metric: str,
     min_metrics: tuple[str, ...],
     max_metrics: tuple[str, ...],
@@ -319,21 +326,30 @@ def rank_factor_research_results(
     limit: int,
 ) -> None:
     """Rank factor-library research results by period and metric filters."""
+    resolved = _resolve_research_rank_preset(
+        preset=preset,
+        test_type=test_type,
+        metric=metric,
+        min_metrics=min_metrics,
+        max_metrics=max_metrics,
+    )
     data = client_from_config().list_factor_research_runs(
         factor_family=factor_family,
         factor_alias=factor_alias,
         product_group=product_group,
-        test_type=test_type,
+        test_type=resolved["test_type"],
         start_date=start_date,
         end_date=end_date,
         overlap="0" if contained else "1",
-        metric=metric,
-        min_metric=list(min_metrics),
-        max_metric=list(max_metrics),
+        metric=resolved["metric"],
+        min_metric=resolved["min_metrics"],
+        max_metric=resolved["max_metrics"],
         ascending="1" if ascending else "",
         limit=limit,
     )
-    _print_research_runs(data.get("runs") or [], metric=metric)
+    if preset:
+        click.echo(f"预设: {preset} · metric={resolved['metric']} · test_type={resolved['test_type'] or '不限'}")
+    _print_research_runs(data.get("runs") or [], metric=resolved["metric"])
 
 
 @factor_library.command("history")
@@ -499,6 +515,47 @@ def current_user_params(payload: dict[str, Any]) -> list[dict[str, Any]]:
         params = config.get("params_list") or []
         return [dict(row) for row in params if isinstance(row, dict)]
     return []
+
+
+_RESEARCH_RANK_PRESETS: dict[str, dict[str, Any]] = {
+    "ic-stable": {
+        "test_type": "ic",
+        "metric": "ic_mean",
+        "min_metrics": ("ic_mean=0", "ic_t_stat=2"),
+        "max_metrics": (),
+    },
+    "costed-backtest": {
+        "test_type": "backtest",
+        "metric": "ls_return",
+        "min_metrics": ("ls_return=0",),
+        "max_metrics": (),
+    },
+    "bucket-monotonic": {
+        "test_type": "bucket_label",
+        "metric": "a1_a5_label_return_spread",
+        "min_metrics": ("a1_a5_label_return_spread=0",),
+        "max_metrics": (),
+    },
+}
+
+
+def _resolve_research_rank_preset(
+    *,
+    preset: str,
+    test_type: str,
+    metric: str,
+    min_metrics: tuple[str, ...],
+    max_metrics: tuple[str, ...],
+) -> dict[str, Any]:
+    base = dict(_RESEARCH_RANK_PRESETS.get(preset, {}))
+    resolved_test_type = test_type or str(base.get("test_type") or "")
+    resolved_metric = metric or str(base.get("metric") or "ls_return")
+    return {
+        "test_type": resolved_test_type,
+        "metric": resolved_metric,
+        "min_metrics": [*list(base.get("min_metrics") or ()), *list(min_metrics)],
+        "max_metrics": [*list(base.get("max_metrics") or ()), *list(max_metrics)],
+    }
 
 
 def _resolve_factor_from_catalog(

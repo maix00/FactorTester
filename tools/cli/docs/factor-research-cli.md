@@ -9,7 +9,8 @@ FactorTester CLI 是远程 HTTP 客户端，不假设用户机器上有服务端
 3. 预筛选预测力：用 `ic_test grid` 或 `ic_test config --run` 查看 RankIC、ICIR、滚动 IC、IC 衰减。
 4. 做类型诊断：用 `factor_type_analysis grid/run` 判断趋势、波动率等类型相关性和产品组内相关性来源。
 5. 只对通过诊断的候选做回测：用 `backtest compare factor-grid` 与 `backtest --run`，显式纳入费率、成交量容量、保证金和换手。
-6. 审计结果：用 `backtest results summary/equity/order-flow/snapshot/attribution` 导出统计、净值、订单流和快照。
+6. 查询结构化研究结果：用 `custom_factors factor-library history/rank` 查看历史结果、筛选候选；旧 artifact 用 `import-result` 回填。
+7. 审计结果：用 `backtest results summary/equity/order-flow/snapshot/attribution` 导出统计、净值、订单流和快照。
 
 ## 常用命令
 
@@ -20,6 +21,9 @@ factortester factor_evaluation run --factor-family SgCCS --product-group 中国�
 factortester ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m
 factortester factor_type_analysis grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m
 factortester backtest compare factor-grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --volume-capacity-mode infinite
+factortester custom_factors factor-library history --factor-family SgCCS --product-group 中国期货日盘
+factortester custom_factors factor-library rank --preset ic-stable --start-date 2024-01-01 --end-date 2025-12-31
+factortester custom_factors factor-library rank --preset costed-backtest --start-date 2024-01-01 --end-date 2025-12-31
 factortester backtest --run --verbose
 factortester backtest results summary
 factortester backtest results order-flow --group-name A1 --output orders.csv
@@ -33,7 +37,7 @@ factortester backtest results order-flow --group-name A1 --output orders.csv
 - IC/IR：至少检查 RankIC、ICIR、样本数、滚动稳定性和 IC 衰减。
 - 类型分析：检查趋势/波动率等参照类型相关性，以及产品组内相关性来源。
 - 多重检验：参数/产品组网格越大，越要报告候选数量和样本外验证。
+- 结果库：`rank` 只用于候选生成，`ic-stable` / `costed-backtest` / `bucket-monotonic` 预设不能替代样本切片和样本外复核。
 - 交易成本：费率、滑点、成交量容量和换手率必须进入回测解释。
 - 容量：成交量容量限制与不限制至少做一次对照。
 - 结果核查：保存统计、净值、订单流、snapshot；异常跳变要定位到 flow 或数据。
-
