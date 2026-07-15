@@ -62,6 +62,13 @@ def build_factor_research_plan(
             "command": f"cli-anything-factortester-research workspace inspect --factor-family {shlex.quote(factor_family)}",
             "required_outputs": ["source_files", "tree_repr", "source_checks", "rolling_shift_windows", "data_columns"],
         },
+        {
+            "phase": "build_validation_slices",
+            "skill_basis": ["quantitative-research:walk-forward", "quantitative-research:regime-detection"],
+            "purpose": "生成并记录 calendar、rolling 和数据驱动 regime 切片；2026 只能作为 OOS 标注，不能用于选参。",
+            "command": "cli-anything-factortester-research slice-plan --json",
+            "required_outputs": ["calendar_quarterly", "rolling_63d_step21d", "oos_annotation", "selection_policy"],
+        },
     ]
     if template:
         plan.extend(
@@ -134,6 +141,8 @@ def validation_checklist() -> list[str]:
         "参数网格记录 hypotheses_tested，解释多重检验风险。",
         "开始改写因子前，必须先查看后端 FactorExpr 算子表；若算子不全，先补全算子和测试，再继续研究。",
         "开始任何 IC/类型/回测前，必须先 workspace prepare --build --sync，并 inspect 因子源码。",
+        "必须生成 ResearchSlice/ValidationPlan；不能只用 H1/H2，至少要有季度、滚动窗口和数据驱动 regime 说明。",
+        "2026 样本只能作为 OOS 风险标注，不能用于选择因子、产品组、参数或策略 policy。",
         "费用、成交量容量、margin mode、fee mode 显式写入配置。",
         "无未来函数：信号使用 close 时只能在下一可见 open 或更晚成交。",
         "发现 CLI/API/后端能力缺口时先记录 gap，修复代码并验证后再继续研究。",

@@ -18,6 +18,7 @@ from .core.session import (
     save_session,
 )
 from .core.service import fetch_worktrees, restart_worktree_service
+from .core.slices import default_factor_validation_plan
 from .core.workspace import inspect_factor_source, parse_workspace_root
 from .utils.factortester_backend import looks_like_platform_gap, resolve_factortester, run_factortester
 from .utils.repl_skin import ReplSkin
@@ -119,6 +120,43 @@ def plan(
     for index, item in enumerate(session.plan, start=1):
         click.echo(f"{index}. [{item['phase']}] {item['purpose']}")
         click.echo(f"   {item['command']}")
+
+
+@cli.command("slice-plan")
+@click.option("--in-sample-start", default="2024-01-01", show_default=True)
+@click.option("--in-sample-end", default="2025-12-31", show_default=True)
+@click.option("--oos-start", default="2026-01-01", show_default=True)
+@click.option("--oos-end", default="2026-12-31", show_default=True)
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+def slice_plan(
+    in_sample_start: str,
+    in_sample_end: str,
+    oos_start: str,
+    oos_end: str,
+    as_json: bool,
+) -> None:
+    """Print the standard factor-research time-slice validation plan."""
+    plan = default_factor_validation_plan(
+        in_sample_start=in_sample_start,
+        in_sample_end=in_sample_end,
+        oos_start=oos_start,
+        oos_end=oos_end,
+    )
+    payload = plan.to_dict()
+    if as_json:
+        _echo_json(payload)
+        return
+    click.echo(f"validation_plan: {payload['name']}")
+    click.echo(f"in_sample: {in_sample_start} -> {in_sample_end}")
+    click.echo(f"oos_annotation: {oos_start} -> {oos_end}")
+    click.echo(f"selection_policy: {payload['selection_policy']}")
+    for slice_set in payload["slice_sets"]:
+        click.echo(f"\n[{slice_set['name']}] {slice_set['description']}")
+        if not slice_set["slices"]:
+            click.echo("  (requires data-driven generation artifact)")
+            continue
+        for item in slice_set["slices"]:
+            click.echo(f"  {item['name']}: {item['start']} -> {item['end']} · {item['purpose']} · {item['kind']}")
 
 
 @cli.command("run-step", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})

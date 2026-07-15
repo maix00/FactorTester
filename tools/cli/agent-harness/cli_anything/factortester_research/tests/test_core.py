@@ -3,6 +3,7 @@ from __future__ import annotations
 from cli_anything.factortester_research.core.plan import build_factor_research_plan, validation_checklist
 from cli_anything.factortester_research.core.service import ManagedWorktree, select_worktree
 from cli_anything.factortester_research.core.session import ResearchSession, record_gap, resolve_gap
+from cli_anything.factortester_research.core.slices import default_factor_validation_plan
 
 
 def test_plan_orders_diagnostics_before_backtest() -> None:
@@ -19,6 +20,7 @@ def test_plan_orders_diagnostics_before_backtest() -> None:
     assert phases.index("inspect_factor_expr_dsl") < phases.index("prepare_factor_workspace")
     assert phases.index("prepare_factor_workspace") < phases.index("understand_factor_source")
     assert phases.index("understand_factor_source") < phases.index("diagnose_ic")
+    assert phases.index("build_validation_slices") < phases.index("diagnose_ic")
     assert phases.index("diagnose_ic") < phases.index("backtest")
     assert phases.index("diagnose_type") < phases.index("backtest")
     assert phases.index("cost_capacity_screen") < phases.index("backtest")
@@ -26,6 +28,7 @@ def test_plan_orders_diagnostics_before_backtest() -> None:
     assert any("custom_factors operators" in item["command"] for item in plan)
     assert any(item["phase"] == "operator_coverage_gate" for item in plan)
     assert any("workspace prepare --build --sync" in item["command"] for item in plan)
+    assert any("slice-plan --json" in item["command"] for item in plan)
     assert any("--volume-capacity-mode volume_participation" in item["command"] for item in plan)
     assert any(item["phase"] == "platform_gap_loop" for item in plan)
 
@@ -45,6 +48,8 @@ def test_validation_checklist_encodes_quant_research_guardrails() -> None:
     assert "算子不全" in text
     assert "workspace prepare --build --sync" in text
     assert "未来函数" in text
+    assert "ResearchSlice/ValidationPlan" in text
+    assert "2026" in text
     assert "gap" in text
     assert "7998" in text
     assert "client_only" in text
@@ -76,3 +81,23 @@ def test_service_target_selection_requires_unambiguous_worktree() -> None:
     ]
     target = select_worktree(worktrees, target_port=8123)
     assert target.branch == "fix/issue-123-factortester-cli-http"
+
+
+def test_default_validation_plan_separates_selection_from_oos_annotation() -> None:
+    plan = default_factor_validation_plan()
+    payload = plan.to_dict()
+    assert payload["in_sample_start"] == "2024-01-01"
+    assert payload["in_sample_end"] == "2025-12-31"
+    assert payload["oos_start"] == "2026-01-01"
+    names = {item["name"] for item in payload["slice_sets"]}
+    assert {"calendar_quarterly", "rolling_63d_step21d", "oos_annotation"} <= names
+    all_slices = [
+        item
+        for slice_set in payload["slice_sets"]
+        for item in slice_set["slices"]
+    ]
+    assert any(item["name"] == "2024Q1" for item in all_slices)
+    assert any(item["kind"] == "rolling" for item in all_slices)
+    oos = [item for item in all_slices if item["purpose"] == "oos_annotation"]
+    assert oos and all(item["start"].startswith("2026") for item in oos)
+    assert not any(item["purpose"] in {"selection", "validation"} and item["start"].startswith("2026") for item in all_slices)
