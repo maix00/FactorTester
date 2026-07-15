@@ -144,11 +144,11 @@ class FactorTesterClient:
             query["product_group"] = product_group
         if include_subordinates:
             query["include_subordinates"] = "1"
-        return self._expect_success(self.session.get("/api/factor-library-overview", query=query or None))
+        return self._expect_success(self.session.get("/custom-factors/api/factor-library-overview", query=query or None))
 
     def factor_library_configs(self, factor_family: str, *, product_group: str = "") -> dict[str, Any]:
         query = {"product_group": product_group} if product_group else None
-        return self._expect_success(self.session.get(f"/api/factor-library-configs/{factor_family}", query=query))
+        return self._expect_success(self.session.get(f"/custom-factors/api/factor-library-configs/{factor_family}", query=query))
 
     def save_factor_library_config(
         self,
@@ -163,7 +163,7 @@ class FactorTesterClient:
             payload["metadata"] = metadata
         return self._expect_success(
             self.session.put(
-                f"/api/factor-library-configs/{factor_family}",
+                f"/custom-factors/api/factor-library-configs/{factor_family}",
                 payload,
             )
         )
