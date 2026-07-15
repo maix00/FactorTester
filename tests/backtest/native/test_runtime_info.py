@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from tools.testers.backtest.modules.runtime_info import record_runtime_fallback_interval
+from tools.testers.backtest.engines.native.backtester import _record_result_assembly_profile
 
 
 class _State:
@@ -96,3 +97,20 @@ def test_runtime_fallback_interval_reuses_index_and_respects_external_appends():
     assert state.runtime_info_rows[1]["details"]["count"] == 2
     assert state.runtime_info_rows[1]["details"]["end"] == "2026-01-05 09:04:00"
     assert len(state.runtime_info_sink.events) == 1
+
+
+def test_result_assembly_profile_records_runtime_info_row():
+    state = _State()
+    state.backtest_profile_min_duration_ms = 0.0
+
+    _record_result_assembly_profile(
+        state,
+        elapsed_ms=12.5,
+        strategy_count=2,
+        portfolio_count=2,
+    )
+
+    assert len(state.runtime_info_rows) == 1
+    assert state.runtime_info_rows[0]["code"] == "backtest_result_assembly_profile"
+    assert state.runtime_info_rows[0]["details"]["phase"] == "result_assembly"
+    assert state.runtime_info_rows[0]["details"]["elapsed_ms"] == 12.5

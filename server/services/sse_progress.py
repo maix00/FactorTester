@@ -40,8 +40,9 @@ class SSEProgressEmitter:
     哨兵 None 自动触发流结束。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, heartbeat_interval: float = 15.0) -> None:
         self._q: queue.Queue = queue.Queue()
+        self._heartbeat_interval = max(0.0, float(heartbeat_interval))
 
     # ── 事件发射（工具线程调用） ──
 
@@ -133,7 +134,11 @@ class SSEProgressEmitter:
 
     def _generate(self):
         while True:
-            chunk = self._q.get()
+            try:
+                chunk = self._q.get(timeout=self._heartbeat_interval or None)
+            except queue.Empty:
+                yield self._event("heartbeat", {"ok": True})
+                continue
             if chunk is None:
                 break
             yield chunk

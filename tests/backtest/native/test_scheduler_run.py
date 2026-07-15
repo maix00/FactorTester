@@ -56,6 +56,27 @@ def test_pre_replay_flow_produces_event_processed_by_per_event_flow():
     assert seen == [pd.Timestamp("2024-01-01")]
 
 
+def test_flow_profile_records_slow_pre_replay_flow():
+    s = Strategy(alias="S")
+
+    def compute(account, ctx) -> None:
+        return None
+
+    flow = Flow("profiled_flow", inputs=(), outputs=(), phase=Phase.PRE_REPLAY, compute=compute)
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    account = _account([s], active_flow_names=frozenset({"profiled_flow"}))
+    account.backtest_profile_min_duration_ms = 0.0
+
+    run(account, EventQueue(), registry.resolve())
+
+    rows = [row for row in account.runtime_info_rows if row.get("code") == "backtest_flow_profile"]
+    assert len(rows) == 1
+    assert rows[0]["details"]["phase"] == "pre_replay"
+    assert rows[0]["details"]["flow"] == "profiled_flow"
+    assert rows[0]["details"]["count"] == 1
+
+
 def test_chained_event_production_is_consumed_not_dropped():
     s = Strategy(alias="S")
     fills: list[str] = []

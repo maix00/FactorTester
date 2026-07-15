@@ -12,6 +12,7 @@ from __future__ import annotations
 import heapq
 import itertools
 import math
+import time
 import warnings
 from collections import defaultdict
 from collections.abc import Mapping
@@ -1007,6 +1008,73 @@ class _ProgressTracker:
             self._activity_sink.emit_signal_progress(completed=1, total=1, phase="done", percent=100.0)
 
 
+def _flow_profile_threshold_ms(state: "BacktestRunState") -> float:
+    raw = getattr(state, "backtest_profile_min_duration_ms", 1000.0)
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return 1000.0
+
+
+def _record_flow_profile(
+    state: "BacktestRunState",
+    flow: ResolvedFlow,
+    *,
+    elapsed_ms: float,
+    timestamp: pd.Timestamp | None,
+    strategies: frozenset["Strategy"] | None,
+) -> None:
+    if elapsed_ms < _flow_profile_threshold_ms(state):
+        return
+    try:
+        from tools.testers.backtest.modules.runtime_info import record_runtime_info
+    except Exception:
+        return
+
+    phase = _activity_phase_for_flow(flow)
+    event_kind = flow.event_kind.name if flow.event_kind is not None else "once"
+    aggregation_key = f"{phase}|{event_kind}|{flow.owner}|{flow.name}"
+    rows = getattr(state, "runtime_info_rows", None)
+    previous: dict[str, Any] | None = None
+    if isinstance(rows, list):
+        for row in rows:
+            if row.get("code") == "backtest_flow_profile" and row.get("aggregation_key") == aggregation_key:
+                previous = row
+                break
+    previous_details = previous.get("details", {}) if isinstance(previous, dict) else {}
+    count = int(previous_details.get("count") or 0) + 1
+    total_ms = float(previous_details.get("total_ms") or 0.0) + float(elapsed_ms)
+    max_ms = max(float(previous_details.get("max_ms") or 0.0), float(elapsed_ms))
+    details = {
+        "phase": phase,
+        "event_kind": event_kind,
+        "flow": flow.name,
+        "owner": flow.owner,
+        "label": flow.effective_description,
+        "count": count,
+        "elapsed_ms": round(float(elapsed_ms), 3),
+        "total_ms": round(total_ms, 3),
+        "max_ms": round(max_ms, 3),
+        "avg_ms": round(total_ms / count, 3),
+        "strategy_count": len(strategies or ()),
+        "timestamp": timestamp.isoformat() if timestamp is not None else "",
+    }
+    record_runtime_info(
+        state,
+        code="backtest_flow_profile",
+        type="性能",
+        status="profiled",
+        level="info",
+        message=f"{phase} {flow.effective_description} 耗时 {elapsed_ms:.1f}ms",
+        detail=(
+            f"{phase}/{event_kind}/{flow.owner}.{flow.name} 最近一次耗时 "
+            f"{elapsed_ms:.1f}ms；累计 {count} 次，平均 {details['avg_ms']}ms。"
+        ),
+        details=details,
+        aggregation_key=aggregation_key,
+    )
+
+
 
 def _strategy_alias(state: "BacktestRunState", strategy: Any) -> str:
     from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
@@ -1548,7 +1616,14 @@ def make_dispatcher(
             before = _step_before_flow(
                 f, state, ctx, timestamp, step_callback, applicable, all_active_ledgers,
             )
+            started_at = time.perf_counter()
             _compute_flow(f, state, ctx)
+            _record_flow_profile(
+                state, f,
+                elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+                timestamp=timestamp,
+                strategies=applicable,
+            )
             _step_after_flow(f, state, ctx, step_callback, before)
             if tracker is not None:
                 tracker.tick(f.effective_description, phase=f.phase)
@@ -1790,7 +1865,14 @@ def _run_with_guards(
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="pre_replay", strategies=applicable)
         before = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
+        started_at = time.perf_counter()
         _compute_flow(f, state, ctx)
+        _record_flow_profile(
+            state, f,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+            timestamp=None,
+            strategies=applicable,
+        )
         _step_after_flow(f, state, ctx, step_callback, before)
         tracker.phase_flow_done(phase="pre_replay")
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
@@ -1812,7 +1894,14 @@ def _run_with_guards(
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="post_replay", strategies=applicable)
         before = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
+        started_at = time.perf_counter()
         _compute_flow(f, state, ctx)
+        _record_flow_profile(
+            state, f,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+            timestamp=None,
+            strategies=applicable,
+        )
         _step_after_flow(f, state, ctx, step_callback, before)
         tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
