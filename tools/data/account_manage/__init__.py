@@ -470,9 +470,16 @@ def load_factor_param_config(username: str, ff_alias: str, scope_key: str = DEFA
     return _load_factor_param_config(username, ff_alias, scope_key)
 
 
-def save_factor_param_config(username: str, ff_alias: str, params_list: list, scope_key: str = DEFAULT_SCOPE_KEY) -> dict:
+def save_factor_param_config(
+    username: str,
+    ff_alias: str,
+    params_list: list,
+    scope_key: str = DEFAULT_SCOPE_KEY,
+    *,
+    metadata: dict | None = None,
+) -> dict:
     ensure_account_manager_sqlite_store()
-    return _save_factor_param_config(username, ff_alias, params_list, scope_key)
+    return _save_factor_param_config(username, ff_alias, params_list, scope_key, metadata=metadata)
 
 
 def delete_factor_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> bool:
