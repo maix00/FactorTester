@@ -165,7 +165,12 @@ def run_flask_server(port=8000, directory='.'):
     IdleResourceManager.get_instance().start(idle_timeout=10, scan_interval=5)
     print("IdleResourceManager started.")
 
-    debug_reloader_child = os.environ.get("FLASK_DEBUG") != "1" or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    use_werkzeug_reloader = os.environ.get("FACTORTESTER_WERKZEUG_RELOADER", "1") != "0"
+    debug_reloader_child = (
+        os.environ.get("FLASK_DEBUG") != "1"
+        or not use_werkzeug_reloader
+        or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    )
     if os.environ.get("DERIVED_ARTIFACT_AUTO_ENSURE", "1") == "1" and debug_reloader_child:
         from sources import load_all_sources
         from tools.data.artifacts import start_background_ensure
@@ -174,16 +179,19 @@ def run_flask_server(port=8000, directory='.'):
         start_background_ensure()
         print("Derived artifact ensure started in background.")
 
-    # 开发模式：使用 Flask 内置服务器 + 热重载
+    # 开发模式：使用 Flask 内置服务器。默认保留 Werkzeug reloader，
+    # 这样通过 7998 启动的 worktree 子进程仍会出现在 VS Code/debugpy
+    # call stack 中；需要排查热重载时可设 FACTORTESTER_WERKZEUG_RELOADER=0。
     if os.environ.get('FLASK_DEBUG') == '1':
-        print("开发模式 (VS Code debugger, Flask 热重载已启用)")
+        reload_status = "已启用" if use_werkzeug_reloader else "已关闭"
+        print(f"开发模式 (VS Code debugger, Werkzeug reloader {reload_status})")
         # debugpy owns exception handling; Werkzeug's debugger otherwise pauses
         # on normal WSGI iterator shutdown (GeneratorExit) when a client leaves.
         app.run(
             host='0.0.0.0',
             port=port,
             debug=True,
-            use_reloader=True,
+            use_reloader=use_werkzeug_reloader,
             use_debugger=False,
         )
     else:
