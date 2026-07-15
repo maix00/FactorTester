@@ -160,6 +160,8 @@ def grid(ctx: click.Context, verbose: bool) -> None:
             if event_name == "result" and isinstance(data, dict):
                 result = data
         summary = _ic_summary_values(result or {}, item["factor"])
+        if isinstance(result, dict):
+            _save_ic_research_result(client, state, item, payload, result, summary)
         rows.append((
             item["factor"],
             item["product_group"],
@@ -463,6 +465,9 @@ def _run_ic_configs(state, *, configs: list[dict[str, Any]] | None = None, verbo
                     click.echo(f"  进度: {data.get('phase')} {data.get('completed')}/{data.get('total')}")
             if event_name == "result":
                 result = data
+        if isinstance(result, dict):
+            summary = _ic_summary_values(result, str(item.get("factor") or ""))
+            _save_ic_research_result(client, state, item, payload, result, summary)
     if isinstance(result, dict):
         _print_ic_result(result)
         _print_ic_factor_outputs(result)
@@ -717,3 +722,61 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _save_ic_research_result(
+    client: Any,
+    state: Any,
+    item: dict[str, Any],
+    payload: dict[str, Any],
+    result: dict[str, Any],
+    summary: dict[str, Any],
+) -> None:
+    try:
+        factor_alias = str(item.get("factor") or payload.get("factor_alias") or payload.get("factor") or "")
+        if not factor_alias:
+            return
+        settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+        start_date = str(settings.get("start_date") or "")
+        end_date = str(settings.get("end_date") or "")
+        if not start_date or not end_date:
+            return
+        metrics = {
+            "ic_mean": summary.get("mean"),
+            "ic_std": summary.get("std"),
+            "ic_ir": summary.get("ir"),
+            "ic_t_stat": summary.get("t_stat"),
+            "ic_n": summary.get("n"),
+            "ic_ac1": summary.get("ac1"),
+            "ic_half_life": summary.get("half_life"),
+        }
+        factor = _first_factor_result(result, factor_alias)
+        if factor and isinstance(factor.get("ic_decay"), list):
+            metrics["ic_decay"] = factor.get("ic_decay")
+        client.save_factor_research_run(
+            {
+                "ff_alias": str(item.get("factor_family_alias") or payload.get("factor_family_alias") or state.factor_family or _factor_family_from_alias(factor_alias)),
+                "factor_alias": factor_alias,
+                "factor_source": str((state.page_settings or {}).get("factor_source") or ""),
+                "product_group": str(item.get("product_group") or selection_label(item.get("product_path_selection")) or ""),
+                "start_date": start_date,
+                "end_date": end_date,
+                "test_type": "ic",
+                "config": {
+                    "settings": settings,
+                    "ic_correlation": payload.get("ic_correlation"),
+                    "ic_lag": payload.get("ic_lag"),
+                    "ic_decay_lags": payload.get("ic_decay_lags"),
+                    "rolling_window": payload.get("rolling_window"),
+                    "paths": payload.get("paths") or [],
+                },
+                "metrics": {key: value for key, value in metrics.items() if value is not None},
+                "note": "auto-saved from factortester ic_test run",
+            }
+        )
+    except Exception as exc:
+        click.echo(f"IC 研究结果入库失败: {exc}", err=True)
+
+
+def _factor_family_from_alias(factor_alias: str) -> str:
+    return factor_alias.split("|", 1)[0] if "|" in factor_alias else factor_alias

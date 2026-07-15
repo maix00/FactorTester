@@ -2257,6 +2257,7 @@ def _run_backtest(
     if renderer.last_result:
         state.backtest_last_result = renderer.last_result
         save_state(state)
+        _save_backtest_research_result(client, state, run_payload, renderer.last_result)
     _print_backtest_result_hints()
 
 
@@ -2286,6 +2287,132 @@ def _arg_value(args: tuple[str, ...], flag: str) -> str:
 
 def _print_backtest_result_hints() -> None:
     config_command_handlers.print_result_hints()
+
+
+def _save_backtest_research_result(client: Any, state: Any, run_payload: dict[str, Any], result: dict[str, Any]) -> None:
+    try:
+        groups = [group for group in (run_payload.get("groups") or []) if isinstance(group, dict)]
+        factor_alias = _primary_backtest_factor_alias(groups)
+        if not factor_alias:
+            return
+        product_group = _primary_backtest_product_group(groups)
+        local_settings = run_payload.get("local_settings") if isinstance(run_payload.get("local_settings"), dict) else {}
+        start_date = str(local_settings.get("start_date") or "")
+        end_date = str(local_settings.get("end_date") or "")
+        if not start_date or not end_date:
+            return
+        payload = {
+            "ff_alias": _factor_family_from_alias(factor_alias, state),
+            "factor_alias": factor_alias,
+            "factor_source": str((state.page_settings or {}).get("factor_source") or ""),
+            "product_group": product_group,
+            "start_date": start_date,
+            "end_date": end_date,
+            "test_type": "backtest",
+            "config": {
+                "local_settings": local_settings,
+                "ledger_configs": run_payload.get("ledger_configs") or {},
+                "strategy_book": run_payload.get("strategy_book") or {},
+                "ls_count": len(run_payload.get("ls_configs") or []),
+                "group_count": len(groups),
+            },
+            "metrics": _backtest_research_metrics(result),
+            "note": "auto-saved from factortester backtest run",
+        }
+        client.save_factor_research_run(payload)
+    except Exception as exc:
+        click.echo(f"研究结果入库失败: {exc}", err=True)
+
+
+def _primary_backtest_factor_alias(groups: list[dict[str, Any]]) -> str:
+    for group in groups:
+        alias = str(group.get("factorAlias") or group.get("factor") or "").strip()
+        if alias:
+            return alias
+    return ""
+
+
+def _primary_backtest_product_group(groups: list[dict[str, Any]]) -> str:
+    for group in groups:
+        selection = group.get("product_path_selection")
+        if isinstance(selection, dict):
+            label = str(selection.get("label") or selection.get("name") or selection.get("product_group") or "").strip()
+            if label:
+                return label
+        selection_id = str(group.get("product_path_selection_id") or "").strip()
+        if selection_id:
+            return selection_id
+    return ""
+
+
+def _factor_family_from_alias(factor_alias: str, state: Any) -> str:
+    if "|" in factor_alias:
+        return factor_alias.split("|", 1)[0]
+    return str(getattr(state, "factor_family", "") or factor_alias)
+
+
+def _backtest_research_metrics(result: dict[str, Any]) -> dict[str, Any]:
+    metrics: dict[str, Any] = {}
+    returns: dict[str, float] = {}
+    groups = result.get("groups") if isinstance(result.get("groups"), list) else []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        name = _metric_safe_name(str(group.get("name") or group.get("shortAlias") or group.get("id") or "portfolio"))
+        curve = _numeric_curve(group.get("total_equity") or group.get("equity") or [])
+        if curve:
+            ret = curve[-1] / curve[0] - 1 if curve[0] else None
+            dd = _max_drawdown(curve)
+            if ret is not None:
+                metrics[f"{name}_return"] = ret
+                returns[name] = ret
+            metrics[f"{name}_max_drawdown"] = dd
+            metrics[f"{name}_points"] = len(curve)
+            if name.startswith("ls_"):
+                metrics.setdefault("ls_return", ret)
+                metrics.setdefault("ls_max_drawdown", dd)
+        for key in ("return", "max_drawdown"):
+            if group.get(key) is not None:
+                metrics.setdefault(f"{name}_{key}", group.get(key))
+        if name.startswith("ls_") and group.get("return") is not None:
+            metrics.setdefault("ls_return", group.get("return"))
+            if group.get("max_drawdown") is not None:
+                metrics.setdefault("ls_max_drawdown", group.get("max_drawdown"))
+    if "a1" in returns and "a5" in returns:
+        metrics["a1_a5_return_spread"] = returns["a1"] - returns["a5"]
+    return {key: value for key, value in metrics.items() if value is not None}
+
+
+def _numeric_curve(values: Any) -> list[float]:
+    if not isinstance(values, list):
+        return []
+    out: list[float] = []
+    for value in values:
+        try:
+            if value is not None:
+                out.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _max_drawdown(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    peak = values[0]
+    drawdown = 0.0
+    for value in values:
+        peak = max(peak, value)
+        if peak:
+            drawdown = min(drawdown, value / peak - 1)
+    return drawdown
+
+
+def _metric_safe_name(name: str) -> str:
+    import re
+
+    value = re.sub(r"[^0-9A-Za-z]+", "_", name.strip().lower()).strip("_")
+    return value or "portfolio"
 
 
 def _print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict[str, Any]]) -> None:
