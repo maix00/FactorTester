@@ -199,7 +199,7 @@ class HttpSession:
             return base
         from urllib.parse import urlencode
 
-        return f"{base}?{urlencode({k: v for k, v in query.items() if v is not None})}"
+        return f"{base}?{urlencode({k: v for k, v in query.items() if v is not None}, doseq=True)}"
 
     def _save_cookies(self) -> None:
         cookie_file = Path(self.cookie_jar.filename)
