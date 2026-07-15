@@ -361,13 +361,19 @@ def test_event_order_flow_detail_filters_by_group_and_timestamp_ms():
 
 def test_long_short_default_id_matches_settings_and_owner_rows():
     source_settings = {
-        f"g{i}": {"strategy_id": f"g{i}", "factor": object(), "product_path_selection": object()}
+        f"g{i}": {
+            "strategy_id": f"g{i}",
+            "factor": object(),
+            "product_path_selection": object(),
+            "strategy_intent_mode": "group",
+            "strategy_kind": "group",
+        }
         for i in range(7)
     }
     ls_config = {
         "name": "",
-        "long": [{"group_id": "g0", "weight": 1.0}],
-        "short": [{"group_id": "g6", "weight": 1.0}],
+        "long_group_id": "g0",
+        "short_group_id": "g6",
     }
     normalized = dict(ls_config)
     strategy_id = group_module._long_short_strategy_id(normalized, 0)
@@ -402,6 +408,10 @@ def test_long_short_default_id_matches_settings_and_owner_rows():
 
     assert strategy_id == "ls-0"
     assert settings["strategy_id"] == "ls-0"
+    assert settings["strategy_intent_mode"] == "long_short"
+    assert settings["strategy_kind"] == "long_short"
+    assert settings["long_leg_strategy_ids"] == [{"strategy_id": "g0", "group_id": "g0", "weight": 1.0}]
+    assert settings["short_leg_strategy_ids"] == [{"strategy_id": "g6", "group_id": "g6", "weight": 1.0}]
     assert owner_rows[0]["group_id"] == "ls-0"
 
 
