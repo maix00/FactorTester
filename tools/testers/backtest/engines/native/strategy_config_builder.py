@@ -546,12 +546,30 @@ def _ledger_owned_setting_should_materialize(
                 return True
             if value == _default_value_for_field(fd, resolved, materialized_values, entries):
                 return False
+            if _is_disabled_margin_dependent_setting(field_name, resolved, materialized_values, entries):
+                return False
             visible_when = getattr(fd, "visible_when", None) or {}
             raise ValueError(
                 f"ledger-owned field {field_name!r} is only valid when {visible_when!r}; "
                 f"got {value!r} under current settings"
             )
     return True
+
+
+def _is_disabled_margin_dependent_setting(
+    field_name: str,
+    resolved: Mapping[str, Any],
+    materialized: Mapping[Any, Any],
+    entries: list[tuple[str, Any, Any, frozenset[str]]],
+) -> bool:
+    if field_name not in {"margin_call_mode", "liquidation_target_buffer"}:
+        return False
+    values_by_name = dict(resolved)
+    for candidate_name, ref, _fd, _owner_flow_names in entries:
+        if ref in materialized:
+            values_by_name[candidate_name] = materialized[ref]
+    margin_mode = str(values_by_name.get("margin_mode") or "").lower()
+    return margin_mode in {"off", "none", "zero"}
 
 
 def _raise_on_conflicting_ledger_config(left: LedgerConfig, right: LedgerConfig, *, ledger_id: str, source: str) -> None:
