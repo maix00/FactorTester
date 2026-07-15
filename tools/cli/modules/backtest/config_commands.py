@@ -8,6 +8,7 @@ from typing import Any
 import click
 
 from tools.cli.field_help import render_settings_help
+from tools.cli.http import HttpClientError
 from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest import config_state as config_state_helpers
 from tools.cli.modules.backtest import config_views as config_view_formatter
@@ -150,7 +151,15 @@ def print_local_settings(
 ) -> None:
     if validate and validate_registered_settings is not None:
         validate_registered_settings(state)
-    _, store = config_state_helpers.stores_for_backtest(state)
+    try:
+        _, store = config_state_helpers.stores_for_backtest(state)
+    except (HttpClientError, TimeoutError, OSError) as exc:
+        for line in config_view_formatter.local_settings_fallback_lines(
+            state.backtest_local_settings,
+            reason=str(exc) or exc.__class__.__name__,
+        ):
+            click.echo(line)
+        return
     for line in config_view_formatter.local_settings_lines(state.backtest_local_settings, store):
         click.echo(line)
 

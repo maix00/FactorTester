@@ -4434,6 +4434,27 @@ def test_backtest_config_local_settings_is_sibling_action(tmp_path, monkeypatch)
         assert "allocation_mode: equal_notional" in result.output
 
 
+def test_backtest_local_settings_prints_fallback_when_manifest_is_unavailable(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=False, error="settings temporarily unavailable"), 503
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+
+        result = runner.invoke(cli, ["backtest", "local-settings", "--start-date", "2025-01-02"])
+
+        assert result.exit_code == 0
+        assert "已更新 local-settings" in result.output
+        assert "无法读取后端注册字段" in result.output
+        assert "start_date: 2025-01-02" in result.output
+
+
 def test_backtest_add_group_context_help_prints_registered_visible_and_editable_fields(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)

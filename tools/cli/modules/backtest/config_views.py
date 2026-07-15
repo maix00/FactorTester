@@ -123,6 +123,18 @@ def local_settings_lines(local_settings: dict[str, Any], store) -> list[str]:
     return lines
 
 
+def local_settings_fallback_lines(local_settings: dict[str, Any], *, reason: str = "") -> list[str]:
+    lines = ["Backtest local-settings"]
+    if reason:
+        lines.append(f"  （无法读取后端注册字段，以下仅显示本地显式值：{reason}）")
+    if not local_settings:
+        lines.append("  （无显式 local-settings）")
+        return lines
+    for key in sorted(local_settings):
+        lines.append(f"  {key}: {local_settings[key]}")
+    return lines
+
+
 def group_field_key_for_option(option: str) -> str | None:
     normalized = option.lstrip("-").replace("-", "_")
     aliases = {
@@ -301,4 +313,3 @@ def run_strategy_info_lines(groups: list[dict[str, Any]], ls_configs: list[dict[
         name = config.get("name") or f"ls-{index}"
         lines.append(f"  {name} · Long-Short · 多头={long_label} · 空头={short_label}")
     return lines
-
