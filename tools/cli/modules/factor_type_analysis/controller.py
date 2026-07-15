@@ -69,8 +69,10 @@ def run(ctx: click.Context) -> None:
     payload = base_payload(state, selectors=selectors, settings=state.factor_type_analysis_local_settings)
     summary = str(payload.pop("_summary"))
     click.echo("开始因子类型分析: " + summary)
-    result = client_from_config().run_factor_type_analysis(payload)
+    client = client_from_config()
+    result = client.run_factor_type_analysis(payload)
     _print_result(result)
+    _save_factor_type_research_result(client, state, payload, result)
     save_state(state)
 
 
@@ -94,6 +96,7 @@ def grid(ctx: click.Context) -> None:
         payload = {**item["payload_base"], "settings": item["settings"]}
         click.echo(f"类型分析: {item['factor']} · {item['product_group']}")
         result = client.run_factor_type_analysis(payload)
+        _save_factor_type_research_result(client, state, payload, result)
         rows.append((item["factor"], item["product_group"], *_type_summary_tuple(result)))
     save_state(state)
     _print_grid_rows(rows, top=int(options.get("top") or 12))
@@ -218,3 +221,46 @@ def _print_grid_rows(rows: list[tuple[str, str, str, str]], *, top: int) -> None
         max_widths=(36, 18, 18, 12),
     ):
         click.echo(line)
+
+
+def _save_factor_type_research_result(client, state, payload: dict, result: dict) -> None:
+    try:
+        factor_alias = str(payload.get("factor_alias") or payload.get("factor") or "")
+        settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+        start_date = str(settings.get("start_date") or "")
+        end_date = str(settings.get("end_date") or "")
+        if not factor_alias or not start_date or not end_date:
+            return
+        best = result.get("best_match") or result.get("best_category") or {}
+        if not isinstance(best, dict):
+            best = {}
+        metrics = {
+            "best_type": _best_type_label(best),
+            "best_type_score": _best_type_score(best),
+            "category_summary": result.get("category_summary") or result.get("category_correlations"),
+            "reference_factors": result.get("reference_factors") or result.get("reference_correlations"),
+        }
+        product_selection = payload.get("product_path_selection")
+        product_group = ""
+        if isinstance(product_selection, dict):
+            product_group = str(product_selection.get("label") or product_selection.get("name") or product_selection.get("product_group") or "")
+        client.save_factor_research_run(
+            {
+                "ff_alias": str(payload.get("factor_family_alias") or state.factor_family or _factor_family_from_alias(factor_alias)),
+                "factor_alias": factor_alias,
+                "factor_source": str((state.page_settings or {}).get("factor_source") or ""),
+                "product_group": product_group,
+                "start_date": start_date,
+                "end_date": end_date,
+                "test_type": "factor_type",
+                "config": {"settings": settings, "paths": payload.get("paths") or []},
+                "metrics": {key: value for key, value in metrics.items() if value is not None},
+                "note": "auto-saved from factortester factor_type_analysis run",
+            }
+        )
+    except Exception as exc:
+        click.echo(f"因子类型研究结果入库失败: {exc}", err=True)
+
+
+def _factor_family_from_alias(factor_alias: str) -> str:
+    return factor_alias.split("|", 1)[0] if "|" in factor_alias else factor_alias

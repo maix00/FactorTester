@@ -238,7 +238,8 @@ def add_factor_params(
 
 
 @factor_library.command("import-result")
-@click.option("--artifact", "artifact_paths", multiple=True, type=click.Path(exists=True, dir_okay=False), required=True, help="研究 artifact JSON，可重复。")
+@click.option("--artifact", "artifact_paths", multiple=True, type=click.Path(exists=True, dir_okay=False), help="研究 artifact JSON，可重复。")
+@click.option("--dir", "artifact_dirs", multiple=True, type=click.Path(exists=True, file_okay=False), help="递归导入目录下的 JSON artifacts，可重复。")
 @click.option("--factor-family", "--factor_family", default="", help="覆盖 artifact 中的因子家族。")
 @click.option("--factor-alias", "--factor_alias", default="", help="覆盖 artifact 中的因子 alias。")
 @click.option("--product-group", "--product_group", default="", help="覆盖 artifact 中的产品组。")
@@ -248,6 +249,7 @@ def add_factor_params(
 @friendly_errors
 def import_factor_research_result(
     artifact_paths: tuple[str, ...],
+    artifact_dirs: tuple[str, ...],
     factor_family: str,
     factor_alias: str,
     product_group: str,
@@ -257,8 +259,14 @@ def import_factor_research_result(
 ) -> None:
     """Import existing research artifact JSON into the structured result index."""
     client = client_from_config()
+    paths = [Path(path) for path in artifact_paths]
+    for directory in artifact_dirs:
+        paths.extend(sorted(Path(directory).rglob("*.json")))
+    if not paths:
+        raise click.ClickException("缺少 artifact；请传 --artifact 或 --dir")
     saved = []
-    for artifact_path in artifact_paths:
+    skipped = []
+    for artifact_path in paths:
         payloads = _research_payloads_from_artifact(
             Path(artifact_path),
             factor_family=factor_family,
@@ -269,8 +277,15 @@ def import_factor_research_result(
             note=note,
         )
         for payload in payloads:
+            if not payload.get("ff_alias") or not payload.get("factor_alias") or not payload.get("start_date") or not payload.get("end_date"):
+                skipped.append(str(artifact_path))
+                continue
             saved.append(client.save_factor_research_run(payload).get("run") or {})
     click.echo(f"已导入研究结果: {len(saved)}")
+    if skipped:
+        click.echo(f"已跳过 artifact: {len(skipped)}")
+        for item in skipped[:8]:
+            click.echo(f"  - {item}")
     for run in saved:
         click.echo(_research_run_line(run))
 
@@ -992,13 +1007,14 @@ def _print_research_runs(runs: list[dict[str, Any]], *, metric: str) -> None:
     rows = []
     for run in runs:
         metrics = run.get("metrics") if isinstance(run.get("metrics"), dict) else {}
+        display_metric = metric or _default_display_metric(run, metrics)
         rows.append(
             (
                 run.get("factor_alias") or "",
                 run.get("test_type") or "",
                 run.get("product_group") or "",
                 f"{run.get('start_date') or ''}..{run.get('end_date') or ''}",
-                _format_metric(metrics.get(metric)) if metric else "",
+                _format_metric(metrics.get(display_metric)) if display_metric else "",
                 _format_metric(metrics.get("ls_return")),
                 _format_metric(metrics.get("a1_return")),
                 _format_metric(metrics.get("a5_return")),
@@ -1009,6 +1025,21 @@ def _print_research_runs(runs: list[dict[str, Any]], *, metric: str) -> None:
     headers = ("factor", "type", "product_group", "period", metric or "metric", "ls", "a1", "a5", "ic", "artifact/report")
     for line in render_table(headers, rows, max_widths=(40, 12, 18, 24, 10, 10, 10, 10, 10, 50)):
         click.echo(line)
+
+
+def _default_display_metric(run: dict[str, Any], metrics: dict[str, Any]) -> str:
+    test_type = str(run.get("test_type") or "")
+    if test_type == "factor_type":
+        return "best_type_score" if "best_type_score" in metrics else "best_type"
+    if test_type == "factor_evaluation":
+        return "product_count" if "product_count" in metrics else "series_count"
+    if test_type == "backtest":
+        return "ls_return" if "ls_return" in metrics else "a1_return"
+    if test_type == "ic":
+        return "ic_mean"
+    if test_type == "bucket_label":
+        return "a1_a5_label_return_spread" if "a1_a5_label_return_spread" in metrics else "ic_mean"
+    return ""
 
 
 def _format_metric(value: Any) -> str:
