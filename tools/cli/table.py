@@ -21,7 +21,9 @@ def truncate_display(value: object, width: int) -> str:
     text = str(value)
     if width <= 0 or display_width(text) <= width:
         return text
-    return Text(text, no_wrap=True, overflow="ellipsis").truncate(width, overflow="ellipsis").plain
+    rich_text = Text(text, no_wrap=True, overflow="ellipsis")
+    truncated = rich_text.truncate(width, overflow="ellipsis")
+    return (truncated or rich_text).plain
 
 
 def pad_display(value: object, width: int, *, align: str = "left") -> str:

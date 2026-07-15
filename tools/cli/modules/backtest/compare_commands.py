@@ -35,7 +35,7 @@ def handle_compare_command(
     verbose: bool,
     run_backtest: RunBacktest,
 ) -> None:
-    if not args or args[0] in {"help", "--help", "-h"}:
+    if not args or any(arg in {"help", "--help", "-h"} for arg in args):
         print_compare_help()
         return
     preset = args[0]
