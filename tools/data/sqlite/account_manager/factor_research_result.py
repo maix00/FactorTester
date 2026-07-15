@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 import sqlite3
 import time
 from typing import Any
@@ -44,6 +45,9 @@ def _make_run_id(payload: dict[str, Any]) -> str:
             "start_date": payload.get("start_date") or "",
             "end_date": payload.get("end_date") or "",
             "test_type": payload.get("test_type") or "",
+            "sample_role": payload.get("sample_role") or "",
+            "regime_label": payload.get("regime_label") or "",
+            "slice_name": payload.get("slice_name") or "",
             "config_hash": payload.get("config_hash") or "",
         }
     )
@@ -70,6 +74,9 @@ def ensure_factor_research_result_schema(conn: sqlite3.Connection) -> None:
             start_date TEXT NOT NULL,
             end_date TEXT NOT NULL,
             test_type TEXT NOT NULL,
+            sample_role TEXT NOT NULL DEFAULT '',
+            regime_label TEXT NOT NULL DEFAULT '',
+            slice_name TEXT NOT NULL DEFAULT '',
             config_hash TEXT NOT NULL DEFAULT '',
             config_json TEXT NOT NULL DEFAULT '{}',
             report_path TEXT NOT NULL DEFAULT '',
@@ -80,6 +87,15 @@ def ensure_factor_research_result_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    existing_columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(account_factor_research_runs)").fetchall()
+    }
+    for column in ("sample_role", "regime_label", "slice_name"):
+        if column not in existing_columns:
+            conn.execute(
+                f"ALTER TABLE account_factor_research_runs ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+            )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS account_factor_research_metrics (
@@ -127,10 +143,14 @@ def save_factor_research_run(
     report_path: str = "",
     artifact_path: str = "",
     note: str = "",
+    sample_role: str = "",
+    regime_label: str = "",
+    slice_name: str = "",
     run_id: str | None = None,
 ) -> dict[str, Any]:
     """Upsert one structured factor research run and its metrics."""
     cfg = dict(config or {})
+    meta = cfg.get("research_meta") if isinstance(cfg.get("research_meta"), dict) else {}
     cfg_hash = str(config_hash_value or config_hash(cfg))
     payload = {
         "username": str(username or ""),
@@ -141,6 +161,9 @@ def save_factor_research_run(
         "start_date": _normal_date(start_date),
         "end_date": _normal_date(end_date),
         "test_type": str(test_type or ""),
+        "sample_role": str(sample_role or meta.get("sample_role") or ""),
+        "regime_label": str(regime_label or meta.get("regime_label") or ""),
+        "slice_name": str(slice_name or meta.get("slice_name") or ""),
         "config_hash": cfg_hash,
         "config_json": _json_dumps(cfg),
         "report_path": str(report_path or ""),
@@ -165,9 +188,9 @@ def save_factor_research_run(
             """
             INSERT INTO account_factor_research_runs (
                 run_id, username, ff_alias, factor_alias, factor_source, product_group,
-                start_date, end_date, test_type, config_hash, config_json,
+                start_date, end_date, test_type, sample_role, regime_label, slice_name, config_hash, config_json,
                 report_path, artifact_path, note, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 username = excluded.username,
                 ff_alias = excluded.ff_alias,
@@ -177,6 +200,9 @@ def save_factor_research_run(
                 start_date = excluded.start_date,
                 end_date = excluded.end_date,
                 test_type = excluded.test_type,
+                sample_role = excluded.sample_role,
+                regime_label = excluded.regime_label,
+                slice_name = excluded.slice_name,
                 config_hash = excluded.config_hash,
                 config_json = excluded.config_json,
                 report_path = excluded.report_path,
@@ -194,6 +220,9 @@ def save_factor_research_run(
                 payload["start_date"],
                 payload["end_date"],
                 payload["test_type"],
+                payload["sample_role"],
+                payload["regime_label"],
+                payload["slice_name"],
                 payload["config_hash"],
                 payload["config_json"],
                 payload["report_path"],
@@ -247,10 +276,15 @@ def _rows_to_runs(rows: list[sqlite3.Row], metrics_by_run: dict[str, dict[str, A
                 "start_date": row["start_date"],
                 "end_date": row["end_date"],
                 "test_type": row["test_type"],
+                "sample_role": row["sample_role"],
+                "regime_label": row["regime_label"],
+                "slice_name": row["slice_name"],
                 "config_hash": row["config_hash"],
                 "config": config,
                 "report_path": row["report_path"],
                 "artifact_path": row["artifact_path"],
+                "artifact_exists": _path_exists(row["artifact_path"]),
+                "report_exists": _path_exists(row["report_path"]),
                 "note": row["note"],
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
@@ -258,6 +292,16 @@ def _rows_to_runs(rows: list[sqlite3.Row], metrics_by_run: dict[str, dict[str, A
             }
         )
     return result
+
+
+def _path_exists(path: str) -> bool | None:
+    text = str(path or "")
+    if not text:
+        return None
+    try:
+        return Path(text).exists()
+    except OSError:
+        return False
 
 
 def _load_metrics(conn: sqlite3.Connection, run_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -290,6 +334,9 @@ def list_factor_research_runs(
     factor_alias: str | None = None,
     product_group: str | None = None,
     test_type: str | None = None,
+    sample_role: str | None = None,
+    regime_label: str | None = None,
+    slice_name: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     overlap: bool = True,
@@ -314,6 +361,15 @@ def list_factor_research_runs(
     if test_type:
         clauses.append("test_type = ?")
         params.append(str(test_type))
+    if sample_role:
+        clauses.append("sample_role = ?")
+        params.append(str(sample_role))
+    if regime_label:
+        clauses.append("regime_label = ?")
+        params.append(str(regime_label))
+    if slice_name:
+        clauses.append("slice_name = ?")
+        params.append(str(slice_name))
     start = _normal_date(start_date)
     end = _normal_date(end_date)
     if start and end:

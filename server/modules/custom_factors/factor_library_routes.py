@@ -27,6 +27,12 @@ from tools.data.account_manage import (
     list_factor_research_runs,
     save_factor_research_run,
 )
+from tools.data.factor_research_registry import (
+    RESEARCH_METRIC_REGISTRY,
+    parse_metric_thresholds,
+    research_stability_rows,
+    resolve_research_rank_preset,
+)
 from server.services.factor_registry import get_factor_family_instance
 from server.services.http_auth import login_required
 from server.services.session_runtime import current_user, get_user_file_lock
@@ -268,6 +274,9 @@ def api_list_factor_research_runs():
         factor_alias=request.args.get('factor_alias') or None,
         product_group=request.args.get('product_group') or None,
         test_type=request.args.get('test_type') or None,
+        sample_role=request.args.get('sample_role') or None,
+        regime_label=request.args.get('regime_label') or None,
+        slice_name=request.args.get('slice_name') or None,
         start_date=request.args.get('start_date') or None,
         end_date=request.args.get('end_date') or None,
         overlap=request.args.get('overlap', '1') != '0',
@@ -305,11 +314,76 @@ def api_save_factor_research_run():
             report_path=str(data.get('report_path') or ''),
             artifact_path=str(data.get('artifact_path') or ''),
             note=str(data.get('note') or ''),
+            sample_role=str(data.get('sample_role') or ''),
+            regime_label=str(data.get('regime_label') or ''),
+            slice_name=str(data.get('slice_name') or ''),
             run_id=str(data.get('run_id') or '') or None,
         )
     except ValueError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
     return jsonify({'success': True, 'run': run})
+
+
+@cf_bp.route('/api/factor-library-research-metrics', methods=['GET'])
+@login_required
+def api_factor_research_metrics():
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    test_type = request.args.get('test_type') or ''
+    metrics = {
+        key: value
+        for key, value in RESEARCH_METRIC_REGISTRY.items()
+        if not test_type or value.get('default_test_type') == test_type
+    }
+    return jsonify({'success': True, 'metrics': metrics})
+
+
+@cf_bp.route('/api/factor-library-research-stability', methods=['GET'])
+@login_required
+def api_factor_research_stability():
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    limit_arg = request.args.get('limit')
+    try:
+        limit = int(limit_arg) if limit_arg not in (None, '') else None
+    except ValueError:
+        limit = None
+    resolved = resolve_research_rank_preset(
+        preset=request.args.get('preset') or '',
+        test_type=request.args.get('test_type') or '',
+        metric=request.args.get('metric') or '',
+        min_metrics=request.args.getlist('min_metric'),
+        max_metrics=request.args.getlist('max_metric'),
+    )
+    try:
+        min_metrics = parse_metric_thresholds(resolved['min_metrics'])
+        max_metrics = parse_metric_thresholds(resolved['max_metrics'])
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    runs = list_factor_research_runs(
+        username,
+        ff_alias=request.args.get('factor_family') or request.args.get('ff_alias') or None,
+        factor_alias=request.args.get('factor_alias') or None,
+        product_group=request.args.get('product_group') or None,
+        test_type=resolved['test_type'] or None,
+        sample_role=request.args.get('sample_role') or None,
+        regime_label=request.args.get('regime_label') or None,
+        slice_name=request.args.get('slice_name') or None,
+        start_date=request.args.get('start_date') or None,
+        end_date=request.args.get('end_date') or None,
+        overlap=True,
+        limit=limit,
+    )
+    rows = research_stability_rows(
+        runs,
+        metric=resolved['metric'],
+        min_metrics=min_metrics,
+        max_metrics=max_metrics,
+        bucket=request.args.get('by') or request.args.get('bucket') or 'quarter',
+    )
+    return jsonify({'success': True, 'rows': rows, 'preset': resolved})
 
 
 @cf_bp.route('/api/factor-library-research-runs/<run_id>', methods=['DELETE'])

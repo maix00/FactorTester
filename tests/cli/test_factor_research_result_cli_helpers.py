@@ -4,6 +4,7 @@ import json
 
 from tools.cli.modules.custom_factors.controller import (
     _RESEARCH_METRIC_REGISTRY,
+    _parse_metric_value,
     _research_payloads_from_artifact,
     _research_stability_rows,
     _resolve_research_rank_preset,
@@ -200,3 +201,11 @@ def test_research_stability_rows_aggregates_periods_and_failures():
 def test_research_metric_registry_has_core_metrics():
     assert _RESEARCH_METRIC_REGISTRY["ic_mean"]["default_test_type"] == "ic"
     assert _RESEARCH_METRIC_REGISTRY["ls_return"]["direction"] == "higher"
+
+
+def test_parse_metric_value_for_save_result():
+    assert _parse_metric_value("1") == 1
+    assert _parse_metric_value("1.5") == 1.5
+    assert _parse_metric_value("true") is True
+    assert _parse_metric_value('{"a": 1}') == {"a": 1}
+    assert _parse_metric_value("label") == "label"

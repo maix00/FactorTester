@@ -541,6 +541,9 @@ def save_factor_research_run(
     report_path: str = "",
     artifact_path: str = "",
     note: str = "",
+    sample_role: str = "",
+    regime_label: str = "",
+    slice_name: str = "",
     run_id: str | None = None,
 ) -> dict:
     ensure_account_manager_sqlite_store()
@@ -559,6 +562,9 @@ def save_factor_research_run(
         report_path=report_path,
         artifact_path=artifact_path,
         note=note,
+        sample_role=sample_role,
+        regime_label=regime_label,
+        slice_name=slice_name,
         run_id=run_id,
     )
 
@@ -570,6 +576,9 @@ def list_factor_research_runs(
     factor_alias: str | None = None,
     product_group: str | None = None,
     test_type: str | None = None,
+    sample_role: str | None = None,
+    regime_label: str | None = None,
+    slice_name: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     overlap: bool = True,
@@ -586,6 +595,9 @@ def list_factor_research_runs(
         factor_alias=factor_alias,
         product_group=product_group,
         test_type=test_type,
+        sample_role=sample_role,
+        regime_label=regime_label,
+        slice_name=slice_name,
         start_date=start_date,
         end_date=end_date,
         overlap=overlap,

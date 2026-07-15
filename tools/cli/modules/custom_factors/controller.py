@@ -13,6 +13,13 @@ from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
 from tools.cli.table import render_table
+from tools.data.factor_research_registry import (
+    RESEARCH_METRIC_REGISTRY,
+    default_display_metric,
+    parse_metric_thresholds,
+    research_stability_rows,
+    resolve_research_rank_preset,
+)
 
 
 @click.group("custom_factors", invoke_without_command=True)
@@ -26,7 +33,7 @@ def custom_factors(ctx: click.Context) -> None:
         click.echo("下一层: factortester custom_factors list")
         click.echo("可用功能:")
         click.echo("  factortester custom_factors factor-library list|add")
-        click.echo("  factortester custom_factors factor-library metrics|history|rank|stability|import-result")
+        click.echo("  factortester custom_factors factor-library metrics|history|rank|stability|import-result|save-result")
         click.echo("  factortester custom_factors workspace show|root|build|sync|push")
         click.echo("  factortester custom_factors workspace git status|diff|commit|branch|checkout")
         click.echo("  factortester custom_factors operators")
@@ -169,13 +176,14 @@ def factor_library(ctx: click.Context, factor_family: str, product_group: str) -
     ctx.obj["factor_family"] = factor_family
     ctx.obj["product_group"] = product_group
     if ctx.invoked_subcommand is None:
-        ctx.invoke(list_factors, factor_family=factor_family, product_group=product_group)
+        ctx.invoke(list_factors, factor_family=factor_family, product_group=product_group, include_subordinates=False, with_research=False)
 
 
 @factor_library.command("list")
 @click.option("--factor-family", "--factor_family", default="", help="因子家族。")
 @click.option("--product-group", "--product_group", default="", help="可选产品组 scope。")
 @click.option("--include-subordinates", is_flag=True, help="包含下级用户可见配置。")
+@click.option("--with-research", is_flag=True, help="附带最近结构化研究摘要。")
 @click.pass_context
 @friendly_errors
 def list_factors(
@@ -183,6 +191,7 @@ def list_factors(
     factor_family: str,
     product_group: str,
     include_subordinates: bool,
+    with_research: bool,
 ) -> None:
     """List factor parameter candidates."""
     factor_family = factor_family or ctx.obj.get("factor_family", "")
@@ -196,8 +205,11 @@ def list_factors(
     if not factors:
         click.echo("暂无因子参数候选")
         return
+    research_by_alias = _latest_research_by_alias(factor_family, product_group) if with_research else {}
     for factor in factors:
-        click.echo(factor_line(factor, default_family=factor_family, default_product_group=product_group))
+        line = factor_line(factor, default_family=factor_family, default_product_group=product_group)
+        summary = research_by_alias.get(str(factor.get("factor_alias") or factor.get("alias") or factor.get("name") or ""))
+        click.echo(line + (f" · 研究={summary}" if summary else ""))
 
 
 @factor_library.command("add")
@@ -306,6 +318,75 @@ def import_factor_research_result(
         click.echo(_research_run_line(run))
 
 
+@factor_library.command("save-result")
+@click.option("--factor-family", "--factor_family", required=True, help="因子家族。")
+@click.option("--factor-alias", "--factor_alias", required=True, help="因子 alias。")
+@click.option("--product-group", "--product_group", default="", help="产品组。")
+@click.option("--test-type", "--test_type", required=True, help="研究结果类型。")
+@click.option("--start-date", "--start_date", required=True, help="开始日期。")
+@click.option("--end-date", "--end_date", required=True, help="结束日期。")
+@click.option("--metric", "metrics", multiple=True, required=True, metavar="KEY=VALUE", help="指标键值，可重复。")
+@click.option("--config", "config_items", multiple=True, metavar="KEY=VALUE", help="配置键值，可重复。")
+@click.option("--factor-source", "--factor_source", default="", help="因子来源。")
+@click.option("--report-path", "--research-report", "--research_report", default="", help="关联研究报告路径。")
+@click.option("--artifact-path", "--artifact", default="", help="关联 artifact 路径。")
+@click.option("--note", default="", help="备注。")
+@click.option("--sample-role", "--sample_role", default="", type=click.Choice(["", "is", "oos", "walk_forward", "regime_slice"]), help="样本角色。")
+@click.option("--regime-label", "--regime_label", default="", help="市场环境标签。")
+@click.option("--slice-name", "--slice_name", default="", help="切片名称。")
+@friendly_errors
+def save_factor_research_result(
+    factor_family: str,
+    factor_alias: str,
+    product_group: str,
+    test_type: str,
+    start_date: str,
+    end_date: str,
+    metrics: tuple[str, ...],
+    config_items: tuple[str, ...],
+    factor_source: str,
+    report_path: str,
+    artifact_path: str,
+    note: str,
+    sample_role: str,
+    regime_label: str,
+    slice_name: str,
+) -> None:
+    """Save one structured research result from a script or external workflow."""
+    config = dict(parse_key_value(item) for item in config_items)
+    meta = {
+        key: value
+        for key, value in {
+            "sample_role": sample_role,
+            "regime_label": regime_label,
+            "slice_name": slice_name,
+        }.items()
+        if value
+    }
+    if meta:
+        config["research_meta"] = meta
+    payload = {
+        "ff_alias": factor_family,
+        "factor_alias": factor_alias,
+        "factor_source": factor_source,
+        "product_group": product_group,
+        "start_date": start_date,
+        "end_date": end_date,
+        "test_type": test_type,
+        "config": config,
+        "metrics": {key: _parse_metric_value(value) for key, value in (parse_key_value(item) for item in metrics)},
+        "report_path": report_path,
+        "artifact_path": artifact_path,
+        "note": note,
+        "sample_role": sample_role,
+        "regime_label": regime_label,
+        "slice_name": slice_name,
+    }
+    run = client_from_config().save_factor_research_run(payload).get("run") or {}
+    click.echo("已保存研究结果")
+    click.echo(_research_run_line(run))
+
+
 @factor_library.command("rank")
 @click.option("--factor-family", "--factor_family", default="", help="因子家族。")
 @click.option("--factor-alias", "--factor_alias", default="", help="因子 alias。")
@@ -405,9 +486,11 @@ def factor_research_history(
 @friendly_errors
 def factor_research_metrics(test_type: str, as_json: bool) -> None:
     """List registered research metric names, direction and units."""
+    data = client_from_config().factor_research_metrics(test_type=test_type)
+    registry = data.get("metrics") if isinstance(data.get("metrics"), dict) else RESEARCH_METRIC_REGISTRY
     rows = [
         (key, meta)
-        for key, meta in sorted(_RESEARCH_METRIC_REGISTRY.items())
+        for key, meta in sorted(registry.items())
         if not test_type or meta.get("default_test_type") == test_type
     ]
     if as_json:
@@ -471,23 +554,21 @@ def factor_research_stability(
         min_metrics=min_metrics,
         max_metrics=max_metrics,
     )
-    data = client_from_config().list_factor_research_runs(
+    data = client_from_config().factor_research_stability(
         factor_family=factor_family,
         factor_alias=factor_alias,
         product_group=product_group,
         test_type=resolved["test_type"],
         start_date=start_date,
         end_date=end_date,
-        overlap="1",
+        preset=preset,
+        metric=metric,
+        min_metric=tuple(min_metrics),
+        max_metric=tuple(max_metrics),
+        by=bucket,
         limit=limit,
     )
-    rows = _research_stability_rows(
-        data.get("runs") or [],
-        metric=resolved["metric"],
-        min_metrics=_parse_metric_thresholds(resolved["min_metrics"]),
-        max_metrics=_parse_metric_thresholds(resolved["max_metrics"]),
-        bucket=bucket,
-    )
+    rows = _research_stability_table_rows(data.get("rows") or [])
     if preset:
         click.echo(f"预设: {preset} · metric={resolved['metric']} · test_type={resolved['test_type'] or '不限'}")
     if not rows:
@@ -636,96 +717,44 @@ def current_user_params(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-_RESEARCH_METRIC_REGISTRY: dict[str, dict[str, Any]] = {
-    "ic_mean": {"label": "IC Mean", "direction": "higher", "unit": "ratio", "default_test_type": "ic"},
-    "ic_t_stat": {"label": "IC t-stat", "direction": "higher", "unit": "t", "default_test_type": "ic"},
-    "ic_ir": {"label": "IC IR", "direction": "higher", "unit": "ratio", "default_test_type": "ic"},
-    "ls_return": {"label": "Long-Short Return", "direction": "higher", "unit": "return", "default_test_type": "backtest"},
-    "a1_return": {"label": "A1 Return", "direction": "higher", "unit": "return", "default_test_type": "backtest"},
-    "a5_return": {"label": "A5 Return", "direction": "higher", "unit": "return", "default_test_type": "backtest"},
-    "a1_a5_return_spread": {"label": "A1-A5 Spread", "direction": "higher", "unit": "return", "default_test_type": "backtest"},
-    "a1_a5_label_return_spread": {"label": "A1-A5 Label Spread", "direction": "higher", "unit": "return", "default_test_type": "bucket_label"},
-    "max_drawdown": {"label": "Max Drawdown", "direction": "higher", "unit": "return", "default_test_type": "backtest"},
-    "best_type_score": {"label": "Best Type Score", "direction": "higher", "unit": "correlation", "default_test_type": "factor_type"},
-    "product_count": {"label": "Product Count", "direction": "higher", "unit": "count", "default_test_type": "factor_evaluation"},
-}
+def _latest_research_by_alias(factor_family: str, product_group: str) -> dict[str, str]:
+    data = client_from_config().list_factor_research_runs(
+        factor_family=factor_family,
+        product_group=product_group,
+        limit=200,
+    )
+    out: dict[str, str] = {}
+    for run in data.get("runs") or []:
+        alias = str(run.get("factor_alias") or "")
+        if not alias or alias in out:
+            continue
+        metrics = run.get("metrics") if isinstance(run.get("metrics"), dict) else {}
+        display_metric = default_display_metric(run, metrics)
+        metric_text = f"{display_metric}={_format_metric(metrics.get(display_metric))}" if display_metric else ""
+        out[alias] = " · ".join(
+            part
+            for part in (
+                str(run.get("test_type") or ""),
+                f"{run.get('start_date') or ''}..{run.get('end_date') or ''}",
+                metric_text,
+            )
+            if part
+        )
+    return out
 
 
-_RESEARCH_RANK_PRESETS: dict[str, dict[str, Any]] = {
-    "ic-stable": {
-        "test_type": "ic",
-        "metric": "ic_mean",
-        "min_metrics": ("ic_mean=0", "ic_t_stat=2"),
-        "max_metrics": (),
-    },
-    "costed-backtest": {
-        "test_type": "backtest",
-        "metric": "ls_return",
-        "min_metrics": ("ls_return=0",),
-        "max_metrics": (),
-    },
-    "costed-good": {
-        "test_type": "backtest",
-        "metric": "ls_return",
-        "min_metrics": ("ls_return=0",),
-        "max_metrics": (),
-    },
-    "bucket-monotonic": {
-        "test_type": "bucket_label",
-        "metric": "a1_a5_label_return_spread",
-        "min_metrics": ("a1_a5_label_return_spread=0",),
-        "max_metrics": (),
-    },
-    "monotonic-long-short": {
-        "test_type": "backtest",
-        "metric": "a1_a5_return_spread",
-        "min_metrics": ("a1_a5_return_spread=0",),
-        "max_metrics": (),
-    },
-}
+_RESEARCH_METRIC_REGISTRY = RESEARCH_METRIC_REGISTRY
 
 
-def _resolve_research_rank_preset(
-    *,
-    preset: str,
-    test_type: str,
-    metric: str,
-    min_metrics: tuple[str, ...],
-    max_metrics: tuple[str, ...],
-) -> dict[str, Any]:
-    base = dict(_RESEARCH_RANK_PRESETS.get(preset, {}))
-    resolved_test_type = test_type or str(base.get("test_type") or "")
-    resolved_metric = metric or str(base.get("metric") or "ls_return")
-    return {
-        "test_type": resolved_test_type,
-        "metric": resolved_metric,
-        "min_metrics": [*list(base.get("min_metrics") or ()), *list(min_metrics)],
-        "max_metrics": [*list(base.get("max_metrics") or ()), *list(max_metrics)],
-    }
+def _resolve_research_rank_preset(**kwargs: Any) -> dict[str, Any]:
+    return resolve_research_rank_preset(**kwargs)
 
 
 def _parse_metric_thresholds(items: list[str] | tuple[str, ...]) -> dict[str, float]:
-    parsed: dict[str, float] = {}
-    for item in items:
-        key, value = _split_metric_threshold(item)
-        parsed[key] = value
-    return parsed
-
-
-def _split_metric_threshold(item: str) -> tuple[str, float]:
-    if ":" in item:
-        key, value = item.split(":", 1)
-    elif "=" in item:
-        key, value = item.split("=", 1)
-    else:
-        raise click.ClickException("metric 阈值必须使用 KEY=VALUE 格式")
-    key = key.strip()
-    if not key:
-        raise click.ClickException("metric 阈值 KEY 不能为空")
     try:
-        return key, float(value)
+        return parse_metric_thresholds(items)
     except ValueError as exc:
-        raise click.ClickException(f"metric 阈值不是数字: {item}") from exc
+        raise click.ClickException(str(exc)) from exc
 
 
 def _research_stability_rows(
@@ -736,96 +765,44 @@ def _research_stability_rows(
     max_metrics: dict[str, float],
     bucket: str,
 ) -> list[tuple[Any, ...]]:
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    for run in runs:
-        metrics = run.get("metrics") if isinstance(run.get("metrics"), dict) else {}
-        display_metric = metric or _default_display_metric(run, metrics)
-        if not display_metric or _metric_float(metrics.get(display_metric)) is None:
-            continue
-        key = (
-            str(run.get("factor_alias") or ""),
-            str(run.get("test_type") or ""),
-            str(run.get("product_group") or ""),
+    rows = research_stability_rows(
+        runs,
+        metric=metric,
+        min_metrics=min_metrics,
+        max_metrics=max_metrics,
+        bucket=bucket,
+    )
+    return [
+        (
+            row["factor_alias"],
+            row["test_type"],
+            row["product_group"],
+            row["periods"],
+            f"{row['pass_count']}/{row['run_count']}",
+            _format_metric(row["avg"]),
+            _format_metric(row["worst"]),
+            _format_metric(row["best"]),
+            row["failures"],
         )
-        grouped.setdefault(key, []).append({**run, "_display_metric": display_metric})
+        for row in rows
+    ]
 
-    rows: list[tuple[Any, ...]] = []
-    for (factor_alias, test_type, product_group), items in grouped.items():
-        values: list[float] = []
-        pass_count = 0
-        period_keys: set[str] = set()
-        failures = 0
-        for item in items:
-            metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
-            display_metric = str(item.get("_display_metric") or metric)
-            value = _metric_float(metrics.get(display_metric))
-            if value is None:
-                continue
-            values.append(value)
-            period_keys.add(_research_period_key(str(item.get("start_date") or ""), bucket=bucket))
-            passed = _run_passes_metric_thresholds(metrics, min_metrics=min_metrics, max_metrics=max_metrics)
-            if passed:
-                pass_count += 1
-            else:
-                failures += 1
-        if not values:
-            continue
-        rows.append(
-            (
-                factor_alias,
-                test_type,
-                product_group,
-                len(period_keys) if bucket != "run" else len(values),
-                f"{pass_count}/{len(values)}",
-                _format_metric(sum(values) / len(values)),
-                _format_metric(min(values)),
-                _format_metric(max(values)),
-                failures,
-            )
+
+def _research_stability_table_rows(rows: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+    return [
+        (
+            row.get("factor_alias") or "",
+            row.get("test_type") or "",
+            row.get("product_group") or "",
+            row.get("periods") or 0,
+            f"{row.get('pass_count') or 0}/{row.get('run_count') or 0}",
+            _format_metric(row.get("avg")),
+            _format_metric(row.get("worst")),
+            _format_metric(row.get("best")),
+            row.get("failures") or 0,
         )
-    rows.sort(key=lambda row: (str(row[0]), str(row[1]), str(row[2])))
-    return rows
-
-
-def _research_period_key(start_date: str, *, bucket: str) -> str:
-    text = str(start_date or "")
-    if bucket == "run":
-        return text
-    if bucket == "year":
-        return text[:4]
-    if bucket == "month":
-        return text[:7]
-    if bucket == "quarter":
-        try:
-            year = int(text[:4])
-            month = int(text[5:7])
-        except ValueError:
-            return text[:7] or text
-        return f"{year}-Q{((month - 1) // 3) + 1}"
-    return text
-
-
-def _run_passes_metric_thresholds(metrics: dict[str, Any], *, min_metrics: dict[str, float], max_metrics: dict[str, float]) -> bool:
-    for key, threshold in min_metrics.items():
-        value = _metric_float(metrics.get(key))
-        if value is None or value < threshold:
-            return False
-    for key, threshold in max_metrics.items():
-        value = _metric_float(metrics.get(key))
-        if value is None or value > threshold:
-            return False
-    return True
-
-
-def _metric_float(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    try:
-        if value is None or value == "":
-            return None
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+        for row in rows
+    ]
 
 
 def _resolve_factor_from_catalog(
@@ -1058,6 +1035,26 @@ def parse_key_value(item: str) -> tuple[str, str]:
     return key, value.strip()
 
 
+def _parse_metric_value(value: str) -> Any:
+    text = value.strip()
+    if text.lower() == "true":
+        return True
+    if text.lower() == "false":
+        return False
+    try:
+        if any(ch in text for ch in ".eE"):
+            return float(text)
+        return int(text)
+    except ValueError:
+        pass
+    if text.startswith(("{", "[")):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+    return text
+
+
 def _research_payloads_from_artifact(
     artifact_path: Path,
     *,
@@ -1132,6 +1129,9 @@ def _base_research_payload(
         "report_path": report_path,
         "artifact_path": str(artifact_path),
         "note": note,
+        "sample_role": str(meta.get("sample_role") or ""),
+        "regime_label": str(meta.get("regime_label") or ""),
+        "slice_name": str(meta.get("slice_name") or ""),
     }
 
 
@@ -1366,7 +1366,7 @@ def _print_research_runs(runs: list[dict[str, Any]], *, metric: str) -> None:
     rows = []
     for run in runs:
         metrics = run.get("metrics") if isinstance(run.get("metrics"), dict) else {}
-        display_metric = metric or _default_display_metric(run, metrics)
+        display_metric = metric or default_display_metric(run, metrics)
         rows.append(
             (
                 run.get("factor_alias") or "",
@@ -1384,21 +1384,6 @@ def _print_research_runs(runs: list[dict[str, Any]], *, metric: str) -> None:
     headers = ("factor", "type", "product_group", "period", metric or "metric", "ls", "a1", "a5", "ic", "artifact/report")
     for line in render_table(headers, rows, max_widths=(40, 12, 18, 24, 10, 10, 10, 10, 10, 50)):
         click.echo(line)
-
-
-def _default_display_metric(run: dict[str, Any], metrics: dict[str, Any]) -> str:
-    test_type = str(run.get("test_type") or "")
-    if test_type == "factor_type":
-        return "best_type_score" if "best_type_score" in metrics else "best_type"
-    if test_type == "factor_evaluation":
-        return "product_count" if "product_count" in metrics else "series_count"
-    if test_type == "backtest":
-        return "ls_return" if "ls_return" in metrics else "a1_return"
-    if test_type == "ic":
-        return "ic_mean"
-    if test_type == "bucket_label":
-        return "a1_a5_label_return_spread" if "a1_a5_label_return_spread" in metrics else "ic_mean"
-    return ""
 
 
 def _format_metric(value: Any) -> str:

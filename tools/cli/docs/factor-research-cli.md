@@ -27,6 +27,7 @@ factortester custom_factors factor-library rank --preset ic-stable --start-date 
 factortester custom_factors factor-library rank --preset costed-backtest --start-date 2024-01-01 --end-date 2025-12-31
 factortester custom_factors factor-library stability --preset ic-stable --factor-family SgCCS --by quarter
 factortester custom_factors factor-library import-result --dir /path/to/research_reports/factors/SgCCS --sample-role oos --regime-label low_vol
+factortester custom_factors factor-library save-result --factor-family SgCCS --factor-alias 'SgCCS|N:2m' --test-type ic --start-date 2026-01-01 --end-date 2026-01-31 --metric ic_mean=0.03 --sample-role oos
 factortester backtest --run --verbose
 factortester backtest results summary
 factortester backtest results order-flow --group-name A1 --output orders.csv

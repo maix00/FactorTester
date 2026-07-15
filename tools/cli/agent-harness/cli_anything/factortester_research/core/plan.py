@@ -119,10 +119,11 @@ def build_factor_research_plan(
             {
                 "phase": "backfill_research_library",
                 "skill_basis": ["quantitative-research:record-keeping"],
-                "purpose": "如果已有报告或 artifact 尚未结构化入库，用 import-result 回填；目录导入可批量索引同一因子工作区下的历史研究结果。",
+                "purpose": "如果已有报告或 artifact 尚未结构化入库，用 import-result 回填；如果脚本已直接得到指标，用 save-result 直写结果库。",
                 "command": (
                     "factortester custom_factors factor-library import-result "
-                    "--dir <research_report_dir> --report-path <report.md> --note '<why imported>'"
+                    "--dir <research_report_dir> --report-path <report.md> --note '<why imported>' "
+                    "# or: factortester custom_factors factor-library save-result --factor-family <NAME> --factor-alias <ALIAS> --test-type ic --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --metric ic_mean=<VALUE>"
                 ),
             },
             {

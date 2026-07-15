@@ -87,6 +87,15 @@ factortester custom_factors factor-library import-result \
   --report-path /path/to/research_reports/factors/MyFamily/report.md \
   --note "backfill existing artifacts before candidate ranking"
 
+factortester custom_factors factor-library save-result \
+  --factor-family MyFamily \
+  --factor-alias 'MyFamily|N:20' \
+  --test-type ic \
+  --start-date 2026-01-01 \
+  --end-date 2026-01-31 \
+  --metric ic_mean=0.03 \
+  --sample-role oos
+
 factortester custom_factors factor-library stability \
   --factor-family SgCCS \
   --preset ic-stable \

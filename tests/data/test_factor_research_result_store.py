@@ -149,3 +149,33 @@ def test_factor_research_result_upsert_replaces_metrics(monkeypatch, tmp_path):
     runs = list_factor_research_runs("alice", ff_alias="MmRet", test_type="ic")
     assert len(runs) == 1
     assert runs[0]["metrics"] == {"ic_mean": 0.2}
+
+
+def test_factor_research_result_sample_fields_and_artifact_lifecycle(monkeypatch, tmp_path):
+    db_path = tmp_path / "cache.sqlite"
+    artifact = tmp_path / "artifact.json"
+    artifact.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(Settings, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", db_path)
+
+    save_factor_research_run(
+        "alice",
+        ff_alias="MmRet",
+        factor_alias="MmRet|N:10d",
+        product_group="core8",
+        start_date="2024-01-02",
+        end_date="2024-12-31",
+        test_type="ic",
+        config={"research_meta": {"sample_role": "oos", "regime_label": "trend", "slice_name": "2024-oos"}},
+        metrics={"ic_mean": 0.1},
+        artifact_path=str(artifact),
+        report_path=str(tmp_path / "missing.md"),
+    )
+
+    runs = list_factor_research_runs("alice", sample_role="oos", regime_label="trend", slice_name="2024-oos")
+    assert len(runs) == 1
+    assert runs[0]["sample_role"] == "oos"
+    assert runs[0]["regime_label"] == "trend"
+    assert runs[0]["slice_name"] == "2024-oos"
+    assert runs[0]["artifact_exists"] is True
+    assert runs[0]["report_exists"] is False
