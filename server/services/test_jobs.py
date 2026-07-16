@@ -27,6 +27,7 @@ import multiprocessing
 import os
 import pickle
 import queue
+import copy
 import threading
 import time
 import traceback as traceback_module
@@ -36,8 +37,10 @@ from typing import Any, Callable, Iterable
 import orjson
 from flask import Response, stream_with_context
 
+from server.services import test_job_store
 
-TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+
+TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "expired"}
 _MAX_EVENTS = int(os.environ.get("GTHT_TEST_JOB_MAX_EVENTS", "2000"))
 _MAX_WORKERS = max(1, int(os.environ.get("GTHT_TEST_JOB_WORKERS", "2")))
 _MAX_PROCESS_WORKERS = max(1, int(os.environ.get("GTHT_TEST_JOB_PROCESS_WORKERS", "2")))
@@ -46,6 +49,20 @@ _JOB_TTL_SECONDS = max(60, int(os.environ.get("GTHT_TEST_JOB_TTL_SECONDS", "8640
 _EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="test-job")
 _PROCESS_CONTEXT = multiprocessing.get_context(os.environ.get("GTHT_TEST_JOB_PROCESS_START_METHOD", "spawn"))
 _PROCESS_SEMAPHORE = threading.BoundedSemaphore(_MAX_PROCESS_WORKERS)
+_SSE_GAP_EVENT = "reset"
+
+
+class JobConflictError(ValueError):
+    def __init__(self, message: str, *, job_id: str) -> None:
+        super().__init__(message)
+        self.job_id = job_id
+
+
+class EventGapError(ValueError):
+    def __init__(self, message: str, *, oldest_seq: int, requested_seq: int) -> None:
+        super().__init__(message)
+        self.oldest_seq = oldest_seq
+        self.requested_seq = requested_seq
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,9 +86,15 @@ class TestJob:
     job_id: str
     kind: str
     run_token: str
+    run_id: str
+    workspace_id: str
     page_uuid: str
+    view_uuid: str
+    lifecycle_policy: str
     owner: str
     request_digest: str
+    request_snapshot: dict[str, Any]
+    request_snapshot_bytes: bytes
     cancel_event: threading.Event
     status: str = "queued"
     created_at: float = field(default_factory=time.time)
@@ -80,6 +103,7 @@ class TestJob:
     result: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
     cancel_requested: bool = False
+    cancel_reason: str = ""
     future: Future | None = None
     execution_mode: str = "thread"
     runner_path: str | None = None
@@ -87,6 +111,7 @@ class TestJob:
     worker_exitcode: int | None = None
     process_cancel_event: Any | None = None
     process: Any | None = None
+    artifacts: dict[str, Any] = field(default_factory=dict)
     _seq: int = 0
     _events: list[TestJobEvent] = field(default_factory=list)
     _closed: bool = False
@@ -107,6 +132,7 @@ class TestJob:
                 self.status = "running"
                 self.started_at = time.time()
                 self._condition.notify_all()
+        test_job_store.update_job_record(self)
 
     def emit(self, event: str, data: dict[str, Any]) -> TestJobEvent:
         with self._condition:
@@ -121,6 +147,7 @@ class TestJob:
             if len(self._events) > _MAX_EVENTS:
                 del self._events[: len(self._events) - _MAX_EVENTS]
             self._condition.notify_all()
+            test_job_store.record_event(self, item)
             return item
 
     def succeed(self, result: dict[str, Any]) -> None:
@@ -130,30 +157,40 @@ class TestJob:
             self.status = "succeeded"
             self.finished_at = time.time()
             self._condition.notify_all()
+        test_job_store.update_job_record(self)
 
     def fail(self, error: dict[str, Any], *, cancelled: bool = False) -> None:
         with self._condition:
             self.error = dict(error)
+            self.cancel_reason = str(self.error.get("cancel_reason") or self.cancel_reason or "")
             self.status = "cancelled" if cancelled else "failed"
             self.finished_at = time.time()
             self._condition.notify_all()
+        test_job_store.update_job_record(self, cancel_reason=self.cancel_reason)
 
-    def request_cancel(self) -> bool:
+    def request_cancel(self, *, reason: str = "") -> bool:
         with self._condition:
             if self.status in TERMINAL_STATUSES:
                 return False
             self.cancel_requested = True
+            self.cancel_reason = str(reason or self.cancel_reason or "explicit_cancel")
             self.cancel_event.set()
             if self.process_cancel_event is not None:
                 self.process_cancel_event.set()
             if self.status == "queued":
                 self.fail(
-                    {"success": False, "error": "test job cancelled before start", "cancelled": True},
+                    {
+                        "success": False,
+                        "error": "test job cancelled before start",
+                        "cancelled": True,
+                        "cancel_reason": self.cancel_reason,
+                    },
                     cancelled=True,
                 )
                 self.close()
             else:
                 self._condition.notify_all()
+                test_job_store.update_job_record(self, cancel_reason=self.cancel_reason)
             return True
 
     def close(self) -> None:
@@ -163,12 +200,24 @@ class TestJob:
 
     def events_after(self, seq: int = 0) -> list[TestJobEvent]:
         with self._lock:
+            if self._events and seq > 0 and seq < self._events[0].seq:
+                raise EventGapError(
+                    "requested event cursor is no longer available",
+                    oldest_seq=self._events[0].seq,
+                    requested_seq=seq,
+                )
             return [event for event in self._events if event.seq > seq]
 
     def wait_for_events(self, seq: int, timeout: float = 15.0) -> list[TestJobEvent]:
         deadline = time.monotonic() + timeout
         with self._condition:
             while True:
+                if self._events and seq > 0 and seq < self._events[0].seq:
+                    raise EventGapError(
+                        "requested event cursor is no longer available",
+                        oldest_seq=self._events[0].seq,
+                        requested_seq=seq,
+                    )
                 events = [event for event in self._events if event.seq > seq]
                 if events or self._closed:
                     return events
@@ -184,13 +233,20 @@ class TestJob:
                 "job_id": self.job_id,
                 "kind": self.kind,
                 "run_token": self.run_token,
+                "run_id": self.run_id,
+                "workspace_id": self.workspace_id,
                 "page_uuid": self.page_uuid,
+                "initiator_page_uuid": self.page_uuid,
+                "view_uuid": self.view_uuid,
+                "lifecycle_policy": self.lifecycle_policy,
                 "status": self.status,
+                "cancel_reason": self.cancel_reason,
                 "cancel_requested": self.cancel_requested,
                 "created_at": self.created_at,
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
                 "request_digest": self.request_digest,
+                "snapshot_bytes": len(self.request_snapshot_bytes),
                 "execution_mode": self.execution_mode,
                 "runner_path": self.runner_path,
                 "worker_pid": self.worker_pid,
@@ -261,6 +317,9 @@ class TestJobSink:
 
     def emit_result(self, data: dict[str, Any]) -> None:
         payload = dict(data)
+        payload.setdefault("job_id", self.job.job_id)
+        payload.setdefault("run_id", self.job.run_token)
+        payload.setdefault("execution_mode", self.job.execution_mode)
         self.job.succeed(payload)
         self.job.emit("result", payload)
 
@@ -411,6 +470,7 @@ def _apply_process_message(job: TestJob, message: dict[str, Any]) -> None:
 _lock = threading.RLock()
 _jobs: dict[str, TestJob] = {}
 _run_token_to_job: dict[str, str] = {}
+_run_id_to_job: dict[str, str] = {}
 
 
 def _request_digest(payload: dict[str, Any]) -> str:
@@ -421,40 +481,96 @@ def _request_digest(payload: dict[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+def _snapshot_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
+    snapshot = copy.deepcopy(payload)
+    try:
+        raw = orjson.dumps(snapshot, option=orjson.OPT_SORT_KEYS | orjson.OPT_SERIALIZE_NUMPY)
+    except Exception as exc:
+        raise ValueError("job payload snapshot must be serializable") from exc
+    restored = orjson.loads(raw)
+    if not isinstance(restored, dict):
+        raise ValueError("job payload snapshot must serialize to an object")
+    return restored, raw
+
+
 def create_job(
     *,
     kind: str = "backtest",
     run_token: str,
-    page_uuid: str,
     owner: str,
     payload: dict[str, Any],
+    run_id: str = "",
+    workspace_id: str = "",
+    view_uuid: str = "",
+    lifecycle_policy: str = "",
+    page_uuid: str = "",
     cancel_event: threading.Event | None = None,
 ) -> TestJob:
     kind = str(kind or "").strip()
     run_token = str(run_token).strip()
     page_uuid = str(page_uuid).strip()
+    run_id = str(run_id or payload.get("run_id") or run_token).strip()
+    workspace_id = str(workspace_id or payload.get("workspace_id") or "").strip()
+    view_uuid = str(view_uuid or payload.get("view_uuid") or page_uuid).strip()
+    lifecycle_policy = str(
+        lifecycle_policy
+        or payload.get("lifecycle_policy")
+        or ("observer_bound" if page_uuid else "durable")
+    ).strip()
     owner = str(owner).strip()
-    if not kind or not run_token or not page_uuid or not owner:
-        raise ValueError("test job requires kind, run_token, page_uuid, and owner")
+    if not kind or not run_token or not run_id or not owner:
+        raise ValueError("test job requires kind, run_token, run_id, and owner")
+    retry_of = str(payload.get("_retry_of") or payload.get("retry_of") or "").strip()
+    try:
+        attempt = int(payload.get("_attempt") or payload.get("attempt") or (2 if retry_of else 1))
+    except (TypeError, ValueError):
+        attempt = 2 if retry_of else 1
+    snapshot, snapshot_bytes = _snapshot_payload(payload)
     job = TestJob(
         job_id=uuid.uuid4().hex,
         kind=kind,
         run_token=run_token,
+        run_id=run_id,
+        workspace_id=workspace_id,
         page_uuid=page_uuid,
+        view_uuid=view_uuid,
+        lifecycle_policy=lifecycle_policy,
         owner=owner,
         request_digest=_request_digest(payload),
+        request_snapshot=snapshot,
+        request_snapshot_bytes=snapshot_bytes,
         cancel_event=cancel_event or threading.Event(),
     )
     with _lock:
         if run_token in _run_token_to_job:
             raise ValueError(f"run_token already has a test job: {run_token}")
+        for existing in _jobs.values():
+            if (
+                existing.owner == owner
+                and lifecycle_policy == "observer_bound"
+                and view_uuid
+                and existing.view_uuid == view_uuid
+                and existing.kind == kind
+                and existing.status not in TERMINAL_STATUSES
+            ):
+                raise JobConflictError(
+                    f"active {kind} job already exists for this view",
+                    job_id=existing.job_id,
+                )
         _jobs[job.job_id] = job
         _run_token_to_job[run_token] = job.job_id
+        _run_id_to_job[run_id] = job.job_id
+    test_job_store.create_job_record(job=job, retry_of=retry_of, attempt=attempt)
     return job
 
 
 def submit(job: TestJob, target: Callable[[TestJobSink], None]) -> Future:
     job.execution_mode = "thread"
+    test_job_store.update_job_record(job)
+    job.emit("execution_mode", {
+        "mode": "thread",
+        "reason": "route runner uses in-process FactorTester/page-bound objects",
+    })
 
     def _run() -> None:
         sink = TestJobSink(job)
@@ -491,6 +607,7 @@ def submit_process(job: TestJob, runner_path: str, payload: dict[str, Any]) -> F
 
     job.execution_mode = "process"
     job.runner_path = runner_path
+    test_job_store.update_job_record(job)
     process_cancel_event = _PROCESS_CONTEXT.Event()
     job.process_cancel_event = process_cancel_event
     event_queue = _PROCESS_CONTEXT.Queue()
@@ -604,16 +721,50 @@ def get_by_run_token(run_token: str) -> TestJob | None:
         return _jobs.get(job_id) if job_id else None
 
 
+def get_by_run_id(run_id: str) -> TestJob | None:
+    with _lock:
+        job_id = _run_id_to_job.get(str(run_id))
+        return _jobs.get(job_id) if job_id else None
+
+
 def _prune_locked(now: float | None = None) -> None:
     now = time.time() if now is None else now
     expired = [
-        job_id for job_id, job in _jobs.items()
+        job for job in _jobs.values()
         if job.finished_at is not None and now - job.finished_at > _JOB_TTL_SECONDS
+        and job.status != "expired"
     ]
-    for job_id in expired:
-        job = _jobs.pop(job_id, None)
-        if job is not None:
-            _run_token_to_job.pop(job.run_token, None)
+    for job in expired:
+        job.result = None
+        job.error = {
+            "success": False,
+            "error": "test job result expired",
+            "expired": True,
+            "ttl_seconds": _JOB_TTL_SECONDS,
+        }
+        job.status = "expired"
+        job.artifacts.clear()
+        test_job_store.update_job_record(job)
+
+
+def store_artifact(job: TestJob, name: str, value: Any) -> None:
+    with job._lock:
+        job.artifacts[str(name)] = copy.deepcopy(value)
+
+
+def get_artifact(job: TestJob, name: str) -> Any:
+    with job._lock:
+        value = job.artifacts.get(str(name))
+        return copy.deepcopy(value)
+
+
+def resolve_job_for_detail(*, owner: str, job_id: str = "", run_id: str = "") -> TestJob:
+    job = get(job_id) if job_id else get_by_run_id(run_id)
+    if job is None:
+        raise KeyError("test job not found")
+    if job.owner != str(owner):
+        raise PermissionError("无权访问其他用户的测试任务")
+    return job
 
 
 def list_jobs(
@@ -629,28 +780,32 @@ def list_jobs(
     page_uuid = str(page_uuid or "").strip()
     with _lock:
         _prune_locked()
-        jobs = [
-            job for job in _jobs.values()
-            if job.owner == owner
-            and (not kind or job.kind == kind)
-            and (not page_uuid or job.page_uuid == page_uuid)
-            and (statuses is None or job.status in statuses)
-        ]
-        jobs.sort(key=lambda job: job.created_at, reverse=True)
-        return [job.summary() for job in jobs[:max(1, int(limit))]]
+    records = test_job_store.list_jobs(
+        owner=owner,
+        kind=kind,
+        page_uuid=page_uuid,
+        statuses=statuses,
+        limit=limit,
+    )
+    return [record.summary() for record in records]
 
 
-def require_job(job_id: str, owner: str) -> TestJob:
+def require_job(job_id: str, owner: str):
     job = get(job_id)
-    if job is None:
+    durable = test_job_store.load_job(job_id) if job is None else None
+    target = job or durable
+    if target is None:
         raise KeyError("test job not found")
-    if job.owner != str(owner):
+    if target.owner != str(owner):
         raise PermissionError("无权访问其他用户的回测任务")
-    return job
+    return target
 
 
 def cancel(job_id: str, owner: str) -> bool:
-    return require_job(job_id, owner).request_cancel()
+    job = require_job(job_id, owner)
+    if not isinstance(job, TestJob):
+        return False
+    return job.request_cancel(reason="explicit_cancel")
 
 
 def cancel_run_token(run_token: str, page_uuid: str, owner: str) -> bool:
@@ -659,7 +814,7 @@ def cancel_run_token(run_token: str, page_uuid: str, owner: str) -> bool:
         return False
     if job.page_uuid != str(page_uuid) or job.owner != str(owner):
         raise PermissionError("无权取消其他页面或用户的回测任务")
-    return job.request_cancel()
+    return job.request_cancel(reason="explicit_cancel")
 
 
 def cancel_page(page_uuid: str) -> int:
@@ -667,7 +822,7 @@ def cancel_page(page_uuid: str) -> int:
     with _lock:
         jobs = [job for job in _jobs.values() if job.page_uuid == str(page_uuid)]
     for job in jobs:
-        if job.request_cancel():
+        if job.request_cancel(reason="page_closed"):
             count += 1
     return count
 
@@ -677,10 +832,30 @@ def _format_sse_event(event: TestJobEvent) -> str:
     return f"id: {event.seq}\nevent: {event.event}\ndata: {data}\n\n"
 
 
+def _format_sse_payload(seq: int, event: str, data: dict[str, Any]) -> str:
+    raw = orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY).decode()
+    return f"id: {seq}\nevent: {event}\ndata: {raw}\n\n"
+
+
 def _stream_events(job: TestJob, *, after_seq: int = 0) -> Iterable[str]:
     seq = int(after_seq)
     while True:
-        events = job.wait_for_events(seq)
+        try:
+            events = job.wait_for_events(seq)
+        except EventGapError as exc:
+            yield _format_sse_payload(
+                exc.oldest_seq,
+                _SSE_GAP_EVENT,
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "reset": True,
+                    "oldest_seq": exc.oldest_seq,
+                    "requested_seq": exc.requested_seq,
+                },
+            )
+            seq = max(0, exc.oldest_seq - 1)
+            continue
         for event in events:
             seq = max(seq, event.seq)
             yield _format_sse_event(event)
@@ -689,8 +864,26 @@ def _stream_events(job: TestJob, *, after_seq: int = 0) -> Iterable[str]:
 
 
 def stream_response(job: TestJob, *, after_seq: int = 0) -> Response:
+    if not isinstance(job, TestJob):
+        return stream_durable_response(job, after_seq=after_seq)
     return Response(
         stream_with_context(_stream_events(job, after_seq=after_seq)),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _stream_durable_events(job: Any, *, after_seq: int = 0) -> Iterable[str]:
+    for event in test_job_store.load_events_after(job.job_id, after_seq):
+        yield _format_sse_payload(int(event["seq"]), str(event["event"]), dict(event["data"]))
+
+
+def stream_durable_response(job: Any, *, after_seq: int = 0) -> Response:
+    return Response(
+        stream_with_context(_stream_durable_events(job, after_seq=after_seq)),
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -702,14 +895,24 @@ def stream_response(job: TestJob, *, after_seq: int = 0) -> Response:
 def deployment_semantics() -> dict[str, Any]:
     """Return explicit operational constraints for the current registry."""
     return {
-        "registry": "in_memory_process_local",
-        "restart_persistent": False,
-        "cross_flask_worker_visible": False,
+        "registry": "sqlite_canonical_with_process_local_live_cache",
+        "restart_persistent": True,
+        "cross_flask_worker_visible": True,
         "requires_sticky_routing": True,
+        "page_uuid_role": "initiator/subscriber/UI projection; page lease may cancel jobs after close grace",
+        "canonical_job_owner": "owner + workspace/context + job_id/run_token in durable SQLite registry",
+        "job_ttl_seconds": _JOB_TTL_SECONDS,
+        "sse_cursor": {
+            "after_query_param": "after",
+            "last_event_id_header": "Last-Event-ID",
+            "gap_event": _SSE_GAP_EVENT,
+        },
         "thread_workers": _MAX_WORKERS,
         "process_workers": _MAX_PROCESS_WORKERS,
         "process_start_method": _PROCESS_CONTEXT.get_start_method(),
         "process_runner_contract": "importable runner_path + pickle-serializable payload; no Flask/page objects",
+        "product_routes_default_execution_mode": "thread",
+        "product_routes_process_contract": "only routes with importable serializable runners may advertise execution_mode=process",
     }
 
 
