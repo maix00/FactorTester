@@ -1,11 +1,18 @@
-"""HTTP interface for durable research workspaces and runs."""
+"""HTTP interface for research contexts, configurations, templates, and runs."""
 
 from __future__ import annotations
+
+from copy import deepcopy
 
 from flask import jsonify, request
 
 from server.modules.single_factor_test import sft_bp
-from server.services import research_runs, research_workspaces, view_leases
+from server.services import (
+    research_configurations,
+    research_runs,
+    research_workspaces,
+    view_leases,
+)
 from server.services.session_runtime import require_user
 
 
@@ -13,81 +20,192 @@ SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analys
 
 
 def _submit_kind(kind: str, payload: dict):
-    from server.modules.single_factor_test.backtest_jobs import _submit_by_kind
+    process_runners = {
+        "backtest": "server.modules.single_factor_test.process_runners:run_group",
+        "ic": "server.modules.single_factor_test.process_runners:run_ic",
+        "factor_evaluation": "server.modules.single_factor_test.process_runners:run_factor_evaluation",
+        "factor_type_analysis": "server.modules.single_factor_test.process_runners:run_factor_type_analysis",
+    }
+    runner = process_runners.get(kind)
+    if runner is None:
+        raise ValueError(f"unsupported research job kind: {kind}")
+    from server.services import test_jobs
 
-    return _submit_by_kind(kind, payload)
+    job = test_jobs.create_job(
+        kind=kind,
+        run_token=str(payload["run_token"]),
+        run_id=str(payload["run_id"]),
+        workspace_id=str(payload["workspace_id"]),
+        view_uuid=str(payload.get("view_uuid") or ""),
+        lifecycle_policy=str(payload.get("lifecycle_policy") or "durable"),
+        owner=str(payload["_owner"]),
+        payload=payload,
+    )
+    test_jobs.submit_process(job, runner, job.request_snapshot)
+    return job
+
+
+def _execution_payload(configuration: dict, kind: str) -> dict:
+    payload = configuration["payload"]
+    analysis = payload["analyses"].get(kind)
+    if not isinstance(analysis, dict):
+        raise ValueError(f"configuration has no {kind} analysis payload")
+    shared = deepcopy(payload["shared"])
+    execution = {**shared, **deepcopy(analysis)}
+    families = shared.get("factor_families")
+    if isinstance(families, list) and len(families) == 1 and isinstance(families[0], dict):
+        execution.setdefault("factor_family_alias", str(families[0].get("alias") or ""))
+    execution["research_configuration"] = {
+        "configuration_id": configuration["configuration_id"],
+        "revision": configuration["revision"],
+        "fingerprint": configuration["fingerprint"],
+    }
+    return execution
 
 
 @sft_bp.post("/api/workspaces")
 def create_research_workspace():
     data = request.get_json(silent=True) or {}
-    kind = str(data.get("kind") or "single_factor").strip()
-    if kind != "single_factor":
-        return jsonify({"success": False, "error": "unsupported workspace kind"}), 400
-    draft = data.get("draft")
-    if draft is not None and not isinstance(draft, dict):
-        return jsonify({"success": False, "error": "draft must be an object"}), 400
+    factor_families = data.get("factor_families") or []
+    factors = data.get("factors") or []
+    if not isinstance(factor_families, list) or not all(isinstance(item, dict) for item in factor_families):
+        return jsonify({"success": False, "error": "factor_families must be an array of objects"}), 400
+    if not isinstance(factors, list) or not all(isinstance(item, dict) for item in factors):
+        return jsonify({"success": False, "error": "factors must be an array of objects"}), 400
     workspace = research_workspaces.create_workspace(
         owner=require_user(),
-        kind=kind,
-        title=str(data.get("title") or "Single factor research").strip(),
-        factor_family_alias=str(data.get("factor_family_alias") or "").strip(),
-        draft=draft,
+        title=str(data.get("title") or "Factor research").strip(),
+        factor_families=factor_families,
+        factors=factors,
     )
     return jsonify({"success": True, "workspace": workspace}), 201
 
 
 @sft_bp.get("/api/workspaces")
 def list_research_workspaces():
-    workspaces = research_workspaces.list_workspaces(
-        owner=require_user(),
-        kind=str(request.args.get("kind") or "").strip(),
-    )
-    return jsonify({"success": True, "workspaces": workspaces})
+    return jsonify({
+        "success": True,
+        "workspaces": research_workspaces.list_workspaces(owner=require_user()),
+    })
 
 
 @sft_bp.get("/api/workspaces/<workspace_id>")
 def get_research_workspace(workspace_id: str):
     workspace = research_workspaces.load_workspace(
-        workspace_id=workspace_id,
-        owner=require_user(),
+        workspace_id=workspace_id, owner=require_user(),
     )
     if workspace is None:
         return jsonify({"success": False, "error": "workspace not found"}), 404
     return jsonify({"success": True, "workspace": workspace})
 
 
-@sft_bp.patch("/api/workspaces/<workspace_id>")
-def update_research_workspace(workspace_id: str):
+@sft_bp.get("/api/workspaces/<workspace_id>/configuration")
+def get_workspace_configuration(workspace_id: str):
+    value = research_configurations.load_workspace_configuration(
+        workspace_id=workspace_id, owner=require_user(),
+    )
+    if value is None:
+        return jsonify({"success": False, "error": "workspace configuration not found"}), 404
+    return jsonify({"success": True, "configuration": value})
+
+
+@sft_bp.put("/api/workspaces/<workspace_id>/configuration")
+def update_workspace_configuration(workspace_id: str):
     data = request.get_json(silent=True) or {}
-    draft = data.get("draft")
-    if not isinstance(draft, dict):
-        return jsonify({"success": False, "error": "draft must be an object"}), 400
     try:
         expected_revision = int(data.get("expected_revision"))
     except (TypeError, ValueError):
         return jsonify({"success": False, "error": "expected_revision is required"}), 400
     try:
-        workspace = research_workspaces.update_workspace(
+        value = research_configurations.update_workspace_configuration(
             workspace_id=workspace_id,
             owner=require_user(),
             expected_revision=expected_revision,
-            draft=draft,
-            title=str(data["title"]).strip() if "title" in data else None,
-            factor_family_alias=(
-                str(data["factor_family_alias"]).strip()
-                if "factor_family_alias" in data else None
-            ),
+            payload=data.get("payload"),
         )
-    except research_workspaces.WorkspaceRevisionConflict as exc:
+    except research_configurations.ConfigurationRevisionConflict as exc:
         return jsonify({
             "success": False,
             "error": str(exc),
             "current_revision": exc.current_revision,
         }), 409
-    if workspace is None:
-        return jsonify({"success": False, "error": "workspace not found"}), 404
-    return jsonify({"success": True, "workspace": workspace})
+    except KeyError:
+        return jsonify({"success": False, "error": "workspace configuration not found"}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "configuration": value})
+
+
+@sft_bp.get("/api/configuration-templates")
+def list_configuration_templates():
+    return jsonify({
+        "success": True,
+        "templates": research_configurations.list_templates(owner=require_user()),
+    })
+
+
+@sft_bp.post("/api/workspaces/<workspace_id>/configuration/templates")
+def save_configuration_template(workspace_id: str):
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return jsonify({"success": False, "error": "template name is required"}), 400
+    try:
+        template = research_configurations.save_template(
+            workspace_id=workspace_id, owner=require_user(), name=name,
+        )
+    except KeyError:
+        return jsonify({"success": False, "error": "workspace configuration not found"}), 404
+    return jsonify({"success": True, "template": template}), 201
+
+
+@sft_bp.post("/api/workspaces/<workspace_id>/configuration/load-template")
+def load_configuration_template(workspace_id: str):
+    data = request.get_json(silent=True) or {}
+    configuration_id = str(data.get("configuration_id") or "").strip()
+    try:
+        expected_revision = int(data.get("expected_revision"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "expected_revision is required"}), 400
+    try:
+        value = research_configurations.load_template_into_workspace(
+            configuration_id=configuration_id,
+            workspace_id=workspace_id,
+            owner=require_user(),
+            expected_revision=expected_revision,
+        )
+    except research_configurations.ConfigurationRevisionConflict as exc:
+        return jsonify({
+            "success": False, "error": str(exc), "current_revision": exc.current_revision,
+        }), 409
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    return jsonify({"success": True, "configuration": value})
+
+
+@sft_bp.put("/api/configuration-templates/<configuration_id>")
+def overwrite_configuration_template(configuration_id: str):
+    workspace_id = str((request.get_json(silent=True) or {}).get("workspace_id") or "").strip()
+    if not workspace_id:
+        return jsonify({"success": False, "error": "workspace_id is required"}), 400
+    try:
+        value = research_configurations.overwrite_template_from_workspace(
+            configuration_id=configuration_id,
+            workspace_id=workspace_id,
+            owner=require_user(),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    return jsonify({"success": True, "template": value})
+
+
+@sft_bp.delete("/api/configuration-templates/<configuration_id>")
+def delete_configuration_template(configuration_id: str):
+    if not research_configurations.delete_template(
+        configuration_id=configuration_id, owner=require_user(),
+    ):
+        return jsonify({"success": False, "error": "template not found"}), 404
+    return jsonify({"success": True, "configuration_id": configuration_id})
 
 
 @sft_bp.post("/api/runs")
@@ -96,9 +214,9 @@ def submit_research_run():
     owner = require_user()
     workspace_id = str(data.get("workspace_id") or "").strip()
     try:
-        workspace_revision = int(data.get("workspace_revision"))
+        configuration_revision = int(data.get("configuration_revision"))
     except (TypeError, ValueError):
-        return jsonify({"success": False, "error": "workspace_revision is required"}), 400
+        return jsonify({"success": False, "error": "configuration_revision is required"}), 400
     analyses = data.get("analyses")
     if not isinstance(analyses, list) or not analyses:
         return jsonify({"success": False, "error": "analyses must be a non-empty list"}), 400
@@ -109,42 +227,57 @@ def submit_research_run():
     lifecycle_policy = str(data.get("lifecycle_policy") or "durable").strip()
     if lifecycle_policy not in {"durable", "observer_bound", "pause_on_detach"}:
         return jsonify({"success": False, "error": "unsupported lifecycle_policy"}), 400
+    view_uuid = str(data.get("view_uuid") or "").strip()
+    if lifecycle_policy == "observer_bound":
+        lease = view_leases.load(view_uuid=view_uuid, owner=owner) if view_uuid else None
+        if lease is None or lease.get("status") != "active" or lease.get("workspace_id") != workspace_id:
+            return jsonify({"success": False, "error": "active workspace view lease is required"}), 409
 
-    revision = research_workspaces.load_workspace_revision(
-        workspace_id=workspace_id,
-        owner=owner,
-        revision=workspace_revision,
+    configuration = research_configurations.load_workspace_configuration(
+        workspace_id=workspace_id, owner=owner,
     )
-    if revision is None:
-        return jsonify({"success": False, "error": "workspace revision not found"}), 404
+    if configuration is None:
+        return jsonify({"success": False, "error": "workspace configuration not found"}), 404
+    if configuration["revision"] != configuration_revision:
+        return jsonify({
+            "success": False,
+            "error": "configuration revision changed",
+            "current_revision": configuration["revision"],
+        }), 409
+    missing = [kind for kind in analyses if not isinstance(configuration["payload"]["analyses"].get(kind), dict)]
+    if missing:
+        return jsonify({"success": False, "error": f"configuration missing analyses: {missing}"}), 400
+
     run_spec = {
-        "schema_version": revision["schema_version"],
         "run_spec_version": research_runs.RUN_SPEC_VERSION,
         "workspace_id": workspace_id,
-        "workspace_revision": workspace_revision,
-        "factor_family_alias": revision["factor_family_alias"],
+        "configuration_id": configuration["configuration_id"],
+        "configuration_revision": configuration["revision"],
+        "configuration_fingerprint": configuration["fingerprint"],
         "analyses": analyses,
         "lifecycle_policy": lifecycle_policy,
-        "configuration": revision["draft"],
+        "configuration": deepcopy(configuration["payload"]),
     }
     run = research_runs.create_run(
         owner=owner,
         workspace_id=workspace_id,
-        workspace_revision=workspace_revision,
+        configuration_id=configuration["configuration_id"],
+        configuration_revision=configuration["revision"],
         lifecycle_policy=lifecycle_policy,
         run_spec=run_spec,
     )
-
     jobs = []
     for kind in analyses:
-        run_token = f"{run['run_id']}:{kind}"
         payload = {
-            **revision["draft"],
+            **_execution_payload(configuration, kind),
             "run_id": run["run_id"],
-            "run_token": run_token,
+            "run_token": f"{run['run_id']}:{kind}",
             "workspace_id": workspace_id,
-            "workspace_revision": workspace_revision,
+            "configuration_id": configuration["configuration_id"],
+            "configuration_revision": configuration["revision"],
             "lifecycle_policy": lifecycle_policy,
+            "view_uuid": view_uuid,
+            "_owner": owner,
             "run_spec": run_spec,
         }
         job = _submit_kind(kind, payload)
@@ -169,25 +302,16 @@ def create_view_lease():
         return jsonify({"success": False, "error": "view_uuid and workspace_id are required"}), 400
     if research_workspaces.load_workspace(workspace_id=workspace_id, owner=require_user()) is None:
         return jsonify({"success": False, "error": "workspace not found"}), 404
-    lease = view_leases.renew(
-        view_uuid=view_uuid,
-        owner=require_user(),
-        workspace_id=workspace_id,
-    )
+    lease = view_leases.renew(view_uuid=view_uuid, owner=require_user(), workspace_id=workspace_id)
     return jsonify({"success": True, "lease": lease}), 201
 
 
 @sft_bp.put("/api/view-leases/<view_uuid>")
 def renew_view_lease(view_uuid: str):
-    data = request.get_json(silent=True) or {}
-    workspace_id = str(data.get("workspace_id") or "").strip()
+    workspace_id = str((request.get_json(silent=True) or {}).get("workspace_id") or "").strip()
     if not workspace_id:
         return jsonify({"success": False, "error": "workspace_id is required"}), 400
-    lease = view_leases.renew(
-        view_uuid=view_uuid,
-        owner=require_user(),
-        workspace_id=workspace_id,
-    )
+    lease = view_leases.renew(view_uuid=view_uuid, owner=require_user(), workspace_id=workspace_id)
     return jsonify({"success": True, "lease": lease})
 
 

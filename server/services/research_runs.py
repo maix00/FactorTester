@@ -1,4 +1,4 @@
-"""Immutable research runs created from workspace revisions."""
+"""Immutable research runs created from canonical configurations."""
 
 from __future__ import annotations
 
@@ -22,13 +22,27 @@ def _loads(value: str | None) -> Any:
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
+    existing = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_runs'"
+    ).fetchone()
+    if existing is not None:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(research_runs)").fetchall()
+        }
+        if "configuration_id" not in columns:
+            raise RuntimeError(
+                "legacy research run schema detected; run "
+                "python -m tools.migrations.migrate_research_configurations --apply"
+            )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS research_runs (
             run_id TEXT PRIMARY KEY,
             owner TEXT NOT NULL,
             workspace_id TEXT NOT NULL,
-            workspace_revision INTEGER NOT NULL,
+            configuration_id TEXT NOT NULL,
+            configuration_revision INTEGER NOT NULL,
             kind TEXT NOT NULL,
             lifecycle_policy TEXT NOT NULL,
             run_spec_version INTEGER NOT NULL,
@@ -45,12 +59,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 def create_run(
-    *,
-    owner: str,
-    workspace_id: str,
-    workspace_revision: int,
-    lifecycle_policy: str,
-    run_spec: dict[str, Any],
+    *, owner: str, workspace_id: str, configuration_id: str,
+    configuration_revision: int, lifecycle_policy: str, run_spec: dict[str, Any],
 ) -> dict[str, Any]:
     run_id = uuid.uuid4().hex
     raw = orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
@@ -60,21 +70,15 @@ def create_run(
         conn.execute(
             """
             INSERT INTO research_runs (
-                run_id, owner, workspace_id, workspace_revision, kind,
-                lifecycle_policy, run_spec_version, run_spec_hash,
-                run_spec_json, created_at
-            ) VALUES (?, ?, ?, ?, 'single_factor', ?, ?, ?, ?, ?)
+                run_id, owner, workspace_id, configuration_id,
+                configuration_revision, kind, lifecycle_policy, run_spec_version,
+                run_spec_hash, run_spec_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, 'factor_research', ?, ?, ?, ?, ?)
             """,
             (
-                run_id,
-                owner,
-                workspace_id,
-                int(workspace_revision),
-                lifecycle_policy,
-                RUN_SPEC_VERSION,
-                hashlib.sha256(raw).hexdigest(),
-                raw.decode(),
-                created_at,
+                run_id, owner, workspace_id, configuration_id,
+                int(configuration_revision), lifecycle_policy, RUN_SPEC_VERSION,
+                hashlib.sha256(raw).hexdigest(), raw.decode(), created_at,
             ),
         )
     return load_run(run_id=run_id, owner=owner) or {}
@@ -84,8 +88,7 @@ def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         row = conn.execute(
-            "SELECT * FROM research_runs WHERE run_id = ? AND owner = ?",
-            (run_id, owner),
+            "SELECT * FROM research_runs WHERE run_id=? AND owner=?", (run_id, owner)
         ).fetchone()
     if row is None:
         return None
@@ -93,7 +96,8 @@ def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:
         "run_id": str(row["run_id"]),
         "owner": str(row["owner"]),
         "workspace_id": str(row["workspace_id"]),
-        "workspace_revision": int(row["workspace_revision"]),
+        "configuration_id": str(row["configuration_id"]),
+        "configuration_revision": int(row["configuration_revision"]),
         "kind": str(row["kind"]),
         "lifecycle_policy": str(row["lifecycle_policy"]),
         "run_spec_version": int(row["run_spec_version"]),

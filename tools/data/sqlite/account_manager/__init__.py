@@ -40,19 +40,6 @@ from .factor_research_result import (
     list_factor_research_runs,
     save_factor_research_run,
 )
-from .user_template import (
-    delete_user_template_collections,
-    delete_user_template_collection,
-    iter_user_template_collections,
-    list_user_template_metadata,
-    load_user_template,
-    load_user_templates,
-    save_user_template_payload,
-    save_user_templates,
-    ensure_user_template_schema,
-)
-
-
 def ensure_account_manager_sqlite_store() -> str:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_user_schema(conn)
@@ -60,7 +47,6 @@ def ensure_account_manager_sqlite_store() -> str:
         ensure_product_group_schema(conn)
         ensure_factor_param_config_schema(conn)
         ensure_factor_research_result_schema(conn)
-        ensure_user_template_schema(conn)
     return str(Settings.CACHE_DB_PATH)
 
 

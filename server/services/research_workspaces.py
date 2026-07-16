@@ -1,4 +1,4 @@
-"""Durable research workspace drafts and immutable revisions."""
+"""Durable research contexts; configuration lives in ResearchConfiguration."""
 
 from __future__ import annotations
 
@@ -7,30 +7,25 @@ import time
 import uuid
 from typing import Any
 
-import orjson
-
 import settings as Settings
+from server.services import research_configurations
 from tools.data.sqlite.db import connect_sqlite
 
 
-SCHEMA_VERSION = 1
-
-
-class WorkspaceRevisionConflict(RuntimeError):
-    def __init__(self, current_revision: int) -> None:
-        super().__init__(f"workspace revision changed to {current_revision}")
-        self.current_revision = current_revision
-
-
-def _dumps(value: Any) -> str:
-    return orjson.dumps(value, option=orjson.OPT_SORT_KEYS).decode()
-
-
-def _loads(value: str | None) -> Any:
-    return orjson.loads(value) if value else None
-
-
 def _ensure_schema(conn: sqlite3.Connection) -> None:
+    existing = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_workspaces'"
+    ).fetchone()
+    if existing is not None:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(research_workspaces)").fetchall()
+        }
+        if "current_revision" in columns or "factor_family_alias" in columns:
+            raise RuntimeError(
+                "legacy research workspace schema detected; run "
+                "python -m tools.migrations.migrate_research_configurations --apply"
+            )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS research_workspaces (
@@ -38,23 +33,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             owner TEXT NOT NULL,
             kind TEXT NOT NULL,
             title TEXT NOT NULL,
-            factor_family_alias TEXT NOT NULL DEFAULT '',
-            current_revision INTEGER NOT NULL,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
             deleted_at REAL
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS research_workspace_revisions (
-            workspace_id TEXT NOT NULL,
-            revision INTEGER NOT NULL,
-            schema_version INTEGER NOT NULL,
-            draft_json TEXT NOT NULL,
-            created_at REAL NOT NULL,
-            PRIMARY KEY (workspace_id, revision)
         )
         """
     )
@@ -64,39 +45,23 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
 
 
-def _row_payload(conn: sqlite3.Connection, row: sqlite3.Row | None) -> dict[str, Any] | None:
+def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
-    revision = int(row["current_revision"])
-    revision_row = conn.execute(
-        """
-        SELECT schema_version, draft_json
-        FROM research_workspace_revisions
-        WHERE workspace_id = ? AND revision = ?
-        """,
-        (row["workspace_id"], revision),
-    ).fetchone()
     return {
         "workspace_id": str(row["workspace_id"]),
         "owner": str(row["owner"]),
         "kind": str(row["kind"]),
         "title": str(row["title"]),
-        "factor_family_alias": str(row["factor_family_alias"] or ""),
-        "revision": revision,
-        "schema_version": int(revision_row["schema_version"]),
-        "draft": _loads(revision_row["draft_json"]) or {},
         "created_at": float(row["created_at"]),
         "updated_at": float(row["updated_at"]),
     }
 
 
 def create_workspace(
-    *,
-    owner: str,
-    kind: str,
-    title: str,
-    factor_family_alias: str = "",
-    draft: dict[str, Any] | None = None,
+    *, owner: str, title: str,
+    factor_families: list[dict[str, Any]] | None = None,
+    factors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workspace_id = uuid.uuid4().hex
     now = time.time()
@@ -105,25 +70,22 @@ def create_workspace(
         conn.execute(
             """
             INSERT INTO research_workspaces (
-                workspace_id, owner, kind, title, factor_family_alias,
-                current_revision, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                workspace_id, owner, kind, title, created_at, updated_at
+            ) VALUES (?, ?, 'factor_research', ?, ?, ?)
             """,
-            (workspace_id, owner, kind, title, factor_family_alias, now, now),
-        )
-        conn.execute(
-            """
-            INSERT INTO research_workspace_revisions (
-                workspace_id, revision, schema_version, draft_json, created_at
-            ) VALUES (?, 1, ?, ?, ?)
-            """,
-            (workspace_id, SCHEMA_VERSION, _dumps(draft or {}), now),
+            (workspace_id, owner, title, now, now),
         )
         row = conn.execute(
-            "SELECT * FROM research_workspaces WHERE workspace_id = ?",
-            (workspace_id,),
+            "SELECT * FROM research_workspaces WHERE workspace_id=?", (workspace_id,)
         ).fetchone()
-        return _row_payload(conn, row) or {}
+    workspace = _row_payload(row) or {}
+    workspace["configuration"] = research_configurations.create_workspace_configuration(
+        owner=owner,
+        workspace_id=workspace_id,
+        factor_families=factor_families,
+        factors=factors,
+    )
+    return workspace
 
 
 def load_workspace(*, workspace_id: str, owner: str) -> dict[str, Any] | None:
@@ -132,122 +94,35 @@ def load_workspace(*, workspace_id: str, owner: str) -> dict[str, Any] | None:
         row = conn.execute(
             """
             SELECT * FROM research_workspaces
-            WHERE workspace_id = ? AND owner = ? AND deleted_at IS NULL
+            WHERE workspace_id=? AND owner=? AND deleted_at IS NULL
             """,
             (workspace_id, owner),
         ).fetchone()
-        return _row_payload(conn, row)
+    workspace = _row_payload(row)
+    if workspace is not None:
+        workspace["configuration"] = research_configurations.load_workspace_configuration(
+            workspace_id=workspace_id,
+            owner=owner,
+        )
+    return workspace
 
 
-def list_workspaces(*, owner: str, kind: str = "") -> list[dict[str, Any]]:
-    clauses = ["owner = ?", "deleted_at IS NULL"]
-    args: list[Any] = [owner]
-    if kind:
-        clauses.append("kind = ?")
-        args.append(kind)
+def list_workspaces(*, owner: str) -> list[dict[str, Any]]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         rows = conn.execute(
-            f"""
+            """
             SELECT * FROM research_workspaces
-            WHERE {' AND '.join(clauses)}
+            WHERE owner=? AND deleted_at IS NULL
             ORDER BY updated_at DESC, created_at DESC
             """,
-            args,
+            (owner,),
         ).fetchall()
-        return [payload for row in rows if (payload := _row_payload(conn, row)) is not None]
-
-
-def load_workspace_revision(
-    *,
-    workspace_id: str,
-    owner: str,
-    revision: int,
-) -> dict[str, Any] | None:
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
-        workspace = conn.execute(
-            """
-            SELECT * FROM research_workspaces
-            WHERE workspace_id = ? AND owner = ? AND deleted_at IS NULL
-            """,
-            (workspace_id, owner),
-        ).fetchone()
-        if workspace is None:
-            return None
-        revision_row = conn.execute(
-            """
-            SELECT schema_version, draft_json, created_at
-            FROM research_workspace_revisions
-            WHERE workspace_id = ? AND revision = ?
-            """,
-            (workspace_id, int(revision)),
-        ).fetchone()
-        if revision_row is None:
-            return None
-        return {
-            "workspace_id": str(workspace["workspace_id"]),
-            "owner": str(workspace["owner"]),
-            "kind": str(workspace["kind"]),
-            "title": str(workspace["title"]),
-            "factor_family_alias": str(workspace["factor_family_alias"] or ""),
-            "revision": int(revision),
-            "schema_version": int(revision_row["schema_version"]),
-            "draft": _loads(revision_row["draft_json"]) or {},
-            "created_at": float(revision_row["created_at"]),
-        }
-
-
-def update_workspace(
-    *,
-    workspace_id: str,
-    owner: str,
-    expected_revision: int,
-    draft: dict[str, Any],
-    title: str | None = None,
-    factor_family_alias: str | None = None,
-) -> dict[str, Any] | None:
-    now = time.time()
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            """
-            SELECT * FROM research_workspaces
-            WHERE workspace_id = ? AND owner = ? AND deleted_at IS NULL
-            """,
-            (workspace_id, owner),
-        ).fetchone()
-        if row is None:
-            return None
-        current_revision = int(row["current_revision"])
-        if current_revision != int(expected_revision):
-            raise WorkspaceRevisionConflict(current_revision)
-        revision = current_revision + 1
-        conn.execute(
-            """
-            INSERT INTO research_workspace_revisions (
-                workspace_id, revision, schema_version, draft_json, created_at
-            ) VALUES (?, ?, ?, ?, ?)
-            """,
-            (workspace_id, revision, SCHEMA_VERSION, _dumps(draft), now),
+    result = []
+    for row in rows:
+        workspace = _row_payload(row) or {}
+        workspace["configuration"] = research_configurations.load_workspace_configuration(
+            workspace_id=workspace["workspace_id"], owner=owner,
         )
-        conn.execute(
-            """
-            UPDATE research_workspaces
-            SET title = ?, factor_family_alias = ?, current_revision = ?, updated_at = ?
-            WHERE workspace_id = ?
-            """,
-            (
-                str(title if title is not None else row["title"]),
-                str(factor_family_alias if factor_family_alias is not None else row["factor_family_alias"]),
-                revision,
-                now,
-                workspace_id,
-            ),
-        )
-        updated = conn.execute(
-            "SELECT * FROM research_workspaces WHERE workspace_id = ?",
-            (workspace_id,),
-        ).fetchone()
-        return _row_payload(conn, updated)
+        result.append(workspace)
+    return result

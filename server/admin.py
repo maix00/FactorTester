@@ -22,8 +22,8 @@ from tools.data.account_manage import (
     next_account_username,
     levels_lock, load_levels, save_levels, normalize_levels,
     list_levels_with_roots, root_level_id_for_org,
-    delete_user_template_data,
 )
+from server.services.research_configurations import delete_owner_configurations
 from server.services.http_auth import login_required
 from server.services.session_runtime import require_user
 
@@ -515,5 +515,5 @@ def api_delete_user(target_username):
             if acct.get('parent_username') == target_username:
                 acct['parent_username'] = ''
         save_accounts(accounts)
-    deleted_templates = delete_user_template_data(target_username)
-    return jsonify({'success': True, 'deleted_template_collections': deleted_templates})
+    deleted_configurations = delete_owner_configurations(target_username)
+    return jsonify({'success': True, 'deleted_research_configurations': deleted_configurations})

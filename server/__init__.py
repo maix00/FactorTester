@@ -40,7 +40,13 @@ def create_app() -> Flask:
 
     # ── 启动时一次性建好所有 SQLite schema（避免每个 API 请求重复检查） ──
     from tools.data.account_manage import ensure_account_manager_sqlite_store
+    from server.services.test_job_store import ensure_test_job_store
+    from server.services.research_configurations import ensure_schema as ensure_research_configuration_schema
+    from server.services.view_leases import start_lease_janitor
     ensure_account_manager_sqlite_store()
+    ensure_test_job_store()
+    ensure_research_configuration_schema()
+    start_lease_janitor()
 
     # ── 注册 Blueprint ──
     from server.auth import auth_bp

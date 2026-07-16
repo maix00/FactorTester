@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import settings as Settings
+import hashlib
+import json
+import time
+import uuid
+
 from flask import Flask
 import pytest
-import time
 
-from server.modules.single_factor_test import sft_bp
-from server.services import test_jobs
+import settings as Settings
+from server.modules.single_factor_test import research_jobs, sft_bp
+from server.services import research_configurations, research_runs, research_workspaces, test_jobs
+from tools.data.sqlite.db import connect_sqlite
 
 
 @pytest.fixture()
@@ -25,227 +30,310 @@ def client(tmp_path, monkeypatch):
     return client
 
 
-def test_user_can_create_and_reopen_a_durable_research_workspace(client) -> None:
-    created = client.post(
-        "/api/workspaces",
+def _create_workspace(client):
+    response = client.post("/api/workspaces", json={
+        "title": "multi factor research",
+        "factor_families": [{"alias": "MmRet"}, {"alias": "MmMADevRat"}],
+        "factors": [
+            {"factor_family_alias": "MmRet", "alias": "MmRet|P:CA|N:10d|$F:1d"},
+            {"factor_family_alias": "MmMADevRat", "alias": "MmMADevRat|P:CA|N:10d|$F:1d|$Rev"},
+        ],
+    })
+    assert response.status_code == 201
+    return response.get_json()["workspace"]
+
+
+def _payload(workspace, *, n: str = "10d"):
+    shared = dict(workspace["configuration"]["payload"]["shared"])
+    shared["user_defined_shared_setting"] = {"enabled": True, "threshold": 1.25}
+    return {
+        "schema_version": 1,
+        "shared": shared,
+        "analyses": {
+            "ic": {"factor_configs": [{"N": n}], "product_paths": ["core8_path"]},
+            "backtest": {
+                "local_settings": {"user_defined_local_setting": "kept"},
+                "groups": [{
+                    "id": "A1", "name": "A1", "splitCount": 5, "groupIndex": 1,
+                    "factorAlias": "MmRet|P:CA|N:10d|$F:1d",
+                    "product_path_selection_id": "core8",
+                    "user_defined_group_setting": {"mode": "custom"},
+                }],
+                "ls_configs": [{
+                    "id": "LS1", "longGroupId": "A1", "shortGroupId": "A5",
+                    "user_defined_ls_setting": [1, 2, 3],
+                }],
+                "product_selections": {"core8": {"id": "core8", "selected_paths": ["core8_path"]}},
+            },
+            "factor_evaluation": {"factor_alias": "MmRet|P:CA|N:10d|$F:1d"},
+            "factor_type_analysis": {"factor_alias": "MmRet|P:CA|N:10d|$F:1d"},
+        },
+        "ui": {"selected_tab": "ic"},
+    }
+
+
+def _update(client, workspace, payload):
+    response = client.put(
+        f"/api/workspaces/{workspace['workspace_id']}/configuration",
         json={
-            "kind": "single_factor",
-            "title": "MmMADevRat research",
-            "factor_family_alias": "MmMADevRat",
-            "draft": {"time_range": {"start": "2025-01-02", "end": "2025-02-14"}},
+            "expected_revision": workspace["configuration"]["revision"],
+            "payload": payload,
         },
     )
-
-    assert created.status_code == 201
-    workspace = created.get_json()["workspace"]
-    assert workspace["owner"] == "alice"
-    assert workspace["revision"] == 1
-    assert workspace["draft"]["time_range"]["end"] == "2025-02-14"
-
-    reopened = client.get(f"/api/workspaces/{workspace['workspace_id']}")
-
-    assert reopened.status_code == 200
-    assert reopened.get_json()["workspace"] == workspace
+    assert response.status_code == 200, response.get_data(as_text=True)
+    workspace["configuration"] = response.get_json()["configuration"]
+    return workspace
 
 
-def test_workspace_updates_create_revisions_and_reject_stale_writers(client) -> None:
-    created = client.post(
-        "/api/workspaces",
-        json={"kind": "single_factor", "draft": {"factor_configs": [{"N": "10d"}]}},
-    ).get_json()["workspace"]
+def test_workspace_has_one_mutable_configuration_not_revision_history(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    _update(client, workspace, _payload(workspace, n="20d"))
 
-    updated = client.patch(
-        f"/api/workspaces/{created['workspace_id']}",
+    reopened = client.get(f"/api/workspaces/{workspace['workspace_id']}").get_json()["workspace"]
+
+    assert reopened["configuration"]["revision"] == 3
+    assert reopened["configuration"]["payload"]["analyses"]["ic"]["factor_configs"] == [{"N": "20d"}]
+    from tools.data.sqlite.db import connect_sqlite
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_configurations WHERE workspace_id=?",
+            (workspace["workspace_id"],),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_workspace_revisions'"
+        ).fetchone() is None
+
+
+def test_template_save_and_load_copy_the_same_configuration_schema(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    saved = client.post(
+        f"/api/workspaces/{workspace['workspace_id']}/configuration/templates",
+        json={"name": "Core 8 template"},
+    )
+    template = saved.get_json()["template"]
+
+    _update(client, workspace, _payload(workspace, n="20d"))
+    loaded = client.post(
+        f"/api/workspaces/{workspace['workspace_id']}/configuration/load-template",
         json={
-            "expected_revision": 1,
-            "draft": {"factor_configs": [{"N": "20d"}]},
+            "configuration_id": template["configuration_id"],
+            "expected_revision": workspace["configuration"]["revision"],
         },
     )
+    value = loaded.get_json()["configuration"]
 
-    assert updated.status_code == 200
-    assert updated.get_json()["workspace"]["revision"] == 2
-    assert updated.get_json()["workspace"]["draft"]["factor_configs"] == [{"N": "20d"}]
-
-    stale = client.patch(
-        f"/api/workspaces/{created['workspace_id']}",
-        json={"expected_revision": 1, "draft": {"factor_configs": []}},
-    )
-
-    assert stale.status_code == 409
-    assert stale.get_json()["current_revision"] == 2
+    assert saved.status_code == 201
+    assert value["payload"] == template["payload"]
+    assert value["payload"]["shared"]["user_defined_shared_setting"]["threshold"] == 1.25
+    assert value["payload"]["analyses"]["backtest"]["local_settings"]["user_defined_local_setting"] == "kept"
+    assert value["payload"]["analyses"]["backtest"]["groups"][0]["user_defined_group_setting"] == {"mode": "custom"}
+    assert value["payload"]["analyses"]["backtest"]["ls_configs"][0]["user_defined_ls_setting"] == [1, 2, 3]
+    assert value["source_configuration_id"] == template["configuration_id"]
+    assert value["revision"] == 4
 
 
-def test_submitted_run_freezes_workspace_revision_and_creates_page_independent_job(
-    client,
-    monkeypatch,
-) -> None:
-    workspace = client.post(
-        "/api/workspaces",
-        json={
-            "kind": "single_factor",
-            "factor_family_alias": "MmMADevRat",
-            "draft": {"factor_configs": [{"N": "10d"}], "product_paths": ["core8_path"]},
+def test_legacy_templates_are_migrated_once_and_removed(client) -> None:
+    legacy_rows = [("global", "MmRet", "", {
+        "id": "legacy-1",
+        "name": "legacy",
+        "ff_alias": "MmRet",
+        "snapshot": {
+            "submissions": [{"id": "selection-1", "selected_paths": ["core8_path"]}],
+            "group_settings": {"groups": [{
+                "id": "A1", "testerId": "selection-1", "groupCount": 5,
+                "groupIndex": 0, "factorAlias": "MmRet|P:CA|N:10d|$F:1d",
+            }]},
         },
-    ).get_json()["workspace"]
+    }), ("params", "", "MmRet", {
+        "id": "legacy-params", "name": "__global_tpl_old__", "params_list": [{"N": "10d"}],
+    }), ("time", "", "", {
+        "id": "legacy-time", "name": "old time", "time_data": {"start_date": "2024-01-01"},
+    })]
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE account_templates (
+                username TEXT NOT NULL, kind TEXT NOT NULL, scope_key TEXT NOT NULL,
+                ff_alias TEXT NOT NULL, template_id TEXT NOT NULL, sort_order INTEGER NOT NULL,
+                name TEXT NOT NULL, item_ff_alias TEXT NOT NULL,
+                payload_json TEXT NOT NULL, updated_at REAL NOT NULL,
+                PRIMARY KEY (username, kind, scope_key, ff_alias, template_id)
+            )
+            """
+        )
+        for sort_order, (kind, scope_key, ff_alias, payload) in enumerate(legacy_rows):
+            conn.execute(
+                "INSERT INTO account_templates VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, 1.0)",
+                (
+                    "alice", kind, scope_key, ff_alias, payload["id"], sort_order,
+                    payload["name"], json.dumps(payload),
+                ),
+            )
+
+    dry_run = research_configurations.migrate_legacy_templates(apply=False)
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_configurations'"
+        ).fetchone() is None
+    applied = research_configurations.migrate_legacy_templates(apply=True)
+
+    assert dry_run["scanned"] == 3 and dry_run["migrated"] == 1
+    assert dry_run["retired_legacy_components"] == {"params": 1, "time": 1}
+    assert applied["migrated"] == 1 and applied["errors"] == []
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_templates'"
+        ).fetchone() is None
+    templates = research_configurations.list_templates(owner="alice")
+    assert templates[0]["legacy_template_id"] == "MmRet:legacy-1"
+    assert templates[0]["payload"]["shared"]["factor_families"] == [{"alias": "MmRet"}]
+    assert templates[0]["payload"]["shared"]["factors"] == [{
+        "alias": "MmRet|P:CA|N:10d|$F:1d",
+        "factor_family_alias": "MmRet",
+    }]
+    assert templates[0]["payload"]["analyses"]["backtest"]["groups"][0]["splitCount"] == 5
+
+
+def test_legacy_workspace_and_runs_require_then_apply_one_time_migration(client) -> None:
+    draft = {
+        "factor_alias": "MmRet|P:CA|N:10d|$F:1d",
+        "group_settings": {"groups": []},
+    }
+    run_spec = {"workspace_id": "legacy-workspace", "workspace_revision": 3}
+    run_raw = json.dumps(run_spec, sort_keys=True).encode()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE research_workspaces (
+                workspace_id TEXT PRIMARY KEY, owner TEXT NOT NULL, kind TEXT NOT NULL,
+                title TEXT NOT NULL, factor_family_alias TEXT NOT NULL DEFAULT '',
+                current_revision INTEGER NOT NULL, created_at REAL NOT NULL,
+                updated_at REAL NOT NULL, deleted_at REAL
+            );
+            CREATE TABLE research_workspace_revisions (
+                workspace_id TEXT NOT NULL, revision INTEGER NOT NULL,
+                schema_version INTEGER NOT NULL, draft_json TEXT NOT NULL,
+                created_at REAL NOT NULL, PRIMARY KEY (workspace_id, revision)
+            );
+            CREATE TABLE research_runs (
+                run_id TEXT PRIMARY KEY, owner TEXT NOT NULL, workspace_id TEXT NOT NULL,
+                workspace_revision INTEGER NOT NULL, kind TEXT NOT NULL,
+                lifecycle_policy TEXT NOT NULL, run_spec_version INTEGER NOT NULL,
+                run_spec_hash TEXT NOT NULL, run_spec_json TEXT NOT NULL, created_at REAL NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO research_workspaces VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            ("legacy-workspace", "alice", "single_factor", "Legacy", "MmRet", 3, 1.0, 2.0),
+        )
+        conn.execute(
+            "INSERT INTO research_workspace_revisions VALUES (?, ?, ?, ?, ?)",
+            ("legacy-workspace", 3, 1, json.dumps(draft), 2.0),
+        )
+        conn.execute(
+            "INSERT INTO research_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-run", "alice", "legacy-workspace", 3, "single_factor", "durable", 1,
+                hashlib.sha256(run_raw).hexdigest(), run_raw.decode(), 3.0,
+            ),
+        )
+
+    with pytest.raises(RuntimeError, match="migrate_research_configurations"):
+        research_workspaces.load_workspace(workspace_id="legacy-workspace", owner="alice")
+    with pytest.raises(RuntimeError, match="migrate_research_configurations"):
+        research_runs.load_run(run_id="legacy-run", owner="alice")
+
+    dry_run = research_configurations.migrate_legacy_workspaces_and_runs(apply=False)
+    applied = research_configurations.migrate_legacy_workspaces_and_runs(apply=True)
+
+    assert dry_run["legacy_workspace_schema"] is True
+    assert dry_run["legacy_run_schema"] is True
+    assert applied["workspace_configurations_created"] == 1
+    workspace = research_workspaces.load_workspace(workspace_id="legacy-workspace", owner="alice")
+    run = research_runs.load_run(run_id="legacy-run", owner="alice")
+    assert workspace is not None
+    assert workspace["configuration"]["revision"] == 1
+    assert workspace["configuration"]["payload"]["shared"]["factors"][0]["alias"] == draft["factor_alias"]
+    assert run is not None
+    assert run["configuration_id"] == workspace["configuration"]["configuration_id"]
+    assert run["configuration_revision"] == 1
+    assert run["run_spec"]["workspace_revision"] == 3
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_workspace_revisions'"
+        ).fetchone() is None
+
+
+def test_run_freezes_configuration_while_workspace_keeps_editing(client, monkeypatch) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
 
     def fake_submit(kind, payload):
         return test_jobs.create_job(
-            kind=kind,
-            run_token=payload["run_token"],
-            run_id=payload["run_id"],
-            workspace_id=payload["workspace_id"],
-            owner="alice",
-            payload=payload,
+            kind=kind, run_token=payload["run_token"], run_id=payload["run_id"],
+            workspace_id=payload["workspace_id"], owner="alice", payload=payload,
         )
 
-    monkeypatch.setattr(
-        "server.modules.single_factor_test.research_jobs._submit_kind",
-        fake_submit,
-        raising=False,
-    )
+    monkeypatch.setattr(research_jobs, "_submit_kind", fake_submit)
+    submitted = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }).get_json()
+    _update(client, workspace, _payload(workspace, n="20d"))
 
-    submitted = client.post(
-        "/api/runs",
-        json={
-            "workspace_id": workspace["workspace_id"],
-            "workspace_revision": 1,
-            "analyses": ["ic"],
-            "lifecycle_policy": "durable",
-        },
-    )
-
-    assert submitted.status_code == 202
-    submission = submitted.get_json()
-    assert submission["run_id"]
-    assert len(submission["jobs"]) == 1
-    assert submission["jobs"][0]["kind"] == "ic"
-
-    client.patch(
-        f"/api/workspaces/{workspace['workspace_id']}",
-        json={
-            "expected_revision": 1,
-            "draft": {"factor_configs": [{"N": "20d"}], "product_paths": ["core8_path"]},
-        },
-    )
-    frozen = client.get(f"/api/runs/{submission['run_id']}")
-
-    assert frozen.status_code == 200
-    run_spec = frozen.get_json()["run"]["run_spec"]
-    assert run_spec["workspace_revision"] == 1
-    assert run_spec["configuration"]["factor_configs"] == [{"N": "10d"}]
-    assert "page_uuid" not in run_spec
+    frozen = client.get(f"/api/runs/{submitted['run_id']}").get_json()["run"]
+    assert frozen["configuration_revision"] == 2
+    assert frozen["run_spec"]["configuration"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
 
 
-def test_expired_view_cancels_observer_bound_job_but_not_durable_job(
-    client,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        "server.services.view_leases.VIEW_LEASE_GRACE_SECONDS",
-        0.01,
-        raising=False,
-    )
-    workspace = client.post(
-        "/api/workspaces",
-        json={"kind": "single_factor", "draft": {}},
-    ).get_json()["workspace"]
-    lease = client.post(
-        "/api/view-leases",
-        json={"view_uuid": "view-a", "workspace_id": workspace["workspace_id"]},
-    )
-    assert lease.status_code == 201
+def test_all_analyses_dispatch_importable_process_runners(client, monkeypatch) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    captured = []
 
-    observer_job = test_jobs.create_job(
-        kind="factor_evaluation",
-        run_token="observer-job",
-        run_id="observer-run",
-        workspace_id=workspace["workspace_id"],
-        view_uuid="view-a",
-        lifecycle_policy="observer_bound",
-        owner="alice",
-        payload={"run_id": "observer-run"},
-    )
-    durable_job = test_jobs.create_job(
-        kind="ic",
-        run_token="durable-job",
-        run_id="durable-run",
-        workspace_id=workspace["workspace_id"],
-        view_uuid="view-a",
-        lifecycle_policy="durable",
-        owner="alice",
-        payload={"run_id": "durable-run"},
-    )
+    def fake_process(job, runner, payload):
+        captured.append((job.kind, runner, payload))
+        job.execution_mode = "process"
+        return job
 
-    detached = client.delete("/api/view-leases/view-a")
-    assert detached.status_code == 202
-    time.sleep(0.02)
-    expired = client.get("/api/view-leases/view-a")
+    monkeypatch.setattr(test_jobs, "submit_process", fake_process)
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic", "factor_evaluation", "factor_type_analysis", "backtest"],
+    })
 
-    assert expired.get_json()["lease"]["status"] == "expired"
-    assert client.get(f"/api/jobs/{observer_job.job_id}").get_json()["status"] == "cancelled"
-    assert client.get(f"/api/jobs/{observer_job.job_id}").get_json()["cancel_reason"] == "view_closed"
-    assert client.get(f"/api/jobs/{durable_job.job_id}").get_json()["status"] == "queued"
-
-
-def test_job_artifact_is_queryable_after_live_registry_is_gone(client) -> None:
-    job = test_jobs.create_job(
-        kind="backtest",
-        run_token="artifact-job",
-        run_id="artifact-run",
-        workspace_id="workspace-a",
-        owner="alice",
-        payload={"run_id": "artifact-run"},
-    )
-    test_jobs.store_artifact(
-        job,
-        "group_execution",
-        {"groups": [{"name": "A1", "return": 0.15}]},
-    )
-    with test_jobs._lock:
-        test_jobs._jobs.clear()
-        test_jobs._run_token_to_job.clear()
-        test_jobs._run_id_to_job.clear()
-
-    artifact = client.get(f"/api/jobs/{job.job_id}/artifacts/group_execution")
-
-    assert artifact.status_code == 200
-    assert artifact.get_json()["artifact"]["groups"][0]["name"] == "A1"
-
-
-def test_workspace_bootstrap_lists_only_its_runs_and_jobs(client) -> None:
-    workspace_a = client.post(
-        "/api/workspaces",
-        json={"kind": "single_factor", "title": "A", "draft": {}},
-    ).get_json()["workspace"]
-    workspace_b = client.post(
-        "/api/workspaces",
-        json={"kind": "single_factor", "title": "B", "draft": {}},
-    ).get_json()["workspace"]
-    job_a = test_jobs.create_job(
-        kind="ic",
-        run_token="list-a",
-        run_id="run-a",
-        workspace_id=workspace_a["workspace_id"],
-        owner="alice",
-        payload={"run_id": "run-a"},
-    )
-    test_jobs.create_job(
-        kind="ic",
-        run_token="list-b",
-        run_id="run-b",
-        workspace_id=workspace_b["workspace_id"],
-        owner="alice",
-        payload={"run_id": "run-b"},
-    )
-
-    workspaces = client.get("/api/workspaces").get_json()["workspaces"]
-    jobs = client.get(
-        f"/api/jobs?workspace_id={workspace_a['workspace_id']}&status=queued"
-    ).get_json()["jobs"]
-
-    assert {item["workspace_id"] for item in workspaces} == {
-        workspace_a["workspace_id"],
-        workspace_b["workspace_id"],
+    assert response.status_code == 202, response.get_data(as_text=True)
+    assert {kind for kind, _, _ in captured} == {
+        "ic", "factor_evaluation", "factor_type_analysis", "backtest",
     }
-    assert [item["job_id"] for item in jobs] == [job_a.job_id]
-    assert jobs[0]["run_id"] == "run-a"
+    assert all(":run_" in runner for _, runner, _ in captured)
+    assert all("page_uuid" not in payload for _, _, payload in captured)
+
+
+def test_expired_view_cancels_observer_bound_but_not_durable_job(client, monkeypatch) -> None:
+    monkeypatch.setattr("server.services.view_leases.VIEW_LEASE_GRACE_SECONDS", 0.01)
+    workspace = _create_workspace(client)
+    client.post("/api/view-leases", json={
+        "view_uuid": "view-a", "workspace_id": workspace["workspace_id"],
+    })
+    observer = test_jobs.create_job(
+        kind="ic", run_token=uuid.uuid4().hex, run_id="run-a",
+        workspace_id=workspace["workspace_id"], view_uuid="view-a",
+        lifecycle_policy="observer_bound", owner="alice", payload={},
+    )
+    durable = test_jobs.create_job(
+        kind="ic", run_token=uuid.uuid4().hex, run_id="run-b",
+        workspace_id=workspace["workspace_id"], view_uuid="view-a",
+        lifecycle_policy="durable", owner="alice", payload={},
+    )
+    client.delete("/api/view-leases/view-a")
+    time.sleep(0.02)
+    client.get("/api/view-leases/view-a")
+
+    assert client.get(f"/api/jobs/{observer.job_id}").get_json()["status"] == "cancelled"
+    assert client.get(f"/api/jobs/{durable.job_id}").get_json()["status"] == "queued"
