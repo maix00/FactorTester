@@ -31,6 +31,9 @@ The harness adapts two research skill systems:
    `factor-library metrics` for canonical metric names, and use
    `factor-library history` / `rank` / `stability` to find candidates that
    deserve revalidation.
+   Prefer structured metadata on every saved run: `sample_role`,
+   `regime_label`, `slice_name`, `test_count`, `grid_size`, `oos_pass`,
+   `multi_product_group_pass`, and `costed_pass`.
 6. Run group/backtest grids only after diagnostics pass.
 7. Audit order flow, snapshots, ledger results, volume-capacity constraints,
    margin mode, fee mode, and runtime summaries.
@@ -61,6 +64,8 @@ ignored.
   research evidence.
 - Product groups are point-in-time enough for the requested research question.
 - Parameter grids record how many hypotheses were tried.
+- Saved research runs carry sample/regime/slice labels and overfit-audit fields
+  whenever those are known.
 - New IC/type/backtest runs are queryable through `factor-library history` and
   old artifacts are backfilled through `factor-library import-result`.
 - `factor-library rank` is a candidate-generation query only; it never replaces
