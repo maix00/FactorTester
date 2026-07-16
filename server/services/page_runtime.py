@@ -284,6 +284,11 @@ def unregister_page(page_uuid: str) -> None:
         return
     from server.services.backtest_runs import cancel_page
     cancel_page(page_uuid)
+    try:
+        from server.services.backtest_jobs import cancel_page as cancel_backtest_jobs_page
+        cancel_backtest_jobs_page(page_uuid)
+    except Exception:
+        pass
     clear_page(page_uuid, delete=True)
     from server.services.factor_registry import unregister_page as _unreg_page
     _unreg_page(page_uuid)
