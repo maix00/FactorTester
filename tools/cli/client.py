@@ -14,13 +14,107 @@ class FactorTesterClient:
     def login(self, username: str, password: str) -> dict[str, Any]:
         return self._expect_success(self.session.post("/login", {"username": username, "password": password}))
 
-    def bootstrap_page(self, *, factor: str | None = None, factor_type: str | None = None) -> dict[str, Any]:
-        payload: dict[str, Any] = {}
-        if factor:
-            payload["factor"] = factor
-        if factor_type:
-            payload["type"] = factor_type
-        return self._expect_success(self.session.post("/api/single_factor_test/page", payload))
+    def create_workspace(
+        self,
+        *,
+        factor_family_alias: str = "",
+        title: str = "Single factor research",
+        draft: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post("/api/workspaces", {
+            "kind": "single_factor",
+            "title": title,
+            "factor_family_alias": factor_family_alias,
+            "draft": draft or {},
+        }))
+        return dict(data.get("workspace") or {})
+
+    def list_workspaces(self) -> list[dict[str, Any]]:
+        data = self._expect_success(self.session.get("/api/workspaces"))
+        return list(data.get("workspaces") or [])
+
+    def get_workspace(self, workspace_id: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(f"/api/workspaces/{workspace_id}"))
+        return dict(data.get("workspace") or {})
+
+    def update_workspace(
+        self,
+        workspace_id: str,
+        *,
+        expected_revision: int,
+        draft: dict[str, Any],
+        title: str | None = None,
+        factor_family_alias: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "expected_revision": expected_revision,
+            "draft": draft,
+        }
+        if title is not None:
+            payload["title"] = title
+        if factor_family_alias is not None:
+            payload["factor_family_alias"] = factor_family_alias
+        data = self._expect_success(
+            self.session.patch(f"/api/workspaces/{workspace_id}", payload)
+        )
+        return dict(data.get("workspace") or {})
+
+    def submit_run(
+        self,
+        workspace_id: str,
+        workspace_revision: int,
+        *,
+        analyses: list[str],
+        lifecycle_policy: str = "durable",
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.post("/api/runs", {
+            "workspace_id": workspace_id,
+            "workspace_revision": workspace_revision,
+            "analyses": analyses,
+            "lifecycle_policy": lifecycle_policy,
+        }))
+
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(f"/api/runs/{run_id}"))
+        return dict(data.get("run") or {})
+
+    def list_jobs(
+        self,
+        *,
+        workspace_id: str = "",
+        run_id: str = "",
+        status: str = "",
+        kind: str = "",
+    ) -> list[dict[str, Any]]:
+        query = {
+            key: value for key, value in {
+                "workspace_id": workspace_id,
+                "run_id": run_id,
+                "status": status,
+                "kind": kind,
+            }.items() if value
+        }
+        data = self._expect_success(self.session.get("/api/jobs", query=query or None))
+        return list(data.get("jobs") or [])
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.get(f"/api/jobs/{job_id}"))
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.post(f"/api/jobs/{job_id}/cancel", {}))
+
+    def retry_job(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.post(f"/api/jobs/{job_id}/retry", {}))
+
+    def continue_job(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.post(f"/api/jobs/{job_id}/continue", {}))
+
+    def job_artifact(self, job_id: str, name: str) -> dict[str, Any]:
+        return self._expect_success(self.session.get(f"/api/jobs/{job_id}/artifacts/{name}"))
+
+    def stream_job_id(self, job_id: str, *, after: int = 0):
+        query = {"after": after} if after else None
+        yield from self.session.stream_get(f"/api/jobs/{job_id}/stream", query=query)
 
     def list_modules(self, parent: str | None = None) -> list[dict[str, Any]]:
         if parent is None:

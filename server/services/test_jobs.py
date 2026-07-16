@@ -777,19 +777,22 @@ def list_jobs(
     *,
     owner: str,
     kind: str | None = None,
-    page_uuid: str | None = None,
+    workspace_id: str | None = None,
+    run_id: str | None = None,
     statuses: set[str] | None = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     owner = str(owner)
     kind = str(kind or "").strip()
-    page_uuid = str(page_uuid or "").strip()
+    workspace_id = str(workspace_id or "").strip()
+    run_id = str(run_id or "").strip()
     with _lock:
         _prune_locked()
     records = test_job_store.list_jobs(
         owner=owner,
         kind=kind,
-        page_uuid=page_uuid,
+        workspace_id=workspace_id,
+        run_id=run_id,
         statuses=statuses,
         limit=limit,
     )

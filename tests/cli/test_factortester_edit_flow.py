@@ -3733,10 +3733,6 @@ def test_click_login_success_prints_welcome(tmp_path, monkeypatch) -> None:
     def login():
         return jsonify(success=True, username="alice")
 
-    @app.post("/api/single_factor_test/page")
-    def page():
-        return jsonify(success=True, page_uuid="page-1")
-
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     with running_server(app) as url:
@@ -3746,7 +3742,6 @@ def test_click_login_success_prints_welcome(tmp_path, monkeypatch) -> None:
         result = runner.invoke(cli, ["login", "--username", "alice", "--password", "pw"])
         assert result.exit_code == 0
         assert "已登录: alice" in result.output
-        assert "页面上下文: page-1" in result.output
         assert "欢迎使用 FactorTester CLI" in result.output
         assert "factortester list" in result.output
         assert "longbridge-quant、quantitative-research skill" in result.output

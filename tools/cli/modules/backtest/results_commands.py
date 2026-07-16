@@ -254,6 +254,8 @@ def print_group_ranking_result(state, args: tuple[str, ...]) -> None:
     detail = client_from_config().group_ranking_detail({
         "page_uuid": state.page_uuid,
         "product_path_selection_id": product_path_selection_id,
+        "job_id": data.get("job_id") or "",
+        "run_id": data.get("run_id") or data.get("run_token") or "",
     }).get("detail") or {}
     rows = []
     for key, value in sorted(detail.items()):
@@ -277,6 +279,8 @@ def print_snapshot_result(state, args: tuple[str, ...]) -> None:
         "page_uuid": state.page_uuid,
         "product_path_selection_id": product_path_selection_id,
         "timestamp_ms": timestamp_ms,
+        "job_id": data.get("job_id") or "",
+        "run_id": data.get("run_id") or data.get("run_token") or "",
     })
     summary = result.get("summary") or {}
     click.echo(f"快照: timestamp_ms={result.get('timestamp_ms')}")
@@ -293,7 +297,11 @@ def print_snapshot_result(state, args: tuple[str, ...]) -> None:
 
 def print_order_flow_result(state, args: tuple[str, ...]) -> None:
     data = require_last_result(state)
-    payload: dict[str, Any] = {"page_uuid": state.page_uuid}
+    payload: dict[str, Any] = {
+        "page_uuid": state.page_uuid,
+        "job_id": data.get("job_id") or "",
+        "run_id": data.get("run_id") or data.get("run_token") or "",
+    }
     group_name = _arg_value(args, "--group-name")
     if group_name:
         group_id = _group_id_for_name(data, group_name)
@@ -425,6 +433,8 @@ def _fetch_order_flow_for_group(state, data: dict[str, Any], group_name: str) ->
     result = client_from_config().group_order_flow({
         "page_uuid": state.page_uuid,
         "group_id": group_id,
+        "job_id": data.get("job_id") or "",
+        "run_id": data.get("run_id") or data.get("run_token") or "",
     })
     groups = result.get("groups") if isinstance(result.get("groups"), list) else []
     if not groups:

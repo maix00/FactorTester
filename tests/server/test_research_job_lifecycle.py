@@ -210,3 +210,42 @@ def test_job_artifact_is_queryable_after_live_registry_is_gone(client) -> None:
 
     assert artifact.status_code == 200
     assert artifact.get_json()["artifact"]["groups"][0]["name"] == "A1"
+
+
+def test_workspace_bootstrap_lists_only_its_runs_and_jobs(client) -> None:
+    workspace_a = client.post(
+        "/api/workspaces",
+        json={"kind": "single_factor", "title": "A", "draft": {}},
+    ).get_json()["workspace"]
+    workspace_b = client.post(
+        "/api/workspaces",
+        json={"kind": "single_factor", "title": "B", "draft": {}},
+    ).get_json()["workspace"]
+    job_a = test_jobs.create_job(
+        kind="ic",
+        run_token="list-a",
+        run_id="run-a",
+        workspace_id=workspace_a["workspace_id"],
+        owner="alice",
+        payload={"run_id": "run-a"},
+    )
+    test_jobs.create_job(
+        kind="ic",
+        run_token="list-b",
+        run_id="run-b",
+        workspace_id=workspace_b["workspace_id"],
+        owner="alice",
+        payload={"run_id": "run-b"},
+    )
+
+    workspaces = client.get("/api/workspaces").get_json()["workspaces"]
+    jobs = client.get(
+        f"/api/jobs?workspace_id={workspace_a['workspace_id']}&status=queued"
+    ).get_json()["jobs"]
+
+    assert {item["workspace_id"] for item in workspaces} == {
+        workspace_a["workspace_id"],
+        workspace_b["workspace_id"],
+    }
+    assert [item["job_id"] for item in jobs] == [job_a.job_id]
+    assert jobs[0]["run_id"] == "run-a"

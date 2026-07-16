@@ -37,6 +37,15 @@ def create_research_workspace():
     return jsonify({"success": True, "workspace": workspace}), 201
 
 
+@sft_bp.get("/api/workspaces")
+def list_research_workspaces():
+    workspaces = research_workspaces.list_workspaces(
+        owner=require_user(),
+        kind=str(request.args.get("kind") or "").strip(),
+    )
+    return jsonify({"success": True, "workspaces": workspaces})
+
+
 @sft_bp.get("/api/workspaces/<workspace_id>")
 def get_research_workspace(workspace_id: str):
     workspace = research_workspaces.load_workspace(

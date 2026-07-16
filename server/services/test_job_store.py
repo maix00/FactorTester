@@ -348,15 +348,26 @@ def load_job(job_id: str) -> DurableJobRecord | None:
     return _record_from_row(row)
 
 
-def list_jobs(*, owner: str, kind: str = "", page_uuid: str = "", statuses: set[str] | None = None, limit: int = 20) -> list[DurableJobRecord]:
+def list_jobs(
+    *,
+    owner: str,
+    kind: str = "",
+    workspace_id: str = "",
+    run_id: str = "",
+    statuses: set[str] | None = None,
+    limit: int = 20,
+) -> list[DurableJobRecord]:
     clauses = ["owner = ?"]
     args: list[Any] = [owner]
     if kind:
         clauses.append("kind = ?")
         args.append(kind)
-    if page_uuid:
-        clauses.append("initiator_page_uuid = ?")
-        args.append(page_uuid)
+    if workspace_id:
+        clauses.append("workspace_id = ?")
+        args.append(workspace_id)
+    if run_id:
+        clauses.append("run_id = ?")
+        args.append(run_id)
     if statuses is not None:
         placeholders = ", ".join("?" for _ in statuses)
         clauses.append(f"status IN ({placeholders})")

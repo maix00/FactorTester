@@ -136,7 +136,8 @@ def list_test_jobs():
     jobs = test_jobs.list_jobs(
         owner=_owner(),
         kind=str(request.args.get("kind") or "").strip() or None,
-        page_uuid=str(request.args.get("page_uuid") or "").strip() or None,
+        workspace_id=str(request.args.get("workspace_id") or "").strip() or None,
+        run_id=str(request.args.get("run_id") or "").strip() or None,
         statuses=_parse_statuses(),
         limit=int(request.args.get("limit", "20") or 20),
     )
@@ -263,7 +264,8 @@ def list_backtest_jobs():
     jobs = test_jobs.list_jobs(
         owner=_owner(),
         kind="backtest",
-        page_uuid=str(request.args.get("page_uuid") or "").strip() or None,
+        workspace_id=str(request.args.get("workspace_id") or "").strip() or None,
+        run_id=str(request.args.get("run_id") or "").strip() or None,
         statuses=_parse_statuses(),
         limit=limit,
     )

@@ -12,13 +12,8 @@ from typing import Iterable
 
 import click
 
-from tools.cli.modules.backtest import backtest, group, ledger_config, local_settings, long_short, strategy_book
 from tools.cli.modules.custom_factors import custom_factors
-from tools.cli.modules.factor_evaluation import factor_evaluation
-from tools.cli.modules.factor_type_analysis import factor_type_analysis
-from tools.cli.modules.ic_test import ic_test
 from tools.cli.modules.products import products
-from tools.cli.modules.single_factor_family_test import enter_single_factor_family_test, enter_single_factor_test
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,31 +26,6 @@ class ControllerAdapter:
 class ControllerRegistry:
     def __init__(self) -> None:
         self._adapters = (
-            ControllerAdapter(
-                public_key="single_factor_test",
-                backend_key="single_factor_test",
-                commands=(enter_single_factor_test, enter_single_factor_family_test),
-            ),
-            ControllerAdapter(
-                public_key="backtest",
-                backend_key="group_test",
-                commands=(backtest, group, local_settings, long_short, strategy_book, ledger_config),
-            ),
-            ControllerAdapter(
-                public_key="ic_test",
-                backend_key="ic_test",
-                commands=(ic_test,),
-            ),
-            ControllerAdapter(
-                public_key="factor_evaluation",
-                backend_key="factor_evaluation",
-                commands=(factor_evaluation,),
-            ),
-            ControllerAdapter(
-                public_key="factor_type_analysis",
-                backend_key="factor_type_analysis",
-                commands=(factor_type_analysis,),
-            ),
             ControllerAdapter(
                 public_key="products",
                 backend_key="products",

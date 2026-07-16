@@ -19,7 +19,8 @@ class CliState:
     current_parent: str | None = None
     stack: list[str | None] = field(default_factory=list)
     factor_family: str = ""
-    page_uuid: str = ""
+    workspace_id: str = ""
+    workspace_revision: int = 0
     page_settings: dict[str, Any] = field(default_factory=dict)
     active_backtest_space: str = BACKTEST_SPACE
     backtest_spaces: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -78,7 +79,8 @@ def load_state(path: Path | None = None) -> CliState:
         current_parent=raw.get("current_parent"),
         stack=list(raw.get("stack") or []),
         factor_family=str(raw.get("factor_family") or ""),
-        page_uuid=str(raw.get("page_uuid") or ""),
+        workspace_id=str(raw.get("workspace_id") or ""),
+        workspace_revision=int(raw.get("workspace_revision") or 0),
         page_settings=dict(raw.get("page_settings") or {}),
         active_backtest_space=str(raw.get("active_backtest_space") or BACKTEST_SPACE),
         backtest_spaces=spaces,

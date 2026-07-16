@@ -113,6 +113,8 @@ def group_detail_payload(state: Any, data: dict[str, Any], group: dict[str, Any]
         "product_path_selection_id": product_path_selection_id,
         "group_index": group.get("group_index", group.get("groupIndex", 1)),
         "group_id": group.get("group_id") or group.get("id"),
+        "job_id": data.get("job_id") or "",
+        "run_id": data.get("run_id") or data.get("run_token") or "",
     }
 
 

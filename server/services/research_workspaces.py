@@ -139,6 +139,25 @@ def load_workspace(*, workspace_id: str, owner: str) -> dict[str, Any] | None:
         return _row_payload(conn, row)
 
 
+def list_workspaces(*, owner: str, kind: str = "") -> list[dict[str, Any]]:
+    clauses = ["owner = ?", "deleted_at IS NULL"]
+    args: list[Any] = [owner]
+    if kind:
+        clauses.append("kind = ?")
+        args.append(kind)
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            f"""
+            SELECT * FROM research_workspaces
+            WHERE {' AND '.join(clauses)}
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            args,
+        ).fetchall()
+        return [payload for row in rows if (payload := _row_payload(conn, row)) is not None]
+
+
 def load_workspace_revision(
     *,
     workspace_id: str,

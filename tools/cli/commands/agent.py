@@ -143,8 +143,8 @@ def _doctor_checks() -> list[CheckResult]:
         checks.append(CheckResult("server", "fail", str(exc)))
     try:
         state = load_state()
-        page = state.page_uuid or "未登录/未初始化"
-        checks.append(CheckResult("state", "ok", f"{state_path()} page_uuid={page}"))
+        workspace = state.workspace_id or "未选择"
+        checks.append(CheckResult("state", "ok", f"{state_path()} workspace_id={workspace}"))
         checks.append(CheckResult("backtest draft", "ok", f"groups={len(state.backtest_groups)}, ls={len(state.backtest_ls_configs)}, space={state.active_backtest_space}"))
     except Exception as exc:
         checks.append(CheckResult("state", "fail", str(exc)))
