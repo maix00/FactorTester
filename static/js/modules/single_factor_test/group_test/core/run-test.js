@@ -30,6 +30,78 @@
         return String(group && group.product_path_selection_id || '');
     }
 
+    var ACTIVE_JOB_KEY = 'single_factor_test_active_backtest_job';
+
+    function saveActiveJob(job) {
+        try {
+            if (job && job.job_id) {
+                sessionStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(job));
+            }
+        } catch (e) {}
+    }
+
+    function loadActiveJob() {
+        try {
+            var raw = sessionStorage.getItem(ACTIVE_JOB_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function clearActiveJob(jobId) {
+        try {
+            var active = loadActiveJob();
+            if (!jobId || (active && active.job_id === jobId)) {
+                sessionStorage.removeItem(ACTIVE_JOB_KEY);
+            }
+        } catch (e) {}
+    }
+
+    async function readSseResponse(res, onEvent) {
+        if (!res.ok) {
+            throw new Error('HTTP ' + res.status);
+        }
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        var lastEvent = '';
+        var resultData = null;
+        var lastSeq = 0;
+
+        while (true) {
+            var readResult = await reader.read();
+            if (readResult.done) break;
+            buffer += decoder.decode(readResult.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+                if (line.startsWith('id: ')) {
+                    lastSeq = Number(line.slice(4).trim()) || lastSeq;
+                } else if (line.startsWith('event: ')) {
+                    lastEvent = line.slice(7).trim();
+                } else if (line.startsWith('data: ')) {
+                    try {
+                        var payload = JSON.parse(line.slice(6));
+                        if (onEvent) {
+                            onEvent(lastEvent, payload, lastSeq);
+                        }
+                        if (lastEvent === 'result') {
+                            resultData = payload;
+                        } else if (lastEvent === 'error') {
+                            resultData = payload;
+                        }
+                    } catch (e) {
+                        // skip malformed JSON
+                    }
+                }
+            }
+        }
+        return resultData || { success: false, error: '无响应数据' };
+    }
+
     // ════════════════════════════════════════════════════════════════
     //  工具函数
     // ════════════════════════════════════════════════════════════════
@@ -61,52 +133,56 @@
     /**
      * 批量分组测试 POST（SSE 流式）
      */
-    runTest.postBatchGroupTest = function(payload, onEvent, signal) {
+    runTest.postBatchGroupTestLegacy = function(payload, onEvent, signal) {
         return fetch('/run_group_test_stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
             signal: signal
-        }).then(async function(res) {
-            if (!res.ok) {
-                throw new Error('HTTP ' + res.status);
-            }
-            var reader = res.body.getReader();
-            var decoder = new TextDecoder();
-            var buffer = '';
-            var lastEvent = '';
-            var resultData = null;
-
-            while (true) {
-                var readResult = await reader.read();
-                if (readResult.done) break;
-                buffer += decoder.decode(readResult.value, { stream: true });
-                var lines = buffer.split('\n');
-                buffer = lines.pop();
-
-                for (var i = 0; i < lines.length; i++) {
-                    var line = lines[i];
-                    if (line.startsWith('event: ')) {
-                        lastEvent = line.slice(7).trim();
-                    } else if (line.startsWith('data: ')) {
-                        try {
-                            var payload = JSON.parse(line.slice(6));
-                            if (onEvent) {
-                                onEvent(lastEvent, payload);
-                            }
-                            if (lastEvent === 'result') {
-                                resultData = payload;
-                            } else if (lastEvent === 'error') {
-                                resultData = payload;
-                            }
-                        } catch (e) {
-                            // skip malformed JSON
-                        }
-                    }
-                }
-            }
-            return resultData || { success: false, error: '无响应数据' };
+        }).then(function(res) {
+            return readSseResponse(res, onEvent);
         });
+    };
+
+    runTest.postBatchGroupTest = async function(payload, onEvent, signal) {
+        var submit = await fetch('/backtest/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: signal
+        });
+        if (!submit.ok) {
+            throw new Error('HTTP ' + submit.status);
+        }
+        var job = await submit.json();
+        if (!job.success) {
+            return job;
+        }
+        saveActiveJob({
+            job_id: job.job_id,
+            run_token: job.run_token || payload.run_token,
+            page_uuid: payload.page_uuid || window._pageUuid || '',
+            stream_url: job.stream_url,
+            result_url: job.result_url,
+            cancel_url: job.cancel_url,
+            factor_family_alias: payload.factor_family_alias || window.factorFamilyAlias || '',
+            last_seq: 0
+        });
+        if (onEvent) {
+            onEvent('job', job, 0);
+        }
+        var result = await fetch(job.stream_url, { signal: signal }).then(function(res) {
+            return readSseResponse(res, function(event, data, seq) {
+                var active = loadActiveJob();
+                if (active && active.job_id === job.job_id) {
+                    active.last_seq = seq || active.last_seq || 0;
+                    saveActiveJob(active);
+                }
+                if (onEvent) onEvent(event, data, seq);
+            });
+        });
+        clearActiveJob(job.job_id);
+        return result;
     };
 
     // ════════════════════════════════════════════════════════════════
@@ -408,6 +484,151 @@
             }
         }
     };
+
+    function ensureProgressContainer() {
+        var progressContainerId = 'gt-batch-progress';
+        var progressContainer = document.getElementById(progressContainerId);
+        if (!progressContainer) {
+            progressContainer = document.createElement('div');
+            progressContainer.id = progressContainerId;
+            progressContainer.className = 'gt-progress-container';
+            progressContainer.style.cssText = 'display:block;width:100%;box-sizing:border-box;margin:8px 0;padding:8px;background:#f9f9f9;border-radius:8px;border:1px solid #e0e0e0;';
+            var chartContainer = document.getElementById('group_chart_container');
+            var runBtn = document.getElementById('run_group_test_btn');
+            var insertParent = chartContainer ? chartContainer.parentNode : (runBtn ? runBtn.parentNode : document.body);
+            var insertBefore = chartContainer || (runBtn ? runBtn.nextSibling : null);
+            insertParent.insertBefore(progressContainer, insertBefore);
+        }
+        progressContainer.innerHTML = '';
+        return progressContainer;
+    }
+
+    function applyRestoredEvent(batchMgr, event, payload) {
+        if (event === 'activity_manifest') {
+            batchMgr.registerActivityManifest(payload.phases || []);
+        } else if (event === 'activity') {
+            batchMgr.recordActivity(payload);
+        } else if (event === 'signal_progress') {
+            batchMgr.updateSignalProgress(payload);
+        } else if (event === 'start') {
+            batchMgr.syncRows(payload.product_coverage_batch_total || payload.total || 1);
+        } else if (event === 'progress') {
+            if (payload.product_coverage_batch_index !== undefined && payload.product_coverage_batch_index >= 0) {
+                batchMgr.updateRow(
+                    payload.product_coverage_batch_index,
+                    payload.phase,
+                    payload.completed || 0,
+                    payload.total || 0,
+                    payload.message,
+                    payload.sub_step
+                );
+            } else {
+                batchMgr.updateAllRows(
+                    payload.phase,
+                    payload.completed || 0,
+                    payload.total || 0,
+                    payload.message,
+                    payload.sub_step
+                );
+            }
+        } else if (event === 'runtime_info') {
+            if (GT.results && GT.results.strategyPanel && typeof GT.results.strategyPanel.pushRuntimeInfo === 'function') {
+                GT.results.strategyPanel.pushRuntimeInfo(payload.row || payload);
+            }
+        }
+    }
+
+    runTest.restoreActiveJob = async function() {
+        var active = loadActiveJob();
+        if (!active || !active.job_id || !active.stream_url) return;
+        var statusSpan = document.getElementById('group_test_status');
+        var runBtn = document.getElementById('run_group_test_btn');
+        var cancelBtn = document.getElementById('cancel_group_test_btn');
+        if (statusSpan) {
+            statusSpan.textContent = '正在恢复异步回测进度...';
+            statusSpan.style.color = '#0078d4';
+        }
+        if (runBtn) runBtn.disabled = true;
+        if (cancelBtn) {
+            cancelBtn.style.display = '';
+            cancelBtn.disabled = false;
+            cancelBtn.onclick = async function() {
+                cancelBtn.disabled = true;
+                try {
+                    await fetch(active.cancel_url || ('/backtest/jobs/' + encodeURIComponent(active.job_id) + '/cancel'), { method: 'POST' });
+                } catch (e) {}
+            };
+        }
+        var progressContainer = ensureProgressContainer();
+        var batchProgressHost = document.createElement('div');
+        progressContainer.appendChild(batchProgressHost);
+        var batchMgr = GT.groupSettings.runGroupBatch.createManager({
+            progressContainer: batchProgressHost,
+        });
+        try {
+            var statusResp = await fetch('/backtest/jobs/' + encodeURIComponent(active.job_id));
+            if (!statusResp.ok) throw new Error('HTTP ' + statusResp.status);
+            var status = await statusResp.json();
+            if (!status.success) throw new Error(status.error || '恢复失败');
+            if (status.page_uuid && window._pageUuid !== status.page_uuid) {
+                window._pageUuid = status.page_uuid;
+                try { sessionStorage.setItem('single_factor_test_page_uuid', window._pageUuid); } catch (e) {}
+            }
+            var terminal = status.status === 'succeeded' || status.status === 'failed' || status.status === 'cancelled';
+            var resultData = null;
+            if (terminal) {
+                var resultResp = await fetch(active.result_url || ('/backtest/jobs/' + encodeURIComponent(active.job_id) + '/result'));
+                var body = await resultResp.json();
+                resultData = body.result || body.error || body;
+            } else {
+                var streamUrl = active.stream_url;
+                var after = Number(active.last_seq || 0);
+                if (after > 0) streamUrl += (streamUrl.indexOf('?') >= 0 ? '&' : '?') + 'after=' + encodeURIComponent(after);
+                resultData = await fetch(streamUrl).then(function(res) {
+                    return readSseResponse(res, function(event, payload, seq) {
+                        active.last_seq = seq || active.last_seq || 0;
+                        saveActiveJob(active);
+                        applyRestoredEvent(batchMgr, event, payload || {});
+                    });
+                });
+            }
+            if (resultData && resultData.success && GT.results && GT.results.renderer && GT.results.renderer.applyGroupTestResult) {
+                GT.results.renderer.applyGroupTestResult(resultData);
+                batchMgr.markAllDone(true, '分组测试完成');
+                if (statusSpan) {
+                    statusSpan.textContent = '✓ 异步回测已恢复';
+                    statusSpan.style.color = '#28a745';
+                }
+                clearActiveJob(active.job_id);
+            } else if (resultData) {
+                batchMgr.markAllDone(false, resultData.error || '异步回测失败');
+                if (statusSpan) {
+                    statusSpan.textContent = resultData.cancelled ? '异步回测已取消' : ('✗ ' + (resultData.error || '异步回测失败'));
+                    statusSpan.style.color = resultData.cancelled ? '#b45309' : '#d40000';
+                }
+                clearActiveJob(active.job_id);
+            }
+        } catch (e) {
+            console.warn('[runGroupTest] restore async job failed:', e);
+            if (statusSpan) {
+                statusSpan.textContent = '异步回测恢复失败: ' + (e.message || e);
+                statusSpan.style.color = '#d40000';
+            }
+        } finally {
+            if (runBtn) runBtn.disabled = false;
+            if (cancelBtn) {
+                cancelBtn.style.display = 'none';
+                cancelBtn.disabled = false;
+                cancelBtn.onclick = null;
+            }
+        }
+    };
+
+    setTimeout(function() {
+        if (loadActiveJob()) {
+            runTest.restoreActiveJob();
+        }
+    }, 0);
 
 
     // ════════════════════════════════════════════════════════════════
