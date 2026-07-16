@@ -358,6 +358,64 @@ def test_all_analyses_dispatch_importable_process_runners(client, monkeypatch) -
     assert all("page_uuid" not in payload for _, _, payload in captured)
 
 
+def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monkeypatch) -> None:
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    backtest = payload["analyses"]["backtest"]
+    backtest["product_selections"] = {}
+    backtest["groups"][0]["product_path_selection"] = {
+        "product_path_selection_id": "owner-group",
+    }
+    _update(client, workspace, payload)
+    monkeypatch.setattr(
+        "server.modules.products.product_group_store.load_product_groups",
+        lambda owner: [{"id": "owner-group", "name": "Owner group", "paths": ["core8_path"]}],
+    )
+    captured = []
+
+    def fake_process(job, runner, execution_payload):
+        captured.append(execution_payload)
+        return job
+
+    monkeypatch.setattr(test_jobs, "submit_process", fake_process)
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    frozen = captured[0]["product_selections"]["owner-group"]
+    assert frozen["selected_paths"] == ["core8_path"]
+    assert frozen["product_group_template_id"] == "owner-group"
+    run = response.get_json()["run"]
+    assert run["run_spec"]["configuration"]["analyses"]["backtest"]["product_selections"]["owner-group"] == frozen
+
+
+def test_run_rejects_unresolvable_product_selection_before_creating_job(client, monkeypatch) -> None:
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    backtest = payload["analyses"]["backtest"]
+    backtest["product_selections"] = {}
+    backtest["groups"][0]["product_path_selection"] = {
+        "product_path_selection_id": "missing-group",
+    }
+    _update(client, workspace, payload)
+    monkeypatch.setattr(
+        "server.modules.products.product_group_store.load_product_groups", lambda owner: [],
+    )
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+    })
+
+    assert response.status_code == 400
+    assert "missing-group" in response.get_json()["error"]
+    assert test_jobs.list_jobs(owner="alice", workspace_id=workspace["workspace_id"]) == []
+
+
 def test_expired_view_cancels_observer_bound_but_not_durable_job(client, monkeypatch) -> None:
     monkeypatch.setattr("server.services.view_leases.VIEW_LEASE_GRACE_SECONDS", 0.01)
     workspace = _create_workspace(client)
