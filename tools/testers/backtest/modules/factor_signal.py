@@ -307,7 +307,9 @@ def _schedule_signal_live_timestamps(state, ctx) -> None:
             end_session_skip=end_session_skip,
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(end_session_gap)),
         )
-        scheduled = _clip_scheduled_table_to_strategy_window(aligned, state.config_for(strategies[0]))
+        config = state.config_for(strategies[0])
+        aligned = _table_with_exact_event_index(aligned, config, state)
+        scheduled = _clip_scheduled_table_to_strategy_window(aligned, config)
         _append_signal_drafts(drafts, signal_event_times(scheduled), strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)  # pushes every draft via FlowContext._push_if_event
 
@@ -594,7 +596,7 @@ def _table_with_exact_event_index(table: pd.DataFrame, config, state=None) -> pd
         return table
     lookup = _last_market_event_lookup_by_trading_day(state)
     if lookup is None:
-        raise ValueError("日级预计算信号在 exact 回测中需要已加载的日内 market-data 事件时间")
+        raise ValueError("日级信号在 exact 回测中需要已加载的日内 market-data 事件时间")
     trading_days = DataIndex.trading_day_index_from_index(table.index)
     start_day = _naive_trading_day(start_dt.ts)
     end_day = _naive_trading_day(end_dt.ts)
@@ -604,7 +606,7 @@ def _table_with_exact_event_index(table: pd.DataFrame, config, state=None) -> pd
     mapped = [lookup.get(pd.Timestamp(day).normalize()) for day in trading_days]
     if any(value is None for value in mapped):
         missing = next(pd.Timestamp(day).date() for day, value in zip(trading_days, mapped) if value is None)
-        raise ValueError(f"日级预计算信号缺少 trading_day={missing} 的 market-data 事件时间")
+        raise ValueError(f"日级信号缺少 trading_day={missing} 的 market-data 事件时间")
     result = table.copy(deep=False)
     result.index = pd.DatetimeIndex(cast(list[pd.Timestamp], mapped))
     return result
