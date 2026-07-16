@@ -233,6 +233,50 @@ def test_signal_live_groups_by_shared_align_params_calls_once_per_group():
     assert calls.count("1h") == 1  # s3's own group
 
 
+def test_signal_live_maps_daily_schedule_to_trading_day_last_bar_close():
+    strategy = Strategy(alias="daily-live-exact")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_live"}),
+        field_values={
+            FactorSignalModule.signal_freq: "1d",
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.timezone: "Asia/Shanghai",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2024-01-02",
+            RunWindowModule.end_time: "15:00",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    market_times = pd.DatetimeIndex(
+        ["2024-01-02 09:00", "2024-01-02 15:00"],
+        tz="Asia/Shanghai",
+        name="MIN1",
+    )
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {"P1": [1.0, 2.0]},
+        index=market_times,
+    )
+    daily_signal = pd.DataFrame(
+        {"P1": [2.0]},
+        index=pd.DatetimeIndex(["2024-01-02"], name="_SIGNAL@DAY1"),
+    )
+    queue = EventQueue()
+
+    with patch(
+        "tools.testers.backtest.modules.factor_signal.signal_align",
+        return_value=daily_signal,
+    ):
+        _schedule_signal_live_timestamps(account, FlowContext(timestamp=None, event_queue=queue))
+
+    scheduled = queue.snapshot_head()
+    assert [draft.timestamp for draft in scheduled] == [
+        pd.Timestamp("2024-01-02 15:00", tz="Asia/Shanghai")
+    ]
+    assert config.get(RunWindowModule.time_precision) == "exact"
+
+
 def test_exact_window_clips_daily_signal_schedule_by_intraday_event_timestamp():
     strategy = Strategy(alias="daily-exact")
     config = StrategyConfig(
