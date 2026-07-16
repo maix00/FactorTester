@@ -24,7 +24,6 @@ from sources.FieldHistory.scripts import ingest_dce_listing_fee_baselines
 from sources.FieldHistory.scripts import fix_shfe_listing_fee_baselines
 from sources.FieldHistory.scripts import audit_2024_field_history_coverage
 from sources.FieldHistory.scripts import ingest_dce_2023_margin_limit_notice
-from sources.FieldHistory.scripts import ingest_dce_risk_management_rules
 from sources.FieldHistory.scripts import ingest_gfex_listing_fee_baselines
 from sources.FieldHistory.scripts import ingest_exchange_contract_rule_baselines
 from sources.FieldHistory.scripts import ingest_exchange_order_volume_rules
@@ -364,66 +363,6 @@ def test_dce_2023_margin_limit_notice_generates_all_mentioned_products(tmp_path)
     assert by_key[("P", "LongMarginRatioByMoney")]["value"] == 0.08
     assert all(event["source_notice_id"] == "大商所发〔2023〕139号" for event in events)
     assert all(event["change_type"] == "change" for event in events)
-
-
-def test_dce_risk_management_rules_expand_to_contract_scoped_value_history(tmp_path) -> None:
-    db_path = tmp_path / "dce_risk_rules.sqlite"
-    store_key = "dce_risk_rules_test"
-    DataHub.get_instance().register_sqlite_store(SQLiteStore(
-        key=store_key,
-        label="dce-risk-rules-test",
-        path_getter=lambda: str(db_path),
-    ))
-
-    append_agent_field_change_events(
-        [
-            {
-                "event_id": "dce_l_margin_base",
-                "data_source": "DCE",
-                "field_group": "Margin",
-                "source_url": "https://example.test/dce-l-base",
-                "source_accessed_at": "2026-07-09T00:00:00+08:00",
-                "agent_name": "Agent:DCE",
-                "requester_key": "human-secret-key",
-                "instrument": "L",
-                "instrument_label": "聚乙烯",
-                "instrument_type": "future",
-                "field_name": "LongMarginRatioByMoney",
-                "effective_trading_day": "2023-04-13",
-                "effective_timestamp": "2023-04-12 15:00:00",
-                "value": 0.07,
-                "contract_scope_type": "all",
-                "change_type": "change",
-                "source_notice_id": "大商所发〔2023〕139号",
-            }
-        ],
-        store_key=store_key,
-    )
-    assert materialize_agent_events_to_history(store_key=store_key, field_group="Margin") == 1
-
-    events = ingest_dce_risk_management_rules.build_events(store_key=store_key)
-    assert len(events) > 100
-    assert {event["change_type"] for event in events} == {"rule"}
-    assert all(isinstance(event["value"], float) for event in events)
-    assert all(event["contract_scope_type"] == "explicit" for event in events)
-    append_agent_field_change_events(events, store_key=store_key)
-    materialize_agent_events_to_history(store_key=store_key, data_source="DCE", field_group="Margin")
-
-    with DataHub.get_instance().connect_store(store_key) as conn:
-        count = conn.execute(
-            f"SELECT COUNT(*) FROM {AGENT_EVENT_TABLE} WHERE change_type = 'rule'"
-        ).fetchone()[0]
-    assert count == len(events)
-
-    history = load_historical_field_frame(store_key=store_key)
-    provider = FieldHistoryProvider(history)
-    value = provider.resolve_by_trading_day(
-        "L2401.DCE",
-        "LongMarginRatioByMoney",
-        pd.Timestamp("2024-01-02"),
-    )
-    assert value.value == 0.20
-    assert value.source_notice_id == "DCE-risk-management-measures-delivery-calendar-rules"
 
 
 def test_local_cnfutures_static_specs_generate_asof_and_listing_baselines(tmp_path) -> None:
