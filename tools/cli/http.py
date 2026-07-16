@@ -112,13 +112,32 @@ class HttpSession:
         return self.request("PUT", path, payload=payload or {})
 
     def stream_post(self, path: str, payload: dict[str, Any] | None = None):
+        yield from self.stream_request("POST", path, payload=payload or {})
+
+    def stream_get(self, path: str, *, query: dict[str, Any] | None = None):
+        yield from self.stream_request("GET", path, query=query)
+
+    def stream_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        query: dict[str, Any] | None = None,
+    ):
         url = self._url(path)
-        body = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
+        if query:
+            url = self._url(path, query=query)
+        body = None
+        headers = {"Accept": "text/event-stream"}
+        if payload is not None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json"
         request = Request(
             url,
             data=body,
-            headers={"Accept": "text/event-stream", "Content-Type": "application/json"},
-            method="POST",
+            headers=headers,
+            method=method.upper(),
         )
         try:
             with self._opener.open(request, timeout=self._stream_timeout()) as response:

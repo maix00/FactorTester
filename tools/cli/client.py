@@ -165,7 +165,8 @@ class FactorTesterClient:
         )
 
     def run_group_test_stream(self, payload: dict[str, Any]):
-        yield from self.session.stream_post("/run_group_test_stream", payload)
+        job = self.submit_job("backtest", payload)
+        yield from self.stream_job(job)
 
     def group_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._expect_success(self.session.post("/get_group_snapshot", payload))
@@ -180,13 +181,53 @@ class FactorTesterClient:
         return self._expect_success(self.session.post("/get_group_ranking_detail", payload))
 
     def run_ic_test_stream(self, payload: dict[str, Any]):
-        yield from self.session.stream_post("/run_ic_test_stream", payload)
+        job = self.submit_job("ic", payload)
+        yield from self.stream_job(job)
 
     def run_factor_evaluation(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._expect_success(self.session.post("/api/factor_evaluation/evaluate", payload))
+        return self.run_job_result("factor_evaluation", payload)
 
     def run_factor_type_analysis(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._expect_success(self.session.post("/api/factor_type_analysis/analyze", payload))
+        return self.run_job_result("factor_type_analysis", payload)
+
+    def submit_job(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.post("/api/jobs", {"kind": kind, "payload": payload})
+        )
+
+    def stream_job(self, job: dict[str, Any]):
+        stream_url = str(job.get("stream_url") or "")
+        if not stream_url:
+            raise ValueError("服务器 job 响应缺少 stream_url")
+        yield from self.session.stream_get(stream_url)
+
+    def job_result(self, job: dict[str, Any]) -> dict[str, Any]:
+        result_url = str(job.get("result_url") or "")
+        if not result_url:
+            job_id = str(job.get("job_id") or "")
+            if not job_id:
+                raise ValueError("服务器 job 响应缺少 result_url/job_id")
+            result_url = f"/api/jobs/{job_id}/result"
+        return self._expect_success(self.session.get(result_url))
+
+    def run_job_result(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        job = self.submit_job(kind, payload)
+        terminal_error: Any = None
+        for event in self.stream_job(job):
+            event_name = str(event.get("event") or "message")
+            data = event.get("data")
+            if event_name == "error":
+                terminal_error = data
+            elif event_name == "result" and isinstance(data, dict):
+                return data
+        if terminal_error is not None:
+            message = terminal_error.get("error") if isinstance(terminal_error, dict) else terminal_error
+            raise RuntimeError(str(message))
+        result = self.job_result(job)
+        payload_result = result.get("result")
+        if isinstance(payload_result, dict):
+            return payload_result
+        raise ValueError("服务器 job result 响应缺少 result")
 
     def list_single_factor_setting_templates(self, factor_family: str) -> list[dict[str, Any]]:
         data = self._expect_success(self.session.get(f"/api/single_factor_setting_templates/{factor_family}"))

@@ -102,6 +102,51 @@
         });
     }
 
+    async function runJobResult(kind, payload) {
+        var job = await requestJSON('/api/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: kind, payload: payload }),
+        });
+        if (!job.stream_url) throw new Error('服务器 job 响应缺少 stream_url');
+        var response = await fetch(job.stream_url);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        var reader = response.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        var lastEvent = '';
+        var result = null;
+        var error = null;
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+                if (line.indexOf('event: ') === 0) {
+                    lastEvent = line.slice(7).trim();
+                } else if (line.indexOf('data: ') === 0) {
+                    try {
+                        var payloadData = JSON.parse(line.slice(6));
+                        if (lastEvent === 'result') result = payloadData;
+                        if (lastEvent === 'error') error = payloadData;
+                    } catch (err) {
+                        // Ignore malformed SSE payloads.
+                    }
+                }
+            }
+        }
+        if (error) throw new Error(error.error || 'job failed');
+        if (result) return result;
+        if (job.result_url) {
+            var resultPayload = await requestJSON(job.result_url);
+            if (resultPayload.result) return resultPayload.result;
+        }
+        throw new Error('job finished without result');
+    }
+
     function defaults() {
         return state.manifest && state.manifest.defaults ? state.manifest.defaults : {};
     }
@@ -1288,16 +1333,12 @@
         chart.innerHTML = message('正在计算因子...');
         try {
             setProgress(25, '计算因子');
-            var data = await requestJSON('/api/factor_evaluation/evaluate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    paths: state.paths,
-                    factor_family_alias: currentFactorFamilyAlias(),
-                    factor_alias: factor.alias || factor.name,
-                    page_uuid: window._pageUuid || '',
-                    settings: effectiveSettingsForRun(),
-                }),
+            var data = await runJobResult('factor_evaluation', {
+                paths: state.paths,
+                factor_family_alias: currentFactorFamilyAlias(),
+                factor_alias: factor.alias || factor.name,
+                page_uuid: window._pageUuid || '',
+                settings: effectiveSettingsForRun(),
             });
             state.lastSeries = Array.isArray(data.series) ? data.series : [];
             if (state.lastSeries.length) {
