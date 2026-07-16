@@ -84,6 +84,14 @@ def _submit_by_kind(kind: str, payload: dict):
         from server.modules.single_factor_test.ic import start_ic_test_job
 
         return start_ic_test_job(payload)
+    if kind == "factor_evaluation":
+        from server.modules.factors.analysis import start_factor_evaluation_job
+
+        return start_factor_evaluation_job(payload)
+    if kind == "factor_type_analysis":
+        from server.modules.factors.analysis import start_factor_type_analysis_job
+
+        return start_factor_type_analysis_job(payload)
     raise ValueError(f"unsupported job kind: {kind}")
 
 
