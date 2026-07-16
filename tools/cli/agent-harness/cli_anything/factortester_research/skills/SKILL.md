@@ -28,8 +28,8 @@ factortester custom_factors factor-library history --factor-family SgCCS --produ
 factortester custom_factors factor-library metrics
 factortester custom_factors factor-library rank --preset ic-stable --start-date 2024-01-01 --end-date 2025-12-31
 factortester custom_factors factor-library rank --preset costed-backtest --start-date 2024-01-01 --end-date 2025-12-31
-factortester custom_factors factor-library import-result --dir /path/to/research_reports/factors/MyFamily --report-path /path/to/report.md --note 'backfill existing artifacts'
-factortester custom_factors factor-library save-result --factor-family MyFamily --factor-alias 'MyFamily|N:20' --test-type ic --start-date 2026-01-01 --end-date 2026-01-31 --metric ic_mean=0.03 --sample-role oos
+factortester custom_factors factor-library import-result --dir /path/to/research_reports/factors/MyFamily --report-path /path/to/report.md --note 'backfill existing artifacts' --sample-role oos --regime-label low_vol --slice-name 2026Q1
+factortester custom_factors factor-library save-result --factor-family MyFamily --factor-alias 'MyFamily|N:20' --test-type ic --start-date 2026-01-01 --end-date 2026-01-31 --metric ic_mean=0.03 --sample-role oos --regime-label low_vol --slice-name 2026Q1
 factortester custom_factors factor-library stability --preset ic-stable --factor-family SgCCS --by quarter
 cli-anything-factortester-research operator set --mode source_owner --admin-port 7998
 cli-anything-factortester-research service restart --target-port 8123 --dry-run --json
@@ -58,6 +58,9 @@ Factor-source rule:
   `factor-library import-result --artifact ...` or `--dir ...`.
 - Research scripts that already have metrics can write directly with
   `factor-library save-result` instead of creating an intermediate artifact.
+- Saved runs should carry `sample_role`, `regime_label`, `slice_name`, and
+  overfit-audit fields such as `test_count`, `grid_size`, `oos_pass`,
+  `multi_product_group_pass`, and `costed_pass` whenever those are known.
 - Use `factor-library metrics` as the canonical metric-name registry and
   `factor-library stability` before treating a candidate as robust across
   regimes or time slices.

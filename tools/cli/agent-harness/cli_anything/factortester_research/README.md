@@ -85,7 +85,10 @@ factortester custom_factors factor-library rank \
 factortester custom_factors factor-library import-result \
   --dir /path/to/research_reports/factors/MyFamily \
   --report-path /path/to/research_reports/factors/MyFamily/report.md \
-  --note "backfill existing artifacts before candidate ranking"
+  --note "backfill existing artifacts before candidate ranking" \
+  --sample-role oos \
+  --regime-label low_vol \
+  --slice-name 2026Q1
 
 factortester custom_factors factor-library save-result \
   --factor-family MyFamily \
@@ -94,7 +97,9 @@ factortester custom_factors factor-library save-result \
   --start-date 2026-01-01 \
   --end-date 2026-01-31 \
   --metric ic_mean=0.03 \
-  --sample-role oos
+  --sample-role oos \
+  --regime-label low_vol \
+  --slice-name 2026Q1
 
 factortester custom_factors factor-library stability \
   --factor-family SgCCS \
@@ -109,6 +114,21 @@ cost/capacity checks, and OOS review before it can be treated as a research
 result. Product-group names in result records are labels for the tested
 configuration; they are not automatically product-group candidates for future
 runs unless the product group exists in the product-group library.
+
+Saved runs should carry structured research metadata whenever known:
+`sample_role`, `regime_label`, `slice_name`, `test_count`, `grid_size`,
+`oos_pass`, `multi_product_group_pass`, and `costed_pass`. These fields are used
+by `rank` and `stability` to separate exploratory in-sample screens from
+out-of-sample or regime-sliced validation.
+
+## CLI-Anything Adaptation Notes
+
+This harness intentionally adapts CLI-Anything to a remote HTTP research client.
+It does not create local project files, render GUI previews, or export local
+documents. The real backend is the external `factortester` command and the
+FactorTester server it points to. The harness state is the research session,
+gap list, operator/source-owner mode, validation slices, and worktree restart
+context.
 
 If the gap is platform/server code rather than factor source, including missing
 FactorExpr operators, wrong operator semantics, or incorrect factor/backtest

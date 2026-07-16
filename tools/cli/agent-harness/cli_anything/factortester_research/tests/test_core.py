@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from cli_anything.factortester_research.core.plan import build_factor_research_plan, validation_checklist
 from cli_anything.factortester_research.core.service import ManagedWorktree, select_worktree
 from cli_anything.factortester_research.core.session import ResearchSession, record_gap, resolve_gap
 from cli_anything.factortester_research.core.slices import default_factor_validation_plan
+
+
+HARNESS_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_plan_orders_diagnostics_before_backtest() -> None:
@@ -107,3 +112,22 @@ def test_default_validation_plan_separates_selection_from_oos_annotation() -> No
     oos = [item for item in all_slices if item["purpose"] == "oos_annotation"]
     assert oos and all(item["start"].startswith("2026") for item in oos)
     assert not any(item["purpose"] in {"selection", "validation"} and item["start"].startswith("2026") for item in all_slices)
+
+
+def test_packaging_and_docs_record_cli_anything_adaptation_contract() -> None:
+    setup_text = (HARNESS_ROOT / "setup.py").read_text(encoding="utf-8")
+    readme = (HARNESS_ROOT / "cli_anything/factortester_research/README.md").read_text(encoding="utf-8")
+    skill = (HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md").read_text(encoding="utf-8")
+    test_doc = (HARNESS_ROOT / "cli_anything/factortester_research/tests/TEST.md").read_text(encoding="utf-8")
+
+    assert 'python_requires=">=3.10"' in setup_text
+    assert "CLI-Anything Adaptation Notes" in readme
+    assert "remote HTTP research client" in readme
+    for text in (readme, skill):
+        assert "sample_role" in text
+        assert "regime_label" in text
+        assert "slice_name" in text
+        assert "grid_size" in text
+        assert "costed_pass" in text
+    assert "15 passed" in test_doc
+    assert "7 passed" in test_doc

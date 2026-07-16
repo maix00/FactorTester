@@ -57,27 +57,34 @@ Run:
 
 ```bash
 cd tools/cli/agent-harness
-python -m pytest cli_anything/factortester_research/tests -v --tb=no
+conda run -n GTHT pytest cli_anything/factortester_research/tests -q
 ```
 
 Validated in GTHT environment:
 
 ```text
-..............                                                           [100%]
-14 passed in 2.34s
+...............                                                          [100%]
+15 passed in 0.92s
 ```
 
 Installed-command validation:
 
 ```bash
 python -m pip install -e .
-CLI_ANYTHING_FORCE_INSTALLED=1 python -m pytest cli_anything/factortester_research/tests -q
+CLI_ANYTHING_FORCE_INSTALLED=1 conda run -n GTHT pytest cli_anything/factortester_research/tests/test_full_e2e.py -q
 ```
 
 ```text
-...........                                                              [100%]
-11 passed in 1.40s
+.......                                                                  [100%]
+7 passed in 0.84s
 ```
+
+Scope note: this is a CLI-Anything adaptation for a remote HTTP research client.
+It intentionally validates session state, subprocess command behavior, real
+`factortester` CLI delegation, gap handling, workspace/source inspection, and
+7998 service-restart planning. It does not validate local GUI preview/export
+features because FactorTester research runs are not local document-rendering
+workflows.
 
 Manual command smoke test:
 

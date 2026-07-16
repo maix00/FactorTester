@@ -13,6 +13,7 @@ setup(
         "cli_anything.factortester_research": ["skills/*.md"],
     },
     install_requires=["click>=8.0"],
+    python_requires=">=3.10",
     entry_points={
         "console_scripts": [
             "cli-anything-factortester-research=cli_anything.factortester_research.factortester_research_cli:cli",
