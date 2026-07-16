@@ -80,6 +80,10 @@ def _submit_by_kind(kind: str, payload: dict):
         from server.modules.single_factor_test.group import start_group_test_job
 
         return start_group_test_job(payload)
+    if kind == "ic":
+        from server.modules.single_factor_test.ic import start_ic_test_job
+
+        return start_ic_test_job(payload)
     raise ValueError(f"unsupported job kind: {kind}")
 
 

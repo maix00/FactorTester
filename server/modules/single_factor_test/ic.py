@@ -7,6 +7,7 @@ import json
 import threading
 import traceback
 from typing import Any, Dict, List, Tuple, cast
+import uuid
 
 import orjson
 
@@ -29,6 +30,7 @@ from server.services.factor_registry import get_factor_family_instance
 from server.services.page_runtime import get_page_owner
 from server.services.session_runtime import current_user, current_user_obj
 from server.services.sse_progress import SSEProgressEmitter
+from server.services import test_jobs
 from server.modules.shared.factor_tester_runtime import selection_from_request, create_factor_tester_for_run
 
 
@@ -241,6 +243,10 @@ class _ICComputeResult:
         self.selected_product_names: List[str] = []
 
 
+class _ICCancelled(RuntimeError):
+    """Raised when an async IC job has been cancelled."""
+
+
 def _merge_ic_result(
     compute: _ICComputeResult,
     key: tuple,
@@ -286,12 +292,18 @@ def _compute_ic_groups(
     param_payloads: Dict[tuple, Dict[str, Any]],
     primary_ic_lag: int,
     *,
-    emitter: SSEProgressEmitter | None = None,
+    emitter: Any | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> _ICComputeResult:
     """执行 IC 分组计算（支持并行）。返回中间状态。"""
     state = _ICComputeResult()
 
+    def _check_cancelled() -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise _ICCancelled("IC test job cancelled")
+
     def _calc_one_group(item: Tuple[tuple, List[Factor]]):
+        _check_cancelled()
         key, factor_list = item
         result = run_ic_for_factor(tester, param_payloads[key], factor_list)
         return key, result
@@ -339,6 +351,10 @@ def _compute_ic_groups(
                 futures = {pool.submit(_worker, item): item for item in param_items}
                 group_done = 0
                 for future in as_completed(futures):
+                    if cancel_event is not None and cancel_event.is_set():
+                        for pending in futures:
+                            pending.cancel()
+                        raise _ICCancelled("IC test job cancelled")
                     key, result = future.result()
                     group_done += 1
                     if emitter is not None:
@@ -347,6 +363,7 @@ def _compute_ic_groups(
         else:
             group_done = 0
             for key, factor_list in param_items:
+                _check_cancelled()
                 key, result = _calc_one_group((key, factor_list))
                 group_done += 1
                 if emitter is not None:
@@ -737,6 +754,86 @@ def run_ic_test():
     finally:
         if _token is not None:
             _active_tester.reset(_token)
+
+
+def _prepare_ic_runtime_from_payload(data: dict[str, Any]):
+    page_uuid = str(data.get('page_uuid') or '')
+    if not page_uuid:
+        raise ValueError('缺少 page_uuid')
+    if get_page_owner(page_uuid) != current_user():
+        raise PermissionError('page_uuid 不属于当前用户')
+
+    run_user = current_user_obj()
+    tester = _create_ic_tester_from_request(data, page_uuid=page_uuid, user=run_user)
+    factor_family = get_factor_family_instance(
+        str(data.get('factor_family_alias', '')),
+        username=data.get('owner_username'),
+        page_uuid=data.get('page_uuid'),
+    )
+    assert isinstance(factor_family, FactorFamily)
+    _populate_family_factors_from_page(factor_family, page_uuid)
+    return page_uuid, tester, factor_family
+
+
+def _run_ic_compute_to_sink(
+    data: dict[str, Any],
+    tester: Any,
+    factor_family: FactorFamily,
+    sink: Any,
+) -> None:
+    _token = None
+    try:
+        if sink.job.cancel_event.is_set():
+            raise _ICCancelled("IC test job cancelled before start")
+
+        (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
+         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = \
+            _prepare_ic_compute(data, tester, factor_family)
+
+        tester.sync_signal_index = None
+        tester.sync_signal_index_replaced = None
+        _token = _active_tester.set(tester)
+
+        param_items = list(ic_param_map.items())
+
+        compute = _compute_ic_groups(
+            tester, param_items, param_payloads, primary_ic_lag,
+            emitter=sink,
+            cancel_event=sink.job.cancel_event,
+        )
+        if sink.job.cancel_event.is_set():
+            raise _ICCancelled("IC test job cancelled")
+        response = _build_ic_response(
+            tester, display_columns, all_products, compute,
+            paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
+        )
+        sink.emit_result(response)
+    except _ICCancelled as exc:
+        sink.emit_error(str(exc), cancelled=True)
+    except Exception as e:
+        sink.emit_error(str(e), traceback=traceback.format_exc())
+    finally:
+        if _token is not None:
+            _active_tester.reset(_token)
+
+
+def start_ic_test_job(data: dict[str, Any]):
+    """Submit an IC test to the shared async test job runtime."""
+    page_uuid, tester, factor_family = _prepare_ic_runtime_from_payload(data)
+    run_token = str(data.get('run_token') or f"ic-{uuid.uuid4().hex}")
+    job = test_jobs.create_job(
+        kind="ic",
+        run_token=run_token,
+        page_uuid=page_uuid,
+        owner=current_user(),
+        payload=data,
+    )
+
+    def _target(sink: test_jobs.TestJobSink) -> None:
+        _run_ic_compute_to_sink(data, tester, factor_family, sink)
+
+    test_jobs.submit(job, _target)
+    return job
 
 
 # ═══════════════════════════════════════════════════════════════
