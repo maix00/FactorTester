@@ -455,6 +455,29 @@ def legacy_snapshot_to_payload(snapshot: dict, *, factor_family_alias: str) -> d
     }
 
 
+def _repair_registered_backtest_settings(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Repair canonical records produced by the pre-scope migration."""
+    from tools.testers.settings import backtest_setting_registry
+
+    value = deepcopy(payload)
+    backtest = (value.get("analyses") or {}).get("backtest")
+    if not isinstance(backtest, dict):
+        return value, False
+    local_settings = deepcopy(backtest.get("local_settings") or {})
+    changed = False
+    for key in set(backtest_setting_registry.get("group_test").settings):
+        if key not in backtest:
+            continue
+        if key not in local_settings:
+            local_settings[key] = deepcopy(backtest[key])
+        backtest.pop(key, None)
+        changed = True
+    if changed:
+        backtest["local_settings"] = local_settings
+        validate_payload(value)
+    return value, changed
+
+
 def migrate_legacy_templates(*, apply: bool = False) -> dict[str, Any]:
     """Convert old account template rows into canonical template configurations."""
     report: dict[str, Any] = {
@@ -463,6 +486,7 @@ def migrate_legacy_templates(*, apply: bool = False) -> dict[str, Any]:
         "migrated": 0,
         "skipped": 0,
         "retired_legacy_components": {},
+        "canonical_templates_repaired": 0,
         "errors": [],
     }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -474,6 +498,32 @@ def migrate_legacy_templates(*, apply: bool = False) -> dict[str, Any]:
         collections_exists = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_template_collections'"
         ).fetchone() is not None
+        canonical_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_configurations'"
+        ).fetchone() is not None
+        if canonical_exists:
+            migrated_rows = conn.execute(
+                """
+                SELECT configuration_id, payload_json FROM research_configurations
+                WHERE role='template' AND legacy_template_id IS NOT NULL AND deleted_at IS NULL
+                """
+            ).fetchall()
+            for migrated in migrated_rows:
+                repaired, changed = _repair_registered_backtest_settings(
+                    _loads(migrated["payload_json"]) or {}
+                )
+                if not changed:
+                    continue
+                report["canonical_templates_repaired"] += 1
+                if apply:
+                    conn.execute(
+                        """
+                        UPDATE research_configurations
+                        SET payload_json=?, revision=revision+1, updated_at=?
+                        WHERE configuration_id=?
+                        """,
+                        (_dumps(repaired), time.time(), migrated["configuration_id"]),
+                    )
         if not templates_exists and not collections_exists:
             report["applied"] = bool(apply)
             return report
@@ -511,9 +561,6 @@ def migrate_legacy_templates(*, apply: bool = False) -> dict[str, Any]:
             if kind != "global"
         }
         report["scanned"] = sum(report["scanned_by_kind"].values())
-        canonical_exists = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_configurations'"
-        ).fetchone() is not None
         for row in (item for item in rows if item["kind"] == "global"):
             try:
                 legacy = json.loads(row["payload_json"])

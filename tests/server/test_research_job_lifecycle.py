@@ -298,6 +298,41 @@ def test_run_freezes_configuration_while_workspace_keeps_editing(client, monkeyp
     assert frozen["run_spec"]["configuration"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
 
 
+def test_migration_repairs_registered_settings_in_already_migrated_templates(client) -> None:
+    workspace = _create_workspace(client)
+    template = research_configurations.save_template(
+        workspace_id=workspace["workspace_id"], owner="alice", name="pre-fix migration",
+    )
+    payload = template["payload"]
+    payload["analyses"]["backtest"] = {
+        "factor": "MmRet|P:CA|N:10d|$F:1d",
+        "local_settings": {"start_date": "2024-01-01"},
+        "groups": [],
+    }
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            """
+            UPDATE research_configurations
+            SET payload_json=?, legacy_template_id='MmRet:legacy-before-fix'
+            WHERE configuration_id=?
+            """,
+            (json.dumps(payload), template["configuration_id"]),
+        )
+
+    dry_run = research_configurations.migrate_legacy_templates(apply=False)
+    applied = research_configurations.migrate_legacy_templates(apply=True)
+    repaired = research_configurations.list_templates(owner="alice")[0]
+
+    assert dry_run["canonical_templates_repaired"] == 1
+    assert applied["canonical_templates_repaired"] == 1
+    backtest = repaired["payload"]["analyses"]["backtest"]
+    assert "factor" not in backtest
+    assert backtest["local_settings"] == {
+        "start_date": "2024-01-01",
+        "factor": "MmRet|P:CA|N:10d|$F:1d",
+    }
+
+
 def test_all_analyses_dispatch_importable_process_runners(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
