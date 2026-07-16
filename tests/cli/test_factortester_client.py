@@ -92,6 +92,16 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
 
 
+def test_client_discards_corrupt_cookie_jar_without_traceback(fake_server: str, tmp_path) -> None:
+    cookie_file = tmp_path / "cookies.lwp"
+    cookie_file.write_text("not an LWP cookie jar\n", encoding="utf-8")
+
+    client = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
+
+    assert client.list_modules()[0]["key"] == "single_factor_test"
+    assert cookie_file.read_text(encoding="utf-8").startswith("#LWP-Cookies-2.0")
+
+
 def test_client_fetches_settings_and_candidates(fake_server: str, tmp_path) -> None:
     client = FactorTesterClient(HttpSession(fake_server, cookies=tmp_path / "cookies.lwp"))
     client.login("alice", "pw")

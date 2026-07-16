@@ -4907,6 +4907,18 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
     assert all(group["slippage_bps"] == "3" for group in payload["groups"])
     assert payload["ls_configs"][0]["name"] == "LS A1/A2"
     group_ids = {group["name"]: group["id"] for group in payload["groups"]}
+    assert payload["ls_configs"][0]["longGroupId"] == group_ids["A1"]
+    assert payload["ls_configs"][0]["shortGroupId"] == group_ids["A2"]
+    assert payload["ls_configs"][0]["long"] == [{
+        "group_id": group_ids["A1"],
+        "strategy_id": group_ids["A1"],
+        "weight": 1.0,
+    }]
+    assert payload["ls_configs"][0]["short"] == [{
+        "group_id": group_ids["A2"],
+        "strategy_id": group_ids["A2"],
+        "weight": 1.0,
+    }]
     assert payload["strategy_book"]["strategies"][group_ids["A1"]]["ledger_ids"] == ["shared-main"]
     assert payload["strategy_book"]["strategies"][group_ids["A1"]]["default_ledger_id"] == "shared-main"
     assert payload["strategy_book"]["cash_pools"]["shared-main"] == "pool-main"
@@ -5223,6 +5235,40 @@ def test_backtest_group_add_help_and_batch_help_use_action_specific_text(tmp_pat
         result = runner.invoke(cli, ["backtest", "group", "--add", "--batch", "--help"])
         assert result.exit_code == 0
         assert "group --add --batch 字段说明" in result.output
+
+
+def test_backtest_group_help_discards_corrupt_cookie_jar(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("FACTORTESTER_HOME", str(home))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        (home / "cookies.lwp").write_text("bad cookie jar\n", encoding="utf-8")
+
+        result = runner.invoke(cli, ["backtest", "group", "--help"])
+
+    assert result.exit_code == 0
+    assert "回测设置上下文" in result.output
+    assert "LoadError" not in result.output
+    assert "Traceback" not in result.output
 
 
 def test_single_factor_template_load_restores_backtest_state_and_clear_resets_draft(tmp_path, monkeypatch) -> None:

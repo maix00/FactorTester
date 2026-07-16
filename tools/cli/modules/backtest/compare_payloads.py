@@ -8,6 +8,7 @@ import click
 
 from tools.cli.core.context import client_from_config
 from tools.cli.modules.backtest import template_state as template_state_helpers
+from tools.cli.modules.backtest.run_payloads import serialize_ls_config_for_run
 from tools.cli.modules.backtest.shared.selectors import selection_label
 from tools.cli.modules.products.controller import product_group_selection
 
@@ -71,6 +72,7 @@ def volume_capacity_margin_compare_payload(
             old_short = str(config.get("shortAlias") or config.get("name") or old_id)
             cloned_ls["shortAlias"] = f"{scenario['label']} · {old_short}"
             cloned_ls["name"] = f"{scenario['label']} · {config.get('name') or old_short}"
+            cloned_ls = serialize_ls_config_for_run(cloned_ls, index=index)
             remap_long_short_leg_ids(cloned_ls, id_map)
             apply_compare_scenario_settings(cloned_ls, scenario["key"], volume_rate=volume_rate)
             ls_configs.append(cloned_ls)
@@ -175,6 +177,7 @@ def factor_grid_payload(
                     cloned_ls["shortAlias"] = f"{scenario_label} · {old_short}"
                     cloned_ls["name"] = f"{scenario_label} · {config.get('name') or old_short}"
                     apply_factor_grid_capacity_override(cloned_ls, liquidity_mode=liquidity_mode, participation_rate=participation_rate)
+                    cloned_ls = serialize_ls_config_for_run(cloned_ls, index=index)
                     remap_long_short_leg_ids(cloned_ls, id_map)
                     cloned_ls["compare_scenario"] = scenario_key
                     ls_configs.append(cloned_ls)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from http.cookiejar import LWPCookieJar
+from http.cookiejar import LWPCookieJar, LoadError
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
@@ -100,6 +100,9 @@ class HttpSession:
             self.cookie_jar.load(ignore_discard=True, ignore_expires=True)
         except FileNotFoundError:
             pass
+        except LoadError:
+            Path(self.cookie_jar.filename).unlink(missing_ok=True)
+            self.cookie_jar = LWPCookieJar(str(cookies or cookie_path()))
         self._opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
 
     def get(self, path: str, *, query: dict[str, Any] | None = None) -> dict[str, Any]:
