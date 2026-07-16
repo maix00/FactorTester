@@ -140,6 +140,8 @@ def test_legacy_templates_are_migrated_once_and_removed(client) -> None:
         "name": "legacy",
         "ff_alias": "MmRet",
         "snapshot": {
+            "factor": "MmRet|P:CA|N:10d|$F:1d",
+            "factor_candidates": [{"alias": "MmRet|P:CA|N:10d|$F:1d"}],
             "submissions": [{"id": "selection-1", "selected_paths": ["core8_path"]}],
             "group_settings": {"groups": [{
                 "id": "A1", "testerId": "selection-1", "groupCount": 5,
@@ -194,6 +196,12 @@ def test_legacy_templates_are_migrated_once_and_removed(client) -> None:
         "factor_family_alias": "MmRet",
     }]
     assert templates[0]["payload"]["analyses"]["backtest"]["groups"][0]["splitCount"] == 5
+    migrated_backtest = templates[0]["payload"]["analyses"]["backtest"]
+    assert "factor" not in migrated_backtest and "factor_candidates" not in migrated_backtest
+    assert migrated_backtest["local_settings"]["factor"] == "MmRet|P:CA|N:10d|$F:1d"
+    assert migrated_backtest["local_settings"]["factor_candidates"] == [{
+        "alias": "MmRet|P:CA|N:10d|$F:1d",
+    }]
 
 
 def test_legacy_workspace_and_runs_require_then_apply_one_time_migration(client) -> None:
