@@ -42,6 +42,22 @@ def test_plan_orders_diagnostics_before_backtest() -> None:
     assert any(item["phase"] == "platform_gap_loop" for item in plan)
 
 
+def test_plan_records_product_group_and_mask_semantics() -> None:
+    plan = build_factor_research_plan(
+        factor_family="SgCCS",
+        product_groups=["custom-low-fee-day"],
+        n_values=["20d"],
+        f_values=["1d"],
+    )
+    phases = [item["phase"] for item in plan]
+    assert "define_product_universe" in phases
+    text = "\n".join(str(item.get("purpose", "")) for item in plan)
+    assert "product group/product path" in text
+    assert "product mask" in text
+    assert "ranking universe" in text
+    assert "membership" in text
+
+
 def test_plan_treats_factor_family_as_value_not_sgccs_default() -> None:
     plan = build_factor_research_plan(factor_family="MyCustomFamily", n_values=["3m"])
     commands = "\n".join(str(item["command"]) for item in plan)
@@ -58,6 +74,8 @@ def test_validation_checklist_encodes_quant_research_guardrails() -> None:
     assert "workspace prepare --build --sync" in text
     assert "未来函数" in text
     assert "ResearchSlice/ValidationPlan" in text
+    assert "product mask" in text
+    assert "分组边界" in text
     assert "2026" in text
     assert "gap" in text
     assert "7998" in text
@@ -129,5 +147,7 @@ def test_packaging_and_docs_record_cli_anything_adaptation_contract() -> None:
         assert "slice_name" in text
         assert "grid_size" in text
         assert "costed_pass" in text
+        assert "product mask" in text
+        assert "ranking universe" in text
     assert "15 passed" in test_doc
     assert "7 passed" in test_doc

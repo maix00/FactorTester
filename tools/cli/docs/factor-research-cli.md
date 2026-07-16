@@ -4,7 +4,7 @@ FactorTester CLI 是远程 HTTP 客户端，不假设用户机器上有服务端
 
 ## 推荐研究顺序
 
-1. 定义研究上下文：因子家族、因子参数、产品路径候选、时间范围、模板。
+1. 定义研究上下文：因子家族、因子参数、产品路径候选、时间范围、模板。产品组/产品路径决定因子截面排序 universe；产品 mask 只在 membership/target 之后筛选交易或评估对象，不能把两者混用。
 2. 检查因子序列：用 `factor_evaluation run` 查看覆盖、缺失、异常值和数据对齐。
 3. 预筛选预测力：用 `ic_test grid` 或 `ic_test config --run` 查看 RankIC、ICIR、滚动 IC、IC 衰减。
 4. 做类型诊断：用 `factor_type_analysis grid/run` 判断趋势、波动率等类型相关性和产品组内相关性来源。
@@ -37,6 +37,7 @@ factortester backtest results order-flow --group-name A1 --output orders.csv
 
 - 因子定义：写清因子家族、参数、方向、产品域和时间范围。
 - 样本域：产品路径候选必须点时一致；grid 可以同时扫参数和产品组。
+- 产品域语义：`--path`/产品组改变排序 universe 和分组边界；`--mask-products` 只筛选已分好组后的交易/评估对象。最终报告必须说明用的是现场新建产品组，还是更大产品组加 mask。
 - 无未来函数：信号使用可见数据；默认下一 bar open 成交；close 信号不得同 bar 成交。
 - IC/IR：至少检查 RankIC、ICIR、样本数、滚动稳定性和 IC 衰减。
 - 类型分析：检查趋势/波动率等参照类型相关性，以及产品组内相关性来源。

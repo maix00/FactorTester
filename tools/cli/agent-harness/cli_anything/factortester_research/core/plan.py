@@ -31,8 +31,15 @@ def build_factor_research_plan(
         {
             "phase": "setup",
             "skill_basis": ["longbridge-quant:factor-research", "quantitative-research:patterns"],
-            "purpose": "绑定因子家族、模板和候选产品组。",
+            "purpose": "绑定因子家族、模板和候选产品组；明确 product group/product path 是因子排序与分组的 ranking universe，product mask 只是分组后交易/评估的子集过滤，二者不能互相替代。",
             "command": f"factortester single_factor_test --factor-family {shlex.quote(factor_family)}",
+        },
+        {
+            "phase": "define_product_universe",
+            "skill_basis": ["longbridge-quant:factor-research", "quantitative-research:validations"],
+            "purpose": "为每次研究记录产品域语义：产品组/产品路径决定哪些产品进入因子截面排名与分组；product mask 在 membership 已算出后筛掉不交易产品。用 --path 缩小产品组会改变 rank 分母和分组边界，用 --mask-products 只改变交易子集。最终报告必须说明选择的是哪一种。",
+            "command": "factortester products path-candidates list && # 若需现场构建: factortester products path-candidates add --name <NAME> --path <+/-Product/...>",
+            "required_outputs": ["ranking_universe_product_group", "optional_trade_mask_products", "session_compatibility", "fee_capacity_screen"],
         },
         {
             "phase": "inspect_factor_expr_dsl",
@@ -183,6 +190,7 @@ def validation_checklist() -> list[str]:
         "参数网格记录 hypotheses_tested，解释多重检验风险。",
         "开始改写因子前，必须先查看后端 FactorExpr 算子表；若算子不全，先补全算子和测试，再继续研究。",
         "开始任何 IC/类型/回测前，必须先 workspace prepare --build --sync，并 inspect 因子源码。",
+        "必须区分 product group/product path 与 product mask：前者决定因子排名 universe 和分组边界，后者只在 membership 后筛选交易/评估对象；最终报告不得把 mask 回测解释成缩小 universe 后的分组回测。",
         "必须生成 ResearchSlice/ValidationPlan；不能只用 H1/H2，至少要有季度、滚动窗口和数据驱动 regime 说明。",
         "2026 样本只能作为 OOS 风险标注，不能用于选择因子、产品组、参数或策略 policy。",
         "费用、成交量容量、margin mode、fee mode 显式写入配置。",

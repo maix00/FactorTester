@@ -17,7 +17,10 @@ The harness adapts two research skill systems:
 ## Research Loop
 
 1. Define the factor family, factor alias or parameter grid, product groups,
-   time range, and cost/capacity settings.
+   time range, and cost/capacity settings. Product groups/product paths define
+   the cross-sectional ranking universe; product masks only filter the already
+   computed membership or targets for trading/evaluation. Do not treat a masked
+   broad-universe run as equivalent to reranking inside the masked subset.
 2. Inspect backend FactorExpr operators. If the research idea needs operators
    that are not covered, record the missing operator semantics/signature/tests
    and fix the platform before testing the factor.
@@ -63,6 +66,11 @@ ignored.
 - Operator semantics and factor calculations are verified before being used as
   research evidence.
 - Product groups are point-in-time enough for the requested research question.
+- Product group/product path and product mask are recorded separately:
+  product group/path determines factor ranking, group boundaries, IC universe,
+  and type-analysis universe; product mask is applied after membership to decide
+  which products are traded or evaluated. Reports must state whether a result
+  comes from a newly constructed product group or from a broader group plus mask.
 - Parameter grids record how many hypotheses were tried.
 - Saved research runs carry sample/regime/slice labels and overfit-audit fields
   whenever those are known.

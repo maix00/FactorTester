@@ -66,3 +66,8 @@ Factor-source rule:
   regimes or time slices.
 - Result-library ranking is candidate generation only; still run validation
   slices, transaction costs, capacity, and OOS review.
+- Product group/product path and product mask are different research controls.
+  Product group/path defines the cross-sectional ranking universe and group
+  boundaries. Product mask filters products after membership/target construction
+  for trading or evaluation. Do not report a masked broad-universe run as if it
+  were a reranked narrow-universe product group.

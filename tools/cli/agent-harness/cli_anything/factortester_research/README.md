@@ -35,6 +35,22 @@ cli-anything-factortester-research run-step -- factor_type_analysis grid --facto
 cli-anything-factortester-research run-step -- backtest compare factor-grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --rev --volume-capacity-mode volume_participation
 ```
 
+### Product Universe vs Product Mask
+
+Record this distinction before interpreting any IC or backtest:
+
+- `product group` / `product path` is the ranking universe. It decides which
+  products enter cross-sectional IC, factor type analysis, rank ordering, group
+  boundaries, and membership.
+- `product mask` is applied after membership or target construction. It filters
+  which products are traded or evaluated without recomputing the rank universe.
+- `--path ...` and `--mask-products ...` answer different research questions.
+  A result from a broad product group plus mask is not evidence that reranking
+  inside only the masked products works.
+- Final reports must name both fields when both are used, especially when
+  screening low-fee products or excluding products whose expected period return
+  cannot cover effective fees.
+
 If a command exposes a missing backend/CLI feature, the harness records a gap and
 sets the session status to `code_improvement_required`.
 
@@ -114,6 +130,8 @@ cost/capacity checks, and OOS review before it can be treated as a research
 result. Product-group names in result records are labels for the tested
 configuration; they are not automatically product-group candidates for future
 runs unless the product group exists in the product-group library.
+If a run used a product mask, store that mask in the config/note/report and do
+not collapse it into the product-group label.
 
 Saved runs should carry structured research metadata whenever known:
 `sample_role`, `regime_label`, `slice_name`, `test_count`, `grid_size`,

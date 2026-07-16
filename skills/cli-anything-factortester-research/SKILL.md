@@ -63,6 +63,11 @@ cli-anything-factortester-research checklist
 - Product-group labels stored in research results are not automatically product
   group candidates; create or import real product groups before using them in new
   tests.
+- Product group/product path and product mask are different research controls.
+  Product group/path defines the cross-sectional ranking universe and group
+  boundaries. Product mask filters products after membership/target construction
+  for trading or evaluation. A masked broad-universe run is not evidence that the
+  same factor works when reranked inside only the masked products.
 - Track the number of hypotheses tested when sweeping factor/product grids.
 - Include transaction costs, capacity, and explicit margin mode before claiming a
   factor is profitable.
