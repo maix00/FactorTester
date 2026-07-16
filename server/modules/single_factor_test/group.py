@@ -3137,7 +3137,7 @@ def get_product_path_selection_session_info():
 def start_group_test_job(data: dict[str, Any]):
     """Submit a group-test backtest as a queryable async job."""
     import threading
-    from server.services import backtest_jobs, backtest_runs
+    from server.services import test_jobs, backtest_runs
     from server.services.factor_registry import page_factors
     from tools.testers.backtest.engines.cancellation import BacktestCancelled
     from tools.testers.backtest.engines.native.state import BacktestRunState
@@ -3155,7 +3155,8 @@ def start_group_test_job(data: dict[str, Any]):
     run_token = str(data.get('run_token') or uuid.uuid4().hex)
     active_run = backtest_runs.register(run_token, page_uuid, owner)
     try:
-        job = backtest_jobs.create_job(
+        job = test_jobs.create_job(
+            kind="backtest",
             run_token=run_token,
             page_uuid=page_uuid,
             owner=owner,
@@ -3376,13 +3377,13 @@ def start_group_test_job(data: dict[str, Any]):
             backtest_runs.finish(run_token)
             emitter.close()
 
-    backtest_jobs.submit(job, _compute_and_emit)
+    test_jobs.submit(job, _compute_and_emit)
     return job
 
 
 @sft_bp.route('/cancel_group_test', methods=['POST'])
 def cancel_group_test():
-    from server.services import backtest_jobs, backtest_runs
+    from server.services import test_jobs, backtest_runs
 
     data = request.get_json(silent=True) or {}
     run_token = str(data.get('run_token') or '')
@@ -3392,7 +3393,7 @@ def cancel_group_test():
     try:
         owner = str(current_user() or '')
         cancelled = backtest_runs.cancel(run_token, page_uuid, owner)
-        cancelled = backtest_jobs.cancel_run_token(run_token, page_uuid, owner) or cancelled
+        cancelled = test_jobs.cancel_run_token(run_token, page_uuid, owner) or cancelled
     except PermissionError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 403
     return jsonify({'success': True, 'cancelled': cancelled})

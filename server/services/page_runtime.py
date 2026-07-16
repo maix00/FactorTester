@@ -285,7 +285,7 @@ def unregister_page(page_uuid: str) -> None:
     from server.services.backtest_runs import cancel_page
     cancel_page(page_uuid)
     try:
-        from server.services.backtest_jobs import cancel_page as cancel_backtest_jobs_page
+        from server.services.test_jobs import cancel_page as cancel_backtest_jobs_page
         cancel_backtest_jobs_page(page_uuid)
     except Exception:
         pass
