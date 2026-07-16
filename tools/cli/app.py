@@ -21,7 +21,7 @@ def cli() -> None:
       factortester configure --host 127.0.0.1 --port 8114
       factortester login --username 18717974771
       factortester doctor
-      factortester factor-plan --factor-family SgCCS --template '2026-06-02 07:20:47' --product-group 中国期货日盘 --n 2m
+      factortester factor-plan --factor-family SgCCS --template '2026-06-02 07:20:47' --product-group 中国期货日盘 --param N=2m
       # agent 因子研究：安装/使用 longbridge-quant、quantitative-research，并阅读 tools/cli/docs/factor-research-cli.md
       factortester list
       factortester single_factor_test list

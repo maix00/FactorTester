@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import product
 from typing import Any
 
 import click
@@ -171,8 +172,7 @@ def base_payload(
 def parse_factor_grid_options(args: tuple[str, ...], *, default_factor_family: str = "") -> dict[str, Any]:
     options: dict[str, Any] = {
         "factor_family": default_factor_family,
-        "n": [],
-        "f": [],
+        "params": {},
         "product_group": [],
         "rev": [],
         "top": 12,
@@ -184,12 +184,13 @@ def parse_factor_grid_options(args: tuple[str, ...], *, default_factor_family: s
             options["factor_family"] = _required_grid_value(args, i, token)
             i += 2
             continue
-        if token == "--n":
-            options["n"].append(_required_grid_value(args, i, token))
+        if token == "--f":
+            _append_grid_param(options, "$F", _required_grid_value(args, i, token))
             i += 2
             continue
-        if token == "--f":
-            options["f"].append(_required_grid_value(args, i, token))
+        if token in {"--param", "--factor-param", "--factor_param"}:
+            key, value = _parse_grid_param_assignment(_required_grid_value(args, i, token))
+            _append_grid_param(options, key, value)
             i += 2
             continue
         if token == "--product-group":
@@ -211,10 +212,10 @@ def parse_factor_grid_options(args: tuple[str, ...], *, default_factor_family: s
             i += 1
             continue
         raise click.ClickException(f"无法识别 grid 参数: {token}")
-    if not options["n"]:
-        options["n"] = ["1m", "2m", "3m", "5m", "10m"]
-    if not options["f"]:
-        options["f"] = ["1m"]
+    if not options["params"]:
+        options["params"] = {}
+    if "$F" not in options["params"]:
+        options["params"]["$F"] = ["1m"]
     if not options["rev"]:
         options["rev"] = [True]
     if not str(options.get("factor_family") or "").strip():
@@ -231,21 +232,23 @@ def factor_grid_items(state: Any, *, options: dict[str, Any], settings: dict[str
     product_selections = grid_product_selections(state, client, list(options.get("product_group") or []))
     time_settings = shared_time_settings(state)
     items: list[dict[str, Any]] = []
-    for n_value in options["n"]:
-        for f_value in options["f"]:
-            for rev in options["rev"]:
-                alias = factor_alias(factor_family, str(n_value), str(f_value), rev=bool(rev))
-                register_grid_factor(state, client, alias, factor_family=factor_family)
-                for selection in product_selections:
-                    item_settings = dict(settings or {})
-                    item_settings.update(time_settings)
-                    items.append({
-                        "factor": alias,
-                        "product_group": selection_label(selection),
-                        "selection": selection,
-                        "settings": item_settings,
-                        "payload_base": grid_payload_base(state, factor_family=factor_family, alias=alias, selection=selection),
-                    })
+    for params in grid_param_combinations(options.get("params") or {}):
+        for rev in options["rev"]:
+            alias = factor_alias_from_params(factor_family, params, rev=bool(rev))
+            alias = register_grid_factor(state, client, alias, factor_family=factor_family)
+            for selection in product_selections:
+                item_settings = dict(time_settings)
+                item_settings.update(settings or {})
+                factor_item = {"factor_alias": alias, "alias": alias, "params": params_from_factor_alias(alias, factor_family)}
+                item_settings["factor_candidates"] = [factor_item]
+                item_settings["factor_selections"] = [factor_item]
+                items.append({
+                    "factor": alias,
+                    "product_group": selection_label(selection),
+                    "selection": selection,
+                    "settings": item_settings,
+                    "payload_base": grid_payload_base(state, factor_family=factor_family, alias=alias, selection=selection),
+                })
     return items
 
 
@@ -308,7 +311,7 @@ def grid_product_selections(state: Any, client: Any, names: list[str]) -> list[d
     raise click.ClickException("grid 缺少产品路径；请传 --product-group 或先加载含产品路径的模板")
 
 
-def register_grid_factor(state: Any, client: Any, alias: str, *, factor_family: str) -> None:
+def register_grid_factor(state: Any, client: Any, alias: str, *, factor_family: str) -> str:
     candidates = list(getattr(state, "page_settings", {}).get("factor_candidates") or [])
     known = {str(item.get("factor_alias") or item.get("alias") or "") for item in candidates if isinstance(item, dict)}
     data = client.add_candidate("factor", {
@@ -320,13 +323,20 @@ def register_grid_factor(state: Any, client: Any, alias: str, *, factor_family: 
     if factor_alias not in known:
         candidates.append({"factor_alias": factor_alias, "params": params_from_factor_alias(alias, factor_family)})
         state.page_settings["factor_candidates"] = candidates
+    return factor_alias
 
 
-def factor_alias(factor_family: str, n_value: str, f_value: str, *, rev: bool) -> str:
-    alias = f"{factor_family}|N:{n_value}|$F:{f_value}"
+def factor_alias_from_params(factor_family: str, params: dict[str, Any], *, rev: bool) -> str:
+    alias = factor_family
+    for key, value in params.items():
+        alias += f"|{key}:{value}"
     if rev:
         alias += "|$Rev"
     return alias
+
+
+def factor_alias(factor_family: str, n_value: str, f_value: str, *, rev: bool) -> str:
+    return factor_alias_from_params(factor_family, {"N": n_value, "$F": f_value}, rev=rev)
 
 
 def params_from_factor_alias(alias: str, factor_family: str) -> dict[str, Any]:
@@ -353,3 +363,37 @@ def _required_grid_value(args: tuple[str, ...], index: int, option: str) -> str:
     if index + 1 >= len(args) or args[index + 1].startswith("--"):
         raise click.ClickException(f"{option} 缺少参数")
     return str(args[index + 1])
+
+
+def _append_grid_param(options: dict[str, Any], key: str, value: str) -> None:
+    key = _normalize_grid_param_key(key)
+    params = options.setdefault("params", {})
+    params.setdefault(key, [])
+    if value not in params[key]:
+        params[key].append(value)
+
+
+def _parse_grid_param_assignment(raw: str) -> tuple[str, str]:
+    if "=" not in raw:
+        raise click.ClickException("--param 需要 KEY=VALUE")
+    key, value = raw.split("=", 1)
+    if not key or value == "":
+        raise click.ClickException("--param 需要 KEY=VALUE")
+    return _normalize_grid_param_key(key), value
+
+
+def _normalize_grid_param_key(key: str) -> str:
+    key = key.strip()
+    if key in {"f", "F"}:
+        return "$F"
+    if key.startswith("$"):
+        return key
+    return key.upper()
+
+
+def grid_param_combinations(params: dict[str, list[str]]) -> list[dict[str, str]]:
+    keys = list(params.keys())
+    values = [list(params[key]) for key in keys]
+    if not keys or any(not item for item in values):
+        return [{}]
+    return [dict(zip(keys, combo)) for combo in product(*values)]

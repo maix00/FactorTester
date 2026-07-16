@@ -43,8 +43,8 @@ class TestCLISubprocess:
             "SgCCS",
             "--product-group",
             "中国期货日盘",
-            "--n",
-            "2m",
+            "--param",
+            "N=2m",
             "--json",
         ])
         data = json.loads(result.stdout)

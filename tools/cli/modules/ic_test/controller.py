@@ -44,7 +44,7 @@ def ic_test(ctx: click.Context, run: bool, verbose: bool) -> None:
       factortester single_factor_test --factor-family SgCCS ic_test
       factortester ic_test local-settings --ic-correlation rank --ic-lag 0
       factortester ic_test config --add --name 日盘RankIC --factor-family SgCCS --product-group 中国期货日盘 --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'
-      factortester ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 1m --n 2m
+      factortester ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --param N=1m --param N=2m
       factortester ic_test config list
       factortester ic_test --run
     """
@@ -221,7 +221,7 @@ def _print_config_help() -> None:
 
 def _print_grid_help() -> None:
     click.echo("ic_test grid 命令")
-    click.echo("  --factor-family NAME [--product-group NAME] [--n 1m --n 2m] [--f 1m] [--rev] [--no-rev] [--top 12]")
+    click.echo("  --factor-family NAME [--product-group NAME] [--param N=1m --param N=2m] [--f 1m] [--rev] [--no-rev] [--top 12]")
     click.echo("")
     click.echo("说明: grid = 因子参数 × 产品组 × 方向。产品组和方向可重复传入；方向不传默认使用 $Rev。")
 

@@ -9,19 +9,19 @@ def build_factor_research_plan(
     factor_family: str,
     template: str = "",
     product_groups: list[str] | None = None,
-    n_values: list[str] | None = None,
+    params: list[str] | None = None,
     f_values: list[str] | None = None,
     include_rev: bool = True,
     top: int = 12,
 ) -> list[dict[str, Any]]:
     product_groups = product_groups or []
-    n_values = n_values or []
+    params = params or []
     f_values = f_values or []
     grid_args = ["--factor-family", shlex.quote(factor_family)]
     for group in product_groups:
         grid_args.extend(["--product-group", shlex.quote(group)])
-    for value in n_values:
-        grid_args.extend(["--n", shlex.quote(value)])
+    for value in params:
+        grid_args.extend(["--param", shlex.quote(value)])
     for value in f_values:
         grid_args.extend(["--f", shlex.quote(value)])
     grid_args.append("--rev" if include_rev else "--no-rev")

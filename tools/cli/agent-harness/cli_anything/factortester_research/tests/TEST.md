@@ -93,7 +93,7 @@ cli-anything-factortester-research --session /tmp/ftr-session.json plan \
   --factor-family SgCCS \
   --template '2026-06-02 07:20:47' \
   --product-group 中国期货日盘 \
-  --n 2m --f 1m --rev --json
+  --param N=2m --f 1m --rev --json
 ```
 
 Verified that `SgCCS` is passed as a factor-family value, not registered as a

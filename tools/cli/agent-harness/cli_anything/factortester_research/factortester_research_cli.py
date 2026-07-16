@@ -73,7 +73,7 @@ def doctor(as_json: bool) -> None:
 @click.option("--factor-family", required=True, help="因子家族名，例如 SgCCS。")
 @click.option("--template", default="", help="可选模板名，例如 '2026-06-02 07:20:47'。")
 @click.option("--product-group", "product_groups", multiple=True, help="产品组，可重复。")
-@click.option("--n", "n_values", multiple=True, help="N 参数候选，可重复。")
+@click.option("--param", "params", multiple=True, help="业务因子参数 KEY=VALUE，可重复，例如 --param N=2m。")
 @click.option("--f", "f_values", multiple=True, help="$F 参数候选，可重复。")
 @click.option("--rev/--no-rev", default=True, show_default=True, help="是否包含 $Rev。")
 @click.option("--top", default=12, show_default=True, type=int, help="每组输出 Top N。")
@@ -85,7 +85,7 @@ def plan(
     factor_family: str,
     template: str,
     product_groups: tuple[str, ...],
-    n_values: tuple[str, ...],
+    params: tuple[str, ...],
     f_values: tuple[str, ...],
     rev: bool,
     top: int,
@@ -102,12 +102,12 @@ def plan(
         factor_family=factor_family,
         template=template,
         product_groups=list(product_groups),
-        n_values=list(n_values),
+        params=list(params),
         f_values=list(f_values),
         include_rev=rev,
         top=top,
     )
-    grid_size = max(len(product_groups), 1) * max(len(n_values), 1) * max(len(f_values), 1) * (1 if rev else 1)
+    grid_size = max(len(product_groups), 1) * max(len(params), 1) * max(len(f_values), 1) * (1 if rev else 1)
     session.hypotheses_tested += grid_size
     record_event(session, "plan_created", factor_family=factor_family, template=template, hypotheses=grid_size)
     payload = {"session": session.to_dict(), "validation_checklist": validation_checklist()}

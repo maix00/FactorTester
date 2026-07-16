@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import product
 from typing import Any
 
 import click
@@ -95,7 +96,7 @@ def factor_grid_payload(
     state,
     *,
     factor_family: str,
-    n_values: tuple[str, ...],
+    params: tuple[str, ...],
     f_values: tuple[str, ...],
     product_groups: tuple[str, ...],
     rev: bool,
@@ -107,10 +108,10 @@ def factor_grid_payload(
     factor_family = str(factor_family or state.factor_family or state.page_settings.get("factor_family") or "").strip()
     if not factor_family:
         raise click.ClickException("factor-grid 缺少因子家族；请传 --factor-family")
-    n_list = [str(item).strip() for item in (n_values or ("1m", "2m", "3m", "5m", "10m")) if str(item).strip()]
+    param_grid = parse_factor_grid_params(params)
     f_list = [str(item).strip() for item in (f_values or ("1m",)) if str(item).strip()]
-    if not n_list or not f_list:
-        raise click.ClickException("--n 和 --f 至少各有一个候选")
+    if not f_list:
+        raise click.ClickException("--f 至少有一个候选")
     client = client_from_config()
     product_group_selections = factor_grid_product_group_selections(client, product_groups)
     scenarios: list[dict[str, str]] = []
@@ -118,10 +119,10 @@ def factor_grid_payload(
     ls_configs: list[dict[str, Any]] = []
     ledger_configs: dict[str, dict[str, Any]] = {}
     strategy_book: dict[str, Any] = {"strategies": {}, "cash_pools": {}}
-    for n_value in n_list:
+    for param_values in factor_grid_param_combinations(param_grid):
         for f_value in f_list:
-            alias = factor_grid_alias(factor_family, n_value, f_value, rev=rev)
-            register_factor_alias(state, client, alias, factor_family=factor_family)
+            alias = factor_grid_alias(factor_family, {**param_values, "$F": f_value}, rev=rev)
+            alias = register_factor_alias(state, client, alias, factor_family=factor_family)
             product_items = product_group_selections or [None]
             for product_group_selection_item in product_items:
                 product_label = (
@@ -193,11 +194,39 @@ def factor_grid_payload(
     return payload, groups, ls_configs, scenarios
 
 
-def factor_grid_alias(factor_family: str, n_value: str, f_value: str, *, rev: bool) -> str:
-    alias = f"{factor_family}|N:{n_value}|$F:{f_value}"
+def factor_grid_alias(factor_family: str, params: dict[str, str], *, rev: bool) -> str:
+    alias = factor_family
+    for key, value in params.items():
+        alias += f"|{key}:{value}"
     if rev:
         alias += "|$Rev"
     return alias
+
+
+def parse_factor_grid_params(params: tuple[str, ...]) -> dict[str, list[str]]:
+    grid: dict[str, list[str]] = {}
+    for item in params:
+        if "=" not in item:
+            raise click.ClickException("--param 需要 KEY=VALUE")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            raise click.ClickException("--param 需要 KEY=VALUE")
+        if key in {"f", "F"}:
+            raise click.ClickException("$F 请使用 --f，不要写入 --param")
+        grid.setdefault(key, [])
+        if value not in grid[key]:
+            grid[key].append(value)
+    return grid
+
+
+def factor_grid_param_combinations(params: dict[str, list[str]]) -> list[dict[str, str]]:
+    if not params:
+        return [{}]
+    keys = list(params.keys())
+    values = [params[key] for key in keys]
+    return [dict(zip(keys, combo)) for combo in product(*values)]
 
 
 def factor_grid_key(alias: str, product_label: str) -> str:
@@ -289,11 +318,11 @@ def factor_grid_product_group_selections(client, product_groups: tuple[str, ...]
     return selections
 
 
-def register_factor_alias(state, client, alias: str, *, factor_family: str) -> None:
+def register_factor_alias(state, client, alias: str, *, factor_family: str) -> str:
     candidates = list(state.page_settings.get("factor_candidates") or [])
     known = {str(item.get("factor_alias") or item.get("alias") or "") for item in candidates if isinstance(item, dict)}
     if alias in known:
-        return
+        return alias
     params = template_state_helpers.params_from_factor_alias(alias, factor_family)
     data = client.add_candidate("factor", {
         "factor_family_alias": factor_family,
@@ -303,6 +332,7 @@ def register_factor_alias(state, client, alias: str, *, factor_family: str) -> N
     factor_alias = str(data.get("factor_alias") or alias)
     candidates.append({"factor_alias": factor_alias, "params": params})
     state.page_settings["factor_candidates"] = candidates
+    return factor_alias
 
 
 def apply_compare_scenario_settings(target: dict[str, Any], scenario_key: str, *, volume_rate: float) -> None:

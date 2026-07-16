@@ -34,7 +34,7 @@ def factor_type_analysis(ctx: click.Context) -> None:
       factortester single_factor_test --factor-family SgCCS factor_type_analysis
       factortester factor_type_analysis local-settings --correlation-method spearman
       factortester factor_type_analysis run --factor-family SgCCS --product-group 中国期货日盘 --factor --alias 'SgCCS|N:2m'
-      factortester factor_type_analysis grid --factor-family SgCCS --product-group 中国期货日盘 --n 1m --n 2m
+      factortester factor_type_analysis grid --factor-family SgCCS --product-group 中国期货日盘 --param N=1m --param N=2m
     """
     state = load_state()
     enter_factor_type_analysis_state(state)
@@ -123,7 +123,7 @@ def _print_welcome(state) -> None:
 
 def _print_grid_help() -> None:
     click.echo("factor_type_analysis grid 命令")
-    click.echo("  --factor-family NAME [--product-group NAME] [--n 1m --n 2m] [--f 1m] [--rev] [--no-rev] [--top 12]")
+    click.echo("  --factor-family NAME [--product-group NAME] [--param N=1m --param N=2m] [--f 1m] [--rev] [--no-rev] [--top 12]")
     click.echo("")
     click.echo("说明: grid = 因子参数 × 产品组 × 方向。产品组和方向可重复传入；方向不传默认使用 $Rev。")
 

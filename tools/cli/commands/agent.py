@@ -60,7 +60,7 @@ def _factor_plan_options(func):
     func = click.option("--top", default=12, type=int, show_default=True, help="每个 grid 输出前 N 项。")(func)
     func = click.option("--rev/--no-rev", default=True, show_default=True, help="是否使用 $Rev。")(func)
     func = click.option("--f", "f_values", multiple=True, help="$F 参数候选，可重复。")(func)
-    func = click.option("--n", "n_values", multiple=True, help="N 参数候选，可重复。")(func)
+    func = click.option("--param", "params", multiple=True, help="业务因子参数 KEY=VALUE，可重复，例如 --param N=2m。")(func)
     func = click.option("--product-group", "product_groups", multiple=True, help="产品路径候选，可重复。")(func)
     func = click.option("--template", default="", help="可选：先从 single_factor_test 模板加载，例如 '2026-06-02 07:20:47'。")(func)
     func = click.option("--factor-family", required=True, help="因子家族名，例如 SgCCS。")(func)
@@ -73,7 +73,7 @@ def factor_plan(
     factor_family: str,
     template: str,
     product_groups: tuple[str, ...],
-    n_values: tuple[str, ...],
+    params: tuple[str, ...],
     f_values: tuple[str, ...],
     rev: bool,
     top: int,
@@ -85,7 +85,7 @@ def factor_plan(
         factor_family=factor_family,
         template=template,
         product_groups=product_groups,
-        n_values=n_values,
+        params=params,
         f_values=f_values,
         rev=rev,
         top=top,
@@ -99,7 +99,7 @@ def _print_factor_plan(
     factor_family: str,
     template: str,
     product_groups: tuple[str, ...],
-    n_values: tuple[str, ...],
+    params: tuple[str, ...],
     f_values: tuple[str, ...],
     rev: bool,
     top: int,
@@ -110,7 +110,7 @@ def _print_factor_plan(
         factor_family=factor_family,
         template=template,
         product_groups=product_groups,
-        n_values=n_values,
+        params=params,
         f_values=f_values,
         rev=rev,
         top=top,
@@ -164,7 +164,7 @@ def _factor_research_plan(
     factor_family: str,
     template: str,
     product_groups: tuple[str, ...],
-    n_values: tuple[str, ...],
+    params: tuple[str, ...],
     f_values: tuple[str, ...],
     rev: bool,
     top: int,
@@ -174,7 +174,7 @@ def _factor_research_plan(
     grid_args = _grid_args(
         factor_family=factor_family,
         product_groups=product_groups,
-        n_values=n_values,
+        params=params,
         f_values=f_values,
         rev=rev,
         top=top,
@@ -261,7 +261,7 @@ def _grid_args(
     *,
     factor_family: str,
     product_groups: tuple[str, ...],
-    n_values: tuple[str, ...],
+    params: tuple[str, ...],
     f_values: tuple[str, ...],
     rev: bool,
     top: int,
@@ -269,8 +269,8 @@ def _grid_args(
     args: list[str] = ["--factor-family", shlex.quote(factor_family)]
     for item in product_groups:
         args.extend(["--product-group", shlex.quote(item)])
-    for item in n_values or ("2m",):
-        args.extend(["--n", shlex.quote(item)])
+    for item in params or ("N=2m",):
+        args.extend(["--param", shlex.quote(item)])
     for item in f_values or ("1m",):
         args.extend(["--f", shlex.quote(item)])
     args.append("--rev" if rev else "--no-rev")

@@ -15,13 +15,13 @@ COMPARE_HELP_LINES = (
     "      1. 成交量容量=无限 / 保证金=关闭",
     "      2. 成交量容量=成交量参与率 / 保证金=关闭",
     "      3. 成交量容量=无限 / 保证金=auto",
-    "  factor-grid --factor-family NAME [--n 1m --n 2m] [--f 1m] [--product-group 中国期货日盘]",
+    "  factor-grid --factor-family NAME [--param N=1m --param N=2m] [--f 1m] [--product-group 中国期货日盘]",
     "    继承当前草稿和已注册 policy/local-settings，批量替换因子参数和可选产品组。",
     "    可加 --volume-capacity-mode infinite|volume_participation 覆盖模板内成交量容量设置。",
     "",
     "示例:",
     "  factortester backtest compare volume-capacity-margin --volume-rate 0.02",
-    "  factortester backtest compare factor-grid --factor-family SgCCS --product-group 中国期货夜盘 --product-group 中国期货日盘 --n 2m --f 1m --volume-capacity-mode infinite",
+    "  factortester backtest compare factor-grid --factor-family SgCCS --product-group 中国期货夜盘 --product-group 中国期货日盘 --param N=2m --f 1m --volume-capacity-mode infinite",
 )
 
 

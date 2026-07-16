@@ -16,7 +16,7 @@ def test_plan_orders_diagnostics_before_backtest() -> None:
         factor_family="SgCCS",
         template="2026-06-02 07:20:47",
         product_groups=["中国期货日盘"],
-        n_values=["2m"],
+        params=["N=2m"],
         f_values=["1m"],
     )
     phases = [item["phase"] for item in plan]
@@ -46,7 +46,7 @@ def test_plan_records_product_group_and_mask_semantics() -> None:
     plan = build_factor_research_plan(
         factor_family="SgCCS",
         product_groups=["custom-low-fee-day"],
-        n_values=["20d"],
+        params=["N=20d"],
         f_values=["1d"],
     )
     phases = [item["phase"] for item in plan]
@@ -59,7 +59,7 @@ def test_plan_records_product_group_and_mask_semantics() -> None:
 
 
 def test_plan_treats_factor_family_as_value_not_sgccs_default() -> None:
-    plan = build_factor_research_plan(factor_family="MyCustomFamily", n_values=["3m"])
+    plan = build_factor_research_plan(factor_family="MyCustomFamily", params=["N=3m"])
     commands = "\n".join(str(item["command"]) for item in plan)
     assert "--factor-family MyCustomFamily" in commands
     assert "SgCCS" not in commands

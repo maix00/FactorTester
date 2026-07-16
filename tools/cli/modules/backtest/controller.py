@@ -313,7 +313,7 @@ def local_settings(ctx: click.Context) -> None:
 @backtest.command("compare", context_settings=SELECTOR_HELP_CONTEXT)
 @click.option("--volume-rate", type=float, default=0.02, show_default=True, help="成交量容量限制场景的参与率。")
 @click.option("--factor-family", default="", help="因子家族名；factor-grid 未传时使用当前上下文。")
-@click.option("--n", "n_values", multiple=True, help="N 参数候选，可重复。默认: 1m,2m,3m,5m,10m")
+@click.option("--param", "params", multiple=True, help="业务因子参数 KEY=VALUE，可重复；例如 --param N=2m。")
 @click.option("--f", "f_values", multiple=True, help="$F 参数候选，可重复。默认: 1m")
 @click.option("--product-group", "product_groups", multiple=True, help="产品组候选名称，可重复。默认继承当前草稿。")
 @click.option("--rev/--no-rev", default=True, show_default=True, help="是否使用 $Rev 标志。")
@@ -335,7 +335,7 @@ def compare(
     ctx: click.Context,
     volume_rate: float,
     factor_family: str,
-    n_values: tuple[str, ...],
+    params: tuple[str, ...],
     f_values: tuple[str, ...],
     product_groups: tuple[str, ...],
     rev: bool,
@@ -352,7 +352,7 @@ def compare(
         tuple(ctx.args),
         volume_rate=volume_rate,
         factor_family=factor_family,
-        n_values=n_values,
+        params=params,
         f_values=f_values,
         product_groups=product_groups,
         rev=rev,

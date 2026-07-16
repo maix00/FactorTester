@@ -28,11 +28,11 @@ cli-anything-factortester-research plan \
   --factor-family SgCCS \
   --template '2026-06-02 07:20:47' \
   --product-group 中国期货日盘 \
-  --n 1m --n 2m --f 1m --rev
+  --param N=1m --param N=2m --f 1m --rev
 
-cli-anything-factortester-research run-step -- ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --rev
-cli-anything-factortester-research run-step -- factor_type_analysis grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --rev
-cli-anything-factortester-research run-step -- backtest compare factor-grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --rev --volume-capacity-mode volume_participation
+cli-anything-factortester-research run-step -- ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --param N=2m --f 1m --rev
+cli-anything-factortester-research run-step -- factor_type_analysis grid --factor-family SgCCS --product-group 中国期货日盘 --param N=2m --f 1m --rev
+cli-anything-factortester-research run-step -- backtest compare factor-grid --factor-family SgCCS --product-group 中国期货日盘 --param N=2m --f 1m --rev --volume-capacity-mode volume_participation
 ```
 
 ### Product Universe vs Product Mask

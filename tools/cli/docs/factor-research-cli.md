@@ -16,11 +16,12 @@ FactorTester CLI 是远程 HTTP 客户端，不假设用户机器上有服务端
 
 ```bash
 factortester doctor
-factortester factor-plan --factor-family SgCCS --template '2026-06-02 07:20:47' --product-group 中国期货日盘 --n 2m --f 1m
+factortester factor-plan --factor-family SgCCS --template '2026-06-02 07:20:47' --product-group 中国期货日盘 --param N=2m --f 1m
 factortester factor_evaluation run --factor-family SgCCS --product-group 中国期货日盘 --factor --alias 'SgCCS|N:2m'
-factortester ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m
-factortester factor_type_analysis grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m
-factortester backtest compare factor-grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --volume-capacity-mode infinite
+factortester ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --param N=2m --f 1m
+factortester ic_test grid --factor-family TrCCSSmooth --product-group FT研究_xxx --param W=0.25 --param C=30m --param M=1d --f 1d
+factortester factor_type_analysis grid --factor-family SgCCS --product-group 中国期货日盘 --param N=2m --f 1m
+factortester backtest compare factor-grid --factor-family SgCCS --product-group 中国期货日盘 --param N=2m --f 1m --volume-capacity-mode infinite
 factortester custom_factors factor-library history --factor-family SgCCS --product-group 中国期货日盘
 factortester custom_factors factor-library metrics
 factortester custom_factors factor-library rank --preset ic-stable --start-date 2024-01-01 --end-date 2025-12-31
@@ -36,7 +37,7 @@ factortester backtest results order-flow --group-name A1 --output orders.csv
 ## 验证清单
 
 - 因子定义：写清因子家族、参数、方向、产品域和时间范围。
-- 样本域：产品路径候选必须点时一致；grid 可以同时扫参数和产品组。
+- 样本域：产品路径候选必须点时一致；grid 可以同时扫参数和产品组。业务因子参数一律用 `--param KEY=VALUE`；只有框架公共 `$F`/`$Rev` 保留 `--f` 和 `--rev/--no-rev` 特殊入口。
 - 产品域语义：`--path`/产品组改变排序 universe 和分组边界；`--mask-products` 只筛选已分好组后的交易/评估对象。最终报告必须说明用的是现场新建产品组，还是更大产品组加 mask。
 - 无未来函数：信号使用可见数据；默认下一 bar open 成交；close 信号不得同 bar 成交。
 - IC/IR：至少检查 RankIC、ICIR、样本数、滚动稳定性和 IC 衰减。
