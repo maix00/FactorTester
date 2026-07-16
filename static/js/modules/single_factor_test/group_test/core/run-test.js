@@ -58,6 +58,30 @@
         } catch (e) {}
     }
 
+    function jobFromStatus(status) {
+        if (!status || !status.job_id) return null;
+        return {
+            job_id: status.job_id,
+            run_token: status.run_token || status.run_id || '',
+            workspace_id: status.workspace_id || '',
+            stream_url: status.stream_url || ('/api/jobs/' + encodeURIComponent(status.job_id) + '/stream'),
+            result_url: status.result_url || ('/api/jobs/' + encodeURIComponent(status.job_id) + '/result'),
+            cancel_url: status.cancel_url || ('/api/jobs/' + encodeURIComponent(status.job_id) + '/cancel'),
+            last_seq: Number(status.last_seq || 0) || 0
+        };
+    }
+
+    async function discoverActiveJob() {
+        var current = window.SingleFactorResearch && window.SingleFactorResearch.workspace();
+        if (!current) return null;
+        var query = '/api/jobs?status=queued,running,paused&kind=backtest&limit=1&workspace_id=' + encodeURIComponent(current.workspace_id);
+        var resp = await fetch(query);
+        if (!resp.ok) return null;
+        var data = await resp.json();
+        var jobs = Array.isArray(data.jobs) ? data.jobs : [];
+        return jobs.length ? jobFromStatus(jobs[0]) : null;
+    }
+
     async function readSseResponse(res, onEvent) {
         if (!res.ok) {
             throw new Error('HTTP ' + res.status);
@@ -131,23 +155,14 @@
     // ════════════════════════════════════════════════════════════════
 
     runTest.postBatchGroupTest = async function(payload, onEvent, signal) {
-        var submit = await fetch('/backtest/jobs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: signal
-        });
-        if (!submit.ok) {
-            throw new Error('HTTP ' + submit.status);
-        }
-        var job = await submit.json();
-        if (!job.success) {
-            return job;
-        }
+        var submitted = await window.SingleFactorResearch.submit('backtest', payload);
+        var summary = submitted.jobs && submitted.jobs[0];
+        if (!summary || !summary.job_id) throw new Error('回测任务提交失败');
+        var job = jobFromStatus(summary);
         saveActiveJob({
             job_id: job.job_id,
             run_token: job.run_token || payload.run_token,
-            page_uuid: payload.page_uuid || window._pageUuid || '',
+            workspace_id: summary.workspace_id || '',
             stream_url: job.stream_url,
             result_url: job.result_url,
             cancel_url: job.cancel_url,
@@ -264,7 +279,6 @@
             local_settings: backendRunPayload.local_settings || {},
             groups: runGroups,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
-            page_uuid: window._pageUuid || '',
             factor_family_alias: window.factorFamilyAlias || ''
         };
         var runToken = (window.crypto && typeof window.crypto.randomUUID === 'function')
@@ -521,7 +535,12 @@
     }
 
     runTest.restoreActiveJob = async function() {
+        if (window.SingleFactorResearch) await window.SingleFactorResearch.renewLease();
         var active = loadActiveJob();
+        if (!active || !active.job_id || !active.stream_url) {
+            active = await discoverActiveJob();
+            if (active) saveActiveJob(active);
+        }
         if (!active || !active.job_id || !active.stream_url) return;
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
@@ -537,7 +556,7 @@
             cancelBtn.onclick = async function() {
                 cancelBtn.disabled = true;
                 try {
-                    await fetch(active.cancel_url || ('/backtest/jobs/' + encodeURIComponent(active.job_id) + '/cancel'), { method: 'POST' });
+                    await fetch(active.cancel_url || ('/api/jobs/' + encodeURIComponent(active.job_id) + '/cancel'), { method: 'POST' });
                 } catch (e) {}
             };
         }
@@ -548,18 +567,14 @@
             progressContainer: batchProgressHost,
         });
         try {
-            var statusResp = await fetch('/backtest/jobs/' + encodeURIComponent(active.job_id));
+            var statusResp = await fetch('/api/jobs/' + encodeURIComponent(active.job_id));
             if (!statusResp.ok) throw new Error('HTTP ' + statusResp.status);
             var status = await statusResp.json();
             if (!status.success) throw new Error(status.error || '恢复失败');
-            if (status.page_uuid && window._pageUuid !== status.page_uuid) {
-                window._pageUuid = status.page_uuid;
-                try { sessionStorage.setItem('single_factor_test_page_uuid', window._pageUuid); } catch (e) {}
-            }
-            var terminal = status.status === 'succeeded' || status.status === 'failed' || status.status === 'cancelled';
+            var terminal = status.status === 'succeeded' || status.status === 'failed' || status.status === 'cancelled' || status.status === 'expired' || status.status === 'paused';
             var resultData = null;
             if (terminal) {
-                var resultResp = await fetch(active.result_url || ('/backtest/jobs/' + encodeURIComponent(active.job_id) + '/result'));
+                var resultResp = await fetch(active.result_url || ('/api/jobs/' + encodeURIComponent(active.job_id) + '/result'));
                 var body = await resultResp.json();
                 resultData = body.result || body.error || body;
             } else {
@@ -607,9 +622,7 @@
     };
 
     setTimeout(function() {
-        if (loadActiveJob()) {
-            runTest.restoreActiveJob();
-        }
+        runTest.restoreActiveJob();
     }, 0);
 
 

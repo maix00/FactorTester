@@ -19,6 +19,302 @@ let _sftCurrentFactorId = '';
 let _sftCurrentFactorType = 'public';
 let _sftCurrentOwner = '';
 
+window.SingleFactorResearch = (function() {
+    const VIEW_KEY = 'single_factor_research_view_uuid';
+    const CURSOR_KEY = 'single_factor_research_job_cursors';
+    let workspace = null;
+    let monitorGeneration = 0;
+
+    function uuid() {
+        return window.crypto && window.crypto.randomUUID
+            ? window.crypto.randomUUID()
+            : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+    }
+
+    async function jsonRequest(url, options) {
+        const response = await fetch(url, options);
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.error || ('HTTP ' + response.status));
+        return body;
+    }
+
+    async function bootstrapView() {
+        let viewUuid = '';
+        try { viewUuid = sessionStorage.getItem(VIEW_KEY) || ''; } catch (e) {}
+        if (!viewUuid) viewUuid = uuid();
+        const body = await jsonRequest('/api/single_factor_test/page', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({view_uuid: viewUuid})
+        });
+        window._viewUuid = body.view_uuid;
+        window._pageUuid = body.view_uuid;
+        try { sessionStorage.setItem(VIEW_KEY, body.view_uuid); } catch (e) {}
+        const label = document.getElementById('page-uuid-label');
+        if (label) label.textContent = body.view_uuid;
+    }
+
+    async function ensureWorkspace(factorId) {
+        function hasFamily(item) {
+            const payload = item && item.configuration && item.configuration.payload;
+            const families = payload && payload.shared && payload.shared.factor_families;
+            return Array.isArray(families) && families.some(entry => entry && entry.alias === factorId);
+        }
+        if (workspace && hasFamily(workspace)) return workspace;
+        const listed = await jsonRequest('/api/workspaces');
+        workspace = (listed.workspaces || []).find(hasFamily) || null;
+        if (!workspace) {
+            const created = await jsonRequest('/api/workspaces', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    factor_families: [{alias: factorId}], factors: [],
+                    title: factorId + ' research'
+                })
+            });
+            workspace = created.workspace;
+        }
+        await renewLease();
+        return workspace;
+    }
+
+    async function renewLease() {
+        if (!workspace || !window._viewUuid) return;
+        const url = '/api/view-leases/' + encodeURIComponent(window._viewUuid);
+        try {
+            await jsonRequest(url, {
+                method: 'PUT', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({workspace_id: workspace.workspace_id})
+            });
+        } catch (error) {
+            await jsonRequest('/api/view-leases', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({view_uuid: window._viewUuid, workspace_id: workspace.workspace_id})
+            });
+        }
+    }
+
+    async function submit(kind, draft) {
+        await ensureWorkspace(String(draft.factor_family_alias || _sftCurrentFactorId || ''));
+        const configuration = workspace.configuration;
+        const payload = JSON.parse(JSON.stringify(configuration.payload || {}));
+        payload.schema_version = 1;
+        payload.shared = payload.shared || {};
+        payload.shared.factor_families = [{alias: String(draft.factor_family_alias || _sftCurrentFactorId || '')}];
+        payload.shared.factors = Array.isArray(payload.shared.factors) ? payload.shared.factors : [];
+        payload.analyses = payload.analyses || {};
+        payload.analyses[kind] = draft;
+        payload.ui = payload.ui || {};
+        const updated = await jsonRequest('/api/workspaces/' + encodeURIComponent(workspace.workspace_id) + '/configuration', {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({expected_revision: configuration.revision, payload: payload})
+        });
+        workspace.configuration = updated.configuration;
+        await renewLease();
+        return jsonRequest('/api/runs', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                workspace_id: workspace.workspace_id,
+                configuration_revision: workspace.configuration.revision,
+                analyses: [kind], lifecycle_policy: 'observer_bound',
+                view_uuid: window._viewUuid
+            })
+        });
+    }
+
+    async function updateUiSnapshot(uiSnapshot) {
+        await ensureWorkspace(_sftCurrentFactorId || '');
+        const configuration = workspace.configuration;
+        const payload = JSON.parse(JSON.stringify(configuration.payload || {}));
+        payload.ui = uiSnapshot || {};
+        const updated = await jsonRequest('/api/workspaces/' + encodeURIComponent(workspace.workspace_id) + '/configuration', {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({expected_revision: configuration.revision, payload: payload})
+        });
+        workspace.configuration = updated.configuration;
+        return updated.configuration;
+    }
+
+    async function saveTemplate(name, uiSnapshot) {
+        await updateUiSnapshot(uiSnapshot);
+        return jsonRequest('/api/workspaces/' + encodeURIComponent(workspace.workspace_id) + '/configuration/templates', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name})
+        });
+    }
+
+    async function listTemplates() {
+        const data = await jsonRequest('/api/configuration-templates');
+        const current = _sftCurrentFactorId || '';
+        return (data.templates || []).filter(function(item) {
+            const families = item && item.payload && item.payload.shared && item.payload.shared.factor_families;
+            return Array.isArray(families) && families.some(entry => entry && entry.alias === current);
+        });
+    }
+
+    async function loadTemplate(configurationId) {
+        await ensureWorkspace(_sftCurrentFactorId || '');
+        const data = await jsonRequest('/api/workspaces/' + encodeURIComponent(workspace.workspace_id) + '/configuration/load-template', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                configuration_id: configurationId,
+                expected_revision: workspace.configuration.revision
+            })
+        });
+        workspace.configuration = data.configuration;
+        return data.configuration;
+    }
+
+    async function overwriteTemplate(configurationId) {
+        return jsonRequest('/api/configuration-templates/' + encodeURIComponent(configurationId), {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({workspace_id: workspace.workspace_id})
+        });
+    }
+
+    async function deleteTemplate(configurationId) {
+        return jsonRequest('/api/configuration-templates/' + encodeURIComponent(configurationId), {method: 'DELETE'});
+    }
+
+    function jobCursors() {
+        try { return JSON.parse(sessionStorage.getItem(CURSOR_KEY) || '{}'); }
+        catch (e) { return {}; }
+    }
+
+    function saveJobCursor(jobId, seq) {
+        const cursors = jobCursors();
+        cursors[jobId] = Number(seq || 0);
+        try { sessionStorage.setItem(CURSOR_KEY, JSON.stringify(cursors)); } catch (e) {}
+    }
+
+    function progressFrom(job, eventData) {
+        const data = eventData || (job.latest_progress && job.latest_progress.data) || {};
+        const completed = Number(data.completed || 0);
+        const total = Number(data.total || 0);
+        const phases = job.manifest && job.manifest.data && Array.isArray(job.manifest.data.phases)
+            ? job.manifest.data.phases : [];
+        return {
+            percent: total > 0 ? Math.max(0, Math.min(100, completed / total * 100)) : 0,
+            text: data.message || data.phase || (phases.length ? ('流程 ' + phases.length + ' 步') : job.status) || '',
+        };
+    }
+
+    function renderJob(job) {
+        const list = document.getElementById('research-job-monitor-list');
+        if (!list) return null;
+        let row = list.querySelector('[data-job-id="' + CSS.escape(job.job_id) + '"]');
+        if (!row) {
+            row = document.createElement('div');
+            row.className = 'research-job-row';
+            row.dataset.jobId = job.job_id;
+            row.innerHTML = '<div class="research-job-identity"></div>'
+                + '<div class="research-job-progress"><div class="research-job-progress-label"></div>'
+                + '<div class="research-job-progress-track"><div class="research-job-progress-fill"></div></div></div>'
+                + '<div class="research-job-actions"></div>';
+            list.appendChild(row);
+        }
+        const progress = progressFrom(job);
+        row.querySelector('.research-job-identity').textContent = job.kind + ' · ' + job.status;
+        row.querySelector('.research-job-progress-label').textContent = progress.text;
+        row.querySelector('.research-job-progress-fill').style.width = progress.percent + '%';
+        const actions = row.querySelector('.research-job-actions');
+        actions.replaceChildren();
+        if (job.status === 'queued' || job.status === 'running') {
+            const cancel = document.createElement('button');
+            cancel.type = 'button';
+            cancel.title = '取消任务';
+            cancel.textContent = '取消';
+            cancel.onclick = async function() {
+                cancel.disabled = true;
+                await fetch('/api/jobs/' + encodeURIComponent(job.job_id) + '/cancel', {method: 'POST'});
+            };
+            actions.appendChild(cancel);
+        } else if (job.status === 'cancelled' && job.cancel_reason === 'view_closed') {
+            const retry = document.createElement('button');
+            retry.type = 'button';
+            retry.textContent = '重新排队';
+            retry.title = '以同一冻结配置创建新任务';
+            retry.onclick = async function() {
+                retry.disabled = true;
+                await fetch('/api/jobs/' + encodeURIComponent(job.job_id) + '/retry', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({view_uuid: window._viewUuid || ''})
+                });
+                await restoreActiveJobs();
+            };
+            actions.appendChild(retry);
+        }
+        return row;
+    }
+
+    async function watchJob(job, generation) {
+        if (!['queued', 'running'].includes(job.status)) return;
+        const after = Number(jobCursors()[job.job_id] || 0);
+        const url = '/api/jobs/' + encodeURIComponent(job.job_id) + '/stream' + (after ? '?after=' + after : '');
+        const response = await fetch(url);
+        if (!response.ok || generation !== monitorGeneration) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let event = '';
+        let seq = after;
+        while (generation === monitorGeneration) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, {stream: true});
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (line.startsWith('id: ')) seq = Number(line.slice(4).trim()) || seq;
+                else if (line.startsWith('event: ')) event = line.slice(7).trim();
+                else if (line.startsWith('data: ')) {
+                    let data = {};
+                    try { data = JSON.parse(line.slice(6)); } catch (e) { continue; }
+                    saveJobCursor(job.job_id, seq);
+                    if (event === 'progress' || event === 'activity' || event === 'activity_manifest') {
+                        job.latest_progress = {data: data};
+                    }
+                    if (event === 'activity_manifest') job.manifest = {data: data};
+                    if (event === 'result') job.status = 'succeeded';
+                    if (event === 'error') job.status = data.cancelled ? 'cancelled' : 'failed';
+                    renderJob(job);
+                }
+            }
+        }
+    }
+
+    async function restoreActiveJobs() {
+        if (!workspace) return;
+        const generation = ++monitorGeneration;
+        const data = await jsonRequest('/api/jobs?workspace_id=' + encodeURIComponent(workspace.workspace_id) + '&limit=20');
+        if (generation !== monitorGeneration) return;
+        const jobs = data.jobs || [];
+        const visible = jobs.filter(function(job) {
+            return ['queued', 'running', 'paused'].includes(job.status)
+                || (job.status === 'cancelled' && job.cancel_reason === 'view_closed');
+        });
+        const monitor = document.getElementById('research-job-monitor');
+        const list = document.getElementById('research-job-monitor-list');
+        if (!monitor || !list) return;
+        list.replaceChildren();
+        monitor.hidden = visible.length === 0;
+        visible.forEach(renderJob);
+        visible.forEach(function(job) { watchJob(job, generation).catch(function() {}); });
+    }
+
+    async function detach() {
+        if (!window._viewUuid) return;
+        fetch('/api/view-leases/' + encodeURIComponent(window._viewUuid), {
+            method: 'DELETE', keepalive: true
+        }).catch(function(){});
+    }
+
+    return {
+        bootstrapView, ensureWorkspace, renewLease, submit, detach,
+        updateUiSnapshot, saveTemplate, listTemplates, loadTemplate, overwriteTemplate, deleteTemplate,
+        restoreActiveJobs,
+        workspace: function() { return workspace; }
+    };
+})();
+
 document.addEventListener('DOMContentLoaded', function() {
     initSingleFactorShell();
 });
@@ -26,6 +322,7 @@ document.addEventListener('DOMContentLoaded', function() {
 async function initSingleFactorShell() {
     initSingleFactorSidebarResizer();
     initSingleFactorSidebarToggle();
+    await window.SingleFactorResearch.bootstrapView();
     await loadSingleFactorFamilyList();
 
     const app = document.querySelector('.single-factor-app');
@@ -172,15 +469,7 @@ async function selectSingleFactorFamily(factorId, factorType, ownerUsername, opt
     _sftCurrentFactorId = factorId || '';
     _sftCurrentFactorType = factorType || 'public';
     _sftCurrentOwner = ownerUsername || '';
-    if (prevFactorId && prevFactorId !== _sftCurrentFactorId && window._pageUuid) {
-        try {
-            await fetch('/close_page', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ page_uuid: window._pageUuid, factor_family_alias: prevFactorId }),
-            });
-        } catch (e) {}
-    }
+    await window.SingleFactorResearch.ensureWorkspace(_sftCurrentFactorId);
     renderSingleFactorFamilyList();
 
     const body = document.getElementById('editor-body');
@@ -206,12 +495,16 @@ async function selectSingleFactorFamily(factorId, factorType, ownerUsername, opt
         const data = await res.json();
         if (!data.success) throw new Error(data.error || '加载失败');
         await replaceSingleFactorContent(data.html || '');
+        await window.SingleFactorResearch.restoreActiveJobs();
         updateSingleFactorHistory(options.replaceHistory);
         expandCurrentSingleFactorInNav();
     } catch (e) {
         if (body) body.innerHTML = `<div class="editor-placeholder" style="color:#d40000;">加载失败: ${escHtml(e.message || e)}</div>`;
     }
 }
+
+setInterval(function() { window.SingleFactorResearch.renewLease().catch(function(){}); }, 5000);
+window.addEventListener('beforeunload', function() { window.SingleFactorResearch.detach(); });
 
 async function replaceSingleFactorContent(html) {
     const body = document.getElementById('editor-body');

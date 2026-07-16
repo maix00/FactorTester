@@ -21,9 +21,9 @@ class ResearchSession:
     status: str = "research_ready"
     operator_mode: str = "client_only"
     admin_port: int = 7998
-    factor_family: str = ""
-    template: str = ""
-    product_groups: list[str] = field(default_factory=list)
+    factor_families: list[str] = field(default_factory=list)
+    factors: list[str] = field(default_factory=list)
+    configuration_file: str = ""
     plan: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
     gaps: list[dict[str, Any]] = field(default_factory=list)
@@ -36,9 +36,9 @@ class ResearchSession:
             status=str(payload.get("status") or "research_ready"),
             operator_mode=str(payload.get("operator_mode") or "client_only"),
             admin_port=int(payload.get("admin_port") or 7998),
-            factor_family=str(payload.get("factor_family") or ""),
-            template=str(payload.get("template") or ""),
-            product_groups=list(payload.get("product_groups") or []),
+            factor_families=[str(item) for item in payload.get("factor_families") or []],
+            factors=[str(item) for item in payload.get("factors") or []],
+            configuration_file=str(payload.get("configuration_file") or ""),
             plan=list(payload.get("plan") or []),
             events=list(payload.get("events") or []),
             gaps=list(payload.get("gaps") or []),
@@ -51,9 +51,9 @@ class ResearchSession:
             "status": self.status,
             "operator_mode": self.operator_mode,
             "admin_port": self.admin_port,
-            "factor_family": self.factor_family,
-            "template": self.template,
-            "product_groups": self.product_groups,
+            "factor_families": self.factor_families,
+            "factors": self.factors,
+            "configuration_file": self.configuration_file,
             "plan": self.plan,
             "events": self.events,
             "gaps": self.gaps,

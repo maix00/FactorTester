@@ -92,6 +92,8 @@
             product_path_selection_count: data.product_path_selection_count,
             n_groups: data.n_groups,
         });
+        GT.results.currentJobId = data.job_id || '';
+        GT.results.currentRunId = data.run_id || data.run_token || '';
 
         // 0) 注入后端 metrics_meta（替换前端硬编码）
         if (data.metrics_meta) {

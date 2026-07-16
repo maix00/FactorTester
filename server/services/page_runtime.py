@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Optional
 from dataclasses import dataclass
+import os
 import threading
+import time
 import uuid
 from types import SimpleNamespace
 
@@ -22,13 +24,16 @@ if TYPE_CHECKING:
 page_objects: dict[str, dict[str, list]] = {}
 page_owners: dict[str, str | None] = {}
 page_states: dict[str, dict[str, Any]] = {}
+page_leases: dict[str, dict[str, Any]] = {}
 # Submission mutations may call scoped lookup helpers while holding the state
 # lock. An RLock preserves the atomic mutation without deadlocking that lookup.
 factor_testers_lock = threading.RLock()
 
 MAX_PAGE_UUIDS = 500
+PAGE_LEASE_GRACE_SECONDS = max(0.5, float(os.environ.get("GTHT_PAGE_LEASE_GRACE_SECONDS", "10.0")))
 page_time_store: dict = {}
 page_time_store_lock = threading.Lock()
+_page_lease_timers: dict[str, threading.Timer] = {}
 
 
 def create_page_uuid() -> str:
@@ -275,20 +280,69 @@ def register_page(page_uuid: str, owner: str | None = None, **state: Any) -> Non
         page_state = page_states.setdefault(page_uuid, {})
         if state:
             page_state.update(state)
+        page_leases[page_uuid] = {
+            "owner": owner,
+            "status": "active",
+            "last_heartbeat_at": time.time(),
+            "detached_at": None,
+            "expires_at": None,
+        }
+        timer = _page_lease_timers.pop(page_uuid, None)
+        if timer is not None:
+            timer.cancel()
     _reg_page(page_uuid)
 
 
-def unregister_page(page_uuid: str) -> None:
+def heartbeat_page(page_uuid: str, owner: str | None = None) -> None:
     page_uuid = str(page_uuid).strip()
     if not page_uuid:
         return
+    now = time.time()
+    with factor_testers_lock:
+        if owner is not None:
+            page_owners[page_uuid] = owner
+        page_leases[page_uuid] = {
+            "owner": page_owners.get(page_uuid, owner),
+            "status": "active",
+            "last_heartbeat_at": now,
+            "detached_at": None,
+            "expires_at": None,
+        }
+        timer = _page_lease_timers.pop(page_uuid, None)
+        if timer is not None:
+            timer.cancel()
+
+
+def unregister_page(page_uuid: str) -> None:
+    mark_page_detaching(page_uuid)
+
+
+def mark_page_detaching(page_uuid: str, *, grace_seconds: float | None = None) -> None:
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        return
+    grace = PAGE_LEASE_GRACE_SECONDS if grace_seconds is None else max(0.0, float(grace_seconds))
+    now = time.time()
+    expires_at = now + grace
+    with factor_testers_lock:
+        lease = page_leases.setdefault(page_uuid, {"owner": page_owners.get(page_uuid)})
+        lease.update({
+            "status": "detaching",
+            "detached_at": now,
+            "expires_at": expires_at,
+        })
+        timer = _page_lease_timers.pop(page_uuid, None)
+        if timer is not None:
+            timer.cancel()
+        timer = threading.Timer(grace, expire_detached_pages)
+        timer.daemon = True
+        _page_lease_timers[page_uuid] = timer
+        timer.start()
+
+
+def _finalize_unregistered_page(page_uuid: str) -> None:
     from server.services.backtest_runs import cancel_page
     cancel_page(page_uuid)
-    try:
-        from server.services.test_jobs import cancel_page as cancel_backtest_jobs_page
-        cancel_backtest_jobs_page(page_uuid)
-    except Exception:
-        pass
     clear_page(page_uuid, delete=True)
     from server.services.factor_registry import unregister_page as _unreg_page
     _unreg_page(page_uuid)
@@ -297,6 +351,24 @@ def unregister_page(page_uuid: str) -> None:
     with factor_testers_lock:
         page_owners.pop(page_uuid, None)
         page_states.pop(page_uuid, None)
+        page_leases.pop(page_uuid, None)
+        timer = _page_lease_timers.pop(page_uuid, None)
+        if timer is not None:
+            timer.cancel()
+
+
+def expire_detached_pages(now: float | None = None) -> int:
+    now = time.time() if now is None else now
+    with factor_testers_lock:
+        expired = [
+            page_uuid for page_uuid, lease in page_leases.items()
+            if lease.get("status") == "detaching"
+            and lease.get("expires_at") is not None
+            and float(lease.get("expires_at") or 0.0) <= now
+        ]
+    for page_uuid in expired:
+        _finalize_unregistered_page(page_uuid)
+    return len(expired)
 
 
 def update_page_state(page_uuid: str, **kwargs: Any) -> None:

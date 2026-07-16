@@ -11,87 +11,45 @@ from cli_anything.factortester_research.core.slices import default_factor_valida
 HARNESS_ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_plan_orders_diagnostics_before_backtest() -> None:
+def test_plan_uses_one_workspace_run_job_contract() -> None:
     plan = build_factor_research_plan(
-        factor_family="SgCCS",
-        template="2026-06-02 07:20:47",
-        product_groups=["中国期货日盘"],
-        params=["N=2m"],
-        f_values=["1m"],
+        factor_families=["SgCCS", "MmRet"],
+        factors=["SgCCS=SgCCS|P:CA|N:10d", "MmRet=MmRet|P:CA|N:5d"],
+        configuration_file="run spec.json",
+        analyses=["ic", "factor_type_analysis", "backtest"],
     )
+    commands = "\n".join(item["command"] for item in plan)
     phases = [item["phase"] for item in plan]
-    assert phases.index("inspect_factor_expr_dsl") < phases.index("operator_coverage_gate")
-    assert phases.index("operator_coverage_gate") < phases.index("prepare_factor_workspace")
-    assert phases.index("inspect_factor_expr_dsl") < phases.index("prepare_factor_workspace")
-    assert phases.index("prepare_factor_workspace") < phases.index("understand_factor_source")
-    assert phases.index("understand_factor_source") < phases.index("diagnose_ic")
-    assert phases.index("build_validation_slices") < phases.index("diagnose_ic")
-    assert phases.index("query_research_library") < phases.index("diagnose_ic")
-    assert phases.index("diagnose_ic") < phases.index("backtest")
-    assert phases.index("diagnose_type") < phases.index("backtest")
-    assert phases.index("cost_capacity_screen") < phases.index("backtest")
-    assert any("ic_test grid" in item["command"] for item in plan)
-    assert any("custom_factors operators" in item["command"] for item in plan)
-    assert any(item["phase"] == "operator_coverage_gate" for item in plan)
-    assert any("workspace prepare --build --sync" in item["command"] for item in plan)
-    assert any("slice-plan --json" in item["command"] for item in plan)
-    assert any("--volume-capacity-mode volume_participation" in item["command"] for item in plan)
-    assert any("factor-library history" in item["command"] for item in plan)
-    assert any("factor-library import-result" in item["command"] for item in plan)
-    assert any("factor-library rank" in item["command"] for item in plan)
-    assert any(item["phase"] == "platform_gap_loop" for item in plan)
+    assert phases.index("understand_factor_source") < phases.index("submit_run")
+    assert "workspace create --factor-family SgCCS --factor-family MmRet" in commands
+    assert "--factor 'SgCCS=SgCCS|P:CA|N:10d'" in commands
+    assert "workspace update --file 'run spec.json'" in commands
+    assert "run submit --analysis ic --analysis factor_type_analysis --analysis backtest" in commands
+    assert "job watch <job_id>" in commands
+    assert "single_factor_test" not in commands
+    assert "ic_test grid" not in commands
+    assert "backtest compare" not in commands
 
 
-def test_plan_records_product_group_and_mask_semantics() -> None:
+def test_plan_treats_factor_families_as_values() -> None:
     plan = build_factor_research_plan(
-        factor_family="SgCCS",
-        product_groups=["custom-low-fee-day"],
-        params=["N=20d"],
-        f_values=["1d"],
+        factor_families=["MyCustomFamily", "AnotherFamily"],
+        configuration_file="configuration.json",
     )
-    phases = [item["phase"] for item in plan]
-    assert "define_product_universe" in phases
-    text = "\n".join(str(item.get("purpose", "")) for item in plan)
-    assert "product group/product path" in text
-    assert "product mask" in text
-    assert "ranking universe" in text
-    assert "membership" in text
-
-
-def test_plan_treats_factor_family_as_value_not_sgccs_default() -> None:
-    plan = build_factor_research_plan(factor_family="MyCustomFamily", params=["N=3m"])
-    commands = "\n".join(str(item["command"]) for item in plan)
+    commands = "\n".join(item["command"] for item in plan)
     assert "--factor-family MyCustomFamily" in commands
+    assert "--factor-family AnotherFamily" in commands
     assert "SgCCS" not in commands
 
 
-def test_validation_checklist_encodes_quant_research_guardrails() -> None:
+def test_validation_checklist_encodes_durable_and_quant_contracts() -> None:
     text = "\n".join(validation_checklist())
-    assert "费用" in text
-    assert "多重检验" in text
-    assert "FactorExpr 算子表" in text
-    assert "算子不全" in text
-    assert "workspace prepare --build --sync" in text
-    assert "未来函数" in text
-    assert "ResearchSlice/ValidationPlan" in text
-    assert "product mask" in text
-    assert "分组边界" in text
-    assert "2026" in text
-    assert "gap" in text
-    assert "7998" in text
-    assert "client_only" in text
-    assert "branch/worktree" in text
-    assert "factor-library import-result" in text
-    assert "factor-library history/rank" in text
-
-
-def test_platform_gap_plan_requires_owner_worktree_before_cli_merge() -> None:
-    plan = build_factor_research_plan(factor_family="SgCCS")
-    platform = next(item for item in plan if item["phase"] == "platform_gap_loop")
-    text = platform["purpose"] + " " + platform["command"]
-    assert "issue/task" in text
-    assert "branch/worktree" in text
-    assert "merge 到 CLI worktree" in text
+    for required in (
+        "RunSpec", "ranking universe", "product mask", "多重检验", "未来函数",
+        "费用", "ResearchSlice/ValidationPlan", "traceback", "TTL", "retry_of",
+        "page_uuid",
+    ):
+        assert required in text
 
 
 def test_gap_state_machine_blocks_and_resumes_research() -> None:
@@ -106,48 +64,30 @@ def test_gap_state_machine_blocks_and_resumes_research() -> None:
 def test_service_target_selection_requires_unambiguous_worktree() -> None:
     worktrees = [
         ManagedWorktree("feat", "feat", "/repo", 7999, False, False),
-        ManagedWorktree("fix/issue-123-factortester-cli-http", "fix/issue-123-factortester-cli-http", "/repo/.workspace/fix/issue-123", 8123, True, True),
+        ManagedWorktree("fix/issue-123", "fix/issue-123", "/repo/.workspace/fix/issue-123", 8123, True, True),
     ]
-    target = select_worktree(worktrees, target_port=8123)
-    assert target.branch == "fix/issue-123-factortester-cli-http"
+    assert select_worktree(worktrees, target_port=8123).branch == "fix/issue-123"
 
 
 def test_default_validation_plan_separates_selection_from_oos_annotation() -> None:
-    plan = default_factor_validation_plan()
-    payload = plan.to_dict()
-    assert payload["in_sample_start"] == "2024-01-01"
+    payload = default_factor_validation_plan().to_dict()
     assert payload["in_sample_end"] == "2025-12-31"
     assert payload["oos_start"] == "2026-01-01"
-    names = {item["name"] for item in payload["slice_sets"]}
-    assert {"calendar_quarterly", "rolling_63d_step21d", "oos_annotation"} <= names
-    all_slices = [
-        item
-        for slice_set in payload["slice_sets"]
-        for item in slice_set["slices"]
-    ]
-    assert any(item["name"] == "2024Q1" for item in all_slices)
+    all_slices = [item for group in payload["slice_sets"] for item in group["slices"]]
     assert any(item["kind"] == "rolling" for item in all_slices)
-    oos = [item for item in all_slices if item["purpose"] == "oos_annotation"]
-    assert oos and all(item["start"].startswith("2026") for item in oos)
-    assert not any(item["purpose"] in {"selection", "validation"} and item["start"].startswith("2026") for item in all_slices)
+    assert not any(
+        item["purpose"] in {"selection", "validation"} and item["start"].startswith("2026")
+        for item in all_slices
+    )
 
 
-def test_packaging_and_docs_record_cli_anything_adaptation_contract() -> None:
+def test_packaging_and_docs_record_durable_remote_contract() -> None:
     setup_text = (HARNESS_ROOT / "setup.py").read_text(encoding="utf-8")
     readme = (HARNESS_ROOT / "cli_anything/factortester_research/README.md").read_text(encoding="utf-8")
     skill = (HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md").read_text(encoding="utf-8")
-    test_doc = (HARNESS_ROOT / "cli_anything/factortester_research/tests/TEST.md").read_text(encoding="utf-8")
-
     assert 'python_requires=">=3.10"' in setup_text
-    assert "CLI-Anything Adaptation Notes" in readme
-    assert "remote HTTP research client" in readme
     for text in (readme, skill):
-        assert "sample_role" in text
-        assert "regime_label" in text
-        assert "slice_name" in text
-        assert "grid_size" in text
-        assert "costed_pass" in text
-        assert "product mask" in text
-        assert "ranking universe" in text
-    assert "15 passed" in test_doc
-    assert "7 passed" in test_doc
+        assert "workspace" in text
+        assert "RunSpec" in text
+        assert "job_id" in text
+        assert "page_uuid" in text

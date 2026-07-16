@@ -4,204 +4,99 @@ import shlex
 from typing import Any
 
 
+ANALYSES = ("ic", "factor_evaluation", "factor_type_analysis", "backtest")
+
+
 def build_factor_research_plan(
     *,
-    factor_family: str,
-    template: str = "",
-    product_groups: list[str] | None = None,
-    params: list[str] | None = None,
-    f_values: list[str] | None = None,
-    include_rev: bool = True,
-    top: int = 12,
+    factor_families: list[str],
+    factors: list[str] | None = None,
+    configuration_file: str,
+    analyses: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    product_groups = product_groups or []
-    params = params or []
-    f_values = f_values or []
-    grid_args = ["--factor-family", shlex.quote(factor_family)]
-    for group in product_groups:
-        grid_args.extend(["--product-group", shlex.quote(group)])
-    for value in params:
-        grid_args.extend(["--param", shlex.quote(value)])
-    for value in f_values:
-        grid_args.extend(["--f", shlex.quote(value)])
-    grid_args.append("--rev" if include_rev else "--no-rev")
-    grid_args.extend(["--top", str(top)])
-    grid = " ".join(grid_args)
-    plan: list[dict[str, Any]] = [
-        {
-            "phase": "setup",
-            "skill_basis": ["longbridge-quant:factor-research", "quantitative-research:patterns"],
-            "purpose": "绑定因子家族、模板和候选产品组；明确 product group/product path 是因子排序与分组的 ranking universe，product mask 只是分组后交易/评估的子集过滤，二者不能互相替代。",
-            "command": f"factortester single_factor_test --factor-family {shlex.quote(factor_family)}",
-        },
-        {
-            "phase": "define_product_universe",
-            "skill_basis": ["longbridge-quant:factor-research", "quantitative-research:validations"],
-            "purpose": "为每次研究记录产品域语义：产品组/产品路径决定哪些产品进入因子截面排名与分组；product mask 在 membership 已算出后筛掉不交易产品。用 --path 缩小产品组会改变 rank 分母和分组边界，用 --mask-products 只改变交易子集。最终报告必须说明选择的是哪一种。",
-            "command": "factortester products path-candidates list && # 若需现场构建: factortester products path-candidates add --name <NAME> --path <+/-Product/...>",
-            "required_outputs": ["ranking_universe_product_group", "optional_trade_mask_products", "session_compatibility", "fee_capacity_screen"],
-        },
+    """Build a research plan around one durable workspace/run/job contract."""
+    families = [item.strip() for item in factor_families if item.strip()]
+    if not families:
+        raise ValueError("at least one factor family is required")
+    family_args = " ".join(f"--factor-family {shlex.quote(item)}" for item in families)
+    factor_args = " ".join(f"--factor {shlex.quote(item)}" for item in (factors or []))
+    configuration = shlex.quote(configuration_file)
+    selected = analyses or list(ANALYSES)
+    analysis_args = " ".join(f"--analysis {shlex.quote(item)}" for item in selected)
+    return [
         {
             "phase": "inspect_factor_expr_dsl",
-            "skill_basis": ["longbridge-quant:factor-research"],
-            "purpose": "在阅读或改写因子源码前，先从后端注册表查看 FactorExpr 支持的数据列、时序、截面、期限结构等算子，并判断当前研究需要的算子是否覆盖完整。",
+            "purpose": "确认 FactorExpr 算子、输入窗口和无未来函数约束。",
             "command": "factortester custom_factors operators",
-            "required_outputs": ["operator_groups", "operator_keys", "operator_descriptions"],
-        },
-        {
-            "phase": "operator_coverage_gate",
-            "skill_basis": ["longbridge-quant:factor-research", "cli-anything:refine"],
-            "purpose": "如果因子研究需要的算子不全，必须先记录缺失算子的语义、输入输出签名、无未来函数约束、预期测试，再进入所属平台 worktree 补全算子。",
-            "command": "若缺算子: cli-anything-factortester-research gap add 'missing FactorExpr operator' '<semantic/signature/tests>'",
-            "required_outputs": ["missing_operator_semantics", "expected_signature", "validation_tests"],
         },
         {
             "phase": "prepare_factor_workspace",
-            "skill_basis": ["longbridge-quant:factor-research"],
-            "purpose": "研究开始前先搭建/同步因子工作区；没有本地因子工作区时必须先 build，再从数据库 sync。",
+            "purpose": "同步并检查因子源码。",
             "command": "cli-anything-factortester-research workspace prepare --build --sync",
-            "required_outputs": ["workspace_root", "git_status"],
         },
         {
             "phase": "understand_factor_source",
-            "skill_basis": ["longbridge-quant:factor-research"],
-            "purpose": "测试前必须阅读因子工作区源码，确认因子在计算什么、是否存在明显未来函数或过拟合参数。",
-            "command": f"cli-anything-factortester-research workspace inspect --factor-family {shlex.quote(factor_family)}",
-            "required_outputs": ["source_files", "tree_repr", "source_checks", "rolling_shift_windows", "data_columns"],
+            "purpose": "阅读因子实现，记录 rolling/shift、数据列和可见时间。",
+            "command": " && ".join(
+                f"cli-anything-factortester-research workspace inspect --factor-family {shlex.quote(item)}"
+                for item in families
+            ),
         },
         {
             "phase": "build_validation_slices",
-            "skill_basis": ["quantitative-research:walk-forward", "quantitative-research:regime-detection"],
-            "purpose": "生成并记录 calendar、rolling 和数据驱动 regime 切片；2026 只能作为 OOS 标注，不能用于选参。",
+            "purpose": "冻结样本内、滚动和 OOS 标注切片。",
             "command": "cli-anything-factortester-research slice-plan --json",
-            "required_outputs": ["calendar_quarterly", "rolling_63d_step21d", "oos_annotation", "selection_policy"],
         },
         {
-            "phase": "query_research_library",
-            "skill_basis": ["quantitative-research:multiple-testing", "longbridge-quant:factor-research"],
-            "purpose": "测试前先查询已有结构化研究结果，避免重复跑同一时间段/产品组/参数，并用历史表现确定需要复核而不是盲目继续网格搜索。",
-            "command": (
-                "factortester custom_factors factor-library history "
-                f"--factor-family {shlex.quote(factor_family)}"
-            ),
-            "required_outputs": ["existing_runs", "metrics", "config_hash", "artifact_paths"],
+            "phase": "create_research_workspace",
+            "purpose": "创建用户拥有的持久研究工作区。",
+            "command": f"factortester workspace create {family_args} {factor_args}".rstrip(),
+        },
+        {
+            "phase": "freeze_configuration",
+            "purpose": "将因子家族、具体因子、产品域、日期、成本、容量和 step 设置写入活动配置。",
+            "command": f"factortester workspace update --file {configuration}",
+            "required_outputs": ["workspace_id", "configuration_revision", "configuration fingerprint"],
+        },
+        {
+            "phase": "submit_run",
+            "purpose": "一次冻结 RunSpec，并为各分析创建同一 run 下的独立 job。",
+            "command": f"factortester run submit {analysis_args}",
+            "required_outputs": ["run_id", "job_id", "kind", "status"],
+        },
+        {
+            "phase": "observe_jobs",
+            "purpose": "按 job_id 恢复进度；页面和 harness 都不成为任务 owner。",
+            "command": "factortester job list && factortester job watch <job_id>",
+        },
+        {
+            "phase": "control_jobs",
+            "purpose": "显式取消、失败重试或从 paused checkpoint 创建后续 attempt。",
+            "command": "factortester job cancel|retry|continue <job_id>",
+        },
+        {
+            "phase": "audit_results",
+            "purpose": "按 job_id 查询 terminal result、错误堆栈和 artifacts。",
+            "command": "factortester job status <job_id> && factortester job artifact <job_id> <name>",
+        },
+        {
+            "phase": "platform_gap_loop",
+            "purpose": "平台缺口必须在所属 issue branch/worktree 修复并测试；harness 只记录证据。",
+            "command": "记录 gap -> issue worktree 修复 -> tests -> commit -> 人工授权 merge",
         },
     ]
-    if template:
-        plan.extend(
-            [
-                {
-                    "phase": "setup",
-                    "purpose": "加载单因子测试模板到 single_factor_test 上下文。",
-                    "command": f"factortester single_factor_test --factor-family {shlex.quote(factor_family)} template load {shlex.quote(template)}",
-                },
-                {
-                    "phase": "setup",
-                    "purpose": "复制模板到独立 backtest 草稿，避免污染 single_factor_test 状态。",
-                    "command": f"factortester backtest template --from-module-template single_factor_test load {shlex.quote(template)}",
-                },
-            ]
-        )
-    plan.extend(
-        [
-            {
-                "phase": "diagnose_ic",
-                "skill_basis": ["longbridge-quant:factor-research"],
-                "purpose": "先用 IC/IR、t-stat、hit rate、decay 预筛选，避免直接过拟合回测；CLI 运行结果会写入 factor-library。",
-                "command": f"factortester ic_test grid {grid}",
-                "required_outputs": ["mean_ic", "ir", "t_stat", "hit_rate", "decay", "sample_count"],
-            },
-            {
-                "phase": "diagnose_type",
-                "skill_basis": ["longbridge-quant:correlation", "quantitative-research:regime-blindness"],
-                "purpose": "检查因子风格暴露和相似参照因子，防止只是伪装 beta 或趋势/波动率暴露；CLI 运行结果会写入 factor-library。",
-                "command": f"factortester factor_type_analysis grid {grid}",
-            },
-            {
-                "phase": "cost_capacity_screen",
-                "skill_basis": ["longbridge-quant:execution-model"],
-                "purpose": "用费用、成交量容量和产品组覆盖情况筛掉平均收益无法覆盖有效费率的组合；CLI 回测结果会写入 factor-library。",
-                "command": f"factortester backtest compare factor-grid {grid} --volume-capacity-mode volume_participation",
-            },
-            {
-                "phase": "backfill_research_library",
-                "skill_basis": ["quantitative-research:record-keeping"],
-                "purpose": "如果已有报告或 artifact 尚未结构化入库，用 import-result 回填；如果脚本已直接得到指标，用 save-result 直写结果库。",
-                "command": (
-                    "factortester custom_factors factor-library import-result "
-                    "--dir <research_report_dir> --report-path <report.md> --note '<why imported>' "
-                    "# or: factortester custom_factors factor-library save-result --factor-family <NAME> --factor-alias <ALIAS> --test-type ic --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --metric ic_mean=<VALUE>"
-                ),
-            },
-            {
-                "phase": "rank_research_library",
-                "skill_basis": ["quantitative-research:validation", "longbridge-quant:factor-research"],
-                "purpose": "用结构化结果库查询某个时间段内表现较好的因子/产品组；rank 只能作为候选生成，不能替代 OOS 复核。",
-                "command": (
-                    "factortester custom_factors factor-library rank "
-                    "--start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> "
-                    "--preset ic-stable"
-                ),
-                "required_outputs": ["factor_family", "product_group", "metrics", "run_id", "report_path"],
-            },
-            {
-                "phase": "stability_research_library",
-                "skill_basis": ["quantitative-research:validation", "longbridge-quant:factor-research"],
-                "purpose": "检查候选因子是否跨月份/季度/年份稳定，而不是只在单个切片里表现好；先用 metrics 查看指标定义。",
-                "command": (
-                    "factortester custom_factors factor-library metrics && "
-                    "factortester custom_factors factor-library stability "
-                    "--factor-family <NAME> --preset ic-stable --by quarter"
-                ),
-                "required_outputs": ["periods", "pass_rate", "avg", "worst", "failures"],
-            },
-            {
-                "phase": "factor_improvement_loop",
-                "skill_basis": ["quantitative-research:validations"],
-                "purpose": "若 IC/类型/成本/回测表现不好，进入因子工作区修改源码或候选参数，commit、push 入库，然后回到诊断阶段。",
-                "command": "cli-anything-factortester-research decision poor-result --reason '<why>' && factortester custom_factors workspace git diff",
-            },
-            {
-                "phase": "platform_gap_loop",
-                "skill_basis": ["cli-anything:refine"],
-                "purpose": "若发现 FactorTester 平台缺口，包括因子算子缺失、算子语义错误、因子计算错误、测试/回测 API 缺口，先确认所属 issue/task 范围；source_owner 必须在该任务 branch/worktree 修复、充分测试、提交，再 merge 到 CLI worktree，随后经 7998 管理端口重启；client_only 只能记录 gap 并交给维护者。",
-                "command": "记录 gap -> 在所属 issue worktree 修复因子算子/语义/计算/API 并充分验证 -> commit -> merge 到 CLI worktree -> cli-anything-factortester-research service restart --target-port 8123",
-            },
-            {
-                "phase": "backtest",
-                "skill_basis": ["quantitative-research:proper-backtest-framework"],
-                "purpose": "只在诊断通过后运行分组回测；必须带费用、容量、明确 margin mode 和足够订单样本。",
-                "command": "factortester backtest --run --verbose",
-            },
-            {
-                "phase": "audit_results",
-                "skill_basis": ["quantitative-research:validations"],
-                "purpose": "导出策略、ledger、order-flow、snapshot，检查成本、换手、成交容量和无未来函数。",
-                "command": "factortester backtest results summary && factortester backtest results order-flow --output order_flow.csv",
-            },
-        ]
-    )
-    return plan
 
 
 def validation_checklist() -> list[str]:
     return [
-        "IC/IR/t-stat/sample_count 已报告，且不是只看单次收益曲线。",
-        "参数网格记录 hypotheses_tested，解释多重检验风险。",
-        "开始改写因子前，必须先查看后端 FactorExpr 算子表；若算子不全，先补全算子和测试，再继续研究。",
-        "开始任何 IC/类型/回测前，必须先 workspace prepare --build --sync，并 inspect 因子源码。",
-        "必须区分 product group/product path 与 product mask：前者决定因子排名 universe 和分组边界，后者只在 membership 后筛选交易/评估对象；最终报告不得把 mask 回测解释成缩小 universe 后的分组回测。",
-        "必须生成 ResearchSlice/ValidationPlan；不能只用 H1/H2，至少要有季度、滚动窗口和数据驱动 regime 说明。",
-        "2026 样本只能作为 OOS 风险标注，不能用于选择因子、产品组、参数或策略 policy。",
+        "RunSpec 必须冻结因子 aliases、产品 ranking universe/product mask、时间范围与全部设置。",
+        "IC/IR/t-stat/sample_count 与回测成本后指标必须来自同一冻结 RunSpec。",
+        "参数网格记录 hypotheses_tested，并解释多重检验风险。",
+        "信号可见时间、下一 open 成交和 forward-return 窗口必须无未来函数。",
         "费用、成交量容量、margin mode、fee mode 显式写入配置。",
-        "无未来函数：信号使用 close 时只能在下一可见 open 或更晚成交。",
-        "发现 CLI/API/后端能力缺口时先记录 gap，修复代码并验证后再继续研究。",
-        "发现因子算子缺失、算子语义错误或计算结果错误时，必须进入平台代码修复流程，不能把错误结果当作因子结论。",
-        "已有 artifact 或报告必须用 factor-library import-result 入库；新跑的 IC/类型/回测结果应能在 factor-library history/rank 中查到。",
-        "从 factor-library rank 得到的好因子只表示候选，必须经过切片、成本、容量和 OOS 复核后才能形成结论。",
-        "只有 source_owner 可以修 FactorTester 服务代码；client_only 用户只能提交 gap 证据，不能假装能修改服务器源码。",
-        "source_owner 修平台代码前必须确认所属 issue/task 范围，并在对应 branch/worktree 修改；CLI worktree 只能接收 merge 后的平台改动。",
-        "平台代码修复后必须通过 7998 管理端口重启目标服务，再重新运行失败步骤。",
-        "表现不好时先回到因子工作区理解并修改因子源码或参数，再重新跑 IC/类型/回测诊断。",
-        "最终结论标注 exploratory / in-sample / out-of-sample。",
+        "ResearchSlice/ValidationPlan 区分 selection、validation 和 OOS annotation。",
+        "job 的 queued/running/paused/succeeded/failed/cancelled/expired 状态可按 job_id 查询。",
+        "失败保留 error traceback；取消保留 cancel_reason；完成结果与 artifact 保留到 TTL。",
+        "重试或 step continue 创建新 job_id，并通过 retry_of 关联旧 attempt。",
+        "harness 不调用分析专属提交 API，也不依赖 page_uuid。",
     ]

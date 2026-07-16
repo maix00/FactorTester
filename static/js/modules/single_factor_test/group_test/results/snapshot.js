@@ -102,7 +102,9 @@
                 product_path_selection_id: productPathSelectionId,
                 timestamp_ms: timestampMs,
                 page_uuid: window._pageUuid || '',
-                event_cursor: eventCursor || null
+                event_cursor: eventCursor || null,
+                job_id: GT.results.currentJobId || '',
+                run_id: GT.results.currentRunId || ''
             })
         };
 
@@ -726,6 +728,8 @@
                 page_uuid: window._pageUuid || '',
                 group_id: _snapshotOrderFlowGroupId,
                 timestamp_ms: _snapshotCurrentMs,
+                job_id: GT.results.currentJobId || '',
+                run_id: GT.results.currentRunId || ''
             })
         })
         .then(function(res) { return res.json(); })

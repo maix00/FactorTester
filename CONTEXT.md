@@ -21,6 +21,14 @@ FactorTester 是一个量化因子研究与回测平台，面向期货及多资�
 
 ## 领域概念
 
+### Research Workspace / Run / Job
+
+异步研究不归浏览器页面所有。`session_uuid` 只负责认证，`view_uuid` 只表示浏览器
+观察租约；可编辑配置属于 `workspace_id`，一次冻结配置属于 `run_id`，具体回测、IC、
+因子评估或类型分析属于独立 `job_id`。worker 只接收可序列化 RunSpec，不读取页面
+FactorTester 或 `page_factors`。Web 与 CLI 统一通过 `/api/workspaces`、`/api/runs`、
+`/api/jobs` 管理生命周期。完整决策见 ADR-036。
+
 ### 因子 (Factor)
 
 从市场数据（价格、成交量、持仓量）计算出的量化信号。用于预测未来收益或对品种排序。每个因子是 `FactorFamily` 的子类。

@@ -37,10 +37,28 @@ def fake_server() -> Iterator[str]:
             return jsonify(success=True, username="alice")
         return jsonify(success=False, error="bad login"), 401
 
-    @app.post("/api/single_factor_test/page")
-    def page():
+    @app.post("/api/workspaces")
+    def create_workspace():
         assert session.get("username") == "alice"
-        return jsonify(success=True, page_uuid="page-1")
+        return jsonify(success=True, workspace={
+            "workspace_id": "workspace-1", "configuration": {"revision": 1},
+        }), 201
+
+    @app.get("/api/workspaces")
+    def list_workspaces():
+        assert session.get("username") == "alice"
+        return jsonify(success=True, workspaces=[{"workspace_id": "workspace-1", "revision": 1}])
+
+    @app.post("/api/runs")
+    def submit_run():
+        payload = request.get_json()
+        assert payload["workspace_id"] == "workspace-1"
+        assert payload["configuration_revision"] == 1
+        return jsonify(success=True, run_id="run-1", jobs=[{"job_id": "job-1", "kind": "ic"}]), 202
+
+    @app.get("/api/jobs")
+    def list_jobs():
+        return jsonify(success=True, jobs=[{"job_id": "job-1", "status": "queued"}])
 
     @app.get("/api/testers/modules")
     def modules():
@@ -87,7 +105,11 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     client = FactorTesterClient(HttpSession(fake_server, cookies=tmp_path / "cookies.lwp"))
 
     assert client.login("alice", "pw")["username"] == "alice"
-    assert client.bootstrap_page()["page_uuid"] == "page-1"
+    workspace = client.create_workspace(factor_families=[{"alias": "MmRet"}])
+    assert workspace["workspace_id"] == "workspace-1"
+    assert client.list_workspaces()[0]["workspace_id"] == "workspace-1"
+    assert client.submit_run("workspace-1", 1, analyses=["ic"])["run_id"] == "run-1"
+    assert client.list_jobs(workspace_id="workspace-1")[0]["job_id"] == "job-1"
     assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
 

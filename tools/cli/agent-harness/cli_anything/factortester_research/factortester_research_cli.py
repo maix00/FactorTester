@@ -45,7 +45,7 @@ def cli(ctx: click.Context, session_path: str, as_json: bool) -> None:
         skin = ReplSkin("factortester-research", version=__version__)
         skin.print_banner()
         skin.status("status", session.status)
-        skin.status("factor_family", session.factor_family or "未设置")
+        skin.status("factor_families", ", ".join(session.factor_families) or "未设置")
         skin.info("Use `plan`, `run-step`, `gap list`, and `status` commands. This harness calls the real `factortester` CLI.")
 
 
@@ -70,53 +70,48 @@ def doctor(as_json: bool) -> None:
 
 
 @cli.command("plan")
-@click.option("--factor-family", required=True, help="因子家族名，例如 SgCCS。")
-@click.option("--template", default="", help="可选模板名，例如 '2026-06-02 07:20:47'。")
-@click.option("--product-group", "product_groups", multiple=True, help="产品组，可重复。")
-@click.option("--param", "params", multiple=True, help="业务因子参数 KEY=VALUE，可重复，例如 --param N=2m。")
-@click.option("--f", "f_values", multiple=True, help="$F 参数候选，可重复。")
-@click.option("--rev/--no-rev", default=True, show_default=True, help="是否包含 $Rev。")
-@click.option("--top", default=12, show_default=True, type=int, help="每组输出 Top N。")
+@click.option("--factor-family", "factor_families", multiple=True, required=True, help="因子家族 alias，可重复。")
+@click.option("--factor", "factors", multiple=True, help="具体 factor，格式 FAMILY_ALIAS=FACTOR_ALIAS，可重复。")
+@click.option("--configuration-file", required=True, type=click.Path(dir_okay=False), help="canonical ResearchConfiguration JSON。")
+@click.option(
+    "--analysis", "analyses", multiple=True,
+    type=click.Choice(["backtest", "ic", "factor_evaluation", "factor_type_analysis"]),
+)
 @click.option("--dry-run", is_flag=True, help="只打印，不保存 session。")
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 @click.pass_context
 def plan(
     ctx: click.Context,
-    factor_family: str,
-    template: str,
-    product_groups: tuple[str, ...],
-    params: tuple[str, ...],
-    f_values: tuple[str, ...],
-    rev: bool,
-    top: int,
+    factor_families: tuple[str, ...],
+    factors: tuple[str, ...],
+    configuration_file: str,
+    analyses: tuple[str, ...],
     dry_run: bool,
     as_json: bool,
 ) -> None:
     """Create a rigorous factor research plan without executing it."""
     session_path = ctx.obj["session_path"]
     session = load_session(session_path)
-    session.factor_family = factor_family
-    session.template = template
-    session.product_groups = list(product_groups)
+    session.factor_families = list(factor_families)
+    session.factors = list(factors)
+    session.configuration_file = configuration_file
     session.plan = build_factor_research_plan(
-        factor_family=factor_family,
-        template=template,
-        product_groups=list(product_groups),
-        params=list(params),
-        f_values=list(f_values),
-        include_rev=rev,
-        top=top,
+        factor_families=list(factor_families),
+        factors=list(factors),
+        configuration_file=configuration_file,
+        analyses=list(analyses) or None,
     )
-    grid_size = max(len(product_groups), 1) * max(len(params), 1) * max(len(f_values), 1) * (1 if rev else 1)
-    session.hypotheses_tested += grid_size
-    record_event(session, "plan_created", factor_family=factor_family, template=template, hypotheses=grid_size)
+    record_event(
+        session, "plan_created", factor_families=list(factor_families),
+        factors=list(factors), configuration_file=configuration_file,
+    )
     payload = {"session": session.to_dict(), "validation_checklist": validation_checklist()}
     if not dry_run:
         save_session(session, session_path)
     if as_json:
         _echo_json(payload)
         return
-    click.echo(f"研究计划: {factor_family}")
+    click.echo(f"研究计划: {', '.join(factor_families)}")
     for index, item in enumerate(session.plan, start=1):
         click.echo(f"{index}. [{item['phase']}] {item['purpose']}")
         click.echo(f"   {item['command']}")
@@ -170,7 +165,7 @@ def run_step(ctx: click.Context, dry_run: bool, timeout: int, as_json: bool) -> 
     if args[:1] == ["--"]:
         args = args[1:]
     if not args:
-        raise click.ClickException("run-step 后需要 factortester 参数，例如: run-step -- ic_test grid ...")
+        raise click.ClickException("run-step 后需要 factortester 参数，例如: run-step -- job list")
     session_path = ctx.obj["session_path"]
     session = load_session(session_path)
     command_text = "factortester " + " ".join(shlex.quote(item) for item in args)
@@ -406,7 +401,8 @@ def workspace_inspect(ctx: click.Context, factor_family: str, root: str, sync: b
     report["tree_repr"] = factor_tree.get("tree_repr") or ""
     report["operator_keys"] = factor_tree.get("operator_keys") or []
     report["source_checks"] = source_checks
-    session.factor_family = factor_family
+    if factor_family not in session.factor_families:
+        session.factor_families.append(factor_family)
     session.factor_source = report
     record_event(session, "factor_source_inspected", factor_family=factor_family, file_count=report["file_count"])
     if report["file_count"] == 0:
@@ -528,9 +524,9 @@ def status(ctx: click.Context, as_json: bool) -> None:
     click.echo(f"status: {session.status}")
     click.echo(f"operator_mode: {session.operator_mode}")
     click.echo(f"admin_port: {session.admin_port}")
-    click.echo(f"factor_family: {session.factor_family or '未设置'}")
-    click.echo(f"template: {session.template or '无'}")
-    click.echo(f"product_groups: {', '.join(session.product_groups) if session.product_groups else '无'}")
+    click.echo(f"factor_families: {', '.join(session.factor_families) or '未设置'}")
+    click.echo(f"factors: {', '.join(session.factors) or '未设置'}")
+    click.echo(f"configuration_file: {session.configuration_file or '无'}")
     click.echo(f"plan_steps: {len(session.plan)}")
     click.echo(f"open_gaps: {sum(1 for item in session.gaps if item.get('status') == 'open')}")
     source = session.factor_source or {}

@@ -35,11 +35,9 @@ def login(username: str, password: str) -> None:
         password = getpass.getpass("Password: ")
     data = client_from_config().login(username, password)
     click.echo(f"已登录: {data.get('username') or username}")
-    page = client_from_config().bootstrap_page()
     state = load_state()
     state.reset()
-    state.page_uuid = str(page.get("page_uuid") or "")
+    state.workspace_id = ""
+    state.configuration_revision = 0
     save_state(state)
-    if state.page_uuid:
-        click.echo(f"页面上下文: {state.page_uuid}")
     print_home_welcome()

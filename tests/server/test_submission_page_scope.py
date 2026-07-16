@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import uuid
 
 import pytest
 from flask import Flask
+import settings as Settings
 
 import server.services.page_runtime as runtime_state
+from server.services import test_jobs
 from server.modules.shared import submissions as submission_routes
 from server.modules.factors import data as factor_data_routes
 from server.modules.shared import page_lifecycle as page_lifecycle_routes
@@ -13,6 +16,20 @@ from server.modules.single_factor_test import page as page_routes
 from server.modules.single_factor_test import view_helpers
 
 _FT = runtime_state.FACTOR_TESTER
+
+
+@pytest.fixture(autouse=True)
+def _isolated_jobs(tmp_path, monkeypatch):
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    with test_jobs._lock:
+        test_jobs._jobs.clear()
+        test_jobs._run_token_to_job.clear()
+        test_jobs._run_id_to_job.clear()
+    yield
+    with test_jobs._lock:
+        test_jobs._jobs.clear()
+        test_jobs._run_token_to_job.clear()
+        test_jobs._run_id_to_job.clear()
 
 
 def _snapshot_page_objects() -> dict:
@@ -385,29 +402,15 @@ def test_factor_data_rejects_another_users_page(app, two_page_testers, monkeypat
     assert response.get_json()["error"] == "page_uuid 不属于当前用户"
 
 
-def test_single_factor_page_generates_and_registers_page_uuid(app, monkeypatch):
-    captured = {}
-
-    monkeypatch.setattr(page_routes.runtime_state, "create_page_uuid", lambda: "page-new")
-    monkeypatch.setattr(
-        page_routes.runtime_state,
-        "register_page",
-        lambda page_uuid, owner=None, **state: captured.update({"page_uuid": page_uuid, "owner": owner, **state}),
-    )
+def test_single_factor_page_defers_view_registration_to_browser_bootstrap(app, monkeypatch):
     monkeypatch.setattr(page_routes, "render_template", lambda template, **ctx: ctx)
     monkeypatch.setattr(page_routes, "current_user", lambda: "alice@1")
 
     with app.test_request_context("/single_factor_test"):
         ctx = page_routes.single_factor_page()
 
-    assert ctx["page_uuid"] == "page-new"
+    assert ctx["page_uuid"] == ""
     assert ctx["initial_factor"] == ""
-    assert captured == {
-        "page_uuid": "page-new",
-        "owner": "alice@1",
-        "page_kind": "single_factor_test",
-        "factor_family_alias": "",
-    }
 
 
 def test_testers_modules_endpoint_serializes_one_navigation_layer(app):
@@ -462,8 +465,7 @@ def test_testers_modules_endpoint_serializes_one_navigation_layer(app):
     assert all(tab["application"] == "group_test" for tab in backtest_tabs)
 
 
-def test_single_factor_page_bootstrap_api_returns_page_uuid_without_html(app, monkeypatch):
-    monkeypatch.setattr(page_routes.runtime_state, "create_page_uuid", lambda: "page-bootstrap")
+def test_single_factor_page_bootstrap_api_reclaims_browser_view_uuid(app, monkeypatch):
     captured = {}
     monkeypatch.setattr(
         page_routes.runtime_state,
@@ -471,16 +473,18 @@ def test_single_factor_page_bootstrap_api_returns_page_uuid_without_html(app, mo
         lambda page_uuid, owner=None, **state: captured.update({"page_uuid": page_uuid, "owner": owner, **state}),
     )
     monkeypatch.setattr(page_routes, "current_user", lambda: "alice@1")
+    monkeypatch.setattr(page_routes.runtime_state, "get_page_owner", lambda view_uuid: None)
 
     with app.test_request_context(
-        "/api/single_factor_test/page", method="POST", json={"factor": "Mm"},
+        "/api/single_factor_test/page", method="POST",
+        json={"factor": "Mm", "view_uuid": "view-bootstrap"},
     ):
         response = page_routes.single_factor_page_bootstrap_api()
 
     payload = response.get_json()
-    assert payload == {"success": True, "page_uuid": "page-bootstrap"}
+    assert payload == {"success": True, "view_uuid": "view-bootstrap"}
     assert captured == {
-        "page_uuid": "page-bootstrap",
+        "page_uuid": "view-bootstrap",
         "owner": "alice@1",
         "page_kind": "single_factor_test",
         "factor_family_alias": "Mm",
@@ -488,15 +492,7 @@ def test_single_factor_page_bootstrap_api_returns_page_uuid_without_html(app, mo
 
 
 def test_single_factor_page_shows_runtime_ids_for_developer(app, monkeypatch):
-    captured = {}
-
-    monkeypatch.setattr(page_routes.runtime_state, "create_page_uuid", lambda: "page-dev")
     monkeypatch.setattr(page_routes, "get_session_id", lambda: "sid-dev")
-    monkeypatch.setattr(
-        page_routes.runtime_state,
-        "register_page",
-        lambda page_uuid, owner=None, **state: captured.update({"page_uuid": page_uuid, "owner": owner, **state}),
-    )
     monkeypatch.setattr(page_routes, "render_template", lambda template, **ctx: ctx)
     monkeypatch.setattr(page_routes, "current_user", lambda: "dev@1")
     monkeypatch.setattr(page_routes, "get_account", lambda username: {"username": username, "role": "super_admin", "is_developer": 1})
@@ -506,7 +502,7 @@ def test_single_factor_page_shows_runtime_ids_for_developer(app, monkeypatch):
 
     assert ctx["show_runtime_ids"] is True
     assert ctx["session_id"] == "sid-dev"
-    assert captured["page_uuid"] == "page-dev"
+    assert ctx["page_uuid"] == ""
 
 
 def test_close_page_unregisters_page_resources(app):
@@ -574,6 +570,11 @@ def test_unload_unregisters_all_page_owned_objects(app, monkeypatch):
         response = page_lifecycle_routes.unregister_page()
 
     assert response.status_code == 200
+    assert response.get_json()["detaching"] is True
+    assert runtime_state.page_leases["page-unload"]["status"] == "detaching"
+
+    expired = runtime_state.expire_detached_pages(now=runtime_state.page_leases["page-unload"]["expires_at"] + 0.001)
+    assert expired == 1
     assert tester.deleted is True
     assert "page-unload" not in runtime_state.page_objects
     assert "page-unload" not in runtime_state.page_owners
@@ -581,6 +582,37 @@ def test_unload_unregisters_all_page_owned_objects(app, monkeypatch):
     assert "page-unload" not in runtime_state.page_time_store
     assert "page-unload" not in page_families
     assert "page-unload" not in page_factors
+
+
+def test_page_heartbeat_reclaims_detaching_page_before_grace(app, monkeypatch):
+    from server.services.factor_registry import page_families, page_factors
+
+    runtime_state.page_owners["page-refresh"] = "alice"
+    runtime_state.page_states["page-refresh"] = {"page_kind": "single_factor_test"}
+    page_families["page-refresh"] = {}
+    page_factors["page-refresh"] = {}
+    monkeypatch.setattr(page_lifecycle_routes, "current_user", lambda: "alice")
+
+    with app.test_request_context(
+        "/unregister_page",
+        method="POST",
+        json={"page_uuid": "page-refresh"},
+    ):
+        response = page_lifecycle_routes.unregister_page()
+    assert response.status_code == 200
+    assert runtime_state.page_leases["page-refresh"]["status"] == "detaching"
+
+    with app.test_request_context(
+        "/page_heartbeat",
+        method="POST",
+        json={"page_uuid": "page-refresh"},
+    ):
+        response = page_lifecycle_routes.page_heartbeat()
+    assert response.status_code == 200
+    assert runtime_state.page_leases["page-refresh"]["status"] == "active"
+
+    assert runtime_state.expire_detached_pages(now=10_000_000_000.0) == 0
+    runtime_state._finalize_unregistered_page("page-refresh")
 
 
 def test_debug_page_state_reports_page_scope(app, monkeypatch):
