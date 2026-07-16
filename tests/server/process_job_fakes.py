@@ -51,3 +51,8 @@ def raises_error(payload, sink, cancel_event):
 def crashes(payload, sink, cancel_event):
     sink.emit_start(total=1, groups=1, phase="crash")
     os._exit(int(payload.get("exitcode") or 7))
+
+
+def pauses(payload, sink, cancel_event):
+    sink.emit_start(total=2, groups=1, phase="step")
+    sink.emit_pause({"flow_index": int(payload.get("flow_index") or 1), "flow_id": "signal"})

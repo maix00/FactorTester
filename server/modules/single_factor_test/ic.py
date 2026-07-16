@@ -1,19 +1,14 @@
-"""
-IC test endpoints: /run_ic_test  (JSON) 和 /run_ic_test_stream  (SSE)
-"""
+"""IC computation for immutable research RunSpecs."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
-import json
 import threading
 import traceback
 from typing import Any, Dict, List, Tuple, cast
-import uuid
 
 import orjson
 
 import numpy as np
 import pandas as pd
-from flask import Response, jsonify, request
 
 from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
@@ -24,39 +19,18 @@ from tools.factors.tester_calc.NextReturns import NextReturns
 from tools.factors.tester_calc.single_factor_test.ic import run_ic_for_factor
 from tools.data.types import DataTime
 
-from . import sft_bp
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
-from server.services.factor_registry import get_factor_family_instance
-from server.services.page_runtime import get_page_owner
-from server.services.session_runtime import current_user, current_user_obj
-from server.services.sse_progress import SSEProgressEmitter
-from server.services import test_jobs
-from server.modules.shared.factor_tester_runtime import selection_from_request, create_factor_tester_for_run
+from server.services.factor_registry import factor_from_alias, get_factor_family_instance
+from server.services.session_runtime import user_obj_for_name
+from server.modules.shared.factor_tester_runtime import (
+    create_isolated_factor_tester_for_run,
+    selection_from_request,
+)
 
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数
 # ═══════════════════════════════════════════════════════════════
-
-def _populate_family_factors_from_page(factor_family: FactorFamily, page_uuid: str) -> None:
-    """Populate factor_family.factors from page_factors for the given page.
-
-    This replaces the old session-scoped params_list → get_factors() pattern.
-    Factors are the single source of truth, stored in page_factors by
-    /add_factor_by_params or similar routes.
-    """
-    if not page_uuid:
-        factor_family.factors = []
-        return
-    from server.services.factor_registry import page_factors
-    family_alias = getattr(factor_family, 'alias', '')
-    page_dict = page_factors.get(page_uuid, {})
-    factors = [
-        f for alias, f in page_dict.items()
-        if getattr(getattr(f, 'family', None), 'alias', None) == family_alias
-    ]
-    factor_family.factors = factors
-
 
 def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
     if isinstance(idx, pd.MultiIndex):
@@ -124,19 +98,6 @@ def _run_window_datetimes(
     start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
     end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
     return DataTime(ts=start, precision="exact"), DataTime(ts=end, precision="exact")
-
-
-def _create_ic_tester_from_request(data: dict[str, Any], *, page_uuid: str, user: Any | None = None):
-    selection = selection_from_request(data, page_uuid=page_uuid)
-    settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
-    start_dt, end_dt = _run_window_datetimes(settings)
-    return create_factor_tester_for_run(
-        selection,
-        page_uuid=page_uuid,
-        start_dt=start_dt,
-        end_dt=end_dt,
-        user=user,
-    )
 
 
 def _parse_ic_params(data: dict) -> Tuple[
@@ -700,95 +661,24 @@ def _prepare_ic_compute(
     )
 
 
-# ═══════════════════════════════════════════════════════════════
-# 端点：JSON（兼容旧接口）
-# ═══════════════════════════════════════════════════════════════
-
-@sft_bp.route('/run_ic_test', methods=['POST'])
-def run_ic_test():
-    """IC 测试（JSON 一次性返回）。"""
-    data = request.get_json(silent=True) or {}
-    page_uuid = str(data.get('page_uuid') or '')
-    if not page_uuid:
-        return jsonify({'success': False, 'error': '缺少 page_uuid'}), 400
-    if get_page_owner(page_uuid) != current_user():
-        return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
-    run_user = current_user_obj()
-    _token = None
-    tester = None
-
-    try:
-        (_, _, _, _, _, _, ic_lags, primary_ic_lag, _, _) = _parse_ic_params(data)
-
-        tester = _create_ic_tester_from_request(data, page_uuid=page_uuid, user=run_user)
-        factor_family = get_factor_family_instance(data.get('factor_family_alias', ''), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
-        assert isinstance(factor_family, FactorFamily)
-        page_uuid_str = str(data.get('page_uuid') or '')
-        # Factors are the single source of truth in page_factors (not session-scoped params).
-        # Populate factor_family.factors from page_factors so get_factor_by_alias works.
-        _populate_family_factors_from_page(factor_family, page_uuid_str)
-
-        tester.sync_signal_index = None
-        tester.sync_signal_index_replaced = None
-        _token = _active_tester.set(tester)
-
-        (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
-         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = \
-            _prepare_ic_compute(data, tester, factor_family)
-
-        param_items = list(ic_param_map.items())
-
-        compute = _compute_ic_groups(
-            tester, param_items, param_payloads, primary_ic_lag,
-        )
-        response = _build_ic_response(
-            tester, display_columns, all_products, compute,
-            paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
-        )
-        return Response(orjson.dumps(response, option=orjson.OPT_SERIALIZE_NUMPY), mimetype='application/json')
-
-    except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
-    finally:
-        if _token is not None:
-            _active_tester.reset(_token)
-
-
-def _prepare_ic_runtime_from_payload(data: dict[str, Any]):
-    page_uuid = str(data.get('page_uuid') or '')
-    if not page_uuid:
-        raise ValueError('缺少 page_uuid')
-    if get_page_owner(page_uuid) != current_user():
-        raise PermissionError('page_uuid 不属于当前用户')
-
-    run_user = current_user_obj()
-    tester = _create_ic_tester_from_request(data, page_uuid=page_uuid, user=run_user)
-    factor_family = get_factor_family_instance(
-        str(data.get('factor_family_alias', '')),
-        username=data.get('owner_username'),
-        page_uuid=data.get('page_uuid'),
-    )
-    assert isinstance(factor_family, FactorFamily)
-    _populate_family_factors_from_page(factor_family, page_uuid)
-    return page_uuid, tester, factor_family
-
-
 def _run_ic_compute_to_sink(
     data: dict[str, Any],
     tester: Any,
     factor_family: FactorFamily,
     sink: Any,
+    prepared: tuple | None = None,
+    cancel_event: Any | None = None,
 ) -> None:
     _token = None
     try:
-        if sink.job.cancel_event.is_set():
+        cancel_event = cancel_event or getattr(getattr(sink, "job", None), "cancel_event", None)
+        if cancel_event is not None and cancel_event.is_set():
             raise _ICCancelled("IC test job cancelled before start")
 
+        if prepared is None:
+            prepared = _prepare_ic_compute(data, tester, factor_family)
         (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
-         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = \
-            _prepare_ic_compute(data, tester, factor_family)
+         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = prepared
 
         tester.sync_signal_index = None
         tester.sync_signal_index_replaced = None
@@ -799,9 +689,9 @@ def _run_ic_compute_to_sink(
         compute = _compute_ic_groups(
             tester, param_items, param_payloads, primary_ic_lag,
             emitter=sink,
-            cancel_event=sink.job.cancel_event,
+            cancel_event=cancel_event,
         )
-        if sink.job.cancel_event.is_set():
+        if cancel_event is not None and cancel_event.is_set():
             raise _ICCancelled("IC test job cancelled")
         response = _build_ic_response(
             tester, display_columns, all_products, compute,
@@ -817,85 +707,29 @@ def _run_ic_compute_to_sink(
             _active_tester.reset(_token)
 
 
-def start_ic_test_job(data: dict[str, Any]):
-    """Submit an IC test to the shared async test job runtime."""
-    page_uuid, tester, factor_family = _prepare_ic_runtime_from_payload(data)
-    run_token = str(data.get('run_token') or f"ic-{uuid.uuid4().hex}")
-    job = test_jobs.create_job(
-        kind="ic",
-        run_token=run_token,
-        page_uuid=page_uuid,
-        owner=current_user(),
-        payload=data,
+def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -> None:
+    """Execute IC from frozen paths and aliases without consulting PageRuntime."""
+    owner = str(data.get("_owner") or data.get("owner_username") or "").strip()
+    run_id = str(data.get("run_id") or data.get("run_token") or "").strip()
+    if not owner or not run_id:
+        raise ValueError("IC RunSpec requires owner and run_id")
+    selection = selection_from_request(data, page_uuid="")
+    settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+    start_dt, end_dt = _run_window_datetimes(settings)
+    tester = create_isolated_factor_tester_for_run(
+        selection,
+        run_id=run_id,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        user=user_obj_for_name(owner),
     )
-
-    def _target(sink: test_jobs.TestJobSink) -> None:
-        _run_ic_compute_to_sink(data, tester, factor_family, sink)
-
-    test_jobs.submit(job, _target)
-    return job
-
-
-# ═══════════════════════════════════════════════════════════════
-# 端点：SSE 流式
-# ═══════════════════════════════════════════════════════════════
-
-@sft_bp.route('/run_ic_test_stream', methods=['POST'])
-def run_ic_test_stream():
-    """SSE 流式 IC 测试 — 推送进度事件 + 最终结果"""
-    data = request.get_json(silent=True) or {}
-    page_uuid = str(data.get('page_uuid') or '')
-    if not page_uuid:
-        return jsonify({'success': False, 'error': '缺少 page_uuid'}), 400
-    if get_page_owner(page_uuid) != current_user():
-        return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
-    run_user = current_user_obj()
-
-    # ── 在主线程中完成所有需要 context 的操作 ──
-    try:
-        tester = _create_ic_tester_from_request(data, page_uuid=page_uuid, user=run_user)
-        factor_family = get_factor_family_instance(str(data.get('factor_family_alias', '')), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
-        assert isinstance(factor_family, FactorFamily)
-        page_uuid_str = str(data.get('page_uuid') or '')
-        _populate_family_factors_from_page(factor_family, page_uuid_str)
-    except Exception as e:
-        error = str(e)
-        tb = traceback.format_exc()
-        def _early_err():
-            yield f"event: error\ndata: {json.dumps({'success': False, 'error': error, 'traceback': tb}, default=str)}\n\n"
-        return Response(_early_err(), mimetype='text/event-stream',
-                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
-
-    emitter = SSEProgressEmitter()
-
-    def _compute_and_emit():
-        _token = None
-        try:
-            (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
-             ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = \
-                _prepare_ic_compute(data, tester, factor_family)
-
-            tester.sync_signal_index = None
-            tester.sync_signal_index_replaced = None
-            _token = _active_tester.set(tester)
-
-            param_items = list(ic_param_map.items())
-
-            compute = _compute_ic_groups(
-                tester, param_items, param_payloads, primary_ic_lag,
-                emitter=emitter,
-            )
-            response = _build_ic_response(
-                tester, display_columns, all_products, compute,
-                paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
-            )
-            emitter.emit_result(response)
-        except Exception as e:
-            emitter.emit_error(str(e), traceback=traceback.format_exc())
-        finally:
-            if _token is not None:
-                _active_tester.reset(_token)
-            emitter.close()
-
-    threading.Thread(target=_compute_and_emit, daemon=True).start()
-    return emitter.get_response()
+    family = get_factor_family_instance(
+        str(data.get("factor_family_alias") or ""), username=owner, page_uuid=None,
+    )
+    aliases = [
+        str(item.get("alias") or "").strip()
+        for item in (data.get("factors") or [])
+        if isinstance(item, dict) and item.get("alias")
+    ]
+    family.factors = [factor_from_alias(alias, username=owner) for alias in aliases]
+    _run_ic_compute_to_sink(data, tester, family, sink, cancel_event=cancel_event)

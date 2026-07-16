@@ -71,6 +71,11 @@ def current_user_obj():
     username = current_user()
     if not username:
         return None
+    return user_obj_for_name(username)
+
+
+def user_obj_for_name(username: str):
+    """Build a User domain object without requiring a Flask request context."""
     from tools.data.account_manage import User
     with accounts_lock:
         accounts = load_accounts()

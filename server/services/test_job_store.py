@@ -9,6 +9,7 @@ and later UI sessions can reason about prior jobs without depending on
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ class DurableJobRecord:
     lifecycle_policy: str
     status: str
     cancel_reason: str
+    cancel_requested_at: float | None
     request_digest: str
     run_spec_hash: str
     run_spec: dict[str, Any]
@@ -45,6 +47,7 @@ class DurableJobRecord:
     runner_path: str
     worker_pid: int | None
     worker_exitcode: int | None
+    dispatcher_pid: int | None
     created_at: float
     started_at: float | None
     finished_at: float | None
@@ -52,6 +55,7 @@ class DurableJobRecord:
     manifest: dict[str, Any] | None
     result: dict[str, Any] | None
     error: dict[str, Any] | None
+    checkpoint: dict[str, Any] | None
 
     @property
     def page_uuid(self) -> str:
@@ -78,6 +82,8 @@ class DurableJobRecord:
             "lifecycle_policy": self.lifecycle_policy,
             "status": self.status,
             "cancel_reason": self.cancel_reason,
+            "cancel_requested": self.cancel_requested_at is not None,
+            "cancel_requested_at": self.cancel_requested_at,
             "request_digest": self.request_digest,
             "run_spec_hash": self.run_spec_hash,
             "retry_of": self.retry_of,
@@ -89,9 +95,13 @@ class DurableJobRecord:
             "runner_path": self.runner_path or None,
             "worker_pid": self.worker_pid,
             "worker_exitcode": self.worker_exitcode,
+            "dispatcher_pid": self.dispatcher_pid,
             "latest_event": latest_event,
+            "latest_progress": self.latest_progress,
+            "manifest": self.manifest,
             "has_result": self.result is not None,
             "has_error": self.error is not None,
+            "checkpoint": self.checkpoint,
             "durable": True,
         }
 
@@ -125,6 +135,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             lifecycle_policy TEXT NOT NULL DEFAULT 'durable',
             status TEXT NOT NULL,
             cancel_reason TEXT NOT NULL DEFAULT '',
+            cancel_requested_at REAL,
             request_digest TEXT NOT NULL,
             run_spec_hash TEXT NOT NULL,
             run_spec_json TEXT NOT NULL,
@@ -141,6 +152,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             manifest_json TEXT,
             result_json TEXT,
             error_json TEXT,
+            checkpoint_json TEXT,
             updated_at REAL NOT NULL
         )
         """
@@ -154,12 +166,25 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "run_id": "TEXT NOT NULL DEFAULT ''",
         "initiator_view_uuid": "TEXT NOT NULL DEFAULT ''",
         "lifecycle_policy": "TEXT NOT NULL DEFAULT 'durable'",
+        "cancel_requested_at": "REAL",
+        "dispatcher_pid": "INTEGER",
+        "checkpoint_json": "TEXT",
     }
     for name, declaration in additions.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE test_jobs ADD COLUMN {name} {declaration}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_test_jobs_run ON test_jobs(owner, run_id, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_test_jobs_workspace ON test_jobs(owner, workspace_id, created_at)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS test_job_process_slots (
+            slot INTEGER PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            dispatcher_pid INTEGER NOT NULL,
+            leased_until REAL NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS test_job_events (
@@ -193,6 +218,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 def ensure_test_job_store() -> str:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
+    reconcile_orphaned_jobs()
     return str(Settings.CACHE_DB_PATH)
 
 
@@ -252,7 +278,8 @@ def update_job_record(job: Any, *, cancel_reason: str = "") -> None:
             UPDATE test_jobs
             SET status = ?, cancel_reason = COALESCE(NULLIF(?, ''), cancel_reason),
                 execution_mode = ?, runner_path = ?, worker_pid = ?, worker_exitcode = ?,
-                started_at = ?, finished_at = ?, result_json = ?, error_json = ?,
+                dispatcher_pid = ?, started_at = ?, finished_at = ?, result_json = ?, error_json = ?,
+                checkpoint_json = ?,
                 updated_at = ?
             WHERE job_id = ?
             """,
@@ -263,10 +290,12 @@ def update_job_record(job: Any, *, cancel_reason: str = "") -> None:
                 job.runner_path or "",
                 job.worker_pid,
                 job.worker_exitcode,
+                getattr(job, "dispatcher_pid", None),
                 job.started_at,
                 job.finished_at,
                 _json_dumps(job.result) if job.result is not None else None,
                 _json_dumps(job.error) if job.error is not None else None,
+                _json_dumps(getattr(job, "checkpoint", None)) if getattr(job, "checkpoint", None) is not None else None,
                 time.time(),
                 job.job_id,
             ),
@@ -322,6 +351,7 @@ def _record_from_row(row: sqlite3.Row | None) -> DurableJobRecord | None:
         lifecycle_policy=str(row["lifecycle_policy"] or "durable"),
         status=str(row["status"]),
         cancel_reason=str(row["cancel_reason"] or ""),
+        cancel_requested_at=row["cancel_requested_at"],
         request_digest=str(row["request_digest"]),
         run_spec_hash=str(row["run_spec_hash"]),
         run_spec=_json_loads(row["run_spec_json"]) or {},
@@ -331,6 +361,7 @@ def _record_from_row(row: sqlite3.Row | None) -> DurableJobRecord | None:
         runner_path=str(row["runner_path"] or ""),
         worker_pid=row["worker_pid"],
         worker_exitcode=row["worker_exitcode"],
+        dispatcher_pid=row["dispatcher_pid"],
         created_at=float(row["created_at"]),
         started_at=row["started_at"],
         finished_at=row["finished_at"],
@@ -338,7 +369,153 @@ def _record_from_row(row: sqlite3.Row | None) -> DurableJobRecord | None:
         manifest=_json_loads(row["manifest_json"]),
         result=_json_loads(row["result_json"]),
         error=_json_loads(row["error_json"]),
+        checkpoint=_json_loads(row["checkpoint_json"]),
     )
+
+
+def _pid_is_alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def reconcile_orphaned_jobs(*, unclaimed_grace_seconds: float = 30.0) -> int:
+    """Fail jobs whose dispatching Flask process disappeared.
+
+    A live dispatcher in another Flask worker is preserved. Newly-created jobs
+    receive a short grace before a missing dispatcher is treated as a crash.
+    """
+    now = time.time()
+    changed = 0
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT job_id, status, dispatcher_pid, created_at FROM test_jobs WHERE status IN ('queued', 'running')"
+        ).fetchall()
+        for row in rows:
+            dispatcher_pid = row["dispatcher_pid"]
+            if dispatcher_pid and _pid_is_alive(int(dispatcher_pid)):
+                continue
+            if not dispatcher_pid and now - float(row["created_at"]) < float(unclaimed_grace_seconds):
+                continue
+            error = {
+                "success": False,
+                "error": "job dispatcher exited before completion",
+                "worker_crash": True,
+                "dispatcher_pid": dispatcher_pid,
+            }
+            conn.execute(
+                """
+                UPDATE test_jobs
+                SET status = 'failed', finished_at = ?, error_json = ?, updated_at = ?
+                WHERE job_id = ? AND status IN ('queued', 'running')
+                """,
+                (now, _json_dumps(error), now, str(row["job_id"])),
+            )
+            changed += 1
+    return changed
+
+
+def request_cancel(*, job_id: str, owner: str, reason: str) -> tuple[bool, str]:
+    """Persist a cancellation request visible to every Flask worker."""
+    now = time.time()
+    reason = str(reason or "explicit_cancel")
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT owner, status FROM test_jobs WHERE job_id = ?",
+            (str(job_id),),
+        ).fetchone()
+        if row is None:
+            raise KeyError("test job not found")
+        if str(row["owner"]) != str(owner):
+            raise PermissionError("无权取消其他用户的测试任务")
+        status = str(row["status"])
+        if status in {"succeeded", "failed", "cancelled", "expired"}:
+            return False, status
+        if status in {"queued", "paused"}:
+            error = {
+                "success": False,
+                "error": "test job cancelled before start",
+                "cancelled": True,
+                "cancel_reason": reason,
+            }
+            conn.execute(
+                """
+                UPDATE test_jobs
+                SET status = 'cancelled', cancel_reason = ?, cancel_requested_at = ?,
+                    finished_at = ?, error_json = ?, updated_at = ?
+                WHERE job_id = ?
+                """,
+                (reason, now, now, _json_dumps(error), now, str(job_id)),
+            )
+            return True, "cancelled"
+        conn.execute(
+            """
+            UPDATE test_jobs
+            SET cancel_reason = ?, cancel_requested_at = ?, updated_at = ?
+            WHERE job_id = ?
+            """,
+            (reason, now, now, str(job_id)),
+        )
+        return True, status
+
+
+def cancel_request(job_id: str) -> str:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT cancel_reason, cancel_requested_at FROM test_jobs WHERE job_id = ?",
+            (str(job_id),),
+        ).fetchone()
+    if row is None or row["cancel_requested_at"] is None:
+        return ""
+    return str(row["cancel_reason"] or "explicit_cancel")
+
+
+def acquire_process_slot(
+    *, job_id: str, dispatcher_pid: int, limit: int, lease_seconds: float = 5.0,
+) -> int | None:
+    now = time.time()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM test_job_process_slots WHERE leased_until < ?", (now,))
+        occupied = {
+            int(row["slot"])
+            for row in conn.execute("SELECT slot FROM test_job_process_slots").fetchall()
+        }
+        slot = next((value for value in range(max(1, int(limit))) if value not in occupied), None)
+        if slot is None:
+            return None
+        conn.execute(
+            "INSERT INTO test_job_process_slots(slot, job_id, dispatcher_pid, leased_until) VALUES (?, ?, ?, ?)",
+            (slot, str(job_id), int(dispatcher_pid), now + float(lease_seconds)),
+        )
+        return slot
+
+
+def renew_process_slot(*, slot: int, job_id: str, lease_seconds: float = 5.0) -> bool:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        cursor = conn.execute(
+            "UPDATE test_job_process_slots SET leased_until = ? WHERE slot = ? AND job_id = ?",
+            (time.time() + float(lease_seconds), int(slot), str(job_id)),
+        )
+        return cursor.rowcount == 1
+
+
+def release_process_slot(*, slot: int, job_id: str) -> None:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        conn.execute(
+            "DELETE FROM test_job_process_slots WHERE slot = ? AND job_id = ?",
+            (int(slot), str(job_id)),
+        )
 
 
 def load_job(job_id: str) -> DurableJobRecord | None:
@@ -409,6 +586,59 @@ def load_events_after(job_id: str, seq: int = 0) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+def event_bounds(job_id: str) -> tuple[int, int]:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT MIN(seq) AS oldest, MAX(seq) AS newest FROM test_job_events WHERE job_id = ?",
+            (str(job_id),),
+        ).fetchone()
+    return int(row["oldest"] or 0), int(row["newest"] or 0)
+
+
+def expire_jobs(*, ttl_seconds: int) -> int:
+    cutoff = time.time() - max(60, int(ttl_seconds))
+    now = time.time()
+    error = _json_dumps({
+        "success": False,
+        "error": "test job result expired",
+        "expired": True,
+        "ttl_seconds": max(60, int(ttl_seconds)),
+    })
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            """
+            SELECT job_id FROM test_jobs
+            WHERE status IN ('succeeded', 'failed', 'cancelled', 'paused')
+              AND finished_at IS NOT NULL AND finished_at < ?
+            """,
+            (cutoff,),
+        ).fetchall()
+        job_ids = [str(row["job_id"]) for row in rows]
+        if not job_ids:
+            return 0
+        placeholders = ",".join("?" for _ in job_ids)
+        conn.execute(
+            f"""
+            UPDATE test_jobs
+            SET status = 'expired', result_json = NULL, checkpoint_json = NULL,
+                error_json = ?, updated_at = ?
+            WHERE job_id IN ({placeholders})
+            """,
+            (error, now, *job_ids),
+        )
+        conn.execute(
+            f"""
+            UPDATE test_job_artifacts
+            SET status = 'expired', payload_json = NULL, expires_at = ?
+            WHERE job_id IN ({placeholders})
+            """,
+            (now, *job_ids),
+        )
+        return len(job_ids)
 
 
 def store_artifact(*, job_id: str, name: str, value: Any) -> None:

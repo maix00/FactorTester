@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 import time
 from typing import Any
 
@@ -15,6 +16,8 @@ VIEW_LEASE_GRACE_SECONDS = max(
     0.0,
     float(os.environ.get("GTHT_VIEW_LEASE_GRACE_SECONDS", "10.0")),
 )
+_JANITOR_LOCK = threading.Lock()
+_JANITOR_STARTED = False
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -147,3 +150,21 @@ def load(*, view_uuid: str, owner: str) -> dict[str, Any] | None:
             (view_uuid, owner),
         ).fetchone()
         return _payload(row)
+
+
+def start_lease_janitor(*, interval_seconds: float = 1.0) -> None:
+    global _JANITOR_STARTED
+    with _JANITOR_LOCK:
+        if _JANITOR_STARTED:
+            return
+        _JANITOR_STARTED = True
+
+    def _run() -> None:
+        while True:
+            try:
+                expire_due_leases()
+            except Exception:
+                pass
+            time.sleep(max(0.25, float(interval_seconds)))
+
+    threading.Thread(target=_run, name="research-view-lease-janitor", daemon=True).start()

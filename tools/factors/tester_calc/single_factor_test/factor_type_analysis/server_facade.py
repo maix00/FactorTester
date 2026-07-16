@@ -23,10 +23,11 @@ from server.modules.factors.helpers import (
     match_product_column as _match_product_column,
 )
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_run
+from server.modules.shared.factor_tester_runtime import create_isolated_factor_tester_for_run
 from server.modules.shared.factor_tester_runtime import selection_from_request
 from tools.products.product_path_selection import ProductPathSelection
-from server.services.factor_registry import get_factor_family_instance, get_page_factor, page_factors
-from server.services.session_runtime import current_user_obj
+from server.services.factor_registry import factor_from_alias, get_factor_family_instance, get_page_factor, page_factors
+from server.services.session_runtime import current_user_obj, user_obj_for_name
 from tools.data.types import DataTime, finest_index
 from tools.factors.FactorTester import _active_tester
 from tools.factors.tester_calc.single_factor_test.factor_type_analysis import (
@@ -102,15 +103,23 @@ def _load_and_calc_factor(
     page_uuid: str,
     *,
     allow_default_factor: bool = False,
+    owner: str = "",
+    isolated: bool = False,
 ) -> Any:
     """
     加载因子族 → 获取因子定义 → 在 tester 上计算因子。
     返回计算后的 factor 对象。
     """
-    factor_family = get_factor_family_instance(
-        factor_family_alias,
-        page_uuid=page_uuid,
-    )
+    if isolated:
+        factor = factor_from_alias(factor_alias, username=owner)
+        token = _active_tester.set(tester)
+        try:
+            tester.calc_factor(factor, parallel=False)
+        finally:
+            _active_tester.reset(token)
+        return factor
+
+    factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
     # Populate factor_family.factors from page_factors (single source of truth)
     from server.services.factor_registry import page_factors
     page_dict = page_factors.get(str(page_uuid), {})
@@ -206,6 +215,9 @@ class FactorTypeAnalysisRun:
     settings: dict[str, Any] | None = None
     method: str = "pearson"
     min_periods: int = 30
+    owner: str = ""
+    run_id: str = ""
+    isolated: bool = False
 
     @classmethod
     def from_request(cls, data: dict[str, Any], *, page_uuid: str) -> "FactorTypeAnalysisRun":
@@ -239,17 +251,39 @@ class FactorTypeAnalysisRun:
             min_periods=min_periods,
         )
 
+    @classmethod
+    def from_run_spec(cls, data: dict[str, Any]) -> "FactorTypeAnalysisRun":
+        owner = str(data.get("_owner") or data.get("owner_username") or "").strip()
+        run_id = str(data.get("run_id") or data.get("run_token") or "").strip()
+        if not owner or not run_id:
+            raise ValueError("factor type analysis RunSpec requires owner and run_id")
+        base = cls.from_request(data, page_uuid="")
+        base.owner = owner
+        base.run_id = run_id
+        base.isolated = True
+        return base
+
     def run(self) -> dict[str, Any]:
         started_at = time.time()
         start_dt, end_dt = _run_window_datetimes(self.settings)
 
         # 1) 创建 FactorTester
-        tester = create_factor_tester_for_run(
-            self.selection,
-            page_uuid=self.page_uuid,
-            start_dt=start_dt,
-            end_dt=end_dt,
-            user=current_user_obj(),
+        tester = (
+            create_isolated_factor_tester_for_run(
+                self.selection,
+                run_id=self.run_id,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                user=user_obj_for_name(self.owner),
+            )
+            if self.isolated
+            else create_factor_tester_for_run(
+                self.selection,
+                page_uuid=self.page_uuid,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                user=current_user_obj(),
+            )
         )
 
         # 2) 计算目标因子
@@ -258,6 +292,8 @@ class FactorTypeAnalysisRun:
             self.factor_family_alias,
             self.factor_alias,
             self.page_uuid,
+            owner=self.owner,
+            isolated=self.isolated,
         )
 
         # 3) 提取目标因子在各产品上的序列
@@ -288,6 +324,8 @@ class FactorTypeAnalysisRun:
                     ref_def.factor_alias,
                     self.page_uuid,
                     allow_default_factor=getattr(ref_def, "reference_source", "") == "public_factor",
+                    owner=self.owner,
+                    isolated=self.isolated,
                 )
                 ref_series = _product_series_from_tester(tester, ref_factor)
                 if ref_series:

@@ -1,4 +1,4 @@
-"""Page-scoped async test job registry.
+"""Durable async research job execution and event delivery.
 
 The registry owns the user-visible lifecycle for long-running FactorTester
 tasks. It exposes one API/SSE contract with two execution boundaries:
@@ -10,11 +10,9 @@ tasks. It exposes one API/SSE contract with two execution boundaries:
   process. This is the CPU-bound boundary; callers must pass only serializable
   data and an import path such as ``"pkg.module:function"``.
 
-The in-memory registry is process-local by design. Jobs are visible only to the
-Flask worker process that accepted the submission, are not persisted across
-process restarts, and require sticky routing or a single Flask worker for
-status/SSE/result APIs. Multi-worker or restart-persistent deployments must add
-a shared durable registry before enabling cross-worker job lookup.
+SQLite is canonical for metadata, cancellation, events, results, and global
+process slots. The in-memory registry only owns live process handles and SSE
+fanout for jobs dispatched by the current Flask worker.
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ from flask import Response, stream_with_context
 from server.services import test_job_store
 
 
-TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "expired"}
+TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "expired", "paused"}
 _MAX_EVENTS = int(os.environ.get("GTHT_TEST_JOB_MAX_EVENTS", "2000"))
 _MAX_WORKERS = max(1, int(os.environ.get("GTHT_TEST_JOB_WORKERS", "2")))
 _MAX_PROCESS_WORKERS = max(1, int(os.environ.get("GTHT_TEST_JOB_PROCESS_WORKERS", "2")))
@@ -48,7 +46,6 @@ _PROCESS_CANCEL_GRACE_SECONDS = max(0.1, float(os.environ.get("GTHT_TEST_JOB_PRO
 _JOB_TTL_SECONDS = max(60, int(os.environ.get("GTHT_TEST_JOB_TTL_SECONDS", "86400")))
 _EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="test-job")
 _PROCESS_CONTEXT = multiprocessing.get_context(os.environ.get("GTHT_TEST_JOB_PROCESS_START_METHOD", "spawn"))
-_PROCESS_SEMAPHORE = threading.BoundedSemaphore(_MAX_PROCESS_WORKERS)
 _SSE_GAP_EVENT = "reset"
 
 
@@ -91,6 +88,8 @@ class TestJob:
     page_uuid: str
     view_uuid: str
     lifecycle_policy: str
+    retry_of: str
+    attempt: int
     owner: str
     request_digest: str
     request_snapshot: dict[str, Any]
@@ -102,6 +101,7 @@ class TestJob:
     finished_at: float | None = None
     result: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
+    checkpoint: dict[str, Any] | None = None
     cancel_requested: bool = False
     cancel_reason: str = ""
     future: Future | None = None
@@ -109,6 +109,7 @@ class TestJob:
     runner_path: str | None = None
     worker_pid: int | None = None
     worker_exitcode: int | None = None
+    dispatcher_pid: int | None = None
     process_cancel_event: Any | None = None
     process: Any | None = None
     artifacts: dict[str, Any] = field(default_factory=dict)
@@ -168,16 +169,24 @@ class TestJob:
             self._condition.notify_all()
         test_job_store.update_job_record(self, cancel_reason=self.cancel_reason)
 
+    def pause(self, checkpoint: dict[str, Any]) -> None:
+        with self._condition:
+            self.checkpoint = dict(checkpoint)
+            self.status = "paused"
+            self.finished_at = time.time()
+            self._condition.notify_all()
+        test_job_store.update_job_record(self)
+
     def request_cancel(self, *, reason: str = "") -> bool:
         with self._condition:
-            if self.status in TERMINAL_STATUSES:
+            if self.status in TERMINAL_STATUSES and self.status != "paused":
                 return False
             self.cancel_requested = True
             self.cancel_reason = str(reason or self.cancel_reason or "explicit_cancel")
             self.cancel_event.set()
             if self.process_cancel_event is not None:
                 self.process_cancel_event.set()
-            if self.status == "queued":
+            if self.status in {"queued", "paused"}:
                 self.fail(
                     {
                         "success": False,
@@ -200,7 +209,7 @@ class TestJob:
 
     def events_after(self, seq: int = 0) -> list[TestJobEvent]:
         with self._lock:
-            if self._events and seq > 0 and seq < self._events[0].seq:
+            if self._events and seq > 0 and seq < self._events[0].seq - 1:
                 raise EventGapError(
                     "requested event cursor is no longer available",
                     oldest_seq=self._events[0].seq,
@@ -212,7 +221,7 @@ class TestJob:
         deadline = time.monotonic() + timeout
         with self._condition:
             while True:
-                if self._events and seq > 0 and seq < self._events[0].seq:
+                if self._events and seq > 0 and seq < self._events[0].seq - 1:
                     raise EventGapError(
                         "requested event cursor is no longer available",
                         oldest_seq=self._events[0].seq,
@@ -229,6 +238,14 @@ class TestJob:
     def summary(self) -> dict[str, Any]:
         with self._lock:
             latest_event = self._events[-1].to_dict() if self._events else None
+            latest_progress = next(
+                (event.to_dict() for event in reversed(self._events) if event.event == "progress"),
+                None,
+            )
+            manifest = next(
+                (event.to_dict() for event in reversed(self._events) if event.event == "activity_manifest"),
+                None,
+            )
             return {
                 "job_id": self.job_id,
                 "kind": self.kind,
@@ -239,6 +256,8 @@ class TestJob:
                 "initiator_page_uuid": self.page_uuid,
                 "view_uuid": self.view_uuid,
                 "lifecycle_policy": self.lifecycle_policy,
+                "retry_of": self.retry_of,
+                "attempt": self.attempt,
                 "status": self.status,
                 "cancel_reason": self.cancel_reason,
                 "cancel_requested": self.cancel_requested,
@@ -253,8 +272,11 @@ class TestJob:
                 "worker_exitcode": self.worker_exitcode,
                 "event_count": self._seq,
                 "latest_event": latest_event,
+                "latest_progress": latest_progress,
+                "manifest": manifest,
                 "has_result": self.result is not None,
                 "has_error": self.error is not None,
+                "checkpoint": copy.deepcopy(self.checkpoint),
             }
 
 
@@ -332,6 +354,15 @@ class TestJobSink:
 
     def emit_step(self, step_info: dict[str, Any]) -> None:
         self.job.emit("step", step_info)
+
+    def emit_artifact(self, name: str, value: Any) -> None:
+        store_artifact(self.job, name, value)
+        self.job.emit("artifact", {"name": str(name)})
+
+    def emit_pause(self, checkpoint: dict[str, Any]) -> None:
+        store_artifact(self.job, "step_checkpoint", checkpoint)
+        self.job.pause(checkpoint)
+        self.job.emit("paused", {"checkpoint": checkpoint})
 
     def close(self) -> None:
         self.job.close()
@@ -422,6 +453,13 @@ class ProcessJobSink:
     def emit_step(self, step_info: dict[str, Any]) -> None:
         self._emit("step", step_info)
 
+    def emit_artifact(self, name: str, value: Any) -> None:
+        self._emit("artifact", {"name": str(name), "value": value})
+
+    def emit_pause(self, checkpoint: dict[str, Any]) -> None:
+        self._terminal_emitted = True
+        self._emit("paused", {"checkpoint": dict(checkpoint)})
+
 
 def _load_runner(runner_path: str) -> Callable[[dict[str, Any], ProcessJobSink, Any], dict[str, Any] | None]:
     module_name, sep, attr = str(runner_path).partition(":")
@@ -463,6 +501,18 @@ def _apply_process_message(job: TestJob, message: dict[str, Any]) -> None:
     if event == "error":
         job.fail(data, cancelled=bool(data.get("cancelled")))
         job.emit("error", data)
+        return
+    if event == "artifact":
+        name = str(data.get("name") or "")
+        if name:
+            store_artifact(job, name, data.get("value"))
+            job.emit("artifact", {"name": name})
+        return
+    if event == "paused":
+        checkpoint = data.get("checkpoint") if isinstance(data.get("checkpoint"), dict) else data
+        store_artifact(job, "step_checkpoint", checkpoint)
+        job.pause(checkpoint)
+        job.emit("paused", {"checkpoint": checkpoint})
         return
     job.emit(event, data)
 
@@ -535,6 +585,8 @@ def create_job(
         page_uuid=page_uuid,
         view_uuid=view_uuid,
         lifecycle_policy=lifecycle_policy,
+        retry_of=retry_of,
+        attempt=attempt,
         owner=owner,
         request_digest=_request_digest(payload),
         request_snapshot=snapshot,
@@ -624,12 +676,24 @@ def submit_process(job: TestJob, runner_path: str, payload: dict[str, Any]) -> F
                 count += 1
 
     def _run() -> None:
-        acquired = False
+        process_slot: int | None = None
         process = None
         cancel_started_at: float | None = None
         try:
-            _PROCESS_SEMAPHORE.acquire()
-            acquired = True
+            job.dispatcher_pid = os.getpid()
+            test_job_store.update_job_record(job)
+            while process_slot is None:
+                reason = test_job_store.cancel_request(job.job_id)
+                if reason:
+                    job.request_cancel(reason=reason)
+                    return
+                process_slot = test_job_store.acquire_process_slot(
+                    job_id=job.job_id,
+                    dispatcher_pid=os.getpid(),
+                    limit=_MAX_PROCESS_WORKERS,
+                )
+                if process_slot is None:
+                    time.sleep(0.1)
             if job.status in TERMINAL_STATUSES:
                 return
             if job.cancel_event.is_set():
@@ -653,6 +717,10 @@ def submit_process(job: TestJob, runner_path: str, payload: dict[str, Any]) -> F
 
             while process.is_alive():
                 _drain_events(block=True)
+                test_job_store.renew_process_slot(slot=process_slot, job_id=job.job_id)
+                reason = test_job_store.cancel_request(job.job_id)
+                if reason and not job.cancel_event.is_set():
+                    job.request_cancel(reason=reason)
                 if job.cancel_event.is_set():
                     process_cancel_event.set()
                     if cancel_started_at is None:
@@ -702,8 +770,8 @@ def submit_process(job: TestJob, runner_path: str, payload: dict[str, Any]) -> F
                 event_queue.close()
             except Exception:
                 pass
-            if acquired:
-                _PROCESS_SEMAPHORE.release()
+            if process_slot is not None:
+                test_job_store.release_process_slot(slot=process_slot, job_id=job.job_id)
 
     future = _EXECUTOR.submit(_run)
     job.future = future
@@ -788,6 +856,7 @@ def list_jobs(
     run_id = str(run_id or "").strip()
     with _lock:
         _prune_locked()
+    test_job_store.expire_jobs(ttl_seconds=_JOB_TTL_SECONDS)
     records = test_job_store.list_jobs(
         owner=owner,
         kind=kind,
@@ -800,6 +869,9 @@ def list_jobs(
 
 
 def require_job(job_id: str, owner: str):
+    test_job_store.expire_jobs(ttl_seconds=_JOB_TTL_SECONDS)
+    with _lock:
+        _prune_locked()
     job = get(job_id)
     durable = test_job_store.load_job(job_id) if job is None else None
     target = job or durable
@@ -812,41 +884,29 @@ def require_job(job_id: str, owner: str):
 
 def cancel(job_id: str, owner: str) -> bool:
     job = require_job(job_id, owner)
-    if not isinstance(job, TestJob):
-        return False
-    return job.request_cancel(reason="explicit_cancel")
-
-
-def cancel_run_token(run_token: str, page_uuid: str, owner: str) -> bool:
-    job = get_by_run_token(run_token)
-    if job is None:
-        return False
-    if job.page_uuid != str(page_uuid) or job.owner != str(owner):
-        raise PermissionError("无权取消其他页面或用户的回测任务")
-    return job.request_cancel(reason="explicit_cancel")
-
-
-def cancel_page(page_uuid: str) -> int:
-    count = 0
-    with _lock:
-        jobs = [job for job in _jobs.values() if job.page_uuid == str(page_uuid)]
-    for job in jobs:
-        if job.request_cancel(reason="page_closed"):
-            count += 1
-    return count
+    requested, _ = test_job_store.request_cancel(
+        job_id=job_id, owner=owner, reason="explicit_cancel",
+    )
+    if isinstance(job, TestJob):
+        job.request_cancel(reason="explicit_cancel")
+    return requested
 
 
 def expire_view(view_uuid: str, owner: str) -> int:
     count = 0
-    with _lock:
-        jobs = [
-            job for job in _jobs.values()
-            if job.view_uuid == str(view_uuid)
-            and job.owner == str(owner)
-            and job.lifecycle_policy == "observer_bound"
-        ]
-    for job in jobs:
-        if job.request_cancel(reason="view_closed"):
+    records = test_job_store.list_jobs(
+        owner=str(owner), statuses={"queued", "running"}, limit=1000,
+    )
+    for record in records:
+        if record.initiator_view_uuid != str(view_uuid) or record.lifecycle_policy != "observer_bound":
+            continue
+        requested, _ = test_job_store.request_cancel(
+            job_id=record.job_id, owner=owner, reason="view_closed",
+        )
+        live = get(record.job_id)
+        if isinstance(live, TestJob):
+            live.request_cancel(reason="view_closed")
+        if requested:
             count += 1
     return count
 
@@ -901,8 +961,28 @@ def stream_response(job: TestJob, *, after_seq: int = 0) -> Response:
 
 
 def _stream_durable_events(job: Any, *, after_seq: int = 0) -> Iterable[str]:
-    for event in test_job_store.load_events_after(job.job_id, after_seq):
-        yield _format_sse_payload(int(event["seq"]), str(event["event"]), dict(event["data"]))
+    seq = int(after_seq)
+    while True:
+        oldest, _ = test_job_store.event_bounds(job.job_id)
+        if seq > 0 and oldest > 0 and seq < oldest - 1:
+            yield _format_sse_payload(oldest, _SSE_GAP_EVENT, {
+                "success": False,
+                "error": "requested event cursor is no longer available",
+                "reset": True,
+                "oldest_seq": oldest,
+                "requested_seq": seq,
+            })
+            seq = oldest - 1
+        events = test_job_store.load_events_after(job.job_id, seq)
+        for event in events:
+            seq = max(seq, int(event["seq"]))
+            yield _format_sse_payload(seq, str(event["event"]), dict(event["data"]))
+        current = test_job_store.load_job(job.job_id)
+        if current is None or (current.status in TERMINAL_STATUSES and not events):
+            break
+        if not events:
+            yield ": keep-alive\n\n"
+            time.sleep(0.5)
 
 
 def stream_durable_response(job: Any, *, after_seq: int = 0) -> Response:
@@ -922,8 +1002,8 @@ def deployment_semantics() -> dict[str, Any]:
         "registry": "sqlite_canonical_with_process_local_live_cache",
         "restart_persistent": True,
         "cross_flask_worker_visible": True,
-        "requires_sticky_routing": True,
-        "page_uuid_role": "initiator/subscriber/UI projection; page lease may cancel jobs after close grace",
+        "requires_sticky_routing": False,
+        "view_uuid_role": "observer lease only; observer-bound jobs cancel after close grace",
         "canonical_job_owner": "owner + workspace/context + job_id/run_token in durable SQLite registry",
         "job_ttl_seconds": _JOB_TTL_SECONDS,
         "sse_cursor": {
@@ -933,14 +1013,9 @@ def deployment_semantics() -> dict[str, Any]:
         },
         "thread_workers": _MAX_WORKERS,
         "process_workers": _MAX_PROCESS_WORKERS,
+        "process_worker_limit_scope": "global per shared SQLite store via renewable slots",
         "process_start_method": _PROCESS_CONTEXT.get_start_method(),
         "process_runner_contract": "importable runner_path + pickle-serializable payload; no Flask/page objects",
         "product_routes_default_execution_mode": "thread",
         "product_routes_process_contract": "only routes with importable serializable runners may advertise execution_mode=process",
     }
-
-
-# Backward-compatible names for callers introduced by the first backtest slice.
-BacktestJob = TestJob
-BacktestJobEvent = TestJobEvent
-BacktestJobSink = TestJobSink
