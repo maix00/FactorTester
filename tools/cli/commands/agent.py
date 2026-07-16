@@ -123,7 +123,7 @@ def _print_factor_plan(
     for note in plan["notes"]:
         click.echo(f"  - {note}")
     click.echo("")
-    for index, item in enumerate(plan["commands"], start=1):
+    for index, item in enumerate(plan.get("steps") or [], start=1):
         click.echo(f"{index}. [{item['phase']}] {item['title']}")
         click.echo(f"   {item['command']}")
 

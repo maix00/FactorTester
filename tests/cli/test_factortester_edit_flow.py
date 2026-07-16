@@ -3758,6 +3758,21 @@ def test_agent_facing_doctor_and_factor_plan(tmp_path, monkeypatch) -> None:
         assert type_index < backtest_index
         assert "--volume-capacity-mode infinite" in commands[backtest_index]
 
+        result = runner.invoke(cli, [
+            "factor-plan",
+            "--factor-family",
+            "MmVolWgtRet",
+            "--product-group",
+            "trend5_path",
+            "--n",
+            "10d",
+            "--f",
+            "1d",
+        ])
+        assert result.exit_code == 0
+        assert "MmVolWgtRet CLI 执行计划" in result.output
+        assert "factortester ic_test grid --factor-family MmVolWgtRet" in result.output
+
 
 def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
@@ -5928,6 +5943,56 @@ def test_custom_factor_describe_cross_checks_source_and_operator_tree(tmp_path, 
         assert payload["source_checks"]["ok"] is True
         assert payload["operator_keys"] == ["rolling_mean"]
         assert "rolling_mean" in payload["tree_repr"]
+
+
+def test_custom_factor_describe_accepts_delta_sugar_expanded_to_sub_shift(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/custom-factors/api/list")
+    def factor_list():
+        return jsonify(
+            success=True,
+            public_factors=[
+                {
+                    "id": "MmVolWgtRet",
+                    "name": "MmVolWgtRet",
+                    "source_code": "def factor_expr():\n    r = P.delta(RF) / P.shift(RF)\n    return r.rolling_sum(N)\n",
+                }
+            ],
+            custom_factors=[],
+        )
+
+    @app.post("/custom-factors/api/validate")
+    def validate():
+        return jsonify(
+            success=True,
+            valid=True,
+            tree_repr=(
+                "div\n"
+                "├─ sub\n"
+                "│  ├─ ParamRef[P]\n"
+                "│  └─ shift\n"
+                "│     ├─ ParamRef[RF]\n"
+                "│     └─ ParamRef[P]\n"
+                "└─ shift\n"
+                "   ├─ ParamRef[RF]\n"
+                "   └─ ParamRef[P]\n"
+                "rolling_sum"
+            ),
+            params=[],
+        )
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        result = runner.invoke(cli, ["custom_factors", "describe", "MmVolWgtRet", "--json", "--source-code"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["source_checks"]["ok"] is True
+        assert "delta" in payload["source_checks"]["source_tokens"]
+        assert payload["source_checks"]["missing_in_tree"] == []
 
 
 def test_backtest_context_help_errors_on_unregistered_field(tmp_path, monkeypatch) -> None:

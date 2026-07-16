@@ -910,7 +910,7 @@ _SOURCE_TOKEN_TO_TREE_KEYS = {
     "rolling_argmax": {"rolling_argmax"},
     "rolling_argmin": {"rolling_argmin"},
     "shift": {"shift"},
-    "delta": {"delta"},
+    "delta": {"delta", "sub"},
     "cs_rank": {"cs_rank"},
     "cs_zscore": {"cs_zscore"},
     "cs_spearman": {"cs_spearman"},
