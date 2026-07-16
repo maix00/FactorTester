@@ -36,6 +36,7 @@ from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_i
 from tools.cli.modules.backtest.audit_formatters import value_text as value_text_formatter
 from tools.cli.modules.backtest import run_stream
 from tools.cli.modules.backtest import step_runtime
+from tools.cli.modules.research_metadata import attach_research_metadata
 from tools.testers.backtest.engines.native.flow import phase_label
 
 _audit_field_state_product_filter: tuple[str, ...] = ()
@@ -2319,7 +2320,7 @@ def _save_backtest_research_result(client: Any, state: Any, run_payload: dict[st
             "metrics": _backtest_research_metrics(result),
             "note": "auto-saved from factortester backtest run",
         }
-        client.save_factor_research_run(payload)
+        client.save_factor_research_run(attach_research_metadata(payload, settings=local_settings, extra=run_payload))
     except Exception as exc:
         click.echo(f"研究结果入库失败: {exc}", err=True)
 

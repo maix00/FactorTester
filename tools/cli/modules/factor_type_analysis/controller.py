@@ -13,6 +13,7 @@ from tools.cli.modules.single_factor_analysis_shared import (
     parse_factor_grid_options,
     factor_grid_items,
 )
+from tools.cli.modules.research_metadata import attach_research_metadata
 from tools.cli.state import load_state, save_state
 from tools.cli.table import render_table
 
@@ -244,20 +245,19 @@ def _save_factor_type_research_result(client, state, payload: dict, result: dict
         product_group = ""
         if isinstance(product_selection, dict):
             product_group = str(product_selection.get("label") or product_selection.get("name") or product_selection.get("product_group") or "")
-        client.save_factor_research_run(
-            {
-                "ff_alias": str(payload.get("factor_family_alias") or state.factor_family or _factor_family_from_alias(factor_alias)),
-                "factor_alias": factor_alias,
-                "factor_source": str((state.page_settings or {}).get("factor_source") or ""),
-                "product_group": product_group,
-                "start_date": start_date,
-                "end_date": end_date,
-                "test_type": "factor_type",
-                "config": {"settings": settings, "paths": payload.get("paths") or []},
-                "metrics": {key: value for key, value in metrics.items() if value is not None},
-                "note": "auto-saved from factortester factor_type_analysis run",
-            }
-        )
+        save_payload = {
+            "ff_alias": str(payload.get("factor_family_alias") or state.factor_family or _factor_family_from_alias(factor_alias)),
+            "factor_alias": factor_alias,
+            "factor_source": str((state.page_settings or {}).get("factor_source") or ""),
+            "product_group": product_group,
+            "start_date": start_date,
+            "end_date": end_date,
+            "test_type": "factor_type",
+            "config": {"settings": settings, "paths": payload.get("paths") or []},
+            "metrics": {key: value for key, value in metrics.items() if value is not None},
+            "note": "auto-saved from factortester factor_type_analysis run",
+        }
+        client.save_factor_research_run(attach_research_metadata(save_payload, settings=settings, extra=payload))
     except Exception as exc:
         click.echo(f"因子类型研究结果入库失败: {exc}", err=True)
 

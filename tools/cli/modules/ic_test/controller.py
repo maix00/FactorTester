@@ -21,6 +21,7 @@ from tools.cli.modules.backtest.shared.selectors import (
 from tools.cli.modules.single_factor_analysis_shared import parse_factor_grid_options, factor_grid_items
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.run_output import _multi_series_chart
+from tools.cli.modules.research_metadata import attach_research_metadata
 from tools.cli.state import load_state, save_state
 from tools.cli.table import render_table
 
@@ -753,27 +754,26 @@ def _save_ic_research_result(
         factor = _first_factor_result(result, factor_alias)
         if factor and isinstance(factor.get("ic_decay"), list):
             metrics["ic_decay"] = factor.get("ic_decay")
-        client.save_factor_research_run(
-            {
-                "ff_alias": str(item.get("factor_family_alias") or payload.get("factor_family_alias") or state.factor_family or _factor_family_from_alias(factor_alias)),
-                "factor_alias": factor_alias,
-                "factor_source": str((state.page_settings or {}).get("factor_source") or ""),
-                "product_group": str(item.get("product_group") or selection_label(item.get("product_path_selection")) or ""),
-                "start_date": start_date,
-                "end_date": end_date,
-                "test_type": "ic",
-                "config": {
-                    "settings": settings,
-                    "ic_correlation": payload.get("ic_correlation"),
-                    "ic_lag": payload.get("ic_lag"),
-                    "ic_decay_lags": payload.get("ic_decay_lags"),
-                    "rolling_window": payload.get("rolling_window"),
-                    "paths": payload.get("paths") or [],
-                },
-                "metrics": {key: value for key, value in metrics.items() if value is not None},
-                "note": "auto-saved from factortester ic_test run",
-            }
-        )
+        save_payload = {
+            "ff_alias": str(item.get("factor_family_alias") or payload.get("factor_family_alias") or state.factor_family or _factor_family_from_alias(factor_alias)),
+            "factor_alias": factor_alias,
+            "factor_source": str((state.page_settings or {}).get("factor_source") or ""),
+            "product_group": str(item.get("product_group") or selection_label(item.get("product_path_selection")) or ""),
+            "start_date": start_date,
+            "end_date": end_date,
+            "test_type": "ic",
+            "config": {
+                "settings": settings,
+                "ic_correlation": payload.get("ic_correlation"),
+                "ic_lag": payload.get("ic_lag"),
+                "ic_decay_lags": payload.get("ic_decay_lags"),
+                "rolling_window": payload.get("rolling_window"),
+                "paths": payload.get("paths") or [],
+            },
+            "metrics": {key: value for key, value in metrics.items() if value is not None},
+            "note": "auto-saved from factortester ic_test run",
+        }
+        client.save_factor_research_run(attach_research_metadata(save_payload, settings=settings, extra=payload))
     except Exception as exc:
         click.echo(f"IC 研究结果入库失败: {exc}", err=True)
 
