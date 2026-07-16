@@ -5,7 +5,7 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from server.modules.single_factor_test import sft_bp
-from server.services import research_runs, research_workspaces
+from server.services import research_runs, research_workspaces, view_leases
 from server.services.session_runtime import require_user
 
 
@@ -149,3 +149,50 @@ def get_research_run(run_id: str):
     if run is None:
         return jsonify({"success": False, "error": "run not found"}), 404
     return jsonify({"success": True, "run": run})
+
+
+@sft_bp.post("/api/view-leases")
+def create_view_lease():
+    data = request.get_json(silent=True) or {}
+    view_uuid = str(data.get("view_uuid") or "").strip()
+    workspace_id = str(data.get("workspace_id") or "").strip()
+    if not view_uuid or not workspace_id:
+        return jsonify({"success": False, "error": "view_uuid and workspace_id are required"}), 400
+    if research_workspaces.load_workspace(workspace_id=workspace_id, owner=require_user()) is None:
+        return jsonify({"success": False, "error": "workspace not found"}), 404
+    lease = view_leases.renew(
+        view_uuid=view_uuid,
+        owner=require_user(),
+        workspace_id=workspace_id,
+    )
+    return jsonify({"success": True, "lease": lease}), 201
+
+
+@sft_bp.put("/api/view-leases/<view_uuid>")
+def renew_view_lease(view_uuid: str):
+    data = request.get_json(silent=True) or {}
+    workspace_id = str(data.get("workspace_id") or "").strip()
+    if not workspace_id:
+        return jsonify({"success": False, "error": "workspace_id is required"}), 400
+    lease = view_leases.renew(
+        view_uuid=view_uuid,
+        owner=require_user(),
+        workspace_id=workspace_id,
+    )
+    return jsonify({"success": True, "lease": lease})
+
+
+@sft_bp.delete("/api/view-leases/<view_uuid>")
+def detach_view_lease(view_uuid: str):
+    lease = view_leases.detach(view_uuid=view_uuid, owner=require_user())
+    if lease is None:
+        return jsonify({"success": False, "error": "view lease not found"}), 404
+    return jsonify({"success": True, "lease": lease}), 202
+
+
+@sft_bp.get("/api/view-leases/<view_uuid>")
+def get_view_lease(view_uuid: str):
+    lease = view_leases.load(view_uuid=view_uuid, owner=require_user())
+    if lease is None:
+        return jsonify({"success": False, "error": "view lease not found"}), 404
+    return jsonify({"success": True, "lease": lease})

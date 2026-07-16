@@ -172,6 +172,22 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS test_job_artifacts (
+            job_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            payload_json TEXT,
+            content_hash TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            expires_at REAL,
+            PRIMARY KEY (job_id, name)
+        )
+        """
+    )
 
 
 def ensure_test_job_store() -> str:
@@ -382,3 +398,55 @@ def load_events_after(job_id: str, seq: int = 0) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+def store_artifact(*, job_id: str, name: str, value: Any) -> None:
+    raw = orjson.dumps(value, option=orjson.OPT_SORT_KEYS | orjson.OPT_SERIALIZE_NUMPY)
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO test_job_artifacts (
+                job_id, name, status, content_type, payload_json,
+                content_hash, size_bytes, created_at, expires_at
+            ) VALUES (?, ?, 'active', 'application/json', ?, ?, ?, ?, NULL)
+            ON CONFLICT(job_id, name) DO UPDATE SET
+                status = 'active', payload_json = excluded.payload_json,
+                content_hash = excluded.content_hash,
+                size_bytes = excluded.size_bytes, created_at = excluded.created_at,
+                expires_at = NULL
+            """,
+            (
+                str(job_id),
+                str(name),
+                raw.decode(),
+                hashlib.sha256(raw).hexdigest(),
+                len(raw),
+                time.time(),
+            ),
+        )
+
+
+def load_artifact(*, job_id: str, name: str) -> dict[str, Any] | None:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            """
+            SELECT * FROM test_job_artifacts
+            WHERE job_id = ? AND name = ?
+            """,
+            (str(job_id), str(name)),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "job_id": str(row["job_id"]),
+        "name": str(row["name"]),
+        "status": str(row["status"]),
+        "content_type": str(row["content_type"]),
+        "content_hash": str(row["content_hash"]),
+        "size_bytes": int(row["size_bytes"]),
+        "created_at": float(row["created_at"]),
+        "expires_at": row["expires_at"],
+        "value": _json_loads(row["payload_json"]),
+    }

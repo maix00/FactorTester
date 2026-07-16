@@ -3,6 +3,7 @@ from __future__ import annotations
 import settings as Settings
 from flask import Flask
 import pytest
+import time
 
 from server.modules.single_factor_test import sft_bp
 from server.services import test_jobs
@@ -133,3 +134,79 @@ def test_submitted_run_freezes_workspace_revision_and_creates_page_independent_j
     assert run_spec["workspace_revision"] == 1
     assert run_spec["configuration"]["factor_configs"] == [{"N": "10d"}]
     assert "page_uuid" not in run_spec
+
+
+def test_expired_view_cancels_observer_bound_job_but_not_durable_job(
+    client,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "server.services.view_leases.VIEW_LEASE_GRACE_SECONDS",
+        0.01,
+        raising=False,
+    )
+    workspace = client.post(
+        "/api/workspaces",
+        json={"kind": "single_factor", "draft": {}},
+    ).get_json()["workspace"]
+    lease = client.post(
+        "/api/view-leases",
+        json={"view_uuid": "view-a", "workspace_id": workspace["workspace_id"]},
+    )
+    assert lease.status_code == 201
+
+    observer_job = test_jobs.create_job(
+        kind="factor_evaluation",
+        run_token="observer-job",
+        run_id="observer-run",
+        workspace_id=workspace["workspace_id"],
+        view_uuid="view-a",
+        lifecycle_policy="observer_bound",
+        owner="alice",
+        payload={"run_id": "observer-run"},
+    )
+    durable_job = test_jobs.create_job(
+        kind="ic",
+        run_token="durable-job",
+        run_id="durable-run",
+        workspace_id=workspace["workspace_id"],
+        view_uuid="view-a",
+        lifecycle_policy="durable",
+        owner="alice",
+        payload={"run_id": "durable-run"},
+    )
+
+    detached = client.delete("/api/view-leases/view-a")
+    assert detached.status_code == 202
+    time.sleep(0.02)
+    expired = client.get("/api/view-leases/view-a")
+
+    assert expired.get_json()["lease"]["status"] == "expired"
+    assert client.get(f"/api/jobs/{observer_job.job_id}").get_json()["status"] == "cancelled"
+    assert client.get(f"/api/jobs/{observer_job.job_id}").get_json()["cancel_reason"] == "view_closed"
+    assert client.get(f"/api/jobs/{durable_job.job_id}").get_json()["status"] == "queued"
+
+
+def test_job_artifact_is_queryable_after_live_registry_is_gone(client) -> None:
+    job = test_jobs.create_job(
+        kind="backtest",
+        run_token="artifact-job",
+        run_id="artifact-run",
+        workspace_id="workspace-a",
+        owner="alice",
+        payload={"run_id": "artifact-run"},
+    )
+    test_jobs.store_artifact(
+        job,
+        "group_execution",
+        {"groups": [{"name": "A1", "return": 0.15}]},
+    )
+    with test_jobs._lock:
+        test_jobs._jobs.clear()
+        test_jobs._run_token_to_job.clear()
+        test_jobs._run_id_to_job.clear()
+
+    artifact = client.get(f"/api/jobs/{job.job_id}/artifacts/group_execution")
+
+    assert artifact.status_code == 200
+    assert artifact.get_json()["artifact"]["groups"][0]["name"] == "A1"

@@ -750,12 +750,18 @@ def _prune_locked(now: float | None = None) -> None:
 def store_artifact(job: TestJob, name: str, value: Any) -> None:
     with job._lock:
         job.artifacts[str(name)] = copy.deepcopy(value)
+    test_job_store.store_artifact(job_id=job.job_id, name=str(name), value=value)
 
 
 def get_artifact(job: TestJob, name: str) -> Any:
     with job._lock:
         value = job.artifacts.get(str(name))
         return copy.deepcopy(value)
+
+
+def load_artifact(*, job_id: str, owner: str, name: str) -> dict[str, Any] | None:
+    require_job(job_id, owner)
+    return test_job_store.load_artifact(job_id=job_id, name=name)
 
 
 def resolve_job_for_detail(*, owner: str, job_id: str = "", run_id: str = "") -> TestJob:
@@ -823,6 +829,21 @@ def cancel_page(page_uuid: str) -> int:
         jobs = [job for job in _jobs.values() if job.page_uuid == str(page_uuid)]
     for job in jobs:
         if job.request_cancel(reason="page_closed"):
+            count += 1
+    return count
+
+
+def expire_view(view_uuid: str, owner: str) -> int:
+    count = 0
+    with _lock:
+        jobs = [
+            job for job in _jobs.values()
+            if job.view_uuid == str(view_uuid)
+            and job.owner == str(owner)
+            and job.lifecycle_policy == "observer_bound"
+        ]
+    for job in jobs:
+        if job.request_cancel(reason="view_closed"):
             count += 1
     return count
 
