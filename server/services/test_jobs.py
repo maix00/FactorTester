@@ -1,9 +1,20 @@
 """Page-scoped async test job registry.
 
 The registry owns the user-visible lifecycle for long-running FactorTester
-tasks. It intentionally stays in the existing Flask process for this slice;
-task-specific runners may still use their own worker subprocesses behind their
-normal dispatch boundary.
+tasks. It exposes one API/SSE contract with two execution boundaries:
+
+* ``submit`` runs compatibility targets in the current Flask process. Use this
+  for existing page-bound code that closes over Flask request state, page
+  runtime objects, FactorTester instances, or other non-serializable objects.
+* ``submit_process`` runs importable, payload-serializable runners in a child
+  process. This is the CPU-bound boundary; callers must pass only serializable
+  data and an import path such as ``"pkg.module:function"``.
+
+The in-memory registry is process-local by design. Jobs are visible only to the
+Flask worker process that accepted the submission, are not persisted across
+process restarts, and require sticky routing or a single Flask worker for
+status/SSE/result APIs. Multi-worker or restart-persistent deployments must add
+a shared durable registry before enabling cross-worker job lookup.
 """
 
 from __future__ import annotations
@@ -11,7 +22,11 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 import hashlib
+import importlib
+import multiprocessing
 import os
+import pickle
+import queue
 import threading
 import time
 import traceback as traceback_module
@@ -25,8 +40,12 @@ from flask import Response, stream_with_context
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 _MAX_EVENTS = int(os.environ.get("GTHT_TEST_JOB_MAX_EVENTS", "2000"))
 _MAX_WORKERS = max(1, int(os.environ.get("GTHT_TEST_JOB_WORKERS", "2")))
+_MAX_PROCESS_WORKERS = max(1, int(os.environ.get("GTHT_TEST_JOB_PROCESS_WORKERS", "2")))
+_PROCESS_CANCEL_GRACE_SECONDS = max(0.1, float(os.environ.get("GTHT_TEST_JOB_PROCESS_CANCEL_GRACE_SECONDS", "1.0")))
 _JOB_TTL_SECONDS = max(60, int(os.environ.get("GTHT_TEST_JOB_TTL_SECONDS", "86400")))
 _EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="test-job")
+_PROCESS_CONTEXT = multiprocessing.get_context(os.environ.get("GTHT_TEST_JOB_PROCESS_START_METHOD", "spawn"))
+_PROCESS_SEMAPHORE = threading.BoundedSemaphore(_MAX_PROCESS_WORKERS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +81,12 @@ class TestJob:
     error: dict[str, Any] | None = None
     cancel_requested: bool = False
     future: Future | None = None
+    execution_mode: str = "thread"
+    runner_path: str | None = None
+    worker_pid: int | None = None
+    worker_exitcode: int | None = None
+    process_cancel_event: Any | None = None
+    process: Any | None = None
     _seq: int = 0
     _events: list[TestJobEvent] = field(default_factory=list)
     _closed: bool = False
@@ -119,6 +144,8 @@ class TestJob:
                 return False
             self.cancel_requested = True
             self.cancel_event.set()
+            if self.process_cancel_event is not None:
+                self.process_cancel_event.set()
             if self.status == "queued":
                 self.fail(
                     {"success": False, "error": "test job cancelled before start", "cancelled": True},
@@ -164,6 +191,10 @@ class TestJob:
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
                 "request_digest": self.request_digest,
+                "execution_mode": self.execution_mode,
+                "runner_path": self.runner_path,
+                "worker_pid": self.worker_pid,
+                "worker_exitcode": self.worker_exitcode,
                 "event_count": self._seq,
                 "latest_event": latest_event,
                 "has_result": self.result is not None,
@@ -250,6 +281,133 @@ class TestJobSink:
         return stream_response(self.job)
 
 
+class ProcessJobSink:
+    """Progress sink used inside child worker processes.
+
+    It deliberately has no access to the parent ``TestJob`` object. All state
+    changes are serialized as queue messages and applied by the parent process.
+    """
+
+    def __init__(self, event_queue: Any) -> None:
+        self._queue = event_queue
+        self._terminal_emitted = False
+
+    @property
+    def terminal_emitted(self) -> bool:
+        return self._terminal_emitted
+
+    def _emit(self, event: str, data: dict[str, Any]) -> None:
+        self._queue.put({"event": str(event), "data": dict(data)})
+
+    def emit_start(self, *, total: int, groups: int, phase: str = "init", phases=None, **extra) -> None:
+        payload: dict[str, Any] = {"total": total, "groups": groups, "phase": phase}
+        if phases:
+            payload["phases"] = phases
+        payload.update(extra)
+        self._emit("start", payload)
+
+    def emit_progress(self, completed: int, total: int, phase: str = "eval", **extra) -> None:
+        payload: dict[str, Any] = {"completed": completed, "total": total, "phase": phase}
+        payload.update(extra)
+        self._emit("progress", payload)
+
+    def emit_activity_manifest(self, phases: list[dict[str, Any]]) -> None:
+        self._emit("activity_manifest", {"phases": phases})
+
+    def emit_activity(self, **payload: Any) -> None:
+        self._emit("activity", payload)
+
+    def emit_signal_progress(
+        self,
+        *,
+        completed: int,
+        total: int,
+        phase: str = "event_replay",
+        percent: float | None = None,
+    ) -> None:
+        if percent is None:
+            percent = 100.0 if total <= 0 else completed / total * 100.0
+        percent = max(0.0, min(100.0, float(percent)))
+        self._emit("signal_progress", {
+            "completed": completed,
+            "total": total,
+            "percent": percent,
+            "phase": phase,
+        })
+
+    def emit_runtime_info(
+        self,
+        message: str,
+        *,
+        level: str = "info",
+        code: str = "",
+        details: dict[str, Any] | None = None,
+        **extra,
+    ) -> None:
+        payload: dict[str, Any] = {"message": message, "level": level, "code": code}
+        if details is not None:
+            payload["details"] = details
+        payload.update(extra)
+        self._emit("runtime_info", payload)
+
+    def emit_result(self, data: dict[str, Any]) -> None:
+        self._terminal_emitted = True
+        self._emit("result", dict(data))
+
+    def emit_error(self, error: str, traceback: str = "", **extra) -> None:
+        payload: dict[str, Any] = {"success": False, "error": error, "traceback": traceback}
+        payload.update(extra)
+        self._terminal_emitted = True
+        self._emit("error", payload)
+
+    def emit_step(self, step_info: dict[str, Any]) -> None:
+        self._emit("step", step_info)
+
+
+def _load_runner(runner_path: str) -> Callable[[dict[str, Any], ProcessJobSink, Any], dict[str, Any] | None]:
+    module_name, sep, attr = str(runner_path).partition(":")
+    if not sep or not module_name or not attr:
+        raise ValueError("runner_path must be 'module:function'")
+    target: Any = importlib.import_module(module_name)
+    for part in attr.split("."):
+        target = getattr(target, part)
+    if not callable(target):
+        raise TypeError(f"runner is not callable: {runner_path}")
+    return target
+
+
+def _process_entrypoint(
+    runner_path: str,
+    payload: dict[str, Any],
+    event_queue: Any,
+    cancel_event: Any,
+) -> None:
+    sink = ProcessJobSink(event_queue)
+    try:
+        runner = _load_runner(runner_path)
+        result = runner(payload, sink, cancel_event)
+        if result is not None and not sink.terminal_emitted:
+            sink.emit_result(result)
+    except BaseException as exc:  # subprocess boundary: report then exit normally
+        sink.emit_error(str(exc), traceback=traceback_module.format_exc())
+
+
+def _apply_process_message(job: TestJob, message: dict[str, Any]) -> None:
+    event = str(message.get("event") or "message")
+    data = message.get("data")
+    if not isinstance(data, dict):
+        data = {"value": data}
+    if event == "result":
+        job.succeed(data)
+        job.emit("result", data)
+        return
+    if event == "error":
+        job.fail(data, cancelled=bool(data.get("cancelled")))
+        job.emit("error", data)
+        return
+    job.emit(event, data)
+
+
 _lock = threading.RLock()
 _jobs: dict[str, TestJob] = {}
 _run_token_to_job: dict[str, str] = {}
@@ -296,6 +454,8 @@ def create_job(
 
 
 def submit(job: TestJob, target: Callable[[TestJobSink], None]) -> Future:
+    job.execution_mode = "thread"
+
     def _run() -> None:
         sink = TestJobSink(job)
         job.start()
@@ -309,6 +469,124 @@ def submit(job: TestJob, target: Callable[[TestJobSink], None]) -> Future:
                 sink.emit_error(str(exc), traceback=traceback_module.format_exc())
         finally:
             job.close()
+
+    future = _EXECUTOR.submit(_run)
+    job.future = future
+    return future
+
+
+def submit_process(job: TestJob, runner_path: str, payload: dict[str, Any]) -> Future:
+    """Run an importable serializable runner in a child process.
+
+    ``runner_path`` must resolve to a callable with signature
+    ``runner(payload, sink, cancel_event)``. The payload is serialized before
+    submission so Flask request/page objects and closures fail fast in the
+    parent process instead of leaking across the process boundary.
+    """
+    _load_runner(runner_path)
+    try:
+        pickle.dumps(payload)
+    except Exception as exc:
+        raise ValueError("process job payload must be pickle-serializable") from exc
+
+    job.execution_mode = "process"
+    job.runner_path = runner_path
+    process_cancel_event = _PROCESS_CONTEXT.Event()
+    job.process_cancel_event = process_cancel_event
+    event_queue = _PROCESS_CONTEXT.Queue()
+
+    def _drain_events(block: bool = False) -> int:
+        count = 0
+        while True:
+            try:
+                message = event_queue.get(timeout=0.05 if block and count == 0 else 0)
+            except queue.Empty:
+                return count
+            if isinstance(message, dict):
+                _apply_process_message(job, message)
+                count += 1
+
+    def _run() -> None:
+        acquired = False
+        process = None
+        cancel_started_at: float | None = None
+        try:
+            _PROCESS_SEMAPHORE.acquire()
+            acquired = True
+            if job.status in TERMINAL_STATUSES:
+                return
+            if job.cancel_event.is_set():
+                job.fail(
+                    {"success": False, "error": "test job cancelled before process start", "cancelled": True},
+                    cancelled=True,
+                )
+                job.emit("error", job.error or {})
+                return
+
+            job.start()
+            process = _PROCESS_CONTEXT.Process(
+                target=_process_entrypoint,
+                args=(runner_path, payload, event_queue, process_cancel_event),
+                daemon=True,
+            )
+            job.process = process
+            process.start()
+            job.worker_pid = process.pid
+            job.emit("worker", {"pid": process.pid, "runner_path": runner_path})
+
+            while process.is_alive():
+                _drain_events(block=True)
+                if job.cancel_event.is_set():
+                    process_cancel_event.set()
+                    if cancel_started_at is None:
+                        cancel_started_at = time.monotonic()
+                    elif time.monotonic() - cancel_started_at >= _PROCESS_CANCEL_GRACE_SECONDS:
+                        process.terminate()
+                if job.status in TERMINAL_STATUSES and not job.cancel_requested:
+                    break
+
+            process.join(timeout=1.0)
+            _drain_events(block=False)
+            job.worker_exitcode = process.exitcode
+
+            if job.status not in TERMINAL_STATUSES:
+                if job.cancel_requested or process_cancel_event.is_set():
+                    error = {
+                        "success": False,
+                        "error": "test job cancelled",
+                        "cancelled": True,
+                        "worker_pid": job.worker_pid,
+                        "worker_exitcode": process.exitcode,
+                    }
+                    job.fail(error, cancelled=True)
+                    job.emit("error", error)
+                elif process.exitcode not in (0, None):
+                    error = {
+                        "success": False,
+                        "error": f"worker process exited with code {process.exitcode}",
+                        "traceback": "",
+                        "worker_pid": job.worker_pid,
+                        "worker_exitcode": process.exitcode,
+                    }
+                    job.fail(error)
+                    job.emit("error", error)
+                else:
+                    TestJobSink(job).emit_result({"success": True, "job_id": job.job_id})
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            if job.status not in TERMINAL_STATUSES:
+                TestJobSink(job).emit_error(str(exc), traceback=traceback_module.format_exc())
+        finally:
+            if process is not None and process.is_alive():
+                process.terminate()
+                process.join(timeout=1.0)
+                job.worker_exitcode = process.exitcode
+            job.close()
+            try:
+                event_queue.close()
+            except Exception:
+                pass
+            if acquired:
+                _PROCESS_SEMAPHORE.release()
 
     future = _EXECUTOR.submit(_run)
     job.future = future
@@ -419,6 +697,20 @@ def stream_response(job: TestJob, *, after_seq: int = 0) -> Response:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def deployment_semantics() -> dict[str, Any]:
+    """Return explicit operational constraints for the current registry."""
+    return {
+        "registry": "in_memory_process_local",
+        "restart_persistent": False,
+        "cross_flask_worker_visible": False,
+        "requires_sticky_routing": True,
+        "thread_workers": _MAX_WORKERS,
+        "process_workers": _MAX_PROCESS_WORKERS,
+        "process_start_method": _PROCESS_CONTEXT.get_start_method(),
+        "process_runner_contract": "importable runner_path + pickle-serializable payload; no Flask/page objects",
+    }
 
 
 # Backward-compatible names for callers introduced by the first backtest slice.
