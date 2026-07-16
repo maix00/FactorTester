@@ -130,20 +130,6 @@
     //  API 调用
     // ════════════════════════════════════════════════════════════════
 
-    /**
-     * 批量分组测试 POST（SSE 流式）
-     */
-    runTest.postBatchGroupTestLegacy = function(payload, onEvent, signal) {
-        return fetch('/run_group_test_stream', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: signal
-        }).then(function(res) {
-            return readSseResponse(res, onEvent);
-        });
-    };
-
     runTest.postBatchGroupTest = async function(payload, onEvent, signal) {
         var submit = await fetch('/backtest/jobs', {
             method: 'POST',
@@ -298,14 +284,10 @@
                     statusSpan.style.color = '#b45309';
                 }
                 try {
-                    await fetch('/cancel_group_test', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            run_token: runToken,
-                            page_uuid: window._pageUuid || ''
-                        })
-                    });
+                    var active = loadActiveJob();
+                    if (active && active.cancel_url) {
+                        await fetch(active.cancel_url, { method: 'POST' });
+                    }
                 } finally {
                     abortController.abort();
                 }

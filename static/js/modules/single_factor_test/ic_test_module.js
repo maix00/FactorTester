@@ -1686,7 +1686,7 @@
                 progressUi.set(pct, parts.join(' · ') || '准备中…');
             };
 
-            const body = JSON.stringify({
+            const payload = {
                 product_path_selection_id: selectionId(selection),
                 product_path_selection: selection,
                 factor_family_alias: factorFamilyAlias,
@@ -1700,14 +1700,23 @@
                 return_price_basis: icSettingValues.return_price_basis,
                 settings: icSettingValues,
                 page_uuid: window._pageUuid || ''
-            });
+            };
 
-            const sseResponse = await fetch('/run_ic_test_stream', {
+            const jobResponse = await fetch('/api/jobs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: body
+                body: JSON.stringify({ kind: 'ic', payload: payload })
             });
 
+            const jobPayload = await jobResponse.json().catch(() => ({}));
+            if (!jobResponse.ok || jobPayload.success === false || !jobPayload.stream_url) {
+                btn.disabled = false;
+                statusSpan.innerText = '✗ IC测试失败: ' + (jobPayload.error || ('HTTP ' + jobResponse.status));
+                statusSpan.style.color = '#d40000';
+                return;
+            }
+
+            const sseResponse = await fetch(jobPayload.stream_url);
             if (!sseResponse.ok) {
                 btn.disabled = false;
                 statusSpan.innerText = '✗ IC测试失败: HTTP ' + sseResponse.status;

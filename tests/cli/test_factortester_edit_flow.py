@@ -65,6 +65,58 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
+def _sse_body(events: list[tuple[str, dict]]) -> str:
+    parts: list[str] = []
+    for event, data in events:
+        parts.extend([
+            f"event: {event}",
+            "data: " + json.dumps(data, ensure_ascii=False),
+            "",
+        ])
+    return "\n".join(parts)
+
+
+def _register_cli_job_routes(app: Flask, handlers: dict[str, object], received: dict[str, list[dict]] | None = None) -> None:
+    jobs: dict[str, tuple[str, dict]] = {}
+
+    @app.post("/api/jobs")
+    def submit_cli_test_job():
+        body = request.get_json() or {}
+        kind = str(body.get("kind") or "")
+        payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
+        if kind not in handlers:
+            return jsonify(success=False, error=f"unsupported test kind: {kind}"), 400
+        job_id = f"job-{len(jobs) + 1}"
+        jobs[job_id] = (kind, payload)
+        if received is not None:
+            received.setdefault(kind, []).append(payload)
+        return jsonify(
+            success=True,
+            job_id=job_id,
+            kind=kind,
+            run_token=payload.get("run_token") or job_id,
+            status="queued",
+            status_url=f"/api/jobs/{job_id}",
+            stream_url=f"/api/jobs/{job_id}/stream",
+            result_url=f"/api/jobs/{job_id}/result",
+            cancel_url=f"/api/jobs/{job_id}/cancel",
+        ), 202
+
+    @app.get("/api/jobs/<job_id>/stream")
+    def stream_cli_test_job(job_id: str):
+        kind, payload = jobs[job_id]
+        handler = handlers[kind]
+        value = handler(payload) if callable(handler) else handler
+        if isinstance(value, list):
+            value = _sse_body(value)
+        return Response(value, mimetype="text/event-stream")
+
+    @app.get("/api/jobs/<job_id>/result")
+    def result_cli_test_job(job_id: str):
+        kind, _payload = jobs[job_id]
+        return jsonify(success=True, job_id=job_id, kind=kind, status="succeeded", result={})
+
+
 def test_step_audit_field_metadata_loads_display_value_kind_from_field_definitions() -> None:
     metadata = load_field_metadata()
 
@@ -4717,7 +4769,7 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
     app = Flask(__name__)
     app.secret_key = "test-secret"
     register_home_modules(app)
-    received_payloads: list[dict] = []
+    received_jobs: dict[str, list[dict]] = {}
 
     @app.post("/login")
     def login():
@@ -4763,18 +4815,16 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
         assert payload["page_uuid"] == "page-login-1"
         return jsonify(success=True, factor_alias="SgCCS|N:1m")
 
-    @app.post("/run_group_test_stream")
-    def run_group_test_stream():
-        received_payloads.append(request.get_json())
-        body = "\n".join([
-            "event: activity",
-            'data: {"label": "准备运行"}',
-            "",
-            "event: complete",
-            "data: {}",
-            "",
-        ])
-        return Response(body, mimetype="text/event-stream")
+    _register_cli_job_routes(
+        app,
+        {
+            "backtest": [
+                ("activity", {"label": "准备运行"}),
+                ("complete", {}),
+            ],
+        },
+        received_jobs,
+    )
 
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
@@ -4893,8 +4943,8 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
         assert "当前: 准备运行" in result.output
         assert "回测完成" in result.output
 
-    assert len(received_payloads) == 1
-    payload = received_payloads[0]
+    assert len(received_jobs["backtest"]) == 1
+    payload = received_jobs["backtest"][0]
     assert payload["page_uuid"] == "page-login-1"
     assert [group["name"] for group in payload["groups"]] == ["A1", "A2"]
     assert {group["factor_family_alias"] for group in payload["groups"]} == {"SgCCS"}
@@ -5002,6 +5052,33 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
             "",
         ])
         return Response(body, mimetype="text/event-stream")
+
+    _register_cli_job_routes(
+        app,
+        {
+            "backtest": [
+                ("activity_manifest", {"phases": [
+                    {"key": "pre_replay", "label": "准备", "flows": [{"flow_key": "market_data", "flow_label": "加载行情", "display_order": 1}]},
+                    {"key": "event_replay", "label": "事件回放", "flows": [
+                        {"flow_key": "signal.target", "flow_label": "合成目标", "display_order": 1, "event_kind": "SIGNAL"},
+                        {"flow_key": "notice.roll", "flow_label": "换月通知", "display_order": 2, "event_kind": "ORDER_NOTICE"},
+                        {"flow_key": "order.fill", "flow_label": "成交记账", "display_order": 3, "event_kind": "ORDER"},
+                    ]},
+                    {"key": "post_replay", "label": "整理", "flows": [{"flow_key": "risk", "flow_label": "计算风险指标", "display_order": 1}]},
+                ]}),
+                ("activity", {"phase": "pre_replay", "phase_label": "准备", "flow_key": "market_data", "flow_label": "加载行情", "timestamp": "2026-01-02 09:00:00"}),
+                ("signal_progress", {"completed": 1, "total": 4, "phase": "event_replay"}),
+                ("activity", {"phase": "event_replay", "phase_label": "事件回放", "flow_key": "signal.target", "flow_label": "合成目标", "timestamp": "2026-01-02 09:01:00"}),
+                ("runtime_info", {"type": "产品路径", "status": "已移除", "detail": "ER.CZC(早籼稻)"}),
+                ("activity", {"phase": "post_replay", "phase_label": "整理", "flow_key": "risk", "flow_label": "计算风险指标", "timestamp": "2026-01-31 15:00:00"}),
+                ("result", {"success": True, "product_path_selection_id": "pg-day", "groups": [
+                    {"id": "g-a1", "name": "A1", "total_equity": [100000000, 100200000, 100100000, 100500000], "timestamps": [1000, 2000, 3000, 4000]},
+                    {"id": "ls-a1-a5", "name": "LS A1/A5", "is_ls": True, "total_equity": [100000000, 99900000, 100300000], "timestamps": [1000, 2000, 3000]},
+                ]}),
+                ("complete", {}),
+            ],
+        },
+    )
 
     @app.post("/get_group_snapshot")
     def group_snapshot():
@@ -5463,7 +5540,7 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)
     app.secret_key = "test-secret"
-    received_payloads: list[dict[str, object]] = []
+    received_jobs: dict[str, list[dict]] = {}
 
     @app.post("/login")
     def login():
@@ -5573,25 +5650,35 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
     def product_groups():
         return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘", "paths": ["Product/Futures/CNFutures/日盘"]}])
 
-    @app.post("/run_ic_test_stream")
-    def run_ic_test_stream():
-        payload = request.get_json() or {}
-        received_payloads.append(payload)
-
-        def stream():
-            yield 'event: start\ndata: {"total": 2, "groups": 1, "phase": "init"}\n\n'
-            yield 'event: progress\ndata: {"completed": 1, "total": 2, "phase": "eval"}\n\n'
-            yield (
-                'event: result\ndata: '
-                '{"success": true, "ic_stats": {"columns": ["index", "SgCCS|N:2m"], '
-                '"rows": [{"index": "mean", "SgCCS|N:2m": 0.123456}, '
-                '{"index": "ir", "SgCCS|N:2m": 1.5}]}, '
-                '"factors": [{"alias": "SgCCS|N:2m", "ic_series": {"dates": [1,2,3], "values": [0.1, 0.2, -0.1]}, '
-                '"rolling_ic": {"window": 3, "mean": [0.066], "ir": [0.4]}, '
-                '"ic_decay": [{"lag": 1, "mean": 0.1, "ir": 0.5, "n": 3}, {"lag": 2, "mean": 0.2, "ir": 0.6, "n": 3}]}]}\n\n'
-            )
-
-        return Response(stream(), mimetype="text/event-stream")
+    _register_cli_job_routes(
+        app,
+        {
+            "ic": [
+                ("start", {"total": 2, "groups": 1, "phase": "init"}),
+                ("progress", {"completed": 1, "total": 2, "phase": "eval"}),
+                ("result", {
+                    "success": True,
+                    "ic_stats": {
+                        "columns": ["index", "SgCCS|N:2m"],
+                        "rows": [
+                            {"index": "mean", "SgCCS|N:2m": 0.123456},
+                            {"index": "ir", "SgCCS|N:2m": 1.5},
+                        ],
+                    },
+                    "factors": [{
+                        "alias": "SgCCS|N:2m",
+                        "ic_series": {"dates": [1, 2, 3], "values": [0.1, 0.2, -0.1]},
+                        "rolling_ic": {"window": 3, "mean": [0.066], "ir": [0.4]},
+                        "ic_decay": [
+                            {"lag": 1, "mean": 0.1, "ir": 0.5, "n": 3},
+                            {"lag": 2, "mean": 0.2, "ir": 0.6, "n": 3},
+                        ],
+                    }],
+                }),
+            ],
+        },
+        received_jobs,
+    )
 
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
@@ -5652,18 +5739,18 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
         assert "IC 序列图" in result.output
         assert "Rolling IC" in result.output
         assert "IC 衰减" in result.output
-        assert received_payloads
-        assert received_payloads[-1]["page_uuid"] == "page-ic-1"
-        assert received_payloads[-1]["factor_family_alias"] == "SgCCS"
-        assert received_payloads[-1]["product_path_selection_id"] == "pg-day"
-        assert received_payloads[-1]["factors"] == [{"alias": "SgCCS|N:2m"}]
-        assert (received_payloads[-1]["settings"])["ic_correlation"] == "both"
-        assert (received_payloads[-1]["settings"])["group_adjust"] == "on"
-        assert (received_payloads[-1]["settings"])["by_group"] == "on"
-        assert received_payloads[-1]["ic_correlation"] == "both"
-        assert received_payloads[-1]["ic_lag"] == "1"
-        assert received_payloads[-1]["ic_decay_lags"] == [1, 2, 3]
-        assert received_payloads[-1]["rolling_window"] == "3"
+        assert received_jobs["ic"]
+        assert received_jobs["ic"][-1]["page_uuid"] == "page-ic-1"
+        assert received_jobs["ic"][-1]["factor_family_alias"] == "SgCCS"
+        assert received_jobs["ic"][-1]["product_path_selection_id"] == "pg-day"
+        assert received_jobs["ic"][-1]["factors"] == [{"alias": "SgCCS|N:2m"}]
+        assert (received_jobs["ic"][-1]["settings"])["ic_correlation"] == "both"
+        assert (received_jobs["ic"][-1]["settings"])["group_adjust"] == "on"
+        assert (received_jobs["ic"][-1]["settings"])["by_group"] == "on"
+        assert received_jobs["ic"][-1]["ic_correlation"] == "both"
+        assert received_jobs["ic"][-1]["ic_lag"] == "1"
+        assert received_jobs["ic"][-1]["ic_decay_lags"] == [1, 2, 3]
+        assert received_jobs["ic"][-1]["rolling_window"] == "3"
 
         result = runner.invoke(cli, [
             "ic_test",
@@ -5679,19 +5766,19 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
 
         result = runner.invoke(cli, ["ic_test", "--run"])
         assert result.exit_code == 0
-        assert received_payloads[-1]["ic_correlation"] == "pearson"
-        assert received_payloads[-1]["ic_lag"] == "0"
-        assert received_payloads[-1]["ic_decay_lags"] == [1]
-        assert received_payloads[-1]["rolling_window"] == "2"
-        assert (received_payloads[-1]["settings"])["group_adjust"] == "off"
-        assert (received_payloads[-1]["settings"])["by_group"] == "off"
+        assert received_jobs["ic"][-1]["ic_correlation"] == "pearson"
+        assert received_jobs["ic"][-1]["ic_lag"] == "0"
+        assert received_jobs["ic"][-1]["ic_decay_lags"] == [1]
+        assert received_jobs["ic"][-1]["rolling_window"] == "2"
+        assert (received_jobs["ic"][-1]["settings"])["group_adjust"] == "off"
+        assert (received_jobs["ic"][-1]["settings"])["by_group"] == "off"
 
 
 def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)
     app.secret_key = "test-secret"
-    received: dict[str, dict[str, object]] = {}
+    received: dict[str, list[dict]] = {}
 
     @app.post("/login")
     def login():
@@ -5763,21 +5850,37 @@ def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> N
             "paths": ["Product/Futures/CNFutures/日盘/_products/AP.CZC"],
         }])
 
-    @app.post("/api/factor_evaluation/evaluate")
-    def factor_evaluation_endpoint():
-        payload = request.get_json() or {}
-        received["factor_evaluation"] = payload
-        return jsonify(success=True, factor={"alias": payload.get("factor_alias")}, meta={"product_count": 1, "elapsed_ms": 12}, series=[
-            {"product": "AP.CZC", "desc": "苹果", "dates": [1, 2], "values": [0.1, 0.2]},
-        ])
+    def _factor_evaluation_events(payload: dict):
+        return [
+            ("start", {"total": 1, "groups": 1, "phase": "compute"}),
+            ("progress", {"completed": 1, "total": 1, "phase": "compute"}),
+            ("result", {
+                "success": True,
+                "factor": {"alias": payload.get("factor_alias")},
+                "meta": {"product_count": 1, "elapsed_ms": 12},
+                "series": [{"product": "AP.CZC", "desc": "苹果", "dates": [1, 2], "values": [0.1, 0.2]}],
+            }),
+        ]
 
-    @app.post("/api/factor_type_analysis/analyze")
-    def factor_type_endpoint():
-        payload = request.get_json() or {}
-        received["factor_type_analysis"] = payload
-        return jsonify(success=True, best_match={"category_label": "趋势", "correlation": 0.81}, reference_factors=[
-            {"key": "trend", "name": "趋势参照", "correlation": 0.81},
-        ])
+    def _factor_type_events(_payload: dict):
+        return [
+            ("start", {"total": 1, "groups": 1, "phase": "compute"}),
+            ("progress", {"completed": 1, "total": 1, "phase": "compute"}),
+            ("result", {
+                "success": True,
+                "best_match": {"category_label": "趋势", "correlation": 0.81},
+                "reference_factors": [{"key": "trend", "name": "趋势参照", "correlation": 0.81}],
+            }),
+        ]
+
+    _register_cli_job_routes(
+        app,
+        {
+            "factor_evaluation": _factor_evaluation_events,
+            "factor_type_analysis": _factor_type_events,
+        },
+        received,
+    )
 
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
@@ -5804,8 +5907,8 @@ def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> N
         assert "AP.CZC" in result.output
         assert "苹果" in result.output
         assert "因子序列图" in result.output
-        assert received["factor_evaluation"]["page_uuid"] == "page-analysis-1"
-        assert received["factor_evaluation"]["paths"] == ["Product/Futures/CNFutures/日盘/_products/AP.CZC"]
+        assert received["factor_evaluation"][-1]["page_uuid"] == "page-analysis-1"
+        assert received["factor_evaluation"][-1]["paths"] == ["Product/Futures/CNFutures/日盘/_products/AP.CZC"]
 
         result = runner.invoke(cli, ["factor_type_analysis", "local-settings", "--correlation-method", "spearman"])
         assert result.exit_code == 0
@@ -5827,7 +5930,7 @@ def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> N
         assert "类型" in result.output
         assert "相关性" in result.output
         assert "趋势" in result.output
-        assert received["factor_type_analysis"]["settings"]["correlation_method"] == "spearman"
+        assert received["factor_type_analysis"][-1]["settings"]["correlation_method"] == "spearman"
 
 
 def test_custom_factor_workspace_cli_maps_web_workspace_actions(tmp_path, monkeypatch) -> None:
