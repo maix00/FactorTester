@@ -17,15 +17,14 @@ class FactorTesterClient:
     def create_workspace(
         self,
         *,
-        factor_family_alias: str = "",
-        title: str = "Single factor research",
-        draft: dict[str, Any] | None = None,
+        factor_families: list[dict[str, Any]] | None = None,
+        factors: list[dict[str, Any]] | None = None,
+        title: str = "Factor research",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post("/api/workspaces", {
-            "kind": "single_factor",
             "title": title,
-            "factor_family_alias": factor_family_alias,
-            "draft": draft or {},
+            "factor_families": factor_families or [],
+            "factors": factors or [],
         }))
         return dict(data.get("workspace") or {})
 
@@ -37,39 +36,60 @@ class FactorTesterClient:
         data = self._expect_success(self.session.get(f"/api/workspaces/{workspace_id}"))
         return dict(data.get("workspace") or {})
 
-    def update_workspace(
+    def get_workspace_configuration(self, workspace_id: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(f"/api/workspaces/{workspace_id}/configuration"))
+        return dict(data.get("configuration") or {})
+
+    def save_configuration_template(self, workspace_id: str, *, name: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/workspaces/{workspace_id}/configuration/templates",
+            {"name": name},
+        ))
+        return dict(data.get("template") or {})
+
+    def update_workspace_configuration(
         self,
         workspace_id: str,
         *,
         expected_revision: int,
-        draft: dict[str, Any],
-        title: str | None = None,
-        factor_family_alias: str | None = None,
+        payload: dict[str, Any],
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "expected_revision": expected_revision,
-            "draft": draft,
-        }
-        if title is not None:
-            payload["title"] = title
-        if factor_family_alias is not None:
-            payload["factor_family_alias"] = factor_family_alias
         data = self._expect_success(
-            self.session.patch(f"/api/workspaces/{workspace_id}", payload)
+            self.session.put(f"/api/workspaces/{workspace_id}/configuration", {
+            "expected_revision": expected_revision,
+            "payload": payload,
+            })
         )
-        return dict(data.get("workspace") or {})
+        return dict(data.get("configuration") or {})
+
+    def load_configuration_template(
+        self,
+        workspace_id: str,
+        *,
+        expected_revision: int,
+        configuration_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/workspaces/{workspace_id}/configuration/load-template",
+            {"expected_revision": expected_revision, "configuration_id": configuration_id},
+        ))
+        return dict(data.get("configuration") or {})
+
+    def list_configuration_templates(self) -> list[dict[str, Any]]:
+        data = self._expect_success(self.session.get("/api/configuration-templates"))
+        return list(data.get("templates") or [])
 
     def submit_run(
         self,
         workspace_id: str,
-        workspace_revision: int,
+        configuration_revision: int,
         *,
         analyses: list[str],
         lifecycle_policy: str = "durable",
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post("/api/runs", {
             "workspace_id": workspace_id,
-            "workspace_revision": workspace_revision,
+            "configuration_revision": configuration_revision,
             "analyses": analyses,
             "lifecycle_policy": lifecycle_policy,
         }))
@@ -85,6 +105,7 @@ class FactorTesterClient:
         run_id: str = "",
         status: str = "",
         kind: str = "",
+        limit: int = 20,
     ) -> list[dict[str, Any]]:
         query = {
             key: value for key, value in {
@@ -92,6 +113,7 @@ class FactorTesterClient:
                 "run_id": run_id,
                 "status": status,
                 "kind": kind,
+                "limit": limit,
             }.items() if value
         }
         data = self._expect_success(self.session.get("/api/jobs", query=query or None))
@@ -100,14 +122,20 @@ class FactorTesterClient:
     def get_job(self, job_id: str) -> dict[str, Any]:
         return self._expect_success(self.session.get(f"/api/jobs/{job_id}"))
 
+    def job_result(self, job_id: str) -> dict[str, Any]:
+        return self.session.get(f"/api/jobs/{job_id}/result")
+
     def cancel_job(self, job_id: str) -> dict[str, Any]:
         return self._expect_success(self.session.post(f"/api/jobs/{job_id}/cancel", {}))
 
     def retry_job(self, job_id: str) -> dict[str, Any]:
         return self._expect_success(self.session.post(f"/api/jobs/{job_id}/retry", {}))
 
-    def continue_job(self, job_id: str) -> dict[str, Any]:
-        return self._expect_success(self.session.post(f"/api/jobs/{job_id}/continue", {}))
+    def continue_job(self, job_id: str, *, action: str = "continue", until: str = "") -> dict[str, Any]:
+        payload = {"action": action}
+        if until:
+            payload["until"] = until
+        return self._expect_success(self.session.post(f"/api/jobs/{job_id}/continue", payload))
 
     def job_artifact(self, job_id: str, name: str) -> dict[str, Any]:
         return self._expect_success(self.session.get(f"/api/jobs/{job_id}/artifacts/{name}"))
@@ -283,10 +311,6 @@ class FactorTesterClient:
             self.session.get("/custom-factors/api/factor-library-research-stability", query=query or None)
         )
 
-    def run_group_test_stream(self, payload: dict[str, Any]):
-        job = self.submit_job("backtest", payload)
-        yield from self.stream_job(job)
-
     def group_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._expect_success(self.session.post("/get_group_snapshot", payload))
 
@@ -298,83 +322,6 @@ class FactorTesterClient:
 
     def group_ranking_detail(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._expect_success(self.session.post("/get_group_ranking_detail", payload))
-
-    def run_ic_test_stream(self, payload: dict[str, Any]):
-        job = self.submit_job("ic", payload)
-        yield from self.stream_job(job)
-
-    def run_factor_evaluation(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.run_job_result("factor_evaluation", payload)
-
-    def run_factor_type_analysis(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.run_job_result("factor_type_analysis", payload)
-
-    def submit_job(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.post("/api/jobs", {"kind": kind, "payload": payload})
-        )
-
-    def stream_job(self, job: dict[str, Any]):
-        stream_url = str(job.get("stream_url") or "")
-        if not stream_url:
-            raise ValueError("服务器 job 响应缺少 stream_url")
-        yield from self.session.stream_get(stream_url)
-
-    def job_result(self, job: dict[str, Any]) -> dict[str, Any]:
-        result_url = str(job.get("result_url") or "")
-        if not result_url:
-            job_id = str(job.get("job_id") or "")
-            if not job_id:
-                raise ValueError("服务器 job 响应缺少 result_url/job_id")
-            result_url = f"/api/jobs/{job_id}/result"
-        return self._expect_success(self.session.get(result_url))
-
-    def run_job_result(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-        job = self.submit_job(kind, payload)
-        terminal_error: Any = None
-        for event in self.stream_job(job):
-            event_name = str(event.get("event") or "message")
-            data = event.get("data")
-            if event_name == "error":
-                terminal_error = data
-            elif event_name == "result" and isinstance(data, dict):
-                return data
-        if terminal_error is not None:
-            message = terminal_error.get("error") if isinstance(terminal_error, dict) else terminal_error
-            raise RuntimeError(str(message))
-        result = self.job_result(job)
-        payload_result = result.get("result")
-        if isinstance(payload_result, dict):
-            return payload_result
-        raise ValueError("服务器 job result 响应缺少 result")
-
-    def list_single_factor_setting_templates(self, factor_family: str) -> list[dict[str, Any]]:
-        data = self._expect_success(self.session.get(f"/api/single_factor_setting_templates/{factor_family}"))
-        templates = data.get("templates")
-        if not isinstance(templates, list):
-            raise ValueError("服务器模板列表响应格式错误")
-        return templates
-
-    def get_single_factor_setting_template(self, factor_family: str, template_id: str) -> dict[str, Any]:
-        data = self._expect_success(self.session.get(f"/api/single_factor_setting_templates/{factor_family}/{template_id}"))
-        template = data.get("template")
-        if not isinstance(template, dict):
-            raise ValueError("服务器模板详情响应格式错误")
-        return template
-
-    def save_single_factor_setting_template(
-        self,
-        factor_family: str,
-        *,
-        name: str,
-        snapshot: dict[str, Any],
-    ) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.post(
-                f"/api/single_factor_setting_templates/{factor_family}",
-                {"name": name, "ff_alias": factor_family, "snapshot": snapshot},
-            )
-        )
 
     def factor_workspace_source_root(self) -> dict[str, Any]:
         return self._expect_success(self.session.get("/custom-factors/api/source-root"))

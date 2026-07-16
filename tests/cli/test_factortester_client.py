@@ -40,7 +40,9 @@ def fake_server() -> Iterator[str]:
     @app.post("/api/workspaces")
     def create_workspace():
         assert session.get("username") == "alice"
-        return jsonify(success=True, workspace={"workspace_id": "workspace-1", "revision": 1}), 201
+        return jsonify(success=True, workspace={
+            "workspace_id": "workspace-1", "configuration": {"revision": 1},
+        }), 201
 
     @app.get("/api/workspaces")
     def list_workspaces():
@@ -51,6 +53,7 @@ def fake_server() -> Iterator[str]:
     def submit_run():
         payload = request.get_json()
         assert payload["workspace_id"] == "workspace-1"
+        assert payload["configuration_revision"] == 1
         return jsonify(success=True, run_id="run-1", jobs=[{"job_id": "job-1", "kind": "ic"}]), 202
 
     @app.get("/api/jobs")
@@ -102,7 +105,7 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     client = FactorTesterClient(HttpSession(fake_server, cookies=tmp_path / "cookies.lwp"))
 
     assert client.login("alice", "pw")["username"] == "alice"
-    workspace = client.create_workspace(factor_family_alias="MmRet")
+    workspace = client.create_workspace(factor_families=[{"alias": "MmRet"}])
     assert workspace["workspace_id"] == "workspace-1"
     assert client.list_workspaces()[0]["workspace_id"] == "workspace-1"
     assert client.submit_run("workspace-1", 1, analyses=["ic"])["run_id"] == "run-1"

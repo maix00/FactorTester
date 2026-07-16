@@ -113,7 +113,9 @@
                 product_path_selection_id: productPathSelectionId,
                 group_index: groupIndex,
                 group_id: groupId || '',
-                page_uuid: window._pageUuid || ''
+                page_uuid: window._pageUuid || '',
+                job_id: GT.results.currentJobId || '',
+                run_id: GT.results.currentRunId || ''
             }),
         });
         var data = await resp.json();
@@ -211,7 +213,9 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     product_path_selection_id: productPathSelectionId,
-                    page_uuid: window._pageUuid || ''
+                    page_uuid: window._pageUuid || '',
+                    job_id: GT.results.currentJobId || '',
+                    run_id: GT.results.currentRunId || ''
                 }),
             });
             var data = await resp.json();

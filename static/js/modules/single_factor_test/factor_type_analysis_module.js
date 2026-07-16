@@ -79,15 +79,11 @@
     }
 
     async function runJobResult(kind, payload) {
-        var submit = await fetch('/api/jobs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: kind, payload: payload }),
-        });
-        var job = await submit.json().catch(function() { return {}; });
-        if (!submit.ok || job.success === false || !job.stream_url) {
-            throw new Error(job.error || ('HTTP ' + submit.status));
-        }
+        var submitted = await window.SingleFactorResearch.submit(kind, payload);
+        var job = submitted.jobs && submitted.jobs[0];
+        if (!job || !job.job_id) throw new Error('任务提交失败');
+        job.stream_url = '/api/jobs/' + encodeURIComponent(job.job_id) + '/stream';
+        job.result_url = '/api/jobs/' + encodeURIComponent(job.job_id) + '/result';
         var response = await fetch(job.stream_url);
         if (!response.ok) throw new Error('HTTP ' + response.status);
         var reader = response.body.getReader();

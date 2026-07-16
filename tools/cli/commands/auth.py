@@ -38,6 +38,6 @@ def login(username: str, password: str) -> None:
     state = load_state()
     state.reset()
     state.workspace_id = ""
-    state.workspace_revision = 0
+    state.configuration_revision = 0
     save_state(state)
     print_home_welcome()

@@ -1702,19 +1702,24 @@
                 page_uuid: window._pageUuid || ''
             };
 
-            const jobResponse = await fetch('/api/jobs', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ kind: 'ic', payload: payload })
-            });
-
-            const jobPayload = await jobResponse.json().catch(() => ({}));
-            if (!jobResponse.ok || jobPayload.success === false || !jobPayload.stream_url) {
+            let submitted;
+            try {
+                submitted = await window.SingleFactorResearch.submit('ic', payload);
+            } catch (error) {
                 btn.disabled = false;
-                statusSpan.innerText = '✗ IC测试失败: ' + (jobPayload.error || ('HTTP ' + jobResponse.status));
+                statusSpan.innerText = '✗ IC测试失败: ' + (error.message || error);
                 statusSpan.style.color = '#d40000';
                 return;
             }
+            const jobPayload = submitted.jobs && submitted.jobs[0];
+            if (!jobPayload || !jobPayload.job_id) {
+                btn.disabled = false;
+                statusSpan.innerText = '✗ IC测试失败: 任务提交响应缺少 job_id';
+                statusSpan.style.color = '#d40000';
+                return;
+            }
+            jobPayload.stream_url = '/api/jobs/' + encodeURIComponent(jobPayload.job_id) + '/stream';
+            jobPayload.result_url = '/api/jobs/' + encodeURIComponent(jobPayload.job_id) + '/result';
 
             const sseResponse = await fetch(jobPayload.stream_url);
             if (!sseResponse.ok) {

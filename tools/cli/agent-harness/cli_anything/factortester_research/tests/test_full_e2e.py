@@ -41,19 +41,23 @@ class TestCLISubprocess:
             "plan",
             "--factor-family",
             "SgCCS",
-            "--product-group",
-            "中国期货日盘",
-            "--param",
-            "N=2m",
+            "--factor-family",
+            "MmRet",
+            "--factor",
+            "SgCCS=SgCCS|P:CA|N:10d",
+            "--configuration-file",
+            "run-spec.json",
             "--json",
         ])
         data = json.loads(result.stdout)
-        assert data["session"]["factor_family"] == "SgCCS"
+        assert data["session"]["factor_families"] == ["SgCCS", "MmRet"]
+        assert data["session"]["factors"] == ["SgCCS=SgCCS|P:CA|N:10d"]
         assert any(item["phase"] == "inspect_factor_expr_dsl" for item in data["session"]["plan"])
-        assert any(item["phase"] == "diagnose_ic" for item in data["session"]["plan"])
+        assert any(item["phase"] == "submit_run" for item in data["session"]["plan"])
         assert any(item["phase"] == "prepare_factor_workspace" for item in data["session"]["plan"])
         assert any(item["phase"] == "understand_factor_source" for item in data["session"]["plan"])
         assert any(item["phase"] == "platform_gap_loop" for item in data["session"]["plan"])
+        assert data["session"]["configuration_file"] == "run-spec.json"
         assert session.exists()
 
     def test_run_step_records_platform_gap_with_fake_factortester(self, tmp_path: Path) -> None:

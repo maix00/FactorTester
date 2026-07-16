@@ -103,12 +103,11 @@
     }
 
     async function runJobResult(kind, payload) {
-        var job = await requestJSON('/api/jobs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: kind, payload: payload }),
-        });
-        if (!job.stream_url) throw new Error('服务器 job 响应缺少 stream_url');
+        var submitted = await window.SingleFactorResearch.submit(kind, payload);
+        var job = submitted.jobs && submitted.jobs[0];
+        if (!job || !job.job_id) throw new Error('服务器 job 响应缺少 job_id');
+        job.stream_url = '/api/jobs/' + encodeURIComponent(job.job_id) + '/stream';
+        job.result_url = '/api/jobs/' + encodeURIComponent(job.job_id) + '/result';
         var response = await fetch(job.stream_url);
         if (!response.ok) throw new Error('HTTP ' + response.status);
         var reader = response.body.getReader();
