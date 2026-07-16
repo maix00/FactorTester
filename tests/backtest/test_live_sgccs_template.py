@@ -416,6 +416,92 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
     assert notional["total_equity"][-1] != risk["total_equity"][-1]
 
 
+def test_live_sgccs_long_short_curve_differs_from_long_leg_on_real_template() -> None:
+    app = create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = USERNAME
+        session["_sid"] = "live-sgccs-ls-different-from-a1"
+
+    page = client.get(f"/single_factor_test?factor={FACTOR_FAMILY}&type=public")
+    assert page.status_code == 200
+    match = re.search(rb'window\._pageUuid\s*=\s*["\']([^"\']+)', page.data)
+    assert match, "single-factor page did not expose page_uuid"
+    page_uuid = match.group(1).decode()
+
+    template_response = client.get(
+        f"/api/single_factor_setting_templates/{FACTOR_FAMILY}/{TEMPLATE_ID}"
+    )
+    assert template_response.status_code == 200
+    snapshot = template_response.get_json()["template"]["snapshot"]
+    for params_row in _template_factor_params(snapshot):
+        resp = client.post("/add_factor_by_params", json={
+            "factor_family_alias": FACTOR_FAMILY,
+            "params": params_row,
+            "page_uuid": page_uuid,
+        })
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["success"]
+
+    all_groups = _resolve_groups(snapshot["group_settings"]["groups"], {})
+    long_group, short_group = _default_ls_pair(all_groups)
+    groups = [long_group, short_group]
+    ls_config = _runtime_ls_config(long_group, short_group, {"name": "LS A1/A5"})
+    local_values = snapshot["local_settings"]
+    status_code, body = _post_group_stream_result(client, {
+        "groups": [
+            {
+                **group,
+                "allocation_policy": "equal_notional",
+                "engine_mode": "basic",
+                "fee_mode": "zero",
+                "margin_mode": "none",
+                "liquidity_mode": "infinite",
+            }
+            for group in groups
+        ],
+        "ls_configs": [ls_config],
+        "page_uuid": page_uuid,
+        "factor_family_alias": FACTOR_FAMILY,
+        "local_settings": {
+            **local_values,
+            "start_date": "2026-01-30",
+            "start_time": "14:30",
+            "end_date": "2026-01-30",
+            "end_time": "15:00",
+            "time_precision": "exact",
+            "timezone": "Asia/Shanghai",
+            "engine": "native",
+            "factor_mode": "precomputed",
+            "rebalance_trigger": "on_factor_signal",
+        },
+        "_runtime_window": {
+            "start_date": "2026-01-30",
+            "start_time": "14:30",
+            "end_date": "2026-01-30",
+            "end_time": "15:00",
+            "time_precision": "exact",
+            "timezone": "Asia/Shanghai",
+        },
+        "auto_group_calendar_freq": True,
+        "group_calendar_freq": None,
+        "_group_owner_username": USERNAME,
+    })
+    assert status_code == 200, body
+    assert body["success"], body
+    by_name = {group["name"]: group for group in body["groups"]}
+    a1 = by_name["A1"]
+    ls = by_name["LS A1/A5"]
+    assert ls["is_ls"] is True
+    assert ls["total_equity"] != a1["total_equity"]
+    assert any(
+        abs(float(left) - float(right)) > 1e-6
+        for left, right in zip(ls["total_equity"], a1["total_equity"], strict=False)
+    )
+    assert body["cross_entry_ls_count"] == 1
+
+
 def test_live_sgccs_template_afternoon_window_flow_accounting_is_stable() -> None:
     state, strategies = _run_live_sgccs_native_window(
         aliases=("A1", "A1a"),
