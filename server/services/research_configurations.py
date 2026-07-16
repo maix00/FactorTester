@@ -387,6 +387,15 @@ def legacy_snapshot_to_payload(snapshot: dict, *, factor_family_alias: str) -> d
     """One-time migration adapter. Runtime APIs never call this function."""
     source = deepcopy(snapshot)
     backtest = deepcopy(source)
+    from tools.testers.settings import backtest_setting_registry
+
+    setting_keys = set(backtest_setting_registry.get("group_test").settings)
+    local_settings = deepcopy(source.get("local_settings") or {})
+    for key in setting_keys:
+        if key in source and key not in local_settings:
+            local_settings[key] = deepcopy(source[key])
+        backtest.pop(key, None)
+    backtest["local_settings"] = local_settings
     group_settings = source.get("group_settings")
     if isinstance(group_settings, dict):
         groups = group_settings.get("groups")
