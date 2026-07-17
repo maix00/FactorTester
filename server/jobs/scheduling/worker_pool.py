@@ -270,6 +270,7 @@ class _Worker:
     process: Any
     job_id: str = ""
     cache_keys: set[str] = field(default_factory=set)
+    cache_key_order: list[str] = field(default_factory=list)
     cancel_requested_at: float | None = None
 
 
@@ -282,9 +283,11 @@ class LongLivedWorkerPool:
         size: int,
         cancel_grace_seconds: float = 2.0,
         start_method: str = "spawn",
+        max_cache_keys_per_worker: int = 128,
     ) -> None:
         self.size = max(1, int(size))
         self.cancel_grace_seconds = max(0.0, float(cancel_grace_seconds))
+        self.max_cache_keys_per_worker = max(1, int(max_cache_keys_per_worker))
         self.context = multiprocessing.get_context(start_method)
         self.output_queue = self.context.Queue()
         self._workers: dict[int, _Worker] = {}
@@ -395,7 +398,13 @@ class LongLivedWorkerPool:
             if worker is None:
                 return
             job_id = str(message.get("job_id") or "")
-            worker.cache_keys.update(str(key) for key in message.get("cache_keys") or [])
+            for key in (str(value) for value in message.get("cache_keys") or []):
+                if key in worker.cache_key_order:
+                    worker.cache_key_order.remove(key)
+                worker.cache_key_order.append(key)
+            if len(worker.cache_key_order) > self.max_cache_keys_per_worker:
+                del worker.cache_key_order[:-self.max_cache_keys_per_worker]
+            worker.cache_keys = set(worker.cache_key_order)
             worker.job_id = ""
             worker.cancel_requested_at = None
             self._job_to_worker.pop(job_id, None)

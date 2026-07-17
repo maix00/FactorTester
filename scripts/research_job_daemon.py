@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from server.jobs.ipc import JobDaemonServer
+from server.jobs.artifacts import cleanup_staging_files
 from server.jobs.repository import JobRepository
 from server.jobs.scheduling import ResearchJobScheduler
 
@@ -19,6 +20,9 @@ def main() -> int:
     parser.add_argument("--planner-workers", type=int, default=1)
     parser.add_argument("--execution-workers", type=int, default=2)
     args = parser.parse_args()
+    cleanup_staging_files(
+        max_age_seconds=float(os.environ.get("GTHT_JOB_STAGING_MAX_AGE_SECONDS", "3600"))
+    )
     scheduler = ResearchJobScheduler(
         repository=JobRepository(),
         deployment_id=args.deployment_id,

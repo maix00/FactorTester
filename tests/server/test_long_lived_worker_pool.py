@@ -50,6 +50,23 @@ def test_worker_process_is_reused_and_affinity_selects_warm_idle_worker() -> Non
     assert first_pid == second_pid == result["data"]["pid"]
 
 
+def test_worker_affinity_inventory_is_lru_bounded() -> None:
+    with LongLivedWorkerPool(size=1, max_cache_keys_per_worker=2) as pool:
+        for index, cache_key in enumerate(("A.DAY1", "B.DAY1", "C.DAY1")):
+            job_id = f"job-{index}"
+            pool.submit(
+                job_id=job_id,
+                runner_path=f"{RUNNERS}:cpu_runner",
+                payload={"loops": 20_000},
+                cache_keys=[cache_key],
+            )
+            _collect(pool, lambda rows, value=job_id: _finished(rows, value))
+
+        snapshot = pool.worker_snapshot()[0]
+
+    assert snapshot["cache_keys"] == ["B.DAY1", "C.DAY1"]
+
+
 def test_pool_runs_cpu_jobs_in_multiple_real_processes() -> None:
     with LongLivedWorkerPool(size=2) as pool:
         pids = {

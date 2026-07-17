@@ -16,6 +16,8 @@ from .worker_pool import LongLivedWorkerPool, WorkerUnavailable
 
 PLANNER_RUNNER = "server.jobs.planning.runners:plan_job"
 
+_PRIORITY_CLASS_RANK = {"low": 0, "standard": 10, "high": 20, "admin": 30}
+
 
 class ResearchJobScheduler:
     """Drive durable job facts while keeping live events process-local."""
@@ -133,19 +135,30 @@ class ResearchJobScheduler:
                 JobStatus.PAUSED,
             ),
         )
-        first_pending_by_owner: dict[str, str] = {}
+        pending_by_owner: dict[str, list[Any]] = {}
         for item in pending:
-            first_pending_by_owner.setdefault(item.owner, item.job_id)
-        jobs.sort(key=lambda job: (not self.repository.is_pinned(job.job_id), job.created_at))
+            pending_by_owner.setdefault(item.owner, []).append(item)
+        queued_by_id = {job.job_id: job for job in jobs}
+        candidates = []
+        for owner, owner_jobs in pending_by_owner.items():
+            pinned = queued_by_id.get(self.repository.pinned_job_id(owner=owner))
+            if pinned is not None:
+                candidates.append(pinned)
+                continue
+            for item in owner_jobs:
+                if item.status in {JobStatus.RUNNING, JobStatus.PAUSED}:
+                    continue
+                if item.status is JobStatus.QUEUED:
+                    candidates.append(item)
+                break
+        candidates.sort(key=self._cross_user_priority_key)
         active_by_owner: dict[str, int] = {}
         for active_id in self._executing:
             active = self.repository.load(active_id)
             if active is not None:
                 active_by_owner[active.owner] = active_by_owner.get(active.owner, 0) + 1
-        for job in jobs:
+        for job in candidates:
             pinned = self.repository.is_pinned(job.job_id)
-            if not pinned and first_pending_by_owner.get(job.owner) != job.job_id:
-                continue
             if active_by_owner.get(job.owner, 0) >= job.entitlement.max_concurrency:
                 continue
             plan = job.execution_plan or {}
@@ -170,6 +183,19 @@ class ResearchJobScheduler:
             self._executing.add(job.job_id)
             active_by_owner[job.owner] = active_by_owner.get(job.owner, 0) + 1
             self.broker.publish(job.job_id, "status", {"status": "running", "worker_pid": pid})
+
+    @staticmethod
+    def _cross_user_priority_key(job: Any) -> tuple[Any, ...]:
+        """Order owner candidates without allowing a personal pin to boost priority."""
+        entitlement = job.entitlement
+        return (
+            -int(bool(entitlement.reserved_capacity_class)),
+            -_PRIORITY_CLASS_RANK.get(entitlement.priority_class, 10),
+            -float(entitlement.weight),
+            float(job.created_at),
+            str(job.owner),
+            str(job.job_id),
+        )
 
     def _propagate_cancellation(self) -> None:
         for job_id, pool in (

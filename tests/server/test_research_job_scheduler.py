@@ -115,6 +115,42 @@ def test_scheduler_respects_per_user_concurrency_and_runs_queued_job_next(tmp_pa
     assert second.status is JobStatus.SUCCEEDED
 
 
+def test_pin_only_reorders_its_owner_queue_without_cross_user_priority(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    bob = replace(
+        _record("bob-first", owner="bob", runner="blocking_runner", seconds=30),
+        created_at=time.time() - 10,
+        entitlement=SchedulingEntitlement(priority_class="standard", weight=1.0),
+    )
+    alice_first = _record("alice-first", owner="alice")
+    alice_pinned = _record("alice-pinned", owner="alice")
+    for job in (bob, alice_first, alice_pinned):
+        repository.create(job)
+        repository.transition(job.job_id, JobStatus.PLANNING, expected=JobStatus.SUBMITTED)
+        repository.set_execution_plan(
+            job.job_id, plan={"cache_keys": []}, notices=[], requires_confirmation=False,
+        )
+    repository.pin("alice-pinned", owner="alice")
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        planner_workers=1,
+        execution_workers=1,
+    ) as scheduler:
+        scheduler.tick()
+
+        assert repository.require("bob-first").status is JobStatus.RUNNING
+        assert repository.require("alice-pinned").status is JobStatus.QUEUED
+
+        repository.request_cancel("bob-first", owner="bob", reason="test_complete")
+        _drive(scheduler, repository, "bob-first", {JobStatus.CANCELLED})
+        scheduler.tick()
+
+        assert repository.require("alice-pinned").status is JobStatus.RUNNING
+        assert repository.require("alice-first").status is JobStatus.QUEUED
+
+
 def test_scheduler_persists_failure_cancel_and_worker_crash(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     repository.create(_record("cancel", runner="blocking_runner", seconds=30))
