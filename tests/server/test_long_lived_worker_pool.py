@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 
 from server.jobs.scheduling import LongLivedWorkerPool
@@ -65,6 +66,28 @@ def test_worker_affinity_inventory_is_lru_bounded() -> None:
         snapshot = pool.worker_snapshot()[0]
 
     assert snapshot["cache_keys"] == ["B.DAY1", "C.DAY1"]
+
+
+def test_full_artifact_serializes_domain_objects_by_stable_string(tmp_path) -> None:
+    with LongLivedWorkerPool(size=1) as pool:
+        pool.submit(
+            job_id="domain-artifact",
+            runner_path=f"{RUNNERS}:domain_object_artifact_runner",
+            payload={},
+            artifact_root=str(tmp_path),
+            retention_mode="full",
+        )
+        messages = _collect(
+            pool, lambda rows: _finished(rows, "domain-artifact")
+        )
+
+    artifact = next(
+        item for item in messages if item.get("event") == "artifact"
+    )
+    payload = json.loads(
+        (tmp_path / artifact["data"]["relative_path"]).read_text(encoding="utf-8")
+    )
+    assert payload == {"factor": "factor-alias"}
 
 
 def test_spawned_worker_bootstraps_product_path_runtime() -> None:

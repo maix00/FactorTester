@@ -4,6 +4,11 @@ import os
 import time
 
 
+class StringIdentifiedValue:
+    def __str__(self) -> str:
+        return "factor-alias"
+
+
 def cpu_runner(payload, sink, cancel_event) -> None:
     loops = int(payload.get("loops") or 100_000)
     total = 0
@@ -66,6 +71,11 @@ def artifact_runner(payload, sink, cancel_event) -> None:
         "annual_return": 0.12,
         "equity_curve": list(range(size)),
     })
+
+
+def domain_object_artifact_runner(payload, sink, cancel_event) -> None:
+    sink.emit_artifact("domain", {"factor": StringIdentifiedValue()})
+    sink.emit_result({"success": True, "pid": os.getpid()})
 
 
 def pausing_runner(payload, sink, cancel_event) -> None:

@@ -155,7 +155,7 @@ class _WorkerSink:
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{safe_name}.json"
         staging = directory / f".{safe_name}.{os.getpid()}.tmp"
-        raw = orjson.dumps(value, option=orjson.OPT_SERIALIZE_NUMPY)
+        raw = _json_bytes(value)
         staging.write_bytes(raw)
         staging.replace(target)
         self._emit("artifact", {
@@ -168,7 +168,7 @@ class _WorkerSink:
 
 
 def _bounded_summary(data: dict[str, Any], *, max_bytes: int = 512 * 1024) -> dict[str, Any]:
-    raw = orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY)
+    raw = _json_bytes(data)
     if len(raw) <= max_bytes:
         return dict(data)
     summary: dict[str, Any] = {
@@ -180,9 +180,17 @@ def _bounded_summary(data: dict[str, Any], *, max_bytes: int = 512 * 1024) -> di
         if key in {"success", "groups", "equity_curve", "curves", "details", "engine_result"}:
             continue
         candidate = {**summary, key: value}
-        if len(orjson.dumps(candidate, option=orjson.OPT_SERIALIZE_NUMPY)) <= max_bytes:
+        if len(_json_bytes(candidate)) <= max_bytes:
             summary[key] = value
     return summary
+
+
+def _json_bytes(value: Any) -> bytes:
+    return orjson.dumps(
+        value,
+        option=orjson.OPT_SERIALIZE_NUMPY,
+        default=str,
+    )
 
 
 def _load_runner(path: str):
