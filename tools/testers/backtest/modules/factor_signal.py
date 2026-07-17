@@ -54,6 +54,7 @@ from tools.testers.backtest.modules.time_index_lookup import (
 class FactorSignalStore:
     precomputed_tables: dict[Any, Any] = field(default_factory=dict)
     precomputed_provenance: dict[Any, dict[str, Any]] = field(default_factory=dict)
+    precomputed_results: dict[Any, Any] = field(default_factory=dict)
     precomputed_table_keys: dict[Any, Any] = field(default_factory=dict)
     precomputed_signal_value_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
     live_price_tables: dict[Any, Any] = field(default_factory=dict)
@@ -61,11 +62,14 @@ class FactorSignalStore:
 
     def put_precomputed_table(
         self, key: Any, table: Any, *, provenance: Any = None,
+        run_result: Any = None,
     ) -> None:
         self.precomputed_tables[key] = table
         self.precomputed_signal_value_cache.clear()
         if provenance:
             self.precomputed_provenance[key] = dict(provenance)
+        if run_result is not None:
+            self.precomputed_results[key] = run_result
 
     def bind_precomputed_table(self, strategy: Any, key: Any) -> None:
         self.precomputed_table_keys[strategy] = key
@@ -81,6 +85,12 @@ class FactorSignalStore:
     ) -> dict[str, Any]:
         key = self.precomputed_table_keys.get(strategy, fallback_key)
         return dict(self.precomputed_provenance.get(key, {}))
+
+    def precomputed_result_for(
+        self, strategy: Any, fallback_key: Any = None,
+    ) -> Any:
+        key = self.precomputed_table_keys.get(strategy, fallback_key)
+        return self.precomputed_results.get(key)
 
 
 class FactorSignalModule(ExecutableModule):
@@ -357,12 +367,18 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
         ).items():
             first_config = state.config_for(scheduled_strategies[0])
             if schedule_key not in tables:
+                scheduled_table = _schedule_table_for_strategy(
+                    table, first_config, factor=factor, state=state,
+                )
+                result_factory = getattr(factor, "to_run_result", None)
                 store.put_precomputed_table(
                     schedule_key,
-                    _schedule_table_for_strategy(
-                        table, first_config, factor=factor, state=state,
-                    ),
+                    scheduled_table,
                     provenance=getattr(factor, "provenance", None),
+                    run_result=(
+                        result_factory(table=scheduled_table)
+                        if callable(result_factory) else None
+                    ),
                 )
             for strategy in scheduled_strategies:
                 store.bind_precomputed_table(strategy, schedule_key)

@@ -69,9 +69,14 @@ def test_external_precomputed_factor_uses_market_signal_schedule() -> None:
     product = object()
 
     class _ExternalFactor:
+        provenance = {"factor_sha256": "abc", "execution": "next_bar"}
+
         def align_to_market_schedule(self, schedule):
             result = pd.DataFrame({product: [3.0]}, index=schedule.index)
             return result
+
+        def to_run_result(self, table):
+            return {"table": table, "provenance": self.provenance}
 
     strategy = Strategy(alias="external")
     config = StrategyConfig(
@@ -113,16 +118,19 @@ def test_factor_signal_store_keeps_external_provenance_per_bound_schedule() -> N
     strategy = Strategy(alias="external")
     store = FactorSignalStore()
     key = ("external", "schedule")
+    run_result = object()
     store.put_precomputed_table(
         key,
         pd.DataFrame({"A": [1.0]}, index=[pd.Timestamp("2026-01-01")]),
         provenance={"factor_sha256": "abc", "execution": "next_bar"},
+        run_result=run_result,
     )
     store.bind_precomputed_table(strategy, key)
 
     assert store.precomputed_provenance_for(strategy) == {
         "factor_sha256": "abc", "execution": "next_bar",
     }
+    assert store.precomputed_result_for(strategy) is run_result
 
 
 def test_factor_calculation_key_separates_market_data_source_and_frequency():
