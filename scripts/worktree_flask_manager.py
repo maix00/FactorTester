@@ -42,11 +42,19 @@ class Worktree:
     port: int  # 0 means no port assigned (should be cleaned up)
 
 
+@dataclass
+class ServiceBundle:
+    api: subprocess.Popen
+    daemon: subprocess.Popen
+    socket_path: Path
+    deployment_id: str
+
+
 class ManagerState:
     def __init__(self, repo: Path, python: str) -> None:
         self.repo = repo.resolve()
         self.python = python
-        self.processes: dict[str, subprocess.Popen] = {}
+        self.processes: dict[str, ServiceBundle] = {}
         self.log_dir = self.repo / ".workspace" / "flask-manager" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -101,18 +109,51 @@ class ManagerState:
         return str(path.resolve())
 
     def is_running(self, path: Path) -> bool:
-        proc = self.processes.get(self.key(path))
-        if not proc:
+        bundle = self.processes.get(self.key(path))
+        if not bundle:
             return False
-        if proc.poll() is not None:
-            self.processes.pop(self.key(path), None)
+        if bundle.api.poll() is not None:
             return False
         return True
+
+    def daemon_running(self, path: Path) -> bool:
+        bundle = self.processes.get(self.key(path))
+        return bool(bundle and bundle.daemon.poll() is None)
+
+    def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
+        deployment_id = f"{safe_name(path.name)}-{port}"
+        socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
+        env = os.environ.copy()
+        env.update({
+            "FLASK_DEBUG": "1",
+            "PYTHONUNBUFFERED": "1",
+            "GTHT_DEPLOYMENT_ID": deployment_id,
+            "GTHT_JOB_DAEMON_SOCKET": str(socket_path),
+            "GTHT_SOURCE_REVISION": subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=path, text=True
+            ).strip(),
+        })
+        return env, deployment_id, socket_path
+
+    def _start_api(self, path: Path, port: int, env: dict[str, str], log) -> subprocess.Popen:
+        return subprocess.Popen(
+            [self.python, "start_server.py", "--port", str(port)],
+            cwd=path,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
 
     def start(self, path: Path, port: int) -> str:
         path = path.resolve()
         if self.is_running(path):
             return "already running"
+        existing = self.processes.get(self.key(path))
+        if existing is not None and existing.daemon.poll() is None:
+            return self.restart_api(path, port)
+        if existing is not None:
+            self.processes.pop(self.key(path), None)
         if not (path / "start_server.py").exists():
             raise RuntimeError(f"missing start_server.py in {path}")
         if port == 0:
@@ -122,44 +163,70 @@ class ManagerState:
 
         log_file = self.log_dir / f"{safe_name(path.name)}-{port}.log"
         log = log_file.open("ab", buffering=0)
-        env = os.environ.copy()
-        env["FLASK_DEBUG"] = "1"
-        env["PYTHONUNBUFFERED"] = "1"
-        proc = subprocess.Popen(
-            [self.python, "start_server.py", "--port", str(port)],
+        env, deployment_id, socket_path = self._service_env(path, port)
+        daemon = subprocess.Popen(
+            [
+                self.python,
+                "scripts/research_job_daemon.py",
+                "--deployment-id", deployment_id,
+                "--socket", str(socket_path),
+            ],
             cwd=path,
             env=env,
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-        self.processes[self.key(path)] = proc
-        return f"started pid {proc.pid}"
+        api = self._start_api(path, port, env, log)
+        self.processes[self.key(path)] = ServiceBundle(
+            api=api,
+            daemon=daemon,
+            socket_path=socket_path,
+            deployment_id=deployment_id,
+        )
+        return f"started api pid {api.pid}, daemon pid {daemon.pid}"
 
-    def stop(self, path: Path) -> str:
+    def restart_api(self, path: Path, port: int) -> str:
         path = path.resolve()
-        proc = self.processes.get(self.key(path))
-        if not proc or proc.poll() is not None:
-            self.processes.pop(self.key(path), None)
-            return "not running"
+        bundle = self.processes.get(self.key(path))
+        if bundle is None or bundle.daemon.poll() is not None:
+            raise RuntimeError("research daemon is not running")
+        if bundle.api.poll() is None:
+            self._terminate(bundle.api)
+        log_file = self.log_dir / f"{safe_name(path.name)}-{port}.log"
+        log = log_file.open("ab", buffering=0)
+        env, _, _ = self._service_env(path, port)
+        bundle.api = self._start_api(path, port, env, log)
+        return f"restarted api pid {bundle.api.pid}; daemon pid {bundle.daemon.pid} preserved"
+
+    @staticmethod
+    def _terminate(proc: subprocess.Popen) -> None:
+        if proc.poll() is not None:
+            return
         try:
             os.killpg(proc.pid, signal.SIGTERM)
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait(timeout=5)
-        finally:
+
+    def stop(self, path: Path) -> str:
+        path = path.resolve()
+        bundle = self.processes.get(self.key(path))
+        if not bundle:
             self.processes.pop(self.key(path), None)
+            return "not running"
+        self._terminate(bundle.api)
+        self._terminate(bundle.daemon)
+        self.processes.pop(self.key(path), None)
         return "stopped"
 
     def stop_all(self) -> None:
         for key in list(self.processes):
-            proc = self.processes.get(key)
-            if proc and proc.poll() is None:
-                try:
-                    os.killpg(proc.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+            bundle = self.processes.get(key)
+            if bundle:
+                self._terminate(bundle.api)
+                self._terminate(bundle.daemon)
         self.processes.clear()
 
 
@@ -215,9 +282,10 @@ def page(state: ManagerState, message: str = "") -> bytes:
             continue
         running = state.is_running(wt.path)
         occupied = port_in_use(wt.port) and not running
-        status = "running" if running else ("occupied" if occupied else "stopped")
+        daemon_running = state.daemon_running(wt.path)
+        status = "running" if running and daemon_running else ("degraded" if running else ("occupied" if occupied else "stopped"))
         start_disabled = "disabled" if running or occupied else ""
-        stop_disabled = "" if running else "disabled"
+        stop_disabled = "" if running or daemon_running else "disabled"
         open_disabled = "" if running or occupied else "disabled"
         rows.append(
             f"""
@@ -229,6 +297,7 @@ def page(state: ManagerState, message: str = "") -> bytes:
               <td>
                 <form method="post" action="/start"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><input type="hidden" name="port" value="{wt.port}"><button {start_disabled}>Start</button></form>
                 <form method="post" action="/stop"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><button {stop_disabled}>Stop</button></form>
+                <form method="post" action="/restart-api"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><input type="hidden" name="port" value="{wt.port}"><button {'' if daemon_running else 'disabled'}>Restart API</button></form>
                 <a class="button {open_disabled}" href="http://localhost:{wt.port}/" target="_blank">Open</a>
                 <a class="button {open_disabled}" href="http://{lan}:{wt.port}/" target="_blank" title="LAN 访问">🌐 Open</a>
               </td>
@@ -261,6 +330,7 @@ def page(state: ManagerState, message: str = "") -> bytes:
     .running {{ background: #dcfce7; color: #166534; }}
     .stopped {{ background: #f3f4f6; color: #374151; }}
     .occupied {{ background: #fef3c7; color: #92400e; }}
+    .degraded {{ background: #fee2e2; color: #991b1b; }}
     .orphan {{ background: #fef2f2; }}
     .orphan-pill {{ background: #fee2e2; color: #991b1b; }}
     .message {{ padding: 8px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; margin-bottom: 12px; }}
@@ -293,6 +363,7 @@ class Handler(BaseHTTPRequestHandler):
                     "path": str(wt.path),
                     "port": wt.port,
                     "running": self.state.is_running(wt.path),
+                    "daemon_running": self.state.daemon_running(wt.path),
                     "port_in_use": port_in_use(wt.port),
                 }
                 for wt in self.state.worktrees()
@@ -320,6 +391,9 @@ class Handler(BaseHTTPRequestHandler):
                 message = self.state.start(path, port)
             elif self.path == "/stop":
                 message = self.state.stop(path)
+            elif self.path == "/restart-api":
+                port = int(params.get("port", ["0"])[0])
+                message = self.state.restart_api(path, port)
             else:
                 self.send_error(404)
                 return
