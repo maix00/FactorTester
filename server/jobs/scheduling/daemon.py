@@ -258,6 +258,21 @@ class ResearchJobScheduler:
             )
             return
         if event == "result" and stage == "execution" and job.status is JobStatus.RUNNING:
+            if job.cancel_requested_at is not None:
+                self.repository.transition(
+                    job_id,
+                    JobStatus.CANCELLED,
+                    expected=JobStatus.RUNNING,
+                    cancel_reason=job.cancel_reason,
+                    error={
+                        "success": False,
+                        "cancelled": True,
+                        "code": "cancelled_before_result_commit",
+                        "message": "cancellation was requested before the result was committed",
+                    },
+                )
+                self.broker.close(job_id)
+                return
             summary = dict(data)
             self.repository.transition(
                 job_id,

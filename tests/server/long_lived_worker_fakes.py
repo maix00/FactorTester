@@ -30,6 +30,13 @@ def uncooperative_runner(payload, sink, cancel_event) -> None:
     sink.emit_result({"success": True, "pid": os.getpid()})
 
 
+def cancel_result_race_runner(payload, sink, cancel_event) -> None:
+    deadline = time.monotonic() + float(payload.get("seconds") or 5.0)
+    while time.monotonic() < deadline and not cancel_event.is_set():
+        time.sleep(0.005)
+    sink.emit_result({"success": True, "pid": os.getpid()})
+
+
 def crash_runner(payload, sink, cancel_event) -> None:
     os._exit(int(payload.get("exitcode") or 17))
 

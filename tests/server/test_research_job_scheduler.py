@@ -177,6 +177,32 @@ def test_scheduler_persists_failure_cancel_and_worker_crash(tmp_path) -> None:
     assert crashed.worker_exitcode == 17
 
 
+def test_cancel_requested_before_result_commit_wins_result_race(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.create(_record(
+        "cancel-race",
+        runner="cancel_result_race_runner",
+        seconds=30,
+    ))
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        execution_workers=1,
+    ) as scheduler:
+        _drive(scheduler, repository, "cancel-race", {JobStatus.RUNNING})
+        repository.request_cancel(
+            "cancel-race", owner="alice", reason="explicit_cancel"
+        )
+        cancelled, _ = _drive(
+            scheduler, repository, "cancel-race", {JobStatus.CANCELLED}
+        )
+
+    assert cancelled.cancel_reason == "explicit_cancel"
+    assert cancelled.error["code"] == "cancelled_before_result_commit"
+    assert cancelled.result_summary is None
+
+
 def test_full_result_uses_files_and_over_quota_cancels_waiting_not_running(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     first = _record("full", runner="artifact_runner")
