@@ -900,6 +900,90 @@ def test_daily_signal_rejects_products_with_different_trading_day_closes():
         })
 
 
+def test_daily_signal_close_is_inferred_from_loaded_market_events():
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    product = _Product()
+    strategy = Strategy(alias="daily-inferred-close")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_live"}),
+            field_values={
+                FactorSignalModule.signal_freq: "1d",
+                MarketDataModule.freq_mode: "fixed",
+                MarketDataModule.freq_fixed: "MIN1",
+                RunWindowModule.timezone: "Asia/Shanghai",
+            },
+        ),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+    utc_index = pd.DatetimeIndex([
+        "2025-01-02 06:59:00+00:00",
+        "2025-01-02 07:00:00+00:00",
+        "2025-01-03 06:59:00+00:00",
+        "2025-01-03 07:00:00+00:00",
+    ])
+
+    _publish_raw_market_data(account, ctx, {
+        "raw_prices": pd.DataFrame({product: [1.0, 2.0, 3.0, 4.0]}, index=utc_index),
+        "included_products": (product,),
+    })
+
+    assert account.market_data_store.daily_signal_close_time == "15:00"
+
+
+def test_daily_signal_close_rejects_different_inferred_market_event_times():
+    class _Product:
+        def __init__(self, name):
+            self.name = name
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    p15 = _Product("P15")
+    p1515 = _Product("P1515")
+    strategy = Strategy(alias="daily-different-inferred-closes")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_live"}),
+            field_values={
+                FactorSignalModule.signal_freq: "1d",
+                MarketDataModule.freq_mode: "fixed",
+                MarketDataModule.freq_fixed: "MIN1",
+                RunWindowModule.timezone: "Asia/Shanghai",
+            },
+        ),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({p15, p1515}))
+    index = pd.DatetimeIndex([
+        "2025-01-02 15:00",
+        "2025-01-02 15:15",
+        "2025-01-03 15:00",
+        "2025-01-03 15:15",
+    ])
+    raw_prices = pd.DataFrame(
+        {
+            p15: [1.0, np.nan, 2.0, np.nan],
+            p1515: [np.nan, 1.0, np.nan, 2.0],
+        },
+        index=index,
+    )
+
+    with pytest.raises(ValueError, match="DAY1.*15:00.*15:15"):
+        _publish_raw_market_data(account, ctx, {
+            "raw_prices": raw_prices,
+            "included_products": (p15, p1515),
+        })
+
+
 def test_daily_signal_close_ignores_products_excluded_by_raw_load():
     class _Product:
         def __init__(self, name, close):
