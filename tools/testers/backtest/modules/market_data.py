@@ -593,7 +593,6 @@ def _resolve_market_data_request(state, ctx) -> None:
     store.required_frequency_by_strategy = dict(frequencies_by_strategy)
     store.required_factor_columns_by_strategy = dict(factor_columns_by_strategy)
     if daily_signal_products:
-        store.daily_signal_close_time = _common_daily_signal_close_time(daily_signal_products)
         _expand_market_data_request_to_complete_trading_days(request)
     unique_sources = {source for source in sources_by_strategy.values()}
     if len(unique_sources) == 1:
@@ -649,6 +648,43 @@ def _common_daily_signal_close_time(products: list[Any]) -> str:
             f"实际为 {details}"
         )
     return next(iter(by_close))
+
+
+def _active_daily_signal_products(
+    state: Any,
+    ctx: Any,
+    *,
+    included: set[Any] | None = None,
+    excluded: set[Any] | None = None,
+) -> list[Any]:
+    excluded = excluded or set()
+    products: list[Any] = []
+    for strategy in state.strategy_configs:
+        if not _strategy_uses_daily_signal(state.config_for(strategy)):
+            continue
+        for product in ctx.get_for(ProductSelectionModule.products, strategy, frozenset()):
+            if product in excluded or (included is not None and product not in included):
+                continue
+            products.append(product)
+    return list(dict.fromkeys(products))
+
+
+def _resolve_daily_signal_close_after_coverage(
+    state: Any,
+    ctx: Any,
+    *,
+    included: set[Any] | None = None,
+    excluded: set[Any] | None = None,
+) -> None:
+    products = _active_daily_signal_products(
+        state,
+        ctx,
+        included=included,
+        excluded=excluded,
+    )
+    market_data_store_for(state).daily_signal_close_time = (
+        _common_daily_signal_close_time(products) if products else None
+    )
 
 
 def _expand_market_data_request_to_complete_trading_days(request: dict[str, Any]) -> None:
@@ -1670,6 +1706,13 @@ def _publish_raw_market_data(state, ctx, raw: dict[str, Any]) -> None:
     ctx.set(MarketDataModule.historical_field_provider, raw.get("historical_field_provider"))
     store = market_data_store_for(state)
     store.publish_raw(raw)
+    included = set(store.included_products) if store.included_products is not None else None
+    _resolve_daily_signal_close_after_coverage(
+        state,
+        ctx,
+        included=included,
+        excluded=set(store.excluded_out_of_range),
+    )
     _record_excluded_out_of_range_products(state, store.excluded_out_of_range)
     # volume_table is not ffill'd -- a gap means zero
                                                 # traded volume, not "carry the last
