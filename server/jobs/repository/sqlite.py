@@ -59,6 +59,8 @@ class JobRepository:
                 deployment_id TEXT NOT NULL DEFAULT '',
                 source_revision TEXT NOT NULL DEFAULT '',
                 runner_path TEXT NOT NULL DEFAULT '',
+                job_spec_json TEXT NOT NULL,
+                job_spec_hash TEXT NOT NULL,
                 worker_pid INTEGER,
                 worker_exitcode INTEGER,
                 cancel_requested_at REAL,
@@ -138,6 +140,7 @@ class JobRepository:
 
     def create(self, record: JobRecord) -> JobRecord:
         now = record.created_at or time.time()
+        job_spec_raw = orjson.dumps(record.job_spec, option=orjson.OPT_SORT_KEYS)
         with self._connect() as conn:
             if record.step_mode:
                 existing = conn.execute(
@@ -161,8 +164,9 @@ class JobRepository:
                         job_id, run_id, owner, workspace_id, kind, status,
                         retry_of, attempt, step_mode, retention_mode,
                         deployment_id, source_revision, runner_path,
+                        job_spec_json, job_spec_hash,
                         entitlement_json, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.job_id,
@@ -178,6 +182,8 @@ class JobRepository:
                         record.deployment_id,
                         record.source_revision,
                         record.runner_path,
+                        job_spec_raw.decode(),
+                        hashlib.sha256(job_spec_raw).hexdigest(),
                         _dumps(record.entitlement.to_dict()),
                         now,
                         now,
@@ -474,6 +480,8 @@ class JobRepository:
             deployment_id=str(row["deployment_id"] or ""),
             source_revision=str(row["source_revision"] or ""),
             runner_path=str(row["runner_path"] or ""),
+            job_spec=dict(_loads(row["job_spec_json"], {})),
+            job_spec_hash=str(row["job_spec_hash"]),
             worker_pid=row["worker_pid"],
             worker_exitcode=row["worker_exitcode"],
             cancel_requested_at=row["cancel_requested_at"],

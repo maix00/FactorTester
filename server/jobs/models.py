@@ -55,6 +55,8 @@ class JobRecord:
     deployment_id: str = ""
     source_revision: str = ""
     runner_path: str = ""
+    job_spec: dict[str, Any] = field(default_factory=dict)
+    job_spec_hash: str = ""
     worker_pid: int | None = None
     worker_exitcode: int | None = None
     cancel_requested_at: float | None = None
@@ -87,6 +89,7 @@ class JobRecord:
             "retention_mode": self.retention_mode,
             "deployment_id": self.deployment_id,
             "source_revision": self.source_revision,
+            "job_spec_hash": self.job_spec_hash,
             "worker_pid": self.worker_pid,
             "worker_exitcode": self.worker_exitcode,
             "cancel_requested": self.cancel_requested_at is not None,

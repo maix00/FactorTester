@@ -27,6 +27,8 @@ def _record(
         step_mode=step_mode,
         deployment_id="issue-135",
         source_revision="abc123",
+        runner_path="tests.server.long_lived_worker_fakes:cpu_runner",
+        job_spec={"run_id": "run-1", "products": ["A.DCE"]},
         created_at=time.time(),
     )
 
@@ -59,6 +61,7 @@ def test_repository_schema_contains_only_durable_job_facts(tmp_path) -> None:
     assert "manifest_json" not in columns
     assert "initiator_page_uuid" not in columns
     assert "lifecycle_policy" not in columns
+    assert {"job_spec_json", "job_spec_hash"} <= columns
 
 
 def test_repository_freezes_plan_and_enforces_transitions(tmp_path) -> None:
