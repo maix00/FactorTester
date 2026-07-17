@@ -346,7 +346,12 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
         ).items():
             first_config = state.config_for(scheduled_strategies[0])
             if schedule_key not in tables:
-                store.put_precomputed_table(schedule_key, _schedule_table_for_strategy(table, first_config, state))
+                store.put_precomputed_table(
+                    schedule_key,
+                    _schedule_table_for_strategy(
+                        table, first_config, factor=factor, state=state,
+                    ),
+                )
             for strategy in scheduled_strategies:
                 store.bind_precomputed_table(strategy, schedule_key)
             _append_signal_drafts(drafts, signal_event_times(tables[schedule_key]), scheduled_strategies)
@@ -555,7 +560,30 @@ def _run_window_envelope_for_strategies(strategies: list, state) -> tuple[DataTi
     return run_window_envelope_for_strategies(strategies, state)
 
 
-def _schedule_table_for_strategy(table: pd.DataFrame, config, state=None) -> pd.DataFrame:
+def _schedule_table_for_strategy(
+    table: pd.DataFrame, config, *, factor: Any = None, state: Any = None,
+) -> pd.DataFrame:
+    external_align = getattr(factor, "align_to_market_schedule", None)
+    if callable(external_align):
+        if state is None:
+            raise ValueError("external precomputed factor alignment requires backtest state")
+        market_table = current_prices_table_for(state)
+        if market_table is None or market_table.empty:
+            raise ValueError("external precomputed factor alignment requires market data")
+        scheduled_market = signal_align(
+            market_table,
+            config.get(FactorSignalModule.signal_freq, "1d"),
+            basepoint=config.get(FactorSignalModule.basepoint, "last"),
+            daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
+            end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
+            end_session_gap=cast(
+                pd.Timedelta,
+                pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h")),
+            ),
+        )
+        return _clip_signal_table_to_strategy_window(
+            external_align(scheduled_market), config,
+        )
     calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
     table = _table_with_exact_event_index(table, config, state)
     run_table = _clip_signal_table_to_strategy_window(table, config)

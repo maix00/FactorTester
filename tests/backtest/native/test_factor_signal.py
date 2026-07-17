@@ -65,6 +65,48 @@ def test_normalize_signal_timestamp_day_level_midnight_without_lookup_raises():
         normalize_signal_timestamp(pd.Timestamp("2024-01-01"), _FakeDayFreq())
 
 
+def test_external_precomputed_factor_uses_market_signal_schedule() -> None:
+    product = object()
+
+    class _ExternalFactor:
+        def align_to_market_schedule(self, schedule):
+            result = pd.DataFrame({product: [3.0]}, index=schedule.index)
+            return result
+
+    strategy = Strategy(alias="external")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            FactorSignalModule.signal_freq: "1d",
+            FactorSignalModule.basepoint: "last",
+        },
+    )
+    state = BacktestRunState(strategy_configs={strategy: config})
+    market_index = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime(["2026-01-02"]),
+            pd.to_datetime(["2026-01-02 15:00"]),
+        ],
+        names=["trading_day", "trade_time"],
+    )
+    state.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [100.0]}, index=market_index
+    )
+    schedule = pd.DataFrame({product: [100.0]}, index=market_index)
+
+    with patch(
+        "tools.testers.backtest.modules.factor_signal.signal_align",
+        return_value=schedule,
+    ) as align:
+        result = _schedule_table_for_strategy(
+            pd.DataFrame(), config, factor=_ExternalFactor(), state=state,
+        )
+
+    assert result.index.equals(market_index)
+    assert result.iloc[0, 0] == 3.0
+    align.assert_called_once()
+
+
 def test_factor_calculation_key_separates_market_data_source_and_frequency():
     factor_key = ("factor", "A")
     base = StrategyConfig(

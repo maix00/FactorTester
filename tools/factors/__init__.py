@@ -9,6 +9,7 @@ if FACTOR_WORKSPACE:
     )
     from tools.factors.Factors import Factor
     from tools.factors.FactorFamily import FactorFamily
+    from tools.factors.PrecomputedFactorArtifact import PrecomputedFactorArtifact
     from tools.factors.FactorExpr import (
         FactorExpr,
         ConstExpr,
