@@ -11,6 +11,7 @@ from .core.plan import build_factor_research_plan, validation_checklist
 from .core.external_factor import (
     validate_dataset_manifest,
     validate_factor_manifest,
+    validate_handoff_manifest,
     vibe_pipeline_plan,
 )
 from .core.session import (
@@ -586,19 +587,22 @@ def external_factor_plan(
 @external_factor.command("validate")
 @click.option("--dataset-manifest", multiple=True, type=click.Path(dir_okay=False))
 @click.option("--factor-manifest", multiple=True, type=click.Path(dir_okay=False))
+@click.option("--handoff-manifest", multiple=True, type=click.Path(dir_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 @click.pass_context
 def external_factor_validate(
     ctx: click.Context, dataset_manifest: tuple[str, ...],
-    factor_manifest: tuple[str, ...], as_json: bool,
+    factor_manifest: tuple[str, ...], handoff_manifest: tuple[str, ...],
+    as_json: bool,
 ) -> None:
     """Validate provenance, non-empty output, and next-bar timing contracts."""
-    if not dataset_manifest and not factor_manifest:
-        raise click.ClickException("至少指定一个 dataset/factor manifest")
+    if not dataset_manifest and not factor_manifest and not handoff_manifest:
+        raise click.ClickException("至少指定一个 dataset/factor/handoff manifest")
     try:
         results = [
             *(validate_dataset_manifest(path) for path in dataset_manifest),
             *(validate_factor_manifest(path) for path in factor_manifest),
+            *(validate_handoff_manifest(path) for path in handoff_manifest),
         ]
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc

@@ -57,7 +57,8 @@ cli-anything-factortester-research external-factor plan \
 cli-anything-factortester-research external-factor validate \
   --dataset-manifest <daily-manifest> \
   --dataset-manifest <minute-manifest> \
-  --factor-manifest <factor-manifest>
+  --factor-manifest <factor-manifest> \
+  --handoff-manifest <gtht-handoff-manifest>
 ```
 
 This does not silently inject a Parquet matrix into native replay. Until GTHT

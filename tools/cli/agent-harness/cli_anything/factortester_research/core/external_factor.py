@@ -15,7 +15,19 @@ def vibe_pipeline_plan(
     daily = root / "data" / "processed" / "china_futures_daily" / dataset_version
     minute = root / "data" / "processed" / "china_futures_minute" / dataset_version
     factor = root / "artifacts" / "factors" / alpha_id
+    config = root / "config" / "research-pipeline.yaml"
     return [
+        {
+            "phase": "run_versioned_pipeline",
+            "argv": [
+                str(python), str(root / "infrastructure/pipeline.py"),
+                "--config", str(config), "run", "--alpha", alpha_id,
+            ],
+            "purpose": (
+                "Canonical locked/idempotent entrypoint. Reuses valid versioned "
+                "artifacts and publishes the GTHT handoff only after validation."
+            ),
+        },
         {
             "phase": "build_daily_panel",
             "argv": [
@@ -58,6 +70,7 @@ def vibe_pipeline_plan(
         {
             "phase": "gtht_handoff",
             "status": "platform_gap",
+            "handoff_manifest": str(factor / "gtht_handoff.json"),
             "reason": (
                 "GTHT currently has no public CLI/HTTP contract for importing a "
                 "precomputed date-by-product factor panel as a FactorRunResult. "
@@ -116,4 +129,39 @@ def validate_factor_manifest(path: str) -> dict[str, Any]:
         "kind": "factor", "path": str(manifest_path), "valid": True,
         "alpha_id": str(payload["alpha_id"]),
         "finite_observations": int(output["finite_observations"]),
+    }
+
+
+def validate_handoff_manifest(path: str) -> dict[str, Any]:
+    manifest_path, payload = _read_manifest(path)
+    required = {
+        "schema_version", "status", "alpha_id", "factor", "universe", "timing",
+        "research", "gtht",
+    }
+    missing = required - set(payload)
+    if missing:
+        raise ValueError(f"handoff manifest missing: {sorted(missing)}")
+    if payload.get("status") != "ready_for_gtht_import_contract":
+        raise ValueError("handoff status must be ready_for_gtht_import_contract")
+    timing = payload.get("timing") or {}
+    if timing.get("execution") != "next_bar":
+        raise ValueError("handoff must require next_bar execution")
+    if not timing.get("same_close_execution_forbidden"):
+        raise ValueError("handoff must forbid same-close execution")
+    research = payload.get("research") or {}
+    if research.get("status") != "experimental_unvalidated":
+        raise ValueError("handoff research status must remain experimental_unvalidated")
+    gtht = payload.get("gtht") or {}
+    if gtht.get("factor_mode") != "precomputed":
+        raise ValueError("handoff factor_mode must be precomputed")
+    if gtht.get("import_contract_available") is not False:
+        raise ValueError("handoff cannot claim the GTHT import contract is available")
+    factor = payload.get("factor") or {}
+    factor_path = Path(str(factor.get("path") or "")).expanduser()
+    if not factor_path.is_file():
+        raise FileNotFoundError(f"handoff factor not found: {factor_path}")
+    return {
+        "kind": "gtht_handoff", "path": str(manifest_path), "valid": True,
+        "alpha_id": str(payload["alpha_id"]),
+        "import_contract_available": False,
     }

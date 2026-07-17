@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from cli_anything.factortester_research.core.plan import build_factor_research_plan, validation_checklist
 from cli_anything.factortester_research.core.external_factor import (
     validate_dataset_manifest,
     validate_factor_manifest,
+    validate_handoff_manifest,
     vibe_pipeline_plan,
 )
 from cli_anything.factortester_research.core.service import ManagedWorktree, select_worktree
@@ -105,8 +107,9 @@ def test_vibe_pipeline_includes_daily_minute_and_explicit_gtht_gap(tmp_path: Pat
         alpha_id="academic_carhart_mom",
     )
     phases = [item["phase"] for item in steps]
-    assert phases[:3] == [
-        "build_daily_panel", "build_minute_panel", "compute_vibe_daily_factor",
+    assert phases[:4] == [
+        "run_versioned_pipeline", "build_daily_panel", "build_minute_panel",
+        "compute_vibe_daily_factor",
     ]
     assert steps[-1]["status"] == "platform_gap"
     assert "FactorRunResult" in steps[-1]["reason"]
@@ -129,3 +132,26 @@ def test_external_manifests_require_next_bar_and_experimental_status(tmp_path: P
     )
     assert validate_dataset_manifest(str(dataset))["frequency"] == "1min"
     assert validate_factor_manifest(str(factor))["alpha_id"] == "x"
+
+
+def test_handoff_manifest_keeps_import_boundary_explicit(tmp_path: Path) -> None:
+    factor = tmp_path / "factor.parquet"
+    factor.write_bytes(b"PAR1")
+    handoff = tmp_path / "handoff.json"
+    handoff.write_text(json.dumps({
+        "schema_version": 1,
+        "status": "ready_for_gtht_import_contract",
+        "alpha_id": "x",
+        "factor": {"path": str(factor), "sha256": "unused"},
+        "universe": {},
+        "timing": {
+            "execution": "next_bar", "same_close_execution_forbidden": True,
+        },
+        "research": {"status": "experimental_unvalidated"},
+        "gtht": {
+            "factor_mode": "precomputed", "import_contract_available": False,
+        },
+    }), encoding="utf-8")
+    result = validate_handoff_manifest(str(handoff))
+    assert result["kind"] == "gtht_handoff"
+    assert result["import_contract_available"] is False
