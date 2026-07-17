@@ -53,14 +53,19 @@ from tools.testers.backtest.modules.time_index_lookup import (
 @dataclass
 class FactorSignalStore:
     precomputed_tables: dict[Any, Any] = field(default_factory=dict)
+    precomputed_provenance: dict[Any, dict[str, Any]] = field(default_factory=dict)
     precomputed_table_keys: dict[Any, Any] = field(default_factory=dict)
     precomputed_signal_value_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
     live_price_tables: dict[Any, Any] = field(default_factory=dict)
     live_executors: dict[Any, Any] = field(default_factory=dict)
 
-    def put_precomputed_table(self, key: Any, table: Any) -> None:
+    def put_precomputed_table(
+        self, key: Any, table: Any, *, provenance: Any = None,
+    ) -> None:
         self.precomputed_tables[key] = table
         self.precomputed_signal_value_cache.clear()
+        if provenance:
+            self.precomputed_provenance[key] = dict(provenance)
 
     def bind_precomputed_table(self, strategy: Any, key: Any) -> None:
         self.precomputed_table_keys[strategy] = key
@@ -70,6 +75,12 @@ class FactorSignalStore:
         if key is None:
             raise KeyError(f"precomputed signal table is not bound for strategy {strategy!r}")
         return self.precomputed_tables.get(key)
+
+    def precomputed_provenance_for(
+        self, strategy: Any, fallback_key: Any = None,
+    ) -> dict[str, Any]:
+        key = self.precomputed_table_keys.get(strategy, fallback_key)
+        return dict(self.precomputed_provenance.get(key, {}))
 
 
 class FactorSignalModule(ExecutableModule):
@@ -351,6 +362,7 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
                     _schedule_table_for_strategy(
                         table, first_config, factor=factor, state=state,
                     ),
+                    provenance=getattr(factor, "provenance", None),
                 )
             for strategy in scheduled_strategies:
                 store.bind_precomputed_table(strategy, schedule_key)
@@ -561,7 +573,7 @@ def _run_window_envelope_for_strategies(strategies: list, state) -> tuple[DataTi
 
 
 def _schedule_table_for_strategy(
-    table: pd.DataFrame, config, *, factor: Any = None, state: Any = None,
+    table: pd.DataFrame, config, state: Any = None, *, factor: Any = None,
 ) -> pd.DataFrame:
     external_align = getattr(factor, "align_to_market_schedule", None)
     if callable(external_align):

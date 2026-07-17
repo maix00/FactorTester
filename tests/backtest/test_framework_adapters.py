@@ -45,6 +45,21 @@ def test_same_factor_signals_prepare_for_all_frameworks() -> None:
     )
 
 
+def test_precomputed_factor_source_preserves_artifact_provenance() -> None:
+    class _Artifact:
+        signals = pd.DataFrame(
+            [[0.2]], index=[pd.Timestamp("2026-01-01")], columns=["A"]
+        )
+        provenance = {"factor_sha256": "abc", "execution": "next_bar"}
+
+    source = PrecomputedFactorSource.from_artifact(_Artifact())
+
+    assert source.signals is _Artifact.signals
+    assert source.provenance == {
+        "factor_sha256": "abc", "execution": "next_bar",
+    }
+
+
 def test_incremental_factor_plan_is_not_forced_through_a_signal_dataframe() -> None:
     expression = ColumnRef(DataColumn.CLOSE).rolling_mean(5)
     bridge_request = FactorBridgeRequest(

@@ -107,6 +107,24 @@ def test_external_precomputed_factor_uses_market_signal_schedule() -> None:
     align.assert_called_once()
 
 
+def test_factor_signal_store_keeps_external_provenance_per_bound_schedule() -> None:
+    from tools.testers.backtest.modules.factor_signal import FactorSignalStore
+
+    strategy = Strategy(alias="external")
+    store = FactorSignalStore()
+    key = ("external", "schedule")
+    store.put_precomputed_table(
+        key,
+        pd.DataFrame({"A": [1.0]}, index=[pd.Timestamp("2026-01-01")]),
+        provenance={"factor_sha256": "abc", "execution": "next_bar"},
+    )
+    store.bind_precomputed_table(strategy, key)
+
+    assert store.precomputed_provenance_for(strategy) == {
+        "factor_sha256": "abc", "execution": "next_bar",
+    }
+
+
 def test_factor_calculation_key_separates_market_data_source_and_frequency():
     factor_key = ("factor", "A")
     base = StrategyConfig(
