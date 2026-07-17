@@ -56,6 +56,16 @@ def fake_server() -> Iterator[str]:
         assert payload["configuration_revision"] == 1
         return jsonify(success=True, run_id="run-1", jobs=[{"job_id": "job-1", "kind": "ic"}]), 202
 
+    @app.post("/api/external-factor-artifacts/validate")
+    def validate_external_factor_artifact():
+        payload = request.get_json()
+        return jsonify(success=True, artifact={
+            "artifact_id": "academic_mom:abc",
+            "manifest_path": payload["manifest_path"],
+            "factor_sha256": "abc",
+            "execution": "next_bar",
+        })
+
     @app.get("/api/jobs")
     def list_jobs():
         return jsonify(success=True, jobs=[{"job_id": "job-1", "status": "queued"}])
@@ -109,6 +119,9 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     assert workspace["workspace_id"] == "workspace-1"
     assert client.list_workspaces()[0]["workspace_id"] == "workspace-1"
     assert client.submit_run("workspace-1", 1, analyses=["ic"])["run_id"] == "run-1"
+    assert client.validate_external_factor_artifact(
+        "/research/gtht_handoff.json"
+    )["artifact_id"] == "academic_mom:abc"
     assert client.list_jobs(workspace_id="workspace-1")[0]["job_id"] == "job-1"
     assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"

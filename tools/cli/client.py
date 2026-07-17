@@ -40,6 +40,13 @@ class FactorTesterClient:
         data = self._expect_success(self.session.get(f"/api/workspaces/{workspace_id}/configuration"))
         return dict(data.get("configuration") or {})
 
+    def validate_external_factor_artifact(self, manifest_path: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/external-factor-artifacts/validate",
+            {"manifest_path": manifest_path},
+        ))
+        return dict(data.get("artifact") or {})
+
     def save_configuration_template(self, workspace_id: str, *, name: str) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/workspaces/{workspace_id}/configuration/templates",

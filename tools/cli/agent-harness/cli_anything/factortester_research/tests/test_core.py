@@ -100,7 +100,7 @@ def test_packaging_and_docs_record_durable_remote_contract() -> None:
         assert "page_uuid" in text
 
 
-def test_vibe_pipeline_includes_daily_minute_and_explicit_gtht_gap(tmp_path: Path) -> None:
+def test_vibe_pipeline_includes_daily_minute_and_server_handoff(tmp_path: Path) -> None:
     steps = vibe_pipeline_plan(
         integration_root=str(tmp_path / "integration"),
         data_root=str(tmp_path / "LocalCNFutures"),
@@ -111,8 +111,8 @@ def test_vibe_pipeline_includes_daily_minute_and_explicit_gtht_gap(tmp_path: Pat
         "run_versioned_pipeline", "build_daily_panel", "build_minute_panel",
         "compute_vibe_daily_factor",
     ]
-    assert steps[-1]["status"] == "platform_gap"
-    assert "FactorRunResult" in steps[-1]["reason"]
+    assert steps[-1]["status"] == "ready_for_server_validation"
+    assert "external-factor validate" in steps[-1]["reason"]
 
 
 def test_external_manifests_require_next_bar_and_experimental_status(tmp_path: Path) -> None:

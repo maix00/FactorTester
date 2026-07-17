@@ -287,6 +287,79 @@ def test_run_freezes_configuration_while_workspace_keeps_editing(client) -> None
     assert frozen["run_spec"]["configuration"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
 
 
+def test_run_revalidates_and_freezes_external_factor_artifact(client, monkeypatch) -> None:
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    payload["shared"]["external_factor_artifacts"] = [{
+        "manifest_path": "/research/gtht_handoff.json",
+        "artifact_id": "academic_mom:abc",
+        "manifest_sha256": "manifest-hash",
+        "factor_sha256": "factor-hash",
+    }]
+    _update(client, workspace, payload)
+    frozen_artifact = {
+        "artifact_id": "academic_mom:abc",
+        "kind": "precomputed_factor_artifact",
+        "alpha_id": "academic_mom",
+        "manifest_path": "/research/gtht_handoff.json",
+        "manifest_sha256": "manifest-hash",
+        "factor_path": "/research/factor.parquet",
+        "factor_sha256": "factor-hash",
+        "information_time": "daily_bar_close",
+        "execution": "next_bar",
+        "research_status": "experimental_unvalidated",
+        "rows": 3980,
+        "products": 97,
+        "finite_observations": 194316,
+    }
+    monkeypatch.setattr(
+        "server.services.external_factor_artifacts.validate_and_freeze",
+        lambda path: frozen_artifact,
+    )
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    run = response.get_json()["run"]
+    assert (
+        run["run_spec"]["configuration"]["shared"]["external_factor_artifacts"]
+        == [frozen_artifact]
+    )
+    job = JobRepository().list(owner="alice", run_id=run["run_id"])[0]
+    assert job.job_spec["external_factor_artifacts"] == [frozen_artifact]
+
+
+def test_run_rejects_external_factor_when_hash_changes(client, monkeypatch) -> None:
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    payload["shared"]["external_factor_artifacts"] = [{
+        "manifest_path": "/research/gtht_handoff.json",
+        "factor_sha256": "old-hash",
+    }]
+    _update(client, workspace, payload)
+    monkeypatch.setattr(
+        "server.services.external_factor_artifacts.validate_and_freeze",
+        lambda path: {
+            "artifact_id": "academic_mom:new",
+            "manifest_sha256": "manifest-hash",
+            "factor_sha256": "new-hash",
+        },
+    )
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    })
+
+    assert response.status_code == 400
+    assert "factor_sha256 changed" in response.get_json()["error"]
+
+
 def test_historical_run_can_be_cloned_into_a_new_editable_workspace(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))

@@ -69,12 +69,12 @@ def vibe_pipeline_plan(
         },
         {
             "phase": "gtht_handoff",
-            "status": "platform_gap",
+            "status": "ready_for_server_validation",
             "handoff_manifest": str(factor / "gtht_handoff.json"),
             "reason": (
-                "GTHT currently has no public CLI/HTTP contract for importing a "
-                "precomputed date-by-product factor panel as a FactorRunResult. "
-                "Do not bypass FactorExpr/signal alignment or native replay."
+                "Validate and attach this manifest through `factortester "
+                "external-factor validate ... --attach`; the server freezes the "
+                "artifact id and hashes before native replay."
             ),
         },
     ]

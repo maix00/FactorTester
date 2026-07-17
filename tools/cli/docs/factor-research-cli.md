@@ -17,6 +17,11 @@ factortester workspace load-template <configuration_id>
 # Or replace the active configuration from a complete JSON object:
 factortester workspace update --file research-configuration.json
 
+# Validate the full panel through GTHT and freeze its id/hashes in this workspace:
+factortester external-factor validate \
+  /path/to/gtht_handoff.json \
+  --attach
+
 factortester run submit \
   --analysis ic \
   --analysis factor_evaluation \

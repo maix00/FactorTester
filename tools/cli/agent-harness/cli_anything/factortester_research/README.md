@@ -61,9 +61,15 @@ cli-anything-factortester-research external-factor validate \
   --handoff-manifest <gtht-handoff-manifest>
 ```
 
-This does not silently inject a Parquet matrix into native replay. Until GTHT
-exposes a public precomputed-factor import contract, the plan reports the
-FactorRunResult handoff as a platform gap.
+This does not silently inject a Parquet matrix into native replay. Register the
+validated handoff through the FactorTester server:
+
+```bash
+factortester external-factor validate <gtht_handoff.json> --attach
+```
+
+The immutable RunSpec then freezes the artifact id, manifest hash, and factor
+hash before execution.
 
 ## CLI-Anything Adaptation Notes
 

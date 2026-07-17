@@ -29,6 +29,51 @@ def workspace() -> None:
     """Manage durable research contexts and their active configuration."""
 
 
+@click.group("external-factor")
+def external_factor() -> None:
+    """Validate and attach external precomputed factor artifacts."""
+
+
+@external_factor.command("validate")
+@click.argument(
+    "manifest_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--attach",
+    is_flag=True,
+    help="Attach the validated immutable descriptor to the active workspace.",
+)
+@friendly_errors
+def external_factor_validate(manifest_path: Path, attach: bool) -> None:
+    client = client_from_config()
+    artifact = client.validate_external_factor_artifact(str(manifest_path.resolve()))
+    if attach:
+        state = _require_workspace()
+        configuration = client.get_workspace_configuration(state.workspace_id)
+        payload = dict(configuration["payload"])
+        shared = dict(payload["shared"])
+        artifacts = [
+            item for item in shared.get("external_factor_artifacts") or []
+            if item.get("artifact_id") != artifact.get("artifact_id")
+        ]
+        artifacts.append(artifact)
+        shared["external_factor_artifacts"] = artifacts
+        payload["shared"] = shared
+        value = client.update_workspace_configuration(
+            state.workspace_id,
+            expected_revision=state.configuration_revision,
+            payload=payload,
+        )
+        state.configuration_revision = int(value["revision"])
+        save_state(state)
+    click.echo(_json({
+        "artifact": artifact,
+        "attached": attach,
+        "workspace_id": load_state().workspace_id if attach else "",
+    }))
+
+
 @workspace.command("create")
 @click.option("--factor-family", "factor_families", multiple=True, help="因子家族 alias，可重复。")
 @click.option(

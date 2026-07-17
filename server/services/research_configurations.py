@@ -83,6 +83,14 @@ def validate_payload(payload: Any) -> dict[str, Any]:
         if alias in factor_aliases:
             raise ValueError(f"factor alias must be unique: {alias}")
         factor_aliases.add(alias)
+    external_artifacts = shared.get("external_factor_artifacts", [])
+    if not isinstance(external_artifacts, list) or not all(
+        isinstance(item, dict) for item in external_artifacts
+    ):
+        raise ValueError("shared.external_factor_artifacts must be an array of objects")
+    for artifact in external_artifacts:
+        if not str(artifact.get("manifest_path") or "").strip():
+            raise ValueError("each external factor artifact requires manifest_path")
     return deepcopy(payload)
 
 

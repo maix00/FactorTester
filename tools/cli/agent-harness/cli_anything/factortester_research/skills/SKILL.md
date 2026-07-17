@@ -28,5 +28,6 @@ Before execution, inspect FactorExpr operators and source. Treat missing operato
 For external Vibe factors, use `external-factor plan` to freeze both daily and
 minute panel preparation, then `external-factor validate` on every dataset and
 factor manifest. Keep cross-market outputs `experimental_unvalidated`, require
-next-bar execution, and report the missing GTHT precomputed FactorRunResult
-import boundary as a platform gap rather than bypassing native signal alignment.
+next-bar execution, then use `factortester external-factor validate ... --attach`
+so the server freezes the artifact id and hashes in the RunSpec. Never bypass
+native signal alignment.

@@ -11,6 +11,7 @@ import settings as Settings
 
 from server.modules.single_factor_test import sft_bp
 from server.services import (
+    external_factor_artifacts,
     research_configurations,
     research_runs,
     research_workspaces,
@@ -92,6 +93,15 @@ def _freeze_product_selections(configuration: dict, *, owner: str, analyses: lis
             + ", ".join(sorted(unresolved))
         )
     backtest["product_selections"] = selections
+    return frozen
+
+
+def _freeze_external_factor_artifacts(configuration: dict) -> dict:
+    frozen = deepcopy(configuration)
+    shared = frozen["payload"]["shared"]
+    artifacts = external_factor_artifacts.freeze_configured_artifacts(shared)
+    if artifacts:
+        shared["external_factor_artifacts"] = artifacts
     return frozen
 
 
@@ -204,6 +214,20 @@ def get_workspace_configuration(workspace_id: str):
     if value is None:
         return jsonify({"success": False, "error": "workspace configuration not found"}), 404
     return jsonify({"success": True, "configuration": value})
+
+
+@sft_bp.post("/api/external-factor-artifacts/validate")
+def validate_external_factor_artifact():
+    require_user()
+    data = request.get_json(silent=True) or {}
+    manifest_path = str(data.get("manifest_path") or "").strip()
+    if not manifest_path:
+        return jsonify({"success": False, "error": "manifest_path is required"}), 400
+    try:
+        artifact = external_factor_artifacts.validate_and_freeze(manifest_path)
+    except (FileNotFoundError, KeyError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "artifact": artifact})
 
 
 @sft_bp.put("/api/workspaces/<workspace_id>/configuration")
@@ -361,6 +385,7 @@ def submit_research_run():
         frozen_configuration = _freeze_product_selections(
             configuration, owner=owner, analyses=analyses,
         )
+        frozen_configuration = _freeze_external_factor_artifacts(frozen_configuration)
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
 
