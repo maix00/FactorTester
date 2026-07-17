@@ -46,6 +46,9 @@ class _WorkerSink:
         self.retention_mode = str(retention_mode)
         self.control_queue = control_queue
         self.cancel_event = cancel_event
+        self._live_event_interval = 0.5
+        self._last_live_emit_at: dict[str, float] = {}
+        self._pending_live_events: dict[str, dict[str, Any]] = {}
 
     def _emit(self, event: str, data: dict[str, Any]) -> None:
         self.output_queue.put({
@@ -56,6 +59,23 @@ class _WorkerSink:
             "worker_pid": os.getpid(),
         })
 
+    def _emit_live(self, event: str, data: dict[str, Any]) -> None:
+        now = time.monotonic()
+        last = self._last_live_emit_at.get(event)
+        if last is not None and now - last < self._live_event_interval:
+            self._pending_live_events[event] = dict(data)
+            return
+        self._pending_live_events.pop(event, None)
+        self._last_live_emit_at[event] = now
+        self._emit(event, data)
+
+    def _flush_live_events(self) -> None:
+        pending = self._pending_live_events
+        self._pending_live_events = {}
+        for event, data in pending.items():
+            self._last_live_emit_at[event] = time.monotonic()
+            self._emit(event, data)
+
     def emit_start(self, *, total: int, groups: int, phase: str = "init", phases=None, **extra) -> None:
         data: dict[str, Any] = {"total": total, "groups": groups, "phase": phase}
         if phases:
@@ -64,7 +84,7 @@ class _WorkerSink:
         self._emit("start", data)
 
     def emit_progress(self, completed: int, total: int, phase: str = "eval", **extra) -> None:
-        self._emit("progress", {
+        self._emit_live("progress", {
             "completed": completed,
             "total": total,
             "phase": phase,
@@ -75,7 +95,7 @@ class _WorkerSink:
         self._emit("activity_manifest", {"phases": phases})
 
     def emit_activity(self, **payload: Any) -> None:
-        self._emit("activity", payload)
+        self._emit_live("activity", payload)
 
     def emit_signal_progress(
         self,
@@ -87,7 +107,7 @@ class _WorkerSink:
     ) -> None:
         if percent is None:
             percent = 100.0 if total <= 0 else completed / total * 100.0
-        self._emit("signal_progress", {
+        self._emit_live("signal_progress", {
             "completed": completed,
             "total": total,
             "phase": phase,
@@ -116,9 +136,11 @@ class _WorkerSink:
     def emit_result(self, data: dict[str, Any]) -> None:
         if self.retention_mode == "full":
             self._write_artifact("result", data)
+        self._flush_live_events()
         self._emit("result", _bounded_summary(data))
 
     def emit_error(self, error: str, traceback: str = "", **extra) -> None:
+        self._flush_live_events()
         self._emit("error", {
             "success": False,
             "error": error,
@@ -134,6 +156,7 @@ class _WorkerSink:
             self._write_artifact(str(name), value)
 
     def emit_pause(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
+        self._flush_live_events()
         self._emit("paused", {"checkpoint": dict(checkpoint)})
         if self.control_queue is None:
             return {"action": "cancel"}
@@ -381,21 +404,28 @@ class LongLivedWorkerPool:
             worker.task_queue.put({"type": "step_control", "command": dict(command)})
             return True
 
-    def poll(self, *, timeout: float = 0.0) -> list[dict[str, Any]]:
+    def poll(
+        self,
+        *,
+        timeout: float = 0.0,
+        max_messages: int = 1000,
+    ) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         deadline = time.monotonic() + max(0.0, float(timeout))
-        while True:
-            remaining = deadline - time.monotonic()
-            wait = max(0.0, remaining) if not messages else 0.0
+        limit = max(1, int(max_messages))
+        while len(messages) < limit:
             try:
-                message = self.output_queue.get(timeout=wait)
+                if timeout > 0 and not messages:
+                    message = self.output_queue.get(
+                        timeout=max(0.0, deadline - time.monotonic())
+                    )
+                else:
+                    message = self.output_queue.get_nowait()
             except queue.Empty:
                 break
             if isinstance(message, dict):
                 messages.append(message)
                 self._apply_message(message)
-            if timeout <= 0 or time.monotonic() >= deadline:
-                break
         with self._lock:
             messages.extend(self._reconcile_locked())
         return messages

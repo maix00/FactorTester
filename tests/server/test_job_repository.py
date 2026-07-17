@@ -77,6 +77,26 @@ def test_repository_schema_contains_only_durable_job_facts(tmp_path) -> None:
     assert {"job_spec_json", "job_spec_hash"} <= columns
 
 
+def test_repository_initializes_schema_once_per_instance(tmp_path, monkeypatch) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    original = repository._ensure_schema
+    calls = []
+
+    def counted(conn):
+        calls.append(1)
+        return original(conn)
+
+    monkeypatch.setattr(repository, "_ensure_schema", counted)
+    repository.ensure_schema()
+    repository.list(owner="alice")
+    repository.list_for_deployment(
+        deployment_id="test",
+        statuses=(JobStatus.SUBMITTED,),
+    )
+
+    assert len(calls) == 1
+
+
 def test_repository_freezes_plan_and_enforces_transitions(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     created = repository.create(_record("job-1"))

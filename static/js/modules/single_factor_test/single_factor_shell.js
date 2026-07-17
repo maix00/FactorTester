@@ -337,6 +337,10 @@ window.SingleFactorResearch = (function() {
                         job.latest_progress = data.latest_progress || job.latest_progress;
                         job.manifest = data.manifest || job.manifest;
                     }
+                    if (event === 'heartbeat') {
+                        job.status = data.status || job.status;
+                        job.latest_progress = data.latest_progress || job.latest_progress;
+                    }
                     if (event === 'result') job.status = 'succeeded';
                     if (event === 'error') job.status = data.cancelled ? 'cancelled' : 'failed';
                     renderJob(job);

@@ -53,6 +53,19 @@ def planned_cpu_runner(payload, sink, cancel_event) -> None:
     cpu_runner(payload, sink, cancel_event)
 
 
+def progress_flood_runner(payload, sink, cancel_event) -> None:
+    count = int(payload.get("count") or 10_000)
+    for index in range(count):
+        sink.emit_activity(phase="event_replay", message=f"flow-{index}")
+        sink.emit_progress(index + 1, count, phase="event_replay")
+        sink.emit_signal_progress(
+            completed=index + 1,
+            total=count,
+            phase="event_replay",
+        )
+    sink.emit_result({"success": True, "pid": os.getpid(), "count": count})
+
+
 def product_runtime_probe(payload, sink, cancel_event) -> None:
     from tools.products import product_path_selection
 

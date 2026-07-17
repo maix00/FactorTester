@@ -128,6 +128,38 @@ def test_pool_runs_cpu_jobs_in_multiple_real_processes() -> None:
     assert result_pids == pids
 
 
+def test_worker_coalesces_progress_flood_before_terminal_result() -> None:
+    with LongLivedWorkerPool(size=1) as pool:
+        pool.submit(
+            job_id="progress-flood",
+            runner_path=f"{RUNNERS}:progress_flood_runner",
+            payload={"count": 10_000},
+        )
+        messages = _collect(
+            pool, lambda rows: _finished(rows, "progress-flood")
+        )
+
+    live = [
+        item for item in messages
+        if item.get("event") in {"activity", "progress", "signal_progress"}
+    ]
+    terminal_index = next(
+        index for index, item in enumerate(messages)
+        if item.get("event") == "result"
+    )
+    finished_index = next(
+        index for index, item in enumerate(messages)
+        if item.get("type") == "task_finished"
+    )
+    assert len(live) <= 12
+    assert terminal_index < finished_index
+    assert any(
+        item.get("event") == "signal_progress"
+        and item["data"]["completed"] == 10_000
+        for item in live
+    )
+
+
 def test_cooperative_cancel_keeps_worker_and_forced_cancel_replaces_it() -> None:
     with LongLivedWorkerPool(size=1, cancel_grace_seconds=0.05) as pool:
         original_pid = pool.submit(

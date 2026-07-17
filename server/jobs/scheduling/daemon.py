@@ -50,6 +50,7 @@ class ResearchJobScheduler:
         self._stop = threading.Event()
         self._draining = False
         self._thread: threading.Thread | None = None
+        self._tick_lock = threading.Lock()
         self._recover_interrupted_jobs()
 
     def _recover_interrupted_jobs(self) -> None:
@@ -68,7 +69,7 @@ class ResearchJobScheduler:
                 },
             )
 
-    def start(self, *, poll_interval: float = 0.05) -> None:
+    def start(self, *, poll_interval: float = 1.0) -> None:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
@@ -85,13 +86,14 @@ class ResearchJobScheduler:
             self.tick()
 
     def tick(self) -> None:
-        self._drain_pool(self.planners, stage="planning")
-        self._drain_pool(self.executors, stage="execution")
-        self._propagate_cancellation()
-        if self._draining:
-            return
-        self._dispatch_planning()
-        self._dispatch_execution()
+        with self._tick_lock:
+            self._drain_pool(self.planners, stage="planning")
+            self._drain_pool(self.executors, stage="execution")
+            self._propagate_cancellation()
+            if self._draining:
+                return
+            self._dispatch_planning()
+            self._dispatch_execution()
 
     def _dispatch_planning(self) -> None:
         jobs = self.repository.list_for_deployment(
@@ -222,6 +224,9 @@ class ResearchJobScheduler:
                     self._executing.discard(job_id)
 
     def _handle_event(self, job_id: str, event: str, data: dict[str, Any], *, stage: str) -> None:
+        if event not in {"artifact", "paused", "result", "error"}:
+            self.broker.publish(job_id, event, data)
+            return
         job = self.repository.load(job_id)
         if job is None:
             return
