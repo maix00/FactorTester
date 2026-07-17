@@ -48,6 +48,11 @@ def test_unix_socket_exposes_health_wake_events_and_cancel(tmp_path) -> None:
         assert repository.require("ipc-job").status is JobStatus.RUNNING
         snapshot = client.events("ipc-job", after=0, timeout=0)
         assert any(row["event"] == "status" for row in snapshot["events"])
+        short_timeout_client = JobDaemonClient(tmp_path / "jobs.sock", timeout=0.05)
+        started = time.monotonic()
+        empty = short_timeout_client.events("unknown-job", after=0, timeout=0.15)
+        assert time.monotonic() - started >= 0.1
+        assert empty["known"] is False
         repository.request_cancel("ipc-job", owner="alice", reason="explicit_cancel")
         client.cancel("ipc-job")
         deadline = time.monotonic() + 5

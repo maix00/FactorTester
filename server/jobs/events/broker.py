@@ -85,6 +85,7 @@ class EventBroker:
             state = self._jobs.get(str(job_id))
             if state is None:
                 return {
+                    "known": False,
                     "events": [],
                     "gap": None,
                     "latest_progress": None,
@@ -99,6 +100,7 @@ class EventBroker:
             if int(after) > 0 and oldest > 0 and int(after) < oldest - 1:
                 gap = EventGap(int(after), oldest, newest).__dict__
             return {
+                "known": True,
                 "events": [
                     event.to_dict() for event in state.events if event.seq > int(after)
                 ],
@@ -117,7 +119,10 @@ class EventBroker:
         with self._condition:
             while True:
                 snapshot = self.read(job_id, after=after)
-                if snapshot["events"] or snapshot["gap"] or snapshot["closed"]:
+                if (
+                    snapshot["events"] or snapshot["gap"] or snapshot["closed"]
+                    or (int(after) > 0 and not snapshot["known"])
+                ):
                     return snapshot
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:

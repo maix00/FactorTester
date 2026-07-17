@@ -23,7 +23,10 @@ class _Handler(socketserver.StreamRequestHandler):
             payload = {"success": True, **response}
         except Exception as exc:
             payload = {"success": False, "error": str(exc)}
-        self.wfile.write(orjson.dumps(payload) + b"\n")
+        try:
+            self.wfile.write(orjson.dumps(payload) + b"\n")
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
 
 class _UnixServer(socketserver.ThreadingUnixStreamServer):

@@ -20,11 +20,16 @@ class JobDaemonClient:
         self.socket_path = str(normalized_socket_path(socket_path))
         self.timeout = max(0.05, float(timeout))
 
-    def request(self, action: str, **payload: Any) -> dict[str, Any]:
+    def request(
+        self, action: str, *, response_timeout: float | None = None, **payload: Any,
+    ) -> dict[str, Any]:
         request = orjson.dumps({"action": str(action), **payload}) + b"\n"
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                sock.settimeout(self.timeout)
+                sock.settimeout(
+                    self.timeout if response_timeout is None
+                    else max(self.timeout, float(response_timeout))
+                )
                 sock.connect(self.socket_path)
                 sock.sendall(request)
                 chunks = bytearray()
@@ -70,6 +75,7 @@ class JobDaemonClient:
     def events(self, job_id: str, *, after: int, timeout: float = 15.0) -> dict[str, Any]:
         return self.request(
             "events",
+            response_timeout=max(0.0, float(timeout)) + 1.0,
             job_id=str(job_id),
             after=max(0, int(after)),
             timeout=max(0.0, float(timeout)),

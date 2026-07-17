@@ -131,3 +131,48 @@ def test_artifact_cleanup_only_removes_expired_staging_files(tmp_path) -> None:
     assert not old.exists()
     assert recent.is_file()
     assert retained.is_file()
+
+
+def test_terminal_job_stream_resets_when_daemon_lost_live_event_state(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    JobRepository().create(JobRecord(
+        job_id="job-after-restart",
+        run_id="run-after-restart",
+        owner="alice",
+        workspace_id="workspace-1",
+        kind="ic",
+        status=JobStatus.SUCCEEDED,
+        deployment_id="test",
+        runner_path="tests.server.long_lived_worker_fakes:cpu_runner",
+        job_spec={},
+        result_summary={"success": True},
+        created_at=time.time(),
+    ))
+
+    class EmptyDaemon:
+        def events(self, job_id, *, after, timeout):
+            return {
+                "known": False, "events": [], "gap": None, "closed": False,
+                "latest_progress": None, "manifest": None,
+            }
+
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.backtest_jobs._daemon_client",
+        lambda: EmptyDaemon(),
+    )
+
+    response = client.get(
+        "/api/jobs/job-after-restart/stream",
+        headers={"Last-Event-ID": "12"},
+    )
+    body = response.get_data(as_text=True)
+
+    assert "event: reset" in body
+    assert '"reason":"event_state_unavailable"' in body
+    assert '"status":"succeeded"' in body

@@ -143,6 +143,17 @@ def stream_test_job(job_id: str):
                     "error": current.error,
                 })
                 return
+            if not snapshot.get("known", True):
+                yield _sse("reset", {
+                    "reason": "event_state_unavailable",
+                    "status": current.status.value,
+                    "latest_progress": None,
+                    "manifest": None,
+                    "result_summary": current.result_summary,
+                    "error": current.error,
+                })
+                if current.status in TERMINAL_STATUSES or after > 0:
+                    return
             gap = snapshot.get("gap")
             if gap:
                 yield _sse("reset", {
