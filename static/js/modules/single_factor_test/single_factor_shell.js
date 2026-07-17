@@ -398,12 +398,29 @@ async function initSingleFactorShell() {
             if (!current) return;
             clearWorkspaceResults.disabled = true;
             try {
-                await fetch('/api/jobs/artifacts?workspace_id=' + encodeURIComponent(current.workspace_id), {
+                await jsonRequest('/api/jobs/artifacts?workspace_id=' + encodeURIComponent(current.workspace_id), {
                     method: 'DELETE'
                 });
                 await window.SingleFactorResearch.restoreActiveJobs();
             } finally {
                 clearWorkspaceResults.disabled = false;
+            }
+        });
+    }
+    const clearWorkspaceHistory = document.getElementById('research-job-clear-workspace-history');
+    if (clearWorkspaceHistory) {
+        clearWorkspaceHistory.addEventListener('click', async function() {
+            const current = window.SingleFactorResearch.workspace();
+            if (!current) return;
+            if (!window.confirm('删除当前工作区全部已完成、失败和已取消的任务记录？运行中的任务会保留。')) return;
+            clearWorkspaceHistory.disabled = true;
+            try {
+                await jsonRequest('/api/jobs?workspace_id=' + encodeURIComponent(current.workspace_id), {
+                    method: 'DELETE'
+                });
+                await window.SingleFactorResearch.restoreActiveJobs();
+            } finally {
+                clearWorkspaceHistory.disabled = false;
             }
         });
     }

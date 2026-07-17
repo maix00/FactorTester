@@ -101,6 +101,38 @@ def list_test_jobs():
     })
 
 
+@sft_bp.delete("/api/jobs")
+def delete_terminal_test_job_history():
+    owner = require_user()
+    workspace_id = str(request.args.get("workspace_id") or "").strip()
+    if not workspace_id:
+        return jsonify({
+            "success": False,
+            "error": "workspace_id is required when deleting job history",
+        }), 400
+    repository = _repository()
+    job_ids, artifacts = repository.delete_terminal_history(
+        owner=owner,
+        workspace_id=workspace_id,
+    )
+    root = artifact_root()
+    deleted_files = 0
+    for metadata in artifacts:
+        path = (root / str(metadata["relative_path"])).resolve()
+        if root in path.parents and path.is_file():
+            path.unlink()
+            deleted_files += 1
+    return jsonify({
+        "success": True,
+        "workspace_id": workspace_id,
+        "deleted_jobs": len(job_ids),
+        "deleted_job_ids": job_ids,
+        "deleted_artifacts": len(artifacts),
+        "deleted_files": deleted_files,
+        "usage_bytes": repository.storage_usage(owner=owner),
+    })
+
+
 @sft_bp.get("/api/jobs/<job_id>")
 def get_test_job(job_id: str):
     job, error = _require_job(job_id)

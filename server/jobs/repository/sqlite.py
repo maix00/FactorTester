@@ -427,6 +427,47 @@ class JobRepository:
             )
         return [dict(row) for row in rows]
 
+    def delete_terminal_history(
+        self, *, owner: str, workspace_id: str,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        if not workspace_id:
+            raise ValueError("workspace_id is required")
+        terminal = tuple(status.value for status in TERMINAL_STATUSES)
+        placeholders = ",".join("?" for _ in terminal)
+        args = [str(owner), str(workspace_id), *terminal]
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            jobs = conn.execute(
+                f"""
+                SELECT job_id FROM research_jobs
+                WHERE owner=? AND workspace_id=?
+                  AND status IN ({placeholders})
+                ORDER BY updated_at, job_id
+                """,
+                args,
+            ).fetchall()
+            job_ids = [str(row["job_id"]) for row in jobs]
+            if not job_ids:
+                return [], []
+            job_placeholders = ",".join("?" for _ in job_ids)
+            artifacts = conn.execute(
+                f"""
+                SELECT * FROM research_job_artifacts
+                WHERE job_id IN ({job_placeholders})
+                ORDER BY job_id, created_at, name
+                """,
+                job_ids,
+            ).fetchall()
+            conn.execute(
+                f"""
+                DELETE FROM research_jobs
+                WHERE owner=? AND workspace_id=?
+                  AND status IN ({placeholders})
+                """,
+                args,
+            )
+        return job_ids, [dict(row) for row in artifacts]
+
     def storage_usage(self, *, owner: str) -> int:
         with self._connect() as conn:
             row = conn.execute(

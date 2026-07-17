@@ -394,6 +394,23 @@ def job_clear_results(job_id: str | None, current_workspace: bool, all_results: 
     click.echo(_json(result))
 
 
+@job.command("clear-history")
+@click.option(
+    "--workspace",
+    "current_workspace",
+    is_flag=True,
+    required=True,
+    help="删除当前工作区已成功、失败或取消的任务记录；活动任务不受影响。",
+)
+@friendly_errors
+def job_clear_history(current_workspace: bool) -> None:
+    state = _require_workspace()
+    result = client_from_config().delete_terminal_job_history(
+        workspace_id=state.workspace_id,
+    )
+    click.echo(_json(result))
+
+
 @job.command("storage")
 @friendly_errors
 def job_storage() -> None:

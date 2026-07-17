@@ -115,6 +115,71 @@ def test_user_can_bulk_clear_retained_results_by_workspace(tmp_path, monkeypatch
     assert client.get("/api/jobs/job-a").status_code == 200
 
 
+def test_user_can_delete_terminal_job_history_without_touching_active_or_other_jobs(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    repository = JobRepository()
+    rows = (
+        ("done", "alice", "workspace-1", JobStatus.SUCCEEDED),
+        ("failed", "alice", "workspace-1", JobStatus.FAILED),
+        ("cancelled", "alice", "workspace-1", JobStatus.CANCELLED),
+        ("running", "alice", "workspace-1", JobStatus.RUNNING),
+        ("other-workspace", "alice", "workspace-2", JobStatus.SUCCEEDED),
+        ("other-owner", "bob", "workspace-1", JobStatus.SUCCEEDED),
+    )
+    for job_id, owner, workspace_id, status in rows:
+        repository.create(JobRecord(
+            job_id=job_id,
+            run_id=f"run-{job_id}",
+            owner=owner,
+            workspace_id=workspace_id,
+            kind="backtest",
+            status=status,
+            retention_mode="full",
+            deployment_id="test",
+            runner_path="tests.server.long_lived_worker_fakes:artifact_runner",
+            job_spec={},
+            created_at=time.time(),
+        ))
+    root = tmp_path / "artifacts"
+    target = root / "done" / "result.json"
+    target.parent.mkdir(parents=True)
+    raw = orjson.dumps({"job_id": "done"})
+    target.write_bytes(raw)
+    repository.record_artifact(
+        job_id="done",
+        name="result",
+        relative_path="done/result.json",
+        content_type="application/json",
+        content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+    )
+
+    missing_workspace = client.delete("/api/jobs")
+    cleared = client.delete("/api/jobs?workspace_id=workspace-1")
+
+    assert missing_workspace.status_code == 400
+    assert cleared.status_code == 200
+    assert set(cleared.get_json()["deleted_job_ids"]) == {
+        "done", "failed", "cancelled",
+    }
+    assert cleared.get_json()["deleted_files"] == 1
+    assert not target.exists()
+    for job_id in ("done", "failed", "cancelled"):
+        assert repository.load(job_id) is None
+    for job_id in ("running", "other-workspace", "other-owner"):
+        assert repository.load(job_id) is not None
+
+
 def test_artifact_cleanup_only_removes_expired_staging_files(tmp_path) -> None:
     old = tmp_path / "job-old" / ".result.1.tmp"
     recent = tmp_path / "job-new" / ".result.2.tmp"
