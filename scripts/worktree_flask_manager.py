@@ -9,6 +9,7 @@ import html
 import json
 import os
 import re
+import secrets
 import signal
 import socket
 import subprocess
@@ -59,6 +60,16 @@ class ManagerState:
         self.processes: dict[str, ServiceBundle] = {}
         self.log_dir = self.repo / ".workspace" / "flask-manager" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.secret_path = self.log_dir.parent / "flask-secret.key"
+
+    def _flask_secret(self) -> str:
+        if not self.secret_path.exists():
+            self.secret_path.write_text(secrets.token_hex(32), encoding="ascii")
+        self.secret_path.chmod(0o600)
+        value = self.secret_path.read_text(encoding="ascii").strip()
+        if not value:
+            raise RuntimeError("Flask session secret is empty")
+        return value
 
     def worktrees(self) -> list[Worktree]:
         out = subprocess.check_output(
@@ -135,6 +146,7 @@ class ManagerState:
                 ["git", "rev-parse", "HEAD"], cwd=path, text=True
             ).strip(),
             "GTHT_JOB_ARTIFACT_ROOT": str(path / ".workspace" / "job-results"),
+            "FLASK_SECRET_KEY": self._flask_secret(),
         })
         return env, deployment_id, socket_path
 
