@@ -116,6 +116,29 @@
                             resultData = payload;
                         } else if (lastEvent === 'error') {
                             resultData = payload;
+                        } else if (lastEvent === 'reset') {
+                            if (payload.result_summary) {
+                                resultData = payload.result_summary;
+                            } else if (payload.error) {
+                                resultData = payload.error;
+                            } else if (payload.reason === 'daemon_unavailable') {
+                                resultData = {
+                                    success: false,
+                                    code: 'daemon_unavailable',
+                                    error: '异步任务执行服务不可用，请从 7998 重启该工作区的服务包后重试'
+                                };
+                            } else if (payload.status === 'cancelled') {
+                                resultData = {
+                                    success: false,
+                                    cancelled: true,
+                                    error: '任务已取消'
+                                };
+                            } else if (payload.status === 'failed') {
+                                resultData = {
+                                    success: false,
+                                    error: '任务失败，实时事件已过期，请查看任务详情'
+                                };
+                            }
                         }
                     } catch (e) {
                         // skip malformed JSON
