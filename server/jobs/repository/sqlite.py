@@ -45,6 +45,15 @@ class JobRepository:
     def _ensure_schema(conn: sqlite3.Connection) -> None:
         conn.executescript(
             """
+            DROP TABLE IF EXISTS test_job_events;
+            DROP TABLE IF EXISTS test_job_process_slots;
+            DROP TABLE IF EXISTS test_job_artifacts;
+            DROP TABLE IF EXISTS test_jobs;
+            DROP TABLE IF EXISTS research_view_leases;
+            """
+        )
+        conn.executescript(
+            """
             CREATE TABLE IF NOT EXISTS research_jobs (
                 job_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,

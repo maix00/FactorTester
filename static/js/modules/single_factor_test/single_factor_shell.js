@@ -72,24 +72,11 @@ window.SingleFactorResearch = (function() {
             });
             workspace = created.workspace;
         }
-        await renewLease();
         return workspace;
     }
 
     async function renewLease() {
-        if (!workspace || !window._viewUuid) return;
-        const url = '/api/view-leases/' + encodeURIComponent(window._viewUuid);
-        try {
-            await jsonRequest(url, {
-                method: 'PUT', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({workspace_id: workspace.workspace_id})
-            });
-        } catch (error) {
-            await jsonRequest('/api/view-leases', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({view_uuid: window._viewUuid, workspace_id: workspace.workspace_id})
-            });
-        }
+        return workspace;
     }
 
     async function submit(kind, draft) {
@@ -108,14 +95,12 @@ window.SingleFactorResearch = (function() {
             body: JSON.stringify({expected_revision: configuration.revision, payload: payload})
         });
         workspace.configuration = updated.configuration;
-        await renewLease();
         return jsonRequest('/api/runs', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 workspace_id: workspace.workspace_id,
                 configuration_revision: workspace.configuration.revision,
-                analyses: [kind], lifecycle_policy: 'observer_bound',
-                view_uuid: window._viewUuid
+                analyses: [kind]
             })
         });
     }
@@ -217,7 +202,7 @@ window.SingleFactorResearch = (function() {
         row.querySelector('.research-job-progress-fill').style.width = progress.percent + '%';
         const actions = row.querySelector('.research-job-actions');
         actions.replaceChildren();
-        if (job.status === 'queued' || job.status === 'running') {
+        if (['submitted', 'planning', 'awaiting_confirmation', 'queued', 'running', 'paused'].includes(job.status)) {
             const cancel = document.createElement('button');
             cancel.type = 'button';
             cancel.title = '取消任务';
@@ -227,7 +212,7 @@ window.SingleFactorResearch = (function() {
                 await fetch('/api/jobs/' + encodeURIComponent(job.job_id) + '/cancel', {method: 'POST'});
             };
             actions.appendChild(cancel);
-        } else if (job.status === 'cancelled' && job.cancel_reason === 'view_closed') {
+        } else if (job.status === 'cancelled' || job.status === 'failed') {
             const retry = document.createElement('button');
             retry.type = 'button';
             retry.textContent = '重新排队';
@@ -236,7 +221,7 @@ window.SingleFactorResearch = (function() {
                 retry.disabled = true;
                 await fetch('/api/jobs/' + encodeURIComponent(job.job_id) + '/retry', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({view_uuid: window._viewUuid || ''})
+                    body: JSON.stringify({})
                 });
                 await restoreActiveJobs();
             };
@@ -246,7 +231,7 @@ window.SingleFactorResearch = (function() {
     }
 
     async function watchJob(job, generation) {
-        if (!['queued', 'running'].includes(job.status)) return;
+        if (!['submitted', 'planning', 'awaiting_confirmation', 'queued', 'running', 'paused'].includes(job.status)) return;
         const after = Number(jobCursors()[job.job_id] || 0);
         const url = '/api/jobs/' + encodeURIComponent(job.job_id) + '/stream' + (after ? '?after=' + after : '');
         const response = await fetch(url);
@@ -288,8 +273,7 @@ window.SingleFactorResearch = (function() {
         if (generation !== monitorGeneration) return;
         const jobs = data.jobs || [];
         const visible = jobs.filter(function(job) {
-            return ['queued', 'running', 'paused'].includes(job.status)
-                || (job.status === 'cancelled' && job.cancel_reason === 'view_closed');
+            return ['submitted', 'planning', 'awaiting_confirmation', 'queued', 'running', 'paused'].includes(job.status);
         });
         const monitor = document.getElementById('research-job-monitor');
         const list = document.getElementById('research-job-monitor-list');
@@ -301,10 +285,7 @@ window.SingleFactorResearch = (function() {
     }
 
     async function detach() {
-        if (!window._viewUuid) return;
-        fetch('/api/view-leases/' + encodeURIComponent(window._viewUuid), {
-            method: 'DELETE', keepalive: true
-        }).catch(function(){});
+        return;
     }
 
     return {
@@ -502,9 +483,6 @@ async function selectSingleFactorFamily(factorId, factorType, ownerUsername, opt
         if (body) body.innerHTML = `<div class="editor-placeholder" style="color:#d40000;">加载失败: ${escHtml(e.message || e)}</div>`;
     }
 }
-
-setInterval(function() { window.SingleFactorResearch.renewLease().catch(function(){}); }, 5000);
-window.addEventListener('beforeunload', function() { window.SingleFactorResearch.detach(); });
 
 async function replaceSingleFactorContent(html) {
     const body = document.getElementById('editor-body');

@@ -66,9 +66,6 @@ import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
 from server.modules.shared.price_data_helpers import to_epoch_ms
 
-class _StepCheckpointReached(RuntimeError):
-    pass
-
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 _log = logging.getLogger(__name__)
@@ -2167,26 +2164,41 @@ def _group_execution_for_request(data: dict[str, Any]) -> dict[str, Any] | None:
     ``page_uuid`` may carry a latest-view projection, but page runtime is not
     the canonical owner of job results or lifecycle.
     """
-    from server.services import test_jobs
+    from server.jobs.artifacts import load_json_artifact
+    from server.jobs.repository import JobRepository
+    from server.jobs.states import JobStatus
 
     job_id = str(data.get("job_id") or "").strip()
     run_id = str(data.get("run_id") or data.get("run_token") or "").strip()
-    page_uuid = str(data.get("page_uuid") or "")
-    if not job_id and not run_id and page_uuid:
-        page_state = runtime_state.get_page_state(page_uuid)
-        latest_job = getattr(page_state, "latest_group_job", None) if page_state else None
-        if isinstance(latest_job, dict):
-            job_id = str(latest_job.get("job_id") or "").strip()
-            run_id = str(latest_job.get("run_id") or "").strip()
     if job_id or run_id:
-        job = test_jobs.resolve_job_for_detail(
-            owner=str(current_user() or ""),
-            job_id=job_id,
-            run_id=run_id,
+        owner = str(current_user() or "")
+        repository = JobRepository()
+        if job_id:
+            job = repository.require(job_id, owner=owner)
+        else:
+            jobs = repository.list(
+                owner=owner,
+                run_id=run_id,
+                kind="backtest",
+                statuses=(JobStatus.SUCCEEDED,),
+                limit=20,
+            )
+            if not jobs:
+                raise LookupError("指定 run 尚无成功的分组测试 job")
+            job = jobs[0]
+        artifact = repository.load_artifact(
+            job_id=job.job_id,
+            name="group_execution",
+            owner=owner,
         )
-        execution = test_jobs.get_artifact(job, "group_execution")
-        if not execution:
+        if not artifact or artifact["state"] != "active":
             raise LookupError("指定 job 尚无可读取的分组测试详情")
+        execution = load_json_artifact(
+            str(artifact["relative_path"]),
+            str(artifact["content_hash"]),
+        )
+        if not isinstance(execution, dict):
+            raise TypeError("分组测试详情文件格式错误")
         return execution
     return None
 
@@ -3307,8 +3319,6 @@ def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any
             step_mode=step_mode,
             step_callback=step_callback,
         )
-    except _StepCheckpointReached:
-        return
     except BacktestCancelled as exc:
         sink.emit_error(str(exc), cancelled=True, cancel_reason="explicit_cancel")
         return

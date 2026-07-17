@@ -35,6 +35,16 @@ def _record(
 
 def test_repository_schema_contains_only_durable_job_facts(tmp_path) -> None:
     path = tmp_path / "jobs.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE test_jobs(job_id TEXT PRIMARY KEY);
+            CREATE TABLE test_job_events(job_id TEXT);
+            CREATE TABLE test_job_process_slots(slot INTEGER);
+            CREATE TABLE test_job_artifacts(job_id TEXT);
+            CREATE TABLE research_view_leases(view_uuid TEXT);
+            """
+        )
     repository = JobRepository(path)
     repository.ensure_schema()
 
@@ -56,6 +66,9 @@ def test_repository_schema_contains_only_durable_job_facts(tmp_path) -> None:
         "research_job_artifacts",
     }
     assert "test_job_events" not in tables
+    assert "test_jobs" not in tables
+    assert "test_job_process_slots" not in tables
+    assert "test_job_artifacts" not in tables
     assert "research_view_leases" not in tables
     assert "latest_progress_json" not in columns
     assert "manifest_json" not in columns

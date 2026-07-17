@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import hashlib
 from pathlib import Path
+
+import orjson
 
 import settings as Settings
 
@@ -23,3 +26,14 @@ def default_user_quota_bytes() -> int:
         0,
         int(os.environ.get("GTHT_JOB_USER_QUOTA_BYTES", str(DEFAULT_USER_QUOTA_BYTES))),
     )
+
+
+def load_json_artifact(relative_path: str, expected_hash: str) -> object:
+    root = artifact_root()
+    path = (root / str(relative_path)).resolve()
+    if root not in path.parents or not path.is_file():
+        raise FileNotFoundError("retained result file is unavailable")
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != str(expected_hash):
+        raise RuntimeError("retained result integrity check failed")
+    return orjson.loads(raw)
