@@ -17,7 +17,7 @@ def test_unix_socket_exposes_health_wake_events_and_cancel(tmp_path) -> None:
         run_id="run-ipc",
         owner="alice",
         workspace_id="workspace-1",
-        kind="backtest",
+        kind="fake",
         status=JobStatus.SUBMITTED,
         deployment_id="ipc-test",
         runner_path="tests.server.long_lived_worker_fakes:blocking_runner",

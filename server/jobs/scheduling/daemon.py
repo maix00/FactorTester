@@ -100,6 +100,7 @@ class ResearchJobScheduler:
                     runner_path=PLANNER_RUNNER,
                     payload={
                         "job_spec": job.job_spec,
+                        "kind": job.kind,
                         "runner_path": job.runner_path,
                     },
                 )
@@ -192,18 +193,23 @@ class ResearchJobScheduler:
                     self._executing.discard(job_id)
 
     def _handle_event(self, job_id: str, event: str, data: dict[str, Any], *, stage: str) -> None:
-        self.broker.publish(job_id, event, data)
         job = self.repository.load(job_id)
         if job is None:
             return
         if event == "result" and stage == "planning" and job.status is JobStatus.PLANNING:
-            self.repository.set_execution_plan(
+            planned = self.repository.set_execution_plan(
                 job_id,
                 plan=dict(data.get("plan") or {}),
                 notices=list(data.get("notices") or []),
                 requires_confirmation=bool(data.get("requires_confirmation")),
             )
+            self.broker.publish(job_id, "plan", {
+                "status": planned.status.value,
+                "execution_plan": planned.execution_plan,
+                "notices": planned.plan_notices,
+            })
             return
+        self.broker.publish(job_id, event, data)
         if event == "artifact" and stage == "execution":
             self.repository.record_artifact(
                 job_id=job_id,

@@ -3138,23 +3138,12 @@ def get_product_path_selection_session_info():
     return jsonify({'success': True, 'product_path_selections': selections_info})
 
 
-# ═══════════════════════════════════════════════════
-#  SSE 流式端点
-# ═══════════════════════════════════════════════════
-
-def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -> None:
-    """Execute a frozen group RunSpec without reading Flask or page runtime."""
-    from tools.factors.FactorTester import FactorTester
-    from tools.testers.backtest.engines.cancellation import BacktestCancelled
-    from tools.testers.backtest.engines.native.state import BacktestRunState
-    from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
-
+def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
+    """Resolve immutable group settings and selections without loading bars."""
     payload = deepcopy(data)
     flat_groups_raw = payload.get("groups")
     if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
         raise ValueError("groups 必须是非空数组")
-    step_mode = bool(payload.get("step_mode"))
-
     run_id = str(payload.get("run_id") or payload.get("run_token") or uuid.uuid4().hex)
     owner = str(payload.get("_owner") or "")
     payload["_group_owner_username"] = owner
@@ -3238,6 +3227,58 @@ def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any
             if product not in seen_products:
                 seen_products.add(product)
                 all_products.append(product)
+
+    return {
+        "payload": payload,
+        "run_id": run_id,
+        "owner": owner,
+        "flat_groups": flat_groups,
+        "flat_ls_configs": flat_ls_configs,
+        "normalized_ls_configs": normalized_ls_configs,
+        "resolved_backtest_settings": resolved_backtest_settings,
+        "resolved_settings_by_alias": resolved_settings_by_alias,
+        "group_owner": group_owner,
+        "all_products": all_products,
+        "local_settings": local_settings,
+        "market_rule_fallback": market_rule_fallback,
+        "evaluation_split": evaluation_split,
+        "run_registry": run_registry,
+        "factor_mode": factor_mode,
+        "start_dt": start_dt,
+        "end_dt": end_dt,
+    }
+
+
+# ═══════════════════════════════════════════════════
+#  SSE 流式端点
+# ═══════════════════════════════════════════════════
+
+def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -> None:
+    """Execute a frozen group RunSpec without reading Flask or page runtime."""
+    from tools.factors.FactorTester import FactorTester
+    from tools.testers.backtest.engines.cancellation import BacktestCancelled
+    from tools.testers.backtest.engines.native.state import BacktestRunState
+    from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
+
+    prepared = prepare_group_run_spec(data)
+    payload = prepared["payload"]
+    run_id = prepared["run_id"]
+    owner = prepared["owner"]
+    flat_groups = prepared["flat_groups"]
+    flat_ls_configs = prepared["flat_ls_configs"]
+    normalized_ls_configs = prepared["normalized_ls_configs"]
+    resolved_backtest_settings = prepared["resolved_backtest_settings"]
+    resolved_settings_by_alias = prepared["resolved_settings_by_alias"]
+    group_owner = prepared["group_owner"]
+    all_products = prepared["all_products"]
+    local_settings = prepared["local_settings"]
+    market_rule_fallback = prepared["market_rule_fallback"]
+    evaluation_split = prepared["evaluation_split"]
+    run_registry = prepared["run_registry"]
+    factor_mode = prepared["factor_mode"]
+    start_dt = prepared["start_dt"]
+    end_dt = prepared["end_dt"]
+    step_mode = bool(payload.get("step_mode"))
 
     account = BacktestRunState()
     strategy_book_payload = payload.get("strategy_book")

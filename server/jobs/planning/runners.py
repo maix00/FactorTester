@@ -2,33 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any
-
-import orjson
-
-
-def _cache_keys(spec: dict[str, Any]) -> list[str]:
-    keys: set[str] = set()
-    selections = spec.get("product_selections") or {}
-    if isinstance(selections, dict):
-        values = selections.values()
-    elif isinstance(selections, list):
-        values = selections
-    else:
-        values = ()
-    for selection in values:
-        if not isinstance(selection, dict):
-            continue
-        for path in selection.get("selected_paths") or selection.get("paths") or ():
-            if not isinstance(path, dict):
-                continue
-            product = str(path.get("product") or path.get("symbol") or "").strip()
-            source = str(path.get("source") or path.get("data_source") or "").strip()
-            frequency = str(path.get("frequency") or path.get("freq") or "").strip()
-            if product:
-                keys.add(":".join((product, source or "auto", frequency or "auto")))
-    return sorted(keys)
 
 
 def plan_job(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
@@ -42,18 +16,12 @@ def plan_job(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     runner_path = str(payload.get("runner_path") or "").strip()
     if not runner_path:
         raise ValueError("runner_path is required")
-    raw = orjson.dumps(spec, option=orjson.OPT_SORT_KEYS)
-    plan = {
-        "plan_version": 1,
-        "job_spec_hash": hashlib.sha256(raw).hexdigest(),
-        "runner_path": runner_path,
-        "cache_keys": _cache_keys(spec),
-        "requested_start": spec.get("start_date") or spec.get("run_start"),
-        "requested_end": spec.get("end_date") or spec.get("run_end"),
-    }
+    from server.modules.single_factor_test.planning import build_execution_plan
+
+    plan = build_execution_plan(str(payload.get("kind") or ""), spec)
     sink.emit_result({
         "success": True,
         "plan": plan,
-        "notices": [],
-        "requires_confirmation": False,
+        "notices": list(plan.get("notices") or []),
+        "requires_confirmation": bool(plan.get("requires_confirmation")),
     })
