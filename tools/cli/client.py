@@ -171,6 +171,11 @@ class FactorTesterClient:
         query = {"workspace_id": workspace_id} if workspace_id else None
         return self._expect_success(self.session.delete("/api/jobs/artifacts", query=query))
 
+    def delete_terminal_job_history(self, *, workspace_id: str) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.delete("/api/jobs", query={"workspace_id": workspace_id})
+        )
+
     def job_storage(self) -> dict[str, Any]:
         return self._expect_success(self.session.get("/api/jobs/storage"))
 

@@ -60,6 +60,10 @@ class FakeClient:
         self.cleared_workspace_id = workspace_id
         return {"deleted_files": 3, "workspace_id": workspace_id}
 
+    def delete_terminal_job_history(self, *, workspace_id):
+        self.cleared_history_workspace_id = workspace_id
+        return {"deleted_jobs": 4, "workspace_id": workspace_id}
+
 
 def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
@@ -147,6 +151,7 @@ def test_cli_restores_historical_run_and_bulk_clears_current_workspace(tmp_path,
         "run", "clone-workspace", "run-1", "--title", "Historical clone",
     ])
     cleared = runner.invoke(cli, ["job", "clear-results", "--workspace"])
+    cleared_history = runner.invoke(cli, ["job", "clear-history", "--workspace"])
 
     assert cloned.exit_code == 0, cloned.output
     assert "workspace_id=workspace-clone" in cloned.output
@@ -154,3 +159,5 @@ def test_cli_restores_historical_run_and_bulk_clears_current_workspace(tmp_path,
     assert fake.clone_title == "Historical clone"
     assert cleared.exit_code == 0, cleared.output
     assert fake.cleared_workspace_id == "workspace-clone"
+    assert cleared_history.exit_code == 0, cleared_history.output
+    assert fake.cleared_history_workspace_id == "workspace-clone"
