@@ -67,6 +67,22 @@ def test_worker_affinity_inventory_is_lru_bounded() -> None:
     assert snapshot["cache_keys"] == ["B.DAY1", "C.DAY1"]
 
 
+def test_spawned_worker_bootstraps_product_path_runtime() -> None:
+    with LongLivedWorkerPool(size=1) as pool:
+        pool.submit(
+            job_id="product-runtime",
+            runner_path=f"{RUNNERS}:product_runtime_probe",
+            payload={},
+        )
+        messages = _collect(pool, lambda rows: _finished(rows, "product-runtime"))
+
+    result = next(
+        item for item in messages
+        if item.get("event") == "result" and item.get("job_id") == "product-runtime"
+    )
+    assert result["data"]["success"] is True
+
+
 def test_pool_runs_cpu_jobs_in_multiple_real_processes() -> None:
     with LongLivedWorkerPool(size=2) as pool:
         pids = {

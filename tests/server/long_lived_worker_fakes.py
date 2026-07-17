@@ -41,6 +41,15 @@ def planned_cpu_runner(payload, sink, cancel_event) -> None:
     cpu_runner(payload, sink, cancel_event)
 
 
+def product_runtime_probe(payload, sink, cancel_event) -> None:
+    from tools.products import product_path_selection
+
+    sink.emit_result({
+        "success": product_path_selection._product_resolver is not None,
+        "pid": os.getpid(),
+    })
+
+
 def artifact_runner(payload, sink, cancel_event) -> None:
     size = int(payload.get("size") or 2048)
     sink.emit_artifact("details", {"values": list(range(size))})

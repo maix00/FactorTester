@@ -201,6 +201,9 @@ def _worker_entry(
     output_queue: Any,
     cancel_value: Any,
 ) -> None:
+    from server.jobs.worker_runtime import initialize_worker_runtime
+
+    initialize_worker_runtime()
     try:
         from tools.data.cache.IdleResourceManager import IdleResourceManager
 
