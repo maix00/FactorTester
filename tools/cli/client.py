@@ -100,6 +100,12 @@ class FactorTesterClient:
         data = self._expect_success(self.session.get(f"/api/runs/{run_id}"))
         return dict(data.get("run") or {})
 
+    def clone_run_workspace(self, run_id: str, *, title: str = "") -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/runs/{run_id}/clone-workspace", {"title": title},
+        ))
+        return dict(data.get("workspace") or {})
+
     def list_jobs(
         self,
         *,
@@ -153,6 +159,10 @@ class FactorTesterClient:
 
     def delete_job_artifacts(self, job_id: str) -> dict[str, Any]:
         return self._expect_success(self.session.delete(f"/api/jobs/{job_id}/artifacts"))
+
+    def delete_user_artifacts(self, *, workspace_id: str = "") -> dict[str, Any]:
+        query = {"workspace_id": workspace_id} if workspace_id else None
+        return self._expect_success(self.session.delete("/api/jobs/artifacts", query=query))
 
     def job_storage(self) -> dict[str, Any]:
         return self._expect_success(self.session.get("/api/jobs/storage"))

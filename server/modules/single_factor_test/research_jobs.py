@@ -17,6 +17,7 @@ from server.services import (
 )
 from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
 from server.jobs.artifacts import default_user_quota_bytes
+from server.jobs.entitlements import entitlement_for_owner
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
@@ -132,6 +133,7 @@ def _submit_kind(kind: str, payload: dict):
         source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
         runner_path=runner,
         job_spec=deepcopy(payload),
+        entitlement=entitlement_for_owner(str(payload["_owner"])),
     ))
     try:
         _daemon_client().wake()
@@ -407,3 +409,25 @@ def get_research_run(run_id: str):
         return jsonify({"success": False, "error": "run not found"}), 404
     jobs = JobRepository().list(owner=owner, run_id=run_id, limit=200)
     return jsonify({"success": True, "run": run, "jobs": [job.summary() for job in jobs]})
+
+
+@sft_bp.post("/api/runs/<run_id>/clone-workspace")
+def clone_research_run_workspace(run_id: str):
+    owner = require_user()
+    run = research_runs.load_run(run_id=run_id, owner=owner)
+    if run is None:
+        return jsonify({"success": False, "error": "run not found"}), 404
+    payload = run["run_spec"].get("configuration")
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "run has no restorable configuration"}), 409
+    data = request.get_json(silent=True) or {}
+    title = str(data.get("title") or f"Restored run {run_id[:8]}").strip()
+    workspace = research_workspaces.create_workspace(
+        owner=owner, title=title, payload=deepcopy(payload),
+    )
+    return jsonify({
+        "success": True,
+        "workspace": workspace,
+        "source_run_id": run_id,
+        "source_run_spec_hash": run["run_spec_hash"],
+    }), 201

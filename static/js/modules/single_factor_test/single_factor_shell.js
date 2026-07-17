@@ -275,6 +275,27 @@ window.SingleFactorResearch = (function() {
             };
             actions.appendChild(clear);
         }
+        if (['succeeded', 'failed', 'cancelled'].includes(job.status)) {
+            const restore = document.createElement('button');
+            restore.type = 'button';
+            restore.textContent = '恢复冻结配置';
+            restore.title = '从该任务所属 RunSpec 创建一个新的研究工作区';
+            restore.onclick = async function() {
+                restore.disabled = true;
+                try {
+                    const data = await jsonRequest('/api/runs/' + encodeURIComponent(job.run_id) + '/clone-workspace', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({})
+                    });
+                    workspace = data.workspace;
+                    window.location.reload();
+                } catch (error) {
+                    restore.disabled = false;
+                    throw error;
+                }
+            };
+            actions.appendChild(restore);
+        }
         return row;
     }
 
@@ -366,6 +387,22 @@ async function initSingleFactorShell() {
     initSingleFactorSidebarResizer();
     initSingleFactorSidebarToggle();
     await window.SingleFactorResearch.bootstrapView();
+    const clearWorkspaceResults = document.getElementById('research-job-clear-workspace-results');
+    if (clearWorkspaceResults) {
+        clearWorkspaceResults.addEventListener('click', async function() {
+            const current = window.SingleFactorResearch.workspace();
+            if (!current) return;
+            clearWorkspaceResults.disabled = true;
+            try {
+                await fetch('/api/jobs/artifacts?workspace_id=' + encodeURIComponent(current.workspace_id), {
+                    method: 'DELETE'
+                });
+                await window.SingleFactorResearch.restoreActiveJobs();
+            } finally {
+                clearWorkspaceResults.disabled = false;
+            }
+        });
+    }
     await loadSingleFactorFamilyList();
 
     const app = document.querySelector('.single-factor-app');

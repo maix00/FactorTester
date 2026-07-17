@@ -47,6 +47,19 @@ class FakeClient:
             "error": {"message": "boom", "traceback": "trace"},
         }
 
+    def clone_run_workspace(self, run_id, *, title=""):
+        assert run_id == "run-1"
+        self.clone_title = title
+        return {
+            "workspace_id": "workspace-clone",
+            "title": title,
+            "configuration": {"revision": 1},
+        }
+
+    def delete_user_artifacts(self, *, workspace_id=""):
+        self.cleared_workspace_id = workspace_id
+        return {"deleted_files": 3, "workspace_id": workspace_id}
+
 
 def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
@@ -121,3 +134,23 @@ def test_job_queue_commands_expose_filtered_json_and_failure_result(tmp_path, mo
     }
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["error"]["traceback"] == "trace"
+
+
+def test_cli_restores_historical_run_and_bulk_clears_current_workspace(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    runner = CliRunner()
+    assert runner.invoke(cli, ["workspace", "create", "--factor-family", "MmRet"]).exit_code == 0
+
+    cloned = runner.invoke(cli, [
+        "run", "clone-workspace", "run-1", "--title", "Historical clone",
+    ])
+    cleared = runner.invoke(cli, ["job", "clear-results", "--workspace"])
+
+    assert cloned.exit_code == 0, cloned.output
+    assert "workspace_id=workspace-clone" in cloned.output
+    assert load_state().workspace_id == "workspace-clone"
+    assert fake.clone_title == "Historical clone"
+    assert cleared.exit_code == 0, cleared.output
+    assert fake.cleared_workspace_id == "workspace-clone"

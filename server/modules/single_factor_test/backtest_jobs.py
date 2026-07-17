@@ -197,6 +197,30 @@ def get_job_storage():
     })
 
 
+@sft_bp.delete("/api/jobs/artifacts")
+def delete_user_test_job_artifacts():
+    owner = require_user()
+    workspace_id = str(request.args.get("workspace_id") or "").strip()
+    repository = _repository()
+    artifacts = repository.mark_owner_artifacts_deleted(
+        owner=owner, workspace_id=workspace_id,
+    )
+    root = artifact_root()
+    deleted_files = 0
+    for metadata in artifacts:
+        path = (root / str(metadata["relative_path"])).resolve()
+        if root in path.parents and path.is_file():
+            path.unlink()
+            deleted_files += 1
+    return jsonify({
+        "success": True,
+        "workspace_id": workspace_id,
+        "deleted_files": deleted_files,
+        "deleted_artifacts": len(artifacts),
+        "usage_bytes": repository.storage_usage(owner=owner),
+    })
+
+
 @sft_bp.get("/api/jobs/<job_id>/artifacts")
 def list_test_job_artifacts(job_id: str):
     job, error = _require_job(job_id)

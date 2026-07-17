@@ -382,6 +382,40 @@ class JobRepository:
             )
         return artifacts
 
+    def mark_owner_artifacts_deleted(
+        self, *, owner: str, workspace_id: str = "",
+    ) -> list[dict[str, Any]]:
+        clauses = ["jobs.owner=?", "artifacts.state != 'deleted'"]
+        args: list[Any] = [str(owner)]
+        if workspace_id:
+            clauses.append("jobs.workspace_id=?")
+            args.append(str(workspace_id))
+        now = time.time()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                f"""
+                SELECT artifacts.* FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY artifacts.created_at, artifacts.job_id, artifacts.name
+                """,
+                args,
+            ).fetchall()
+            conn.execute(
+                f"""
+                UPDATE research_job_artifacts AS artifacts
+                SET state='deleted', deleted_at=?
+                WHERE EXISTS (
+                    SELECT 1 FROM research_jobs AS jobs
+                    WHERE jobs.job_id=artifacts.job_id
+                      AND {' AND '.join(clauses)}
+                )
+                """,
+                [now, *args],
+            )
+        return [dict(row) for row in rows]
+
     def storage_usage(self, *, owner: str) -> int:
         with self._connect() as conn:
             row = conn.execute(

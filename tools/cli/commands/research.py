@@ -198,6 +198,22 @@ def run_show(run_id: str) -> None:
     click.echo(_json(client_from_config().get_run(run_id)))
 
 
+@run.command("clone-workspace")
+@click.argument("run_id")
+@click.option("--title", default="", help="新工作区标题。")
+@friendly_errors
+def run_clone_workspace(run_id: str, title: str) -> None:
+    workspace = client_from_config().clone_run_workspace(run_id, title=title)
+    state = load_state()
+    state.workspace_id = str(workspace["workspace_id"])
+    state.configuration_revision = int(workspace["configuration"]["revision"])
+    save_state(state)
+    click.echo(
+        f"workspace_id={state.workspace_id} "
+        f"configuration_revision={state.configuration_revision} source_run_id={run_id}"
+    )
+
+
 @click.group("job")
 def job() -> None:
     """Observe and control durable job attempts."""
@@ -316,10 +332,21 @@ def job_artifact(job_id: str, name: str) -> None:
 
 
 @job.command("clear-results")
-@click.argument("job_id")
+@click.argument("job_id", required=False)
+@click.option("--workspace", "current_workspace", is_flag=True, help="清除当前工作区的完整结果。")
+@click.option("--all", "all_results", is_flag=True, help="清除当前用户的全部完整结果。")
 @friendly_errors
-def job_clear_results(job_id: str) -> None:
-    click.echo(_json(client_from_config().delete_job_artifacts(job_id)))
+def job_clear_results(job_id: str | None, current_workspace: bool, all_results: bool) -> None:
+    selected = int(bool(job_id)) + int(current_workspace) + int(all_results)
+    if selected != 1:
+        raise click.ClickException("请指定 JOB_ID、--workspace 或 --all 三者之一")
+    client = client_from_config()
+    if job_id:
+        result = client.delete_job_artifacts(job_id)
+    else:
+        workspace_id = _require_workspace().workspace_id if current_workspace else ""
+        result = client.delete_user_artifacts(workspace_id=workspace_id)
+    click.echo(_json(result))
 
 
 @job.command("storage")

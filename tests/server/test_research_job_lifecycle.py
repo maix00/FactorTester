@@ -8,6 +8,7 @@ import pytest
 
 import settings as Settings
 from server.modules.single_factor_test import sft_bp
+from server.jobs.models import SchedulingEntitlement
 from server.jobs.repository import JobRepository
 from server.services import research_configurations, research_runs, research_workspaces
 from tools.data.sqlite.db import connect_sqlite
@@ -286,6 +287,29 @@ def test_run_freezes_configuration_while_workspace_keeps_editing(client) -> None
     assert frozen["run_spec"]["configuration"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
 
 
+def test_historical_run_can_be_cloned_into_a_new_editable_workspace(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    submitted = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }).get_json()
+    _update(client, workspace, _payload(workspace, n="20d"))
+
+    cloned = client.post(
+        f"/api/runs/{submitted['run_id']}/clone-workspace",
+        json={"title": "Historical IC clone"},
+    )
+
+    assert cloned.status_code == 201, cloned.get_data(as_text=True)
+    value = cloned.get_json()["workspace"]
+    assert value["workspace_id"] != workspace["workspace_id"]
+    assert value["title"] == "Historical IC clone"
+    assert value["configuration"]["revision"] == 1
+    assert value["configuration"]["payload"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
+
+
 def test_migration_repairs_registered_settings_in_already_migrated_templates(client) -> None:
     workspace = _create_workspace(client)
     template = research_configurations.save_template(
@@ -338,6 +362,31 @@ def test_all_analyses_dispatch_importable_process_runners(client) -> None:
     assert all(":run_" in job.runner_path for job in jobs)
     assert all(job.summary()["execution_mode"] == "process" for job in jobs)
     assert all("page_uuid" not in job.job_spec and "view_uuid" not in job.job_spec for job in jobs)
+
+
+def test_submission_snapshots_server_side_scheduling_entitlement(client, monkeypatch) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.research_jobs.entitlement_for_owner",
+        lambda owner: SchedulingEntitlement(
+            priority_class="high", weight=2.0,
+            reserved_capacity_class="research-admin", max_concurrency=2,
+        ),
+    )
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+        "entitlement": {"priority_class": "admin", "weight": 999},
+    })
+
+    assert response.status_code == 202
+    job = JobRepository().list(owner="alice", run_id=response.get_json()["run_id"])[0]
+    assert job.entitlement.priority_class == "high"
+    assert job.entitlement.weight == 2.0
+    assert job.entitlement.max_concurrency == 2
 
 
 def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monkeypatch) -> None:
