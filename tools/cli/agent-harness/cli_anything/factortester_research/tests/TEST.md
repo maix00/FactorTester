@@ -34,3 +34,18 @@ cli-anything-factortester-research --session /tmp/ftr-session.json plan \
 ```
 
 The generated plan must create/select a workspace, write or import a revision, submit one run containing requested analyses, and observe/control results by `job_id`.
+
+## External Vibe infrastructure coverage
+
+- Unit coverage validates the canonical locked pipeline command, daily/minute
+  manifest contracts, factor provenance, mandatory next-bar execution, and the
+  explicit unavailable GTHT import boundary.
+- The real-file smoke test validated the existing daily v1, minute v1,
+  `academic_carhart_mom`, and `gtht_handoff.json` artifacts.
+
+Latest result:
+
+```text
+.................                                                        [100%]
+17 passed in 1.52s
+```
