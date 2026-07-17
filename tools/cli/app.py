@@ -5,7 +5,7 @@ from __future__ import annotations
 import click
 
 from tools.cli.commands.agent import doctor, factor_plan
-from tools.cli.commands.auth import configure, login
+from tools.cli.commands.auth import configure, login, logout
 from tools.cli.commands.navigation import list_modules
 from tools.cli.commands.settings import describe, edit
 from tools.cli.commands.research import external_factor, job, run, workspace
@@ -35,6 +35,7 @@ def cli() -> None:
 
 cli.add_command(configure)
 cli.add_command(login)
+cli.add_command(logout)
 cli.add_command(doctor)
 cli.add_command(factor_plan)
 cli.add_command(list_modules)

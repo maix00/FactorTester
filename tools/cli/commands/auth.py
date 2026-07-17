@@ -28,16 +28,38 @@ def configure(host: str, port: int, base_url: str) -> None:
 @click.command()
 @click.option("--username", prompt=True)
 @click.option("--password", default="", help="不传则安全提示输入。")
+@click.option(
+    "--keep-login/--no-keep-login",
+    default=True,
+    show_default=True,
+    help="持久保存本地 session；默认跳过十分钟空闲退出，服务端最长保留三十天。",
+)
 @friendly_errors
-def login(username: str, password: str) -> None:
+def login(username: str, password: str, keep_login: bool) -> None:
     """Login through the configured remote server."""
     if not password:
         password = getpass.getpass("Password: ")
-    data = client_from_config().login(username, password)
-    click.echo(f"已登录: {data.get('username') or username}")
+    client = client_from_config()
+    data = client.login(username, password)
+    persistence = client.set_keep_login(keep_login)
+    click.echo(
+        f"已登录: {data.get('username') or username} "
+        f"keep_login={str(bool(persistence.get('keep_login'))).lower()}"
+    )
     state = load_state()
     state.reset()
     state.workspace_id = ""
     state.configuration_revision = 0
     save_state(state)
     print_home_welcome()
+
+
+@click.command()
+@friendly_errors
+def logout() -> None:
+    """Logout remotely and remove the persisted local session cookie."""
+    client_from_config().logout()
+    state = load_state()
+    state.reset()
+    save_state(state)
+    click.echo("已登出，并清除本地登录状态。")

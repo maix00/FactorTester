@@ -37,6 +37,17 @@ def fake_server() -> Iterator[str]:
             return jsonify(success=True, username="alice")
         return jsonify(success=False, error="bad login"), 401
 
+    @app.post("/api/keep_login")
+    def keep_login():
+        assert session.get("username") == "alice"
+        session["keep_login"] = bool(request.get_json().get("keep_login"))
+        return jsonify(success=True, keep_login=session["keep_login"])
+
+    @app.post("/logout")
+    def logout():
+        session.clear()
+        return jsonify(success=True)
+
     @app.post("/api/workspaces")
     def create_workspace():
         assert session.get("username") == "alice"
@@ -115,6 +126,7 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     client = FactorTesterClient(HttpSession(fake_server, cookies=tmp_path / "cookies.lwp"))
 
     assert client.login("alice", "pw")["username"] == "alice"
+    assert client.set_keep_login(True)["keep_login"] is True
     workspace = client.create_workspace(factor_families=[{"alias": "MmRet"}])
     assert workspace["workspace_id"] == "workspace-1"
     assert client.list_workspaces()[0]["workspace_id"] == "workspace-1"
@@ -125,6 +137,23 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     assert client.list_jobs(workspace_id="workspace-1")[0]["job_id"] == "job-1"
     assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
+
+
+def test_client_login_persists_across_processes_and_logout_clears_cookie(
+    fake_server: str, tmp_path,
+) -> None:
+    cookie_file = tmp_path / "cookies.lwp"
+    first = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
+    first.login("alice", "pw")
+    first.set_keep_login(True)
+
+    second = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
+    assert second.list_workspaces()[0]["workspace_id"] == "workspace-1"
+
+    assert second.logout()["success"] is True
+    assert list(second.session.cookie_jar) == []
+    third = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
+    assert list(third.session.cookie_jar) == []
 
 
 def test_client_discards_corrupt_cookie_jar_without_traceback(fake_server: str, tmp_path) -> None:

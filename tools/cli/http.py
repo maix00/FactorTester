@@ -234,6 +234,11 @@ class HttpSession:
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
         self.cookie_jar.save(ignore_discard=True, ignore_expires=True)
 
+    def clear_cookies(self) -> None:
+        """Remove the persisted authenticated session from this client."""
+        self.cookie_jar.clear()
+        self._save_cookies()
+
     def _stream_timeout(self) -> float:
         raw = os.environ.get(STREAM_TIMEOUT_ENV)
         if raw:
