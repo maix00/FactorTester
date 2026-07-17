@@ -23,11 +23,14 @@ FactorTester 是一个量化因子研究与回测平台，面向期货及多资�
 
 ### Research Workspace / Run / Job
 
-异步研究不归浏览器页面所有。`session_uuid` 只负责认证，`view_uuid` 只表示浏览器
-观察租约；可编辑配置属于 `workspace_id`，一次冻结配置属于 `run_id`，具体回测、IC、
-因子评估或类型分析属于独立 `job_id`。worker 只接收可序列化 RunSpec，不读取页面
+异步研究不归浏览器页面所有。`session_uuid` 只负责认证，`page_uuid`/`view_uuid` 只用于
+当前 UI/runtime 隔离；可编辑配置属于 `workspace_id`，一次冻结配置属于 `run_id`，具体
+回测、IC、因子评估或类型分析属于独立 `job_id`。关闭页面不会取消任务，取消只能显式
+发生。worker 只接收可序列化 RunSpec 和 planning 后冻结的 ExecutionPlan，不读取页面
 FactorTester 或 `page_factors`。Web 与 CLI 统一通过 `/api/workspaces`、`/api/runs`、
-`/api/jobs` 管理生命周期。完整决策见 ADR-036。
+`/api/jobs` 管理生命周期。SQLite 只保存低频权威事实；实时 progress/SSE 和行情缓存
+属于单机 job daemon 内存，完整曲线/明细属于显式保留的文件 artifact。完整决策见
+ADR-037、ADR-038、ADR-039。
 
 ### 因子 (Factor)
 

@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import os
+import uuid
 
 from flask import jsonify, request
+import settings as Settings
 
 from server.modules.single_factor_test import sft_bp
 from server.services import (
     research_configurations,
     research_runs,
     research_workspaces,
-    view_leases,
 )
+from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
+from server.jobs.artifacts import default_user_quota_bytes
+from server.jobs.entitlements import entitlement_for_owner
+from server.jobs.models import JobRecord
+from server.jobs.repository import JobRepository
+from server.jobs.states import JobStatus
 from server.services.session_runtime import require_user
 
 
@@ -87,6 +95,18 @@ def _freeze_product_selections(configuration: dict, *, owner: str, analyses: lis
     return frozen
 
 
+def _deployment_id() -> str:
+    return str(os.environ.get("GTHT_DEPLOYMENT_ID") or "factortester-local")
+
+
+def _daemon_client() -> JobDaemonClient:
+    socket_path = os.environ.get(
+        "GTHT_JOB_DAEMON_SOCKET",
+        str(Settings.CACHE_DIR / "runtime" / f"research-jobs-{_deployment_id()}.sock"),
+    )
+    return JobDaemonClient(socket_path)
+
+
 def _submit_kind(kind: str, payload: dict):
     process_runners = {
         "backtest": "server.modules.single_factor_test.process_runners:run_group",
@@ -97,19 +117,28 @@ def _submit_kind(kind: str, payload: dict):
     runner = process_runners.get(kind)
     if runner is None:
         raise ValueError(f"unsupported research job kind: {kind}")
-    from server.services import test_jobs
-
-    job = test_jobs.create_job(
+    repository = JobRepository()
+    job = repository.create(JobRecord(
+        job_id=uuid.uuid4().hex,
         kind=kind,
-        run_token=str(payload["run_token"]),
         run_id=str(payload["run_id"]),
         workspace_id=str(payload["workspace_id"]),
-        view_uuid=str(payload.get("view_uuid") or ""),
-        lifecycle_policy=str(payload.get("lifecycle_policy") or "durable"),
         owner=str(payload["_owner"]),
-        payload=payload,
-    )
-    test_jobs.submit_process(job, runner, job.request_snapshot)
+        status=JobStatus.SUBMITTED,
+        retry_of=str(payload.pop("_retry_of", "") or ""),
+        attempt=max(1, int(payload.pop("_attempt", 1) or 1)),
+        step_mode=bool(payload.get("step_mode")),
+        retention_mode=str(payload.get("retention_mode") or "summary"),
+        deployment_id=_deployment_id(),
+        source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
+        runner_path=runner,
+        job_spec=deepcopy(payload),
+        entitlement=entitlement_for_owner(str(payload["_owner"])),
+    ))
+    try:
+        _daemon_client().wake()
+    except DaemonUnavailable:
+        pass
     return job
 
 
@@ -280,6 +309,19 @@ def delete_configuration_template(configuration_id: str):
 def submit_research_run():
     data = request.get_json(silent=True) or {}
     owner = require_user()
+    repository = JobRepository()
+    quota = repository.storage_quota(
+        owner=owner, default_bytes=default_user_quota_bytes()
+    )
+    usage = repository.storage_usage(owner=owner)
+    if usage > quota:
+        return jsonify({
+            "success": False,
+            "error": "retained result quota exceeded; delete full results before submitting",
+            "code": "storage_quota_exceeded",
+            "usage_bytes": usage,
+            "quota_bytes": quota,
+        }), 507
     workspace_id = str(data.get("workspace_id") or "").strip()
     try:
         configuration_revision = int(data.get("configuration_revision"))
@@ -292,15 +334,15 @@ def submit_research_run():
     unsupported = sorted(set(analyses) - SUPPORTED_ANALYSES)
     if unsupported:
         return jsonify({"success": False, "error": f"unsupported analyses: {unsupported}"}), 400
-    lifecycle_policy = str(data.get("lifecycle_policy") or "durable").strip()
-    if lifecycle_policy not in {"durable", "observer_bound", "pause_on_detach"}:
-        return jsonify({"success": False, "error": "unsupported lifecycle_policy"}), 400
-    view_uuid = str(data.get("view_uuid") or "").strip()
-    if lifecycle_policy == "observer_bound":
-        lease = view_leases.load(view_uuid=view_uuid, owner=owner) if view_uuid else None
-        if lease is None or lease.get("status") != "active" or lease.get("workspace_id") != workspace_id:
-            return jsonify({"success": False, "error": "active workspace view lease is required"}), 409
-
+    retention_mode = str(data.get("retention_mode") or "summary").strip()
+    if retention_mode not in {"summary", "full"}:
+        return jsonify({"success": False, "error": "unsupported retention_mode"}), 400
+    step_mode = bool(data.get("step_mode"))
+    if step_mode and analyses != ["backtest"]:
+        return jsonify({
+            "success": False,
+            "error": "step mode requires exactly one backtest analysis",
+        }), 400
     configuration = research_configurations.load_workspace_configuration(
         workspace_id=workspace_id, owner=owner,
     )
@@ -329,7 +371,8 @@ def submit_research_run():
         "configuration_revision": configuration["revision"],
         "configuration_fingerprint": configuration["fingerprint"],
         "analyses": analyses,
-        "lifecycle_policy": lifecycle_policy,
+        "retention_mode": retention_mode,
+        "step_mode": step_mode,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
     run = research_runs.create_run(
@@ -337,7 +380,6 @@ def submit_research_run():
         workspace_id=workspace_id,
         configuration_id=configuration["configuration_id"],
         configuration_revision=configuration["revision"],
-        lifecycle_policy=lifecycle_policy,
         run_spec=run_spec,
     )
     jobs = []
@@ -349,9 +391,9 @@ def submit_research_run():
             "workspace_id": workspace_id,
             "configuration_id": configuration["configuration_id"],
             "configuration_revision": configuration["revision"],
-            "lifecycle_policy": lifecycle_policy,
-            "view_uuid": view_uuid,
             "_owner": owner,
+            "retention_mode": retention_mode,
+            "step_mode": step_mode,
             "run_spec": run_spec,
         }
         job = _submit_kind(kind, payload)
@@ -361,45 +403,31 @@ def submit_research_run():
 
 @sft_bp.get("/api/runs/<run_id>")
 def get_research_run(run_id: str):
-    run = research_runs.load_run(run_id=run_id, owner=require_user())
+    owner = require_user()
+    run = research_runs.load_run(run_id=run_id, owner=owner)
     if run is None:
         return jsonify({"success": False, "error": "run not found"}), 404
-    return jsonify({"success": True, "run": run})
+    jobs = JobRepository().list(owner=owner, run_id=run_id, limit=200)
+    return jsonify({"success": True, "run": run, "jobs": [job.summary() for job in jobs]})
 
 
-@sft_bp.post("/api/view-leases")
-def create_view_lease():
+@sft_bp.post("/api/runs/<run_id>/clone-workspace")
+def clone_research_run_workspace(run_id: str):
+    owner = require_user()
+    run = research_runs.load_run(run_id=run_id, owner=owner)
+    if run is None:
+        return jsonify({"success": False, "error": "run not found"}), 404
+    payload = run["run_spec"].get("configuration")
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "run has no restorable configuration"}), 409
     data = request.get_json(silent=True) or {}
-    view_uuid = str(data.get("view_uuid") or "").strip()
-    workspace_id = str(data.get("workspace_id") or "").strip()
-    if not view_uuid or not workspace_id:
-        return jsonify({"success": False, "error": "view_uuid and workspace_id are required"}), 400
-    if research_workspaces.load_workspace(workspace_id=workspace_id, owner=require_user()) is None:
-        return jsonify({"success": False, "error": "workspace not found"}), 404
-    lease = view_leases.renew(view_uuid=view_uuid, owner=require_user(), workspace_id=workspace_id)
-    return jsonify({"success": True, "lease": lease}), 201
-
-
-@sft_bp.put("/api/view-leases/<view_uuid>")
-def renew_view_lease(view_uuid: str):
-    workspace_id = str((request.get_json(silent=True) or {}).get("workspace_id") or "").strip()
-    if not workspace_id:
-        return jsonify({"success": False, "error": "workspace_id is required"}), 400
-    lease = view_leases.renew(view_uuid=view_uuid, owner=require_user(), workspace_id=workspace_id)
-    return jsonify({"success": True, "lease": lease})
-
-
-@sft_bp.delete("/api/view-leases/<view_uuid>")
-def detach_view_lease(view_uuid: str):
-    lease = view_leases.detach(view_uuid=view_uuid, owner=require_user())
-    if lease is None:
-        return jsonify({"success": False, "error": "view lease not found"}), 404
-    return jsonify({"success": True, "lease": lease}), 202
-
-
-@sft_bp.get("/api/view-leases/<view_uuid>")
-def get_view_lease(view_uuid: str):
-    lease = view_leases.load(view_uuid=view_uuid, owner=require_user())
-    if lease is None:
-        return jsonify({"success": False, "error": "view lease not found"}), 404
-    return jsonify({"success": True, "lease": lease})
+    title = str(data.get("title") or f"Restored run {run_id[:8]}").strip()
+    workspace = research_workspaces.create_workspace(
+        owner=owner, title=title, payload=deepcopy(payload),
+    )
+    return jsonify({
+        "success": True,
+        "workspace": workspace,
+        "source_run_id": run_id,
+        "source_run_spec_hash": run["run_spec_hash"],
+    }), 201

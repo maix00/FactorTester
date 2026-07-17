@@ -85,18 +85,26 @@ class FactorTesterClient:
         configuration_revision: int,
         *,
         analyses: list[str],
-        lifecycle_policy: str = "durable",
+        retention_mode: str = "summary",
+        step_mode: bool = False,
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post("/api/runs", {
             "workspace_id": workspace_id,
             "configuration_revision": configuration_revision,
             "analyses": analyses,
-            "lifecycle_policy": lifecycle_policy,
+            "retention_mode": retention_mode,
+            "step_mode": bool(step_mode),
         }))
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         data = self._expect_success(self.session.get(f"/api/runs/{run_id}"))
         return dict(data.get("run") or {})
+
+    def clone_run_workspace(self, run_id: str, *, title: str = "") -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/runs/{run_id}/clone-workspace", {"title": title},
+        ))
+        return dict(data.get("workspace") or {})
 
     def list_jobs(
         self,
@@ -131,6 +139,15 @@ class FactorTesterClient:
     def retry_job(self, job_id: str) -> dict[str, Any]:
         return self._expect_success(self.session.post(f"/api/jobs/{job_id}/retry", {}))
 
+    def approve_job(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.post(f"/api/jobs/{job_id}/approve", {}))
+
+    def pin_job(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.post(f"/api/jobs/{job_id}/pin", {}))
+
+    def unpin_job(self) -> dict[str, Any]:
+        return self._expect_success(self.session.delete("/api/jobs/pin"))
+
     def continue_job(self, job_id: str, *, action: str = "continue", until: str = "") -> dict[str, Any]:
         payload = {"action": action}
         if until:
@@ -139,6 +156,16 @@ class FactorTesterClient:
 
     def job_artifact(self, job_id: str, name: str) -> dict[str, Any]:
         return self._expect_success(self.session.get(f"/api/jobs/{job_id}/artifacts/{name}"))
+
+    def delete_job_artifacts(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.delete(f"/api/jobs/{job_id}/artifacts"))
+
+    def delete_user_artifacts(self, *, workspace_id: str = "") -> dict[str, Any]:
+        query = {"workspace_id": workspace_id} if workspace_id else None
+        return self._expect_success(self.session.delete("/api/jobs/artifacts", query=query))
+
+    def job_storage(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get("/api/jobs/storage"))
 
     def stream_job_id(self, job_id: str, *, after: int = 0):
         query = {"after": after} if after else None

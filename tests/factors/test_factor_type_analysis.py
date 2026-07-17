@@ -242,6 +242,25 @@ class TestTimeSeriesCorrelation:
         # 强相关应有小 p_value
         assert results["trend_a"]["p_value"] < 0.05
 
+    def test_aligns_multiindex_series_by_finest_event_time(self):
+        events = pd.date_range("2025-01-02 15:00", periods=5, freq="D")
+        target_index = pd.MultiIndex.from_arrays(
+            [events.normalize(), events], names=["trading_day", "_SIGNAL@DAY1"],
+        )
+        reference_index = pd.MultiIndex.from_arrays(
+            [events.normalize(), ["close"] * 5, events],
+            names=["trading_day", "session", "event_time"],
+        )
+        target = pd.Series([1, 2, 3, 4, 5], index=target_index)
+        reference = pd.Series([2, 4, 6, 8, 10], index=reference_index)
+
+        result = compute_time_series_correlation(
+            target, {"reference": reference}, min_periods=3,
+        )
+
+        assert result["reference"]["correlation"] == 1.0
+        assert result["reference"]["valid_periods"] == 5
+
 
 # =========================================================
 #  3) 品种相关性矩阵
@@ -281,6 +300,23 @@ class TestProductCorrelationMatrix:
             sample_product_series, method="spearman"
         )
         assert len(result["matrix"]) == 4
+
+    def test_aligns_products_with_different_multiindex_depths(self):
+        events = pd.date_range("2025-01-02 15:00", periods=5, freq="D")
+        two_levels = pd.MultiIndex.from_arrays(
+            [events.normalize(), events], names=["trading_day", "event_time"],
+        )
+        three_levels = pd.MultiIndex.from_arrays(
+            [events.normalize(), ["close"] * 5, events],
+            names=["trading_day", "session", "event_time"],
+        )
+
+        result = compute_product_correlation_matrix({
+            "A": pd.Series([1, 2, 3, 4, 5], index=two_levels),
+            "B": pd.Series([2, 4, 6, 8, 10], index=three_levels),
+        }, min_periods=3)
+
+        assert result["matrix"][0][1] == 1.0
 
 
 # =========================================================

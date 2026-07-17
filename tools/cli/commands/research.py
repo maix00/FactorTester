@@ -174,15 +174,17 @@ def run() -> None:
 @click.option("--analysis", "analyses", multiple=True, type=click.Choice([
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
 ]), required=True)
-@click.option("--lifecycle", type=click.Choice(["durable", "observer_bound", "pause_on_detach"]), default="durable")
+@click.option("--retain-full", is_flag=True, help="在服务器配额内保留完整曲线和明细。")
+@click.option("--step", "step_mode", is_flag=True, help="逐 flow 暂停，仅支持单个 backtest。")
 @friendly_errors
-def run_submit(analyses: tuple[str, ...], lifecycle: str) -> None:
+def run_submit(analyses: tuple[str, ...], retain_full: bool, step_mode: bool) -> None:
     state = _require_workspace()
     result = client_from_config().submit_run(
         state.workspace_id,
         state.configuration_revision,
         analyses=list(analyses),
-        lifecycle_policy=lifecycle,
+        retention_mode="full" if retain_full else "summary",
+        step_mode=step_mode,
     )
     click.echo(f"run_id={result.get('run_id')}")
     for item in result.get("jobs") or []:
@@ -196,6 +198,22 @@ def run_show(run_id: str) -> None:
     click.echo(_json(client_from_config().get_run(run_id)))
 
 
+@run.command("clone-workspace")
+@click.argument("run_id")
+@click.option("--title", default="", help="新工作区标题。")
+@friendly_errors
+def run_clone_workspace(run_id: str, title: str) -> None:
+    workspace = client_from_config().clone_run_workspace(run_id, title=title)
+    state = load_state()
+    state.workspace_id = str(workspace["workspace_id"])
+    state.configuration_revision = int(workspace["configuration"]["revision"])
+    save_state(state)
+    click.echo(
+        f"workspace_id={state.workspace_id} "
+        f"configuration_revision={state.configuration_revision} source_run_id={run_id}"
+    )
+
+
 @click.group("job")
 def job() -> None:
     """Observe and control durable job attempts."""
@@ -205,9 +223,10 @@ def job() -> None:
 @click.option("--all-workspaces", is_flag=True)
 @click.option("--kind", type=click.Choice([
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
-]))
+    ]))
 @click.option("--status", "statuses", multiple=True, type=click.Choice([
-    "queued", "running", "paused", "succeeded", "failed", "cancelled", "expired",
+    "submitted", "planning", "awaiting_confirmation", "queued", "running",
+    "paused", "succeeded", "failed", "cancelled",
 ]))
 @click.option("--limit", default=20, show_default=True, type=click.IntRange(1, 200))
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
@@ -272,6 +291,26 @@ def job_retry(job_id: str) -> None:
     click.echo(_json(client_from_config().retry_job(job_id)))
 
 
+@job.command("approve")
+@click.argument("job_id")
+@friendly_errors
+def job_approve(job_id: str) -> None:
+    click.echo(_json(client_from_config().approve_job(job_id)))
+
+
+@job.command("pin")
+@click.argument("job_id")
+@friendly_errors
+def job_pin(job_id: str) -> None:
+    click.echo(_json(client_from_config().pin_job(job_id)))
+
+
+@job.command("unpin")
+@friendly_errors
+def job_unpin() -> None:
+    click.echo(_json(client_from_config().unpin_job()))
+
+
 @job.command("continue")
 @click.argument("job_id")
 @click.option("--until", default="", help="Replay until this timestamp, then pause.")
@@ -290,3 +329,27 @@ def job_continue(job_id: str, until: str, run_to_end: bool) -> None:
 @friendly_errors
 def job_artifact(job_id: str, name: str) -> None:
     click.echo(_json(client_from_config().job_artifact(job_id, name)))
+
+
+@job.command("clear-results")
+@click.argument("job_id", required=False)
+@click.option("--workspace", "current_workspace", is_flag=True, help="清除当前工作区的完整结果。")
+@click.option("--all", "all_results", is_flag=True, help="清除当前用户的全部完整结果。")
+@friendly_errors
+def job_clear_results(job_id: str | None, current_workspace: bool, all_results: bool) -> None:
+    selected = int(bool(job_id)) + int(current_workspace) + int(all_results)
+    if selected != 1:
+        raise click.ClickException("请指定 JOB_ID、--workspace 或 --all 三者之一")
+    client = client_from_config()
+    if job_id:
+        result = client.delete_job_artifacts(job_id)
+    else:
+        workspace_id = _require_workspace().workspace_id if current_workspace else ""
+        result = client.delete_user_artifacts(workspace_id=workspace_id)
+    click.echo(_json(result))
+
+
+@job.command("storage")
+@friendly_errors
+def job_storage() -> None:
+    click.echo(_json(client_from_config().job_storage()))

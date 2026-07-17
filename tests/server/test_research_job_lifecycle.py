@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
-import uuid
 
 from flask import Flask
 import pytest
 
 import settings as Settings
-from server.modules.single_factor_test import research_jobs, sft_bp
-from server.services import research_configurations, research_runs, research_workspaces, test_jobs
+from server.modules.single_factor_test import sft_bp
+from server.jobs.models import SchedulingEntitlement
+from server.jobs.repository import JobRepository
+from server.services import research_configurations, research_runs, research_workspaces
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -23,10 +23,6 @@ def client(tmp_path, monkeypatch):
     client = app.test_client()
     with client.session_transaction() as session:
         session["username"] = "alice"
-    with test_jobs._lock:
-        test_jobs._jobs.clear()
-        test_jobs._run_token_to_job.clear()
-        test_jobs._run_id_to_job.clear()
     return client
 
 
@@ -275,17 +271,10 @@ def test_legacy_workspace_and_runs_require_then_apply_one_time_migration(client)
         ).fetchone() is None
 
 
-def test_run_freezes_configuration_while_workspace_keeps_editing(client, monkeypatch) -> None:
+def test_run_freezes_configuration_while_workspace_keeps_editing(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
 
-    def fake_submit(kind, payload):
-        return test_jobs.create_job(
-            kind=kind, run_token=payload["run_token"], run_id=payload["run_id"],
-            workspace_id=payload["workspace_id"], owner="alice", payload=payload,
-        )
-
-    monkeypatch.setattr(research_jobs, "_submit_kind", fake_submit)
     submitted = client.post("/api/runs", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
@@ -296,6 +285,29 @@ def test_run_freezes_configuration_while_workspace_keeps_editing(client, monkeyp
     frozen = client.get(f"/api/runs/{submitted['run_id']}").get_json()["run"]
     assert frozen["configuration_revision"] == 2
     assert frozen["run_spec"]["configuration"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
+
+
+def test_historical_run_can_be_cloned_into_a_new_editable_workspace(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    submitted = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }).get_json()
+    _update(client, workspace, _payload(workspace, n="20d"))
+
+    cloned = client.post(
+        f"/api/runs/{submitted['run_id']}/clone-workspace",
+        json={"title": "Historical IC clone"},
+    )
+
+    assert cloned.status_code == 201, cloned.get_data(as_text=True)
+    value = cloned.get_json()["workspace"]
+    assert value["workspace_id"] != workspace["workspace_id"]
+    assert value["title"] == "Historical IC clone"
+    assert value["configuration"]["revision"] == 1
+    assert value["configuration"]["payload"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
 
 
 def test_migration_repairs_registered_settings_in_already_migrated_templates(client) -> None:
@@ -333,17 +345,9 @@ def test_migration_repairs_registered_settings_in_already_migrated_templates(cli
     }
 
 
-def test_all_analyses_dispatch_importable_process_runners(client, monkeypatch) -> None:
+def test_all_analyses_dispatch_importable_process_runners(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
-    captured = []
-
-    def fake_process(job, runner, payload):
-        captured.append((job.kind, runner, payload))
-        job.execution_mode = "process"
-        return job
-
-    monkeypatch.setattr(test_jobs, "submit_process", fake_process)
     response = client.post("/api/runs", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
@@ -351,11 +355,38 @@ def test_all_analyses_dispatch_importable_process_runners(client, monkeypatch) -
     })
 
     assert response.status_code == 202, response.get_data(as_text=True)
-    assert {kind for kind, _, _ in captured} == {
+    jobs = JobRepository().list(owner="alice", run_id=response.get_json()["run_id"], limit=20)
+    assert {job.kind for job in jobs} == {
         "ic", "factor_evaluation", "factor_type_analysis", "backtest",
     }
-    assert all(":run_" in runner for _, runner, _ in captured)
-    assert all("page_uuid" not in payload for _, _, payload in captured)
+    assert all(":run_" in job.runner_path for job in jobs)
+    assert all(job.summary()["execution_mode"] == "process" for job in jobs)
+    assert all("page_uuid" not in job.job_spec and "view_uuid" not in job.job_spec for job in jobs)
+
+
+def test_submission_snapshots_server_side_scheduling_entitlement(client, monkeypatch) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.research_jobs.entitlement_for_owner",
+        lambda owner: SchedulingEntitlement(
+            priority_class="high", weight=2.0,
+            reserved_capacity_class="research-admin", max_concurrency=2,
+        ),
+    )
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+        "entitlement": {"priority_class": "admin", "weight": 999},
+    })
+
+    assert response.status_code == 202
+    job = JobRepository().list(owner="alice", run_id=response.get_json()["run_id"])[0]
+    assert job.entitlement.priority_class == "high"
+    assert job.entitlement.weight == 2.0
+    assert job.entitlement.max_concurrency == 2
 
 
 def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monkeypatch) -> None:
@@ -371,13 +402,6 @@ def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monk
         "server.modules.products.product_group_store.load_product_groups",
         lambda owner: [{"id": "owner-group", "name": "Owner group", "paths": ["core8_path"]}],
     )
-    captured = []
-
-    def fake_process(job, runner, execution_payload):
-        captured.append(execution_payload)
-        return job
-
-    monkeypatch.setattr(test_jobs, "submit_process", fake_process)
     response = client.post("/api/runs", json={
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
@@ -385,7 +409,8 @@ def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monk
     })
 
     assert response.status_code == 202, response.get_data(as_text=True)
-    frozen = captured[0]["product_selections"]["owner-group"]
+    jobs = JobRepository().list(owner="alice", run_id=response.get_json()["run_id"])
+    frozen = jobs[0].job_spec["product_selections"]["owner-group"]
     assert frozen["selected_paths"] == ["core8_path"]
     assert frozen["product_group_template_id"] == "owner-group"
     run = response.get_json()["run"]
@@ -413,28 +438,12 @@ def test_run_rejects_unresolvable_product_selection_before_creating_job(client, 
 
     assert response.status_code == 400
     assert "missing-group" in response.get_json()["error"]
-    assert test_jobs.list_jobs(owner="alice", workspace_id=workspace["workspace_id"]) == []
+    assert JobRepository().list(owner="alice", workspace_id=workspace["workspace_id"]) == []
 
 
-def test_expired_view_cancels_observer_bound_but_not_durable_job(client, monkeypatch) -> None:
-    monkeypatch.setattr("server.services.view_leases.VIEW_LEASE_GRACE_SECONDS", 0.01)
+def test_view_lifecycle_is_not_a_research_job_api(client) -> None:
     workspace = _create_workspace(client)
-    client.post("/api/view-leases", json={
+    response = client.post("/api/view-leases", json={
         "view_uuid": "view-a", "workspace_id": workspace["workspace_id"],
     })
-    observer = test_jobs.create_job(
-        kind="ic", run_token=uuid.uuid4().hex, run_id="run-a",
-        workspace_id=workspace["workspace_id"], view_uuid="view-a",
-        lifecycle_policy="observer_bound", owner="alice", payload={},
-    )
-    durable = test_jobs.create_job(
-        kind="ic", run_token=uuid.uuid4().hex, run_id="run-b",
-        workspace_id=workspace["workspace_id"], view_uuid="view-a",
-        lifecycle_policy="durable", owner="alice", payload={},
-    )
-    client.delete("/api/view-leases/view-a")
-    time.sleep(0.02)
-    client.get("/api/view-leases/view-a")
-
-    assert client.get(f"/api/jobs/{observer.job_id}").get_json()["status"] == "cancelled"
-    assert client.get(f"/api/jobs/{durable.job_id}").get_json()["status"] == "queued"
+    assert response.status_code == 404

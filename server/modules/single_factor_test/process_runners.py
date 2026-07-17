@@ -6,12 +6,17 @@ from typing import Any
 
 
 def run_group(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
+    from server.modules.single_factor_test.planning import verify_execution_plan
     from server.modules.single_factor_test.group import execute_group_run_spec
 
+    verify_execution_plan("backtest", payload)
     execute_group_run_spec(payload, sink=sink, cancel_event=cancel_event)
 
 
 def _run_analysis(payload: dict[str, Any], sink: Any, cancel_event: Any, *, kind: str) -> None:
+    from server.modules.single_factor_test.planning import verify_execution_plan
+
+    verify_execution_plan(kind, payload)
     if cancel_event.is_set():
         sink.emit_error(f"{kind} job cancelled before start", cancelled=True)
         return
@@ -42,6 +47,8 @@ def run_factor_type_analysis(payload: dict[str, Any], sink: Any, cancel_event: A
 
 
 def run_ic(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
+    from server.modules.single_factor_test.planning import verify_execution_plan
     from server.modules.single_factor_test.ic import execute_ic_run_spec
 
+    verify_execution_plan("ic", payload)
     execute_ic_run_spec(payload, sink=sink, cancel_event=cancel_event)

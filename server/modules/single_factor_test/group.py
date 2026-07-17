@@ -66,9 +66,6 @@ import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
 from server.modules.shared.price_data_helpers import to_epoch_ms
 
-class _StepCheckpointReached(RuntimeError):
-    pass
-
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 _log = logging.getLogger(__name__)
@@ -2167,26 +2164,41 @@ def _group_execution_for_request(data: dict[str, Any]) -> dict[str, Any] | None:
     ``page_uuid`` may carry a latest-view projection, but page runtime is not
     the canonical owner of job results or lifecycle.
     """
-    from server.services import test_jobs
+    from server.jobs.artifacts import load_json_artifact
+    from server.jobs.repository import JobRepository
+    from server.jobs.states import JobStatus
 
     job_id = str(data.get("job_id") or "").strip()
     run_id = str(data.get("run_id") or data.get("run_token") or "").strip()
-    page_uuid = str(data.get("page_uuid") or "")
-    if not job_id and not run_id and page_uuid:
-        page_state = runtime_state.get_page_state(page_uuid)
-        latest_job = getattr(page_state, "latest_group_job", None) if page_state else None
-        if isinstance(latest_job, dict):
-            job_id = str(latest_job.get("job_id") or "").strip()
-            run_id = str(latest_job.get("run_id") or "").strip()
     if job_id or run_id:
-        job = test_jobs.resolve_job_for_detail(
-            owner=str(current_user() or ""),
-            job_id=job_id,
-            run_id=run_id,
+        owner = str(current_user() or "")
+        repository = JobRepository()
+        if job_id:
+            job = repository.require(job_id, owner=owner)
+        else:
+            jobs = repository.list(
+                owner=owner,
+                run_id=run_id,
+                kind="backtest",
+                statuses=(JobStatus.SUCCEEDED,),
+                limit=20,
+            )
+            if not jobs:
+                raise LookupError("指定 run 尚无成功的分组测试 job")
+            job = jobs[0]
+        artifact = repository.load_artifact(
+            job_id=job.job_id,
+            name="group_execution",
+            owner=owner,
         )
-        execution = test_jobs.get_artifact(job, "group_execution")
-        if not execution:
+        if not artifact or artifact["state"] != "active":
             raise LookupError("指定 job 尚无可读取的分组测试详情")
+        execution = load_json_artifact(
+            str(artifact["relative_path"]),
+            str(artifact["content_hash"]),
+        )
+        if not isinstance(execution, dict):
+            raise TypeError("分组测试详情文件格式错误")
         return execution
     return None
 
@@ -3126,23 +3138,12 @@ def get_product_path_selection_session_info():
     return jsonify({'success': True, 'product_path_selections': selections_info})
 
 
-# ═══════════════════════════════════════════════════
-#  SSE 流式端点
-# ═══════════════════════════════════════════════════
-
-def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -> None:
-    """Execute a frozen group RunSpec without reading Flask or page runtime."""
-    from tools.factors.FactorTester import FactorTester
-    from tools.testers.backtest.engines.cancellation import BacktestCancelled
-    from tools.testers.backtest.engines.native.state import BacktestRunState
-    from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
-
+def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
+    """Resolve immutable group settings and selections without loading bars."""
     payload = deepcopy(data)
     flat_groups_raw = payload.get("groups")
     if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
         raise ValueError("groups 必须是非空数组")
-    step_mode = bool(payload.get("step_mode"))
-
     run_id = str(payload.get("run_id") or payload.get("run_token") or uuid.uuid4().hex)
     owner = str(payload.get("_owner") or "")
     payload["_group_owner_username"] = owner
@@ -3227,6 +3228,58 @@ def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any
                 seen_products.add(product)
                 all_products.append(product)
 
+    return {
+        "payload": payload,
+        "run_id": run_id,
+        "owner": owner,
+        "flat_groups": flat_groups,
+        "flat_ls_configs": flat_ls_configs,
+        "normalized_ls_configs": normalized_ls_configs,
+        "resolved_backtest_settings": resolved_backtest_settings,
+        "resolved_settings_by_alias": resolved_settings_by_alias,
+        "group_owner": group_owner,
+        "all_products": all_products,
+        "local_settings": local_settings,
+        "market_rule_fallback": market_rule_fallback,
+        "evaluation_split": evaluation_split,
+        "run_registry": run_registry,
+        "factor_mode": factor_mode,
+        "start_dt": start_dt,
+        "end_dt": end_dt,
+    }
+
+
+# ═══════════════════════════════════════════════════
+#  SSE 流式端点
+# ═══════════════════════════════════════════════════
+
+def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -> None:
+    """Execute a frozen group RunSpec without reading Flask or page runtime."""
+    from tools.factors.FactorTester import FactorTester
+    from tools.testers.backtest.engines.cancellation import BacktestCancelled
+    from tools.testers.backtest.engines.native.state import BacktestRunState
+    from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
+
+    prepared = prepare_group_run_spec(data)
+    payload = prepared["payload"]
+    run_id = prepared["run_id"]
+    owner = prepared["owner"]
+    flat_groups = prepared["flat_groups"]
+    flat_ls_configs = prepared["flat_ls_configs"]
+    normalized_ls_configs = prepared["normalized_ls_configs"]
+    resolved_backtest_settings = prepared["resolved_backtest_settings"]
+    resolved_settings_by_alias = prepared["resolved_settings_by_alias"]
+    group_owner = prepared["group_owner"]
+    all_products = prepared["all_products"]
+    local_settings = prepared["local_settings"]
+    market_rule_fallback = prepared["market_rule_fallback"]
+    evaluation_split = prepared["evaluation_split"]
+    run_registry = prepared["run_registry"]
+    factor_mode = prepared["factor_mode"]
+    start_dt = prepared["start_dt"]
+    end_dt = prepared["end_dt"]
+    step_mode = bool(payload.get("step_mode"))
+
     account = BacktestRunState()
     strategy_book_payload = payload.get("strategy_book")
     strategy_book = None
@@ -3262,23 +3315,35 @@ def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any
         after_index = max(0, int(payload.get("step_after_index") or 0))
         raw_until = str(payload.get("step_until") or "").strip()
         until = pd.Timestamp(raw_until).tz_localize(None) if raw_until else None
-        cursor = {"flow_index": 0}
+        cursor = {"flow_index": 0, "until": until, "run_to_end": False}
 
         def _should_capture(timestamp: Any) -> bool:
             cursor["flow_index"] += 1
+            if cursor["run_to_end"]:
+                return False
             if cursor["flow_index"] <= after_index:
                 return False
-            if until is None:
+            if cursor["until"] is None:
                 return True
             if timestamp is None:
                 return False
-            return pd.Timestamp(timestamp).tz_localize(None) >= until
+            return pd.Timestamp(timestamp).tz_localize(None) >= cursor["until"]
 
         def _checkpoint(info: dict[str, Any]) -> None:
             checkpoint = {**info, "flow_index": cursor["flow_index"]}
             sink.emit_step(checkpoint)
-            sink.emit_pause(checkpoint)
-            raise _StepCheckpointReached()
+            command = sink.emit_pause(checkpoint) or {}
+            action = str(command.get("action") or "continue")
+            if action == "cancel":
+                raise BacktestCancelled("group step job cancelled")
+            if action == "end":
+                cursor["run_to_end"] = True
+                return
+            raw_next_until = str(command.get("until") or "").strip()
+            cursor["until"] = (
+                pd.Timestamp(raw_next_until).tz_localize(None)
+                if raw_next_until else None
+            )
 
         _checkpoint.should_capture = _should_capture
         step_callback = _checkpoint
@@ -3295,8 +3360,6 @@ def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any
             step_mode=step_mode,
             step_callback=step_callback,
         )
-    except _StepCheckpointReached:
-        return
     except BacktestCancelled as exc:
         sink.emit_error(str(exc), cancelled=True, cancel_reason="explicit_cancel")
         return

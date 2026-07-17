@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted.
+Superseded by ADR-037, ADR-038, and ADR-039.
+
+This document records the first durable-job design. Its view-owned
+cancellation, persisted progress/events, renewable process slots, replay-based
+step continuation, and TTL semantics are no longer current.
 
 ## Context
 

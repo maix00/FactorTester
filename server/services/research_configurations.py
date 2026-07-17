@@ -751,7 +751,6 @@ def migrate_legacy_workspaces_and_runs(*, apply: bool = False) -> dict[str, Any]
                         configuration_id TEXT NOT NULL,
                         configuration_revision INTEGER NOT NULL,
                         kind TEXT NOT NULL,
-                        lifecycle_policy TEXT NOT NULL,
                         run_spec_version INTEGER NOT NULL,
                         run_spec_hash TEXT NOT NULL,
                         run_spec_json TEXT NOT NULL,
@@ -774,14 +773,14 @@ def migrate_legacy_workspaces_and_runs(*, apply: bool = False) -> dict[str, Any]
                         """
                         INSERT INTO research_runs (
                             run_id, owner, workspace_id, configuration_id,
-                            configuration_revision, kind, lifecycle_policy,
+                            configuration_revision, kind,
                             run_spec_version, run_spec_hash, run_spec_json, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             row["run_id"], row["owner"], row["workspace_id"],
                             config["configuration_id"], int(config["revision"]),
-                            "factor_research", row["lifecycle_policy"], row["run_spec_version"],
+                            "factor_research", row["run_spec_version"],
                             row["run_spec_hash"], row["run_spec_json"], row["created_at"],
                         ),
                     )

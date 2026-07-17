@@ -51,7 +51,7 @@ def select_worktree(worktrees: list[ManagedWorktree], *, target_port: int = 0, b
 
 def post_manager_action(action: str, *, admin_port: int, path: str, target_port: int = 0, timeout: float = 10.0) -> str:
     data: dict[str, Any] = {"path": path}
-    if action == "start":
+    if action in {"start", "restart-bundle", "restart-api"}:
         data["port"] = str(target_port)
     body = urlencode(data).encode("utf-8")
     request = Request(
@@ -74,17 +74,16 @@ def restart_worktree_service(
 ) -> dict[str, Any]:
     worktrees = fetch_worktrees(admin_port=admin_port)
     target = select_worktree(worktrees, target_port=target_port, branch=branch, path=path)
-    actions = [
-        {"action": "stop", "path": target.path, "port": target.port},
-        {"action": "start", "path": target.path, "port": target.port},
-    ]
+    actions = [{"action": "restart-bundle", "path": target.path, "port": target.port}]
     if dry_run:
         return {"dry_run": True, "target": target.__dict__, "actions": actions}
-    stop_url = post_manager_action("stop", admin_port=admin_port, path=target.path)
-    start_url = post_manager_action("start", admin_port=admin_port, path=target.path, target_port=target.port)
+    restart_url = post_manager_action(
+        "restart-bundle", admin_port=admin_port, path=target.path,
+        target_port=target.port, timeout=180.0,
+    )
     return {
         "dry_run": False,
         "target": target.__dict__,
         "actions": actions,
-        "manager_redirects": [stop_url, start_url],
+        "manager_redirects": [restart_url],
     }

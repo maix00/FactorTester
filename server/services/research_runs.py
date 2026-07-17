@@ -35,6 +35,34 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
                 "legacy research run schema detected; run "
                 "python -m tools.migrations.migrate_research_configurations --apply"
             )
+        if "lifecycle_policy" in columns:
+            conn.executescript(
+                """
+                ALTER TABLE research_runs RENAME TO research_runs_with_lifecycle;
+                CREATE TABLE research_runs (
+                    run_id TEXT PRIMARY KEY,
+                    owner TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    configuration_id TEXT NOT NULL,
+                    configuration_revision INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    run_spec_version INTEGER NOT NULL,
+                    run_spec_hash TEXT NOT NULL,
+                    run_spec_json TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                );
+                INSERT INTO research_runs (
+                    run_id, owner, workspace_id, configuration_id,
+                    configuration_revision, kind, run_spec_version,
+                    run_spec_hash, run_spec_json, created_at
+                )
+                SELECT run_id, owner, workspace_id, configuration_id,
+                       configuration_revision, kind, run_spec_version,
+                       run_spec_hash, run_spec_json, created_at
+                FROM research_runs_with_lifecycle;
+                DROP TABLE research_runs_with_lifecycle;
+                """
+            )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS research_runs (
@@ -44,7 +72,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             configuration_id TEXT NOT NULL,
             configuration_revision INTEGER NOT NULL,
             kind TEXT NOT NULL,
-            lifecycle_policy TEXT NOT NULL,
             run_spec_version INTEGER NOT NULL,
             run_spec_hash TEXT NOT NULL,
             run_spec_json TEXT NOT NULL,
@@ -60,7 +87,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 def create_run(
     *, owner: str, workspace_id: str, configuration_id: str,
-    configuration_revision: int, lifecycle_policy: str, run_spec: dict[str, Any],
+    configuration_revision: int, run_spec: dict[str, Any],
 ) -> dict[str, Any]:
     run_id = uuid.uuid4().hex
     raw = orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
@@ -71,13 +98,13 @@ def create_run(
             """
             INSERT INTO research_runs (
                 run_id, owner, workspace_id, configuration_id,
-                configuration_revision, kind, lifecycle_policy, run_spec_version,
+                configuration_revision, kind, run_spec_version,
                 run_spec_hash, run_spec_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, 'factor_research', ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, 'factor_research', ?, ?, ?, ?)
             """,
             (
                 run_id, owner, workspace_id, configuration_id,
-                int(configuration_revision), lifecycle_policy, RUN_SPEC_VERSION,
+                int(configuration_revision), RUN_SPEC_VERSION,
                 hashlib.sha256(raw).hexdigest(), raw.decode(), created_at,
             ),
         )
@@ -99,7 +126,6 @@ def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:
         "configuration_id": str(row["configuration_id"]),
         "configuration_revision": int(row["configuration_revision"]),
         "kind": str(row["kind"]),
-        "lifecycle_policy": str(row["lifecycle_policy"]),
         "run_spec_version": int(row["run_spec_version"]),
         "run_spec_hash": str(row["run_spec_hash"]),
         "run_spec": _loads(row["run_spec_json"]) or {},

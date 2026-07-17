@@ -60,7 +60,6 @@ def test_live_template_import_runs_as_a_durable_process_job() -> None:
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": configuration["revision"],
         "analyses": ["backtest"],
-        "lifecycle_policy": "durable",
     })
     assert submitted.status_code == 202, submitted.get_data(as_text=True)
     job_id = submitted.get_json()["jobs"][0]["job_id"]
