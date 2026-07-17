@@ -229,3 +229,31 @@ def test_paused_step_job_cancels_and_releases_its_worker(tmp_path) -> None:
 
     assert repository.require("step-cancel").status is JobStatus.CANCELLED
     assert completed.worker_pid == pid
+
+
+def test_drain_finishes_active_work_without_starting_queued_jobs(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.create(_record("draining", runner="blocking_runner", seconds=0.2))
+    repository.create(_record("held"))
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        planner_workers=2,
+        execution_workers=1,
+    ) as scheduler:
+        _drive(scheduler, repository, "draining", {JobStatus.RUNNING})
+        deadline = time.monotonic() + 3
+        while repository.require("held").status is not JobStatus.QUEUED:
+            scheduler.tick()
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        scheduler.set_draining(True)
+        finished, _ = _drive(
+            scheduler, repository, "draining", {JobStatus.SUCCEEDED}
+        )
+        for _ in range(10):
+            scheduler.tick()
+
+    assert finished.status is JobStatus.SUCCEEDED
+    assert repository.require("held").status is JobStatus.QUEUED

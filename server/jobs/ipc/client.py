@@ -50,6 +50,12 @@ class JobDaemonClient:
     def health(self) -> dict[str, Any]:
         return self.request("health")
 
+    def drain(self) -> dict[str, Any]:
+        return self.request("drain")
+
+    def resume(self) -> dict[str, Any]:
+        return self.request("resume")
+
     def wake(self) -> None:
         self.request("wake")
 

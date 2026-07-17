@@ -36,11 +36,13 @@ class _UnixServer(socketserver.ThreadingUnixStreamServer):
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         action = str(request.get("action") or "")
         if action == "health":
-            return {
-                "deployment_id": self.scheduler.deployment_id,
-                "planner_workers": self.scheduler.planners.worker_snapshot(),
-                "execution_workers": self.scheduler.executors.worker_snapshot(),
-            }
+            return self.scheduler.health_snapshot()
+        if action == "drain":
+            self.scheduler.set_draining(True)
+            return self.scheduler.health_snapshot()
+        if action == "resume":
+            self.scheduler.set_draining(False)
+            return self.scheduler.health_snapshot()
         if action == "wake":
             self.scheduler.tick()
             return {}

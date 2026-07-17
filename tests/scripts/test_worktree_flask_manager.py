@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from scripts import worktree_flask_manager as manager
 
 
@@ -51,3 +53,28 @@ def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkey
     assert created[0][0].command[1] == "scripts/research_job_daemon.py"
     assert created[1][1]["env"]["GTHT_DEPLOYMENT_ID"].endswith("-8135")
     assert created[1][1]["env"]["GTHT_JOB_DAEMON_SOCKET"] == str(bundle.socket_path)
+
+
+def test_paused_step_job_blocks_drained_bundle_restart(tmp_path, monkeypatch) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    daemon = _Process(["daemon"])
+    api = _Process(["api"])
+    bundle = manager.ServiceBundle(
+        api=api,
+        daemon=daemon,
+        socket_path=tmp_path / "jobs.sock",
+        deployment_id="test",
+    )
+    state.processes[state.key(tmp_path)] = bundle
+    actions = []
+
+    def request(current, action):
+        actions.append(action)
+        if action == "drain":
+            return {"paused_jobs": ["step-1"], "active_planners": 0, "active_executors": 1}
+        return {"paused_jobs": [], "active_planners": 0, "active_executors": 0}
+
+    monkeypatch.setattr(state, "_daemon_request", request)
+    with pytest.raises(RuntimeError, match="paused step jobs"):
+        state.restart_bundle(tmp_path, 8135)
+    assert actions == ["drain", "resume"]

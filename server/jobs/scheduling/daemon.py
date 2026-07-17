@@ -46,6 +46,7 @@ class ResearchJobScheduler:
         self._planning: set[str] = set()
         self._executing: set[str] = set()
         self._stop = threading.Event()
+        self._draining = False
         self._thread: threading.Thread | None = None
         self._recover_interrupted_jobs()
 
@@ -85,6 +86,8 @@ class ResearchJobScheduler:
         self._drain_pool(self.planners, stage="planning")
         self._drain_pool(self.executors, stage="execution")
         self._propagate_cancellation()
+        if self._draining:
+            return
         self._dispatch_planning()
         self._dispatch_execution()
 
@@ -319,6 +322,24 @@ class ResearchJobScheduler:
             },
         )
         return False
+
+    def set_draining(self, draining: bool) -> None:
+        self._draining = bool(draining)
+
+    def health_snapshot(self) -> dict[str, Any]:
+        paused = self.repository.list_for_deployment(
+            deployment_id=self.deployment_id,
+            statuses=(JobStatus.PAUSED,),
+        )
+        return {
+            "deployment_id": self.deployment_id,
+            "draining": self._draining,
+            "active_planners": len(self._planning),
+            "active_executors": len(self._executing),
+            "paused_jobs": [job.job_id for job in paused],
+            "planner_workers": self.planners.worker_snapshot(),
+            "execution_workers": self.executors.worker_snapshot(),
+        }
 
     def stop(self) -> None:
         self._stop.set()

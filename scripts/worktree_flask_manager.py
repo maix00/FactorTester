@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -12,6 +13,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import webbrowser
 from dataclasses import dataclass
@@ -211,12 +213,61 @@ class ManagerState:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait(timeout=5)
 
-    def stop(self, path: Path) -> str:
+    @staticmethod
+    def _normalized_socket_path(path: Path) -> Path:
+        resolved = path.expanduser().resolve()
+        if len(str(resolved).encode()) <= 96:
+            return resolved
+        digest = hashlib.sha256(str(resolved).encode()).hexdigest()[:24]
+        return Path(tempfile.gettempdir()) / "factortester-jobs" / f"{digest}.sock"
+
+    def _daemon_request(self, bundle: ServiceBundle, action: str) -> dict:
+        address = self._normalized_socket_path(bundle.socket_path)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5)
+            sock.connect(str(address))
+            sock.sendall(json.dumps({"action": action}).encode() + b"\n")
+            raw = sock.makefile("rb").readline()
+        payload = json.loads(raw.decode())
+        if not payload.get("success"):
+            raise RuntimeError(payload.get("error") or "job daemon request failed")
+        return payload
+
+    def restart_bundle(self, path: Path, port: int, *, timeout: float = 120.0) -> str:
+        path = path.resolve()
+        bundle = self.processes.get(self.key(path))
+        if bundle is None or bundle.daemon.poll() is not None:
+            return self.start(path, port)
+        health = self._daemon_request(bundle, "drain")
+        if health.get("paused_jobs"):
+            self._daemon_request(bundle, "resume")
+            raise RuntimeError("paused step jobs block bundle restart; cancel them or use Force Stop")
+        deadline = time.monotonic() + max(1.0, float(timeout))
+        while int(health.get("active_planners") or 0) or int(health.get("active_executors") or 0):
+            if time.monotonic() >= deadline:
+                self._daemon_request(bundle, "resume")
+                raise TimeoutError("timed out draining research workers")
+            time.sleep(0.2)
+            health = self._daemon_request(bundle, "health")
+            if health.get("paused_jobs"):
+                self._daemon_request(bundle, "resume")
+                raise RuntimeError("job paused during drain; cancel it or use Force Stop")
+        self._terminate(bundle.api)
+        self._terminate(bundle.daemon)
+        self.processes.pop(self.key(path), None)
+        return self.start(path, port)
+
+    def stop(self, path: Path, *, force: bool = False) -> str:
         path = path.resolve()
         bundle = self.processes.get(self.key(path))
         if not bundle:
             self.processes.pop(self.key(path), None)
             return "not running"
+        if not force and bundle.daemon.poll() is None:
+            health = self._daemon_request(bundle, "health")
+            active = int(health.get("active_planners") or 0) + int(health.get("active_executors") or 0)
+            if active:
+                raise RuntimeError("active research jobs block Stop; use Restart Bundle or Force Stop")
         self._terminate(bundle.api)
         self._terminate(bundle.daemon)
         self.processes.pop(self.key(path), None)
@@ -226,8 +277,7 @@ class ManagerState:
         for key in list(self.processes):
             bundle = self.processes.get(key)
             if bundle:
-                self._terminate(bundle.api)
-                self._terminate(bundle.daemon)
+                self.stop(Path(key), force=True)
         self.processes.clear()
 
 
@@ -299,6 +349,8 @@ def page(state: ManagerState, message: str = "") -> bytes:
                 <form method="post" action="/start"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><input type="hidden" name="port" value="{wt.port}"><button {start_disabled}>Start</button></form>
                 <form method="post" action="/stop"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><button {stop_disabled}>Stop</button></form>
                 <form method="post" action="/restart-api"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><input type="hidden" name="port" value="{wt.port}"><button {'' if daemon_running else 'disabled'}>Restart API</button></form>
+                <form method="post" action="/restart-bundle"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><input type="hidden" name="port" value="{wt.port}"><button {'' if daemon_running else 'disabled'}>Restart Bundle</button></form>
+                <form method="post" action="/force-stop"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><button {stop_disabled}>Force Stop</button></form>
                 <a class="button {open_disabled}" href="http://localhost:{wt.port}/" target="_blank">Open</a>
                 <a class="button {open_disabled}" href="http://{lan}:{wt.port}/" target="_blank" title="LAN 访问">🌐 Open</a>
               </td>
@@ -395,6 +447,11 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/restart-api":
                 port = int(params.get("port", ["0"])[0])
                 message = self.state.restart_api(path, port)
+            elif self.path == "/restart-bundle":
+                port = int(params.get("port", ["0"])[0])
+                message = self.state.restart_bundle(path, port)
+            elif self.path == "/force-stop":
+                message = self.state.stop(path, force=True)
             else:
                 self.send_error(404)
                 return
