@@ -331,6 +331,13 @@ def test_run_revalidates_and_freezes_external_factor_artifact(client, monkeypatc
     )
     job = JobRepository().list(owner="alice", run_id=run["run_id"])[0]
     assert job.job_spec["external_factor_artifacts"] == [frozen_artifact]
+    from server.modules.single_factor_test.planning import _artifact_plan_rows
+
+    assert _artifact_plan_rows(job.job_spec) == [{
+        "artifact_id": "academic_mom:abc",
+        "manifest_sha256": "manifest-hash",
+        "factor_sha256": "factor-hash",
+    }]
 
 
 def test_run_rejects_external_factor_when_hash_changes(client, monkeypatch) -> None:

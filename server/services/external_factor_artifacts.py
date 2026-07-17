@@ -63,3 +63,49 @@ def freeze_configured_artifacts(shared: dict[str, Any]) -> list[dict[str, Any]]:
         seen.add(artifact_id)
         frozen.append(current)
     return frozen
+
+
+def load_frozen_artifacts(raw: Any) -> list[PrecomputedFactorArtifact]:
+    """Revalidate frozen descriptors and return executable factor objects."""
+    if raw in (None, []):
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("external_factor_artifacts must be an array")
+    loaded: list[PrecomputedFactorArtifact] = []
+    seen: set[str] = set()
+    for descriptor in raw:
+        if not isinstance(descriptor, dict):
+            raise ValueError("each external factor artifact must be an object")
+        current = validate_and_freeze(str(descriptor.get("manifest_path") or ""))
+        for field in ("artifact_id", "manifest_sha256", "factor_sha256"):
+            if str(descriptor.get(field) or "") != str(current[field]):
+                raise ValueError(f"external factor artifact {field} changed after submission")
+        artifact = PrecomputedFactorArtifact.load(
+            current["manifest_path"], product_resolver=_resolve_cn_futures,
+        )
+        if artifact.alias in seen:
+            raise ValueError(f"duplicate external factor alias: {artifact.alias}")
+        seen.add(artifact.alias)
+        loaded.append(artifact)
+    return loaded
+
+
+def factor_by_alias(raw: Any, alias: str) -> PrecomputedFactorArtifact | None:
+    matches = [factor for factor in load_frozen_artifacts(raw) if factor.alias == alias]
+    if len(matches) > 1:
+        raise ValueError(f"ambiguous external factor alias: {alias}")
+    return matches[0] if matches else None
+
+
+def result_metadata(raw: Any) -> list[dict[str, str]]:
+    """Return bounded provenance suitable for durable result metadata."""
+    return [
+        {
+            "artifact_id": str(item["artifact_id"]),
+            "alpha_id": str(item["alpha_id"]),
+            "manifest_sha256": str(item["manifest_sha256"]),
+            "factor_sha256": str(item["factor_sha256"]),
+        }
+        for item in (raw or [])
+        if isinstance(item, dict)
+    ]

@@ -105,13 +105,18 @@ def _load_and_calc_factor(
     allow_default_factor: bool = False,
     owner: str = "",
     isolated: bool = False,
+    external_factor_artifacts: list[dict[str, Any]] | None = None,
 ) -> Any:
     """
     加载因子族 → 获取因子定义 → 在 tester 上计算因子。
     返回计算后的 factor 对象。
     """
     if isolated:
-        factor = factor_from_alias(factor_alias, username=owner)
+        from server.services.external_factor_artifacts import factor_by_alias
+
+        factor = factor_by_alias(
+            external_factor_artifacts, factor_alias,
+        ) or factor_from_alias(factor_alias, username=owner)
         token = _active_tester.set(tester)
         try:
             tester.calc_factor(factor, parallel=False)
@@ -218,6 +223,7 @@ class FactorTypeAnalysisRun:
     owner: str = ""
     run_id: str = ""
     isolated: bool = False
+    external_factor_artifacts: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_request(cls, data: dict[str, Any], *, page_uuid: str) -> "FactorTypeAnalysisRun":
@@ -261,6 +267,9 @@ class FactorTypeAnalysisRun:
         base.owner = owner
         base.run_id = run_id
         base.isolated = True
+        base.external_factor_artifacts = list(
+            data.get("external_factor_artifacts") or []
+        )
         return base
 
     def run(self) -> dict[str, Any]:
@@ -294,6 +303,7 @@ class FactorTypeAnalysisRun:
             self.page_uuid,
             owner=self.owner,
             isolated=self.isolated,
+            external_factor_artifacts=self.external_factor_artifacts,
         )
 
         # 3) 提取目标因子在各产品上的序列
@@ -393,6 +403,8 @@ class FactorTypeAnalysisRun:
                 "std": round(float(series.std()), 6) if len(series) else None,
             })
 
+        from server.services.external_factor_artifacts import result_metadata
+
         return {
             "success": True,
             "target_factor": {
@@ -416,4 +428,7 @@ class FactorTypeAnalysisRun:
                 "skipped_reference_count": len(skipped_refs),
                 "asset_classes": list(asset_classes),
             },
+            "external_factor_artifacts": result_metadata(
+                self.external_factor_artifacts
+            ),
         }

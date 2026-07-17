@@ -43,6 +43,7 @@ class FactorEvaluation:
     owner: str = ""
     run_id: str = ""
     isolated: bool = False
+    external_factor_artifacts: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_request(cls, data: dict[str, Any], *, page_uuid: str) -> "FactorEvaluation":
@@ -90,6 +91,7 @@ class FactorEvaluation:
             owner=owner,
             run_id=run_id,
             isolated=True,
+            external_factor_artifacts=list(data.get("external_factor_artifacts") or []),
         )
 
     def run(self) -> dict[str, Any]:
@@ -113,7 +115,11 @@ class FactorEvaluation:
             )
         )
         if self.isolated:
-            factor = factor_from_alias(self.factor_alias, username=self.owner)
+            from server.services.external_factor_artifacts import factor_by_alias
+
+            factor = factor_by_alias(
+                self.external_factor_artifacts, self.factor_alias,
+            ) or factor_from_alias(self.factor_alias, username=self.owner)
         else:
             factor = None
         if factor is None:
@@ -185,6 +191,8 @@ class FactorEvaluation:
 
         if not series_items:
             raise LookupError("所选产品没有该因子的可显示序列")
+        from server.services.external_factor_artifacts import result_metadata
+
         return {
             "success": True,
             "factor": {
@@ -198,6 +206,9 @@ class FactorEvaluation:
                 "elapsed_ms": round((time.time() - started_at) * 1000),
                 "product_count": len(series_items),
             },
+            "external_factor_artifacts": result_metadata(
+                self.external_factor_artifacts
+            ),
         }
 
     def _run_window_datetimes(self) -> tuple[DataTime | None, DataTime | None]:

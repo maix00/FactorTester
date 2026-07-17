@@ -69,6 +69,71 @@ def test_loads_valid_artifact_and_constructs_factor_run_result(tmp_path: Path) -
     pd.testing.assert_frame_equal(result.data_present_mask, artifact.signals.notna())
     assert result.provenance["factor_sha256"]
     assert result.provenance["execution"] == "next_bar"
+    assert artifact._structural_key() == artifact.backtest_factor_cache_key()
+
+
+def test_frozen_descriptor_reloads_executable_factor(tmp_path: Path, monkeypatch) -> None:
+    from server.services import external_factor_artifacts
+
+    manifest, products = _write_artifact(tmp_path)
+    monkeypatch.setattr(
+        external_factor_artifacts,
+        "_resolve_cn_futures",
+        products.get,
+    )
+    frozen = external_factor_artifacts.validate_and_freeze(str(manifest))
+
+    factor = external_factor_artifacts.factor_by_alias(
+        [frozen], "external_momentum",
+    )
+
+    assert factor is not None
+    assert factor.alias == "external_momentum"
+    assert external_factor_artifacts.result_metadata([frozen]) == [{
+        "artifact_id": frozen["artifact_id"],
+        "alpha_id": "external_momentum",
+        "manifest_sha256": frozen["manifest_sha256"],
+        "factor_sha256": frozen["factor_sha256"],
+    }]
+
+
+def test_frozen_descriptor_rejects_post_submission_change(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from server.services import external_factor_artifacts
+
+    manifest, products = _write_artifact(tmp_path)
+    monkeypatch.setattr(
+        external_factor_artifacts,
+        "_resolve_cn_futures",
+        products.get,
+    )
+    frozen = external_factor_artifacts.validate_and_freeze(str(manifest))
+    frozen["factor_sha256"] = "changed"
+
+    with pytest.raises(ValueError, match="changed after submission"):
+        external_factor_artifacts.load_frozen_artifacts([frozen])
+
+
+def test_factor_tester_calculates_factor_like_artifact_into_run_result(
+    tmp_path: Path,
+) -> None:
+    from tools.factors.FactorTester import FactorTester, _active_tester
+
+    manifest, products = _write_artifact(tmp_path)
+    artifact = PrecomputedFactorArtifact.load(
+        manifest, product_resolver=products,
+    )
+    tester = FactorTester(products=list(products.values()), alias="external-test")
+    token = _active_tester.set(tester)
+    try:
+        tester.calc_factor(artifact, parallel=False)
+    finally:
+        _active_tester.reset(token)
+
+    result = tester.results[artifact]
+    pd.testing.assert_frame_equal(result.table, artifact.signals)
+    assert result.provenance["factor_sha256"] == artifact.provenance["factor_sha256"]
 
 
 def test_aligns_trading_days_to_actual_market_signal_times(tmp_path: Path) -> None:

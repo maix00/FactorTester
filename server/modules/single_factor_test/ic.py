@@ -697,6 +697,11 @@ def _run_ic_compute_to_sink(
             tester, display_columns, all_products, compute,
             paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
         )
+        from server.services.external_factor_artifacts import result_metadata
+
+        response["external_factor_artifacts"] = result_metadata(
+            data.get("external_factor_artifacts")
+        )
         sink.emit_result(response)
     except _ICCancelled as exc:
         sink.emit_error(str(exc), cancelled=True)
@@ -723,13 +728,36 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         end_dt=end_dt,
         user=user_obj_for_name(owner),
     )
-    family = get_factor_family_instance(
-        str(data.get("factor_family_alias") or ""), username=owner, page_uuid=None,
-    )
     aliases = [
         str(item.get("alias") or "").strip()
         for item in (data.get("factors") or [])
         if isinstance(item, dict) and item.get("alias")
     ]
-    family.factors = [factor_from_alias(alias, username=owner) for alias in aliases]
+    from server.services.external_factor_artifacts import load_frozen_artifacts
+
+    external = {
+        factor.alias: factor
+        for factor in load_frozen_artifacts(data.get("external_factor_artifacts"))
+    }
+    resolved = [
+        external.get(alias) or factor_from_alias(alias, username=owner)
+        for alias in aliases
+    ]
+    family_alias = str(data.get("factor_family_alias") or "")
+    if external and all(alias in external for alias in aliases):
+        class _FrozenArtifactFamily:
+            factors = resolved
+
+            def get_factor_by_alias(self, alias: str):
+                return next(
+                    (factor for factor in self.factors if factor.alias == alias),
+                    None,
+                )
+
+        family = _FrozenArtifactFamily()
+    else:
+        family = get_factor_family_instance(
+            family_alias, username=owner, page_uuid=None,
+        )
+        family.factors = resolved
     _run_ic_compute_to_sink(data, tester, family, sink, cancel_event=cancel_event)

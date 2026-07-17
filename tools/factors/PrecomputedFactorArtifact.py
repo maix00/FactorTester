@@ -45,7 +45,7 @@ def _resolve_product(resolver: ProductResolver, symbol: str) -> Any | None:
     return resolver.get(symbol)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class PrecomputedFactorArtifact:
     alpha_id: str
     signals: pd.DataFrame
@@ -161,13 +161,36 @@ class PrecomputedFactorArtifact:
             str(self.provenance["factor_sha256"]),
         )
 
+    def _structural_key(self) -> tuple[str, str, str]:
+        """Expose the stable identity expected by IC grouping."""
+        return self.backtest_factor_cache_key()
+
+    def __iter__(self):
+        """Let legacy FactorTester treat this factor-like object as one item."""
+        yield self
+
+    def __len__(self) -> int:
+        return 1
+
     def evaluate(self, *args: Any, start_dt: Any = None, end_dt: Any = None, **kwargs: Any) -> pd.DataFrame:
         table = self.signals
-        if start_dt is None or end_dt is None:
-            return table.copy()
-        start = _normalized_bound(start_dt)
-        end = _normalized_bound(end_dt)
-        return table.loc[(table.index >= start) & (table.index <= end)].copy()
+        if start_dt is not None and end_dt is not None:
+            start = _normalized_bound(start_dt)
+            end = _normalized_bound(end_dt)
+            table = table.loc[(table.index >= start) & (table.index <= end)]
+        evaluated = table.copy()
+        from tools.factors.FactorTester import _active_tester
+
+        tester = _active_tester.get()
+        if tester is not None:
+            result = tester._get_result(self)
+            imported = self.to_run_result(table=evaluated)
+            result.source_table = imported.source_table
+            result.table = imported.table
+            result.data_present_mask = imported.data_present_mask
+            result.data_present_all = imported.data_present_all
+            result.provenance = imported.provenance
+        return evaluated
 
     def align_to_market_schedule(self, schedule: pd.DataFrame) -> pd.DataFrame:
         """Map trading-day values onto GTHT's actual causal SIGNAL index."""

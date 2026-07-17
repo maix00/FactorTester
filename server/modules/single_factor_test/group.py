@@ -1990,6 +1990,10 @@ def _resolve_group_strategy_settings(
     factor_alias = str(g.get('factorAlias', ''))
     factor = page_factors_dict.get(factor_alias)
     if factor is None:
+        from server.services.external_factor_artifacts import factor_by_alias
+
+        factor = factor_by_alias(data.get("external_factor_artifacts"), factor_alias)
+    if factor is None:
         from server.services.factor_registry import factor_from_alias
         try:
             factor = factor_from_alias(factor_alias, username=username, page_uuid=page_uuid)
@@ -3259,6 +3263,7 @@ def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any
     from tools.testers.backtest.engines.cancellation import BacktestCancelled
     from tools.testers.backtest.engines.native.state import BacktestRunState
     from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
+    from server.services.external_factor_artifacts import result_metadata
 
     prepared = prepare_group_run_spec(data)
     payload = prepared["payload"]
@@ -3398,6 +3403,9 @@ def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any
         "simulation_count": 1,
         "cross_entry_ls_count": len(flat_ls_configs),
         "errors": None,
+        "external_factor_artifacts": result_metadata(
+            payload.get("external_factor_artifacts")
+        ),
         "backtest_settings": {
             "engine": "native",
             "factor_mode": factor_mode,

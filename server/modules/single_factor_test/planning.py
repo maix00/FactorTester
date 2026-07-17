@@ -115,6 +115,7 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         }
     resolved = {
         "kind": "backtest",
+        "external_factor_artifacts": _artifact_plan_rows(data),
         "run_window": {"start": start_text, "end": end_text},
         "strategies": strategies,
         "data_requirements": [requirements[key] for key in sorted(requirements)],
@@ -139,6 +140,7 @@ def _analysis_plan(kind: str, data: dict[str, Any]) -> tuple[dict[str, Any], lis
         aliases.append(single)
     resolved = {
         "kind": kind,
+        "external_factor_artifacts": _artifact_plan_rows(data),
         "run_window": {
             "start": _timestamp_text(start),
             "end": _timestamp_text(end),
@@ -149,6 +151,21 @@ def _analysis_plan(kind: str, data: dict[str, Any]) -> tuple[dict[str, Any], lis
         "factors": sorted(set(aliases)),
     }
     return resolved, []
+
+
+def _artifact_plan_rows(data: dict[str, Any]) -> list[dict[str, str]]:
+    return sorted(
+        (
+            {
+                "artifact_id": str(item.get("artifact_id") or ""),
+                "manifest_sha256": str(item.get("manifest_sha256") or ""),
+                "factor_sha256": str(item.get("factor_sha256") or ""),
+            }
+            for item in (data.get("external_factor_artifacts") or [])
+            if isinstance(item, dict)
+        ),
+        key=lambda item: item["artifact_id"],
+    )
 
 
 def build_execution_plan(kind: str, data: dict[str, Any]) -> dict[str, Any]:
