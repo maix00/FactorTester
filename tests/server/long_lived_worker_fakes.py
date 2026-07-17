@@ -32,3 +32,10 @@ def uncooperative_runner(payload, sink, cancel_event) -> None:
 
 def crash_runner(payload, sink, cancel_event) -> None:
     os._exit(int(payload.get("exitcode") or 17))
+
+
+def planned_cpu_runner(payload, sink, cancel_event) -> None:
+    if not isinstance(payload.get("execution_plan"), dict):
+        raise ValueError("execution plan missing")
+    sink.emit_progress(1, 2, phase="compute")
+    cpu_runner(payload, sink, cancel_event)

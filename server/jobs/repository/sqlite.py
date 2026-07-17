@@ -253,6 +253,42 @@ class JobRepository:
             ).fetchall()
         return [record for row in rows if (record := self._record(row)) is not None]
 
+    def list_for_deployment(
+        self,
+        *,
+        deployment_id: str,
+        statuses: Iterable[JobStatus | str],
+        limit: int = 500,
+    ) -> list[JobRecord]:
+        """Return scheduler-visible jobs without crossing the owner API boundary."""
+        values = [JobStatus(value).value for value in statuses]
+        if not values:
+            return []
+        args: list[Any] = [str(deployment_id), *values]
+        args.append(min(2000, max(1, int(limit))))
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT jobs.*,
+                       CASE WHEN pins.job_id IS NULL THEN 0 ELSE 1 END AS is_pinned
+                FROM research_jobs AS jobs
+                LEFT JOIN user_job_pins AS pins ON pins.job_id = jobs.job_id
+                WHERE jobs.deployment_id=?
+                  AND jobs.status IN ({','.join('?' for _ in values)})
+                ORDER BY jobs.created_at, jobs.job_id
+                LIMIT ?
+                """,
+                args,
+            ).fetchall()
+        return [record for row in rows if (record := self._record(row)) is not None]
+
+    def is_pinned(self, job_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM user_job_pins WHERE job_id=?", (str(job_id),)
+            ).fetchone()
+        return row is not None
+
     def transition(
         self,
         job_id: str,
