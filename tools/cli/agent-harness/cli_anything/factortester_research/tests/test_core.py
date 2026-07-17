@@ -3,6 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from cli_anything.factortester_research.core.plan import build_factor_research_plan, validation_checklist
+from cli_anything.factortester_research.core.external_factor import (
+    validate_dataset_manifest,
+    validate_factor_manifest,
+    vibe_pipeline_plan,
+)
 from cli_anything.factortester_research.core.service import ManagedWorktree, select_worktree
 from cli_anything.factortester_research.core.session import ResearchSession, record_gap, resolve_gap
 from cli_anything.factortester_research.core.slices import default_factor_validation_plan
@@ -91,3 +96,36 @@ def test_packaging_and_docs_record_durable_remote_contract() -> None:
         assert "RunSpec" in text
         assert "job_id" in text
         assert "page_uuid" in text
+
+
+def test_vibe_pipeline_includes_daily_minute_and_explicit_gtht_gap(tmp_path: Path) -> None:
+    steps = vibe_pipeline_plan(
+        integration_root=str(tmp_path / "integration"),
+        data_root=str(tmp_path / "LocalCNFutures"),
+        alpha_id="academic_carhart_mom",
+    )
+    phases = [item["phase"] for item in steps]
+    assert phases[:3] == [
+        "build_daily_panel", "build_minute_panel", "compute_vibe_daily_factor",
+    ]
+    assert steps[-1]["status"] == "platform_gap"
+    assert "FactorRunResult" in steps[-1]["reason"]
+
+
+def test_external_manifests_require_next_bar_and_experimental_status(tmp_path: Path) -> None:
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(
+        '{"schema_version":1,"rows":10,"symbols":2,'
+        '"frequency":"1min","timing":{"earliest_execution":"next_bar"}}',
+        encoding="utf-8",
+    )
+    factor = tmp_path / "factor.json"
+    factor.write_text(
+        '{"schema_version":1,"alpha_id":"x",'
+        '"research_status":"experimental_unvalidated","input":{},'
+        '"output":{"finite_observations":8},'
+        '"timing":{"earliest_execution":"next_bar"}}',
+        encoding="utf-8",
+    )
+    assert validate_dataset_manifest(str(dataset))["frequency"] == "1min"
+    assert validate_factor_manifest(str(factor))["alpha_id"] == "x"

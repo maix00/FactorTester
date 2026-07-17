@@ -43,6 +43,27 @@ Saved templates use the same ResearchConfiguration payload as the workspace. Loa
 - Query existing factor-library records before repeating expensive work.
 - A failed job retains traceback; cancellation retains its reason; retry/continue creates a linked new attempt.
 
+## External Vibe factor pipeline
+
+The harness can freeze the local daily/minute preparation commands and validate
+their manifests:
+
+```bash
+cli-anything-factortester-research external-factor plan \
+  --integration-root "/Users/maxdeux/Documents/Vibe-Trading-Integration" \
+  --data-root "/Users/maxdeux/Documents/GTHT/data/sources/LocalCNFutures" \
+  --alpha academic_carhart_mom
+
+cli-anything-factortester-research external-factor validate \
+  --dataset-manifest <daily-manifest> \
+  --dataset-manifest <minute-manifest> \
+  --factor-manifest <factor-manifest>
+```
+
+This does not silently inject a Parquet matrix into native replay. Until GTHT
+exposes a public precomputed-factor import contract, the plan reports the
+FactorRunResult handoff as a platform gap.
+
 ## CLI-Anything Adaptation Notes
 
 This is a remote HTTP research client, not a local computation substitute. It records research session state and platform gaps. `client_only` users report gaps; `source_owner` users follow `AGENTS.md`, fix the owning issue worktree, test, commit, and wait for explicit merge authorization.
