@@ -3262,23 +3262,35 @@ def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any
         after_index = max(0, int(payload.get("step_after_index") or 0))
         raw_until = str(payload.get("step_until") or "").strip()
         until = pd.Timestamp(raw_until).tz_localize(None) if raw_until else None
-        cursor = {"flow_index": 0}
+        cursor = {"flow_index": 0, "until": until, "run_to_end": False}
 
         def _should_capture(timestamp: Any) -> bool:
             cursor["flow_index"] += 1
+            if cursor["run_to_end"]:
+                return False
             if cursor["flow_index"] <= after_index:
                 return False
-            if until is None:
+            if cursor["until"] is None:
                 return True
             if timestamp is None:
                 return False
-            return pd.Timestamp(timestamp).tz_localize(None) >= until
+            return pd.Timestamp(timestamp).tz_localize(None) >= cursor["until"]
 
         def _checkpoint(info: dict[str, Any]) -> None:
             checkpoint = {**info, "flow_index": cursor["flow_index"]}
             sink.emit_step(checkpoint)
-            sink.emit_pause(checkpoint)
-            raise _StepCheckpointReached()
+            command = sink.emit_pause(checkpoint) or {}
+            action = str(command.get("action") or "continue")
+            if action == "cancel":
+                raise BacktestCancelled("group step job cancelled")
+            if action == "end":
+                cursor["run_to_end"] = True
+                return
+            raw_next_until = str(command.get("until") or "").strip()
+            cursor["until"] = (
+                pd.Timestamp(raw_next_until).tz_localize(None)
+                if raw_next_until else None
+            )
 
         _checkpoint.should_capture = _should_capture
         step_callback = _checkpoint

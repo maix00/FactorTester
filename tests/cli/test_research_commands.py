@@ -21,7 +21,7 @@ class FakeClient:
         self.payload = payload
         return {"configuration_id": "config-1", "revision": 2, "payload": payload}
 
-    def submit_run(self, workspace_id, configuration_revision, *, analyses, retention_mode):
+    def submit_run(self, workspace_id, configuration_revision, *, analyses, retention_mode, step_mode):
         assert (workspace_id, configuration_revision) == ("workspace-1", 2)
         return {
             "run_id": "run-1",

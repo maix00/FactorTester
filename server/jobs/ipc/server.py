@@ -49,6 +49,12 @@ class _UnixServer(socketserver.ThreadingUnixStreamServer):
             notified = self.scheduler.planners.request_cancel(job_id)
             notified = self.scheduler.executors.request_cancel(job_id) or notified
             return {"notified": notified}
+        if action == "continue_step":
+            job_id = str(request.get("job_id") or "")
+            command = request.get("command")
+            if not isinstance(command, dict):
+                raise ValueError("step command is required")
+            return {"continued": self.scheduler.continue_step(job_id, command)}
         if action == "events":
             job_id = str(request.get("job_id") or "")
             if not job_id:

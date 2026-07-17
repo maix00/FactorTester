@@ -310,3 +310,38 @@ def retry_test_job(job_id: str):
     except DaemonUnavailable:
         pass
     return jsonify({"success": True, **job.summary(), **_urls(job.job_id)}), 202
+
+
+@sft_bp.post("/api/jobs/<job_id>/continue")
+def continue_test_job(job_id: str):
+    job, error = _require_job(job_id)
+    if error:
+        return error
+    if job.status is not JobStatus.PAUSED or not job.step_mode:
+        return jsonify({"success": False, "error": "job is not a paused step job"}), 409
+    repository = _repository()
+    quota = repository.storage_quota(
+        owner=job.owner, default_bytes=default_user_quota_bytes()
+    )
+    if repository.storage_usage(owner=job.owner) > quota:
+        return jsonify({
+            "success": False,
+            "error": "retained result quota exceeded; paused job cannot continue",
+            "code": "storage_quota_exceeded",
+        }), 507
+    data = request.get_json(silent=True) or {}
+    action = str(data.get("action") or "continue").strip()
+    if action not in {"continue", "end"}:
+        return jsonify({"success": False, "error": "unsupported step action"}), 400
+    command = {"action": action}
+    until = str(data.get("until") or "").strip()
+    if until:
+        command["until"] = until
+    try:
+        continued = _daemon_client().continue_step(job_id, command)
+    except DaemonUnavailable as exc:
+        return jsonify({"success": False, "error": str(exc)}), 503
+    if not continued:
+        return jsonify({"success": False, "error": "paused worker is unavailable"}), 409
+    current = repository.require(job_id, owner=job.owner)
+    return jsonify({"success": True, **current.summary(), **_urls(job_id)})

@@ -215,6 +215,13 @@ class ResearchJobScheduler:
             )
             self._enforce_storage_quota(job.owner)
             return
+        if event == "paused" and stage == "execution" and job.status is JobStatus.RUNNING:
+            self.repository.transition(
+                job_id,
+                JobStatus.PAUSED,
+                expected=JobStatus.RUNNING,
+            )
+            return
         if event == "result" and stage == "execution" and job.status is JobStatus.RUNNING:
             summary = dict(data)
             self.repository.transition(
@@ -283,6 +290,29 @@ class ResearchJobScheduler:
                 owner=owner,
                 reason="storage_quota_exceeded",
             )
+
+    def continue_step(self, job_id: str, command: dict[str, Any]) -> bool:
+        job = self.repository.load(job_id)
+        if job is None or job.status is not JobStatus.PAUSED or not job.step_mode:
+            return False
+        self.repository.transition(
+            job_id,
+            JobStatus.RUNNING,
+            expected=JobStatus.PAUSED,
+        )
+        if self.executors.resume_step(job_id, command):
+            self.broker.publish(job_id, "status", {"status": "running"})
+            return True
+        self.repository.transition(
+            job_id,
+            JobStatus.FAILED,
+            expected=JobStatus.RUNNING,
+            error={
+                "code": "step_worker_unavailable",
+                "message": "paused worker is no longer available",
+            },
+        )
+        return False
 
     def stop(self) -> None:
         self._stop.set()

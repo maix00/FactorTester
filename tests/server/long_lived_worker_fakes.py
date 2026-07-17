@@ -50,3 +50,17 @@ def artifact_runner(payload, sink, cancel_event) -> None:
         "annual_return": 0.12,
         "equity_curve": list(range(size)),
     })
+
+
+def pausing_runner(payload, sink, cancel_event) -> None:
+    seen = []
+    for index in range(3):
+        seen.append(index)
+        sink.emit_step({"flow_index": index, "pid": os.getpid()})
+        command = sink.emit_pause({"flow_index": index, "pid": os.getpid()})
+        if command.get("action") == "cancel" or cancel_event.is_set():
+            sink.emit_error("cancelled", cancelled=True)
+            return
+        if command.get("action") == "end":
+            break
+    sink.emit_result({"success": True, "pid": os.getpid(), "seen": seen})

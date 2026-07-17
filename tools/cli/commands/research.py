@@ -175,14 +175,16 @@ def run() -> None:
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
 ]), required=True)
 @click.option("--retain-full", is_flag=True, help="在服务器配额内保留完整曲线和明细。")
+@click.option("--step", "step_mode", is_flag=True, help="逐 flow 暂停，仅支持单个 backtest。")
 @friendly_errors
-def run_submit(analyses: tuple[str, ...], retain_full: bool) -> None:
+def run_submit(analyses: tuple[str, ...], retain_full: bool, step_mode: bool) -> None:
     state = _require_workspace()
     result = client_from_config().submit_run(
         state.workspace_id,
         state.configuration_revision,
         analyses=list(analyses),
         retention_mode="full" if retain_full else "summary",
+        step_mode=step_mode,
     )
     click.echo(f"run_id={result.get('run_id')}")
     for item in result.get("jobs") or []:

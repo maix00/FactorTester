@@ -172,3 +172,59 @@ def test_full_result_uses_files_and_over_quota_cancels_waiting_not_running(tmp_p
     artifacts = repository.list_artifacts(job_id="full", owner="alice")
     assert {item["name"] for item in artifacts} == {"details", "result"}
     assert all((artifact_dir / item["relative_path"]).is_file() for item in artifacts)
+
+
+def test_step_job_pauses_and_continues_in_same_worker_process(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    job = replace(_record("step", runner="pausing_runner"), step_mode=True)
+    repository.create(job)
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        execution_workers=1,
+    ) as scheduler:
+        first, _ = _drive(scheduler, repository, "step", {JobStatus.PAUSED})
+        pid = first.worker_pid
+        assert scheduler.continue_step("step", {"action": "continue"}) is True
+        second, _ = _drive(scheduler, repository, "step", {JobStatus.PAUSED})
+        assert second.worker_pid == pid
+        assert scheduler.continue_step("step", {"action": "end"}) is True
+        completed, _ = _drive(scheduler, repository, "step", {JobStatus.SUCCEEDED})
+
+    assert completed.worker_pid == pid
+    assert completed.result_summary["pid"] == pid
+    assert completed.result_summary["seen"] == [0, 1]
+
+
+def test_paused_step_job_cancels_and_releases_its_worker(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.create(replace(
+        _record("step-cancel", runner="pausing_runner"), step_mode=True
+    ))
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        execution_workers=1,
+    ) as scheduler:
+        paused, _ = _drive(
+            scheduler, repository, "step-cancel", {JobStatus.PAUSED}
+        )
+        pid = paused.worker_pid
+        repository.request_cancel(
+            "step-cancel", owner="alice", reason="explicit_cancel"
+        )
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            scheduler.tick()
+            if scheduler.executors.worker_snapshot()[0]["job_id"] == "":
+                break
+            time.sleep(0.01)
+        repository.create(_record("after-cancel"))
+        completed, _ = _drive(
+            scheduler, repository, "after-cancel", {JobStatus.SUCCEEDED}
+        )
+
+    assert repository.require("step-cancel").status is JobStatus.CANCELLED
+    assert completed.worker_pid == pid

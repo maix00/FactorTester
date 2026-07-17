@@ -335,6 +335,12 @@ def submit_research_run():
     retention_mode = str(data.get("retention_mode") or "summary").strip()
     if retention_mode not in {"summary", "full"}:
         return jsonify({"success": False, "error": "unsupported retention_mode"}), 400
+    step_mode = bool(data.get("step_mode"))
+    if step_mode and analyses != ["backtest"]:
+        return jsonify({
+            "success": False,
+            "error": "step mode requires exactly one backtest analysis",
+        }), 400
     configuration = research_configurations.load_workspace_configuration(
         workspace_id=workspace_id, owner=owner,
     )
@@ -364,6 +370,7 @@ def submit_research_run():
         "configuration_fingerprint": configuration["fingerprint"],
         "analyses": analyses,
         "retention_mode": retention_mode,
+        "step_mode": step_mode,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
     run = research_runs.create_run(
@@ -384,6 +391,7 @@ def submit_research_run():
             "configuration_revision": configuration["revision"],
             "_owner": owner,
             "retention_mode": retention_mode,
+            "step_mode": step_mode,
             "run_spec": run_spec,
         }
         job = _submit_kind(kind, payload)

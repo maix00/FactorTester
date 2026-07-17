@@ -37,11 +37,15 @@ class _WorkerSink:
         *,
         artifact_root: str = "",
         retention_mode: str = "summary",
+        control_queue: Any = None,
+        cancel_event: Any = None,
     ) -> None:
         self.job_id = str(job_id)
         self.output_queue = output_queue
         self.artifact_root = Path(artifact_root) if artifact_root else None
         self.retention_mode = str(retention_mode)
+        self.control_queue = control_queue
+        self.cancel_event = cancel_event
 
     def _emit(self, event: str, data: dict[str, Any]) -> None:
         self.output_queue.put({
@@ -129,8 +133,19 @@ class _WorkerSink:
         if self.retention_mode == "full":
             self._write_artifact(str(name), value)
 
-    def emit_pause(self, checkpoint: dict[str, Any]) -> None:
+    def emit_pause(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
         self._emit("paused", {"checkpoint": dict(checkpoint)})
+        if self.control_queue is None:
+            return {"action": "cancel"}
+        while True:
+            if self.cancel_event is not None and self.cancel_event.is_set():
+                return {"action": "cancel"}
+            try:
+                command = self.control_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if isinstance(command, dict) and command.get("type") == "step_control":
+                return dict(command.get("command") or {})
 
     def _write_artifact(self, name: str, value: Any) -> None:
         if self.artifact_root is None:
@@ -212,13 +227,16 @@ def _worker_entry(
         terminal_emitted = False
         try:
             runner = _load_runner(str(task["runner_path"]))
+            cancel_flag = _CancelFlag(cancel_value)
             sink = _WorkerSink(
                 job_id,
                 output_queue,
                 artifact_root=str(task.get("artifact_root") or ""),
                 retention_mode=str(task.get("retention_mode") or "summary"),
+                control_queue=task_queue,
+                cancel_event=cancel_flag,
             )
-            runner(dict(task["payload"]), sink, _CancelFlag(cancel_value))
+            runner(dict(task["payload"]), sink, cancel_flag)
         except BaseException as exc:
             terminal_emitted = True
             output_queue.put({
@@ -338,6 +356,15 @@ class LongLivedWorkerPool:
             worker = self._workers[worker_id]
             worker.cancel_value.value = 1
             worker.cancel_requested_at = time.monotonic()
+            return True
+
+    def resume_step(self, job_id: str, command: dict[str, Any]) -> bool:
+        with self._lock:
+            worker_id = self._job_to_worker.get(str(job_id))
+            if worker_id is None:
+                return False
+            worker = self._workers[worker_id]
+            worker.task_queue.put({"type": "step_control", "command": dict(command)})
             return True
 
     def poll(self, *, timeout: float = 0.0) -> list[dict[str, Any]]:

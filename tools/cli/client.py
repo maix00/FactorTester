@@ -86,12 +86,14 @@ class FactorTesterClient:
         *,
         analyses: list[str],
         retention_mode: str = "summary",
+        step_mode: bool = False,
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post("/api/runs", {
             "workspace_id": workspace_id,
             "configuration_revision": configuration_revision,
             "analyses": analyses,
             "retention_mode": retention_mode,
+            "step_mode": bool(step_mode),
         }))
 
     def get_run(self, run_id: str) -> dict[str, Any]:

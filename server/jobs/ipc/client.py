@@ -56,6 +56,11 @@ class JobDaemonClient:
     def cancel(self, job_id: str) -> None:
         self.request("cancel", job_id=str(job_id))
 
+    def continue_step(self, job_id: str, command: dict[str, Any]) -> bool:
+        return bool(self.request(
+            "continue_step", job_id=str(job_id), command=dict(command)
+        ).get("continued"))
+
     def events(self, job_id: str, *, after: int, timeout: float = 15.0) -> dict[str, Any]:
         return self.request(
             "events",
