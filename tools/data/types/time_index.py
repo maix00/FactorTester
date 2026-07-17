@@ -496,8 +496,13 @@ class DataIndex:
                 )
                 if day_name is not None:
                     di_for_slice = DataIndex(self.raw, time_name=str(day_name))
-            # trading_day 精度：end 代表当天结束，推后一天使 <= 变为包含整天
-            end_ts = cast(pd.Timestamp, end_dt.ts) + pd.Timedelta(days=1)
+            # trading_day 精度：end 代表当天结束。slice_by 使用 <=，
+            # 所以上界是次日零点前 1ns，不能把次日 00:00 纳入。
+            end_ts = (
+                cast(pd.Timestamp, end_dt.ts)
+                + pd.Timedelta(days=1)
+                - pd.Timedelta(1, "ns")
+            )
             return di_for_slice.slice_by(start_dt.ts, end_ts)
         else:
             # 守卫：exact 精度要求信号索引有日内分量。显式日级信号层拒绝；

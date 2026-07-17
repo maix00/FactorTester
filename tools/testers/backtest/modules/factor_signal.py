@@ -627,15 +627,32 @@ def _last_market_event_lookup_by_trading_day(state) -> dict[pd.Timestamp, pd.Tim
         return None
     days = DataIndex.trading_day_index_from_index(table.index)
     timestamps = DataIndex.event_timestamps_from_index(table.index)
+    expected_close = getattr(state.market_data_store, "daily_signal_close_time", None)
     lookup: dict[pd.Timestamp, pd.Timestamp] = {}
+    timestamps_by_day: dict[pd.Timestamp, set[pd.Timestamp]] = defaultdict(set)
     for day, timestamp in zip(days, timestamps):
         if pd.isna(day) or pd.isna(timestamp):
             continue
         key = pd.Timestamp(day).normalize()
         ts = pd.Timestamp(timestamp)
+        timestamps_by_day[key].add(ts)
         previous = lookup.get(key)
         if previous is None or ts > previous:
             lookup[key] = ts
+    if expected_close:
+        resolved: dict[pd.Timestamp, pd.Timestamp] = {}
+        for day, observed in timestamps_by_day.items():
+            target = pd.Timestamp(f"{day.date()} {expected_close}")
+            sample = next(iter(observed))
+            if sample.tzinfo is not None:
+                target = target.tz_localize(sample.tzinfo)
+            if target not in observed:
+                raise ValueError(
+                    f"DAY1 信号期望 trading_day={day.date()} 在 {expected_close} 触发，"
+                    "但 market-data 中缺少该 close bar"
+                )
+            resolved[day] = target
+        return resolved
     return lookup
 
 
@@ -665,7 +682,7 @@ def _timestamps_in_timezone(index: pd.DatetimeIndex, timezone: str) -> pd.Dateti
 
 
 def _clip_signal_table_to_strategy_window(table: pd.DataFrame, config) -> pd.DataFrame:
-    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    start_dt, end_dt = _strategy_signal_window_datetimes(config)
     if start_dt is None or end_dt is None:
         return table
     if start_dt.precision == "trading_day" or end_dt.precision == "trading_day":
@@ -684,7 +701,7 @@ def _clip_scheduled_table_to_strategy_window(table: pd.DataFrame, config) -> pd.
     windows must therefore compare the finest/event-time level, while
     trading-day windows retain DataIndex's trading-day-aware slicing.
     """
-    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    start_dt, end_dt = _strategy_signal_window_datetimes(config)
     if start_dt is None or end_dt is None:
         return table
     if start_dt.precision == "trading_day" or end_dt.precision == "trading_day":
@@ -696,7 +713,7 @@ def _clip_scheduled_table_to_strategy_window(table: pd.DataFrame, config) -> pd.
 
 
 def _clip_table_to_strategy_warmup_window(table: pd.DataFrame, config) -> pd.DataFrame:
-    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    start_dt, end_dt = _strategy_signal_window_datetimes(config)
     if table.empty:
         return table
     if start_dt is None or end_dt is None:
@@ -736,6 +753,20 @@ def _warmup_window_to_bars_for_table(warmup_window: pd.Timedelta, table: pd.Data
 
 def _strategy_run_window_datetimes(config) -> tuple[DataTime | None, DataTime | None]:
     return strategy_run_window_datetimes(config)
+
+
+def _strategy_signal_window_datetimes(config) -> tuple[DataTime | None, DataTime | None]:
+    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    try:
+        is_daily = DataFreq(_effective_signal_frequency(config)).is_day_multiple()
+    except (TypeError, ValueError):
+        is_daily = False
+    if not is_daily or start_dt is None or end_dt is None:
+        return start_dt, end_dt
+    return (
+        DataTime.parse(start_dt.date_str, precision="trading_day"),
+        DataTime.parse(end_dt.date_str, precision="trading_day"),
+    )
 
 
 def _strategy_run_window_key(config) -> tuple:
