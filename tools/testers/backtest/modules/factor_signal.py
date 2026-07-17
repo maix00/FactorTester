@@ -606,7 +606,9 @@ def _table_with_exact_event_index(table: pd.DataFrame, config, state=None) -> pd
     mapped = [lookup.get(pd.Timestamp(day).normalize()) for day in trading_days]
     if any(value is None for value in mapped):
         missing = next(pd.Timestamp(day).date() for day, value in zip(trading_days, mapped) if value is None)
-        raise ValueError(f"日级信号缺少 trading_day={missing} 的 market-data 事件时间")
+        expected_close = getattr(state.market_data_store, "daily_signal_close_time", None)
+        close_text = f" {expected_close} close bar" if expected_close else " market-data 事件时间"
+        raise ValueError(f"日级信号缺少 trading_day={missing} 的{close_text}")
     result = table.copy(deep=False)
     result.index = pd.DatetimeIndex(cast(list[pd.Timestamp], mapped))
     return result
@@ -646,12 +648,8 @@ def _last_market_event_lookup_by_trading_day(state) -> dict[pd.Timestamp, pd.Tim
             sample = next(iter(observed))
             if sample.tzinfo is not None:
                 target = target.tz_localize(sample.tzinfo)
-            if target not in observed:
-                raise ValueError(
-                    f"DAY1 信号期望 trading_day={day.date()} 在 {expected_close} 触发，"
-                    "但 market-data 中缺少该 close bar"
-                )
-            resolved[day] = target
+            if target in observed:
+                resolved[day] = target
         return resolved
     return lookup
 
