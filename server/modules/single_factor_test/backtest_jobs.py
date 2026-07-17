@@ -87,7 +87,15 @@ def list_test_jobs():
     return jsonify({
         "success": True,
         "jobs": [
-            {**job.summary(pinned=repository.is_pinned(job.job_id)), **_urls(job.job_id)}
+            {
+                **job.summary(pinned=repository.is_pinned(job.job_id)),
+                "artifact_count": len([
+                    item for item in repository.list_artifacts(
+                        job_id=job.job_id, owner=job.owner
+                    ) if item["state"] == "active"
+                ]),
+                **_urls(job.job_id),
+            }
             for job in jobs
         ],
     })

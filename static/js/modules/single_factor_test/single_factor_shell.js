@@ -176,9 +176,11 @@ window.SingleFactorResearch = (function() {
         const total = Number(data.total || 0);
         const phases = job.manifest && job.manifest.data && Array.isArray(job.manifest.data.phases)
             ? job.manifest.data.phases : [];
+        const notice = Array.isArray(job.plan_notices) && job.plan_notices.length
+            ? job.plan_notices[0].message : '';
         return {
             percent: total > 0 ? Math.max(0, Math.min(100, completed / total * 100)) : 0,
-            text: data.message || data.phase || (phases.length ? ('流程 ' + phases.length + ' 步') : job.status) || '',
+            text: data.message || notice || data.phase || (phases.length ? ('流程 ' + phases.length + ' 步') : job.status) || '',
         };
     }
 
@@ -202,6 +204,41 @@ window.SingleFactorResearch = (function() {
         row.querySelector('.research-job-progress-fill').style.width = progress.percent + '%';
         const actions = row.querySelector('.research-job-actions');
         actions.replaceChildren();
+        if (job.status === 'awaiting_confirmation') {
+            const approve = document.createElement('button');
+            approve.type = 'button';
+            approve.textContent = '确认';
+            approve.onclick = async function() {
+                approve.disabled = true;
+                await fetch('/api/jobs/' + encodeURIComponent(job.job_id) + '/approve', {method: 'POST'});
+                await restoreActiveJobs();
+            };
+            actions.appendChild(approve);
+        }
+        if (job.status === 'paused') {
+            const next = document.createElement('button');
+            next.type = 'button';
+            next.textContent = '下一步';
+            next.onclick = async function() {
+                next.disabled = true;
+                await fetch('/api/jobs/' + encodeURIComponent(job.job_id) + '/continue', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action: 'continue'})
+                });
+            };
+            const end = document.createElement('button');
+            end.type = 'button';
+            end.textContent = '运行到底';
+            end.onclick = async function() {
+                end.disabled = true;
+                await fetch('/api/jobs/' + encodeURIComponent(job.job_id) + '/continue', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action: 'end'})
+                });
+            };
+            actions.appendChild(next);
+            actions.appendChild(end);
+        }
         if (['submitted', 'planning', 'awaiting_confirmation', 'queued', 'running', 'paused'].includes(job.status)) {
             const cancel = document.createElement('button');
             cancel.type = 'button';
@@ -226,6 +263,17 @@ window.SingleFactorResearch = (function() {
                 await restoreActiveJobs();
             };
             actions.appendChild(retry);
+        }
+        if (Number(job.artifact_count || 0) > 0) {
+            const clear = document.createElement('button');
+            clear.type = 'button';
+            clear.textContent = '清除完整结果';
+            clear.onclick = async function() {
+                clear.disabled = true;
+                await fetch('/api/jobs/' + encodeURIComponent(job.job_id) + '/artifacts', {method: 'DELETE'});
+                await restoreActiveJobs();
+            };
+            actions.appendChild(clear);
         }
         return row;
     }
@@ -258,6 +306,16 @@ window.SingleFactorResearch = (function() {
                         job.latest_progress = {data: data};
                     }
                     if (event === 'activity_manifest') job.manifest = {data: data};
+                    if (event === 'plan') {
+                        job.status = data.status || job.status;
+                        job.execution_plan = data.execution_plan;
+                        job.plan_notices = data.notices || [];
+                    }
+                    if (event === 'reset') {
+                        job.status = data.status || job.status;
+                        job.latest_progress = data.latest_progress || job.latest_progress;
+                        job.manifest = data.manifest || job.manifest;
+                    }
                     if (event === 'result') job.status = 'succeeded';
                     if (event === 'error') job.status = data.cancelled ? 'cancelled' : 'failed';
                     renderJob(job);
@@ -272,9 +330,7 @@ window.SingleFactorResearch = (function() {
         const data = await jsonRequest('/api/jobs?workspace_id=' + encodeURIComponent(workspace.workspace_id) + '&limit=20');
         if (generation !== monitorGeneration) return;
         const jobs = data.jobs || [];
-        const visible = jobs.filter(function(job) {
-            return ['submitted', 'planning', 'awaiting_confirmation', 'queued', 'running', 'paused'].includes(job.status);
-        });
+        const visible = jobs;
         const monitor = document.getElementById('research-job-monitor');
         const list = document.getElementById('research-job-monitor-list');
         if (!monitor || !list) return;
@@ -282,6 +338,12 @@ window.SingleFactorResearch = (function() {
         monitor.hidden = visible.length === 0;
         visible.forEach(renderJob);
         visible.forEach(function(job) { watchJob(job, generation).catch(function() {}); });
+        try {
+            const storage = await jsonRequest('/api/jobs/storage');
+            const label = document.getElementById('research-job-storage');
+            if (label) label.textContent = Math.round(storage.usage_bytes / 1048576) + ' / '
+                + Math.round(storage.quota_bytes / 1048576) + ' MiB';
+        } catch (e) {}
     }
 
     async function detach() {
