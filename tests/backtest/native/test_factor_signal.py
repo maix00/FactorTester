@@ -379,6 +379,27 @@ def test_schedule_table_maps_explicit_daily_signal_to_market_event_time():
     assert list(scheduled.index) == [pd.Timestamp("2024-01-02 15:00", tz="Asia/Shanghai")]
 
 
+def test_schedule_table_preserves_naive_loaded_market_event_semantics():
+    strategy = Strategy(alias="daily-naive-market")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            RunWindowModule.timezone: "Asia/Shanghai",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    market_times = pd.DatetimeIndex(["2024-01-01", "2024-01-02"])
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {"P1": [1.0, 2.0]},
+        index=market_times,
+    )
+    table = pd.DataFrame({"P1": [1.0]}, index=market_times[:1])
+
+    scheduled = _schedule_table_for_strategy(table, config, account)
+
+    assert list(scheduled.index) == [pd.Timestamp("2024-01-01")]
+
+
 def test_signal_precomputed_groups_by_factor_identity():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 
