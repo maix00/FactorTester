@@ -10,6 +10,7 @@ from tools.products.AdjustableTermStructure import TERM_CONTRACT_UID_COL, TERM_T
 from sources.LocalCNFutures import SOURCE_DATA_DIR
 from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 from sources.LocalCNFutures.product_catalog import load_product_catalog
+from sources.LocalCNFutures.trading_sessions import infer_trading_day_close_time
 from sources.LocalCNFutures.contract_files import (
     contract_alias_from_path,
     contract_uid_from_exchange_contract,
@@ -512,6 +513,9 @@ for product in CNFUTURES:
             night_time = catalog_row.get(night_time_col_name)
     day_text = _text_or_default(day_time, "")
     night_text = _text_or_default(night_time, "")
+    product.trading_day_sessions = day_text
+    product.night_session = night_text
+    product.trading_day_close_time = infer_trading_day_close_time(day_text, night_text)
     if not day_text and not night_text:
         CNFUTURES_CATEGORY_DAYNIGHT[product] = "未知"
     elif night_text:

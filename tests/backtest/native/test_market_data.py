@@ -41,6 +41,7 @@ from tools.data.field_history import (
     TimestampTradingDayResolver,
 )
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
+from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
 def test_load_raw_market_data_reads_from_account_supplied_input():
@@ -810,6 +811,81 @@ def test_resolve_market_data_request_records_strategy_frequency_and_source_maps(
         s1: ("A",),
         s2: ("B",),
     }
+
+
+def test_daily_signal_loads_complete_trading_days_without_mutating_run_settings():
+    class _Product:
+        name = "P1"
+        trading_day_close_time = "15:00"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    strategy = Strategy(alias="daily")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_live"}),
+        field_values={
+            FactorSignalModule.signal_freq: "1d",
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "MIN1",
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.start_date: "2025-01-02",
+            RunWindowModule.start_time: "10:12",
+            RunWindowModule.end_date: "2025-01-03",
+            RunWindowModule.end_time: "10:13",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    account.market_data_request = {
+        "start_dt": DataTime.parse("2025-01-02 10:12", tz="Asia/Shanghai"),
+        "end_dt": DataTime.parse("2025-01-03 10:13", tz="Asia/Shanghai"),
+    }
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({_Product()}))
+
+    _resolve_market_data_request(account, ctx)
+
+    assert account.market_data_request["start_dt"] == DataTime.parse(
+        "2025-01-02", precision="trading_day"
+    )
+    assert account.market_data_request["end_dt"] == DataTime.parse(
+        "2025-01-03", precision="trading_day"
+    )
+    assert account.market_data_store.daily_signal_close_time == "15:00"
+    assert config.get(RunWindowModule.start_time) == "10:12"
+    assert config.get(RunWindowModule.end_time) == "10:13"
+
+
+def test_daily_signal_rejects_products_with_different_trading_day_closes():
+    class _Product:
+        def __init__(self, name, close):
+            self.name = name
+            self.trading_day_close_time = close
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    strategy = Strategy(alias="mixed-close")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_live"}),
+            field_values={
+                FactorSignalModule.signal_freq: "1d",
+                MarketDataModule.freq_mode: "fixed",
+                MarketDataModule.freq_fixed: "MIN1",
+            },
+        ),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({
+        _Product("P15", "15:00"),
+        _Product("P1515", "15:15"),
+    }))
+
+    with pytest.raises(ValueError, match="DAY1.*15:00.*15:15"):
+        _resolve_market_data_request(account, ctx)
 
 
 def test_resolve_market_data_request_keeps_required_frequency_strategy_scoped_when_uniform():

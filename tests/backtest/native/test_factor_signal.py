@@ -243,12 +243,13 @@ def test_signal_live_maps_daily_schedule_to_trading_day_last_bar_close():
             RunWindowModule.time_precision: "exact",
             RunWindowModule.timezone: "Asia/Shanghai",
             RunWindowModule.start_date: "2024-01-02",
-            RunWindowModule.start_time: "09:00",
+            RunWindowModule.start_time: "10:12",
             RunWindowModule.end_date: "2024-01-02",
-            RunWindowModule.end_time: "15:00",
+            RunWindowModule.end_time: "10:13",
         },
     )
     account = BacktestRunState(strategy_configs={strategy: config})
+    account.market_data_store.daily_signal_close_time = "15:00"
     market_times = pd.DatetimeIndex(
         ["2024-01-02 09:00", "2024-01-02 15:00"],
         tz="Asia/Shanghai",
@@ -275,6 +276,7 @@ def test_signal_live_maps_daily_schedule_to_trading_day_last_bar_close():
         pd.Timestamp("2024-01-02 15:00", tz="Asia/Shanghai")
     ]
     assert config.get(RunWindowModule.time_precision) == "exact"
+    assert config.get(RunWindowModule.end_time) == "10:13"
 
 
 def test_exact_window_clips_daily_signal_schedule_by_intraday_event_timestamp():

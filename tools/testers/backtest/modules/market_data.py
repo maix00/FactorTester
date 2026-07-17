@@ -25,7 +25,7 @@ from typing import Any, ClassVar, cast
 import numpy as np
 import pandas as pd
 
-from tools.data.types import DataColumn
+from tools.data.types import DataColumn, DataTime
 from tools.data.types.time_freq import DataFreq
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
@@ -83,6 +83,7 @@ class MarketDataStore:
     required_data_source_by_strategy: dict[Any, tuple[str, ...]] = field(default_factory=dict)
     required_frequency_by_strategy: dict[Any, DataFreq] = field(default_factory=dict)
     required_factor_columns_by_strategy: dict[Any, tuple[str, ...]] = field(default_factory=dict)
+    daily_signal_close_time: str | None = None
     excluded_out_of_range: tuple[Any, ...] = ()
     series_by_product: dict[Any, Any] = field(default_factory=dict)
     raw_prices_table: Any = None
@@ -566,6 +567,7 @@ def _resolve_market_data_request(state, ctx) -> None:
     frequencies_by_strategy: dict[Any, DataFreq] = {}
     sources_by_strategy: dict[Any, tuple[str, ...]] = {}
     factor_columns_by_strategy: dict[Any, tuple[str, ...]] = {}
+    daily_signal_products: list[Any] = []
     for strategy in state.strategy_configs:
         products = list(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
         if not products:
@@ -580,6 +582,8 @@ def _resolve_market_data_request(state, ctx) -> None:
         sources_by_strategy[strategy] = source
         frequencies_by_strategy[strategy] = frequency
         factor_columns_by_strategy[strategy] = factor_columns
+        if _strategy_uses_daily_signal(config):
+            daily_signal_products.extend(products)
         ctx.set_for(MarketDataModule.required_data_source, strategy, source)
         ctx.set_for(MarketDataModule.required_frequency, strategy, frequency)
         ctx.set_for(MarketDataModule.required_factor_columns, strategy, factor_columns)
@@ -588,9 +592,71 @@ def _resolve_market_data_request(state, ctx) -> None:
     store.required_data_source_by_strategy = dict(sources_by_strategy)
     store.required_frequency_by_strategy = dict(frequencies_by_strategy)
     store.required_factor_columns_by_strategy = dict(factor_columns_by_strategy)
+    if daily_signal_products:
+        store.daily_signal_close_time = _common_daily_signal_close_time(daily_signal_products)
+        _expand_market_data_request_to_complete_trading_days(request)
     unique_sources = {source for source in sources_by_strategy.values()}
     if len(unique_sources) == 1:
         ctx.set(MarketDataModule.required_data_source, next(iter(unique_sources), ()))
+
+
+def _strategy_uses_daily_signal(config: Any) -> bool:
+    if not config.uses_flow("signal_live") and not config.uses_flow("signal_precomputed"):
+        return False
+    from tools.testers.backtest.modules.factor_signal import _effective_signal_frequency
+
+    try:
+        return DataFreq(_effective_signal_frequency(config)).is_day_multiple()
+    except (TypeError, ValueError):
+        return False
+
+
+def _product_daily_signal_close_time(product: Any) -> str | None:
+    current = product
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        value = getattr(current, "trading_day_close_time", None)
+        if value not in (None, ""):
+            return str(value)
+        parent_getter = getattr(current, "get_parent_product", None)
+        current = parent_getter() if callable(parent_getter) else None
+    return None
+
+
+def _common_daily_signal_close_time(products: list[Any]) -> str:
+    by_close: dict[str, list[str]] = {}
+    missing: list[str] = []
+    for product in dict.fromkeys(products):
+        name = str(getattr(product, "name", product))
+        close = _product_daily_signal_close_time(product)
+        if close is None:
+            missing.append(name)
+            continue
+        by_close.setdefault(close, []).append(name)
+    if missing:
+        raise ValueError(
+            "DAY1 信号需要产品已推断并存储的 trading_day close；缺失: "
+            + "、".join(sorted(missing))
+        )
+    if len(by_close) != 1:
+        details = "; ".join(
+            f"{close}: {'、'.join(sorted(names))}"
+            for close, names in sorted(by_close.items())
+        )
+        raise ValueError(
+            "DAY1 信号当前要求所有参与回测的产品具有相同 trading_day close；"
+            f"实际为 {details}"
+        )
+    return next(iter(by_close))
+
+
+def _expand_market_data_request_to_complete_trading_days(request: dict[str, Any]) -> None:
+    for key in ("start_dt", "end_dt"):
+        value = request.get(key)
+        if not isinstance(value, DataTime) or not value.is_set:
+            continue
+        request[key] = DataTime.parse(value.date_str, precision="trading_day")
 
 
 def resolved_bar_frequency_for_strategy(state, strategy: Any | None = None) -> DataFreq | None:

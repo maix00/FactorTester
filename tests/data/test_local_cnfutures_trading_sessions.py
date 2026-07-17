@@ -3,7 +3,10 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from sources.LocalCNFutures.trading_sessions import infer_trading_sessions
+from sources.LocalCNFutures.trading_sessions import (
+    infer_trading_day_close_time,
+    infer_trading_sessions,
+)
 
 
 def _session_frame(intervals, days=10):
@@ -43,3 +46,14 @@ def test_inference_ignores_minutes_missing_on_most_days():
     result = infer_trading_sessions(pd.concat([frame, noise], ignore_index=True))
 
     assert result.observed_night_session is None
+
+
+def test_infer_trading_day_close_uses_last_day_session_not_night_session():
+    assert infer_trading_day_close_time(
+        "09:00-10:15, 10:30-11:30, 13:30-15:00",
+        "21:00-23:00",
+    ) == "15:00"
+
+
+def test_infer_trading_day_close_supports_financial_futures_close():
+    assert infer_trading_day_close_time("09:30-11:30, 13:00-15:15", None) == "15:15"
