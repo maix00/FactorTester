@@ -115,6 +115,20 @@ class ResearchJobScheduler:
             deployment_id=self.deployment_id,
             statuses=(JobStatus.QUEUED,),
         )
+        pending = self.repository.list_for_deployment(
+            deployment_id=self.deployment_id,
+            statuses=(
+                JobStatus.SUBMITTED,
+                JobStatus.PLANNING,
+                JobStatus.AWAITING_CONFIRMATION,
+                JobStatus.QUEUED,
+                JobStatus.RUNNING,
+                JobStatus.PAUSED,
+            ),
+        )
+        first_pending_by_owner: dict[str, str] = {}
+        for item in pending:
+            first_pending_by_owner.setdefault(item.owner, item.job_id)
         jobs.sort(key=lambda job: (not self.repository.is_pinned(job.job_id), job.created_at))
         active_by_owner: dict[str, int] = {}
         for active_id in self._executing:
@@ -122,6 +136,9 @@ class ResearchJobScheduler:
             if active is not None:
                 active_by_owner[active.owner] = active_by_owner.get(active.owner, 0) + 1
         for job in jobs:
+            pinned = self.repository.is_pinned(job.job_id)
+            if not pinned and first_pending_by_owner.get(job.owner) != job.job_id:
+                continue
             if active_by_owner.get(job.owner, 0) >= job.entitlement.max_concurrency:
                 continue
             plan = job.execution_plan or {}
@@ -131,7 +148,7 @@ class ResearchJobScheduler:
                     runner_path=job.runner_path,
                     payload={**job.job_spec, "execution_plan": plan},
                     cache_keys=list(plan.get("cache_keys") or []),
-                    pinned=self.repository.is_pinned(job.job_id),
+                    pinned=pinned,
                 )
             except WorkerUnavailable:
                 return
