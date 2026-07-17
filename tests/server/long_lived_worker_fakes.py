@@ -39,3 +39,14 @@ def planned_cpu_runner(payload, sink, cancel_event) -> None:
         raise ValueError("execution plan missing")
     sink.emit_progress(1, 2, phase="compute")
     cpu_runner(payload, sink, cancel_event)
+
+
+def artifact_runner(payload, sink, cancel_event) -> None:
+    size = int(payload.get("size") or 2048)
+    sink.emit_artifact("details", {"values": list(range(size))})
+    sink.emit_result({
+        "success": True,
+        "pid": os.getpid(),
+        "annual_return": 0.12,
+        "equity_curve": list(range(size)),
+    })

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import multiprocessing
 import os
+from pathlib import Path
 import queue
 import threading
 import time
 import traceback
 from dataclasses import dataclass, field
 from typing import Any
+
+import orjson
 
 
 class WorkerUnavailable(RuntimeError):
@@ -26,9 +30,18 @@ class _CancelFlag:
 
 
 class _WorkerSink:
-    def __init__(self, job_id: str, output_queue: Any) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        output_queue: Any,
+        *,
+        artifact_root: str = "",
+        retention_mode: str = "summary",
+    ) -> None:
         self.job_id = str(job_id)
         self.output_queue = output_queue
+        self.artifact_root = Path(artifact_root) if artifact_root else None
+        self.retention_mode = str(retention_mode)
 
     def _emit(self, event: str, data: dict[str, Any]) -> None:
         self.output_queue.put({
@@ -97,7 +110,9 @@ class _WorkerSink:
         self._emit("runtime_info", data)
 
     def emit_result(self, data: dict[str, Any]) -> None:
-        self._emit("result", dict(data))
+        if self.retention_mode == "full":
+            self._write_artifact("result", data)
+        self._emit("result", _bounded_summary(data))
 
     def emit_error(self, error: str, traceback: str = "", **extra) -> None:
         self._emit("error", {
@@ -111,10 +126,48 @@ class _WorkerSink:
         self._emit("step", dict(step_info))
 
     def emit_artifact(self, name: str, value: Any) -> None:
-        self._emit("artifact", {"name": str(name), "value": value})
+        if self.retention_mode == "full":
+            self._write_artifact(str(name), value)
 
     def emit_pause(self, checkpoint: dict[str, Any]) -> None:
         self._emit("paused", {"checkpoint": dict(checkpoint)})
+
+    def _write_artifact(self, name: str, value: Any) -> None:
+        if self.artifact_root is None:
+            raise RuntimeError("artifact root is required for full retention")
+        safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in name)
+        directory = self.artifact_root / self.job_id
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"{safe_name}.json"
+        staging = directory / f".{safe_name}.{os.getpid()}.tmp"
+        raw = orjson.dumps(value, option=orjson.OPT_SERIALIZE_NUMPY)
+        staging.write_bytes(raw)
+        staging.replace(target)
+        self._emit("artifact", {
+            "name": name,
+            "relative_path": f"{self.job_id}/{target.name}",
+            "content_type": "application/json",
+            "content_hash": hashlib.sha256(raw).hexdigest(),
+            "size_bytes": len(raw),
+        })
+
+
+def _bounded_summary(data: dict[str, Any], *, max_bytes: int = 512 * 1024) -> dict[str, Any]:
+    raw = orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY)
+    if len(raw) <= max_bytes:
+        return dict(data)
+    summary: dict[str, Any] = {
+        "success": bool(data.get("success", True)),
+        "summary_truncated": True,
+        "full_result_bytes": len(raw),
+    }
+    for key, value in data.items():
+        if key in {"success", "groups", "equity_curve", "curves", "details", "engine_result"}:
+            continue
+        candidate = {**summary, key: value}
+        if len(orjson.dumps(candidate, option=orjson.OPT_SERIALIZE_NUMPY)) <= max_bytes:
+            summary[key] = value
+    return summary
 
 
 def _load_runner(path: str):
@@ -159,7 +212,12 @@ def _worker_entry(
         terminal_emitted = False
         try:
             runner = _load_runner(str(task["runner_path"]))
-            sink = _WorkerSink(job_id, output_queue)
+            sink = _WorkerSink(
+                job_id,
+                output_queue,
+                artifact_root=str(task.get("artifact_root") or ""),
+                retention_mode=str(task.get("retention_mode") or "summary"),
+            )
             runner(dict(task["payload"]), sink, _CancelFlag(cancel_value))
         except BaseException as exc:
             terminal_emitted = True
@@ -238,6 +296,8 @@ class LongLivedWorkerPool:
         payload: dict[str, Any],
         cache_keys: list[str] | tuple[str, ...] = (),
         pinned: bool = False,
+        artifact_root: str = "",
+        retention_mode: str = "summary",
     ) -> int:
         with self._lock:
             if self._closed:
@@ -265,6 +325,8 @@ class LongLivedWorkerPool:
                 "runner_path": str(runner_path),
                 "payload": dict(payload),
                 "cache_keys": sorted(requested),
+                "artifact_root": str(artifact_root),
+                "retention_mode": str(retention_mode),
             })
             return worker.process.pid
 

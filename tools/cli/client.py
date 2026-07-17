@@ -85,11 +85,13 @@ class FactorTesterClient:
         configuration_revision: int,
         *,
         analyses: list[str],
+        retention_mode: str = "summary",
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post("/api/runs", {
             "workspace_id": workspace_id,
             "configuration_revision": configuration_revision,
             "analyses": analyses,
+            "retention_mode": retention_mode,
         }))
 
     def get_run(self, run_id: str) -> dict[str, Any]:
@@ -146,6 +148,12 @@ class FactorTesterClient:
 
     def job_artifact(self, job_id: str, name: str) -> dict[str, Any]:
         return self._expect_success(self.session.get(f"/api/jobs/{job_id}/artifacts/{name}"))
+
+    def delete_job_artifacts(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.delete(f"/api/jobs/{job_id}/artifacts"))
+
+    def job_storage(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get("/api/jobs/storage"))
 
     def stream_job_id(self, job_id: str, *, after: int = 0):
         query = {"after": after} if after else None

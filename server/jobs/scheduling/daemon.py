@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from server.jobs.events import EventBroker
+from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 
@@ -28,10 +29,12 @@ class ResearchJobScheduler:
         execution_workers: int = 2,
         broker: EventBroker | None = None,
         cancel_grace_seconds: float = 2.0,
+        result_artifact_root: str | None = None,
     ) -> None:
         self.repository = repository
         self.deployment_id = str(deployment_id)
         self.broker = broker or EventBroker()
+        self.artifact_root = str(result_artifact_root or artifact_root())
         self.planners = LongLivedWorkerPool(
             size=planner_workers,
             cancel_grace_seconds=cancel_grace_seconds,
@@ -149,6 +152,8 @@ class ResearchJobScheduler:
                     payload={**job.job_spec, "execution_plan": plan},
                     cache_keys=list(plan.get("cache_keys") or []),
                     pinned=pinned,
+                    artifact_root=self.artifact_root,
+                    retention_mode=job.retention_mode,
                 )
             except WorkerUnavailable:
                 return
@@ -199,6 +204,17 @@ class ResearchJobScheduler:
                 requires_confirmation=bool(data.get("requires_confirmation")),
             )
             return
+        if event == "artifact" and stage == "execution":
+            self.repository.record_artifact(
+                job_id=job_id,
+                name=str(data["name"]),
+                relative_path=str(data["relative_path"]),
+                content_type=str(data.get("content_type") or "application/octet-stream"),
+                content_hash=str(data["content_hash"]),
+                size_bytes=int(data["size_bytes"]),
+            )
+            self._enforce_storage_quota(job.owner)
+            return
         if event == "result" and stage == "execution" and job.status is JobStatus.RUNNING:
             summary = dict(data)
             self.repository.transition(
@@ -244,6 +260,29 @@ class ResearchJobScheduler:
         )
         self.broker.publish(job_id, "error", self.repository.require(job_id).error or {})
         self.broker.close(job_id)
+
+    def _enforce_storage_quota(self, owner: str) -> None:
+        quota = self.repository.storage_quota(
+            owner=owner, default_bytes=default_user_quota_bytes()
+        )
+        if self.repository.storage_usage(owner=owner) <= quota:
+            return
+        waiting = self.repository.list(
+            owner=owner,
+            statuses=(
+                JobStatus.SUBMITTED,
+                JobStatus.PLANNING,
+                JobStatus.AWAITING_CONFIRMATION,
+                JobStatus.QUEUED,
+            ),
+            limit=200,
+        )
+        for job in waiting:
+            self.repository.request_cancel(
+                job.job_id,
+                owner=owner,
+                reason="storage_quota_exceeded",
+            )
 
     def stop(self) -> None:
         self._stop.set()

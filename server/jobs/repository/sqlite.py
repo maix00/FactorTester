@@ -289,6 +289,123 @@ class JobRepository:
             ).fetchone()
         return row is not None
 
+    def record_artifact(
+        self,
+        *,
+        job_id: str,
+        name: str,
+        relative_path: str,
+        content_type: str,
+        content_hash: str,
+        size_bytes: int,
+        retention_mode: str = "retained",
+    ) -> dict[str, Any]:
+        now = time.time()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_job_artifacts (
+                    job_id, name, retention_mode, state, content_type,
+                    relative_path, content_hash, size_bytes, created_at
+                ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id, name) DO UPDATE SET
+                    retention_mode=excluded.retention_mode,
+                    state='active', content_type=excluded.content_type,
+                    relative_path=excluded.relative_path,
+                    content_hash=excluded.content_hash,
+                    size_bytes=excluded.size_bytes, created_at=excluded.created_at,
+                    deleted_at=NULL
+                """,
+                (
+                    str(job_id), str(name), str(retention_mode), str(content_type),
+                    str(relative_path), str(content_hash), max(0, int(size_bytes)), now,
+                ),
+            )
+        return self.require_artifact(job_id=job_id, name=name)
+
+    def load_artifact(self, *, job_id: str, name: str, owner: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT artifacts.* FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE artifacts.job_id=? AND artifacts.name=? AND jobs.owner=?
+                """,
+                (str(job_id), str(name), str(owner)),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def require_artifact(self, *, job_id: str, name: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM research_job_artifacts WHERE job_id=? AND name=?",
+                (str(job_id), str(name)),
+            ).fetchone()
+        if row is None:
+            raise KeyError("research job artifact not found")
+        return dict(row)
+
+    def list_artifacts(self, *, job_id: str, owner: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT artifacts.* FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE artifacts.job_id=? AND jobs.owner=?
+                ORDER BY artifacts.created_at, artifacts.name
+                """,
+                (str(job_id), str(owner)),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_artifacts_deleted(self, *, job_id: str, owner: str) -> list[dict[str, Any]]:
+        artifacts = self.list_artifacts(job_id=job_id, owner=owner)
+        now = time.time()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE research_job_artifacts SET state='deleted', deleted_at=?
+                WHERE job_id=? AND job_id IN (
+                    SELECT job_id FROM research_jobs WHERE owner=?
+                ) AND state != 'deleted'
+                """,
+                (now, str(job_id), str(owner)),
+            )
+        return artifacts
+
+    def storage_usage(self, *, owner: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COALESCE(SUM(artifacts.size_bytes), 0) AS size_bytes
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='active'
+                """,
+                (str(owner),),
+            ).fetchone()
+        return int(row["size_bytes"] or 0)
+
+    def storage_quota(self, *, owner: str, default_bytes: int) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT quota_bytes FROM user_storage_policies WHERE owner=?",
+                (str(owner),),
+            ).fetchone()
+        return int(row["quota_bytes"]) if row is not None else max(0, int(default_bytes))
+
+    def set_storage_quota(self, *, owner: str, quota_bytes: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_storage_policies(owner, quota_bytes, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(owner) DO UPDATE SET
+                    quota_bytes=excluded.quota_bytes, updated_at=excluded.updated_at
+                """,
+                (str(owner), max(0, int(quota_bytes)), time.time()),
+            )
+
     def transition(
         self,
         job_id: str,

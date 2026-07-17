@@ -174,13 +174,15 @@ def run() -> None:
 @click.option("--analysis", "analyses", multiple=True, type=click.Choice([
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
 ]), required=True)
+@click.option("--retain-full", is_flag=True, help="在服务器配额内保留完整曲线和明细。")
 @friendly_errors
-def run_submit(analyses: tuple[str, ...]) -> None:
+def run_submit(analyses: tuple[str, ...], retain_full: bool) -> None:
     state = _require_workspace()
     result = client_from_config().submit_run(
         state.workspace_id,
         state.configuration_revision,
         analyses=list(analyses),
+        retention_mode="full" if retain_full else "summary",
     )
     click.echo(f"run_id={result.get('run_id')}")
     for item in result.get("jobs") or []:
@@ -309,3 +311,16 @@ def job_continue(job_id: str, until: str, run_to_end: bool) -> None:
 @friendly_errors
 def job_artifact(job_id: str, name: str) -> None:
     click.echo(_json(client_from_config().job_artifact(job_id, name)))
+
+
+@job.command("clear-results")
+@click.argument("job_id")
+@friendly_errors
+def job_clear_results(job_id: str) -> None:
+    click.echo(_json(client_from_config().delete_job_artifacts(job_id)))
+
+
+@job.command("storage")
+@friendly_errors
+def job_storage() -> None:
+    click.echo(_json(client_from_config().job_storage()))

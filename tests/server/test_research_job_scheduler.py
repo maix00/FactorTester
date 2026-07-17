@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 from server.jobs.models import JobRecord, SchedulingEntitlement
 from server.jobs.repository import JobRepository
@@ -137,3 +138,37 @@ def test_scheduler_persists_failure_cancel_and_worker_crash(tmp_path) -> None:
     assert cancelled.error["cancelled"] is True
     assert crashed.error["code"] == "worker_crashed"
     assert crashed.worker_exitcode == 17
+
+
+def test_full_result_uses_files_and_over_quota_cancels_waiting_not_running(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    first = _record("full", runner="artifact_runner")
+    first = replace(
+        first,
+        retention_mode="full",
+        job_spec={**first.job_spec, "size": 200_000},
+    )
+    repository.create(first)
+    repository.create(_record("waiting"))
+    repository.set_storage_quota(owner="alice", quota_bytes=1)
+    artifact_dir = tmp_path / "artifacts"
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        execution_workers=1,
+        result_artifact_root=str(artifact_dir),
+    ) as scheduler:
+        completed, _ = _drive(
+            scheduler, repository, "full", {JobStatus.SUCCEEDED}
+        )
+        waiting = repository.require("waiting")
+
+    assert completed.status is JobStatus.SUCCEEDED
+    assert completed.result_summary["summary_truncated"] is True
+    assert "equity_curve" not in completed.result_summary
+    assert waiting.status is JobStatus.CANCELLED
+    assert waiting.cancel_reason == "storage_quota_exceeded"
+    artifacts = repository.list_artifacts(job_id="full", owner="alice")
+    assert {item["name"] for item in artifacts} == {"details", "result"}
+    assert all((artifact_dir / item["relative_path"]).is_file() for item in artifacts)

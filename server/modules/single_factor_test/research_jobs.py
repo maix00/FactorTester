@@ -16,6 +16,7 @@ from server.services import (
     research_workspaces,
 )
 from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
+from server.jobs.artifacts import default_user_quota_bytes
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
@@ -306,6 +307,19 @@ def delete_configuration_template(configuration_id: str):
 def submit_research_run():
     data = request.get_json(silent=True) or {}
     owner = require_user()
+    repository = JobRepository()
+    quota = repository.storage_quota(
+        owner=owner, default_bytes=default_user_quota_bytes()
+    )
+    usage = repository.storage_usage(owner=owner)
+    if usage > quota:
+        return jsonify({
+            "success": False,
+            "error": "retained result quota exceeded; delete full results before submitting",
+            "code": "storage_quota_exceeded",
+            "usage_bytes": usage,
+            "quota_bytes": quota,
+        }), 507
     workspace_id = str(data.get("workspace_id") or "").strip()
     try:
         configuration_revision = int(data.get("configuration_revision"))
@@ -318,6 +332,9 @@ def submit_research_run():
     unsupported = sorted(set(analyses) - SUPPORTED_ANALYSES)
     if unsupported:
         return jsonify({"success": False, "error": f"unsupported analyses: {unsupported}"}), 400
+    retention_mode = str(data.get("retention_mode") or "summary").strip()
+    if retention_mode not in {"summary", "full"}:
+        return jsonify({"success": False, "error": "unsupported retention_mode"}), 400
     configuration = research_configurations.load_workspace_configuration(
         workspace_id=workspace_id, owner=owner,
     )
@@ -346,6 +363,7 @@ def submit_research_run():
         "configuration_revision": configuration["revision"],
         "configuration_fingerprint": configuration["fingerprint"],
         "analyses": analyses,
+        "retention_mode": retention_mode,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
     run = research_runs.create_run(
@@ -365,6 +383,7 @@ def submit_research_run():
             "configuration_id": configuration["configuration_id"],
             "configuration_revision": configuration["revision"],
             "_owner": owner,
+            "retention_mode": retention_mode,
             "run_spec": run_spec,
         }
         job = _submit_kind(kind, payload)

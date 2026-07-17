@@ -151,3 +151,25 @@ def test_cancel_is_immediate_before_running_and_durable_while_running(tmp_path) 
     )
     assert requested.status is JobStatus.RUNNING
     assert requested.cancel_requested_at is not None
+
+
+def test_repository_tracks_artifact_metadata_and_user_storage_quota(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.create(_record("artifact"))
+    repository.record_artifact(
+        job_id="artifact",
+        name="result",
+        relative_path="artifact/result.json",
+        content_type="application/json",
+        content_hash="abc",
+        size_bytes=321,
+    )
+    repository.set_storage_quota(owner="alice", quota_bytes=300)
+
+    assert repository.storage_usage(owner="alice") == 321
+    assert repository.storage_quota(owner="alice", default_bytes=999) == 300
+    assert repository.load_artifact(
+        job_id="artifact", name="result", owner="alice"
+    )["relative_path"] == "artifact/result.json"
+    repository.mark_artifacts_deleted(job_id="artifact", owner="alice")
+    assert repository.storage_usage(owner="alice") == 0

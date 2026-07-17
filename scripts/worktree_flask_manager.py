@@ -132,6 +132,7 @@ class ManagerState:
             "GTHT_SOURCE_REVISION": subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=path, text=True
             ).strip(),
+            "GTHT_JOB_ARTIFACT_ROOT": str(path / ".workspace" / "job-results"),
         })
         return env, deployment_id, socket_path
 

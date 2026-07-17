@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import time
 import uuid
 
@@ -10,6 +11,7 @@ from flask import Response, jsonify, request, stream_with_context
 import orjson
 
 from server.jobs.ipc import DaemonUnavailable
+from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus, TERMINAL_STATUSES
@@ -169,6 +171,66 @@ def get_test_job_result(job_id: str):
     if job.status in {JobStatus.FAILED, JobStatus.CANCELLED}:
         return jsonify({"success": False, **base, "error": job.error, "cancel_reason": job.cancel_reason})
     return jsonify({"success": False, **base, "error": "job is not complete"}), 202
+
+
+@sft_bp.get("/api/jobs/storage")
+def get_job_storage():
+    owner = require_user()
+    repository = _repository()
+    usage = repository.storage_usage(owner=owner)
+    quota = repository.storage_quota(
+        owner=owner, default_bytes=default_user_quota_bytes()
+    )
+    return jsonify({
+        "success": True,
+        "usage_bytes": usage,
+        "quota_bytes": quota,
+        "over_quota": usage > quota,
+    })
+
+
+@sft_bp.get("/api/jobs/<job_id>/artifacts")
+def list_test_job_artifacts(job_id: str):
+    job, error = _require_job(job_id)
+    if error:
+        return error
+    artifacts = _repository().list_artifacts(job_id=job.job_id, owner=job.owner)
+    return jsonify({"success": True, "job_id": job_id, "artifacts": artifacts})
+
+
+@sft_bp.get("/api/jobs/<job_id>/artifacts/<name>")
+def get_test_job_artifact(job_id: str, name: str):
+    owner = require_user()
+    metadata = _repository().load_artifact(job_id=job_id, name=name, owner=owner)
+    if metadata is None:
+        return jsonify({"success": False, "error": "artifact not found"}), 404
+    if metadata["state"] != "active":
+        return jsonify({"success": False, "error": "artifact was deleted", "artifact": metadata}), 410
+    root = artifact_root()
+    path = (root / str(metadata["relative_path"])).resolve()
+    if root not in path.parents or not path.is_file():
+        return jsonify({"success": False, "error": "artifact file is unavailable"}), 410
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != metadata["content_hash"]:
+        return jsonify({"success": False, "error": "artifact integrity check failed"}), 500
+    return Response(raw, content_type=str(metadata["content_type"]))
+
+
+@sft_bp.delete("/api/jobs/<job_id>/artifacts")
+def delete_test_job_artifacts(job_id: str):
+    job, error = _require_job(job_id)
+    if error:
+        return error
+    repository = _repository()
+    artifacts = repository.mark_artifacts_deleted(job_id=job.job_id, owner=job.owner)
+    root = artifact_root()
+    deleted = 0
+    for metadata in artifacts:
+        path = (root / str(metadata["relative_path"])).resolve()
+        if root in path.parents and path.is_file():
+            path.unlink()
+            deleted += 1
+    return jsonify({"success": True, "job_id": job_id, "deleted_files": deleted})
 
 
 @sft_bp.post("/api/jobs/<job_id>/cancel")
