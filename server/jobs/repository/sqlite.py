@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import threading
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -34,11 +35,21 @@ class JobRepository:
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         self.db_path = Path(db_path or Settings.CACHE_DB_PATH)
+        self._schema_ready = False
+        self._schema_lock = threading.Lock()
 
     def _connect(self) -> sqlite3.Connection:
         conn = connect_sqlite(self.db_path, foreign_keys=True)
         conn.execute("PRAGMA journal_mode = WAL")
-        self._ensure_schema(conn)
+        if not self._schema_ready:
+            with self._schema_lock:
+                if not self._schema_ready:
+                    try:
+                        self._ensure_schema(conn)
+                    except Exception:
+                        conn.close()
+                        raise
+                    self._schema_ready = True
         return conn
 
     @staticmethod

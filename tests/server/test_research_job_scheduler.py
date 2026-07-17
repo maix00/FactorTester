@@ -87,6 +87,32 @@ def test_scheduler_plans_and_executes_real_job_in_child_process(tmp_path) -> Non
     assert events["latest_progress"]["event"] == "progress"
 
 
+def test_live_progress_event_does_not_read_durable_repository(tmp_path, monkeypatch) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        planner_workers=1,
+        execution_workers=1,
+    ) as scheduler:
+        monkeypatch.setattr(
+            repository,
+            "load",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("live progress must not read durable repository")
+            ),
+        )
+        scheduler._handle_event(
+            "live-only",
+            "progress",
+            {"completed": 1, "total": 2},
+            stage="execution",
+        )
+        snapshot = scheduler.broker.read("live-only")
+
+    assert snapshot["events"][0]["event"] == "progress"
+
+
 def test_scheduler_respects_per_user_concurrency_and_runs_queued_job_next(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     repository.create(_record("first", runner="blocking_runner", seconds=30))
