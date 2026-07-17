@@ -53,6 +53,7 @@ def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkey
     assert created[0][0].command[1] == "scripts/research_job_daemon.py"
     assert created[1][1]["env"]["GTHT_DEPLOYMENT_ID"].endswith("-8135")
     assert created[1][1]["env"]["GTHT_JOB_DAEMON_SOCKET"] == str(bundle.socket_path)
+    assert created[1][1]["env"]["FACTORTESTER_WERKZEUG_RELOADER"] == "0"
     assert created[1][1]["env"]["FLASK_SECRET_KEY"]
     assert created[1][1]["env"]["FLASK_SECRET_KEY"] == created[2][1]["env"]["FLASK_SECRET_KEY"]
     assert (tmp_path / ".workspace" / "flask-manager" / "flask-secret.key").stat().st_mode & 0o777 == 0o600

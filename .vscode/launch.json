@@ -51,6 +51,7 @@
             "subProcess": true,
             "env": {
                 "FLASK_DEBUG": "1",
+                "FACTORTESTER_WERKZEUG_RELOADER": "0",
                 "GTHT_DEPLOYMENT_ID": "${input:debugWorktreeDeployment}",
                 "GTHT_JOB_DAEMON_SOCKET": "${input:debugWorktreePath}/.workspace/runtime/${input:debugWorktreeDeployment}.sock"
             },

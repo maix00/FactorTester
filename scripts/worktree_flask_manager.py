@@ -139,6 +139,7 @@ class ManagerState:
         env = os.environ.copy()
         env.update({
             "FLASK_DEBUG": "1",
+            "FACTORTESTER_WERKZEUG_RELOADER": "0",
             "PYTHONUNBUFFERED": "1",
             "GTHT_DEPLOYMENT_ID": deployment_id,
             "GTHT_JOB_DAEMON_SOCKET": str(socket_path),
