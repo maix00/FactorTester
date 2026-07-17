@@ -251,12 +251,12 @@ def test_signal_live_maps_daily_schedule_to_trading_day_last_bar_close():
     account = BacktestRunState(strategy_configs={strategy: config})
     account.market_data_store.daily_signal_close_time = "15:00"
     market_times = pd.DatetimeIndex(
-        ["2024-01-02 09:00", "2024-01-02 15:00"],
+        ["2024-01-01 21:01", "2024-01-02 09:00", "2024-01-02 15:00"],
         tz="Asia/Shanghai",
         name="MIN1",
     )
     account.market_data_store.current_prices_table = pd.DataFrame(
-        {"P1": [1.0, 2.0]},
+        {"P1": [0.5, 1.0, 2.0]},
         index=market_times,
     )
     daily_signal = pd.DataFrame(
@@ -277,6 +277,43 @@ def test_signal_live_maps_daily_schedule_to_trading_day_last_bar_close():
     ]
     assert config.get(RunWindowModule.time_precision) == "exact"
     assert config.get(RunWindowModule.end_time) == "10:13"
+
+
+def test_signal_live_rejects_missing_close_on_formal_signal_day():
+    strategy = Strategy(alias="daily-missing-close")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_live"}),
+        field_values={
+            FactorSignalModule.signal_freq: "1d",
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.end_date: "2024-01-02",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    account.market_data_store.daily_signal_close_time = "15:00"
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {"P1": [1.0]},
+        index=pd.DatetimeIndex(
+            ["2024-01-02 09:00"],
+            tz="Asia/Shanghai",
+            name="MIN1",
+        ),
+    )
+    daily_signal = pd.DataFrame(
+        {"P1": [1.0]},
+        index=pd.DatetimeIndex(["2024-01-02"], name="_SIGNAL@DAY1"),
+    )
+
+    with patch(
+        "tools.testers.backtest.modules.factor_signal.signal_align",
+        return_value=daily_signal,
+    ), pytest.raises(ValueError, match="2024-01-02.*15:00 close bar"):
+        _schedule_signal_live_timestamps(
+            account,
+            FlowContext(timestamp=None, event_queue=EventQueue()),
+        )
 
 
 def test_exact_window_clips_daily_signal_schedule_by_intraday_event_timestamp():
