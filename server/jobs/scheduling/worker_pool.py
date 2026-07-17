@@ -1,0 +1,395 @@
+"""Long-lived isolated execution workers with bounded cache affinity."""
+
+from __future__ import annotations
+
+import importlib
+import multiprocessing
+import os
+import queue
+import threading
+import time
+import traceback
+from dataclasses import dataclass, field
+from typing import Any
+
+
+class WorkerUnavailable(RuntimeError):
+    pass
+
+
+class _CancelFlag:
+    def __init__(self, value: Any) -> None:
+        self._value = value
+
+    def is_set(self) -> bool:
+        return bool(self._value.value)
+
+
+class _WorkerSink:
+    def __init__(self, job_id: str, output_queue: Any) -> None:
+        self.job_id = str(job_id)
+        self.output_queue = output_queue
+
+    def _emit(self, event: str, data: dict[str, Any]) -> None:
+        self.output_queue.put({
+            "type": "event",
+            "job_id": self.job_id,
+            "event": str(event),
+            "data": dict(data),
+            "worker_pid": os.getpid(),
+        })
+
+    def emit_start(self, *, total: int, groups: int, phase: str = "init", phases=None, **extra) -> None:
+        data: dict[str, Any] = {"total": total, "groups": groups, "phase": phase}
+        if phases:
+            data["phases"] = phases
+        data.update(extra)
+        self._emit("start", data)
+
+    def emit_progress(self, completed: int, total: int, phase: str = "eval", **extra) -> None:
+        self._emit("progress", {
+            "completed": completed,
+            "total": total,
+            "phase": phase,
+            **extra,
+        })
+
+    def emit_activity_manifest(self, phases: list[dict[str, Any]]) -> None:
+        self._emit("activity_manifest", {"phases": phases})
+
+    def emit_activity(self, **payload: Any) -> None:
+        self._emit("activity", payload)
+
+    def emit_signal_progress(
+        self,
+        *,
+        completed: int,
+        total: int,
+        phase: str = "event_replay",
+        percent: float | None = None,
+    ) -> None:
+        if percent is None:
+            percent = 100.0 if total <= 0 else completed / total * 100.0
+        self._emit("signal_progress", {
+            "completed": completed,
+            "total": total,
+            "phase": phase,
+            "percent": max(0.0, min(100.0, float(percent))),
+        })
+
+    def emit_runtime_info(
+        self,
+        message: str,
+        *,
+        level: str = "info",
+        code: str = "",
+        details: dict[str, Any] | None = None,
+        **extra,
+    ) -> None:
+        data: dict[str, Any] = {
+            "message": message,
+            "level": level,
+            "code": code,
+            **extra,
+        }
+        if details is not None:
+            data["details"] = details
+        self._emit("runtime_info", data)
+
+    def emit_result(self, data: dict[str, Any]) -> None:
+        self._emit("result", dict(data))
+
+    def emit_error(self, error: str, traceback: str = "", **extra) -> None:
+        self._emit("error", {
+            "success": False,
+            "error": error,
+            "traceback": traceback,
+            **extra,
+        })
+
+    def emit_step(self, step_info: dict[str, Any]) -> None:
+        self._emit("step", dict(step_info))
+
+    def emit_artifact(self, name: str, value: Any) -> None:
+        self._emit("artifact", {"name": str(name), "value": value})
+
+    def emit_pause(self, checkpoint: dict[str, Any]) -> None:
+        self._emit("paused", {"checkpoint": dict(checkpoint)})
+
+
+def _load_runner(path: str):
+    module_name, separator, attr = str(path).partition(":")
+    if not separator or not module_name or not attr:
+        raise ValueError("runner path must use module:function")
+    runner = getattr(importlib.import_module(module_name), attr)
+    if not callable(runner):
+        raise TypeError(f"runner is not callable: {path}")
+    return runner
+
+
+def _worker_entry(
+    worker_id: int,
+    task_queue: Any,
+    output_queue: Any,
+    cancel_value: Any,
+) -> None:
+    try:
+        from tools.data.cache.IdleResourceManager import IdleResourceManager
+
+        IdleResourceManager.get_instance().start(idle_timeout=300, scan_interval=30)
+    except Exception:
+        pass
+    output_queue.put({
+        "type": "worker_ready",
+        "worker_id": worker_id,
+        "worker_pid": os.getpid(),
+    })
+    while True:
+        task = task_queue.get()
+        if task is None:
+            return
+        cancel_value.value = 0
+        job_id = str(task["job_id"])
+        output_queue.put({
+            "type": "task_started",
+            "job_id": job_id,
+            "worker_id": worker_id,
+            "worker_pid": os.getpid(),
+        })
+        terminal_emitted = False
+        try:
+            runner = _load_runner(str(task["runner_path"]))
+            sink = _WorkerSink(job_id, output_queue)
+            runner(dict(task["payload"]), sink, _CancelFlag(cancel_value))
+        except BaseException as exc:
+            terminal_emitted = True
+            output_queue.put({
+                "type": "event",
+                "job_id": job_id,
+                "event": "error",
+                "data": {
+                    "success": False,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                "worker_pid": os.getpid(),
+            })
+        finally:
+            output_queue.put({
+                "type": "task_finished",
+                "job_id": job_id,
+                "worker_id": worker_id,
+                "worker_pid": os.getpid(),
+                "cache_keys": list(task.get("cache_keys") or []),
+                "terminal_emitted_by_pool": terminal_emitted,
+            })
+
+
+@dataclass
+class _Worker:
+    worker_id: int
+    task_queue: Any
+    output_queue: Any
+    cancel_value: Any
+    process: Any
+    job_id: str = ""
+    cache_keys: set[str] = field(default_factory=set)
+    cancel_requested_at: float | None = None
+
+
+class LongLivedWorkerPool:
+    """Own persistent child processes and select idle workers by cache affinity."""
+
+    def __init__(
+        self,
+        *,
+        size: int,
+        cancel_grace_seconds: float = 2.0,
+        start_method: str = "spawn",
+    ) -> None:
+        self.size = max(1, int(size))
+        self.cancel_grace_seconds = max(0.0, float(cancel_grace_seconds))
+        self.context = multiprocessing.get_context(start_method)
+        self.output_queue = self.context.Queue()
+        self._workers: dict[int, _Worker] = {}
+        self._job_to_worker: dict[str, int] = {}
+        self._lock = threading.RLock()
+        self._closed = False
+        for worker_id in range(self.size):
+            self._workers[worker_id] = self._spawn(worker_id)
+
+    def _spawn(self, worker_id: int) -> _Worker:
+        task_queue = self.context.Queue()
+        cancel_value = self.context.Value("b", 0)
+        process = self.context.Process(
+            target=_worker_entry,
+            args=(worker_id, task_queue, self.output_queue, cancel_value),
+            daemon=True,
+            name=f"research-worker-{worker_id}",
+        )
+        process.start()
+        return _Worker(worker_id, task_queue, self.output_queue, cancel_value, process)
+
+    def submit(
+        self,
+        *,
+        job_id: str,
+        runner_path: str,
+        payload: dict[str, Any],
+        cache_keys: list[str] | tuple[str, ...] = (),
+        pinned: bool = False,
+    ) -> int:
+        with self._lock:
+            if self._closed:
+                raise WorkerUnavailable("worker pool is closed")
+            self._reconcile_locked()
+            idle = [worker for worker in self._workers.values() if not worker.job_id]
+            if not idle:
+                raise WorkerUnavailable("no idle execution worker")
+            requested = set(str(key) for key in cache_keys)
+            if pinned:
+                worker = min(idle, key=lambda item: item.worker_id)
+            else:
+                worker = max(
+                    idle,
+                    key=lambda item: (
+                        len(item.cache_keys & requested),
+                        -item.worker_id,
+                    ),
+                )
+            worker.job_id = str(job_id)
+            worker.cancel_requested_at = None
+            self._job_to_worker[str(job_id)] = worker.worker_id
+            worker.task_queue.put({
+                "job_id": str(job_id),
+                "runner_path": str(runner_path),
+                "payload": dict(payload),
+                "cache_keys": sorted(requested),
+            })
+            return worker.process.pid
+
+    def request_cancel(self, job_id: str) -> bool:
+        with self._lock:
+            worker_id = self._job_to_worker.get(str(job_id))
+            if worker_id is None:
+                return False
+            worker = self._workers[worker_id]
+            worker.cancel_value.value = 1
+            worker.cancel_requested_at = time.monotonic()
+            return True
+
+    def poll(self, *, timeout: float = 0.0) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = []
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            remaining = deadline - time.monotonic()
+            wait = max(0.0, remaining) if not messages else 0.0
+            try:
+                message = self.output_queue.get(timeout=wait)
+            except queue.Empty:
+                break
+            if isinstance(message, dict):
+                messages.append(message)
+                self._apply_message(message)
+            if timeout <= 0 or time.monotonic() >= deadline:
+                break
+        with self._lock:
+            messages.extend(self._reconcile_locked())
+        return messages
+
+    def _apply_message(self, message: dict[str, Any]) -> None:
+        if message.get("type") != "task_finished":
+            return
+        worker_id = int(message["worker_id"])
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if worker is None:
+                return
+            job_id = str(message.get("job_id") or "")
+            worker.cache_keys.update(str(key) for key in message.get("cache_keys") or [])
+            worker.job_id = ""
+            worker.cancel_requested_at = None
+            self._job_to_worker.pop(job_id, None)
+
+    def _reconcile_locked(self) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = []
+        now = time.monotonic()
+        for worker_id, worker in list(self._workers.items()):
+            forced = (
+                worker.job_id
+                and worker.cancel_requested_at is not None
+                and now - worker.cancel_requested_at >= self.cancel_grace_seconds
+            )
+            crashed = not worker.process.is_alive()
+            if not forced and not crashed:
+                continue
+            job_id = worker.job_id
+            exitcode = worker.process.exitcode
+            if forced and worker.process.is_alive():
+                worker.process.terminate()
+                worker.process.join(timeout=1.0)
+                exitcode = worker.process.exitcode
+            elif crashed:
+                worker.process.join(timeout=0.1)
+            try:
+                worker.task_queue.close()
+            except Exception:
+                pass
+            self._job_to_worker.pop(job_id, None)
+            if job_id:
+                messages.append({
+                    "type": "worker_terminated" if forced else "worker_crashed",
+                    "job_id": job_id,
+                    "worker_id": worker_id,
+                    "worker_pid": worker.process.pid,
+                    "worker_exitcode": exitcode,
+                })
+            if not self._closed:
+                self._workers[worker_id] = self._spawn(worker_id)
+        return messages
+
+    def worker_snapshot(self) -> list[dict[str, Any]]:
+        with self._lock:
+            self._reconcile_locked()
+            return [
+                {
+                    "worker_id": worker.worker_id,
+                    "pid": worker.process.pid,
+                    "alive": worker.process.is_alive(),
+                    "job_id": worker.job_id,
+                    "cache_keys": sorted(worker.cache_keys),
+                }
+                for worker in sorted(
+                    self._workers.values(), key=lambda item: item.worker_id
+                )
+            ]
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            for worker in self._workers.values():
+                if worker.process.is_alive():
+                    worker.task_queue.put(None)
+            for worker in self._workers.values():
+                worker.process.join(timeout=2.0)
+                if worker.process.is_alive():
+                    worker.process.terminate()
+                    worker.process.join(timeout=1.0)
+                try:
+                    worker.task_queue.close()
+                except Exception:
+                    pass
+            self._workers.clear()
+            self._job_to_worker.clear()
+            try:
+                self.output_queue.close()
+            except Exception:
+                pass
+
+    def __enter__(self) -> "LongLivedWorkerPool":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
