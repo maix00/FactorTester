@@ -82,6 +82,7 @@ class JobRecord:
             "owner": self.owner,
             "workspace_id": self.workspace_id,
             "kind": self.kind,
+            "execution_mode": "process",
             "status": self.status.value,
             "retry_of": self.retry_of,
             "attempt": self.attempt,
