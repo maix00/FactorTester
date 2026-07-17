@@ -627,7 +627,7 @@ def _schedule_table_for_strategy(
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h"))),
         )
     clipped = _clip_scheduled_table_to_strategy_window(scheduled, config)
-    return _table_with_strategy_event_timezone(clipped, config)
+    return _table_with_strategy_event_timezone(clipped, config, state)
 
 
 def _table_with_exact_event_index(table: pd.DataFrame, config, state=None) -> pd.DataFrame:
@@ -710,13 +710,29 @@ def _last_market_event_lookup_by_trading_day(state) -> dict[pd.Timestamp, pd.Tim
     return lookup
 
 
-def _table_with_strategy_event_timezone(table: pd.DataFrame, config) -> pd.DataFrame:
-    timezone = str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai")
+def _table_with_strategy_event_timezone(table: pd.DataFrame, config, state=None) -> pd.DataFrame:
+    strategy_timezone = str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai")
     if table.empty:
         return table
+    market_table = current_prices_table_for(state) if state is not None else None
+    market_timezone = None
+    preserve_naive_market_time = False
+    if isinstance(market_table, pd.DataFrame) and not market_table.empty:
+        market_index = DataIndex.event_timestamps_from_index(market_table.index)
+        market_timezone = market_index.tz
+        preserve_naive_market_time = market_timezone is None
+
+    def align(values: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        aligned = _timestamps_in_timezone(values, strategy_timezone)
+        if preserve_naive_market_time:
+            return pd.DatetimeIndex(aligned.tz_localize(None))
+        if market_timezone is not None:
+            return pd.DatetimeIndex(aligned.tz_convert(market_timezone))
+        return aligned
+
     index = table.index
     if isinstance(index, pd.MultiIndex):
-        event_values = _timestamps_in_timezone(pd.DatetimeIndex(index.get_level_values(-1)), timezone)
+        event_values = align(pd.DatetimeIndex(index.get_level_values(-1)))
         arrays = [
             event_values if pos == index.nlevels - 1 else index.get_level_values(pos)
             for pos in range(index.nlevels)
@@ -725,7 +741,7 @@ def _table_with_strategy_event_timezone(table: pd.DataFrame, config) -> pd.DataF
         result.index = pd.MultiIndex.from_arrays(arrays, names=index.names)
         return result
     result = table.copy(deep=False)
-    result.index = _timestamps_in_timezone(pd.DatetimeIndex(index), timezone)
+    result.index = align(pd.DatetimeIndex(index))
     return result
 
 

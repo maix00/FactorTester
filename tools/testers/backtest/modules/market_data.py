@@ -593,7 +593,6 @@ def _resolve_market_data_request(state, ctx) -> None:
     store.required_frequency_by_strategy = dict(frequencies_by_strategy)
     store.required_factor_columns_by_strategy = dict(factor_columns_by_strategy)
     if daily_signal_products:
-        store.daily_signal_close_time = _common_daily_signal_close_time(daily_signal_products)
         _expand_market_data_request_to_complete_trading_days(request)
     unique_sources = {source for source in sources_by_strategy.values()}
     if len(unique_sources) == 1:
@@ -624,19 +623,75 @@ def _product_daily_signal_close_time(product: Any) -> str | None:
     return None
 
 
-def _common_daily_signal_close_time(products: list[Any]) -> str:
+def _normalise_daily_signal_close_time(value: Any) -> str:
+    text = str(value)
+    try:
+        parsed = pd.Timestamp(f"2000-01-01 {text}")
+    except (TypeError, ValueError):
+        return text
+    if parsed.microsecond:
+        return parsed.strftime("%H:%M:%S.%f").rstrip("0")
+    if parsed.second:
+        return parsed.strftime("%H:%M:%S")
+    return parsed.strftime("%H:%M")
+
+
+def _inferred_daily_signal_close_times(
+    products: list[Any],
+    raw_prices: Any,
+    *,
+    timezone: str | None,
+) -> dict[Any, str]:
+    if not isinstance(raw_prices, pd.DataFrame) or raw_prices.empty:
+        return {}
+    inferred: dict[Any, str] = {}
+    for product in products:
+        if product not in raw_prices.columns:
+            continue
+        series = raw_prices[product].dropna()
+        if series.empty:
+            continue
+        last_events = DataIndex.trading_day_last_event_times_from_index(series.index)
+        event_times = pd.DatetimeIndex(last_events.to_list())
+        if event_times.tz is not None and timezone is not None:
+            event_times = event_times.tz_convert(timezone)
+        closes = {
+            _normalise_daily_signal_close_time(timestamp.time())
+            for timestamp in event_times
+        }
+        if len(closes) != 1:
+            name = str(getattr(product, "name", product))
+            raise ValueError(
+                "DAY1 信号要求每个产品各交易日具有稳定的最后行情事件时间；"
+                f"{name} 实际为 {', '.join(sorted(closes))}"
+            )
+        if closes:
+            inferred[product] = next(iter(closes))
+    return inferred
+
+
+def _common_daily_signal_close_time(
+    products: list[Any],
+    *,
+    inferred: dict[Any, str] | None = None,
+) -> str:
+    inferred = inferred or {}
     by_close: dict[str, list[str]] = {}
     missing: list[str] = []
     for product in dict.fromkeys(products):
         name = str(getattr(product, "name", product))
         close = _product_daily_signal_close_time(product)
         if close is None:
+            close = inferred.get(product)
+        if close is None:
             missing.append(name)
             continue
+        close = _normalise_daily_signal_close_time(close)
         by_close.setdefault(close, []).append(name)
     if missing:
         raise ValueError(
-            "DAY1 信号需要产品已推断并存储的 trading_day close；缺失: "
+            "DAY1 信号需要产品已存储的 trading_day close，"
+            "或可从完整行情交易日推断的最后事件时间；缺失: "
             + "、".join(sorted(missing))
         )
     if len(by_close) != 1:
@@ -649,6 +704,57 @@ def _common_daily_signal_close_time(products: list[Any]) -> str:
             f"实际为 {details}"
         )
     return next(iter(by_close))
+
+
+def _active_daily_signal_products(
+    state: Any,
+    ctx: Any,
+    *,
+    included: set[Any] | None = None,
+    excluded: set[Any] | None = None,
+) -> list[Any]:
+    excluded = excluded or set()
+    products: list[Any] = []
+    for strategy in state.strategy_configs:
+        if not _strategy_uses_daily_signal(state.config_for(strategy)):
+            continue
+        for product in ctx.get_for(ProductSelectionModule.products, strategy, frozenset()):
+            if product in excluded or (included is not None and product not in included):
+                continue
+            products.append(product)
+    return list(dict.fromkeys(products))
+
+
+def _resolve_daily_signal_close_after_coverage(
+    state: Any,
+    ctx: Any,
+    *,
+    included: set[Any] | None = None,
+    excluded: set[Any] | None = None,
+) -> None:
+    products = _active_daily_signal_products(
+        state,
+        ctx,
+        included=included,
+        excluded=excluded,
+    )
+    store = market_data_store_for(state)
+    if not products:
+        store.daily_signal_close_time = None
+        return
+    inferred = _inferred_daily_signal_close_times(
+        [
+            product
+            for product in products
+            if _product_daily_signal_close_time(product) is None
+        ],
+        store.raw_prices_table,
+        timezone=_market_data_event_timezone(state),
+    )
+    store.daily_signal_close_time = _common_daily_signal_close_time(
+        products,
+        inferred=inferred,
+    )
 
 
 def _expand_market_data_request_to_complete_trading_days(request: dict[str, Any]) -> None:
@@ -1670,6 +1776,13 @@ def _publish_raw_market_data(state, ctx, raw: dict[str, Any]) -> None:
     ctx.set(MarketDataModule.historical_field_provider, raw.get("historical_field_provider"))
     store = market_data_store_for(state)
     store.publish_raw(raw)
+    included = set(store.included_products) if store.included_products is not None else None
+    _resolve_daily_signal_close_after_coverage(
+        state,
+        ctx,
+        included=included,
+        excluded=set(store.excluded_out_of_range),
+    )
     _record_excluded_out_of_range_products(state, store.excluded_out_of_range)
     # volume_table is not ffill'd -- a gap means zero
                                                 # traded volume, not "carry the last

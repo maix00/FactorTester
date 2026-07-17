@@ -20,7 +20,7 @@ from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _build_trading_day_resolver, _causal_valuation, _check_market_data_coverage,
     _apply_exchange_rule_defaults, _desired_factor_frequencies,
     _historical_fields_at_from_frames, _load_raw_market_data,
-    _resolve_market_data_request, _set_current_market_snapshot,
+    _publish_raw_market_data, _resolve_market_data_request, _set_current_market_snapshot,
     _settlement_series_on_last_event,
     contract_multiplier_from_fields,
     current_market_snapshot_at, current_prices_at, historical_fields_for_product,
@@ -841,10 +841,16 @@ def test_daily_signal_loads_complete_trading_days_without_mutating_run_settings(
         "start_dt": DataTime.parse("2025-01-02 10:12", tz="Asia/Shanghai"),
         "end_dt": DataTime.parse("2025-01-03 10:13", tz="Asia/Shanghai"),
     }
+    product = _Product()
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
-    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({_Product()}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
     _resolve_market_data_request(account, ctx)
+    _check_market_data_coverage(account, ctx)
+    _publish_raw_market_data(account, ctx, {
+        "raw_prices": pd.DataFrame(),
+        "included_products": (product,),
+    })
 
     assert account.market_data_request["start_dt"] == DataTime.parse(
         "2025-01-02", precision="trading_day"
@@ -879,13 +885,148 @@ def test_daily_signal_rejects_products_with_different_trading_day_closes():
         ),
     })
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
-    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({
+    products = (
         _Product("P15", "15:00"),
         _Product("P1515", "15:15"),
-    }))
+    )
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset(products))
+
+    _resolve_market_data_request(account, ctx)
+    _check_market_data_coverage(account, ctx)
+    with pytest.raises(ValueError, match="DAY1.*15:00.*15:15"):
+        _publish_raw_market_data(account, ctx, {
+            "raw_prices": pd.DataFrame(),
+            "included_products": products,
+        })
+
+
+def test_daily_signal_close_is_inferred_from_loaded_market_events():
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    product = _Product()
+    strategy = Strategy(alias="daily-inferred-close")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_live"}),
+            field_values={
+                FactorSignalModule.signal_freq: "1d",
+                MarketDataModule.freq_mode: "fixed",
+                MarketDataModule.freq_fixed: "MIN1",
+                RunWindowModule.timezone: "Asia/Shanghai",
+            },
+        ),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+    utc_index = pd.DatetimeIndex([
+        "2025-01-02 06:59:00+00:00",
+        "2025-01-02 07:00:00+00:00",
+        "2025-01-03 06:59:00+00:00",
+        "2025-01-03 07:00:00+00:00",
+    ])
+
+    _publish_raw_market_data(account, ctx, {
+        "raw_prices": pd.DataFrame({product: [1.0, 2.0, 3.0, 4.0]}, index=utc_index),
+        "included_products": (product,),
+    })
+
+    assert account.market_data_store.daily_signal_close_time == "15:00"
+
+
+def test_daily_signal_close_rejects_different_inferred_market_event_times():
+    class _Product:
+        def __init__(self, name):
+            self.name = name
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    p15 = _Product("P15")
+    p1515 = _Product("P1515")
+    strategy = Strategy(alias="daily-different-inferred-closes")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_live"}),
+            field_values={
+                FactorSignalModule.signal_freq: "1d",
+                MarketDataModule.freq_mode: "fixed",
+                MarketDataModule.freq_fixed: "MIN1",
+                RunWindowModule.timezone: "Asia/Shanghai",
+            },
+        ),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({p15, p1515}))
+    index = pd.DatetimeIndex([
+        "2025-01-02 15:00",
+        "2025-01-02 15:15",
+        "2025-01-03 15:00",
+        "2025-01-03 15:15",
+    ])
+    raw_prices = pd.DataFrame(
+        {
+            p15: [1.0, np.nan, 2.0, np.nan],
+            p1515: [np.nan, 1.0, np.nan, 2.0],
+        },
+        index=index,
+    )
 
     with pytest.raises(ValueError, match="DAY1.*15:00.*15:15"):
-        _resolve_market_data_request(account, ctx)
+        _publish_raw_market_data(account, ctx, {
+            "raw_prices": raw_prices,
+            "included_products": (p15, p1515),
+        })
+
+
+def test_daily_signal_close_ignores_products_excluded_by_raw_load():
+    class _Product:
+        def __init__(self, name, close):
+            self.name = name
+            self.trading_day_close_time = close
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    retired = _Product("ER.CZC", None)
+    active = _Product("AP.CZC", "15:00")
+    strategy = Strategy(alias="daily-with-retired")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_live"}),
+            field_values={
+                FactorSignalModule.signal_freq: "1d",
+                MarketDataModule.freq_mode: "fixed",
+                MarketDataModule.freq_fixed: "MIN1",
+            },
+        ),
+    })
+    account.market_data_request = {
+        "start_dt": DataTime.parse("2026-01-01 09:00", tz="Asia/Shanghai"),
+        "end_dt": DataTime.parse("2026-01-31 15:00", tz="Asia/Shanghai"),
+    }
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(
+        ProductSelectionModule.products,
+        strategy,
+        frozenset({retired, active}),
+    )
+    _resolve_market_data_request(account, ctx)
+    _check_market_data_coverage(account, ctx)
+    _publish_raw_market_data(account, ctx, {
+        "raw_prices": pd.DataFrame(),
+        "included_products": (active,),
+        "excluded_out_of_range_products": (retired,),
+    })
+
+    assert account.market_data_store.excluded_out_of_range == (retired,)
+    assert account.market_data_store.daily_signal_close_time == "15:00"
 
 
 def test_resolve_market_data_request_keeps_required_frequency_strategy_scoped_when_uniform():

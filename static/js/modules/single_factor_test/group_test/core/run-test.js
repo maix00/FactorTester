@@ -110,7 +110,20 @@
                     try {
                         var payload = JSON.parse(line.slice(6));
                         if (onEvent) {
-                            onEvent(lastEvent, payload, lastSeq);
+                            if (
+                                lastEvent === 'heartbeat'
+                                && payload.latest_progress
+                                && payload.latest_progress.event
+                                && payload.latest_progress.data
+                            ) {
+                                onEvent(
+                                    payload.latest_progress.event,
+                                    payload.latest_progress.data,
+                                    lastSeq
+                                );
+                            } else {
+                                onEvent(lastEvent, payload, lastSeq);
+                            }
                         }
                         if (lastEvent === 'result') {
                             resultData = payload;

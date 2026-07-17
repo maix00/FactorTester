@@ -134,7 +134,7 @@ def stream_test_job(job_id: str):
                 yield _sse("error", {"error": "research job not found"})
                 return
             try:
-                snapshot = _daemon_client().events(job_id, after=after, timeout=15.0)
+                snapshot = _daemon_client().events(job_id, after=after, timeout=2.0)
             except DaemonUnavailable:
                 yield _sse("reset", {
                     "reason": "daemon_unavailable",
@@ -169,7 +169,11 @@ def stream_test_job(job_id: str):
             if current.status in TERMINAL_STATUSES or snapshot.get("closed"):
                 return
             if not snapshot.get("events"):
-                yield ": keepalive\n\n"
+                yield _sse("heartbeat", {
+                    "status": current.status.value,
+                    "latest_progress": snapshot.get("latest_progress"),
+                    "server_time": time.time(),
+                })
 
     return Response(generate(), mimetype="text/event-stream", headers={
         "Cache-Control": "no-cache",
