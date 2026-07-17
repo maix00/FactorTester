@@ -26,6 +26,13 @@ from urllib.parse import parse_qs, urlparse
 
 MASTER_PORT = 8000
 FEAT_PORT = 7999
+VIBE_TRADING_PORT = 7899
+VIBE_TRADING_ROOT = Path(
+    os.environ.get(
+        "VIBE_TRADING_ROOT",
+        "/Users/maxdeux/Documents/Vibe-Trading-Integration",
+    )
+).expanduser()
 
 # Matches branches named fix/issue-<N>-<slug> or fix/issue-<N>
 _ISSUE_BRANCH_RE = re.compile(r'^fix/issue-(\d+)(?:-.*)?$')
@@ -58,6 +65,7 @@ class ManagerState:
         self.repo = repo.resolve()
         self.python = python
         self.processes: dict[str, ServiceBundle] = {}
+        self.vibe_process: subprocess.Popen | None = None
         self.log_dir = self.repo / ".workspace" / "flask-manager" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.secret_path = self.log_dir.parent / "flask-secret.key"
@@ -132,6 +140,47 @@ class ManagerState:
     def daemon_running(self, path: Path) -> bool:
         bundle = self.processes.get(self.key(path))
         return bool(bundle and bundle.daemon.poll() is None)
+
+    def vibe_running(self) -> bool:
+        return bool(
+            self.vibe_process is not None
+            and self.vibe_process.poll() is None
+        )
+
+    def start_vibe(self) -> str:
+        if self.vibe_running():
+            return "Vibe-Trading already running"
+        if port_in_use(VIBE_TRADING_PORT):
+            raise RuntimeError(
+                f"Vibe-Trading port {VIBE_TRADING_PORT} is already in use"
+            )
+        executable = VIBE_TRADING_ROOT / ".conda" / "bin" / "vibe-trading"
+        if not executable.is_file():
+            raise RuntimeError(f"missing Vibe-Trading executable: {executable}")
+        log_file = self.log_dir / f"vibe-trading-{VIBE_TRADING_PORT}.log"
+        log = log_file.open("ab", buffering=0)
+        self.vibe_process = subprocess.Popen(
+            [
+                str(executable),
+                "serve",
+                "--host", "127.0.0.1",
+                "--port", str(VIBE_TRADING_PORT),
+            ],
+            cwd=VIBE_TRADING_ROOT,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        return f"started Vibe-Trading pid {self.vibe_process.pid}"
+
+    def stop_vibe(self) -> str:
+        process = self.vibe_process
+        if process is None or process.poll() is not None:
+            self.vibe_process = None
+            return "Vibe-Trading not running"
+        self._terminate(process)
+        self.vibe_process = None
+        return "stopped Vibe-Trading"
 
     def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
         deployment_id = f"{safe_name(path.name)}-{port}"
@@ -292,6 +341,7 @@ class ManagerState:
             if bundle:
                 self.stop(Path(key), force=True)
         self.processes.clear()
+        self.stop_vibe()
 
 
 def _lan_ip() -> str:
@@ -371,6 +421,27 @@ def page(state: ManagerState, message: str = "") -> bytes:
             """
         )
     msg = f"<div class='message'>{html.escape(message)}</div>" if message else ""
+    vibe_running = state.vibe_running()
+    vibe_occupied = port_in_use(VIBE_TRADING_PORT) and not vibe_running
+    vibe_status = (
+        "running" if vibe_running else "occupied" if vibe_occupied else "stopped"
+    )
+    vibe_start_disabled = "disabled" if vibe_running or vibe_occupied else ""
+    vibe_stop_disabled = "" if vibe_running else "disabled"
+    vibe_open_disabled = "" if vibe_running or vibe_occupied else "disabled"
+    vibe_row = f"""
+      <tr>
+        <td><strong>Vibe-Trading</strong><div class="muted">research UI + MaxA MCP gateway</div></td>
+        <td><code>{html.escape(str(VIBE_TRADING_ROOT))}</code></td>
+        <td><a href="http://localhost:{VIBE_TRADING_PORT}/" target="_blank">{VIBE_TRADING_PORT}</a></td>
+        <td><span class="pill {vibe_status}">{vibe_status}</span></td>
+        <td>
+          <form method="post" action="/vibe/start"><button {vibe_start_disabled}>Start</button></form>
+          <form method="post" action="/vibe/stop"><button {vibe_stop_disabled}>Stop</button></form>
+          <a class="button {vibe_open_disabled}" href="http://localhost:{VIBE_TRADING_PORT}/" target="_blank">Open</a>
+        </td>
+      </tr>
+    """
     return f"""<!doctype html>
 <html>
 <head>
@@ -410,7 +481,7 @@ def page(state: ManagerState, message: str = "") -> bytes:
   {msg}
   <table>
     <thead><tr><th>Worktree</th><th>Path</th><th>Port</th><th>Status</th><th>Actions</th></tr></thead>
-    <tbody>{''.join(rows)}</tbody>
+    <tbody>{vibe_row}{''.join(rows)}</tbody>
   </table>
 </body>
 </html>""".encode("utf-8")
@@ -434,7 +505,15 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 for wt in self.state.worktrees()
             ]
-            json_response(self, {"worktrees": data})
+            json_response(self, {
+                "worktrees": data,
+                "vibe_trading": {
+                    "path": str(VIBE_TRADING_ROOT),
+                    "port": VIBE_TRADING_PORT,
+                    "running": self.state.vibe_running(),
+                    "port_in_use": port_in_use(VIBE_TRADING_PORT),
+                },
+            })
             return
         if parsed.path != "/":
             self.send_error(404)
@@ -452,7 +531,11 @@ class Handler(BaseHTTPRequestHandler):
         params = parse_qs(self.rfile.read(length).decode("utf-8"))
         path = Path(params.get("path", [""])[0])
         try:
-            if self.path == "/start":
+            if self.path == "/vibe/start":
+                message = self.state.start_vibe()
+            elif self.path == "/vibe/stop":
+                message = self.state.stop_vibe()
+            elif self.path == "/start":
                 port = int(params.get("port", ["0"])[0])
                 message = self.state.start(path, port)
             elif self.path == "/stop":

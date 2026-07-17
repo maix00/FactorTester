@@ -82,3 +82,53 @@ def test_paused_step_job_blocks_drained_bundle_restart(tmp_path, monkeypatch) ->
     with pytest.raises(RuntimeError, match="paused step jobs"):
         state.restart_bundle(tmp_path, 8135)
     assert actions == ["drain", "resume"]
+
+
+def test_manager_starts_and_stops_vibe_on_fixed_port(tmp_path, monkeypatch) -> None:
+    vibe_root = tmp_path / "Vibe-Trading-Integration"
+    executable = vibe_root / ".conda" / "bin" / "vibe-trading"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("", encoding="ascii")
+    created = []
+
+    def fake_popen(command, **kwargs):
+        process = _Process(command)
+        created.append((process, kwargs))
+        return process
+
+    monkeypatch.setattr(manager, "VIBE_TRADING_ROOT", vibe_root)
+    monkeypatch.setattr(manager, "port_in_use", lambda port: False)
+    monkeypatch.setattr(manager.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "_terminate",
+        staticmethod(lambda process: setattr(process, "returncode", 0)),
+    )
+    state = manager.ManagerState(tmp_path, "python")
+
+    message = state.start_vibe()
+
+    assert "started Vibe-Trading" in message
+    assert state.vibe_running()
+    assert created[0][0].command == [
+        str(executable),
+        "serve",
+        "--host", "127.0.0.1",
+        "--port", "7899",
+    ]
+    assert created[0][1]["cwd"] == vibe_root
+    assert state.stop_vibe() == "stopped Vibe-Trading"
+    assert not state.vibe_running()
+
+
+def test_manager_page_exposes_vibe_controls(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(manager.ManagerState, "worktrees", lambda self: [])
+    monkeypatch.setattr(manager, "port_in_use", lambda port: False)
+    state = manager.ManagerState(tmp_path, "python")
+
+    body = manager.page(state).decode()
+
+    assert "Vibe-Trading" in body
+    assert "http://localhost:7899/" in body
+    assert 'action="/vibe/start"' in body
+    assert 'action="/vibe/stop"' in body
