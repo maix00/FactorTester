@@ -85,13 +85,11 @@ class FactorTesterClient:
         configuration_revision: int,
         *,
         analyses: list[str],
-        lifecycle_policy: str = "durable",
     ) -> dict[str, Any]:
         return self._expect_success(self.session.post("/api/runs", {
             "workspace_id": workspace_id,
             "configuration_revision": configuration_revision,
             "analyses": analyses,
-            "lifecycle_policy": lifecycle_policy,
         }))
 
     def get_run(self, run_id: str) -> dict[str, Any]:
@@ -130,6 +128,15 @@ class FactorTesterClient:
 
     def retry_job(self, job_id: str) -> dict[str, Any]:
         return self._expect_success(self.session.post(f"/api/jobs/{job_id}/retry", {}))
+
+    def approve_job(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.post(f"/api/jobs/{job_id}/approve", {}))
+
+    def pin_job(self, job_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.post(f"/api/jobs/{job_id}/pin", {}))
+
+    def unpin_job(self) -> dict[str, Any]:
+        return self._expect_success(self.session.delete("/api/jobs/pin"))
 
     def continue_job(self, job_id: str, *, action: str = "continue", until: str = "") -> dict[str, Any]:
         payload = {"action": action}

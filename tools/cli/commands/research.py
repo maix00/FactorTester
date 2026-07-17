@@ -174,15 +174,13 @@ def run() -> None:
 @click.option("--analysis", "analyses", multiple=True, type=click.Choice([
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
 ]), required=True)
-@click.option("--lifecycle", type=click.Choice(["durable", "observer_bound", "pause_on_detach"]), default="durable")
 @friendly_errors
-def run_submit(analyses: tuple[str, ...], lifecycle: str) -> None:
+def run_submit(analyses: tuple[str, ...]) -> None:
     state = _require_workspace()
     result = client_from_config().submit_run(
         state.workspace_id,
         state.configuration_revision,
         analyses=list(analyses),
-        lifecycle_policy=lifecycle,
     )
     click.echo(f"run_id={result.get('run_id')}")
     for item in result.get("jobs") or []:
@@ -205,9 +203,10 @@ def job() -> None:
 @click.option("--all-workspaces", is_flag=True)
 @click.option("--kind", type=click.Choice([
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
-]))
+    ]))
 @click.option("--status", "statuses", multiple=True, type=click.Choice([
-    "queued", "running", "paused", "succeeded", "failed", "cancelled", "expired",
+    "submitted", "planning", "awaiting_confirmation", "queued", "running",
+    "paused", "succeeded", "failed", "cancelled",
 ]))
 @click.option("--limit", default=20, show_default=True, type=click.IntRange(1, 200))
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
@@ -270,6 +269,26 @@ def job_cancel(job_id: str) -> None:
 @friendly_errors
 def job_retry(job_id: str) -> None:
     click.echo(_json(client_from_config().retry_job(job_id)))
+
+
+@job.command("approve")
+@click.argument("job_id")
+@friendly_errors
+def job_approve(job_id: str) -> None:
+    click.echo(_json(client_from_config().approve_job(job_id)))
+
+
+@job.command("pin")
+@click.argument("job_id")
+@friendly_errors
+def job_pin(job_id: str) -> None:
+    click.echo(_json(client_from_config().pin_job(job_id)))
+
+
+@job.command("unpin")
+@friendly_errors
+def job_unpin() -> None:
+    click.echo(_json(client_from_config().unpin_job()))
 
 
 @job.command("continue")

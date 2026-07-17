@@ -117,6 +117,9 @@ class HttpSession:
     def patch(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.request("PATCH", path, payload=payload or {})
 
+    def delete(self, path: str) -> dict[str, Any]:
+        return self.request("DELETE", path)
+
     def stream_post(self, path: str, payload: dict[str, Any] | None = None):
         yield from self.stream_request("POST", path, payload=payload or {})
 
