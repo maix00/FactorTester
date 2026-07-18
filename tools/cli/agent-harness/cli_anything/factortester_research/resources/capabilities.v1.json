@@ -731,7 +731,7 @@
       "capability_id": "research-result.audit",
       "industry_semantics": "Audit provenance, configuration, causal timing, trial counts, raw and adjusted statistics, gross-to-net performance, accounting, artifacts, failure evidence, and unresolved gaps before a decision.",
       "when_to_use": ["after diagnostics or backtests finish", "before any factor-validity or graph-change proposal"],
-      "preconditions": ["run, job, artifact, configuration, data, and graph identities are retained"],
+      "preconditions": ["applicable diagnostic command or run/job identity, artifact, configuration, data, and graph references are retained"],
       "prohibitions": ["do not allow an executor to self-declare factor validity", "do not suppress failed or null experiments"],
       "implementations": [
         {

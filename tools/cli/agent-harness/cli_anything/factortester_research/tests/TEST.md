@@ -25,6 +25,15 @@ added one observable behavior at a time.
   - advisory plan phases remain distinguishable from enforced gap states;
   - capability requirements are semantic contracts, not concrete Skill names;
   - mandatory and conditionally triggered capabilities remain distinct;
+  - FDR, Deflated Sharpe, and PBO trigger only when their trial-family
+    preconditions are known to hold;
+  - authoritative net returns precede bootstrap Sharpe and result audit;
+  - diagnostic and robustness failures can reject or preregister a bounded
+    revision without a post-selection audit loop;
+  - factor revisions restart hypothesis, capability, data, and validation
+    checks;
+  - factor semantics and terminal decisions require bounded
+    hypothesis-code-alignment and provisional-memory references;
   - external Skill execution remains unresolved without an explicit grant.
 - `test_full_e2e.py`
   - the installed Harness command prints the Observed Graph as JSON;

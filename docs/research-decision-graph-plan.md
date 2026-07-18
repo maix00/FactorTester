@@ -167,6 +167,127 @@ Each normative node or edge must cite one or more of:
 
 An agent opinion without evidence is not sufficient to activate an edge.
 
+## Statistical Research Semantics
+
+There is no single industry-standard factor-research state graph. The stable
+constraints come from research protocols and statistical methods whose
+preconditions differ:
+
+- freeze the hypothesis, selection boundary, holdout role, rejection rule, and
+  complete trial family before inspecting selection results;
+- count every factor, transform, horizon, universe, slice, parameter, and
+  adaptive revision in a trial ledger;
+- use false-discovery control only when more than one trial participates in
+  selection, never only on the surviving subset;
+- create an authoritative, net-of-cost return stream before applying Sharpe
+  uncertainty methods;
+- use Deflated Sharpe only after selection among multiple recorded trials;
+- use PBO/CSCV only when complete candidate return paths over common partitions
+  have been retained; it does not replace a true holdout;
+- reject a failed hypothesis without forcing mutation, and treat every revision
+  as a new hypothesis version with a trial-ledger increment and explicit
+  holdout status.
+
+The Draft Graph therefore follows:
+
+```text
+hypothesis preregistration
+  -> capability resolution
+  -> point-in-time data contract
+  -> hypothesis/code/timing semantics
+  -> validation and trial-family design
+  -> cheap in-sample diagnostics
+       -> reject -> independent result audit
+       -> revise -> new hypothesis preregistration
+       -> authoritative backtest
+            -> statistical robustness
+                 -> reject -> independent result audit
+                 -> revise -> new hypothesis preregistration
+                 -> independent result audit
+                      -> research decision
+```
+
+The audit node has no post-result loop back to statistical robustness. An
+omitted or newly invented statistical method is a new research version, not a
+license to tune the same holdout result.
+
+Statistical Skills remain guidance or candidate implementations until their
+exact method, inputs, outputs, version, and preconditions are approved. Runtime
+Agents receive capability descriptions and triggered conditions, not a full
+Skill document. The current implementation gaps for the trial ledger,
+bootstrap Sharpe, FDR, Deflated Sharpe, and PBO are intentionally visible; the
+graph must not silently substitute generic examples.
+
+Factor semantics also require evidence linking the hypothesis hash to the
+factor source or AST hash, financial rationale, numerical examples, and
+semantic invariants. The terminal decision writes only a bounded reference to
+provisional local memory containing the hypothesis, code, data, RunSpec, trial
+ledger, result, failure cause, and decision. Full artifacts remain local and
+behind hashes; one experiment never promotes itself into a graph edge.
+
+The graph also borrows cross-domain research controls without copying
+domain-specific publication workflows:
+
+- [OSF Preregistration](https://www.cos.io/initiatives/prereg) supplies the
+  planned-versus-unplanned distinction and permits predeclared conditional
+  analyses. A branch may adapt, but the condition and alternate path must be
+  frozen before the selection result is observed.
+- [Registered Reports](https://www.cos.io/initiatives/registered-reports)
+  supply the separation between method review and outcome review. This maps to
+  proposal/reviewer/grill approval before evidence-generating execution, not to
+  publication machinery.
+- The
+  [ASA Statement on P-Values](https://www.amstat.org/asa/files/pdfs/p-valuestatement.pdf)
+  prevents a single threshold from becoming a research conclusion. Decisions
+  retain effect magnitude, uncertainty, assumptions, multiplicity, economic
+  meaning, and implementation evidence.
+- W3C provenance standards supply execution lineage as described below.
+
+These are complementary controls, not one universal standard. Clinical
+reporting checklists and journal-specific rules are not imported as factor
+research requirements.
+
+Primary semantic sources:
+
+- Arnott, Harvey, and Markowitz,
+  [A Backtesting Protocol in the Era of Machine Learning](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3275654);
+- Harvey, Liu, and Zhu,
+  [The Cross-Section of Expected Returns](https://academic.oup.com/rfs/article-abstract/29/1/5/1843824);
+- Bailey and López de Prado,
+  [The Deflated Sharpe Ratio](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2460551);
+- Bailey et al.,
+  [The Probability of Backtest Overfitting](https://www.davidhbailey.com/dhbpapers/backtest-prob.pdf);
+- GIM,
+  [XALPHA](https://arxiv.org/abs/2607.08332), used for the
+  hypothesis-to-code and provisional-experiment-memory loop rather than as a
+  statistical standard.
+
+## Decision Graph versus Knowledge Graph
+
+The Active Graph is not a general knowledge graph. Its normative core is a
+versioned executable state graph: nodes are research states, while edges carry
+deterministic guards, evidence requirements, risk, authorization, and bounded
+side-effect rules. A knowledge graph answers semantic relationship and
+provenance queries; it does not replace transition authorization.
+
+Knowledge-graph standards are useful only as a compact metadata vocabulary:
+
+- map immutable artifacts and graph versions to `Entity`, research execution
+  to `Activity`, and human or software reviewers to `Agent`, following
+  [W3C PROV-O](https://www.w3.org/TR/prov-o/);
+- retain equivalents of `used`, `wasGeneratedBy`, `wasDerivedFrom`,
+  `wasAssociatedWith`, and `wasRevisionOf` in evidence envelopes;
+- use the constraint-oriented idea from
+  [W3C SHACL](https://www.w3.org/TR/shacl/) when validating bounded evidence
+  shapes, without introducing RDF or SPARQL into the runtime hot path.
+
+The server continues to store normalized JSON, hashes, receipts, and bounded
+references. It does not serialize the whole research history as RDF, load an
+ontology into every Agent context, or ask an LLM to infer routine transitions.
+If cross-project semantic discovery later becomes necessary, a read-only
+knowledge projection can be derived from the authoritative state/evidence
+records. It must not become a second source of transition truth.
+
 ## Graph Protocol
 
 The first protocol version uses plain JSON and pure Python validation. It does

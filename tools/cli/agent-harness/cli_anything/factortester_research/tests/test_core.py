@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from cli_anything.factortester_research.core.capabilities import (
+    evaluate_capability_predicate,
     load_builtin_capability_registry,
     resolve_graph_capabilities,
 )
@@ -168,13 +169,44 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     nodes = {item["node_id"]: item for item in graph["nodes"]}
 
     assert graph["lifecycle"] == "draft"
+    assert graph["version"] == 3
+    assert graph["parent_version"] == 2
     assert nodes["cheap_factor_diagnostics"]["required_capabilities"] == [
         "factor-validation.cross-sectional-ic",
         "factor-validation.quantile-monotonicity",
     ]
-    assert edges["cheap_diagnostics__statistical_robustness"]["guard"] == {
+    assert edges["cheap_diagnostics__backtest"]["guard"] == {
         "diagnostics_viable": True,
         "selection_role": "in_sample",
+    }
+    assert edges["backtest__statistical_robustness"]["guard"] == {
+        "terminal_job_evidence_retained": True,
+        "net_return_series_available": True,
+    }
+    assert edges["statistical_robustness__result_audit"]["guard"] == {
+        "uncertainty_review_passed": True,
+    }
+    assert "cheap_diagnostics__statistical_robustness" not in edges
+    assert "statistical_robustness__backtest" not in edges
+    assert "backtest__result_audit" not in edges
+    assert edges["cheap_diagnostics__result_audit"]["guard"] == {
+        "diagnostics_reject": True,
+    }
+    assert edges["statistical_robustness__result_audit_reject"]["guard"] == {
+        "robustness_reject": True,
+    }
+    assert edges["statistical_robustness__factor_improvement"]["guard"] == {
+        "robustness_revise": True,
+        "new_falsifiable_hypothesis_proposed": True,
+        "selection_holdout_not_reused": True,
+        "remaining_revision_budget_positive": True,
+    }
+    assert "result_audit__statistical_robustness" not in edges
+    assert edges["factor_improvement__hypothesis"]["guard"] == {
+        "new_hypothesis_version_recorded": True,
+        "trial_ledger_incremented": True,
+        "holdout_status_recorded": True,
+        "factor_change_retained": True,
     }
     assert edges["any_node__capability_gap"]["from_node"] == "*"
     assert nodes["capability_gap"]["required_capabilities"] == [
@@ -187,6 +219,103 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     assert conditional == {
         "market-microstructure.intraday-diagnose",
         "factor-combination.multi-factor",
+    }
+    validation_required = set(
+        nodes["validation_design"]["required_capabilities"]
+    )
+    validation_conditional = {
+        item["capability_id"]: item["predicate"]
+        for item in nodes["validation_design"]["conditional_capabilities"]
+    }
+    robustness_required = set(
+        nodes["statistical_robustness"]["required_capabilities"]
+    )
+    robustness_conditional = {
+        item["capability_id"]: item["predicate"]
+        for item in nodes["statistical_robustness"]["conditional_capabilities"]
+    }
+    assert "multiple-testing.false-discovery-control" not in validation_required
+    assert validation_conditional[
+        "multiple-testing.false-discovery-control"
+    ] == {"field": "research.trial_count", "greater_than": 1}
+    assert robustness_required == {"performance.bootstrap-sharpe"}
+    assert robustness_conditional["performance.deflated-sharpe"] == {
+        "field": "research.trial_count",
+        "greater_than": 1,
+    }
+    assert robustness_conditional[
+        "performance.backtest-overfit-probability"
+    ] == {
+        "all": [
+            {"field": "research.trial_count", "greater_than": 1},
+            {
+                "field": "selection.complete_candidate_return_matrix",
+                "equals": True,
+            },
+        ],
+    }
+    assert "provisional local memory" in nodes["research_decision"]["purpose"]
+    assert nodes["factor_semantics"]["exit_evidence"] == [
+        "hypothesis hash and factor source or AST hash",
+        "financial mechanism to implementation alignment",
+        "numerical examples and semantic invariant checks",
+    ]
+    assert nodes["research_decision"]["exit_evidence"] == [
+        "provisional local memory reference containing hypothesis, code, data, "
+        "RunSpec, trial ledger, result, failure cause, and decision",
+    ]
+
+
+def test_numeric_capability_predicates_fail_closed() -> None:
+    predicate = {"field": "research.trial_count", "greater_than": 1}
+
+    assert evaluate_capability_predicate(
+        predicate,
+        {"research": {"trial_count": 2}},
+    ) is True
+    assert evaluate_capability_predicate(
+        predicate,
+        {"research": {"trial_count": 1}},
+    ) is False
+    assert evaluate_capability_predicate(predicate, {}) is None
+    with pytest.raises(ValueError, match="numeric"):
+        evaluate_capability_predicate(
+            predicate,
+            {"research": {"trial_count": "many"}},
+        )
+
+
+def test_trial_family_capabilities_are_triggered_only_when_applicable() -> None:
+    graph = build_draft_graph()
+    registry = load_builtin_capability_registry()
+    single = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="china_futures",
+        node_id="statistical_robustness",
+        facts={
+            "research": {"trial_count": 1},
+            "selection": {"complete_candidate_return_matrix": False},
+        },
+    )
+    family = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="china_futures",
+        node_id="statistical_robustness",
+        facts={
+            "research": {"trial_count": 4},
+            "selection": {"complete_candidate_return_matrix": True},
+        },
+    )
+
+    assert single["triggered_conditional_gaps"] == []
+    assert {
+        item["capability_id"]
+        for item in family["triggered_conditional_gaps"]
+    } == {
+        "performance.deflated-sharpe",
+        "performance.backtest-overfit-probability",
     }
 
 

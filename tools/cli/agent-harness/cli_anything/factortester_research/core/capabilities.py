@@ -366,6 +366,18 @@ def evaluate_capability_predicate(
         if not isinstance(value, (list, tuple, set)):
             return False
         return any(item in value for item in choices)
+    if "greater_than" in predicate:
+        threshold = predicate["greater_than"]
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not isinstance(threshold, (int, float))
+            or isinstance(threshold, bool)
+        ):
+            raise ValueError(
+                "predicate greater_than requires numeric value and threshold"
+            )
+        return value > threshold
     raise ValueError("unsupported capability predicate operator")
 
 

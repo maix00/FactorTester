@@ -336,7 +336,8 @@ def build_draft_graph() -> dict[str, Any]:
         (
             "factor_semantics",
             "validation",
-            "Reconcile factor source, expression operators, and signal timing.",
+            "Reconcile the financial mechanism with factor source or AST, "
+            "expression operators, numerical invariants, and signal timing.",
             [
                 "factor-expr.operator-registry.inspect",
                 "factor-workspace.source.inspect",
@@ -350,7 +351,6 @@ def build_draft_graph() -> dict[str, Any]:
             [
                 "research-validation.slice-plan",
                 "multiple-testing.trial-ledger",
-                "multiple-testing.false-discovery-control",
             ],
         ),
         (
@@ -370,7 +370,6 @@ def build_draft_graph() -> dict[str, Any]:
             "methods whose preconditions are satisfied.",
             [
                 "performance.bootstrap-sharpe",
-                "performance.deflated-sharpe",
             ],
         ),
         (
@@ -397,7 +396,9 @@ def build_draft_graph() -> dict[str, Any]:
             "research_decision",
             "decision",
             "Record reject, revise, retain-for-more-evidence, or validated "
-            "research status without self-certification by the executor.",
+            "research status without self-certification by the executor, and "
+            "write a provisional local memory of the mechanism, failure cause, "
+            "and next-cycle constraint.",
             [],
         ),
         (
@@ -521,6 +522,50 @@ def build_draft_graph() -> dict[str, Any]:
                 "explanation": "two or more factors are normalized or combined",
             },
         ],
+        "validation_design": [{
+            "capability_id": "multiple-testing.false-discovery-control",
+            "predicate": {
+                "field": "research.trial_count",
+                "greater_than": 1,
+            },
+            "explanation": (
+                "more than one factor, transform, horizon, universe, slice, "
+                "parameter, or adaptive choice participates in selection"
+            ),
+        }],
+        "statistical_robustness": [
+            {
+                "capability_id": "performance.deflated-sharpe",
+                "predicate": {
+                    "field": "research.trial_count",
+                    "greater_than": 1,
+                },
+                "explanation": (
+                    "a result was selected from more than one recorded trial"
+                ),
+            },
+            {
+                "capability_id": "performance.backtest-overfit-probability",
+                "predicate": {
+                    "all": [
+                        {
+                            "field": "research.trial_count",
+                            "greater_than": 1,
+                        },
+                        {
+                            "field": (
+                                "selection.complete_candidate_return_matrix"
+                            ),
+                            "equals": True,
+                        },
+                    ],
+                },
+                "explanation": (
+                    "a material candidate family has complete return paths "
+                    "over common partitions suitable for CSCV"
+                ),
+            },
+        ],
         "authoritative_backtest": [{
             "capability_id": "execution-cost.capacity-model",
             "predicate": {"any": [
@@ -563,6 +608,23 @@ def build_draft_graph() -> dict[str, Any]:
             },
         ],
     }
+    entry_evidence_by_node = {
+        "hypothesis_preregistration": [
+            "relevant provisional local memory references when prior "
+            "experiments exist",
+        ],
+    }
+    exit_evidence_by_node = {
+        "factor_semantics": [
+            "hypothesis hash and factor source or AST hash",
+            "financial mechanism to implementation alignment",
+            "numerical examples and semantic invariant checks",
+        ],
+        "research_decision": [
+            "provisional local memory reference containing hypothesis, code, "
+            "data, RunSpec, trial ledger, result, failure cause, and decision",
+        ],
+    }
     nodes = [
         {
             "node_id": node_id,
@@ -571,8 +633,8 @@ def build_draft_graph() -> dict[str, Any]:
             "enforcement": "audited",
             "required_capabilities": capabilities,
             "conditional_capabilities": conditional_by_node.get(node_id, []),
-            "entry_evidence": [],
-            "exit_evidence": [],
+            "entry_evidence": entry_evidence_by_node.get(node_id, []),
+            "exit_evidence": exit_evidence_by_node.get(node_id, []),
         }
         for node_id, kind, purpose, capabilities in node_specs
     ]
@@ -652,9 +714,9 @@ def build_draft_graph() -> dict[str, Any]:
             guard={"selection_and_trial_plan_frozen": True},
         ),
         edge(
-            "cheap_diagnostics__statistical_robustness",
+            "cheap_diagnostics__backtest",
             "cheap_factor_diagnostics",
-            "statistical_robustness",
+            "authoritative_backtest",
             guard={
                 "diagnostics_viable": True,
                 "selection_role": "in_sample",
@@ -664,22 +726,69 @@ def build_draft_graph() -> dict[str, Any]:
             "cheap_diagnostics__factor_improvement",
             "cheap_factor_diagnostics",
             "factor_improvement_required",
-            guard={"diagnostics_reject_or_revise": True},
+            guard={
+                "diagnostics_revise": True,
+                "revision_reason_preregistered": True,
+                "selection_holdout_not_reused": True,
+                "trial_ledger_incremented": True,
+                "remaining_revision_budget_positive": True,
+            },
             risk_level="L2",
             counterexamples=["failure is caused by a platform or data gap"],
         ),
         edge(
-            "statistical_robustness__backtest",
-            "statistical_robustness",
+            "cheap_diagnostics__result_audit",
+            "cheap_factor_diagnostics",
+            "result_audit",
+            edge_type="failure",
+            guard={"diagnostics_reject": True},
+            risk_level="L2",
+            required_evidence=[
+                "frozen diagnostic specification and rejection evidence",
+            ],
+        ),
+        edge(
+            "backtest__statistical_robustness",
             "authoritative_backtest",
+            "statistical_robustness",
+            guard={
+                "terminal_job_evidence_retained": True,
+                "net_return_series_available": True,
+            },
+        ),
+        edge(
+            "statistical_robustness__result_audit",
+            "statistical_robustness",
+            "result_audit",
             guard={"uncertainty_review_passed": True},
             risk_level="L2",
         ),
         edge(
-            "backtest__result_audit",
-            "authoritative_backtest",
+            "statistical_robustness__result_audit_reject",
+            "statistical_robustness",
             "result_audit",
-            guard={"terminal_job_evidence_retained": True},
+            edge_type="failure",
+            guard={"robustness_reject": True},
+            risk_level="L2",
+            required_evidence=[
+                "predeclared uncertainty method and rejection evidence",
+            ],
+        ),
+        edge(
+            "statistical_robustness__factor_improvement",
+            "statistical_robustness",
+            "factor_improvement_required",
+            edge_type="recovery",
+            guard={
+                "robustness_revise": True,
+                "new_falsifiable_hypothesis_proposed": True,
+                "selection_holdout_not_reused": True,
+                "remaining_revision_budget_positive": True,
+            },
+            risk_level="L2",
+            required_evidence=[
+                "new falsifiable mechanism and remaining revision budget",
+            ],
         ),
         edge(
             "result_audit__research_decision",
@@ -689,20 +798,20 @@ def build_draft_graph() -> dict[str, Any]:
             risk_level="L2",
         ),
         edge(
-            "result_audit__statistical_robustness",
-            "result_audit",
-            "statistical_robustness",
-            edge_type="recovery",
-            guard={"additional_statistical_evidence_required": True},
-            risk_level="L2",
-        ),
-        edge(
-            "factor_improvement__factor_semantics",
+            "factor_improvement__hypothesis",
             "factor_improvement_required",
-            "factor_semantics",
+            "hypothesis_preregistration",
             edge_type="recovery",
-            guard={"new_trial_recorded": True, "factor_change_retained": True},
+            guard={
+                "new_hypothesis_version_recorded": True,
+                "trial_ledger_incremented": True,
+                "holdout_status_recorded": True,
+                "factor_change_retained": True,
+            },
             risk_level="L2",
+            required_evidence=[
+                "new hypothesis version, trial-ledger delta, and holdout status",
+            ],
         ),
         edge(
             "capability_gap__capability_resolution",
@@ -747,9 +856,9 @@ def build_draft_graph() -> dict[str, Any]:
     graph = {
         "schema_version": 1,
         "graph_id": "factor-research",
-        "version": 2,
+        "version": 3,
         "lifecycle": "draft",
-        "parent_version": 1,
+        "parent_version": 2,
         "research_semantics": "product_neutral",
         "entry_node": "hypothesis_preregistration",
         "nodes": nodes,

@@ -140,8 +140,17 @@ class TestCLISubprocess:
             for item in detailed_payload["resolution"]["gaps"]
         } >= {
             "multiple-testing.trial-ledger",
+            "performance.bootstrap-sharpe",
+        }
+        assert {
+            item["capability_id"]
+            for item in detailed_payload["resolution"][
+                "undetermined_conditions"
+            ]
+        } >= {
             "multiple-testing.false-discovery-control",
             "performance.deflated-sharpe",
+            "performance.backtest-overfit-probability",
         }
 
     def test_graph_replay_is_non_mutating(self) -> None:
