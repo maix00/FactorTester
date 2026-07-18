@@ -48,6 +48,50 @@ _SERVER_FORBIDDEN_SKILL_FIELDS = {
 _MAX_CONTEXT_BYTES = 6000
 _MAX_CONTEXT_EVIDENCE_REFS = 8
 _MAX_EVIDENCE_REF_BYTES = 256
+_GRAPH_CACHE: dict[tuple[str, str, int, str], dict[str, Any]] = {}
+_GRAPH_CACHE_INDEX: dict[tuple[str, str, int], str] = {}
+
+
+def _graph_version_cache_key(
+    graph_id: str,
+    version: int,
+) -> tuple[str, str, int]:
+    return (str(Settings.CACHE_DB_PATH), graph_id, int(version))
+
+
+def _cache_graph(graph: dict[str, Any]) -> dict[str, Any]:
+    graph_id = str(graph["graph_id"])
+    version = int(graph["version"])
+    content_hash = str(graph["content_hash"])
+    version_key = _graph_version_cache_key(graph_id, version)
+    cache_key = (*version_key, content_hash)
+    value = deepcopy(graph)
+    _GRAPH_CACHE_INDEX[version_key] = content_hash
+    _GRAPH_CACHE[cache_key] = value
+    return deepcopy(value)
+
+
+def _cached_graph(
+    graph_id: str,
+    version: int,
+) -> dict[str, Any] | None:
+    version_key = _graph_version_cache_key(graph_id, version)
+    content_hash = _GRAPH_CACHE_INDEX.get(version_key)
+    if content_hash is None:
+        return None
+    value = _GRAPH_CACHE.get((*version_key, content_hash))
+    return deepcopy(value) if value is not None else None
+
+
+def _clear_graph_cache_for_current_db() -> None:
+    db_path = str(Settings.CACHE_DB_PATH)
+    version_keys = [
+        key for key in _GRAPH_CACHE_INDEX
+        if key[0] == db_path
+    ]
+    for version_key in version_keys:
+        content_hash = _GRAPH_CACHE_INDEX.pop(version_key)
+        _GRAPH_CACHE.pop((*version_key, content_hash), None)
 
 
 def _merge_bounded_evidence_refs(
@@ -291,8 +335,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             created_at REAL NOT NULL,
             PRIMARY KEY (instance_id, branch_id, node_id)
         );
-        CREATE INDEX IF NOT EXISTS idx_research_graph_node_resolutions_branch
-        ON research_graph_node_resolutions(instance_id, branch_id, node_id);
         CREATE TABLE IF NOT EXISTS research_capability_approvals (
             approval_id TEXT PRIMARY KEY,
             owner_user_id TEXT NOT NULL,
@@ -389,6 +431,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
                 f"ADD COLUMN {column} {declaration}"
             )
     _backfill_branch_aggregates(conn)
+    conn.execute(
+        "DROP INDEX IF EXISTS idx_research_graph_node_resolutions_branch"
+    )
     proposal_columns = {
         str(row["name"])
         for row in conn.execute(
@@ -537,6 +582,7 @@ def _backfill_branch_aggregates(conn: sqlite3.Connection) -> None:
 
 
 def ensure_schema() -> None:
+    _clear_graph_cache_for_current_db()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
 
@@ -550,6 +596,26 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return graph
 
 
+def _load_graph_from_conn(
+    conn: sqlite3.Connection,
+    *,
+    graph_id: str,
+    version: int,
+) -> dict[str, Any] | None:
+    cached = _cached_graph(graph_id, version)
+    if cached is not None:
+        return cached
+    row = conn.execute(
+        """
+        SELECT * FROM research_graph_versions
+        WHERE graph_id=? AND version=?
+        """,
+        (graph_id, int(version)),
+    ).fetchone()
+    graph = _row_payload(row)
+    return _cache_graph(graph) if graph is not None else None
+
+
 def _insert_graph(
     conn: sqlite3.Connection,
     graph: dict[str, Any],
@@ -557,6 +623,7 @@ def _insert_graph(
     actor: str,
 ) -> dict[str, Any]:
     value = _validate_graph(graph)
+    created_at = time.time()
     try:
         conn.execute(
             """
@@ -573,7 +640,7 @@ def _insert_graph(
                 value["content_hash"],
                 orjson.dumps(value, option=orjson.OPT_SORT_KEYS).decode(),
                 actor,
-                time.time(),
+                created_at,
             ),
         )
     except sqlite3.IntegrityError as exc:
@@ -588,19 +655,16 @@ def _insert_graph(
             existing is not None
             and str(existing["content_hash"]) == value["content_hash"]
         ):
-            return _row_payload(existing) or {}
+            stored = _row_payload(existing) or {}
+            return _cache_graph(stored)
         raise GraphVersionConflict(
             f"graph version is immutable: {value['graph_id']} "
             f"v{value['version']}"
         ) from exc
-    row = conn.execute(
-        """
-        SELECT * FROM research_graph_versions
-        WHERE graph_id=? AND version=?
-        """,
-        (value["graph_id"], int(value["version"])),
-    ).fetchone()
-    return _row_payload(row) or {}
+    stored = deepcopy(value)
+    stored["created_by"] = actor
+    stored["created_at"] = created_at
+    return _cache_graph(stored)
 
 
 def register_graph(graph: dict[str, Any], *, actor: str) -> dict[str, Any]:
@@ -612,15 +676,15 @@ def register_graph(graph: dict[str, Any], *, actor: str) -> dict[str, Any]:
 
 
 def load_graph(*, graph_id: str, version: int) -> dict[str, Any] | None:
+    cached = _cached_graph(graph_id, version)
+    if cached is not None:
+        return cached
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        row = conn.execute(
-            """
-            SELECT * FROM research_graph_versions
-            WHERE graph_id=? AND version=?
-            """,
-            (graph_id, int(version)),
-        ).fetchone()
-    return _row_payload(row)
+        return _load_graph_from_conn(
+            conn,
+            graph_id=graph_id,
+            version=version,
+        )
 
 
 def list_graph_versions(*, graph_id: str) -> list[dict[str, Any]]:
@@ -632,7 +696,26 @@ def list_graph_versions(*, graph_id: str) -> list[dict[str, Any]]:
             """,
             (graph_id,),
         ).fetchall()
-    return [_row_payload(row) or {} for row in rows]
+    return [
+        _cache_graph(_row_payload(row) or {})
+        for row in rows
+    ]
+
+
+def _graph_lifecycle(
+    conn: sqlite3.Connection,
+    *,
+    graph_id: str,
+    version: int,
+) -> str | None:
+    row = conn.execute(
+        """
+        SELECT lifecycle FROM research_graph_versions
+        WHERE graph_id=? AND version=?
+        """,
+        (graph_id, int(version)),
+    ).fetchone()
+    return str(row["lifecycle"]) if row is not None else None
 
 
 def record_validation(
@@ -642,8 +725,6 @@ def record_validation(
     actor: str,
     evidence: dict[str, Any],
 ) -> dict[str, Any]:
-    if load_graph(graph_id=graph_id, version=version) is None:
-        raise KeyError("graph version not found")
     if not isinstance(evidence, dict):
         raise ValueError("validation evidence must be an object")
     _assert_no_skill_identity(evidence, location="validation evidence")
@@ -700,6 +781,12 @@ def record_validation(
         "created_at": time.time(),
     }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        if _graph_lifecycle(
+            conn,
+            graph_id=graph_id,
+            version=version,
+        ) is None:
+            raise KeyError("graph version not found")
         conn.execute(
             """
             INSERT INTO research_graph_validations (
@@ -1153,17 +1240,14 @@ def record_proposal(
     _assert_no_skill_identity(change_diff, location="proposal diff")
     proposal_id = uuid.uuid4().hex
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        graph_row = conn.execute(
-            """
-            SELECT * FROM research_graph_versions
-            WHERE graph_id=? AND version=?
-            """,
-            (graph_id, int(version)),
-        ).fetchone()
-        graph = _row_payload(graph_row)
-        if graph is None:
+        lifecycle = _graph_lifecycle(
+            conn,
+            graph_id=graph_id,
+            version=version,
+        )
+        if lifecycle is None:
             raise KeyError("graph version not found")
-        if graph.get("lifecycle") != "draft":
+        if lifecycle != "draft":
             raise ValueError("only a draft graph accepts proposals")
         _require_agent_execution(
             conn,
@@ -1342,8 +1426,6 @@ def record_audit(
     disposition: str,
     grill_evidence: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    if load_graph(graph_id=graph_id, version=version) is None:
-        raise KeyError("graph version not found")
     if disposition not in {"approved", "rejected", "quarantined", "frozen"}:
         raise ValueError("invalid audit disposition")
     if not isinstance(grill_evidence, list) or not grill_evidence:
@@ -1360,6 +1442,12 @@ def record_audit(
         "created_at": time.time(),
     }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        if _graph_lifecycle(
+            conn,
+            graph_id=graph_id,
+            version=version,
+        ) is None:
+            raise KeyError("graph version not found")
         conn.execute(
             """
             INSERT INTO research_graph_audits (
@@ -1424,14 +1512,11 @@ def activate_graph(
     actor: str,
 ) -> dict[str, Any]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        source_row = conn.execute(
-            """
-            SELECT * FROM research_graph_versions
-            WHERE graph_id=? AND version=?
-            """,
-            (graph_id, int(source_version)),
-        ).fetchone()
-        source = _row_payload(source_row)
+        source = _load_graph_from_conn(
+            conn,
+            graph_id=graph_id,
+            version=source_version,
+        )
         if source is None:
             raise KeyError("graph version not found")
         if source["lifecycle"] != "draft":
@@ -1516,16 +1601,17 @@ def rollback_active_graph(
         from_version = int(current["version"])
         if from_version == int(target_version):
             raise ValueError("rollback target is already active")
-        target_row = conn.execute(
-            """
-            SELECT * FROM research_graph_versions
-            WHERE graph_id=? AND version=? AND lifecycle='active'
-            """,
-            (graph_id, int(target_version)),
-        ).fetchone()
-        target = _row_payload(target_row)
-        if target is None:
+        if _graph_lifecycle(
+            conn,
+            graph_id=graph_id,
+            version=target_version,
+        ) != "active":
             raise KeyError("rollback target active version not found")
+        target = _load_graph_from_conn(
+            conn,
+            graph_id=graph_id,
+            version=target_version,
+        ) or {}
         now = time.time()
         rollback_id = uuid.uuid4().hex
         conn.execute(
@@ -1574,14 +1660,18 @@ def load_active_graph(*, graph_id: str) -> dict[str, Any] | None:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         row = conn.execute(
             """
-            SELECT v.* FROM active_research_graphs a
-            JOIN research_graph_versions v
-              ON v.graph_id=a.graph_id AND v.version=a.version
-            WHERE a.graph_id=?
+            SELECT version FROM active_research_graphs
+            WHERE graph_id=?
             """,
             (graph_id,),
         ).fetchone()
-    return _row_payload(row)
+        if row is None:
+            return None
+        return _load_graph_from_conn(
+            conn,
+            graph_id=graph_id,
+            version=int(row["version"]),
+        )
 
 
 def _branch_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -1658,10 +1748,14 @@ def _store_node_resolution(
     resolution: dict[str, Any],
 ) -> dict[str, Any]:
     value = _normalize_node_resolution(resolution, node_id=node_id)
+    serialized = orjson.dumps(
+        value,
+        option=orjson.OPT_SORT_KEYS,
+    ).decode()
     semantic_cache_key = str(
         value.get("semantic_cache_key")
         or (value.get("cache") or {}).get("key")
-        or ""
+        or hashlib.sha256(serialized.encode()).hexdigest()
     )
     conn.execute(
         """
@@ -1673,12 +1767,14 @@ def _store_node_resolution(
             resolution_json=excluded.resolution_json,
             semantic_cache_key=excluded.semantic_cache_key,
             created_at=excluded.created_at
+        WHERE research_graph_node_resolutions.semantic_cache_key
+              <> excluded.semantic_cache_key
         """,
         (
             instance_id,
             branch_id,
             node_id,
-            orjson.dumps(value, option=orjson.OPT_SORT_KEYS).decode(),
+            serialized,
             semantic_cache_key,
             time.time(),
         ),
@@ -1815,14 +1911,11 @@ def issue_capability_receipt(
         ).fetchone()
         if active is None or int(active["version"]) != int(graph_version):
             raise ValueError("receipt graph version is not active")
-        graph_row = conn.execute(
-            """
-            SELECT * FROM research_graph_versions
-            WHERE graph_id=? AND version=?
-            """,
-            (graph_id, int(graph_version)),
-        ).fetchone()
-        graph = _row_payload(graph_row) or {}
+        graph = _load_graph_from_conn(
+            conn,
+            graph_id=graph_id,
+            version=graph_version,
+        ) or {}
         node = next(
             (
                 item for item in graph.get("nodes") or []
@@ -2047,10 +2140,7 @@ def create_graph_instance(
                 int(active["version"]),
                 product_group,
                 workspace_id,
-                orjson.dumps(
-                    local_resolution,
-                    option=orjson.OPT_SORT_KEYS,
-                ).decode(),
+                "{}",
                 token_budget,
                 now,
             ),
@@ -2080,10 +2170,15 @@ def create_graph_instance(
             node_id=entry_node,
             resolution=local_resolution,
         )
-        branch = _branch_payload(conn.execute(
-            "SELECT * FROM research_graph_branches WHERE branch_id=?",
-            (branch_id,),
-        ).fetchone())
+        branch = {
+            "branch_id": branch_id,
+            "instance_id": instance_id,
+            "label": "primary",
+            "current_node": entry_node,
+            "status": "running",
+            "created_at": now,
+            "updated_at": now,
+        }
     return {
         "instance_id": instance_id,
         "owner": owner,
@@ -2098,18 +2193,22 @@ def create_graph_instance(
     }
 
 
-def _load_instance_row(
+def _load_instance_branch_row(
     conn: sqlite3.Connection,
     *,
     instance_id: str,
+    branch_id: str,
     owner: str,
 ) -> sqlite3.Row | None:
     return conn.execute(
         """
-        SELECT * FROM research_graph_instances
-        WHERE instance_id=? AND owner=?
+        SELECT i.*, b.*
+        FROM research_graph_instances i
+        JOIN research_graph_branches b
+          ON b.instance_id=i.instance_id
+        WHERE i.instance_id=? AND b.branch_id=? AND i.owner=?
         """,
-        (instance_id, owner),
+        (instance_id, branch_id, owner),
     ).fetchone()
 
 
@@ -2120,17 +2219,12 @@ def load_graph_branch(
     owner: str,
 ) -> dict[str, Any] | None:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        if _load_instance_row(
-            conn, instance_id=instance_id, owner=owner,
-        ) is None:
-            return None
-        row = conn.execute(
-            """
-            SELECT * FROM research_graph_branches
-            WHERE branch_id=? AND instance_id=?
-            """,
-            (branch_id, instance_id),
-        ).fetchone()
+        row = _load_instance_branch_row(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=owner,
+        )
     return _branch_payload(row)
 
 
@@ -2142,17 +2236,12 @@ def fork_graph_branch(
     label: str,
 ) -> dict[str, Any]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        if _load_instance_row(
-            conn, instance_id=instance_id, owner=owner,
-        ) is None:
-            raise KeyError("graph instance not found")
-        source = conn.execute(
-            """
-            SELECT * FROM research_graph_branches
-            WHERE branch_id=? AND instance_id=?
-            """,
-            (source_branch_id, instance_id),
-        ).fetchone()
+        source = _load_instance_branch_row(
+            conn,
+            instance_id=instance_id,
+            branch_id=source_branch_id,
+            owner=owner,
+        )
         if source is None:
             raise KeyError("source branch not found")
         branch_id = uuid.uuid4().hex
@@ -2187,11 +2276,15 @@ def fork_graph_branch(
                 node_id=str(source["current_node"]),
                 resolution=current_resolution,
             )
-        row = conn.execute(
-            "SELECT * FROM research_graph_branches WHERE branch_id=?",
-            (branch_id,),
-        ).fetchone()
-    return _branch_payload(row) or {}
+    return {
+        "branch_id": branch_id,
+        "instance_id": instance_id,
+        "label": str(label or "fork").strip(),
+        "current_node": str(source["current_node"]),
+        "status": "running",
+        "created_at": now,
+        "updated_at": now,
+    }
 
 
 def advance_graph_branch(
@@ -2264,11 +2357,16 @@ def advance_graph_branch(
             )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        instance = _load_instance_row(
-            conn, instance_id=instance_id, owner=owner,
+        branch_row = _load_instance_branch_row(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=owner,
         )
-        if instance is None:
-            raise KeyError("graph instance not found")
+        if branch_row is None:
+            raise KeyError("graph branch not found")
+        instance = branch_row
+        branch = _branch_payload(branch_row) or {}
         reported_team_tokens = (
             int(telemetry.get("input_tokens") or 0)
             + int(telemetry.get("output_tokens") or 0)
@@ -2314,24 +2412,11 @@ def advance_graph_branch(
             raise ValueError(
                 "reported team token total does not match provider usage"
             )
-        branch_row = conn.execute(
-            """
-            SELECT * FROM research_graph_branches
-            WHERE branch_id=? AND instance_id=?
-            """,
-            (branch_id, instance_id),
-        ).fetchone()
-        branch = _branch_payload(branch_row)
-        if branch is None:
-            raise KeyError("graph branch not found")
-        graph_row = conn.execute(
-            """
-            SELECT * FROM research_graph_versions
-            WHERE graph_id=? AND version=?
-            """,
-            (instance["graph_id"], int(instance["graph_version"])),
-        ).fetchone()
-        graph = _row_payload(graph_row) or {}
+        graph = _load_graph_from_conn(
+            conn,
+            graph_id=str(instance["graph_id"]),
+            version=int(instance["graph_version"]),
+        ) or {}
         edge = next(
             (
                 item for item in graph.get("edges") or []
@@ -2501,11 +2586,15 @@ def advance_graph_branch(
                 now,
             ),
         )
-        row = conn.execute(
-            "SELECT * FROM research_graph_branches WHERE branch_id=?",
-            (branch_id,),
-        ).fetchone()
-    return _branch_payload(row) or {}
+    return {
+        "branch_id": branch_id,
+        "instance_id": instance_id,
+        "label": branch["label"],
+        "current_node": target_id,
+        "status": status,
+        "created_at": branch["created_at"],
+        "updated_at": now,
+    }
 
 
 def build_graph_branch_context(
@@ -2516,29 +2605,21 @@ def build_graph_branch_context(
 ) -> dict[str, Any]:
     """Return only the local subgraph and compact evidence needed next."""
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        instance = _load_instance_row(
-            conn, instance_id=instance_id, owner=owner,
+        branch_row = _load_instance_branch_row(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=owner,
         )
-        if instance is None:
-            raise KeyError("graph instance not found")
-        branch_row = conn.execute(
-            """
-            SELECT * FROM research_graph_branches
-            WHERE branch_id=? AND instance_id=?
-            """,
-            (branch_id, instance_id),
-        ).fetchone()
-        branch = _branch_payload(branch_row)
-        if branch is None:
+        if branch_row is None:
             raise KeyError("graph branch not found")
-        graph_row = conn.execute(
-            """
-            SELECT * FROM research_graph_versions
-            WHERE graph_id=? AND version=?
-            """,
-            (instance["graph_id"], int(instance["graph_version"])),
-        ).fetchone()
-        graph = _row_payload(graph_row) or {}
+        instance = branch_row
+        branch = _branch_payload(branch_row)
+        graph = _load_graph_from_conn(
+            conn,
+            graph_id=str(instance["graph_id"]),
+            version=int(instance["graph_version"]),
+        ) or {}
         node = next(
             (
                 item for item in graph.get("nodes") or []

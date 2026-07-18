@@ -339,6 +339,50 @@ def test_graph_request_paths_do_not_run_schema_ddl(
         statement.startswith("PRAGMA TABLE_INFO")
         for statement in normalized
     )
+    with original_connect(Settings.CACHE_DB_PATH) as connection:
+        index_names = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA index_list(research_graph_node_resolutions)"
+            ).fetchall()
+        }
+    assert "idx_research_graph_node_resolutions_branch" not in index_names
+
+
+def test_immutable_graph_cache_uses_hash_and_returns_defensive_copies(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    stored = research_graphs.register_graph(
+        _draft_graph(),
+        actor="curator-agent",
+    )
+    stored["nodes"][0]["purpose"] = "caller mutation"
+    statements: list[str] = []
+    original_connect = research_graphs.connect_sqlite
+
+    def traced_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(research_graphs, "connect_sqlite", traced_connect)
+    cached = research_graphs.load_graph(
+        graph_id="factor-research",
+        version=2,
+    )
+
+    assert cached["nodes"][0]["purpose"] == "freeze hypothesis"
+    assert statements == []
+    assert any(
+        key[1:] == (
+            "factor-research",
+            2,
+            cached["content_hash"],
+        )
+        for key in research_graphs._GRAPH_CACHE
+    )
 
 
 def test_activation_requires_replay_shadow_capability_and_job_isolation(
@@ -775,6 +819,19 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         label="independent hypothesis",
     )
 
+    transition_statements: list[str] = []
+    original_connect = research_graphs.connect_sqlite
+
+    def traced_transition_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(transition_statements.append)
+        return connection
+
+    monkeypatch.setattr(
+        research_graphs,
+        "connect_sqlite",
+        traced_transition_connect,
+    )
     research_graphs.advance_graph_branch(
         instance_id=instance["instance_id"],
         branch_id=first["branch_id"],
@@ -782,6 +839,32 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         edge_id="hypothesis__resolution",
         evidence={"hypothesis_frozen": True},
     )
+    monkeypatch.setattr(
+        research_graphs,
+        "connect_sqlite",
+        original_connect,
+    )
+    transition_selects = [
+        statement for statement in transition_statements
+        if statement.lstrip().upper().startswith("SELECT ")
+    ]
+    assert len(transition_selects) == 2
+    assert not any(
+        "RESEARCH_GRAPH_VERSIONS" in statement.upper()
+        for statement in transition_selects
+    )
+    assert sum(
+        statement.lstrip().upper().startswith(
+            "UPDATE RESEARCH_GRAPH_BRANCHES"
+        )
+        for statement in transition_statements
+    ) == 1
+    assert sum(
+        statement.lstrip().upper().startswith(
+            "INSERT INTO RESEARCH_GRAPH_TRACE"
+        )
+        for statement in transition_statements
+    ) == 1
     paused = research_graphs.advance_graph_branch(
         instance_id=instance["instance_id"],
         branch_id=first["branch_id"],
@@ -868,6 +951,15 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert not any(
         "FROM RESEARCH_GRAPH_TRACE" in statement.upper()
         for statement in statements
+    )
+    selects = [
+        statement for statement in statements
+        if statement.lstrip().upper().startswith("SELECT ")
+    ]
+    assert len(selects) == 3
+    assert not any(
+        "RESEARCH_GRAPH_VERSIONS" in statement.upper()
+        for statement in selects
     )
 
     monkeypatch.setattr(
@@ -1039,6 +1131,49 @@ def test_transition_stores_only_target_node_resolution(
     assert context["skill_policy"]["agent_action"] == (
         "reuse_matching_runtime_skill_else_load_after_trigger_and_approval"
     )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as connection:
+        before = connection.execute(
+            """
+            SELECT created_at
+            FROM research_graph_node_resolutions
+            WHERE instance_id=? AND branch_id=? AND node_id=?
+            """,
+            (
+                instance["instance_id"],
+                branch["branch_id"],
+                "validation",
+            ),
+        ).fetchone()
+        resolution = research_graphs._load_node_resolution(
+            connection,
+            instance_id=instance["instance_id"],
+            branch_id=branch["branch_id"],
+            node_id="validation",
+        )
+        research_graphs._store_node_resolution(
+            connection,
+            instance_id=instance["instance_id"],
+            branch_id=branch["branch_id"],
+            node_id="validation",
+            resolution=resolution,
+        )
+        unchanged_write_count = int(
+            connection.execute("SELECT changes()").fetchone()[0]
+        )
+        after = connection.execute(
+            """
+            SELECT created_at
+            FROM research_graph_node_resolutions
+            WHERE instance_id=? AND branch_id=? AND node_id=?
+            """,
+            (
+                instance["instance_id"],
+                branch["branch_id"],
+                "validation",
+            ),
+        ).fetchone()
+    assert unchanged_write_count == 0
+    assert after["created_at"] == before["created_at"]
     assert b"factortester.analysis.ic" not in (
         tmp_path / "graphs.sqlite"
     ).read_bytes()

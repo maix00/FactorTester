@@ -367,6 +367,10 @@ use the minimum relevant specialist reviewers and may enter human audit.
 | Context has a real response cap | server measures final serialized packet and rejects anything above 6000 bytes |
 | Request hot paths are schema-free | startup migration runs once; traced graph requests execute 0 DDL and 0 `PRAGMA table_info` |
 | Context database cost is history-independent | branch aggregates are updated atomically; routine context performs 0 trace-history scans |
+| Context reads have a fixed upper bound | warm-cache context uses three SELECTs: owner/branch JOIN, current resolution, and token budget |
+| Routine transition has bounded I/O | warm-cache zero-token transition uses two SELECTs, one branch UPDATE, and one trace INSERT |
+| Immutable graph reads are cached safely | cache key includes database path, graph ID, version, and content hash; callers receive defensive copies |
+| Unchanged resolution does not write | content-addressed UPSERT reports zero changed rows for identical semantics |
 | Graph protocol deterministic | stable hash tests over canonical JSON |
 | Invalid graphs rejected | public validator tests |
 | CLI is agent-readable | installed-command JSON subprocess tests |
