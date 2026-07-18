@@ -445,13 +445,11 @@ def register_graph(graph: dict[str, Any], *, actor: str) -> dict[str, Any]:
     if value["lifecycle"] not in {"observed", "draft"}:
         raise ValueError("only observed or draft graphs may be registered")
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         return _insert_graph(conn, value, actor=actor)
 
 
 def load_graph(*, graph_id: str, version: int) -> dict[str, Any] | None:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         row = conn.execute(
             """
             SELECT * FROM research_graph_versions
@@ -464,7 +462,6 @@ def load_graph(*, graph_id: str, version: int) -> dict[str, Any] | None:
 
 def list_graph_versions(*, graph_id: str) -> list[dict[str, Any]]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         rows = conn.execute(
             """
             SELECT * FROM research_graph_versions
@@ -540,7 +537,6 @@ def record_validation(
         "created_at": time.time(),
     }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         conn.execute(
             """
             INSERT INTO research_graph_validations (
@@ -573,7 +569,6 @@ def create_agent_execution(
     execution_id = uuid.uuid4().hex
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         reservation = conn.execute(
             """
             SELECT * FROM research_token_reservations
@@ -637,7 +632,6 @@ def create_token_budget(
         raise ValueError("token_limit must be positive")
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         try:
             conn.execute(
                 """
@@ -691,7 +685,6 @@ def reserve_tokens(
     reservation_id = uuid.uuid4().hex
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         conn.execute("BEGIN IMMEDIATE")
         budget = conn.execute(
             """
@@ -787,7 +780,6 @@ def ingest_provider_usage_receipt(
     provider_receipt_id = uuid.uuid4().hex
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         reservation = conn.execute(
             """
             SELECT * FROM research_token_reservations
@@ -834,7 +826,6 @@ def commit_token_reservation(
     provider_receipt_id: str,
 ) -> dict[str, Any]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             """
@@ -887,7 +878,6 @@ def release_token_reservation(
     reservation_id: str,
 ) -> dict[str, Any]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             """
@@ -930,7 +920,6 @@ def load_token_budget(
     scope_id: str,
 ) -> dict[str, Any] | None:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         row = conn.execute(
             """
             SELECT * FROM research_token_budgets
@@ -1001,7 +990,6 @@ def record_proposal(
     _assert_no_skill_identity(change_diff, location="proposal diff")
     proposal_id = uuid.uuid4().hex
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         graph_row = conn.execute(
             """
             SELECT * FROM research_graph_versions
@@ -1079,7 +1067,6 @@ def record_proposal_review(
     ):
         raise ValueError("evidence_refs must be an array of references")
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         proposal = conn.execute(
             """
             SELECT * FROM research_graph_proposals WHERE proposal_id=?
@@ -1210,7 +1197,6 @@ def record_audit(
         "created_at": time.time(),
     }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         conn.execute(
             """
             INSERT INTO research_graph_audits (
@@ -1275,7 +1261,6 @@ def activate_graph(
     actor: str,
 ) -> dict[str, Any]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         source_row = conn.execute(
             """
             SELECT * FROM research_graph_versions
@@ -1357,7 +1342,6 @@ def rollback_active_graph(
         location="rollback grill evidence",
     )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         current = conn.execute(
             """
             SELECT version FROM active_research_graphs WHERE graph_id=?
@@ -1425,7 +1409,6 @@ def rollback_active_graph(
 
 def load_active_graph(*, graph_id: str) -> dict[str, Any] | None:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         row = conn.execute(
             """
             SELECT v.* FROM active_research_graphs a
@@ -1578,7 +1561,6 @@ def record_capability_approval(
     approval_id = uuid.uuid4().hex
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         conn.execute(
             """
             INSERT INTO research_capability_approvals (
@@ -1662,7 +1644,6 @@ def issue_capability_receipt(
     if not isinstance(approval_refs, dict):
         raise ValueError("approval_refs must be an object")
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         active = conn.execute(
             """
             SELECT version FROM active_research_graphs WHERE graph_id=?
@@ -1873,7 +1854,6 @@ def create_graph_instance(
     branch_id = uuid.uuid4().hex
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         local_resolution = _verify_capability_receipt(
             conn,
             owner_user_id=owner,
@@ -1977,7 +1957,6 @@ def load_graph_branch(
     owner: str,
 ) -> dict[str, Any] | None:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         if _load_instance_row(
             conn, instance_id=instance_id, owner=owner,
         ) is None:
@@ -2000,7 +1979,6 @@ def fork_graph_branch(
     label: str,
 ) -> dict[str, Any]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         if _load_instance_row(
             conn, instance_id=instance_id, owner=owner,
         ) is None:
@@ -2122,7 +2100,6 @@ def advance_graph_branch(
                 f"token_telemetry.{field} must be a non-negative integer"
             )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         instance = _load_instance_row(
             conn, instance_id=instance_id, owner=owner,
         )
@@ -2336,7 +2313,6 @@ def build_graph_branch_context(
 ) -> dict[str, Any]:
     """Return only the local subgraph and compact evidence needed next."""
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        _ensure_schema(conn)
         instance = _load_instance_row(
             conn, instance_id=instance_id, owner=owner,
         )

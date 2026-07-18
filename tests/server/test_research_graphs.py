@@ -16,6 +16,16 @@ from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs
 
 
+def _initialize_graph_db(tmp_path, monkeypatch) -> None:
+    """Run graph migrations explicitly before exercising request hot paths."""
+    monkeypatch.setattr(
+        Settings,
+        "CACHE_DB_PATH",
+        tmp_path / "graphs.sqlite",
+    )
+    research_graphs.ensure_schema()
+
+
 def _hash(graph: dict) -> str:
     payload = deepcopy(graph)
     payload.pop("content_hash", None)
@@ -230,7 +240,7 @@ def _draft_graph() -> dict:
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(sft_bp)
@@ -244,7 +254,7 @@ def test_graph_versions_are_immutable_and_activation_creates_a_new_version(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     draft = research_graphs.register_graph(_draft_graph(), actor="curator-agent")
 
     changed = _draft_graph()
@@ -291,11 +301,51 @@ def test_graph_versions_are_immutable_and_activation_creates_a_new_version(
     )["content_hash"] == active["content_hash"]
 
 
+def test_graph_request_paths_do_not_run_schema_ddl(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    statements: list[str] = []
+    original_connect = research_graphs.connect_sqlite
+
+    def traced_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(research_graphs, "connect_sqlite", traced_connect)
+
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    assert research_graphs.load_graph(
+        graph_id="factor-research",
+        version=2,
+    ) is not None
+    assert len(research_graphs.list_graph_versions(
+        graph_id="factor-research",
+    )) == 1
+    research_graphs.create_token_budget(
+        owner_user_id="alice",
+        scope_id="request-hot-path",
+        token_limit=100,
+    )
+
+    normalized = [statement.strip().upper() for statement in statements]
+    assert not any(
+        statement.startswith(("CREATE ", "ALTER ", "DROP "))
+        for statement in normalized
+    )
+    assert not any(
+        statement.startswith("PRAGMA TABLE_INFO")
+        for statement in normalized
+    )
+
+
 def test_activation_requires_replay_shadow_capability_and_job_isolation(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     _approve_proposal()
     research_graphs.record_validation(
@@ -331,7 +381,7 @@ def test_validation_rejects_a_token_efficient_claim_with_regression(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     regressed = _token_metrics()
     regressed["routine_context_bytes"] = 7000
@@ -357,7 +407,7 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal = research_graphs.record_proposal(
         graph_id="factor-research",
@@ -431,7 +481,7 @@ def test_audited_rollback_moves_only_the_active_pointer(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     _approve_proposal()
     research_graphs.record_validation(
@@ -632,7 +682,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     graph = _draft_graph()
     graph["nodes"].extend([
         {
@@ -801,7 +851,7 @@ def test_transition_stores_only_target_node_resolution(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     graph = _draft_graph()
     graph["nodes"].append({
         "node_id": "validation",
@@ -938,7 +988,7 @@ def test_token_budget_reservation_denies_before_launch_and_fails_closed(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.create_token_budget(
         owner_user_id="alice",
         scope_id="hard-limit",
@@ -992,7 +1042,7 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    _initialize_graph_db(tmp_path, monkeypatch)
     graph = _draft_graph()
     node = graph["nodes"][0]
     node["conditional_capabilities"] = [
