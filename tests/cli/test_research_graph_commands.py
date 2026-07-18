@@ -63,6 +63,21 @@ class FakeClient:
     def rollback_research_graph(self, graph_id, **kwargs):
         return {"graph_id": graph_id, "from_version": 5, "to_version": kwargs["target_version"]}
 
+    def evaluate_backend_assurance(self, **kwargs):
+        return {
+            "receipt_id": "assurance-1",
+            "disposition": "trusted",
+            "requires_verifier": False,
+            **kwargs,
+        }
+
+    def verify_backend_assurance(self, receipt_id, **kwargs):
+        return {
+            "receipt_id": receipt_id,
+            "disposition": "verifier_required",
+            **kwargs,
+        }
+
     def create_research_graph_instance(self, **kwargs):
         return {
             "instance_id": "instance-1",
@@ -316,6 +331,7 @@ def test_research_graph_token_budget_cli_denies_work_before_agent_launch(
         "research-graph", "agent-start",
         "--role", "reviewer",
         "--reservation-id", "reservation-1",
+        "--authority-scope", "local_research",
         "--agent-principal-hash", "a" * 64,
         "--lineage-hash", "b" * 64,
         "--launcher-attestation", "c" * 64,
@@ -325,3 +341,27 @@ def test_research_graph_token_budget_cli_denies_work_before_agent_launch(
     assert reserved.exit_code == 0
     assert agent.exit_code == 0
     assert '"reservation_id": "reservation-1"' in reserved.output
+
+
+def test_research_graph_backend_assurance_commands(monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    runner = CliRunner()
+
+    assured = runner.invoke(cli, [
+        "research-graph", "backend-assure", "job-1",
+        "--instance-id", "instance-1",
+        "--branch-id", "branch-1",
+        "--node-id", "authoritative-backtest",
+    ])
+    verified = runner.invoke(cli, [
+        "research-graph", "backend-verify", "assurance-1",
+        "--verifier-execution-id", "verifier-1",
+        "--disposition", "confirmed_reliable",
+        "--evidence-ref", "artifact:verification-1",
+    ])
+
+    assert assured.exit_code == 0, assured.output
+    assert '"requires_verifier": false' in assured.output
+    assert verified.exit_code == 0, verified.output
+    assert '"verifier_execution_id": "verifier-1"' in verified.output

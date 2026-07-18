@@ -48,6 +48,23 @@ _SERVER_FORBIDDEN_SKILL_FIELDS = {
 _MAX_CONTEXT_BYTES = 6000
 _MAX_CONTEXT_EVIDENCE_REFS = 8
 _MAX_EVIDENCE_REF_BYTES = 256
+_MAX_ASSURANCE_RECEIPT_BYTES = 1024
+_BACKEND_ASSURANCE_POLICY = {
+    "policy_id": "backend-assurance@1",
+    "checks": [
+        "terminal_state",
+        "job_spec_hash",
+        "execution_plan_hash",
+        "run_spec_hash",
+        "result_state_coherence",
+        "artifact_manifest_hashes",
+    ],
+    "verifier_trigger": "succeeded_with_semantic_or_integrity_anomaly",
+}
+_BACKEND_ASSURANCE_POLICY_HASH = hashlib.sha256(orjson.dumps(
+    _BACKEND_ASSURANCE_POLICY,
+    option=orjson.OPT_SORT_KEYS,
+)).hexdigest()
 _GRAPH_CACHE: dict[tuple[str, str, int, str], dict[str, Any]] = {}
 _GRAPH_CACHE_INDEX: dict[tuple[str, str, int], str] = {}
 
@@ -217,6 +234,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             model_id TEXT NOT NULL,
             codex_version TEXT NOT NULL,
             reservation_id TEXT NOT NULL UNIQUE,
+            authority_scope TEXT NOT NULL,
             agent_principal_hash TEXT NOT NULL,
             lineage_hash TEXT NOT NULL,
             launcher_attestation TEXT NOT NULL,
@@ -306,6 +324,40 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_human_activation_graph
         ON human_activation_authorizations(
             owner_user_id, graph_id, graph_version, created_at
+        );
+        CREATE TABLE IF NOT EXISTS research_backend_assurance_receipts (
+            receipt_id TEXT PRIMARY KEY,
+            owner_user_id TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            job_id TEXT NOT NULL UNIQUE,
+            attempt_id INTEGER NOT NULL,
+            graph_id TEXT NOT NULL,
+            graph_version INTEGER NOT NULL,
+            graph_hash TEXT NOT NULL,
+            instance_id TEXT NOT NULL,
+            branch_id TEXT NOT NULL,
+            node_id TEXT NOT NULL,
+            runspec_hash TEXT NOT NULL,
+            execution_plan_hash TEXT NOT NULL,
+            backend_revision TEXT NOT NULL,
+            policy_hash TEXT NOT NULL,
+            terminal_status TEXT NOT NULL,
+            disposition TEXT NOT NULL,
+            checks_bitmap INTEGER NOT NULL,
+            anomaly_codes_json TEXT NOT NULL,
+            result_summary_hash TEXT NOT NULL,
+            artifact_manifest_hash TEXT NOT NULL,
+            implementation_execution_id TEXT NOT NULL DEFAULT '',
+            verifier_execution_id TEXT NOT NULL DEFAULT '',
+            verifier_disposition TEXT NOT NULL DEFAULT '',
+            evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+            server_attestation TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            verified_at REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_backend_assurance_branch
+        ON research_backend_assurance_receipts(
+            owner_user_id, instance_id, branch_id, created_at
         );
         CREATE TABLE IF NOT EXISTS research_graph_rollbacks (
             rollback_id TEXT PRIMARY KEY,
@@ -517,6 +569,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE research_agent_executions "
             "ADD COLUMN reservation_id TEXT NOT NULL DEFAULT ''"
+        )
+    if "authority_scope" not in execution_columns:
+        conn.execute(
+            "ALTER TABLE research_agent_executions "
+            "ADD COLUMN authority_scope TEXT NOT NULL DEFAULT 'local_research'"
         )
     for column in (
         "agent_principal_hash",
@@ -1044,6 +1101,7 @@ def create_agent_execution(
     model_id: str = "",
     codex_version: str = "",
     reservation_id: str = "",
+    authority_scope: str = "local_research",
     agent_principal_hash: str = "",
     lineage_hash: str = "",
     launcher_attestation: str = "",
@@ -1056,6 +1114,19 @@ def create_agent_execution(
         "backend_verifier",
     }:
         raise ValueError("invalid Agent execution role")
+    if authority_scope not in {
+        "local_research",
+        "server_research",
+        "server_backend_code",
+    }:
+        raise ValueError("invalid Agent authority_scope")
+    if (
+        actor_role in {"implementation_agent", "backend_verifier"}
+        and authority_scope != "server_backend_code"
+    ):
+        raise ValueError(
+            f"{actor_role} requires server_backend_code authority"
+        )
     for field, value in (
         ("agent_principal_hash", agent_principal_hash),
         ("lineage_hash", lineage_hash),
@@ -1073,6 +1144,7 @@ def create_agent_execution(
         "model_id": str(model_id),
         "codex_version": str(codex_version),
         "reservation_id": reservation_id,
+        "authority_scope": authority_scope,
         "agent_principal_hash": agent_principal_hash,
         "lineage_hash": lineage_hash,
     }
@@ -1114,9 +1186,10 @@ def create_agent_execution(
             """
             INSERT INTO research_agent_executions (
                 execution_id, owner_user_id, actor_role, model_id,
-                codex_version, reservation_id, agent_principal_hash,
-                lineage_hash, launcher_attestation, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                codex_version, reservation_id, authority_scope,
+                agent_principal_hash, lineage_hash, launcher_attestation,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution_id,
@@ -1125,6 +1198,7 @@ def create_agent_execution(
                 str(model_id),
                 str(codex_version),
                 reservation_id,
+                authority_scope,
                 agent_principal_hash,
                 lineage_hash,
                 launcher_attestation,
@@ -1139,6 +1213,7 @@ def create_agent_execution(
         "codex_version": str(codex_version),
         "created_at": now,
         "reservation_id": reservation_id,
+        "authority_scope": authority_scope,
         "agent_principal_hash": agent_principal_hash,
         "lineage_hash": lineage_hash,
     }
@@ -2357,6 +2432,388 @@ def _receipt_signature(
 ) -> str:
     raw = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
     return hmac.new(secret, raw, hashlib.sha256).hexdigest()
+
+
+def _backend_assurance_packet(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    anomaly_codes = _loads(row["anomaly_codes_json"]) or []
+    verifier_disposition = str(row["verifier_disposition"] or "")
+    disposition = str(row["disposition"])
+    packet = {
+        "receipt_id": str(row["receipt_id"]),
+        "receipt_ref": f"backend-assurance:{row['receipt_id']}",
+        "job_id": str(row["job_id"]),
+        "terminal_status": str(row["terminal_status"]),
+        "disposition": disposition,
+        "anomaly_codes": anomaly_codes,
+        "requires_verifier": (
+            disposition == "verifier_required" and not verifier_disposition
+        ),
+        "verifier_disposition": verifier_disposition,
+        "policy_hash": str(row["policy_hash"]),
+        "server_attestation": str(row["server_attestation"]),
+        "next_action": (
+            "launch_one_backend_verifier"
+            if disposition == "verifier_required" and not verifier_disposition
+            else "continue"
+            if disposition == "trusted"
+            or verifier_disposition == "confirmed_reliable"
+            else "route_capability_gap_and_propose_change"
+            if verifier_disposition == "backend_change_proposed"
+            else "revise_research_input"
+            if verifier_disposition == "research_input_issue"
+            else "stop_or_retry"
+        ),
+        "receipt_bytes": 0,
+    }
+    for _ in range(2):
+        packet["receipt_bytes"] = len(orjson.dumps(packet))
+    if len(orjson.dumps(packet)) > _MAX_ASSURANCE_RECEIPT_BYTES:
+        raise ValueError("backend assurance packet exceeds hard byte limit")
+    return packet
+
+
+def evaluate_backend_assurance(
+    *,
+    owner_user_id: str,
+    job_id: str,
+    instance_id: str,
+    branch_id: str,
+    node_id: str,
+    policy_hash: str = _BACKEND_ASSURANCE_POLICY_HASH,
+    implementation_execution_id: str = "",
+) -> dict[str, Any]:
+    """Issue one compact deterministic receipt for an immutable terminal job."""
+    if policy_hash != _BACKEND_ASSURANCE_POLICY_HASH:
+        raise ValueError("backend assurance policy hash is not active")
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        existing = conn.execute(
+            """
+            SELECT * FROM research_backend_assurance_receipts
+            WHERE job_id=? AND owner_user_id=?
+            """,
+            (job_id, owner_user_id),
+        ).fetchone()
+        if existing is not None:
+            if (
+                str(existing["instance_id"]) != instance_id
+                or str(existing["branch_id"]) != branch_id
+                or str(existing["node_id"]) != node_id
+                or str(existing["policy_hash"]) != policy_hash
+            ):
+                raise ValueError(
+                    "job already has an assurance receipt for another context"
+                )
+            return _backend_assurance_packet(existing)
+        runtime = conn.execute(
+            """
+            SELECT i.graph_id, i.graph_version, i.owner, b.current_node
+            FROM research_graph_instances i
+            JOIN research_graph_branches b ON b.instance_id=i.instance_id
+            WHERE i.instance_id=? AND b.branch_id=?
+            """,
+            (instance_id, branch_id),
+        ).fetchone()
+        if runtime is None or str(runtime["owner"]) != owner_user_id:
+            raise ValueError("owned research graph branch is required")
+        if str(runtime["current_node"]) != node_id:
+            raise ValueError("backend assurance node is not current")
+        graph = _load_graph_from_conn(
+            conn,
+            graph_id=str(runtime["graph_id"]),
+            version=int(runtime["graph_version"]),
+        )
+        if graph is None:
+            raise ValueError("research graph version is missing")
+        job = conn.execute(
+            """
+            SELECT * FROM research_jobs
+            WHERE job_id=? AND owner=?
+            """,
+            (job_id, owner_user_id),
+        ).fetchone()
+        if job is None:
+            raise KeyError("research job not found")
+        terminal_status = str(job["status"])
+        if terminal_status not in {"succeeded", "failed", "cancelled"}:
+            raise ValueError("backend assurance requires a terminal job")
+        if implementation_execution_id:
+            _require_agent_execution(
+                conn,
+                owner_user_id=owner_user_id,
+                execution_id=implementation_execution_id,
+                role="implementation_agent",
+            )
+
+        anomalies: list[str] = []
+        checks_bitmap = 1
+        job_spec = _loads(job["job_spec_json"]) or {}
+        actual_job_spec_hash = _json_hash(job_spec)
+        if actual_job_spec_hash == str(job["job_spec_hash"]):
+            checks_bitmap |= 2
+        else:
+            anomalies.append("job_spec_hash_mismatch")
+
+        execution_plan = _loads(job["execution_plan_json"])
+        execution_plan_hash = str(job["execution_plan_hash"] or "")
+        if (
+            isinstance(execution_plan, dict)
+            and execution_plan_hash
+            and _json_hash(execution_plan) == execution_plan_hash
+        ):
+            checks_bitmap |= 4
+        else:
+            anomalies.append("execution_plan_missing_or_changed")
+
+        run = conn.execute(
+            """
+            SELECT * FROM research_runs WHERE run_id=? AND owner=?
+            """,
+            (str(job["run_id"]), owner_user_id),
+        ).fetchone()
+        runspec_hash = str(run["run_spec_hash"]) if run is not None else ""
+        if (
+            run is not None
+            and _json_hash(_loads(run["run_spec_json"]) or {}) == runspec_hash
+            and str(run["workspace_id"]) == str(job["workspace_id"])
+        ):
+            checks_bitmap |= 8
+        else:
+            anomalies.append("runspec_missing_or_changed")
+
+        result_summary = _loads(job["result_summary_json"])
+        result_summary_hash = (
+            _json_hash(result_summary) if result_summary is not None else ""
+        )
+        error = _loads(job["error_json"])
+        if terminal_status == "succeeded":
+            if result_summary is None:
+                anomalies.append("succeeded_without_result")
+            if error is not None:
+                anomalies.append("succeeded_with_error")
+            if job["worker_exitcode"] != 0:
+                anomalies.append("succeeded_without_zero_exit")
+            if not any(code.startswith("succeeded_") for code in anomalies):
+                checks_bitmap |= 16
+        elif terminal_status == "failed":
+            if error is not None:
+                checks_bitmap |= 16
+            else:
+                anomalies.append("failed_without_error")
+        else:
+            checks_bitmap |= 16
+
+        artifacts = conn.execute(
+            """
+            SELECT name, content_hash, size_bytes, state
+            FROM research_job_artifacts
+            WHERE job_id=? ORDER BY name
+            """,
+            (job_id,),
+        ).fetchall()
+        artifact_manifest = [
+            {
+                "name": str(item["name"]),
+                "content_hash": str(item["content_hash"]),
+                "size_bytes": int(item["size_bytes"]),
+                "state": str(item["state"]),
+            }
+            for item in artifacts
+        ]
+        artifact_manifest_hash = _json_hash(artifact_manifest)
+        if all(
+            item["state"] != "active" or bool(item["content_hash"])
+            for item in artifact_manifest
+        ):
+            checks_bitmap |= 32
+        else:
+            anomalies.append("active_artifact_without_hash")
+
+        integrity_anomalies = {
+            "job_spec_hash_mismatch",
+            "execution_plan_missing_or_changed",
+            "runspec_missing_or_changed",
+            "active_artifact_without_hash",
+        }
+        if terminal_status == "succeeded" and anomalies:
+            disposition = "verifier_required"
+        elif any(code in integrity_anomalies for code in anomalies):
+            disposition = "verifier_required"
+        elif terminal_status == "succeeded":
+            disposition = "trusted"
+        else:
+            disposition = "not_usable"
+        receipt_id = uuid.uuid4().hex
+        created_at = time.time()
+        signed_payload = {
+            "receipt_id": receipt_id,
+            "owner_user_id": owner_user_id,
+            "run_id": str(job["run_id"]),
+            "job_id": job_id,
+            "attempt_id": int(job["attempt"]),
+            "graph_id": str(runtime["graph_id"]),
+            "graph_version": int(runtime["graph_version"]),
+            "graph_hash": str(graph["content_hash"]),
+            "instance_id": instance_id,
+            "branch_id": branch_id,
+            "node_id": node_id,
+            "runspec_hash": runspec_hash,
+            "execution_plan_hash": execution_plan_hash,
+            "backend_revision": str(job["source_revision"] or "unattested"),
+            "policy_hash": policy_hash,
+            "terminal_status": terminal_status,
+            "disposition": disposition,
+            "checks_bitmap": checks_bitmap,
+            "anomaly_codes": anomalies,
+            "result_summary_hash": result_summary_hash,
+            "artifact_manifest_hash": artifact_manifest_hash,
+            "implementation_execution_id": implementation_execution_id,
+            "created_at": created_at,
+        }
+        server_attestation = _receipt_signature(
+            _attestation_secret(conn),
+            signed_payload,
+        )
+        conn.execute(
+            """
+            INSERT INTO research_backend_assurance_receipts (
+                receipt_id, owner_user_id, run_id, job_id, attempt_id,
+                graph_id, graph_version, graph_hash, instance_id, branch_id,
+                node_id, runspec_hash, execution_plan_hash, backend_revision,
+                policy_hash, terminal_status, disposition, checks_bitmap,
+                anomaly_codes_json, result_summary_hash,
+                artifact_manifest_hash, implementation_execution_id,
+                server_attestation, created_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                receipt_id,
+                owner_user_id,
+                str(job["run_id"]),
+                job_id,
+                int(job["attempt"]),
+                str(runtime["graph_id"]),
+                int(runtime["graph_version"]),
+                str(graph["content_hash"]),
+                instance_id,
+                branch_id,
+                node_id,
+                runspec_hash,
+                execution_plan_hash,
+                str(job["source_revision"] or "unattested"),
+                policy_hash,
+                terminal_status,
+                disposition,
+                checks_bitmap,
+                orjson.dumps(anomalies).decode(),
+                result_summary_hash,
+                artifact_manifest_hash,
+                implementation_execution_id,
+                server_attestation,
+                created_at,
+            ),
+        )
+        stored = conn.execute(
+            """
+            SELECT * FROM research_backend_assurance_receipts
+            WHERE receipt_id=?
+            """,
+            (receipt_id,),
+        ).fetchone()
+    return _backend_assurance_packet(stored)
+
+
+def record_backend_assurance_verification(
+    *,
+    owner_user_id: str,
+    receipt_id: str,
+    verifier_execution_id: str,
+    disposition: str,
+    evidence_refs: list[str],
+) -> dict[str, Any]:
+    if disposition not in {
+        "confirmed_reliable",
+        "backend_change_proposed",
+        "research_input_issue",
+    }:
+        raise ValueError("invalid backend verifier disposition")
+    if (
+        not isinstance(evidence_refs, list)
+        or not evidence_refs
+        or len(evidence_refs) > _MAX_CONTEXT_EVIDENCE_REFS
+        or not all(
+            isinstance(ref, str)
+            and ref.strip()
+            and len(ref.encode()) <= _MAX_EVIDENCE_REF_BYTES
+            for ref in evidence_refs
+        )
+    ):
+        raise ValueError("bounded verifier evidence_refs are required")
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM research_backend_assurance_receipts
+            WHERE receipt_id=? AND owner_user_id=?
+            """,
+            (receipt_id, owner_user_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError("backend assurance receipt not found")
+        if str(row["disposition"]) != "verifier_required":
+            raise ValueError("trusted backend receipt does not accept a verifier")
+        if str(row["verifier_execution_id"]):
+            raise ValueError("backend assurance receipt is already verified")
+        verifier = _require_agent_execution(
+            conn,
+            owner_user_id=owner_user_id,
+            execution_id=verifier_execution_id,
+            role="backend_verifier",
+        )
+        implementation_execution_id = str(
+            row["implementation_execution_id"] or ""
+        )
+        if implementation_execution_id:
+            implementation = _require_agent_execution(
+                conn,
+                owner_user_id=owner_user_id,
+                execution_id=implementation_execution_id,
+                role="implementation_agent",
+            )
+            if (
+                str(implementation["agent_principal_hash"])
+                == str(verifier["agent_principal_hash"])
+                or str(implementation["lineage_hash"])
+                == str(verifier["lineage_hash"])
+            ):
+                raise ValueError(
+                    "backend verifier principal and lineage must be independent"
+                )
+        verified_at = time.time()
+        conn.execute(
+            """
+            UPDATE research_backend_assurance_receipts
+            SET verifier_execution_id=?, verifier_disposition=?,
+                evidence_refs_json=?, verified_at=?
+            WHERE receipt_id=? AND verifier_execution_id=''
+            """,
+            (
+                verifier_execution_id,
+                disposition,
+                orjson.dumps(evidence_refs).decode(),
+                verified_at,
+                receipt_id,
+            ),
+        )
+        stored = conn.execute(
+            """
+            SELECT * FROM research_backend_assurance_receipts
+            WHERE receipt_id=?
+            """,
+            (receipt_id,),
+        ).fetchone()
+    return _backend_assurance_packet(stored)
 
 
 def issue_capability_receipt(

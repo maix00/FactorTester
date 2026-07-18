@@ -175,6 +175,15 @@ def review_graph_proposal(
 @click.option("--model-id", default="")
 @click.option("--codex-version", default="")
 @click.option("--reservation-id", required=True)
+@click.option(
+    "--authority-scope",
+    type=click.Choice([
+        "local_research",
+        "server_research",
+        "server_backend_code",
+    ]),
+    required=True,
+)
 @click.option("--agent-principal-hash", required=True)
 @click.option("--lineage-hash", required=True)
 @click.option("--launcher-attestation", required=True)
@@ -183,6 +192,7 @@ def start_agent_execution(
     model_id: str,
     codex_version: str,
     reservation_id: str,
+    authority_scope: str,
     agent_principal_hash: str,
     lineage_hash: str,
     launcher_attestation: str,
@@ -194,6 +204,7 @@ def start_agent_execution(
             model_id=model_id,
             codex_version=codex_version,
             reservation_id=reservation_id,
+            authority_scope=authority_scope,
             agent_principal_hash=agent_principal_hash,
             lineage_hash=lineage_hash,
             launcher_attestation=launcher_attestation,
@@ -352,6 +363,60 @@ def authorize_activation(
             human_attestation=human_attestation,
         )
     ))
+
+
+@research_graph.command("backend-assure")
+@click.argument("job_id")
+@click.option("--instance-id", required=True)
+@click.option("--branch-id", required=True)
+@click.option("--node-id", required=True)
+@click.option("--policy-hash", default="")
+@click.option("--implementation-execution-id", default="")
+def assure_backend(
+    job_id: str,
+    instance_id: str,
+    branch_id: str,
+    node_id: str,
+    policy_hash: str,
+    implementation_execution_id: str,
+) -> None:
+    """零 Agent 检查终态 job；仅异常时返回 verifier 请求。"""
+    click.echo(_json(client_from_config().evaluate_backend_assurance(
+        job_id=job_id,
+        instance_id=instance_id,
+        branch_id=branch_id,
+        node_id=node_id,
+        policy_hash=policy_hash,
+        implementation_execution_id=implementation_execution_id,
+    )))
+
+
+@research_graph.command("backend-verify")
+@click.argument("receipt_id")
+@click.option("--verifier-execution-id", required=True)
+@click.option(
+    "--disposition",
+    type=click.Choice([
+        "confirmed_reliable",
+        "backend_change_proposed",
+        "research_input_issue",
+    ]),
+    required=True,
+)
+@click.option("--evidence-ref", "evidence_refs", multiple=True, required=True)
+def verify_backend(
+    receipt_id: str,
+    verifier_execution_id: str,
+    disposition: str,
+    evidence_refs: tuple[str, ...],
+) -> None:
+    """记录唯一异常 verifier 的有界结论。"""
+    click.echo(_json(client_from_config().verify_backend_assurance(
+        receipt_id,
+        verifier_execution_id=verifier_execution_id,
+        disposition=disposition,
+        evidence_refs=list(evidence_refs),
+    )))
 
 
 @research_graph.command("rollback")

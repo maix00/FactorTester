@@ -19,6 +19,9 @@ def create_research_agent_execution():
             model_id=str(data.get("model_id") or ""),
             codex_version=str(data.get("codex_version") or ""),
             reservation_id=str(data.get("reservation_id") or ""),
+            authority_scope=str(
+                data.get("authority_scope") or "local_research"
+            ),
             agent_principal_hash=str(
                 data.get("agent_principal_hash") or ""
             ),
@@ -310,6 +313,53 @@ def authorize_research_graph_activation():
         "success": True,
         "authorization": authorization,
     }), 201
+
+
+@sft_bp.post("/api/research-backend-assurance/evaluate")
+def evaluate_research_backend_assurance():
+    data = request.get_json(silent=True) or {}
+    try:
+        receipt = research_graphs.evaluate_backend_assurance(
+            owner_user_id=require_user(),
+            job_id=str(data.get("job_id") or ""),
+            instance_id=str(data.get("instance_id") or ""),
+            branch_id=str(data.get("branch_id") or ""),
+            node_id=str(data.get("node_id") or ""),
+            policy_hash=str(
+                data.get("policy_hash")
+                or research_graphs._BACKEND_ASSURANCE_POLICY_HASH
+            ),
+            implementation_execution_id=str(
+                data.get("implementation_execution_id") or ""
+            ),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "assurance": receipt}), 201
+
+
+@sft_bp.post(
+    "/api/research-backend-assurance/<receipt_id>/verification"
+)
+def verify_research_backend_assurance(receipt_id: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        receipt = research_graphs.record_backend_assurance_verification(
+            owner_user_id=require_user(),
+            receipt_id=receipt_id,
+            verifier_execution_id=str(
+                data.get("verifier_execution_id") or ""
+            ),
+            disposition=str(data.get("disposition") or ""),
+            evidence_refs=data.get("evidence_refs") or [],
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "assurance": receipt}), 201
 
 
 @sft_bp.post("/api/research-graphs/<graph_id>/rollback")

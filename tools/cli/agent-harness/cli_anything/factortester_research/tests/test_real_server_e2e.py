@@ -21,6 +21,9 @@ from werkzeug.serving import make_server
 
 import settings as Settings
 from server import create_app
+from server.jobs.models import JobRecord
+from server.jobs.repository import JobRepository
+from server.jobs.states import JobStatus
 from server.services import research_runs
 
 
@@ -220,6 +223,11 @@ def _agent_execution(
     owner: str,
     launcher_secret: str,
 ) -> dict:
+    authority_scope = (
+        "server_backend_code"
+        if role in {"implementation_agent", "backend_verifier"}
+        else "local_research"
+    )
     scope_id = f"e2e:{role}:{uuid.uuid4().hex}"
     _run_json(
         factortester,
@@ -255,6 +263,7 @@ def _agent_execution(
         "model_id": "e2e-model",
         "codex_version": "e2e",
         "reservation_id": reservation["reservation_id"],
+        "authority_scope": authority_scope,
         "agent_principal_hash": principal_hash,
         "lineage_hash": lineage_hash,
     }
@@ -276,6 +285,8 @@ def _agent_execution(
             "e2e",
             "--reservation-id",
             reservation["reservation_id"],
+            "--authority-scope",
+            authority_scope,
             "--agent-principal-hash",
             principal_hash,
             "--lineage-hash",
@@ -734,6 +745,60 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             env=env,
         )
         live_branch = live_instance["branches"][0]
+        repository = JobRepository()
+        assurance_job = repository.create(JobRecord(
+            job_id=uuid.uuid4().hex,
+            run_id=graph_run["run_id"],
+            owner=owner,
+            workspace_id=workspace_id,
+            kind="backtest",
+            status=JobStatus.SUBMITTED,
+            source_revision="e2e-backend-revision",
+            runner_path="e2e:runner",
+            job_spec={
+                "run_id": graph_run["run_id"],
+                "workspace_id": workspace_id,
+            },
+        ))
+        repository.transition(
+            assurance_job.job_id,
+            JobStatus.PLANNING,
+        )
+        repository.set_execution_plan(
+            assurance_job.job_id,
+            plan={"runner": "e2e:runner", "steps": ["compute"]},
+            notices=[],
+            requires_confirmation=False,
+        )
+        repository.transition(
+            assurance_job.job_id,
+            JobStatus.RUNNING,
+            worker_pid=123,
+        )
+        repository.transition(
+            assurance_job.job_id,
+            JobStatus.SUCCEEDED,
+            worker_exitcode=0,
+            result_summary={"sharpe": 1.2, "observations": 1000},
+        )
+        assurance = _run_json(
+            factortester,
+            [
+                "research-graph",
+                "backend-assure",
+                assurance_job.job_id,
+                "--instance-id",
+                live_instance["instance_id"],
+                "--branch-id",
+                live_branch["branch_id"],
+                "--node-id",
+                live_branch["current_node"],
+            ],
+            env=env,
+        )
+        assert assurance["disposition"] == "trusted"
+        assert assurance["requires_verifier"] is False
+        assert assurance["receipt_bytes"] <= 1024
         context = _run_json(
             factortester,
             [

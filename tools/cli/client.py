@@ -137,6 +137,7 @@ class FactorTesterClient:
         model_id: str = "",
         codex_version: str = "",
         reservation_id: str,
+        authority_scope: str,
         agent_principal_hash: str,
         lineage_hash: str,
         launcher_attestation: str,
@@ -148,6 +149,7 @@ class FactorTesterClient:
                 "model_id": model_id,
                 "codex_version": codex_version,
                 "reservation_id": reservation_id,
+                "authority_scope": authority_scope,
                 "agent_principal_hash": agent_principal_hash,
                 "lineage_hash": lineage_hash,
                 "launcher_attestation": launcher_attestation,
@@ -267,6 +269,52 @@ class FactorTesterClient:
             },
         ))
         return dict(data.get("authorization") or {})
+
+    def evaluate_backend_assurance(
+        self,
+        *,
+        job_id: str,
+        instance_id: str,
+        branch_id: str,
+        node_id: str,
+        policy_hash: str = "",
+        implementation_execution_id: str = "",
+    ) -> dict[str, Any]:
+        payload = {
+            "job_id": job_id,
+            "instance_id": instance_id,
+            "branch_id": branch_id,
+            "node_id": node_id,
+        }
+        if policy_hash:
+            payload["policy_hash"] = policy_hash
+        if implementation_execution_id:
+            payload["implementation_execution_id"] = (
+                implementation_execution_id
+            )
+        data = self._expect_success(self.session.post(
+            "/api/research-backend-assurance/evaluate",
+            payload,
+        ))
+        return dict(data.get("assurance") or {})
+
+    def verify_backend_assurance(
+        self,
+        receipt_id: str,
+        *,
+        verifier_execution_id: str,
+        disposition: str,
+        evidence_refs: list[str],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-backend-assurance/{receipt_id}/verification",
+            {
+                "verifier_execution_id": verifier_execution_id,
+                "disposition": disposition,
+                "evidence_refs": evidence_refs,
+            },
+        ))
+        return dict(data.get("assurance") or {})
 
     def rollback_research_graph(
         self,

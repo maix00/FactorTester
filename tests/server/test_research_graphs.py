@@ -13,6 +13,9 @@ import orjson
 import pytest
 
 import settings as Settings
+from server.jobs.models import JobRecord
+from server.jobs.repository import JobRepository
+from server.jobs.states import JobStatus
 from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs, research_runs
 
@@ -97,6 +100,11 @@ def _create_attested_agent(
     lineage_label: str | None = None,
     model_id: str = "test-model",
 ) -> dict:
+    authority_scope = (
+        "server_backend_code"
+        if role in {"implementation_agent", "backend_verifier"}
+        else "local_research"
+    )
     principal_hash = hashlib.sha256(
         (principal_label or uuid.uuid4().hex).encode()
     ).hexdigest()
@@ -109,6 +117,7 @@ def _create_attested_agent(
         "model_id": model_id,
         "codex_version": "",
         "reservation_id": reservation_id,
+        "authority_scope": authority_scope,
         "agent_principal_hash": principal_hash,
         "lineage_hash": lineage_hash,
     }
@@ -156,6 +165,11 @@ def _agent_http_payload(
     *,
     model_id: str,
 ) -> dict:
+    authority_scope = (
+        "server_backend_code"
+        if role in {"implementation_agent", "backend_verifier"}
+        else "local_research"
+    )
     principal_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
     lineage_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
     payload = {
@@ -164,6 +178,7 @@ def _agent_http_payload(
         "model_id": model_id,
         "codex_version": "",
         "reservation_id": reservation_id,
+        "authority_scope": authority_scope,
         "agent_principal_hash": principal_hash,
         "lineage_hash": lineage_hash,
     }
@@ -238,6 +253,79 @@ def _activate(graph_version: int = 2) -> dict:
         actor="alice",
         human_authorization_id=authorization["authorization_id"],
     )
+
+
+def _active_instance(*, workspace_id: str) -> dict:
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    _approve_proposal()
+    research_graphs.record_validation(
+        graph_id="factor-research",
+        version=2,
+        actor="validation-agent",
+        evidence=_server_validation_evidence(),
+    )
+    research_graphs.record_audit(
+        graph_id="factor-research",
+        version=2,
+        actor="human-auditor",
+        disposition="approved",
+        grill_evidence=[{"question": "activate?", "answer": "yes"}],
+    )
+    _activate()
+    receipt = _issue_receipt(
+        node_id="hypothesis",
+        product_group="equities",
+        capability_ids=["research-hypothesis.preregister"],
+    )
+    return research_graphs.create_graph_instance(
+        graph_id="factor-research",
+        owner="alice",
+        product_group="equities",
+        workspace_id=workspace_id,
+        token_budget=1000,
+        capability_receipt=receipt,
+    )
+
+
+def _succeeded_job(
+    *,
+    workspace_id: str,
+    worker_exitcode: int = 0,
+) -> dict:
+    run = research_runs.create_run(
+        owner="alice",
+        workspace_id=workspace_id,
+        configuration_id=uuid.uuid4().hex,
+        configuration_revision=1,
+        run_spec={"workspace_id": workspace_id, "factor": "test-factor"},
+    )
+    repository = JobRepository()
+    job = repository.create(JobRecord(
+        job_id=uuid.uuid4().hex,
+        run_id=run["run_id"],
+        owner="alice",
+        workspace_id=workspace_id,
+        kind="backtest",
+        status=JobStatus.SUBMITTED,
+        source_revision="test-backend-revision",
+        runner_path="test:runner",
+        job_spec={"run_id": run["run_id"], "workspace_id": workspace_id},
+    ))
+    repository.transition(job.job_id, JobStatus.PLANNING)
+    repository.set_execution_plan(
+        job.job_id,
+        plan={"runner": "test:runner", "steps": ["compute"]},
+        notices=[],
+        requires_confirmation=False,
+    )
+    repository.transition(job.job_id, JobStatus.RUNNING, worker_pid=123)
+    job = repository.transition(
+        job.job_id,
+        JobStatus.SUCCEEDED,
+        worker_exitcode=worker_exitcode,
+        result_summary={"sharpe": 1.2, "observations": 1000},
+    )
+    return {"run": run, "job": job}
 
 
 def _issue_receipt(
@@ -563,10 +651,29 @@ def test_agent_execution_rejects_forged_launcher_attestation(
             owner_user_id="alice",
             actor_role="proposer",
             reservation_id=reservation["reservation_id"],
+            authority_scope="local_research",
             agent_principal_hash="a" * 64,
             lineage_hash="b" * 64,
             launcher_attestation="forged",
         )
+
+
+def test_local_research_agent_cannot_claim_backend_code_roles(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    for role in ("backend_verifier", "implementation_agent"):
+        with pytest.raises(ValueError, match="server_backend_code"):
+            research_graphs.create_agent_execution(
+                owner_user_id="alice",
+                actor_role=role,
+                reservation_id="not-reached",
+                authority_scope="local_research",
+                agent_principal_hash="a" * 64,
+                lineage_hash="b" * 64,
+                launcher_attestation="not-reached",
+            )
 
 
 @pytest.mark.parametrize(
@@ -697,6 +804,147 @@ def test_human_authorization_rejects_forged_adapter_attestation(
             expires_at=time.time() + 300,
             human_attestation="forged",
         )
+
+
+def test_backend_assurance_trusted_path_is_compact_and_uses_no_agent(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    workspace_id = f"assurance-{uuid.uuid4().hex}"
+    instance = _active_instance(workspace_id=workspace_id)
+    job = _succeeded_job(workspace_id=workspace_id)["job"]
+    branch = instance["branches"][0]
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        before = conn.execute(
+            "SELECT COUNT(*) FROM research_agent_executions"
+        ).fetchone()[0]
+
+    receipt = research_graphs.evaluate_backend_assurance(
+        owner_user_id="alice",
+        job_id=job.job_id,
+        instance_id=instance["instance_id"],
+        branch_id=branch["branch_id"],
+        node_id=branch["current_node"],
+    )
+
+    assert receipt["disposition"] == "trusted"
+    assert receipt["requires_verifier"] is False
+    assert receipt["next_action"] == "continue"
+    assert receipt["anomaly_codes"] == []
+    assert receipt["receipt_bytes"] <= 1024
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        after = conn.execute(
+            "SELECT COUNT(*) FROM research_agent_executions"
+        ).fetchone()[0]
+    assert after == before
+
+
+def test_backend_assurance_launches_one_independent_verifier_only_on_anomaly(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    workspace_id = f"assurance-anomaly-{uuid.uuid4().hex}"
+    instance = _active_instance(workspace_id=workspace_id)
+    implementation = _agent_execution(
+        "implementation_agent",
+        principal_label="implementation-principal",
+        lineage_label="implementation-lineage",
+    )
+    job = _succeeded_job(
+        workspace_id=workspace_id,
+        worker_exitcode=1,
+    )["job"]
+    branch = instance["branches"][0]
+
+    receipt = research_graphs.evaluate_backend_assurance(
+        owner_user_id="alice",
+        job_id=job.job_id,
+        instance_id=instance["instance_id"],
+        branch_id=branch["branch_id"],
+        node_id=branch["current_node"],
+        implementation_execution_id=implementation["execution_id"],
+    )
+
+    assert receipt["disposition"] == "verifier_required"
+    assert receipt["requires_verifier"] is True
+    assert receipt["next_action"] == "launch_one_backend_verifier"
+    assert receipt["anomaly_codes"] == ["succeeded_without_zero_exit"]
+    same_lineage_verifier = _agent_execution(
+        "backend_verifier",
+        lineage_label="implementation-lineage",
+    )
+    with pytest.raises(ValueError, match="principal and lineage"):
+        research_graphs.record_backend_assurance_verification(
+            owner_user_id="alice",
+            receipt_id=receipt["receipt_id"],
+            verifier_execution_id=same_lineage_verifier["execution_id"],
+            disposition="backend_change_proposed",
+            evidence_refs=["test:exitcode-anomaly"],
+        )
+
+    verifier = _agent_execution("backend_verifier")
+    verified = research_graphs.record_backend_assurance_verification(
+        owner_user_id="alice",
+        receipt_id=receipt["receipt_id"],
+        verifier_execution_id=verifier["execution_id"],
+        disposition="backend_change_proposed",
+        evidence_refs=["test:exitcode-anomaly"],
+    )
+    assert verified["requires_verifier"] is False
+    assert verified["verifier_disposition"] == "backend_change_proposed"
+    assert (
+        verified["next_action"]
+        == "route_capability_gap_and_propose_change"
+    )
+    with pytest.raises(ValueError, match="already verified"):
+        research_graphs.record_backend_assurance_verification(
+            owner_user_id="alice",
+            receipt_id=receipt["receipt_id"],
+            verifier_execution_id=_agent_execution(
+                "backend_verifier"
+            )["execution_id"],
+            disposition="confirmed_reliable",
+            evidence_refs=["test:duplicate-verifier"],
+        )
+
+
+def test_backend_assurance_http_rejects_nonterminal_job(
+    client,
+) -> None:
+    workspace_id = f"http-assurance-{uuid.uuid4().hex}"
+    instance = _active_instance(workspace_id=workspace_id)
+    run = research_runs.create_run(
+        owner="alice",
+        workspace_id=workspace_id,
+        configuration_id=uuid.uuid4().hex,
+        configuration_revision=1,
+        run_spec={"workspace_id": workspace_id},
+    )
+    job = JobRepository().create(JobRecord(
+        job_id=uuid.uuid4().hex,
+        run_id=run["run_id"],
+        owner="alice",
+        workspace_id=workspace_id,
+        kind="backtest",
+        status=JobStatus.SUBMITTED,
+        job_spec={"run_id": run["run_id"]},
+    ))
+    branch = instance["branches"][0]
+
+    response = client.post(
+        "/api/research-backend-assurance/evaluate",
+        json={
+            "job_id": job.job_id,
+            "instance_id": instance["instance_id"],
+            "branch_id": branch["branch_id"],
+            "node_id": branch["current_node"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert "terminal job" in response.get_json()["error"]
 
 
 def test_graph_request_paths_do_not_run_schema_ddl(

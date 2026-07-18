@@ -63,6 +63,15 @@ added one observable behavior at a time.
   execution IDs cannot simulate independent reviewers;
 - one-time human activation authorization, separate from ordinary authenticated
   Agent proposal, review, validation, and grill requests;
+- a deterministic Backend Assurance Gate that emits a compact signed receipt
+  for an immutable terminal job without launching an Agent;
+- exactly one independently attested `backend_verifier` only when a succeeded
+  job has a semantic or integrity anomaly;
+- backend verifier and implementation roles require trusted-launcher
+  `server_backend_code` authority; ordinary research users can report and route
+  anomalies but cannot claim code-modification authority;
+- no verifier, Skill load, artifact body read, stdout/stderr load, or extra
+  research Agent on the routine trusted backend path;
 - non-mutating historical replay and a hard token-efficiency activation gate.
 
 ### Real installed CLI to server E2E
