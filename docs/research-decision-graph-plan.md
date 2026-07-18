@@ -12,7 +12,9 @@ until the draft graph has passed replay and shadow validation.
 
 The evolving one-question-at-a-time audit record is maintained separately in
 [`research-decision-graph-grill-log.md`](research-decision-graph-grill-log.md);
-it is not loaded into routine Agent context.
+its detailed records and canonical governance language live under
+[`research-decision-graph/`](research-decision-graph/). Neither the full index
+nor the detailed records are loaded into routine Agent context.
 
 ## Objective
 

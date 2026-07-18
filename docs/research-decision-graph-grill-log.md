@@ -2,9 +2,10 @@
 
 ## Status and purpose
 
-This is the working, append-only semantic record for the current design grill.
-It is not an ADR and is not a transcript. An ADR remains deferred until replay
-and shadow validation make the architecture stable enough to justify one.
+This file is the compact index for the working, append-only semantic record of
+the current design grill. It is not an ADR and is not a transcript. An ADR
+remains deferred until replay and shadow validation make the architecture
+stable enough to justify one.
 
 Each accepted decision records the smallest durable meaning needed to prevent a
 later Agent, model, Codex release, or Skill-provider change from silently
@@ -18,11 +19,23 @@ Provenance:
 - branch: `codex/issue-123-research-decision-graph`
 - working plan: `docs/research-decision-graph-plan.md`
 - first continuously emitted question number: `48`
-- latest accepted question in this revision: `116`
+- latest accepted question in this revision: `117`
 
 The discussion before question 48 was not emitted with stable per-question
-numbers. It is therefore recorded below as a pre-numbering phase rather than
-being assigned invented question numbers.
+numbers. It is therefore recorded as a pre-numbering phase rather than being
+assigned invented question numbers.
+
+Detailed records:
+
+- [pre-numbering phase](research-decision-graph/grill/pre-numbered.md)
+- [questions 48–72](research-decision-graph/grill/0048-0072.md)
+- [questions 73–93](research-decision-graph/grill/0073-0093.md)
+- [questions 94–117](research-decision-graph/grill/0094-0117.md)
+- [Research Decision Governance language](research-decision-graph/CONTEXT.md)
+
+This index gives final dispositions for fast lookup. The detailed records are
+authoritative when a user correction, rejected alternative, evidence basis,
+scenario, acceptance condition, or supersession relationship matters.
 
 ## Record format
 
@@ -162,6 +175,7 @@ record. They are thematic decisions, not reconstructed verbatim questions:
 | 114 | Accepted | Discovery ideas remain local scratch until computation/comparison/outcome inspection begins. Executed ideas must be preregistered and cannot be relabeled as drafts to evade trial counting. | Statistical governance |
 | 115 | Accepted | Maintain immutable `attempt_count` and `outcome_examined_count`. Input-quality/computability diagnostics are logged but are not outcome trials; selection-relevant outcome inspection requires a formal trial. Multiplicity uses the count required by its method. | Trial ledger |
 | 116 | Accepted | High-risk governance uses a Skill-neutral, document-grounded, one-question-at-a-time audit with persistent decision records. The graph stores the capability description; the local ledger records the actual approved Skill. This log records the present grill and future revisions without becoming runtime context. | `grill-with-docs`; governance and auditability |
+| 117 | Accepted | Keep this compact index, recover actual question/response and revision evidence into detailed records, move governance language out of the FactorTester domain context, and correct the documentation in a new commit rather than rewriting history. | `grill-with-docs`; documentation conformance |
 
 ## Canonical audit boundary after decision 116
 
