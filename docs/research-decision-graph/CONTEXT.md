@@ -52,8 +52,9 @@ workspace.
 _Avoid_: One factor run, server maintenance goal
 
 **Work Package**:
-A user-confirmed bounded research authorization containing scope, exclusions,
-budget, and completion evidence for one Research Agent.
+A user-confirmed bounded research authorization containing objective, mode,
+factor/product/data scope, permissions, exclusions, and expected evidence for
+one Research Agent.
 _Avoid_: Entire workspace objective, backend maintenance case
 
 **Targeted Research**:
@@ -61,7 +62,7 @@ A Work Package mode with an already identified primary factor or factor range.
 
 **Open Discovery**:
 A Work Package mode authorizing an Agent to create and study new candidates
-inside a confirmed market, data, theme, exclusion, and budget boundary.
+inside a confirmed market, data, theme, permission, and exclusion boundary.
 
 **Coordination Checkpoint**:
 The compact server record needed to resume an Agent identity and affected
@@ -96,6 +97,9 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 - A **Workspace Research Objective** produces one or more **Work Packages**.
 - A **Work Package** is owned by one Research Agent at a time and may create
   many independent **Hypothesis Branches**.
+- A **Work Package** may reference an Agent Flow resource-budget scope, but
+  does not define token, compute, time, concurrency, statistical stopping, or
+  multiplicity semantics.
 - **Candidate Discovery** may short-circuit for **Targeted Research** or
   generate bounded candidates for **Open Discovery**.
 - A **Hypothesis Branch** follows one pinned **Factor Research Graph** version.
@@ -138,3 +142,7 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 - “Goal keeps an Agent online” implied continuous LLM execution. Resolved: the
   goal persists while deterministic event/watch logic wakes an Agent only when
   action is possible.
+- “Work Package budget” previously mixed user authorization, statistical
+  stopping, and runtime resource control. Resolved: **Work Package** owns
+  research authorization, **Factor Research Graph** owns statistical research
+  semantics, and **Agent Flow** owns operational resource enforcement.

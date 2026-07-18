@@ -112,7 +112,7 @@ be inferred from a citation alone.
 | 112–113 | D-MAP, C-HARNESS, C-GRAPH | Research graph returns a current-node gap only; future-node Bootstrap/Skill gaps cannot block candidate discovery. |
 | 114–115 | S-MHT, S-ML | Input missingness inspection is a diagnostic; viewing IC/PnL requires a formal trial; failed submissions remain in attempt count. |
 | 116–117 | D-MAP, D-PLAN, C-CLI | Graph stores an audit need description, local ledger records the chosen Skill, and the compact index links to detailed evidence rather than entering runtime context. |
-| 118 | D-MAP, D-PLAN | Counterexample: one “Work Package budget” object cannot own user scope, statistical multiplicity, and runtime token enforcement without crossing context boundaries. Decision remains pending. |
+| 118 | D-MAP, D-PLAN, C-GRAPH | One “Work Package budget” object cannot own user scope, statistical multiplicity, and runtime enforcement. Counterexamples: token exhaustion pauses Agent Flow without rejecting the hypothesis; statistical futility can end a branch while runtime budget remains. |
 
 ## Release-time evidence rule
 

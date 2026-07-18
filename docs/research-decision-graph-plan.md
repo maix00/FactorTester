@@ -151,6 +151,42 @@ subsets; reviewer tokens are added to primary input/output to form team total.
     Agent implements the bounded change, and the capability becomes available
     only after semantic, numerical, timing, SDK, execution, and release
     conformance evidence passes the existing audit path.
+23. A Work Package is a user authorization boundary, not a statistical or
+    runtime-budget owner. It records the research objective and mode,
+    factor/product/data scope, permissions, exclusions, expected evidence, and
+    optional references to separately owned graph and Agent Flow state.
+
+## Work Package, Graph, and Agent Flow Ownership
+
+```text
+Work Package
+  = what the Research Agent is authorized to study
+
+Factor Research Graph
+  = how statistical evidence permits the research branch to proceed
+
+Agent Flow
+  = what runtime resources remain and when the Agent waits or resumes
+```
+
+The Work Package may carry `budget_scope_ref`, `goal_ref`, and
+`graph_entry_ref` identifiers for coordination, but it does not define or
+evaluate their semantics. In particular:
+
+- hypothesis/trial families, preregistered statistical stopping,
+  outcome-examination accounting, multiplicity, and research-branch decisions
+  belong to the Factor Research Graph;
+- token, compute-time, concurrency, fee, reservation, exhaustion, waiting, and
+  resume behavior belong to Agent Flow and its deterministic scheduler;
+- a backend job enforces only its own assigned resource limit and never decides
+  whether the research hypothesis is supported.
+
+Changing the authorized research scope creates or revises a Work Package.
+Changing statistical design creates a new hypothesis/version or graph-governed
+research decision. Changing runtime resources updates the referenced Agent Flow
+budget through the applicable Agent conversation. These changes may be
+presented together to a user, but must not be persisted as one owner or
+evaluated by one state machine.
 
 ## Existing Observed Workflow
 

@@ -24,8 +24,8 @@ over Workspace Objective and primary scope. Question 95 adds open discovery.
 ## 95 — Targeted research and open discovery
 
 **Question/proposal.** Add `targeted_research` for identified primary scope and
-`open_discovery` for a user-confirmed market/data/theme/exclusion/budget scope
-in which an Agent may create candidates without per-factor confirmation.
+`open_discovery` for a user-confirmed market/data/theme/permission/exclusion
+scope in which an Agent may create candidates without per-factor confirmation.
 
 **User response.** Accepted and asked whether new factors then enter the
 existing Active Graph for feasibility testing.
@@ -52,8 +52,9 @@ repair/redefinition, and strategy-condition candidate.
 
 **User response.** “好”.
 
-**Resolution.** All intents share evidence, budget, preregistration, and
-validation semantics; role changes create later hypothesis versions.
+**Resolution.** All intents share evidence, preregistration, and validation
+semantics; role changes create later hypothesis versions. Question 118 later
+separates statistical graph rules from Agent Flow resource budgets.
 
 ## 98 — Short-circuit discovery
 
@@ -348,5 +349,48 @@ withdrawn because it conflated three owners:
 `grill-with-docs` completely. Existing reconstruction may still be incomplete;
 real implementation must return to the original conversation record.
 
-**Pending question.** The exact narrow boundary is proposed below in the live
-conversation and remains unresolved until the user accepts or revises it.
+**Revised question/proposal.** The follow-up proposed:
+
+- Work Package owns only user authorization: objective, targeted/open mode,
+  factor/product/market/data scope, allowed and forbidden research behavior,
+  and expected evidence;
+- a Work Package may carry `budget_scope_ref`, but does not own budget values,
+  stopping algorithms, or enforcement;
+- Factor Research Graph owns trial family, preregistered statistical stopping,
+  outcome inspection, multiplicity, and evidence-based branch continuation;
+- Agent Flow owns token, compute time, concurrency, fee budget, exhaustion,
+  waiting, resume, and routing a resource-change request to the appropriate
+  Agent conversation;
+- a backend scheduler enforces only the assigned job limit and never decides a
+  research conclusion.
+
+The shorthand presented to the user was:
+
+```text
+Work Package = 可以研究什么
+Active Graph = 证据上应该怎么研究
+Agent Flow = 当前还能运行多少以及何时恢复
+```
+
+**User response to the revised proposal.** “接受”.
+
+**Final resolution.** The revised three-owner boundary is accepted. It
+supersedes only the original combined-budget proposal, not earlier statistical
+trial controls or Agent Flow token/database controls. An implementation may
+join the three by opaque references for coordination, but may not persist or
+evaluate them as one Work Package-owned state machine.
+
+**Concrete counterexample.** If a branch exhausts token budget before an
+outcome-aware statistical stopping rule fires, Agent Flow pauses execution; it
+does not mark the hypothesis rejected. Conversely, a preregistered futility
+rule may end the hypothesis while unused runtime budget remains.
+
+**Acceptance evidence.**
+
+- Work Package schema contains authorization fields and optional references,
+  not trial counters or token-reservation logic.
+- Graph state owns trial/outcome/multiplicity and research-decision evidence.
+- Agent Flow tests resource exhaustion and resume without changing research
+  disposition.
+- Backend job resource failure is recorded as execution evidence, not factor
+  contradiction.

@@ -19,8 +19,8 @@ Provenance:
 - branch: `codex/issue-123-research-decision-graph`
 - working plan: `docs/research-decision-graph-plan.md`
 - first continuously emitted question number: `48`
-- latest accepted question in this revision: `117`
-- latest discussed question in this revision: `118` (challenged; unresolved)
+- latest accepted question in this revision: `118` (revised after challenge)
+- latest discussed question in this revision: `118`
 
 The discussion before question 48 was not emitted with stable per-question
 numbers. It is therefore recorded as a pre-numbering phase rather than being
@@ -157,12 +157,12 @@ record. They are thematic decisions, not reconstructed verbatim questions:
 | 92 | Accepted | Agent Flow owns identity, goals, work packages, checkpoints, watchers, budgets, Git, and routing. Active Graph owns research-method and evidence transitions. They connect only through compact packets, evidence references, and capability-gap events. | Canonical architecture boundary |
 | 93 | Accepted | Version one contains one factor-research Active Graph plus lightweight Planning and Maintenance workflows. Those workflows may become separate graphs only after stable semantic paths emerge. | Scope control |
 
-## Numbered decisions 94–116
+## Numbered decisions 94 onward
 
 | ID | Disposition | Final decision | Basis and affected boundary |
 |---:|---|---|---|
 | 94 | Accepted | The user confirms the Workspace Objective and primary factor/family scope. Research autonomously handles auxiliaries inside the package; a new main alpha direction requires a new user-confirmed package. | User authority; Planning |
-| 95 | Accepted | Work Packages support `targeted_research` and budgeted `open_discovery`. Open discovery lets an Agent create factors within a user-authorized market/data/theme scope. | Research scope |
+| 95 | Refined by 118 | Work Packages support `targeted_research` and `open_discovery`. Open discovery lets an Agent create factors within a user-authorized market/data/theme/permission/exclusion scope; operational budget is referenced from Agent Flow rather than owned by the package. | Research authorization |
 | 96 | Accepted | Each executable discovery candidate enters the existing graph as an independent hypothesis branch/trial. Invalid mechanism/PIT/data may stop early; backend gaps are not factor failures. | Candidate lifecycle |
 | 97 | Accepted | One parameterized `candidate_discovery` handles new primary, auxiliary, primary-for-state, repair/redefinition, and strategy-condition intents. | Graph topology |
 | 98 | Accepted | Candidate discovery is a short-circuit node: a targeted existing factor with no search need passes deterministically and consumes no discovery Agent tokens. | Token control |
@@ -185,7 +185,7 @@ record. They are thematic decisions, not reconstructed verbatim questions:
 | 115 | Accepted | Maintain immutable `attempt_count` and `outcome_examined_count`. Input-quality/computability diagnostics are logged but are not outcome trials; selection-relevant outcome inspection requires a formal trial. Multiplicity uses the count required by its method. | Trial ledger |
 | 116 | Accepted | High-risk governance uses a Skill-neutral, document-grounded, one-question-at-a-time audit with persistent decision records. The graph stores the capability description; the local ledger records the actual approved Skill. This log records the present grill and future revisions without becoming runtime context. | `grill-with-docs`; governance and auditability |
 | 117 | Accepted | Keep this compact index, recover actual question/response and revision evidence into detailed records, move governance language out of the FactorTester domain context, and correct the documentation in a new commit rather than rewriting history. | `grill-with-docs`; documentation conformance |
-| 118 | Challenged; unresolved | The original proposal incorrectly mixed Work Package authorization, Active Graph statistical stopping semantics, and Agent Flow operational budgets. It is withdrawn pending a narrower boundary decision. | User correction; Work Package/Graph/Agent Flow boundary |
+| 118 | Accepted after revision | The original combined-budget proposal was withdrawn. Work Package owns user authorization; Factor Research Graph owns trial/stopping/multiplicity and evidence-transition semantics; Agent Flow owns token/compute/time/concurrency/fee enforcement and wait/resume; backend jobs enforce only assigned limits. Work Package may carry references, not those owners' logic. | User correction; canonical three-layer boundary |
 
 ## Canonical audit boundary after decision 116
 
