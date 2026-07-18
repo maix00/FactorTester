@@ -227,7 +227,7 @@ def _agent_invocation(
     return invocation | settled
 
 
-def _capability_receipt(
+def _capability_resolution(
     *,
     factortester: list[str],
     env: dict[str, str],
@@ -262,32 +262,7 @@ def _capability_receipt(
         "triggered_conditional_gaps": [],
         "undetermined_conditions": [],
     }
-    suffix = f"{graph_version}-{node_id}-{'shadow' if shadow_mode else 'live'}"
-    resolution_file = tmp_path / f"resolution-{suffix}.json"
-    approvals_file = tmp_path / f"approvals-{suffix}.json"
-    resolution_file.write_text(json.dumps(resolution), encoding="utf-8")
-    approvals_file.write_text("{}", encoding="utf-8")
-    args = [
-        "research-graph",
-        "attest",
-        graph["graph_id"],
-        str(graph_version),
-        "--node",
-        node_id,
-        "--product-group",
-        product_group,
-        "--resolution-file",
-        str(resolution_file),
-        "--approval-refs-file",
-        str(approvals_file),
-        "--product-profile-hash",
-        "d" * 64,
-        "--resolver-version",
-        "e2e-resolver-v1",
-    ]
-    if shadow_mode:
-        args.append("--shadow-mode")
-    return _run_json(factortester, args, env=env)
+    return resolution
 
 
 def test_installed_clis_drive_real_server_active_graph_e2e(
@@ -434,7 +409,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             run_spec=run_spec,
         )
         entry_node = graph["entry_node"]
-        shadow_receipt = _capability_receipt(
+        shadow_resolution = _capability_resolution(
             factortester=factortester,
             env=env,
             tmp_path=tmp_path,
@@ -444,9 +419,9 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             product_group="equities",
             shadow_mode=True,
         )
-        shadow_receipt_file = tmp_path / "shadow-receipt.json"
-        shadow_receipt_file.write_text(
-            json.dumps(shadow_receipt),
+        shadow_resolution_file = tmp_path / "shadow-resolution.json"
+        shadow_resolution_file.write_text(
+            json.dumps(shadow_resolution),
             encoding="utf-8",
         )
         shadow_instance = _run_json(
@@ -463,8 +438,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 str(graph["version"]),
                 "--shadow-run-id",
                 graph_run["run_id"],
-                "--capability-receipt-file",
-                str(shadow_receipt_file),
+                "--capability-resolution-file",
+                str(shadow_resolution_file),
             ],
             env=env,
         )
@@ -506,11 +481,6 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 str(graph["version"]),
                 "--proposal-id",
                 proposal["proposal_id"],
-                "--replay-passed",
-                "--shadow-passed",
-                "--capability-resolution-complete",
-                "--unaffected-jobs-preserved",
-                "--token-efficiency-passed",
                 "--routine-instance-id",
                 shadow_instance["instance_id"],
                 "--routine-branch-id",
@@ -519,6 +489,14 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 baseline_run["run_id"],
             ],
             env=env,
+        )
+        assert validation["evidence"]["evidence_authority"] == "server_derived"
+        assert validation["evidence"]["replay_passed"] is True
+        assert validation["evidence"]["shadow_passed"] is True
+        assert validation["evidence"]["replay_summary"]["passed"] is True
+        assert (
+            validation["evidence"]["shadow_summary"]["equivalent"]
+            is True
         )
         metrics = validation["evidence"]["token_metrics"]
         assert metrics["shadow_graph_total_tokens"] == 80
@@ -589,7 +567,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         assert active["version"] == graph["version"]
         assert active["active_pointer"]["version"] == graph["version"]
 
-        live_entry_receipt = _capability_receipt(
+        live_entry_resolution = _capability_resolution(
             factortester=factortester,
             env=env,
             tmp_path=tmp_path,
@@ -599,9 +577,9 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             product_group="equities",
             shadow_mode=False,
         )
-        live_entry_file = tmp_path / "live-entry-receipt.json"
+        live_entry_file = tmp_path / "live-entry-resolution.json"
         live_entry_file.write_text(
-            json.dumps(live_entry_receipt),
+            json.dumps(live_entry_resolution),
             encoding="utf-8",
         )
         live_instance = _run_json(
@@ -614,7 +592,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "equities",
                 "--workspace-id",
                 workspace_id,
-                "--capability-receipt-file",
+                "--capability-resolution-file",
                 str(live_entry_file),
             ],
             env=env,
@@ -707,7 +685,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             input_tokens=12,
             output_tokens=3,
         )
-        target_receipt = _capability_receipt(
+        target_resolution = _capability_resolution(
             factortester=factortester,
             env=env,
             tmp_path=tmp_path,
@@ -717,9 +695,9 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             product_group="equities",
             shadow_mode=False,
         )
-        target_receipt_file = tmp_path / "target-receipt.json"
-        target_receipt_file.write_text(
-            json.dumps(target_receipt),
+        target_resolution_file = tmp_path / "target-resolution.json"
+        target_resolution_file.write_text(
+            json.dumps(target_resolution),
             encoding="utf-8",
         )
         evidence = {
@@ -740,8 +718,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 edge["edge_id"],
                 "--evidence-file",
                 str(evidence_file),
-                "--target-capability-receipt-file",
-                str(target_receipt_file),
+                "--target-capability-resolution-file",
+                str(target_resolution_file),
             ],
             env=env,
         )

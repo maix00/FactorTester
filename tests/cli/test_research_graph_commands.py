@@ -8,7 +8,6 @@ from tools.cli.app import cli
 from tools.cli.client import FactorTesterClient
 from tools.cli.commands import agent_flow as agent_flow_commands
 from tools.cli.commands import research_graph as commands
-from tools.cli.http import HttpClientError
 
 
 class FakeClient:
@@ -92,57 +91,12 @@ class FakeClient:
         self.authorization = kwargs
         return {"authorization_id": "gate-rollback-1", **kwargs}
 
-    def evaluate_backend_assurance(self, **kwargs):
-        return {
-            "receipt_id": "assurance-1",
-            "disposition": "trusted",
-            "requires_verifier": False,
-            **kwargs,
-        }
-
-    def verify_backend_assurance(self, receipt_id, **kwargs):
-        return {
-            "receipt_id": receipt_id,
-            "disposition": "verifier_required",
-            **kwargs,
-        }
-
     def create_research_graph_instance(self, **kwargs):
         return {
             "instance_id": "instance-1",
             **kwargs,
             "branches": [{"branch_id": "branch-1", "status": "running"}],
         }
-
-    def create_research_agent_execution(self, **kwargs):
-        return {"execution_id": "execution-1", **kwargs}
-
-    def approve_research_capability(self, **kwargs):
-        return {"approval_id": "approval-1", **kwargs}
-
-    def attest_research_capabilities(self, payload):
-        return {
-            "receipt_id": "receipt-1",
-            "resolver_attestation": "a" * 64,
-            **payload,
-        }
-
-    def create_research_token_budget(self, **kwargs):
-        return {"used_tokens": 0, "reserved_tokens": 0, **kwargs}
-
-    def reserve_research_tokens(self, scope_id, **kwargs):
-        return {
-            "reservation_id": "reservation-1",
-            "scope_id": scope_id,
-            "status": "granted",
-            **kwargs,
-        }
-
-    def commit_research_tokens(self, reservation_id, **kwargs):
-        return {"reservation_id": reservation_id, "status": "committed"}
-
-    def release_research_tokens(self, reservation_id):
-        return {"reservation_id": reservation_id, "status": "released"}
 
     def load_agent_budget_period(self, agent_id):
         self.agent_budget_call = ("load", agent_id, {})
@@ -268,11 +222,6 @@ def test_research_graph_cli_requires_explicit_gate_evidence(
         "2",
         "--proposal-id",
         "proposal-1",
-        "--replay-passed",
-        "--shadow-passed",
-        "--capability-resolution-complete",
-        "--unaffected-jobs-preserved",
-        "--token-efficiency-passed",
         "--routine-instance-id",
         "instance-shadow-1",
         "--routine-branch-id",
@@ -286,12 +235,7 @@ def test_research_graph_cli_requires_explicit_gate_evidence(
         "factor-research",
         2,
         {
-            "replay_passed": True,
-            "shadow_passed": True,
-            "capability_resolution_complete": True,
-            "unaffected_jobs_preserved": True,
-            "token_efficiency_passed": True,
-            "token_measurement_refs": {
+            "shadow_comparison_refs": {
                 "routine_instance_id": "instance-shadow-1",
                 "routine_branch_id": "branch-shadow-1",
                 "baseline_run_id": "run-baseline-1",
@@ -301,18 +245,19 @@ def test_research_graph_cli_requires_explicit_gate_evidence(
     )
 
 
-def test_research_graph_start_consumes_capability_receipt(
+def test_research_graph_start_consumes_node_local_capability_resolution(
     tmp_path,
     monkeypatch,
 ) -> None:
     fake = FakeClient()
     monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    receipt_file = tmp_path / "receipt.json"
-    receipt_file.write_text(json.dumps({
-        "receipt": {
-            "receipt_id": "receipt-1",
-            "resolver_attestation": "a" * 64,
-        }
+    resolution_file = tmp_path / "resolution.json"
+    resolution_file.write_text(json.dumps({
+        "resolution": {
+            "node_id": "hypothesis",
+            "bindings": [],
+            "gaps": [],
+        },
     }))
 
     result = CliRunner().invoke(cli, [
@@ -323,15 +268,15 @@ def test_research_graph_start_consumes_capability_receipt(
         "china_futures",
         "--workspace-id",
         "workspace-1",
-        "--capability-receipt-file",
-        str(receipt_file),
+        "--capability-resolution-file",
+        str(resolution_file),
     ])
 
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["graph_id"] == "factor-research"
     assert payload["product_group"] == "china_futures"
-    assert payload["capability_receipt"]["receipt_id"] == "receipt-1"
+    assert payload["capability_resolution"]["node_id"] == "hypothesis"
 
 
 def test_research_graph_next_and_bounded_review_commands(
@@ -432,71 +377,6 @@ def test_research_graph_rollback_requires_exact_authorization(
             "human_authorization_id": "gate-rollback-1",
         },
     )
-
-
-def test_research_graph_capability_attestation_cli(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    runner = CliRunner()
-    resolution_file = tmp_path / "resolution.json"
-    resolution_file.write_text(json.dumps({"resolution": {
-        "node_id": "hypothesis",
-        "catalog_hash": "c" * 64,
-        "provider_conformance_hash": "e" * 64,
-        "bindings": [],
-        "gaps": [],
-    }}))
-    approvals_file = tmp_path / "approvals.json"
-    approvals_file.write_text("{}")
-
-    result = runner.invoke(cli, [
-        "research-graph", "attest", "factor-research", "3",
-        "--node", "hypothesis",
-        "--product-group", "china_futures",
-        "--resolution-file", str(resolution_file),
-        "--approval-refs-file", str(approvals_file),
-        "--product-profile-hash", "d" * 64,
-        "--resolver-version", "resolver-v1",
-    ])
-
-    assert result.exit_code == 0
-    assert '"receipt_id": "receipt-1"' in result.output
-
-
-def test_research_graph_token_budget_cli_denies_work_before_agent_launch(
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    runner = CliRunner()
-
-    created = runner.invoke(cli, [
-        "research-graph", "budget-create", "proposal:factor-research:2",
-        "--token-limit", "2000",
-    ])
-    reserved = runner.invoke(cli, [
-        "research-graph", "token-reserve", "proposal:factor-research:2",
-        "--work-kind", "reviewer",
-        "--max-input-tokens", "500",
-        "--max-output-tokens", "200",
-    ])
-    agent = runner.invoke(cli, [
-        "research-graph", "agent-start",
-        "--role", "reviewer",
-        "--reservation-id", "reservation-1",
-        "--authority-scope", "local_research",
-        "--agent-principal-hash", "a" * 64,
-        "--lineage-hash", "b" * 64,
-        "--launcher-attestation", "c" * 64,
-    ])
-
-    assert created.exit_code == 0
-    assert reserved.exit_code == 0
-    assert agent.exit_code == 0
-    assert '"reservation_id": "reservation-1"' in reserved.output
 
 
 def test_agent_flow_budget_commands_are_canonical_and_machine_readable(
@@ -634,7 +514,7 @@ def test_agent_flow_invocation_commands_preserve_provenance(
     assert json.loads(released.output)["status"] == "released"
 
 
-def test_legacy_graph_agent_and_token_commands_are_deprecated() -> None:
+def test_obsolete_research_graph_commands_are_absent() -> None:
     help_result = CliRunner().invoke(cli, ["research-graph", "--help"])
 
     assert help_result.exit_code == 0
@@ -644,12 +524,12 @@ def test_legacy_graph_agent_and_token_commands_are_deprecated() -> None:
         "token-reserve",
         "token-commit",
         "token-release",
+        "backend-assure",
+        "backend-verify",
+        "approve-capability",
+        "attest",
     ):
-        command_line = next(
-            line for line in help_result.output.splitlines()
-            if command_name in line
-        )
-        assert "deprecated" in command_line.lower()
+        assert command_name not in help_result.output
 
 
 class _RecordingSession:
@@ -768,55 +648,3 @@ def test_agent_flow_client_is_a_thin_http_adapter() -> None:
             {},
         ),
     ]
-
-
-def test_research_graph_backend_assurance_commands_are_deprecated(
-    monkeypatch,
-) -> None:
-    class GoneSession:
-        def post(self, path, payload):
-            raise HttpClientError(
-                410,
-                f"http://test{path}",
-                '{"error":"retired"}',
-            )
-
-    monkeypatch.setattr(
-        commands,
-        "client_from_config",
-        lambda: FactorTesterClient(GoneSession()),
-    )
-    runner = CliRunner()
-
-    graph_help = runner.invoke(cli, ["research-graph", "--help"])
-    assure_help = runner.invoke(
-        cli,
-        ["research-graph", "backend-assure", "--help"],
-    )
-    verify_help = runner.invoke(
-        cli,
-        ["research-graph", "backend-verify", "--help"],
-    )
-    assured = runner.invoke(cli, [
-        "research-graph", "backend-assure", "job-1",
-        "--instance-id", "instance-1",
-        "--branch-id", "branch-1",
-        "--node-id", "authoritative-backtest",
-    ])
-    verified = runner.invoke(cli, [
-        "research-graph", "backend-verify", "assurance-1",
-        "--verifier-execution-id", "verifier-1",
-        "--disposition", "confirmed_reliable",
-        "--evidence-ref", "artifact:verification-1",
-    ])
-
-    assert graph_help.exit_code == 0
-    for command_name in ("backend-assure", "backend-verify"):
-        assert command_name in graph_help.output
-    assert graph_help.output.count("(DEPRECATED)") >= 7
-    for result in (assure_help, verify_help, assured, verified):
-        assert "job show/detail" in result.output
-        assert "evidence.terminal_assurance" in result.output
-        assert "Maintenance Case" in result.output
-    assert assured.exit_code == 1
-    assert verified.exit_code == 1

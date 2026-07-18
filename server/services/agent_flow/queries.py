@@ -104,33 +104,6 @@ class AgentFlowQueries:
             )
         return sum(int(row["charged_tokens"]) for row in rows)
 
-    def find_invocation_by_reference(
-        self,
-        *,
-        invocation_or_reservation_id: str,
-        owner_user_id: str = "",
-    ) -> dict[str, Any]:
-        owner_predicate = "AND owner_user_id=?" if owner_user_id else ""
-        parameters: tuple[Any, ...] = (
-            invocation_or_reservation_id,
-            invocation_or_reservation_id,
-            *((owner_user_id,) if owner_user_id else ()),
-        )
-        with connect_agent_flow(self.db_path) as conn:
-            row = conn.execute(
-                f"""
-                SELECT * FROM agent_invocations
-                WHERE (
-                    invocation_id=? OR legacy_reservation_id=?
-                ) {owner_predicate}
-                """,
-                parameters,
-            ).fetchone()
-        if row is None:
-            raise KeyError("Agent invocation not found")
-        return invocation_value(row)
-
-
 def invocation_value(row: sqlite3.Row) -> dict[str, Any]:
     return {
         key: row[key]

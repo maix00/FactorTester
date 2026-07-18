@@ -193,8 +193,6 @@ def _prepare_invocation(
         "period_id": legacy_period_id(owner, scope_id),
         "owner_user_id": owner,
         "agent_id": str(agent_id_by_scope[scope_key]).strip(),
-        "legacy_reservation_id": reservation_id,
-        "legacy_provider_receipt_id": receipt_id,
         "actor_role": (
             str(execution["actor_role"])
             if execution is not None else str(reservation["work_kind"])

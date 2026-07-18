@@ -42,10 +42,12 @@ def create_app() -> Flask:
     from tools.data.account_manage import ensure_account_manager_sqlite_store
     from server.jobs.repository import JobRepository
     from server.services.research_configurations import ensure_schema as ensure_research_configuration_schema
+    from server.services.research_runs import ensure_schema as ensure_research_run_schema
     from server.services.research_graphs import ensure_schema as ensure_research_graph_schema
     ensure_account_manager_sqlite_store()
     JobRepository().ensure_schema()
     ensure_research_configuration_schema()
+    ensure_research_run_schema()
     ensure_research_graph_schema()
 
     # ── 注册 Blueprint ──

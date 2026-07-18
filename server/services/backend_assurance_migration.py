@@ -14,6 +14,10 @@ from server.jobs.assurance import (
     TerminalAssuranceSummary,
     canonical_hash,
 )
+from server.services.migration_telemetry import (
+    MigrationTelemetry,
+    table_count,
+)
 from server.services.maintenance_cases.schema import create_schema
 from server.services.maintenance_cases.store import open_case_in_connection
 from tools.data.sqlite.db import connect_sqlite
@@ -25,8 +29,9 @@ _TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 
 def migrate_backend_assurance(
     db_path: str | Path,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Convert all legacy backend assurance facts in one SQLite transaction."""
+    telemetry = MigrationTelemetry()
     report = {
         "legacy_receipts_migrated": 0,
         "terminal_jobs_backfilled": 0,
@@ -34,6 +39,8 @@ def migrate_backend_assurance(
         "legacy_table_dropped": 0,
     }
     with connect_sqlite(db_path, foreign_keys=True) as conn:
+        conn.set_trace_callback(telemetry.trace)
+        before_count = table_count(conn)
         conn.execute("BEGIN IMMEDIATE")
         _ensure_target_schema(conn)
         _backfill_job_run_spec_hashes(conn)
@@ -67,7 +74,14 @@ def migrate_backend_assurance(
         if legacy_exists:
             conn.execute(f"DROP TABLE {_LEGACY_TABLE}")
             report["legacy_table_dropped"] = 1
-    return report
+        after_count = table_count(conn)
+    return report | {
+        "schema_tables_before": before_count,
+        "schema_tables_after": after_count,
+        "rollback_target": (
+            "restore pre-migration database backup and parent commit 14f4b7f8"
+        ),
+    } | telemetry.report()
 
 
 def _ensure_target_schema(conn: sqlite3.Connection) -> None:
@@ -336,13 +350,15 @@ def _migrate_maintenance_case(
         now=float(receipt["created_at"]),
     )
     if verifier_disposition:
+        assert verified_at is not None
+        verified_at_value = float(verified_at)
         target_status = {
             "confirmed_reliable": "resolved",
             "backend_change_proposed": "blocked",
             "research_input_issue": "rejected",
         }[verifier_disposition]
         closed_at = (
-            None if target_status == "blocked" else float(verified_at)
+            None if target_status == "blocked" else verified_at_value
         )
         conn.execute(
             """
@@ -355,8 +371,8 @@ def _migrate_maintenance_case(
                 target_status,
                 verifier_id,
                 f"agent-invocation:{verifier_id}",
-                float(verified_at),
-                float(verified_at),
+                verified_at_value,
+                verified_at_value,
                 closed_at,
                 case["case_id"],
             ),

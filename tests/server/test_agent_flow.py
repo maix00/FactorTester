@@ -502,11 +502,10 @@ def test_legacy_accounting_migrates_once_without_dual_write(
         },
     )
 
-    assert report == {
-        "budget_periods_migrated": 1,
-        "invocations_migrated": 1,
-        "legacy_tables_dropped": 4,
-    }
+    assert report["budget_periods_migrated"] == 1
+    assert report["invocations_migrated"] == 1
+    assert report["legacy_tables_dropped"] == 4
+    assert report["sql_transactions"] == 1
     period = store.load_current_budget_period(
         owner_user_id="alice",
         agent_id="research-agent-1",
@@ -517,7 +516,8 @@ def test_legacy_accounting_migrates_once_without_dual_write(
         owner_user_id="alice",
         invocation_id="execution-1",
     )
-    assert invocation["legacy_reservation_id"] == "reservation-1"
+    assert "legacy_reservation_id" not in invocation
+    assert "legacy_provider_receipt_id" not in invocation
     assert invocation["runtime_id"] == "codex-a"
     assert invocation["model_id"] == "model-a"
     assert invocation["charged_tokens"] == 32
@@ -558,6 +558,8 @@ def test_http_invocation_path_is_provider_neutral(client) -> None:
     )
     assert reserve_response.status_code == 201
     invocation = reserve_response.get_json()["invocation"]
+    assert "legacy_reservation_id" not in invocation
+    assert "legacy_provider_receipt_id" not in invocation
 
     settle_response = client.post(
         f"/api/agent-flow/invocations/{invocation['invocation_id']}/settle",
@@ -569,7 +571,10 @@ def test_http_invocation_path_is_provider_neutral(client) -> None:
         },
     )
     assert settle_response.status_code == 200
-    assert settle_response.get_json()["invocation"]["charged_tokens"] == 32
+    settled_payload = settle_response.get_json()["invocation"]
+    assert settled_payload["charged_tokens"] == 32
+    assert "legacy_reservation_id" not in settled_payload
+    assert "legacy_provider_receipt_id" not in settled_payload
 
 
 def test_invocation_reserve_and_settle_are_request_idempotent(
@@ -625,7 +630,7 @@ def test_invocation_reserve_and_settle_are_request_idempotent(
         )
 
 
-def test_graph_schema_rejects_legacy_protocol_without_recreating_tables(
+def test_graph_schema_does_not_recreate_legacy_accounting_tables(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -633,15 +638,6 @@ def test_graph_schema_rejects_legacy_protocol_without_recreating_tables(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", graph_db)
     agent_flow.clear_store_cache()
     research_graphs.ensure_schema()
-
-    with pytest.raises(RuntimeError, match="deprecated split reservation"):
-        research_graphs.reserve_tokens(
-            owner_user_id="alice",
-            scope_id="research-agent-1",
-            work_kind="reviewer",
-            max_input_tokens=60,
-            max_output_tokens=20,
-        )
 
     with connect_sqlite(graph_db) as conn:
         graph_tables = {
@@ -682,10 +678,9 @@ def test_graph_schema_rejects_legacy_protocol_without_recreating_tables(
         "/api/research-token-reservations/legacy-id/release",
     ],
 )
-def test_legacy_agent_accounting_http_endpoints_are_explicitly_retired(
+def test_legacy_agent_accounting_http_endpoints_are_absent(
     client,
     path,
 ) -> None:
     response = client.post(path, json={})
-    assert response.status_code == 410
-    assert response.get_json()["replacement"] == "/api/agent-flow"
+    assert response.status_code == 404

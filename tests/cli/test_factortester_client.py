@@ -65,6 +65,10 @@ def fake_server() -> Iterator[str]:
         payload = request.get_json()
         assert payload["workspace_id"] == "workspace-1"
         assert payload["configuration_revision"] == 1
+        assert payload["trial_binding"] == {
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+        }
         return jsonify(success=True, run_id="run-1", jobs=[{"job_id": "job-1", "kind": "ic"}]), 202
 
     @app.post("/api/external-factor-artifacts/validate")
@@ -130,7 +134,15 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     workspace = client.create_workspace(factor_families=[{"alias": "MmRet"}])
     assert workspace["workspace_id"] == "workspace-1"
     assert client.list_workspaces()[0]["workspace_id"] == "workspace-1"
-    assert client.submit_run("workspace-1", 1, analyses=["ic"])["run_id"] == "run-1"
+    assert client.submit_run(
+        "workspace-1",
+        1,
+        analyses=["ic"],
+        trial_binding={
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+        },
+    )["run_id"] == "run-1"
     assert client.validate_external_factor_artifact(
         "/research/gtht_handoff.json"
     )["artifact_id"] == "academic_mom:abc"

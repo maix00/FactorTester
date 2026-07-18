@@ -1475,6 +1475,50 @@ execution count, and both non-zero token totals from normalized settled Agent
 Invocations. Client-submitted metric values are diagnostic only. Activation
 accepts only evidence derived by the authoritative Agent Flow/Graph owners.
 
+## Issue 140 Batch 6 release evidence
+
+Batch 6 finalizes the cutover from parent `2d951a42`. It does not activate,
+merge, or push the branch.
+
+- Final Graph persistence has exactly six owner tables. Final Agent Flow
+  persistence has exactly two owner tables, and its Invocation owner has 33
+  canonical columns with no legacy reservation or provider-receipt IDs.
+- Runtime schema checks reject legacy or unexpected owners. The warm Graph
+  check is one `SELECT` with no DDL or `PRAGMA`; the startup-only Agent Flow
+  check is one owner `SELECT` plus two bounded column inspections. Request
+  handlers reuse the verified schema state.
+- A TrialPlan-to-ResearchRun binding performs one read and one write and no
+  schema operation. An unbound run remains valid and exposes no invented
+  TrialPlan projection.
+- Routine branch context performs one branch `SELECT` without scanning trace
+  history, immutable graph versions, or Agent Flow. An unchanged capability
+  resolution performs zero writes. A changed transition performs one branch
+  `SELECT` inside one `BEGIN IMMEDIATE`, followed by one branch update and one
+  trace insert; it does not reread the immutable graph version.
+- Capability resolution is current-node and transition-target local.
+  Triggered conditional gaps block the applicable transition; untriggered and
+  future-node gaps do not enter current Agent context.
+- Replay is server-owned and non-mutating. Shadow comparison includes Job
+  kind, RunSpec, source revision, runner path, and execution-plan identity, so
+  equal numeric outputs from semantically different jobs cannot self-certify
+  equivalence.
+- The offline finalizer is dry-run by default. Apply requires
+  `--confirm-offline`, creates database backups, runs Graph then Agent Flow
+  migration and exact-schema verification, is idempotent, restores both
+  backups on failed final verification, and reports the parent commit plus
+  exact database rollback target.
+- Batch 1–3 migration reports now expose their before/after schema owner
+  counts, actual traced SQL read/write/DDL counts, transaction count, elapsed
+  milliseconds, and exact parent-commit rollback target. Batch 4–6 expose the
+  same release evidence directly or through the final cutover coordinator;
+  none of this telemetry creates a database owner or a routine runtime write.
+- Final release gates on 2026-07-19: server/CLI/factor-workspace suite
+  `260 passed`; installed Harness suite `41 passed`; installed Harness
+  subprocess replay from `/tmp` `11 passed`; generated factor workspace
+  Pylance/Pyright gate `1 passed`; targeted production Pyright
+  `0 errors, 0 warnings`; both canonical and packaged Skills pass
+  `skill-creator` validation and are byte-identical.
+
 ## Deferred Decisions
 
 These are empirical engineering questions for agents to resolve, not questions

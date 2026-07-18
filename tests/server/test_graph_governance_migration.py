@@ -250,14 +250,19 @@ def test_consumed_governance_projects_to_one_resolved_gate_and_drops_legacy(
 
     report = migrate_graph_governance(db_path=path)
 
-    assert report == {
-        "approval_gate_cases_migrated": 1,
-        "consumed_authorizations_migrated": 1,
-        "unconsumed_authorization_ids": [],
-        "capability_approvals_dropped": 1,
-        "capability_receipts_preserved": 1,
-        "legacy_tables_dropped": 7,
-    }
+    assert report["approval_gate_cases_migrated"] == 1
+    assert report["consumed_authorizations_migrated"] == 1
+    assert report["unconsumed_authorization_ids"] == []
+    assert report["capability_approvals_dropped"] == 1
+    assert report["capability_receipts_preserved"] == 1
+    assert report["legacy_tables_dropped"] == 7
+    assert report["schema_tables_before"] == 9
+    assert report["schema_tables_after"] == 3
+    assert report["sql_reads"] > 0
+    assert report["sql_writes"] > 0
+    assert report["sql_transactions"] == 1
+    assert report["latency_ms"] >= 0
+    assert "595845dd" in report["rollback_target"]
     assert _tables(path).isdisjoint(_LEGACY_TABLES)
     assert "research_capability_receipts" in _tables(path)
     with connect_sqlite(path) as conn:
@@ -291,14 +296,14 @@ def test_unconsumed_authorization_is_reported_but_never_becomes_approval(
 
     assert report["unconsumed_authorization_ids"] == ["authorization-1"]
     assert report["consumed_authorizations_migrated"] == 0
-    assert repeated == {
-        "approval_gate_cases_migrated": 0,
-        "consumed_authorizations_migrated": 0,
-        "unconsumed_authorization_ids": [],
-        "capability_approvals_dropped": 0,
-        "capability_receipts_preserved": 1,
-        "legacy_tables_dropped": 0,
-    }
+    assert repeated["approval_gate_cases_migrated"] == 0
+    assert repeated["consumed_authorizations_migrated"] == 0
+    assert repeated["unconsumed_authorization_ids"] == []
+    assert repeated["capability_approvals_dropped"] == 0
+    assert repeated["capability_receipts_preserved"] == 1
+    assert repeated["legacy_tables_dropped"] == 0
+    assert repeated["schema_tables_before"] == repeated["schema_tables_after"]
+    assert repeated["sql_transactions"] == 0
     with connect_sqlite(path) as conn:
         cases = conn.execute(
             "SELECT * FROM research_maintenance_cases"

@@ -204,55 +204,11 @@ class InvocationLifecycle:
             "created_at": now,
         }
 
-    def claim_reserved_invocation(
-        self,
-        *,
-        owner_user_id: str,
-        invocation_or_reservation_id: str,
-        actor_role: str,
-        authority_scope: str,
-        runtime_id: str,
-        model_id: str,
-        agent_principal_hash: str,
-        lineage_hash: str,
-    ) -> dict[str, Any]:
-        require_sha256("agent_principal_hash", agent_principal_hash)
-        require_sha256("lineage_hash", lineage_hash)
-        with connect_agent_flow(self.db_path) as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                """
-                UPDATE agent_invocations
-                SET actor_role=?, authority_scope=?, runtime_id=?, model_id=?,
-                    agent_principal_hash=?, lineage_hash=?
-                WHERE owner_user_id=?
-                  AND (invocation_id=? OR legacy_reservation_id=?)
-                  AND status='reserved'
-                RETURNING *
-                """,
-                (
-                    actor_role,
-                    authority_scope,
-                    runtime_id,
-                    model_id,
-                    agent_principal_hash,
-                    lineage_hash,
-                    owner_user_id,
-                    invocation_or_reservation_id,
-                    invocation_or_reservation_id,
-                ),
-            ).fetchone()
-            if row is None:
-                raise ValueError(
-                    "active Agent invocation reservation is required"
-                )
-        return invocation_value(row)
-
     def release_invocation(
         self,
         *,
         owner_user_id: str,
-        invocation_or_reservation_id: str,
+        invocation_id: str,
     ) -> dict[str, Any]:
         now = time.time()
         with connect_agent_flow(self.db_path) as conn:
@@ -261,13 +217,12 @@ class InvocationLifecycle:
                 """
                 SELECT * FROM agent_invocations
                 WHERE owner_user_id=?
-                  AND (invocation_id=? OR legacy_reservation_id=?)
+                  AND invocation_id=?
                   AND status='reserved'
                 """,
                 (
                     owner_user_id,
-                    invocation_or_reservation_id,
-                    invocation_or_reservation_id,
+                    invocation_id,
                 ),
             ).fetchone()
             if row is None:
@@ -289,7 +244,7 @@ class InvocationLifecycle:
             )
         return {
             "invocation_id": str(row["invocation_id"]),
-            "reservation_id": invocation_or_reservation_id,
+            "reservation_id": invocation_id,
             "status": "released",
             "released_tokens": int(row["reserved_tokens"]),
         }

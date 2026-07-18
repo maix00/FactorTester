@@ -96,43 +96,6 @@ def review_research_graph_proposal(proposal_id: str):
     return jsonify({"success": True, "review": review}), 201
 
 
-@sft_bp.post("/api/research-capability-approvals")
-def approve_research_capability():
-    require_user()
-    return jsonify({
-        "success": False,
-        "error": (
-            "server capability approvals are retired; approve Skill execution "
-            "in the Agent conversation and retain actual-use audit locally"
-        ),
-    }), 410
-
-
-@sft_bp.post("/api/research-capability-receipts")
-def attest_research_capabilities():
-    data = request.get_json(silent=True) or {}
-    try:
-        receipt = research_graphs.issue_capability_receipt(
-            owner_user_id=require_user(),
-            graph_id=str(data.get("graph_id") or ""),
-            graph_version=int(data.get("graph_version") or 0),
-            node_id=str(data.get("node_id") or ""),
-            product_group=str(data.get("product_group") or ""),
-            catalog_hash=str(data.get("catalog_hash") or ""),
-            product_profile_hash=str(data.get("product_profile_hash") or ""),
-            resolver_version=str(data.get("resolver_version") or ""),
-            semantic_resolution=data.get("semantic_resolution") or {},
-            approval_refs=data.get("approval_refs") or {},
-            provider_conformance_hash=str(
-                data.get("provider_conformance_hash") or ""
-            ),
-            shadow_mode=bool(data.get("shadow_mode", False)),
-        )
-    except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 409
-    return jsonify({"success": True, "receipt": receipt}), 201
-
-
 @sft_bp.post(
     "/api/research-graphs/<graph_id>/versions/<int:version>/validation"
 )
@@ -231,36 +194,6 @@ def authorize_research_graph_activation():
     }), 201
 
 
-@sft_bp.post("/api/research-backend-assurance/evaluate")
-def retired_research_backend_assurance():
-    return _retired_backend_assurance_response()
-
-
-@sft_bp.post(
-    "/api/research-backend-assurance/<receipt_id>/verification"
-)
-def verify_research_backend_assurance(receipt_id: str):
-    del receipt_id
-    return _retired_backend_assurance_response()
-
-
-def _retired_backend_assurance_response():
-    require_user()
-    return jsonify({
-        "success": False,
-        "error": (
-            "Graph backend assurance receipts are retired; terminal "
-            "assurance is Job-owned and review is MaintenanceCase-owned."
-        ),
-        "replacement": {
-            "job_evidence": (
-                "GET /api/jobs/<job_id> -> evidence.terminal_assurance"
-            ),
-            "verification": "MaintenanceCase",
-        },
-    }), 410
-
-
 @sft_bp.post("/api/research-graphs/<graph_id>/rollback")
 def rollback_research_graph(graph_id: str):
     data = request.get_json(silent=True) or {}
@@ -290,7 +223,7 @@ def create_research_graph_instance():
             owner=require_user(),
             product_group=str(data.get("product_group") or ""),
             workspace_id=str(data.get("workspace_id") or ""),
-            capability_receipt=data.get("capability_receipt") or {},
+            capability_resolution=data.get("capability_resolution") or {},
             shadow_graph_version=data.get("shadow_graph_version"),
             shadow_run_id=str(data.get("shadow_run_id") or ""),
         )

@@ -217,12 +217,17 @@ def test_migrates_legacy_receipt_to_job_assurance_and_drops_old_table(
             """
         ).fetchone()
     assurance = orjson.loads(trusted["terminal_assurance_json"])
-    assert report == {
-        "legacy_receipts_migrated": 1,
-        "terminal_jobs_backfilled": 0,
-        "maintenance_cases_migrated": 0,
-        "legacy_table_dropped": 1,
-    }
+    assert report["legacy_receipts_migrated"] == 1
+    assert report["terminal_jobs_backfilled"] == 0
+    assert report["maintenance_cases_migrated"] == 0
+    assert report["legacy_table_dropped"] == 1
+    assert report["schema_tables_before"] == 7
+    assert report["schema_tables_after"] == 7
+    assert report["sql_reads"] > 0
+    assert report["sql_writes"] > 0
+    assert report["sql_transactions"] == 1
+    assert report["latency_ms"] >= 0
+    assert "14f4b7f8" in report["rollback_target"]
     assert assurance["disposition"] == "trusted"
     assert set(assurance) == {
         "policy_hash",
@@ -297,12 +302,12 @@ def test_backfills_unreceipted_terminal_once_without_opening_case(
         "disposition",
     }
     assert case_count == 0
-    assert second == {
-        "legacy_receipts_migrated": 0,
-        "terminal_jobs_backfilled": 0,
-        "maintenance_cases_migrated": 0,
-        "legacy_table_dropped": 0,
-    }
+    assert second["legacy_receipts_migrated"] == 0
+    assert second["terminal_jobs_backfilled"] == 0
+    assert second["maintenance_cases_migrated"] == 0
+    assert second["legacy_table_dropped"] == 0
+    assert second["schema_tables_before"] == second["schema_tables_after"]
+    assert second["sql_transactions"] == 1
     assert assurance_retry == assurance_raw
 
 

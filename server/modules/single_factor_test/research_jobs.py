@@ -401,13 +401,17 @@ def submit_research_run():
         "step_mode": step_mode,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
-    run = research_runs.create_run(
-        owner=owner,
-        workspace_id=workspace_id,
-        configuration_id=configuration["configuration_id"],
-        configuration_revision=configuration["revision"],
-        run_spec=run_spec,
-    )
+    try:
+        run = research_runs.create_run(
+            owner=owner,
+            workspace_id=workspace_id,
+            configuration_id=configuration["configuration_id"],
+            configuration_revision=configuration["revision"],
+            run_spec=run_spec,
+            trial_binding=data.get("trial_binding"),
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     jobs = []
     for kind in analyses:
         payload = {

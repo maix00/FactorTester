@@ -1,158 +1,157 @@
 # Harness Test Plan
 
-The harness tests cover:
+This release gate validates a CLI-Anything adapter to the real remote
+FactorTester backend. A successful process exit is insufficient: tests inspect
+the session, graph, capability, evidence, HTTP, RunSpec, ResearchRun, Job, and
+artifact contracts produced by the workflow.
 
-- plan generation through `workspace -> immutable RunSpec -> job`;
-- absence of analysis-specific submission commands and `page_uuid` ownership;
-- session/gap state transitions;
-- validation slice separation;
-- source-owner worktree selection;
-- subprocess delegation to the real `factortester` executable.
+## Test inventory
 
-## Research decision graph refinement
+- `test_core.py`: deterministic graph/capability/session/evidence and packaging
+  unit tests.
+- `test_full_e2e.py`: installed Harness subprocess workflows with a controlled
+  real `factortester` executable.
+- `test_real_server_e2e.py`: installed Harness and FactorTester console scripts
+  against a complete isolated `server.create_app()` over real HTTP.
 
-The adaptive research-graph work is implemented as vertical slices. Tests are
-added one observable behavior at a time.
+## Unit coverage
 
-### Slice 1 planned behavior
+### Graph protocol and topology
 
-- `test_core.py`
-  - the existing fixed Harness plan projects to a valid Observed Graph;
-  - every edge references declared nodes;
-  - canonical graph JSON produces a stable content hash;
-  - graph validation rejects duplicate IDs, dangling edges, and invalid
-    lifecycle/enforcement values;
-  - advisory plan phases remain distinguishable from enforced gap states;
-  - capability requirements are semantic contracts, not concrete Skill names;
-  - mandatory and conditionally triggered capabilities remain distinct;
-  - FDR, Deflated Sharpe, and PBO trigger only when their trial-family
-    preconditions are known to hold;
-  - authoritative net returns precede bootstrap Sharpe and result audit;
-  - diagnostic and robustness failures can reject or preregister a bounded
-    revision without a post-selection audit loop;
-  - factor revisions restart hypothesis, capability, data, and validation
-    checks;
-  - factor semantics and terminal decisions require bounded
-    hypothesis-code-alignment and provisional-memory references;
-  - external Skill execution remains unresolved without an explicit grant.
-- `test_full_e2e.py`
-  - the installed Harness command prints the Observed Graph as JSON;
-  - repeated invocations produce the same graph hash;
-  - human-readable status identifies the graph as observed and non-active;
-  - default capability output omits full contracts, while
-    `--include-contracts` exposes them for explicit audit.
+- Project the existing fixed plan as an advisory Observed Graph.
+- Build the product-neutral Draft Graph and validate every node, edge,
+  lifecycle, enforcement, risk level, and capability descriptor.
+- Preserve stable content hashes across the natural module split.
+- Reject duplicate IDs, dangling edges, and missing descriptors.
+- Keep diagnostic rejection, bounded revision, capability-gap recovery, and
+  result-audit routes semantically distinct.
 
-### Server and integration behavior
+### Node-local capability resolution
 
-- authenticated FactorTester API and CLI retrieval of observed, draft, and
-  active versions;
-- immutable version history and gated active pointer;
-- capability approval and Skill execution gates;
-- server-side capability descriptions without concrete Skill identity;
-- local hash-chained actual Skill usage audit;
-- branch-local pause with unrelated job continuity;
-- compact current-node context without full graph/catalog/artifact history;
-- current-node resolution storage and `research-graph next`;
-- per-transition token telemetry by main Agent, reviewer, Skill document,
-  artifact summary, and cache use;
-- token-budget behavior that suppresses new reviewers without stopping jobs;
-- provider fingerprint/cache invalidation and model-neutral semantics;
-- proposal/reviewer/audit lifecycle, including third reviewer only after
-  disagreement;
-- trusted-launcher Agent principal and lineage attestations, so distinct
-  execution IDs cannot simulate independent reviewers;
-- one-time human activation authorization, separate from ordinary authenticated
-  Agent proposal, review, validation, and grill requests;
-- a deterministic Backend Assurance Gate that emits a compact signed receipt
-  for an immutable terminal job without launching an Agent;
-- exactly one independently attested `backend_verifier` only when a succeeded
-  job has a semantic or integrity anomaly;
-- backend verifier and implementation roles require trusted-launcher
-  `server_backend_code` authority; ordinary research users can report and route
-  anomalies but cannot claim code-modification authority;
-- no verifier, Skill load, artifact body read, stdout/stderr load, or extra
-  research Agent on the routine trusted backend path;
-- non-mutating historical replay and a hard token-efficiency activation gate.
+- Resolve the current node by default and the full graph only when `--all` is
+  explicit.
+- Evaluate bounded predicates deterministically and expose unknown facts as
+  `requires_agent_judgment`.
+- Exclude model/provider/Codex runtime identity from semantic cache keys.
+- Verify approved provider fingerprints before selecting an implementation.
+- Invalidate cache results when provider source content changes.
+- Require execution approval for a selected external implementation without
+  loading its Skill body.
+- Keep capability descriptions and descriptor hashes independent from concrete
+  locally used Skill identity.
 
-### Real installed CLI to server E2E
+### Local research audit
 
-The release gate must also start the complete `server.create_app()` application
-against an isolated temporary SQLite database and drive it over real HTTP. It
-must not use Flask `test_client`, fake routes, or source-module CLI fallbacks.
+- Preserve hash-chained Skill usage with provider, version, fingerprint,
+  approval reference, load/reuse mode, rationale, and token counts.
+- Persist compact EvidenceEnvelopes with command exit status and artifact
+  references instead of inline stdout/stderr bodies.
+- Preserve gap and factor-improvement state transitions.
+- Keep selection slices separate from OOS annotation.
 
-The workflow must prove:
+### Packaging
 
-- both `cli-anything-factortester-research` and `factortester` resolve to
-  installed console scripts;
-- one real login with `--keep-login` remains authenticated in later,
-  independently spawned CLI processes;
-- the installed Harness emits the real Draft Graph and the installed
-  FactorTester CLI publishes it;
-- proposer and reviewer use distinct server-issued Agent executions under the
-  same owner;
-- capability approvals and receipts, non-zero trusted provider usage,
-  like-for-like shadow runs, validation, grill audit, and activation all pass
-  through the real HTTP service;
-- a live instance returns separate bounded `context` and `next` packets and can
-  advance using a target-node capability receipt;
-- `logout` removes the local cookie and a later protected command fails.
+- Keep canonical and packaged `SKILL.md` bytes identical.
+- Keep every new production module below 500 lines.
+- Preserve the original Click command names, options, help, and JSON shapes
+  after command-domain extraction.
 
-The test must use a temporary `FACTORTESTER_HOME`, temporary database, generated
-credentials, and a test-only provider-attestation secret. It must not read or
-mutate a developer's existing account, cookie, graph, or research data.
+## Installed subprocess workflows
 
-Run:
+The subprocess suite uses `_resolve_cli("cli-anything-factortester-research")`
+and supports `CLI_ANYTHING_FORCE_INSTALLED=1`. It must not set a source-tree
+working directory to make an installed command pass.
+
+Workflows cover:
+
+- `--help`, `--json`, plan creation, status, and gap lifecycle;
+- Observed/Draft Graph output and stable content hashes;
+- current-node capability resolution with full contracts omitted by default;
+- explicit `--include-contracts` audit output;
+- dry-run and real delegation to the configured `factortester` executable;
+- factor-workspace inspection and platform-gap EvidenceEnvelope persistence;
+- external daily/minute/factor/handoff manifest validation.
+
+## Real installed CLI to server E2E
+
+The release gate starts the complete Flask application against temporary SQLite
+state and drives it through installed console scripts over TCP. It does not use
+Flask `test_client`, fake HTTP routes, a developer account, or source-module CLI
+fallbacks.
+
+It proves:
+
+- one login with `--keep-login` authenticates later independent processes and
+  logout removes the local session;
+- the Harness publishes a real immutable graph version;
+- trusted proposer/reviewer executions are server-issued and independently
+  attributable;
+- graph start accepts direct node-local `capability_resolution`; no
+  attest/receipt API participates;
+- `context` and `next` are bounded current-node packets and future,
+  untriggered gaps do not block the branch;
+- target-node resolution accompanies only the transition that needs it;
+- server-owned validation derives non-mutating trace replay, like-for-like
+  shadow comparison, and token-efficiency evidence from canonical references;
+- the client cannot self-certify replay/shadow/token pass booleans;
+- proposal, independent review, grill audit, human authorization, and
+  activation remain separate gates.
+
+Companion server tests, outside this Harness package suite, validate the
+TrialPlan schema, transition freeze rules, TrialPlan-to-ResearchRun binding,
+Job inheritance through `run_id`, retention, and exact-hash rollback gates.
+
+## Commands
+
+Run the Harness package suite:
+
+```bash
+PYTHONPATH=tools/cli/agent-harness \
+  conda run -n GTHT python -m pytest \
+  tools/cli/agent-harness/cli_anything/factortester_research/tests \
+  -v -s --tb=short
+```
+
+Require the installed Harness command:
 
 ```bash
 cd tools/cli/agent-harness
-conda run -n GTHT pytest cli_anything/factortester_research/tests -q
-```
-
-Installed-command validation:
-
-```bash
 python -m pip install -e .
-CLI_ANYTHING_FORCE_INSTALLED=1 conda run -n GTHT pytest cli_anything/factortester_research/tests/test_full_e2e.py -q
+CLI_ANYTHING_FORCE_INSTALLED=1 \
+  conda run -n GTHT python -m pytest \
+  cli_anything/factortester_research/tests/test_full_e2e.py \
+  -v -s --tb=short
 ```
 
-Manual smoke test:
+## Test results
 
-```bash
-cli-anything-factortester-research --session /tmp/ftr-session.json plan \
-  --factor-family SgCCS \
-  --factor 'SgCCS=SgCCS|P:CA|N:10d' \
-  --configuration-file research-configuration.json \
-  --json
-```
-
-The generated plan must create/select a workspace, write or import a revision, submit one run containing requested analyses, and observe/control results by `job_id`.
-
-## External Vibe infrastructure coverage
-
-- Unit coverage validates the canonical locked pipeline command, daily/minute
-  manifest contracts, factor provenance, mandatory next-bar execution, and the
-  explicit unavailable GTHT import boundary.
-- The real-file smoke test validated the existing daily v1, minute v1,
-  `academic_carhart_mom`, and `gtht_handoff.json` artifacts.
-
-Do not keep a hard-coded pass count here; the authoritative result is the
-current command exit status and collected test report.
-
-## Test Results
-
-Last release-gate run: 2026-07-18
+Last release-gate run: 2026-07-19
 
 ```text
-CLI_ANYTHING_FORCE_INSTALLED=1 conda run -n GTHT python -m pytest \
+CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
+  conda run -n GTHT python -m pytest \
   tools/cli/agent-harness/cli_anything/factortester_research/tests \
-  tests/server/test_research_graphs.py \
-  tests/server/test_research_job_lifecycle.py \
-  tests/cli/test_research_graph_commands.py \
-  tests/cli/test_factortester_client.py -q
+  -v -s --tb=no
 
-78 passed, 123 warnings in 16.56s
+[_resolve_cli] Using installed command:
+  /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
+collected 41 items
+
+test_core.py
+  29 passed
+test_full_e2e.py::TestCLISubprocess
+  11 passed
+test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
+  [_resolve_cli] Using installed command:
+    /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/factortester
+  [_resolve_cli] Using installed command:
+    /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
+  PASSED
+
+41 passed, 123 warnings in 12.24s
 ```
 
-The real-server test printed installed paths for both console scripts and
-completed the isolated login-through-logout Active Graph workflow. The warnings
-are existing Pandas frequency-alias deprecations outside this refinement.
+All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in
+parameter and FactorExpr shift code outside this Harness refactor. The command
+exit status and collected test names remain authoritative; no production logic
+uses a hard-coded expected count.

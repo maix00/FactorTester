@@ -17,6 +17,7 @@ from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus, TERMINAL_STATUSES
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.research_jobs import _daemon_client, _deployment_id
+from server.services import research_runs
 from server.services.session_runtime import require_user
 
 
@@ -146,6 +147,10 @@ def get_test_job(job_id: str):
         "result_summary": job.result_summary,
         "error": job.error,
         "evidence": {
+            "trial_binding": research_runs.load_job_trial_binding(
+                job_id=job.job_id,
+                owner=job.owner,
+            ),
             "terminal_assurance": (
                 job.terminal_assurance.to_dict()
                 if job.terminal_assurance is not None
@@ -225,7 +230,18 @@ def get_test_job_result(job_id: str):
     job, error = _require_job(job_id)
     if error:
         return error
-    base = {"job_id": job.job_id, "kind": job.kind, "run_id": job.run_id, "status": job.status.value}
+    base = {
+        "job_id": job.job_id,
+        "kind": job.kind,
+        "run_id": job.run_id,
+        "status": job.status.value,
+        "evidence": {
+            "trial_binding": research_runs.load_job_trial_binding(
+                job_id=job.job_id,
+                owner=job.owner,
+            ),
+        },
+    }
     if job.status is JobStatus.SUCCEEDED:
         return jsonify({"success": True, **base, "result": job.result_summary})
     if job.status is JobStatus.PAUSED:

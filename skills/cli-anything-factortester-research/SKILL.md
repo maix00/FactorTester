@@ -1,83 +1,111 @@
 ---
 name: cli-anything-factortester-research
-description: Use the FactorTester CLI through a CLI-Anything research harness for factor IC, type analysis, backtest grids, result audits, and codebase gap tracking.
+description: Plan and execute factor research through the real remote FactorTester CLI, including local workspace inspection, node-local Active Graph capability resolution, immutable TrialPlan and ResearchRun binding, durable job observation, progressive skill loading with approval, local skill-use audit, and platform-gap routing. Use when an agent needs to research one or more factor families without loading the full graph, capability catalog, artifacts, or backend source into context.
 ---
 
 # FactorTester Research Harness
 
-Use `cli-anything-factortester-research` when an agent is researching a factor
-with FactorTester and needs a disciplined loop:
-
-1. Create an explicit research plan.
-2. Run IC/IR and factor-type diagnostics before group backtests.
-3. Run cost/capacity-aware backtest grids.
-4. Audit order flow, ledgers, snapshots, and runtime summaries.
-5. If a platform gap appears, including incomplete FactorExpr operator coverage
-   or wrong operator semantics, record it, fix FactorTester, validate, then
-   resume.
-
-The harness calls the real `factortester` CLI. It does not require the user's
-machine to have FactorTester server source code. Factor-family names such as
-`SgCCS` are ordinary option values, never subcommands or defaults.
-
-## Commands
+Use the real backend and keep each Agent's local process in an explicit session:
 
 ```bash
-cli-anything-factortester-research doctor --json
-cli-anything-factortester-research plan --factor-family SgCCS --template '2026-06-02 07:20:47' --product-group 中国期货日盘 --param N=2m --f 1m --rev --json
-factortester custom_factors operators
-cli-anything-factortester-research workspace prepare --build --sync --json
-cli-anything-factortester-research workspace inspect --factor-family SgCCS --json
-cli-anything-factortester-research run-step -- ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --param N=2m --f 1m --rev
-factortester custom_factors factor-library history --factor-family SgCCS --product-group 中国期货日盘
-factortester custom_factors factor-library rank --preset ic-stable --start-date 2024-01-01 --end-date 2025-12-31
-factortester custom_factors factor-library rank --preset costed-backtest --start-date 2024-01-01 --end-date 2025-12-31
-factortester custom_factors factor-library import-result --dir /path/to/research_reports/factors/MyFamily --report-path /path/to/report.md --note 'backfill existing artifacts'
-cli-anything-factortester-research decision poor-result --reason 'IC/cost diagnostics failed'
-cli-anything-factortester-research operator set --mode client_only
-cli-anything-factortester-research operator set --mode source_owner --admin-port 7998
-cli-anything-factortester-research service restart --target-port 8123 --dry-run --json
-cli-anything-factortester-research gap list --json
-cli-anything-factortester-research gap resolve gap-1 --note 'implemented and tested'
-cli-anything-factortester-research status --json
-cli-anything-factortester-research checklist
+cli-anything-factortester-research \
+  --session /path/to/agent-session.json doctor --json
 ```
 
-## Agent Rules
+## Run the ordinary research loop
 
-- Do not jump straight to group backtest. Run IC/type diagnostics first.
-- Before editing a factor, inspect backend FactorExpr operators with
-  `factortester custom_factors operators`.
-- If the needed FactorExpr operator is missing or incomplete, record its
-  semantics, input/output signature, no-look-ahead constraints, and validation
-  tests, then fix the owning platform branch/worktree before continuing.
-- Do not run IC/type/backtest before preparing and inspecting the factor
-  workspace. If no workspace exists, build it first with
-  `workspace prepare --build --sync`.
-- Treat missing CLI/backend features as codebase gaps, not research conclusions.
-- Before repeating expensive diagnostics, query `factor-library history` and
-  `factor-library rank`. Backfill old JSON artifacts with
-  `factor-library import-result --artifact ...` or `--dir ...`.
-- Result-library ranking is candidate generation only. Ranked factors still need
-  validation slices, transaction costs, capacity, and OOS review.
-- Product-group labels stored in research results are not automatically product
-  group candidates; create or import real product groups before using them in new
-  tests.
-- Product group/product path and product mask are different research controls.
-  Product group/path defines the cross-sectional ranking universe and group
-  boundaries. Product mask filters products after membership/target construction
-  for trading or evaluation. A masked broad-universe run is not evidence that the
-  same factor works when reranked inside only the masked products.
-- Track the number of hypotheses tested when sweeping factor/product grids.
-- Include transaction costs, capacity, and explicit margin mode before claiming a
-  factor is profitable.
-- If `status` is `code_improvement_required`, stop research and fix FactorTester
-  before continuing.
-- `client_only` users cannot edit server code. They may edit writable factor
-  workspace source/parameters, but server-code gaps must be exported for a source
-  owner.
-- `source_owner` users must run tests after code changes and restart the target
-  service through the local 7998 manager before retrying failed research steps.
-- `source_owner` does not mean "edit platform code in the CLI worktree". First
-  identify the owning issue/task, fix and commit in that branch/worktree, then
-  merge those platform changes into the CLI worktree when the CLI needs them.
+```bash
+cli-anything-factortester-research plan \
+  --factor-family SgCCS \
+  --factor 'SgCCS=SgCCS|P:CA|N:10d' \
+  --configuration-file research-configuration.json \
+  --json
+cli-anything-factortester-research workspace prepare --build --sync --json
+cli-anything-factortester-research workspace inspect \
+  --factor-family SgCCS --json
+cli-anything-factortester-research run-step -- \
+  run submit --analysis ic --analysis factor_evaluation \
+  --analysis factor_type_analysis --analysis backtest
+cli-anything-factortester-research run-step -- job list
+```
+
+Treat the workspace as editable configuration, the `ResearchRun` as immutable
+RunSpec ownership, and `Job` as lifecycle/result/artifact ownership. Never use
+`page_uuid` as execution ownership; observe, cancel, and retry by `job_id`.
+
+## Use Active Graph without loading global state
+
+Resolve only the current node:
+
+```bash
+cli-anything-factortester-research graph capabilities \
+  --product-group china_futures \
+  --node hypothesis_preregistration \
+  --facts-file local-facts.json \
+  --json > capability-resolution.json
+
+factortester research-graph start factor-research \
+  --product-group china_futures \
+  --workspace-id <workspace_id> \
+  --capability-resolution-file capability-resolution.json
+factortester research-graph context <instance_id> <branch_id>
+factortester research-graph next <instance_id> <branch_id>
+```
+
+Do not search for or call capability `attest`/receipt APIs; they do not exist.
+Submit the node-local resolution directly. Use `--all` only for explicit
+activation audit and `--include-contracts` only for human inspection.
+
+When advancing, submit a compact evidence envelope and resolve only the target
+node when it differs:
+
+```bash
+factortester research-graph advance <instance_id> <branch_id> \
+  --edge-id <edge_id> \
+  --evidence-file evidence.json \
+  --target-capability-resolution-file target-resolution.json
+```
+
+For activation validation, send canonical instance/branch/baseline-run
+references. The server derives replay, shadow comparison, and token evidence;
+never invent client-side pass booleans.
+
+## Freeze TrialPlan and bind runs
+
+Persist one canonical TrialPlan body before validation design is frozen; later
+transitions refer to its hash. Bind a submitted ResearchRun with the plan,
+version, graph instance/branch, trial role, and declared comparison. The RunSpec
+hash must be a planned member. Child Jobs inherit the binding through `run_id`.
+Create a new TrialPlan version instead of mutating the frozen body.
+
+```bash
+factortester run submit --analysis ic \
+  --trial-binding-file trial-binding.json
+```
+
+## Load skills progressively
+
+The graph supplies capability descriptions and descriptor hashes, not concrete
+skill names.
+
+1. Match the current description to an already loaded, fingerprint-valid skill.
+2. If none matches, discover metadata without reading the skill body.
+3. Obtain approval in the Agent conversation before first execution.
+4. Load only the selected `SKILL.md`.
+5. Record actual use locally with `skill-usage record`, including provider,
+   version, fingerprint, approval reference, `loaded|reused`, rationale, and
+   token counts.
+
+Do not upload concrete skill identity as graph state. Do not reload a skill
+solely because a historical record names it.
+
+## Preserve research integrity
+
+- Align signal availability, IC return horizon, and next-bar execution.
+- Freeze ranking universe, masks, dates, costs, capacity, margin, fee mode,
+  sample roles, slices, selection history, and trial count.
+- Query reusable factor-library evidence before expensive repetition.
+- Treat missing operators, invalid timing, and broken job lifecycle as platform
+  gaps rather than factor conclusions.
+- Let `client_only` agents retain/report backend gaps. Let a `source_owner` fix
+  only the owning issue worktree, test it, and restart the correct service.

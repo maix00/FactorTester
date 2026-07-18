@@ -104,7 +104,7 @@ def release_agent_invocation(invocation_id: str):
     try:
         invocation = agent_flow.get_store().release_invocation(
             owner_user_id=require_user(),
-            invocation_or_reservation_id=invocation_id,
+            invocation_id=invocation_id,
         )
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409

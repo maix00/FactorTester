@@ -22,13 +22,17 @@ from server.services.research_graph.branch.repository import (
 )
 from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
-    verify_capability_receipt,
+    validate_resolution_against_node,
 )
 from server.services.research_graph.protocol import (
     assert_no_skill_identity,
     loads,
     merge_bounded_evidence_refs,
     serialize_bounded_trace_evidence,
+)
+from server.services.research_graph.trial_plan.transition import (
+    prepare_trial_plan_evidence,
+    validate_trial_plan_transition,
 )
 from server.services.research_graph.versions import load_graph_from_conn
 from tools.data.sqlite.db import connect_sqlite
@@ -44,8 +48,11 @@ def advance_graph_branch(
 ) -> dict[str, Any]:
     if not isinstance(evidence, dict):
         raise ValueError("transition evidence must be an object")
-    persisted_evidence = deepcopy(evidence)
-    persisted_evidence.pop("target_capability_receipt", None)
+    prepared_evidence, proposed_trial_plan_hash, has_trial_plan_body = (
+        prepare_trial_plan_evidence(evidence)
+    )
+    persisted_evidence = deepcopy(prepared_evidence)
+    persisted_evidence.pop("target_capability_resolution", None)
     persisted_evidence.pop("token_telemetry", None)
     assert_no_skill_identity(
         persisted_evidence,
@@ -54,13 +61,13 @@ def advance_graph_branch(
     # Reject obviously oversized payloads before opening a transaction. A
     # second check below includes the server-created receipt reference.
     serialize_bounded_trace_evidence(persisted_evidence)
-    invocation_ids = evidence.get("agent_invocation_ids") or []
+    invocation_ids = prepared_evidence.get("agent_invocation_ids") or []
     if not isinstance(invocation_ids, list) or not all(
         isinstance(item, str) and item for item in invocation_ids
     ):
         raise ValueError("agent_invocation_ids must be an array")
-    trial_plan_hash = validate_trial_plan_hash(
-        evidence.get("trial_plan_hash")
+    proposed_trial_plan_hash = validate_trial_plan_hash(
+        proposed_trial_plan_hash
     )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -99,14 +106,14 @@ def advance_graph_branch(
         failed_guards = [
             key
             for key, expected in (edge.get("guard") or {}).items()
-            if evidence.get(key) != expected
+            if prepared_evidence.get(key) != expected
         ]
         if failed_guards:
             raise ValueError(
                 "transition guards not satisfied: " + ", ".join(failed_guards)
             )
         required_evidence = edge.get("required_evidence") or []
-        evidence_refs = evidence.get("evidence_refs") or []
+        evidence_refs = prepared_evidence.get("evidence_refs") or []
         if required_evidence and (
             not isinstance(evidence_refs, list) or not evidence_refs
         ):
@@ -122,17 +129,18 @@ def advance_graph_branch(
         )
         if target is None:
             raise ValueError("transition target node is missing")
-        supplied_receipt = evidence.get("target_capability_receipt")
-        if supplied_receipt is not None:
-            target_resolution = verify_capability_receipt(
-                conn,
-                owner_user_id=owner,
-                receipt=supplied_receipt,
-                graph_id=str(branch_row["graph_id"]),
-                graph_version=int(branch_row["graph_version"]),
+        supplied_resolution = prepared_evidence.get(
+            "target_capability_resolution"
+        )
+        if supplied_resolution is not None:
+            target_resolution = normalize_capability_resolution(
+                supplied_resolution,
                 node_id=target_id,
-                product_group=str(branch_row["product_group"]),
-                expected_mode=str(branch_row["mode"]),
+            )
+            validate_resolution_against_node(
+                graph=graph,
+                node=target,
+                resolution=target_resolution,
             )
         elif target_id == branch["current_node"]:
             target_resolution = load_current_branch_resolution(branch_row)
@@ -158,8 +166,8 @@ def advance_graph_branch(
             else "running"
         )
         trace_evidence = deepcopy(persisted_evidence)
-        if supplied_receipt is not None:
-            trace_evidence["target_capability_receipt_ref"] = (
+        if supplied_resolution is not None:
+            trace_evidence["target_capability_resolution_ref"] = (
                 f"branch-resolution:{instance_id}:{branch_id}"
             )
         trace_evidence_json = serialize_bounded_trace_evidence(trace_evidence)
@@ -176,10 +184,10 @@ def advance_graph_branch(
                 node_id=target_id,
             )
         )
-        projected_trial_plan_hash = (
-            trial_plan_hash
-            if "trial_plan_hash" in evidence
-            else str(branch_row["current_trial_plan_hash"])
+        projected_trial_plan_hash = validate_trial_plan_transition(
+            current_hash=str(branch_row["current_trial_plan_hash"]),
+            proposed_hash=proposed_trial_plan_hash,
+            has_body=has_trial_plan_body,
         )
         trace_id = uuid.uuid4().hex
         now = time.time()

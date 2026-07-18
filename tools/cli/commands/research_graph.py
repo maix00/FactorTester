@@ -8,7 +8,6 @@ from pathlib import Path
 import click
 
 from tools.cli.core.context import client_from_config
-from tools.cli.core.errors import friendly_errors
 
 
 def _json(value) -> str:
@@ -18,21 +17,6 @@ def _json(value) -> str:
 @click.group("research-graph")
 def research_graph() -> None:
     """管理产品无关、不可变且经审计激活的研究决策图。"""
-
-
-_LEGACY_AGENT_FLOW_COMMANDS = frozenset({
-    "agent-start",
-    "budget-create",
-    "token-reserve",
-    "token-commit",
-    "token-release",
-})
-
-
-def _legacy_agent_flow_command(name: str):
-    if name not in _LEGACY_AGENT_FLOW_COMMANDS:
-        raise ValueError(f"{name!r} is not a registered legacy Agent Flow command")
-    return research_graph.command(name, deprecated=True)
 
 
 @research_graph.command("publish")
@@ -66,11 +50,6 @@ def active_graph(graph_id: str) -> None:
 @click.argument("graph_id")
 @click.argument("version", type=int)
 @click.option("--proposal-id", required=True)
-@click.option("--replay-passed", is_flag=True, required=True)
-@click.option("--shadow-passed", is_flag=True, required=True)
-@click.option("--capability-resolution-complete", is_flag=True, required=True)
-@click.option("--unaffected-jobs-preserved", is_flag=True, required=True)
-@click.option("--token-efficiency-passed", is_flag=True, required=True)
 @click.option("--routine-instance-id", required=True)
 @click.option("--routine-branch-id", required=True)
 @click.option("--baseline-run-id", required=True)
@@ -78,23 +57,13 @@ def validate_graph(
     graph_id: str,
     version: int,
     proposal_id: str,
-    replay_passed: bool,
-    shadow_passed: bool,
-    capability_resolution_complete: bool,
-    unaffected_jobs_preserved: bool,
-    token_efficiency_passed: bool,
     routine_instance_id: str,
     routine_branch_id: str,
     baseline_run_id: str,
 ) -> None:
-    """记录 Agent 生成的 replay、shadow、能力与任务隔离证据。"""
+    """让服务器从 canonical state 推导 replay、shadow 与 token 证据。"""
     evidence = {
-        "replay_passed": replay_passed,
-        "shadow_passed": shadow_passed,
-        "capability_resolution_complete": capability_resolution_complete,
-        "unaffected_jobs_preserved": unaffected_jobs_preserved,
-        "token_efficiency_passed": token_efficiency_passed,
-        "token_measurement_refs": {
+        "shadow_comparison_refs": {
             "routine_instance_id": routine_instance_id,
             "routine_branch_id": routine_branch_id,
             "baseline_run_id": baseline_run_id,
@@ -191,125 +160,6 @@ def review_graph_proposal(
             evidence_refs=list(evidence_refs),
             agent_execution_id=agent_execution_id,
         )
-    ))
-
-
-@_legacy_agent_flow_command("agent-start")
-@click.option(
-    "--role",
-    "actor_role",
-    type=click.Choice([
-        "proposer",
-        "reviewer",
-        "audit_presenter",
-        "implementation_agent",
-        "backend_verifier",
-    ]),
-    required=True,
-)
-@click.option("--model-id", default="")
-@click.option("--codex-version", default="")
-@click.option("--reservation-id", required=True)
-@click.option(
-    "--authority-scope",
-    type=click.Choice([
-        "local_research",
-        "server_research",
-        "server_backend_code",
-    ]),
-    required=True,
-)
-@click.option("--agent-principal-hash", required=True)
-@click.option("--lineage-hash", required=True)
-@click.option("--launcher-attestation", required=True)
-def start_agent_execution(
-    actor_role: str,
-    model_id: str,
-    codex_version: str,
-    reservation_id: str,
-    authority_scope: str,
-    agent_principal_hash: str,
-    lineage_hash: str,
-    launcher_attestation: str,
-) -> None:
-    """由服务器为同一用户签发一个有角色的独立 Agent execution。"""
-    click.echo(_json(
-        client_from_config().create_research_agent_execution(
-            actor_role=actor_role,
-            model_id=model_id,
-            codex_version=codex_version,
-            reservation_id=reservation_id,
-            authority_scope=authority_scope,
-            agent_principal_hash=agent_principal_hash,
-            lineage_hash=lineage_hash,
-            launcher_attestation=launcher_attestation,
-        )
-    ))
-
-
-@_legacy_agent_flow_command("budget-create")
-@click.argument("scope_id")
-@click.option("--token-limit", type=click.IntRange(min=1), required=True)
-def create_token_budget(scope_id: str, token_limit: int) -> None:
-    """创建执行前硬预算 scope。"""
-    click.echo(_json(
-        client_from_config().create_research_token_budget(
-            scope_id=scope_id,
-            token_limit=token_limit,
-        )
-    ))
-
-
-@_legacy_agent_flow_command("token-reserve")
-@click.argument("scope_id")
-@click.option(
-    "--work-kind",
-    type=click.Choice([
-        "researcher", "proposer", "reviewer", "audit_presenter", "skill",
-        "implementation_agent", "backend_verifier",
-    ]),
-    required=True,
-)
-@click.option("--max-input-tokens", type=click.IntRange(min=0), required=True)
-@click.option("--max-output-tokens", type=click.IntRange(min=0), required=True)
-@click.option("--ttl-seconds", type=click.IntRange(min=1, max=3600), default=900)
-def reserve_token_budget(
-    scope_id: str,
-    work_kind: str,
-    max_input_tokens: int,
-    max_output_tokens: int,
-    ttl_seconds: int,
-) -> None:
-    """在启动任何 LLM/Reviewer/Skill 工作前原子预留 token。"""
-    click.echo(_json(client_from_config().reserve_research_tokens(
-        scope_id,
-        work_kind=work_kind,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
-        ttl_seconds=ttl_seconds,
-    )))
-
-
-@_legacy_agent_flow_command("token-commit")
-@click.argument("reservation_id")
-@click.option("--provider-receipt-id", required=True)
-def commit_token_budget(
-    reservation_id: str,
-    provider_receipt_id: str,
-) -> None:
-    """只用可信 provider usage receipt 对账预留。"""
-    click.echo(_json(client_from_config().commit_research_tokens(
-        reservation_id,
-        provider_receipt_id=provider_receipt_id,
-    )))
-
-
-@_legacy_agent_flow_command("token-release")
-@click.argument("reservation_id")
-def release_token_budget(reservation_id: str) -> None:
-    """模型调用未发生时释放完整预留。"""
-    click.echo(_json(
-        client_from_config().release_research_tokens(reservation_id)
     ))
 
 
@@ -413,68 +263,6 @@ def authorize_activation(
     ))
 
 
-@research_graph.command("backend-assure", deprecated=True)
-@click.argument("job_id")
-@click.option("--instance-id", required=True)
-@click.option("--branch-id", required=True)
-@click.option("--node-id", required=True)
-@click.option("--policy-hash", default="")
-@click.option("--implementation-execution-id", default="")
-@friendly_errors
-def assure_backend(
-    job_id: str,
-    instance_id: str,
-    branch_id: str,
-    node_id: str,
-    policy_hash: str,
-    implementation_execution_id: str,
-) -> None:
-    """已退役；请使用 job show/detail 的 evidence.terminal_assurance。
-
-    异常证据未来将进入 Maintenance Case workflow。
-    """
-    click.echo(_json(client_from_config().evaluate_backend_assurance(
-        job_id=job_id,
-        instance_id=instance_id,
-        branch_id=branch_id,
-        node_id=node_id,
-        policy_hash=policy_hash,
-        implementation_execution_id=implementation_execution_id,
-    )))
-
-
-@research_graph.command("backend-verify", deprecated=True)
-@click.argument("receipt_id")
-@click.option("--verifier-execution-id", required=True)
-@click.option(
-    "--disposition",
-    type=click.Choice([
-        "confirmed_reliable",
-        "backend_change_proposed",
-        "research_input_issue",
-    ]),
-    required=True,
-)
-@click.option("--evidence-ref", "evidence_refs", multiple=True, required=True)
-@friendly_errors
-def verify_backend(
-    receipt_id: str,
-    verifier_execution_id: str,
-    disposition: str,
-    evidence_refs: tuple[str, ...],
-) -> None:
-    """已退役；请使用 job show/detail 的 evidence.terminal_assurance。
-
-    异常证据未来将进入 Maintenance Case workflow。
-    """
-    click.echo(_json(client_from_config().verify_backend_assurance(
-        receipt_id,
-        verifier_execution_id=verifier_execution_id,
-        disposition=disposition,
-        evidence_refs=list(evidence_refs),
-    )))
-
-
 @research_graph.command("rollback")
 @click.argument("graph_id")
 @click.option("--target-version", type=int, required=True)
@@ -502,7 +290,7 @@ def rollback_graph(
 @click.option("--shadow-graph-version", type=click.IntRange(min=1))
 @click.option("--shadow-run-id", default="")
 @click.option(
-    "--capability-receipt-file",
+    "--capability-resolution-file",
     required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
@@ -512,112 +300,29 @@ def start_graph_instance(
     workspace_id: str,
     shadow_graph_version: int | None,
     shadow_run_id: str,
-    capability_receipt_file: Path,
+    capability_resolution_file: Path,
 ) -> None:
     """按当前 Active Graph 和产品实现解析启动研究实例。"""
     payload = json.loads(
-        capability_receipt_file.read_text(encoding="utf-8")
+        capability_resolution_file.read_text(encoding="utf-8")
     )
-    receipt = payload.get("receipt") if isinstance(payload, dict) else None
-    if not isinstance(receipt, dict):
-        receipt = payload
-    if not isinstance(receipt, dict):
-        raise click.ClickException(
-            "capability receipt must be a JSON object"
-        )
-    click.echo(_json(client_from_config().create_research_graph_instance(
-        graph_id=graph_id,
-        product_group=product_group,
-        workspace_id=workspace_id,
-        capability_receipt=receipt,
-        shadow_graph_version=shadow_graph_version,
-        shadow_run_id=shadow_run_id,
-    )))
-
-
-@research_graph.command("approve-capability")
-@click.argument("capability_id")
-@click.option("--descriptor-hash", required=True)
-@click.option("--product-group", required=True)
-@click.option("--evidence-ref", "evidence_refs", multiple=True, required=True)
-def approve_capability(
-    capability_id: str,
-    descriptor_hash: str,
-    product_group: str,
-    evidence_refs: tuple[str, ...],
-) -> None:
-    """审计员按 capability 描述批准执行范围，不登记具体 Skill。"""
-    click.echo(_json(
-        client_from_config().approve_research_capability(
-            capability_id=capability_id,
-            descriptor_hash=descriptor_hash,
-            product_group=product_group,
-            evidence_refs=list(evidence_refs),
-        )
-    ))
-
-
-@research_graph.command("attest")
-@click.argument("graph_id")
-@click.argument("graph_version", type=int)
-@click.option("--node", "node_id", required=True)
-@click.option("--product-group", required=True)
-@click.option(
-    "--resolution-file",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@click.option(
-    "--approval-refs-file",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@click.option("--product-profile-hash", required=True)
-@click.option("--resolver-version", required=True)
-@click.option("--shadow-mode", is_flag=True)
-def attest_capabilities(
-    graph_id: str,
-    graph_version: int,
-    node_id: str,
-    product_group: str,
-    resolution_file: Path,
-    approval_refs_file: Path,
-    product_profile_hash: str,
-    resolver_version: str,
-    shadow_mode: bool,
-) -> None:
-    """让服务器校验一次紧凑的当前节点语义投影（兼容命令）。"""
-    payload = json.loads(resolution_file.read_text(encoding="utf-8"))
     resolution = (
         payload.get("resolution") if isinstance(payload, dict) else None
     )
     if not isinstance(resolution, dict):
         resolution = payload
-    approvals = json.loads(
-        approval_refs_file.read_text(encoding="utf-8")
-    )
-    if not isinstance(resolution, dict) or not isinstance(approvals, dict):
+    if not isinstance(resolution, dict):
         raise click.ClickException(
-            "resolution and approval refs must be JSON objects"
+            "capability resolution must be a JSON object"
         )
-    request_payload = {
-        "graph_id": graph_id,
-        "graph_version": graph_version,
-        "node_id": node_id,
-        "product_group": product_group,
-        "catalog_hash": str(resolution.get("catalog_hash") or ""),
-        "product_profile_hash": product_profile_hash,
-        "resolver_version": resolver_version,
-        "semantic_resolution": resolution,
-        "approval_refs": approvals,
-        "provider_conformance_hash": str(
-            resolution.get("provider_conformance_hash") or ""
-        ),
-        "shadow_mode": shadow_mode,
-    }
-    click.echo(_json(
-        client_from_config().attest_research_capabilities(request_payload)
-    ))
+    click.echo(_json(client_from_config().create_research_graph_instance(
+        graph_id=graph_id,
+        product_group=product_group,
+        workspace_id=workspace_id,
+        capability_resolution=resolution,
+        shadow_graph_version=shadow_graph_version,
+        shadow_run_id=shadow_run_id,
+    )))
 
 
 @research_graph.command("branch")
@@ -684,7 +389,7 @@ def fork_graph_branch(
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option(
-    "--target-capability-receipt-file",
+    "--target-capability-resolution-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 def advance_graph_branch(
@@ -692,26 +397,26 @@ def advance_graph_branch(
     branch_id: str,
     edge_id: str,
     evidence_file: Path,
-    target_capability_receipt_file: Path | None,
+    target_capability_resolution_file: Path | None,
 ) -> None:
     """提交证据并沿 Active Graph 的一条已声明边前进。"""
     evidence = json.loads(evidence_file.read_text(encoding="utf-8"))
     if not isinstance(evidence, dict):
         raise click.ClickException("transition evidence must be a JSON object")
-    if target_capability_receipt_file is not None:
+    if target_capability_resolution_file is not None:
         payload = json.loads(
-            target_capability_receipt_file.read_text(encoding="utf-8")
+            target_capability_resolution_file.read_text(encoding="utf-8")
         )
-        receipt = (
-            payload.get("receipt") if isinstance(payload, dict) else None
+        resolution = (
+            payload.get("resolution") if isinstance(payload, dict) else None
         )
-        if not isinstance(receipt, dict):
-            receipt = payload
-        if not isinstance(receipt, dict):
+        if not isinstance(resolution, dict):
+            resolution = payload
+        if not isinstance(resolution, dict):
             raise click.ClickException(
-                "target capability receipt must be a JSON object"
+                "target capability resolution must be a JSON object"
             )
-        evidence["target_capability_receipt"] = receipt
+        evidence["target_capability_resolution"] = resolution
     click.echo(_json(client_from_config().advance_research_graph_branch(
         instance_id,
         branch_id,

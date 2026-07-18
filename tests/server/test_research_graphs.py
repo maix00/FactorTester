@@ -34,6 +34,7 @@ def _initialize_graph_db(tmp_path, monkeypatch) -> None:
         tmp_path / "graphs.sqlite",
     )
     research_graphs.ensure_schema()
+    JobRepository().ensure_schema()
     monkeypatch.setenv(
         "RESEARCH_HUMAN_ACTIVATION_SECRET",
         "test-human-activation-secret",
@@ -335,7 +336,7 @@ def _active_instance(*, workspace_id: str) -> dict:
         grill_ref="grill-with-docs:test-active-instance",
     )
     _activate()
-    receipt = _issue_receipt(
+    resolution = _capability_resolution(
         node_id="hypothesis",
         product_group="equities",
         capability_ids=["research-hypothesis.preregister"],
@@ -345,8 +346,7 @@ def _active_instance(*, workspace_id: str) -> dict:
         owner="alice",
         product_group="equities",
         workspace_id=workspace_id,
-        token_budget=1000,
-        capability_receipt=receipt,
+        capability_resolution=resolution,
     )
 
 
@@ -400,7 +400,7 @@ def _succeeded_job(
     return {"run": run, "job": job}
 
 
-def _issue_receipt(
+def _capability_resolution(
     *,
     node_id: str,
     product_group: str,
@@ -434,26 +434,13 @@ def _issue_receipt(
             "capability_id": capability_id,
             **descriptor,
         })
-    return research_graphs.issue_capability_receipt(
-        owner_user_id="alice",
-        graph_id="factor-research",
-        graph_version=active["version"],
-        node_id=node_id,
-        product_group=product_group,
-        catalog_hash="c" * 64,
-        product_profile_hash="d" * 64,
-        resolver_version="test-resolver-v1",
-        semantic_resolution={
-            "node_id": node_id,
-            "bindings": bindings,
-            "gaps": [],
-            "triggered_conditional_bindings": triggered_bindings,
-            "undetermined_conditions": undetermined_conditions or [],
-        },
-        approval_refs={},
-        provider_conformance_hash="e" * 64,
-        shadow_mode=shadow_mode,
-    )
+    return {
+        "node_id": node_id,
+        "bindings": bindings,
+        "gaps": [],
+        "triggered_conditional_bindings": triggered_bindings,
+        "undetermined_conditions": undetermined_conditions or [],
+    }
 
 
 def _commit_scope_usage(
@@ -504,7 +491,6 @@ def _commit_usage(
 def _server_validation_evidence(
     *,
     version: int = 2,
-    shadow_passed: bool = True,
     graph_tokens: int = 80,
     baseline_tokens: int = 100,
     matching_run_spec: bool = True,
@@ -534,7 +520,7 @@ def _server_validation_evidence(
             else {**run_spec, "factor": "different-factor"}
         ),
     )
-    receipt = _issue_receipt(
+    resolution = _capability_resolution(
         node_id="hypothesis",
         product_group="equities",
         capability_ids=["research-hypothesis.preregister"],
@@ -546,8 +532,7 @@ def _server_validation_evidence(
         owner="alice",
         product_group="equities",
         workspace_id=workspace_id,
-        token_budget=1000,
-        capability_receipt=receipt,
+        capability_resolution=resolution,
         shadow_graph_version=version,
         shadow_run_id=graph_run["run_id"],
     )
@@ -582,12 +567,7 @@ def _server_validation_evidence(
             output_tokens=min(baseline_tokens, 10),
         )
     return {
-        "replay_passed": True,
-        "shadow_passed": shadow_passed,
-        "capability_resolution_complete": True,
-        "unaffected_jobs_preserved": True,
-        "token_efficiency_passed": True,
-        "token_measurement_refs": {
+        "shadow_comparison_refs": {
             "routine_instance_id": instance["instance_id"],
             "routine_branch_id": instance["branches"][0]["branch_id"],
             "baseline_run_id": baseline_run["run_id"],
@@ -1074,20 +1054,16 @@ def test_terminal_job_anomaly_opens_one_maintenance_case(
     [
         "/api/research-backend-assurance/evaluate",
         "/api/research-backend-assurance/legacy/verification",
+        "/api/research-capability-receipts",
     ],
 )
-def test_backend_assurance_legacy_posts_point_to_job_evidence_and_case(
+def test_obsolete_graph_posts_are_absent(
     client,
     path,
 ) -> None:
     response = client.post(path, json={})
 
-    payload = response.get_json()
-    assert response.status_code == 410
-    assert payload["replacement"]["job_evidence"] == (
-        "GET /api/jobs/<job_id> -> evidence.terminal_assurance"
-    )
-    assert payload["replacement"]["verification"] == "MaintenanceCase"
+    assert response.status_code == 404
 
 
 def test_graph_schema_refuses_unmigrated_backend_assurance_receipts(
@@ -1110,7 +1086,7 @@ def test_graph_schema_refuses_unmigrated_backend_assurance_receipts(
 
     with pytest.raises(
         RuntimeError,
-        match="migrate_backend_assurance",
+        match="explicit offline cutover",
     ):
         research_graphs.ensure_schema()
 
@@ -1254,25 +1230,19 @@ def test_activation_requires_replay_shadow_capability_and_job_isolation(
     _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal, _ = _approve_proposal()
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
-        proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(shadow_passed=False),
-    )
     with pytest.raises(
         ValueError,
-        match="deterministic validation to pass",
+        match="client validation conclusions are not accepted",
     ):
-        research_graphs.record_audit(
+        research_graphs.record_validation(
             graph_id="factor-research",
             version=2,
             proposal_id=proposal["proposal_id"],
             actor="alice",
-            disposition="approved",
-            grill_evidence=[{"question": "Shadow?", "answer": "Pending"}],
-            grill_ref="grill-with-docs:test-shadow-failure",
+            evidence={
+                **_server_validation_evidence(),
+                "shadow_passed": False,
+            },
         )
 
 
@@ -1284,7 +1254,10 @@ def test_validation_rejects_a_token_efficient_claim_with_regression(
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal, _ = _approve_proposal()
 
-    with pytest.raises(ValueError, match="client token_metrics"):
+    with pytest.raises(
+        ValueError,
+        match="client validation conclusions are not accepted",
+    ):
         research_graphs.record_validation(
             graph_id="factor-research",
             version=2,
@@ -1298,7 +1271,7 @@ def test_validation_rejects_a_token_efficient_claim_with_regression(
                 },
             },
         )
-    with pytest.raises(ValueError, match="token efficiency checks failed"):
+    with pytest.raises(ValueError, match="token_efficiency_passed"):
         research_graphs.record_validation(
             graph_id="factor-research",
             version=2,
@@ -1741,7 +1714,7 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
     assert activated.get_json()["graph"]["lifecycle"] == "draft"
     assert activated.get_json()["graph"]["active_pointer"]["version"] == 2
 
-    receipt = _issue_receipt(
+    resolution = _capability_resolution(
         node_id="hypothesis",
         product_group="equities",
         capability_ids=["research-hypothesis.preregister"],
@@ -1751,8 +1724,7 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
         owner="alice",
         product_group="equities",
         workspace_id="http-workspace",
-        token_budget=100,
-        capability_receipt=receipt,
+        capability_resolution=resolution,
     )
     branch_id = instance["branches"][0]["branch_id"]
     context_response = client.get(
@@ -1781,7 +1753,7 @@ def test_instance_creation_writes_only_instance_and_branch(
 ) -> None:
     _initialize_graph_db(tmp_path, monkeypatch)
     _active_instance(workspace_id="create-owner-setup")
-    receipt = _issue_receipt(
+    resolution = _capability_resolution(
         node_id="hypothesis",
         product_group="equities",
         capability_ids=["research-hypothesis.preregister"],
@@ -1800,7 +1772,7 @@ def test_instance_creation_writes_only_instance_and_branch(
         owner="alice",
         product_group="equities",
         workspace_id="create-owner-measured",
-        capability_receipt=receipt,
+        capability_resolution=resolution,
     )
 
     inserts = [
@@ -1903,8 +1875,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         owner="alice",
         product_group="china_futures",
         workspace_id="workspace-1",
-        token_budget=1000,
-        capability_receipt=_issue_receipt(
+        capability_resolution=_capability_resolution(
             node_id="hypothesis",
             product_group="china_futures",
             capability_ids=["research-hypothesis.preregister"],
@@ -2194,8 +2165,7 @@ def test_transition_stores_only_target_node_resolution(
         owner="alice",
         product_group="equities",
         workspace_id="workspace-2",
-        token_budget=12,
-        capability_receipt=_issue_receipt(
+        capability_resolution=_capability_resolution(
             node_id="hypothesis",
             product_group="equities",
             capability_ids=["research-hypothesis.preregister"],
@@ -2207,7 +2177,7 @@ def test_transition_stores_only_target_node_resolution(
         token_limit=12,
     )
     branch = instance["branches"][0]
-    target_receipt = _issue_receipt(
+    target_resolution = _capability_resolution(
         node_id="validation",
         product_group="equities",
         capability_ids=["factor-validation.cross-sectional-ic"],
@@ -2220,7 +2190,7 @@ def test_transition_stores_only_target_node_resolution(
         edge_id="hypothesis__validation",
         evidence={
             "hypothesis_frozen": True,
-            "target_capability_receipt": target_receipt,
+            "target_capability_resolution": target_resolution,
             "token_telemetry": {
                 "input_tokens": 10,
                 "output_tokens": 2,
@@ -2363,7 +2333,7 @@ def test_token_budget_reservation_denies_before_launch_and_fails_closed(
 
     released = store.release_invocation(
         owner_user_id="alice",
-        invocation_or_reservation_id=granted["invocation_id"],
+        invocation_id=granted["invocation_id"],
     )
     budget = store.load_current_budget_period(
         owner_user_id="alice",
@@ -2424,8 +2394,7 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
         owner="alice",
         product_group="equities",
         workspace_id="workspace-conditional",
-        token_budget=1000,
-        capability_receipt=_issue_receipt(
+        capability_resolution=_capability_resolution(
             node_id="hypothesis",
             product_group="equities",
             capability_ids=[
@@ -2459,3 +2428,91 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
     assert context["context_bytes"] == len(orjson.dumps(context))
     assert context["context_bytes"] <= 6000
     assert active["version"] == 2
+
+
+def test_triggered_conditional_gap_is_local_and_blocks_next(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    graph = _draft_graph()
+    node = graph["nodes"][0]
+    capability_id = "market-microstructure.intraday-diagnose"
+    node["conditional_capabilities"] = [{
+        "capability_id": capability_id,
+        "predicate": {"field": "signal.frequency", "in": ["MIN1"]},
+        "explanation": "Use only for intraday signals.",
+    }]
+    graph["capability_descriptors"][capability_id] = _descriptor(
+        capability_id
+    )
+    graph["content_hash"] = _hash(graph)
+    research_graphs.register_graph(graph, actor="curator")
+    proposal, _ = _approve_proposal()
+    research_graphs.record_validation(
+        graph_id="factor-research",
+        version=2,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        evidence=_server_validation_evidence(),
+    )
+    research_graphs.record_audit(
+        graph_id="factor-research",
+        version=2,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        disposition="approved",
+        grill_evidence=[{"question": "conditional?", "answer": "bounded"}],
+        grill_ref="grill-with-docs:test-triggered-gap",
+    )
+    _activate()
+    resolution = _capability_resolution(
+        node_id="hypothesis",
+        product_group="equities",
+        capability_ids=["research-hypothesis.preregister"],
+    )
+    resolution["triggered_conditional_gaps"] = [{
+        "capability_id": capability_id,
+        **graph["capability_descriptors"][capability_id],
+        "reason": "no approved implementation supports MIN1",
+    }]
+    tampered_resolution = deepcopy(resolution)
+    tampered_resolution["triggered_conditional_gaps"][0][
+        "descriptor_hash"
+    ] = "0" * 64
+    with pytest.raises(ValueError, match="capability descriptor mismatch"):
+        research_graphs.create_graph_instance(
+            graph_id="factor-research",
+            owner="alice",
+            product_group="equities",
+            workspace_id="workspace-triggered-gap",
+            capability_resolution=tampered_resolution,
+        )
+    instance = research_graphs.create_graph_instance(
+        graph_id="factor-research",
+        owner="alice",
+        product_group="equities",
+        workspace_id="workspace-triggered-gap",
+        capability_resolution=resolution,
+    )
+    branch_id = instance["branches"][0]["branch_id"]
+
+    context = research_graphs.build_graph_branch_context(
+        instance_id=instance["instance_id"],
+        branch_id=branch_id,
+        owner="alice",
+    )
+    next_packet = research_graphs.build_graph_branch_next(
+        instance_id=instance["instance_id"],
+        branch_id=branch_id,
+        owner="alice",
+    )
+
+    assert [
+        item["capability_id"] for item in context["open_gaps"]
+    ] == [capability_id]
+    assert all(
+        edge["readiness"] == "blocked"
+        for edge in next_packet["candidate_edges"]
+        if edge["edge_type"] != "failure"
+    )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import threading
 from typing import Any
 
 import settings as Settings
@@ -25,6 +26,8 @@ class AgentFlowStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
+        self._schema_ready = False
+        self._schema_lock = threading.Lock()
         self.ensure_schema()
         self._budgets = BudgetPeriods(self.db_path)
         self._invocations = InvocationLifecycle(
@@ -34,7 +37,12 @@ class AgentFlowStore:
         self._queries = AgentFlowQueries(self.db_path)
 
     def ensure_schema(self) -> None:
-        ensure_schema(self.db_path)
+        if self._schema_ready:
+            return
+        with self._schema_lock:
+            if not self._schema_ready:
+                ensure_schema(self.db_path)
+                self._schema_ready = True
 
     def reserve_invocation(
         self,
@@ -170,49 +178,15 @@ class AgentFlowStore:
             invocation_ids=invocation_ids,
         )
 
-    def find_invocation_by_reference(
-        self,
-        *,
-        invocation_or_reservation_id: str,
-        owner_user_id: str = "",
-    ) -> dict[str, Any]:
-        return self._queries.find_invocation_by_reference(
-            invocation_or_reservation_id=invocation_or_reservation_id,
-            owner_user_id=owner_user_id,
-        )
-
-    def claim_reserved_invocation(
-        self,
-        *,
-        owner_user_id: str,
-        invocation_or_reservation_id: str,
-        actor_role: str,
-        authority_scope: str,
-        runtime_id: str,
-        model_id: str,
-        agent_principal_hash: str,
-        lineage_hash: str,
-    ) -> dict[str, Any]:
-        return self._invocations.claim_reserved_invocation(
-            owner_user_id=owner_user_id,
-            invocation_or_reservation_id=invocation_or_reservation_id,
-            actor_role=actor_role,
-            authority_scope=authority_scope,
-            runtime_id=runtime_id,
-            model_id=model_id,
-            agent_principal_hash=agent_principal_hash,
-            lineage_hash=lineage_hash,
-        )
-
     def release_invocation(
         self,
         *,
         owner_user_id: str,
-        invocation_or_reservation_id: str,
+        invocation_id: str,
     ) -> dict[str, Any]:
         return self._invocations.release_invocation(
             owner_user_id=owner_user_id,
-            invocation_or_reservation_id=invocation_or_reservation_id,
+            invocation_id=invocation_id,
         )
 
     def settle_invocation(

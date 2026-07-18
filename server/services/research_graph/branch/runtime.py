@@ -9,6 +9,7 @@ from typing import Any
 
 import settings as Settings
 from server.services.research_graph.branch.projection import (
+    normalize_capability_resolution,
     serialize_capability_resolution,
 )
 from server.services.research_graph.branch.repository import (
@@ -17,7 +18,7 @@ from server.services.research_graph.branch.repository import (
 )
 from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
-    verify_capability_receipt,
+    validate_resolution_against_node,
 )
 from server.services.research_graph.active_pointer import load_active_graph
 from server.services.research_graph.protocol import GraphActivationBlocked
@@ -31,13 +32,10 @@ def create_graph_instance(
     owner: str,
     product_group: str,
     workspace_id: str,
-    capability_receipt: dict[str, Any],
-    token_budget: int | None = None,
+    capability_resolution: dict[str, Any],
     shadow_graph_version: int | None = None,
     shadow_run_id: str = "",
 ) -> dict[str, Any]:
-    # Compatibility only: Graph no longer owns or persists this value.
-    del token_budget
     if shadow_graph_version is not None:
         active = load_graph(
             graph_id=graph_id,
@@ -92,15 +90,14 @@ def create_graph_instance(
                     "shadow_run_id must reference an owned research run "
                     "in the same workspace"
                 )
-        local_resolution = verify_capability_receipt(
-            conn,
-            owner_user_id=owner,
-            receipt=capability_receipt,
-            graph_id=graph_id,
-            graph_version=int(active["version"]),
+        local_resolution = normalize_capability_resolution(
+            capability_resolution,
             node_id=entry_node,
-            product_group=product_group,
-            expected_mode=mode,
+        )
+        validate_resolution_against_node(
+            graph=active,
+            node=entry,
+            resolution=local_resolution,
         )
         missing_entry = missing_required_capabilities(
             entry,

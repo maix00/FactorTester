@@ -687,6 +687,43 @@ def test_packaging_and_docs_record_durable_remote_contract() -> None:
         assert "page_uuid" in text
 
 
+def test_canonical_and_packaged_skill_copies_match() -> None:
+    """Fail packaging when the installed progressive-disclosure guide drifts."""
+    packaged = Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"
+    repository = next(
+        parent
+        for parent in Path(__file__).resolve().parents
+        if (
+            parent
+            / "skills"
+            / "cli-anything-factortester-research"
+            / "SKILL.md"
+        ).is_file()
+    )
+    canonical = (
+        repository
+        / "skills"
+        / "cli-anything-factortester-research"
+        / "SKILL.md"
+    )
+
+    assert packaged.read_bytes() == canonical.read_bytes()
+
+
+def test_harness_production_modules_stay_below_500_lines() -> None:
+    package = Path(__file__).resolve().parents[1]
+    oversized = {
+        str(path.relative_to(package)): len(
+            path.read_text(encoding="utf-8").splitlines()
+        )
+        for path in package.rglob("*.py")
+        if "tests" not in path.parts
+        and len(path.read_text(encoding="utf-8").splitlines()) >= 500
+    }
+
+    assert oversized == {}
+
+
 def test_vibe_pipeline_includes_daily_minute_and_server_handoff(tmp_path: Path) -> None:
     steps = vibe_pipeline_plan(
         integration_root=str(tmp_path / "integration"),

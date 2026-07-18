@@ -130,11 +130,18 @@ def test_migration_atomically_preserves_accounting_and_provenance(
         agent_id_by_scope={("alice", "scope-1"): "research-agent-1"},
     )
 
-    assert report == {
-        "budget_periods_migrated": 1,
-        "invocations_migrated": 2,
-        "legacy_tables_dropped": 4,
-    }
+    assert report["budget_periods_migrated"] == 1
+    assert report["invocations_migrated"] == 2
+    assert report["legacy_tables_dropped"] == 4
+    assert report["graph_schema_tables_before"] == 4
+    assert report["graph_schema_tables_after"] == 0
+    assert report["agent_flow_schema_tables_before"] == 2
+    assert report["agent_flow_schema_tables_after"] == 2
+    assert report["sql_reads"] > 0
+    assert report["sql_writes"] > 0
+    assert report["sql_transactions"] == 1
+    assert report["latency_ms"] >= 0
+    assert "8a42b1ea" in report["rollback_target"]
     assert _legacy_tables(graph_db) == set()
     period = store.load_current_budget_period(
         owner_user_id="alice",
@@ -148,8 +155,8 @@ def test_migration_atomically_preserves_accounting_and_provenance(
         owner_user_id="alice",
         invocation_id="execution-1",
     )
-    assert settled["legacy_reservation_id"] == "reservation-settled"
-    assert settled["legacy_provider_receipt_id"] == "receipt-1"
+    assert "legacy_reservation_id" not in settled
+    assert "legacy_provider_receipt_id" not in settled
     assert settled["provider_id"] == "provider-a"
     assert settled["reservation_expires_at"] == 900.0
     assert settled["provider_request_hash"] == hashlib.sha256(
@@ -162,9 +169,9 @@ def test_migration_atomically_preserves_accounting_and_provenance(
         b"launcher-attestation"
     ).hexdigest()
 
-    reserved = store.find_invocation_by_reference(
+    reserved = store.load_invocation(
         owner_user_id="alice",
-        invocation_or_reservation_id="reservation-open",
+        invocation_id="reservation-open",
     )
     assert reserved["status"] == "reserved"
     assert reserved["reservation_expires_at"] == 1200.0

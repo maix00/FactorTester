@@ -6,6 +6,11 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
+from server.services.migration_telemetry import (
+    MigrationTelemetry,
+    table_count,
+)
+
 from .legacy_migration_prepare import prepare_legacy_accounting
 from .schema import connect_agent_flow
 from .store import AgentFlowStore, _CHARGING_POLICY_VERSION
@@ -24,18 +29,22 @@ def migrate_legacy_graph_accounting(
     graph_db_path: str | Path,
     store: AgentFlowStore,
     agent_id_by_scope: dict[tuple[str, str], str],
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Move all legacy accounting owners in one cross-database transaction."""
     graph_path = Path(graph_db_path).expanduser().resolve()
     target_path = Path(store.db_path).expanduser().resolve()
     if graph_path == target_path:
         raise ValueError("legacy Graph and Agent Flow databases must differ")
 
+    telemetry = MigrationTelemetry()
     conn = connect_agent_flow(target_path)
+    conn.set_trace_callback(telemetry.trace)
     attached = False
     try:
         conn.execute("ATTACH DATABASE ? AS legacy_graph", (str(graph_path),))
         attached = True
+        graph_tables_before = table_count(conn, schema="legacy_graph")
+        flow_tables_before = table_count(conn)
         # Super-journal atomicity across attached files requires rollback
         # journals. This command is intentionally an offline cutover.
         conn.execute("PRAGMA main.journal_mode=DELETE")
@@ -51,7 +60,13 @@ def migrate_legacy_graph_accounting(
         }
         present = set(_LEGACY_ACCOUNTING_TABLES).intersection(existing_tables)
         if not present:
-            return _empty_report()
+            return _empty_report() | _release_report(
+                telemetry=telemetry,
+                graph_tables_before=graph_tables_before,
+                graph_tables_after=graph_tables_before,
+                flow_tables_before=flow_tables_before,
+                flow_tables_after=flow_tables_before,
+            )
         missing = set(_LEGACY_ACCOUNTING_TABLES) - existing_tables
         if missing:
             raise ValueError(
@@ -86,7 +101,13 @@ def migrate_legacy_graph_accounting(
             "budget_periods_migrated": len(migration["periods"]),
             "invocations_migrated": len(migration["invocations"]),
             "legacy_tables_dropped": len(_LEGACY_ACCOUNTING_TABLES),
-        }
+        } | _release_report(
+            telemetry=telemetry,
+            graph_tables_before=graph_tables_before,
+            graph_tables_after=table_count(conn, schema="legacy_graph"),
+            flow_tables_before=flow_tables_before,
+            flow_tables_after=table_count(conn),
+        )
     except Exception:
         if conn.in_transaction:
             conn.rollback()
@@ -106,6 +127,26 @@ def _empty_report() -> dict[str, int]:
         "invocations_migrated": 0,
         "legacy_tables_dropped": 0,
     }
+
+
+def _release_report(
+    *,
+    telemetry: MigrationTelemetry,
+    graph_tables_before: int,
+    graph_tables_after: int,
+    flow_tables_before: int,
+    flow_tables_after: int,
+) -> dict[str, Any]:
+    report = telemetry.report()
+    return {
+        "graph_schema_tables_before": graph_tables_before,
+        "graph_schema_tables_after": graph_tables_after,
+        "agent_flow_schema_tables_before": flow_tables_before,
+        "agent_flow_schema_tables_after": flow_tables_after,
+        "rollback_target": (
+            "restore both pre-migration databases and parent commit 8a42b1ea"
+        ),
+    } | report
 
 
 def _assert_target_has_no_collisions(
@@ -139,15 +180,13 @@ def _assert_target_has_no_collisions(
         existing = conn.execute(
             """
             SELECT invocation_id FROM agent_invocations
-            WHERE invocation_id=? OR legacy_reservation_id=?
-               OR (
+            WHERE invocation_id=? OR (
                     owner_user_id=? AND provider_request_hash<>''
                     AND provider_request_hash=?
                )
             """,
             (
                 invocation["invocation_id"],
-                invocation["legacy_reservation_id"],
                 invocation["owner_user_id"],
                 invocation["provider_request_hash"],
             ),
@@ -192,8 +231,8 @@ def _insert_invocations(
         """
         INSERT INTO agent_invocations (
             invocation_id, period_id, owner_user_id, agent_id,
-            legacy_reservation_id, legacy_provider_receipt_id, actor_role,
-            authority_scope, purpose, runtime_id, model_id, provider_id,
+            actor_role, authority_scope, purpose, runtime_id, model_id,
+            provider_id,
             agent_principal_hash, lineage_hash, launcher_attestation_hash,
             max_input_tokens, max_output_tokens, reserved_tokens,
             reservation_expires_at, input_tokens, output_tokens,
@@ -202,8 +241,8 @@ def _insert_invocations(
             created_at, settled_at
         ) VALUES (
             :invocation_id, :period_id, :owner_user_id, :agent_id,
-            :legacy_reservation_id, :legacy_provider_receipt_id, :actor_role,
-            :authority_scope, :purpose, :runtime_id, :model_id, :provider_id,
+            :actor_role, :authority_scope, :purpose, :runtime_id, :model_id,
+            :provider_id,
             :agent_principal_hash, :lineage_hash,
             :launcher_attestation_hash, :max_input_tokens,
             :max_output_tokens, :reserved_tokens, :reservation_expires_at,

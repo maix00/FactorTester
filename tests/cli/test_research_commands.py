@@ -5,7 +5,7 @@ import json
 from click.testing import CliRunner
 
 from tools.cli.app import cli
-from tools.cli.state import load_state
+from tools.cli.state import load_state, save_state
 
 
 class FakeClient:
@@ -21,8 +21,18 @@ class FakeClient:
         self.payload = payload
         return {"configuration_id": "config-1", "revision": 2, "payload": payload}
 
-    def submit_run(self, workspace_id, configuration_revision, *, analyses, retention_mode, step_mode):
+    def submit_run(
+        self,
+        workspace_id,
+        configuration_revision,
+        *,
+        analyses,
+        retention_mode,
+        step_mode,
+        trial_binding=None,
+    ):
         assert (workspace_id, configuration_revision) == ("workspace-1", 2)
+        self.trial_binding = trial_binding
         return {
             "run_id": "run-1",
             "jobs": [{"job_id": f"job-{kind}", "kind": kind, "status": "queued"} for kind in analyses],
@@ -100,7 +110,48 @@ def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypat
         "alias": "MmRet|P:CA|N:10d|$F:1d",
     }]
     assert fake.payload == payload
+    assert fake.trial_binding is None
     assert load_state().configuration_revision == 2
+
+
+def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config",
+        lambda: fake,
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        ["workspace", "create", "--factor-family", "MmRet"],
+    ).exit_code == 0
+    state = load_state()
+    state.configuration_revision = 2
+    save_state(state)
+    binding = {
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+        "trial_plan": {"schema_version": 1},
+        "trial_plan_hash": "a" * 64,
+        "trial_plan_version": 1,
+        "trial_role": "main",
+        "comparison_id": "comparison-1",
+    }
+    path = tmp_path / "trial-binding.json"
+    path.write_text(json.dumps(binding), encoding="utf-8")
+
+    submitted = runner.invoke(cli, [
+        "run",
+        "submit",
+        "--analysis",
+        "ic",
+        "--trial-binding-file",
+        str(path),
+    ])
+
+    assert submitted.exit_code == 0, submitted.output
+    assert fake.trial_binding == binding
 
 
 def test_save_and_load_template_operate_on_same_configuration(tmp_path, monkeypatch) -> None:

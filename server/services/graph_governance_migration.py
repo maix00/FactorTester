@@ -10,6 +10,7 @@ from typing import Any
 
 import orjson
 
+from server.services.migration_telemetry import MigrationTelemetry
 from server.services.maintenance_cases.schema import create_schema
 from server.services.maintenance_cases.store import open_case_in_connection
 from tools.data.sqlite.db import connect_sqlite
@@ -40,8 +41,11 @@ def migrate_graph_governance(
     failure_injector: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Convert bounded Gate references and delete all legacy owners atomically."""
+    telemetry = MigrationTelemetry()
     with connect_sqlite(Path(db_path)) as conn:
+        conn.set_trace_callback(telemetry.trace)
         tables = _table_names(conn)
+        before_count = len(tables)
         present = set(_LEGACY_TABLES).intersection(tables)
         capability_receipts = _count_rows(
             conn,
@@ -49,7 +53,11 @@ def migrate_graph_governance(
             tables=tables,
         )
         if not present:
-            return _empty_report(capability_receipts)
+            return _empty_report(capability_receipts) | _release_report(
+                telemetry=telemetry,
+                before_count=before_count,
+                after_count=before_count,
+            )
         missing = set(_LEGACY_TABLES) - present
         if missing:
             raise ValueError(
@@ -75,6 +83,7 @@ def migrate_graph_governance(
                 conn.execute(f"DROP TABLE {table}")
             if failure_injector is not None:
                 failure_injector("after_legacy_drop")
+            after_count = len(_table_names(conn))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -93,7 +102,11 @@ def migrate_graph_governance(
         "capability_approvals_dropped": capability_approvals,
         "capability_receipts_preserved": capability_receipts,
         "legacy_tables_dropped": len(_LEGACY_TABLES),
-    }
+    } | _release_report(
+        telemetry=telemetry,
+        before_count=before_count,
+        after_count=after_count,
+    )
 
 
 def _prepare_projections(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -493,3 +506,19 @@ def _empty_report(capability_receipts: int) -> dict[str, Any]:
         "capability_receipts_preserved": capability_receipts,
         "legacy_tables_dropped": 0,
     }
+
+
+def _release_report(
+    *,
+    telemetry: MigrationTelemetry,
+    before_count: int,
+    after_count: int,
+) -> dict[str, Any]:
+    report = telemetry.report()
+    return {
+        "schema_tables_before": before_count,
+        "schema_tables_after": after_count,
+        "rollback_target": (
+            "restore pre-migration database backup and parent commit 595845dd"
+        ),
+    } | report

@@ -109,7 +109,15 @@ def _build_local_state(
         trial_plan_hash = (
             str(branch_row["current_trial_plan_hash"]) or None
         )
-    current_ids = set(node.get("required_capabilities") or [])
+    triggered_gap_ids = {
+        str(item.get("capability_id") or "")
+        for item in resolution.get("triggered_conditional_gaps") or []
+        if isinstance(item, dict)
+    }
+    current_ids = (
+        set(node.get("required_capabilities") or [])
+        | triggered_gap_ids
+    )
     open_gaps = [
         deepcopy(gap)
         for capability_id, gap in gap_by_id.items()
