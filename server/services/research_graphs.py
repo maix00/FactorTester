@@ -1043,117 +1043,6 @@ def create_agent_execution(
         "deprecated Agent accounting protocol; reserve one complete "
         "AgentInvocation through /api/agent-flow/invocations"
     )
-    if actor_role not in {
-        "proposer",
-        "reviewer",
-        "audit_presenter",
-        "implementation_agent",
-        "backend_verifier",
-    }:
-        raise ValueError("invalid Agent execution role")
-    if authority_scope not in {
-        "local_research",
-        "server_research",
-        "server_backend_code",
-    }:
-        raise ValueError("invalid Agent authority_scope")
-    if (
-        actor_role in {"implementation_agent", "backend_verifier"}
-        and authority_scope != "server_backend_code"
-    ):
-        raise ValueError(
-            f"{actor_role} requires server_backend_code authority"
-        )
-    for field, value in (
-        ("agent_principal_hash", agent_principal_hash),
-        ("lineage_hash", lineage_hash),
-    ):
-        if len(value) != 64 or any(
-            character not in "0123456789abcdef" for character in value
-        ):
-            raise ValueError(f"{field} must be sha256")
-    launcher_secret = os.environ.get("RESEARCH_AGENT_LAUNCHER_SECRET", "")
-    if not launcher_secret:
-        raise ValueError("trusted Agent launcher is not configured")
-    attested_payload = {
-        "owner_user_id": owner_user_id,
-        "actor_role": actor_role,
-        "model_id": str(model_id),
-        "codex_version": str(codex_version),
-        "reservation_id": reservation_id,
-        "authority_scope": authority_scope,
-        "agent_principal_hash": agent_principal_hash,
-        "lineage_hash": lineage_hash,
-    }
-    expected_attestation = hmac.new(
-        launcher_secret.encode(),
-        orjson.dumps(attested_payload, option=orjson.OPT_SORT_KEYS),
-        hashlib.sha256,
-    ).hexdigest()
-    if not hmac.compare_digest(
-        expected_attestation,
-        launcher_attestation,
-    ):
-        raise ValueError("Agent launcher attestation is invalid")
-    execution_id = uuid.uuid4().hex
-    now = time.time()
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        reservation = conn.execute(
-            """
-            SELECT * FROM research_token_reservations
-            WHERE reservation_id=? AND owner_user_id=? AND status='granted'
-            AND expires_at>?
-            """,
-            (reservation_id, owner_user_id, time.time()),
-        ).fetchone()
-        if reservation is None:
-            raise ValueError(
-                "active token reservation is required before Agent launch"
-            )
-        expected_work_kind = {
-            "proposer": "proposer",
-            "reviewer": "reviewer",
-            "audit_presenter": "audit_presenter",
-            "implementation_agent": "implementation_agent",
-            "backend_verifier": "backend_verifier",
-        }[actor_role]
-        if str(reservation["work_kind"]) != expected_work_kind:
-            raise ValueError("token reservation work_kind does not match role")
-        conn.execute(
-            """
-            INSERT INTO research_agent_executions (
-                execution_id, owner_user_id, actor_role, model_id,
-                codex_version, reservation_id, authority_scope,
-                agent_principal_hash, lineage_hash, launcher_attestation,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                execution_id,
-                owner_user_id,
-                actor_role,
-                str(model_id),
-                str(codex_version),
-                reservation_id,
-                authority_scope,
-                agent_principal_hash,
-                lineage_hash,
-                launcher_attestation,
-                now,
-            ),
-        )
-    return {
-        "execution_id": execution_id,
-        "owner_user_id": owner_user_id,
-        "actor_role": actor_role,
-        "model_id": str(model_id),
-        "codex_version": str(codex_version),
-        "created_at": now,
-        "reservation_id": reservation_id,
-        "authority_scope": authority_scope,
-        "agent_principal_hash": agent_principal_hash,
-        "lineage_hash": lineage_hash,
-    }
 
 
 def create_token_budget(
@@ -1165,36 +1054,6 @@ def create_token_budget(
     raise RuntimeError(
         "deprecated Graph token budget; configure the Agent Profile budget"
     )
-    if not scope_id.strip():
-        raise ValueError("token budget scope_id is required")
-    if (
-        not isinstance(token_limit, int)
-        or isinstance(token_limit, bool)
-        or token_limit <= 0
-    ):
-        raise ValueError("token_limit must be positive")
-    now = time.time()
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        try:
-            conn.execute(
-                """
-                INSERT INTO research_token_budgets (
-                    scope_id, owner_user_id, token_limit, used_tokens,
-                    reserved_tokens, created_at
-                ) VALUES (?, ?, ?, 0, 0, ?)
-                """,
-                (scope_id, owner_user_id, token_limit, now),
-            )
-        except sqlite3.IntegrityError as exc:
-            raise ValueError("token budget scope already exists") from exc
-    return {
-        "scope_id": scope_id,
-        "owner_user_id": owner_user_id,
-        "token_limit": token_limit,
-        "used_tokens": 0,
-        "reserved_tokens": 0,
-        "created_at": now,
-    }
 
 
 def reserve_tokens(
@@ -1210,88 +1069,6 @@ def reserve_tokens(
         "deprecated split reservation protocol; reserve one complete "
         "AgentInvocation"
     )
-    if work_kind not in {
-        "researcher",
-        "proposer",
-        "reviewer",
-        "audit_presenter",
-        "implementation_agent",
-        "backend_verifier",
-        "skill",
-    }:
-        raise ValueError("invalid token reservation work_kind")
-    for field, value in (
-        ("max_input_tokens", max_input_tokens),
-        ("max_output_tokens", max_output_tokens),
-    ):
-        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-            raise ValueError(f"{field} must be non-negative")
-    max_total = max_input_tokens + max_output_tokens
-    if max_total <= 0:
-        raise ValueError("token reservation must be positive")
-    if not isinstance(ttl_seconds, int) or not 1 <= ttl_seconds <= 3600:
-        raise ValueError("ttl_seconds must be between 1 and 3600")
-    reservation_id = uuid.uuid4().hex
-    now = time.time()
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        budget = conn.execute(
-            """
-            SELECT * FROM research_token_budgets
-            WHERE scope_id=? AND owner_user_id=?
-            """,
-            (scope_id, owner_user_id),
-        ).fetchone()
-        if budget is None:
-            raise KeyError("token budget scope not found")
-        available = (
-            int(budget["token_limit"])
-            - int(budget["used_tokens"])
-            - int(budget["reserved_tokens"])
-        )
-        if max_total > available:
-            raise ValueError(
-                f"token reservation denied: requested={max_total}, "
-                f"available={available}"
-            )
-        conn.execute(
-            """
-            UPDATE research_token_budgets
-            SET reserved_tokens=reserved_tokens+?
-            WHERE scope_id=? AND owner_user_id=?
-            """,
-            (max_total, scope_id, owner_user_id),
-        )
-        conn.execute(
-            """
-            INSERT INTO research_token_reservations (
-                reservation_id, scope_id, owner_user_id, work_kind,
-                max_input_tokens, max_output_tokens, max_total_tokens,
-                status, expires_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'granted', ?, ?)
-            """,
-            (
-                reservation_id,
-                scope_id,
-                owner_user_id,
-                work_kind,
-                max_input_tokens,
-                max_output_tokens,
-                max_total,
-                now + ttl_seconds,
-                now,
-            ),
-        )
-    return {
-        "reservation_id": reservation_id,
-        "scope_id": scope_id,
-        "work_kind": work_kind,
-        "max_input_tokens": max_input_tokens,
-        "max_output_tokens": max_output_tokens,
-        "max_total_tokens": max_total,
-        "status": "granted",
-        "expires_at": now + ttl_seconds,
-    }
 
 
 def ingest_provider_usage_receipt(
@@ -1306,69 +1083,6 @@ def ingest_provider_usage_receipt(
     raise RuntimeError(
         "deprecated provider receipt protocol; settle the AgentInvocation"
     )
-    """Trusted gateway adapter: reject when no provider secret is configured."""
-    secret = os.environ.get("RESEARCH_PROVIDER_USAGE_SECRET", "")
-    if not secret:
-        raise ValueError("trusted provider usage adapter is not configured")
-    payload = {
-        "reservation_id": reservation_id,
-        "provider": provider,
-        "provider_request_id": provider_request_id,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-    }
-    expected = hmac.new(
-        secret.encode(),
-        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
-        hashlib.sha256,
-    ).hexdigest()
-    if not hmac.compare_digest(expected, usage_attestation):
-        raise ValueError("provider usage attestation is invalid")
-    if any(
-        not isinstance(value, int) or isinstance(value, bool) or value < 0
-        for value in (input_tokens, output_tokens)
-    ):
-        raise ValueError("provider usage tokens must be non-negative")
-    provider_receipt_id = uuid.uuid4().hex
-    now = time.time()
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        reservation = conn.execute(
-            """
-            SELECT * FROM research_token_reservations
-            WHERE reservation_id=? AND status='granted'
-            """,
-            (reservation_id,),
-        ).fetchone()
-        if reservation is None:
-            raise ValueError("active token reservation not found")
-        if input_tokens > int(reservation["max_input_tokens"]) or (
-            output_tokens > int(reservation["max_output_tokens"])
-        ):
-            raise ValueError("provider usage exceeded granted token maximum")
-        conn.execute(
-            """
-            INSERT INTO research_provider_usage_receipts (
-                provider_receipt_id, reservation_id, provider,
-                provider_request_id, input_tokens, output_tokens,
-                usage_attestation, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                provider_receipt_id,
-                reservation_id,
-                provider,
-                provider_request_id,
-                input_tokens,
-                output_tokens,
-                usage_attestation,
-                now,
-            ),
-        )
-    return {
-        "provider_receipt_id": provider_receipt_id,
-        **payload,
-        "created_at": now,
-    }
 
 
 def commit_token_reservation(
@@ -1380,51 +1094,6 @@ def commit_token_reservation(
     raise RuntimeError(
         "deprecated token commit protocol; settle the AgentInvocation"
     )
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            """
-            SELECT r.*, p.input_tokens, p.output_tokens
-            FROM research_token_reservations r
-            JOIN research_provider_usage_receipts p
-              ON p.reservation_id=r.reservation_id
-            WHERE r.reservation_id=? AND r.owner_user_id=?
-              AND r.status='granted' AND p.provider_receipt_id=?
-            """,
-            (reservation_id, owner_user_id, provider_receipt_id),
-        ).fetchone()
-        if row is None:
-            raise ValueError("trusted provider usage receipt is required")
-        actual = int(row["input_tokens"]) + int(row["output_tokens"])
-        conn.execute(
-            """
-            UPDATE research_token_budgets
-            SET used_tokens=used_tokens+?,
-                reserved_tokens=reserved_tokens-?
-            WHERE scope_id=? AND owner_user_id=?
-            """,
-            (
-                actual,
-                int(row["max_total_tokens"]),
-                row["scope_id"],
-                owner_user_id,
-            ),
-        )
-        conn.execute(
-            """
-            UPDATE research_token_reservations
-            SET status='committed', provider_receipt_id=?
-            WHERE reservation_id=?
-            """,
-            (provider_receipt_id, reservation_id),
-        )
-    return {
-        "reservation_id": reservation_id,
-        "scope_id": str(row["scope_id"]),
-        "status": "committed",
-        "used_tokens": actual,
-        "released_tokens": int(row["max_total_tokens"]) - actual,
-    }
 
 
 def release_token_reservation(
@@ -1435,41 +1104,6 @@ def release_token_reservation(
     raise RuntimeError(
         "deprecated token reservation; release the AgentInvocation"
     )
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            """
-            SELECT * FROM research_token_reservations
-            WHERE reservation_id=? AND owner_user_id=? AND status='granted'
-            """,
-            (reservation_id, owner_user_id),
-        ).fetchone()
-        if row is None:
-            raise ValueError("active token reservation not found")
-        conn.execute(
-            """
-            UPDATE research_token_budgets
-            SET reserved_tokens=reserved_tokens-?
-            WHERE scope_id=? AND owner_user_id=?
-            """,
-            (
-                int(row["max_total_tokens"]),
-                row["scope_id"],
-                owner_user_id,
-            ),
-        )
-        conn.execute(
-            """
-            UPDATE research_token_reservations SET status='released'
-            WHERE reservation_id=?
-            """,
-            (reservation_id,),
-        )
-    return {
-        "reservation_id": reservation_id,
-        "status": "released",
-        "released_tokens": int(row["max_total_tokens"]),
-    }
 
 
 def load_token_budget(
@@ -1480,26 +1114,6 @@ def load_token_budget(
     raise RuntimeError(
         "deprecated Graph token budget; load the Agent Profile budget"
     )
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        row = conn.execute(
-            """
-            SELECT * FROM research_token_budgets
-            WHERE scope_id=? AND owner_user_id=?
-            """,
-            (scope_id, owner_user_id),
-        ).fetchone()
-    if row is None:
-        return None
-    limit = int(row["token_limit"])
-    used = int(row["used_tokens"])
-    reserved = int(row["reserved_tokens"])
-    return {
-        "scope_id": scope_id,
-        "token_limit": limit,
-        "used_tokens": used,
-        "reserved_tokens": reserved,
-        "available_tokens": max(limit - used - reserved, 0),
-    }
 
 
 def _require_agent_execution(

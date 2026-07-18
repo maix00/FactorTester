@@ -10,6 +10,7 @@ from server.services.agent_flow import (
     AgentFlowStore,
     migrate_legacy_graph_accounting,
 )
+from server.services.agent_flow import invocations as invocation_module
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -83,6 +84,75 @@ def test_uncapped_agent_invocation_settles_without_provider_attestation(
         "revision": 1,
         "status": "open",
     }
+
+
+def test_routine_reserve_and_settle_keep_the_sql_floor(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = AgentFlowStore(tmp_path / "agent-flow.sqlite")
+    statements: list[str] = []
+    connect = invocation_module.connect_agent_flow
+
+    def traced_connect(db_path):
+        connection = connect(db_path)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(
+        invocation_module,
+        "connect_agent_flow",
+        traced_connect,
+    )
+    invocation = store.reserve_invocation(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+        actor_role="research",
+        authority_scope="local_research",
+        purpose="measure routine SQL",
+        runtime_id="runtime-a",
+        model_id="model-a",
+        max_input_tokens=100,
+        max_output_tokens=40,
+        agent_principal_hash="a" * 64,
+        lineage_hash="b" * 64,
+    )
+    reserve_statements = [
+        statement.strip().upper() for statement in statements
+    ]
+    statements.clear()
+
+    store.settle_invocation(
+        owner_user_id="alice",
+        invocation_id=invocation["invocation_id"],
+        input_tokens=24,
+        output_tokens=8,
+    )
+    settle_statements = [
+        statement.strip().upper() for statement in statements
+    ]
+
+    assert sum(
+        statement.startswith("SELECT")
+        for statement in reserve_statements
+    ) == 1
+    assert sum(
+        statement.startswith(("INSERT", "UPDATE", "DELETE"))
+        for statement in reserve_statements
+    ) == 3
+    assert sum(
+        statement.startswith("SELECT")
+        for statement in settle_statements
+    ) == 1
+    assert "JOIN AGENT_BUDGET_PERIODS" in next(
+        statement
+        for statement in settle_statements
+        if statement.startswith("SELECT")
+    )
+    assert sum(
+        statement.startswith(("INSERT", "UPDATE", "DELETE"))
+        for statement in settle_statements
+    ) == 2
 
 
 def test_configured_cap_denies_before_call_and_falls_back_to_reservation(
@@ -272,6 +342,67 @@ def test_reset_waits_for_active_invocation_then_opens_new_period(
     assert current["period_id"] != old_period["period_id"]
     assert current["token_limit"] == 50
     assert current["used_tokens"] == 0
+
+
+def test_pending_reset_waits_for_every_reserved_invocation(
+    tmp_path,
+) -> None:
+    store = AgentFlowStore(tmp_path / "agent-flow.sqlite")
+    old_period = store.configure_token_limit(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+        token_limit=100,
+    )
+    invocations = [
+        store.reserve_invocation(
+            owner_user_id="alice",
+            agent_id="research-agent-1",
+            actor_role="research",
+            authority_scope="local_research",
+            purpose=f"active call {index}",
+            runtime_id="runtime-a",
+            model_id="model-a",
+            max_input_tokens=20,
+            max_output_tokens=10,
+            agent_principal_hash=str(index) * 64,
+            lineage_hash=str(index + 2) * 64,
+        )
+        for index in (1, 2)
+    ]
+    store.reset_budget_period(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+        token_limit=50,
+    )
+
+    store.settle_invocation(
+        owner_user_id="alice",
+        invocation_id=invocations[0]["invocation_id"],
+        input_tokens=10,
+        output_tokens=5,
+    )
+    still_pending = store.load_current_budget_period(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+    )
+    assert still_pending is not None
+    assert still_pending["period_id"] == old_period["period_id"]
+    assert still_pending["reserved_tokens"] == 30
+    assert still_pending["reset_pending"] is True
+
+    store.settle_invocation(
+        owner_user_id="alice",
+        invocation_id=invocations[1]["invocation_id"],
+        input_tokens=10,
+        output_tokens=5,
+    )
+    reset = store.load_current_budget_period(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+    )
+    assert reset is not None
+    assert reset["period_id"] != old_period["period_id"]
+    assert reset["token_limit"] == 50
 
 
 def test_legacy_accounting_migrates_once_without_dual_write(
