@@ -5,13 +5,20 @@ from __future__ import annotations
 from copy import deepcopy
 import sqlite3
 import time
-import uuid
 from typing import Any
 
-import orjson
-
 import settings as Settings
-from server.services import agent_flow, graph_governance
+from server.services import agent_flow
+from server.services.research_graph import activation_gate
+from server.services.research_graph.active_pointer import (
+    activate_graph,
+    load_active_graph,
+    pointer_reason_hash,
+    rollback_active_graph,
+)
+from server.services.research_graph.activation_migration import (
+    has_legacy_rollback_table,
+)
 from server.services.research_graph.branch.context import (
     build_graph_branch_context,
     build_graph_branch_next,
@@ -40,15 +47,11 @@ from server.services.research_graph.protocol import (
     GraphActivationBlocked,
     GraphVersionConflict,
     assert_no_skill_identity as _assert_no_skill_identity,
-    graph_content_hash as _content_hash,
     json_hash as _json_hash,
 )
 from server.services.research_graph.versions import (
     clear_graph_cache_for_current_db as _clear_graph_cache_for_current_db,
-    graph_lifecycle as _graph_lifecycle,
-    insert_graph as _insert_graph,
     list_graph_versions,
-    load_active_graph,
     load_graph,
     load_graph_from_conn as _load_graph_from_conn,
     register_graph,
@@ -88,16 +91,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             version INTEGER NOT NULL,
             activated_by TEXT NOT NULL,
             activated_at REAL NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS research_graph_rollbacks (
-            rollback_id TEXT PRIMARY KEY,
-            graph_id TEXT NOT NULL,
-            from_version INTEGER NOT NULL,
-            to_version INTEGER NOT NULL,
-            actor TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            grill_evidence_json TEXT NOT NULL,
-            created_at REAL NOT NULL
         );
         """
     )
@@ -141,6 +134,7 @@ def ensure_schema() -> None:
             """
         ).fetchall()
         legacy_branch_projection = has_batch4_legacy_schema(conn)
+        legacy_pointer_history = has_legacy_rollback_table(conn)
     if legacy_assurance is not None:
         raise RuntimeError(
             "legacy backend assurance receipts require the explicit "
@@ -160,6 +154,11 @@ def ensure_schema() -> None:
         raise RuntimeError(
             "legacy Graph branch projections require the explicit "
             "migrate_graph_branch_projection cutover"
+        )
+    if legacy_pointer_history:
+        raise RuntimeError(
+            "legacy Graph rollback rows require the explicit "
+            "migrate_graph_activation_pointer cutover"
         )
     agent_flow.get_store().ensure_schema()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -398,12 +397,12 @@ def record_validation(
         if graph is None:
             raise KeyError("graph version not found")
     owner = owner_user_id or actor
-    case = graph_governance.load_activation_gate(
+    case = activation_gate.load_activation_gate(
         Settings.CACHE_DB_PATH,
         owner_user_id=owner,
         case_id=proposal_id,
     )
-    graph_governance.require_graph_target(
+    activation_gate.require_graph_target(
         case,
         graph_id=graph_id,
         graph_version=version,
@@ -416,7 +415,7 @@ def record_validation(
     if not failed and (
         evidence_value.get("token_metrics_authority") == "server_derived"
     ):
-        graph_governance.record_activation_validation(
+        activation_gate.record_activation_validation(
             Settings.CACHE_DB_PATH,
             owner_user_id=owner,
             case_id=proposal_id,
@@ -550,6 +549,9 @@ def record_proposal(
     evidence_refs: list[str],
     token_estimate: int,
     conversation_ref: str,
+    pointer_action: str = activation_gate.ACTIVATE_ACTION,
+    pointer_from_version: int = 0,
+    pointer_reason: str = "",
 ) -> dict[str, Any]:
     if risk_level not in {"L1", "L2", "L3", "L4"}:
         raise ValueError("invalid proposal risk_level")
@@ -574,8 +576,28 @@ def record_proposal(
         )
         if graph is None:
             raise KeyError("graph version not found")
-        if graph["lifecycle"] != "draft":
+        if (
+            pointer_action == activation_gate.ACTIVATE_ACTION
+            and graph["lifecycle"] != "draft"
+        ):
             raise ValueError("only a draft graph accepts proposals")
+        if pointer_action == activation_gate.ROLLBACK_ACTION:
+            current = conn.execute(
+                """
+                SELECT version FROM active_research_graphs
+                WHERE graph_id=?
+                """,
+                (graph_id,),
+            ).fetchone()
+            if (
+                current is None
+                or int(current["version"]) != int(pointer_from_version)
+            ):
+                raise ValueError(
+                    "rollback proposal from_version is not currently active"
+                )
+            if int(pointer_from_version) == int(version):
+                raise ValueError("rollback target is already active")
         _require_agent_execution(
             conn,
             owner_user_id=owner_user_id,
@@ -583,7 +605,12 @@ def record_proposal(
             role="proposer",
         )
     diff_hash = _json_hash(change_diff)
-    row = graph_governance.open_activation_gate(
+    reason_hash = (
+        pointer_reason_hash(pointer_reason)
+        if pointer_action == activation_gate.ROLLBACK_ACTION
+        else ""
+    )
+    row = activation_gate.open_activation_gate(
         Settings.CACHE_DB_PATH,
         owner_user_id=owner_user_id,
         graph_id=graph_id,
@@ -593,6 +620,9 @@ def record_proposal(
         proposer_invocation_id=actor_agent_id,
         conversation_ref=conversation_ref,
         proposal_evidence_refs=evidence_refs,
+        action=pointer_action,
+        from_version=pointer_from_version,
+        reason_hash=reason_hash,
     )
     row.update({
         "graph_id": graph_id,
@@ -602,6 +632,9 @@ def record_proposal(
         "change_diff": deepcopy(change_diff),
         "evidence_refs": list(evidence_refs),
         "token_estimate": token_estimate,
+        "pointer_action": pointer_action,
+        "pointer_from_version": int(pointer_from_version),
+        "pointer_reason_hash": reason_hash,
     })
     return row
 
@@ -626,12 +659,12 @@ def record_proposal_review(
         isinstance(item, str) and item.strip() for item in evidence_refs
     ):
         raise ValueError("evidence_refs must be an array of references")
-    case = graph_governance.load_activation_gate(
+    case = activation_gate.load_activation_gate(
         Settings.CACHE_DB_PATH,
         owner_user_id=owner_user_id,
         case_id=proposal_id,
     )
-    proposer_execution_id = graph_governance.proposer_invocation_id(case)
+    proposer_execution_id = activation_gate.proposer_invocation_id(case)
     reviewer_execution = _require_agent_execution(
         None,
         owner_user_id=owner_user_id,
@@ -655,7 +688,7 @@ def record_proposal_review(
         raise ValueError(
             "proposal reviewer principal and lineage must be independent"
         )
-    existing_review_ids = graph_governance.reviewer_invocation_ids(case)
+    existing_review_ids = activation_gate.reviewer_invocation_ids(case)
     existing_review_principals = (
         agent_flow.get_store().load_invocations(
             owner_user_id=owner_user_id,
@@ -677,7 +710,7 @@ def record_proposal_review(
         if scope_drift or semantic_uncertainty
         else disposition
     )
-    review = graph_governance.record_activation_review(
+    review = activation_gate.record_activation_review(
         Settings.CACHE_DB_PATH,
         owner_user_id=owner_user_id,
         case_id=proposal_id,
@@ -744,18 +777,18 @@ def record_audit(
         if graph is None:
             raise KeyError("graph version not found")
     owner = owner_user_id or actor
-    case = graph_governance.load_activation_gate(
+    case = activation_gate.load_activation_gate(
         Settings.CACHE_DB_PATH,
         owner_user_id=owner,
         case_id=proposal_id,
     )
-    graph_governance.require_graph_target(
+    activation_gate.require_graph_target(
         case,
         graph_id=graph_id,
         graph_version=version,
         graph_hash=str(graph["content_hash"]),
     )
-    graph_governance.record_activation_grill(
+    activation_gate.record_activation_grill(
         Settings.CACHE_DB_PATH,
         owner_user_id=owner,
         case_id=proposal_id,
@@ -775,6 +808,9 @@ def authorize_graph_activation(
     diff_hash: str,
     conversation_ref: str,
     approval_ref: str,
+    pointer_action: str = activation_gate.ACTIVATE_ACTION,
+    pointer_from_version: int = 0,
+    pointer_reason: str = "",
 ) -> dict[str, Any]:
     """Bind an authenticated conversation decision to one exact Gate."""
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -783,30 +819,45 @@ def authorize_graph_activation(
             graph_id=graph_id,
             version=int(graph_version),
         )
-        if graph is None or graph.get("lifecycle") != "draft":
+        if graph is None:
+            raise ValueError("human pointer change requires a Graph version")
+        if (
+            pointer_action == activation_gate.ACTIVATE_ACTION
+            and graph.get("lifecycle") != "draft"
+        ):
             raise ValueError("human activation requires a draft graph")
         actual_graph_hash = str(graph["content_hash"])
         if graph_hash != actual_graph_hash:
             raise ValueError("human activation target hash mismatch")
-    case = graph_governance.load_activation_gate(
+    case = activation_gate.load_activation_gate(
         Settings.CACHE_DB_PATH,
         owner_user_id=owner_user_id,
         case_id=proposal_id,
     )
-    graph_governance.require_graph_target(
+    activation_gate.require_graph_target(
         case,
         graph_id=graph_id,
         graph_version=graph_version,
         graph_hash=actual_graph_hash,
     )
-    target_hash = graph_governance.activation_target_hash(
+    if activation_gate.gate_action(case) != pointer_action:
+        raise ValueError("human authorization action does not match")
+    reason_hash = (
+        pointer_reason_hash(pointer_reason)
+        if pointer_action == activation_gate.ROLLBACK_ACTION
+        else ""
+    )
+    target_hash = activation_gate.activation_target_hash(
         owner_user_id=owner_user_id,
         graph_id=graph_id,
         graph_version=graph_version,
         graph_hash=actual_graph_hash,
         diff_hash=diff_hash,
+        action=pointer_action,
+        from_version=pointer_from_version,
+        reason_hash=reason_hash,
     )
-    return graph_governance.approve_activation(
+    return activation_gate.approve_activation(
         Settings.CACHE_DB_PATH,
         owner_user_id=owner_user_id,
         case_id=proposal_id,
@@ -814,154 +865,3 @@ def authorize_graph_activation(
         conversation_ref=conversation_ref,
         approval_ref=approval_ref,
     )
-
-
-def activate_graph(
-    *,
-    graph_id: str,
-    source_version: int,
-    actor: str,
-    human_authorization_id: str,
-) -> dict[str, Any]:
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        source = _load_graph_from_conn(
-            conn,
-            graph_id=graph_id,
-            version=source_version,
-        )
-        if source is None:
-            raise KeyError("graph version not found")
-        if source["lifecycle"] != "draft":
-            raise GraphActivationBlocked("only a draft graph can be activated")
-        next_version = int(conn.execute(
-            """
-            SELECT COALESCE(MAX(version), 0) + 1 AS next_version
-            FROM research_graph_versions WHERE graph_id=?
-            """,
-            (graph_id,),
-        ).fetchone()["next_version"])
-        try:
-            graph_governance.consume_activation_in_connection(
-                conn,
-                owner_user_id=actor,
-                case_id=human_authorization_id,
-                graph_id=graph_id,
-                graph_version=source_version,
-                graph_hash=str(source["content_hash"]),
-                effect_ref=f"active-graph:{graph_id}@{next_version}",
-            )
-        except KeyError as exc:
-            raise GraphActivationBlocked(
-                "human activation authorization Gate not found"
-            ) from exc
-        except ValueError as exc:
-            raise GraphActivationBlocked(str(exc)) from exc
-        human_actor = actor
-        active = deepcopy(source)
-        active.pop("created_by", None)
-        active.pop("created_at", None)
-        active.update({
-            "version": next_version,
-            "lifecycle": "active",
-            "parent_version": int(source_version),
-            "activated_from_hash": source["content_hash"],
-        })
-        active["content_hash"] = _content_hash(active)
-        stored = _insert_graph(conn, active, actor=human_actor)
-        conn.execute(
-            """
-            INSERT INTO active_research_graphs (
-                graph_id, version, activated_by, activated_at
-            ) VALUES (?, ?, ?, ?)
-            ON CONFLICT(graph_id) DO UPDATE SET
-                version=excluded.version,
-                activated_by=excluded.activated_by,
-                activated_at=excluded.activated_at
-            """,
-            (graph_id, next_version, human_actor, time.time()),
-        )
-    return stored
-
-
-def rollback_active_graph(
-    *,
-    graph_id: str,
-    target_version: int,
-    actor: str,
-    reason: str,
-    grill_evidence: list[dict[str, Any]],
-) -> dict[str, Any]:
-    if not str(reason).strip():
-        raise ValueError("rollback reason is required")
-    if not isinstance(grill_evidence, list) or not grill_evidence:
-        raise ValueError("rollback requires grill_evidence")
-    _assert_no_skill_identity(
-        grill_evidence,
-        location="rollback grill evidence",
-    )
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        current = conn.execute(
-            """
-            SELECT version FROM active_research_graphs WHERE graph_id=?
-            """,
-            (graph_id,),
-        ).fetchone()
-        if current is None:
-            raise KeyError("active graph not found")
-        from_version = int(current["version"])
-        if from_version == int(target_version):
-            raise ValueError("rollback target is already active")
-        if _graph_lifecycle(
-            conn,
-            graph_id=graph_id,
-            version=target_version,
-        ) != "active":
-            raise KeyError("rollback target active version not found")
-        target = _load_graph_from_conn(
-            conn,
-            graph_id=graph_id,
-            version=target_version,
-        ) or {}
-        now = time.time()
-        rollback_id = uuid.uuid4().hex
-        conn.execute(
-            """
-            UPDATE active_research_graphs
-            SET version=?, activated_by=?, activated_at=?
-            WHERE graph_id=?
-            """,
-            (int(target_version), actor, now, graph_id),
-        )
-        conn.execute(
-            """
-            INSERT INTO research_graph_rollbacks (
-                rollback_id, graph_id, from_version, to_version, actor,
-                reason, grill_evidence_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                rollback_id,
-                graph_id,
-                from_version,
-                int(target_version),
-                actor,
-                str(reason),
-                orjson.dumps(
-                    grill_evidence,
-                    option=orjson.OPT_SORT_KEYS,
-                ).decode(),
-                now,
-            ),
-        )
-    return {
-        "rollback_id": rollback_id,
-        "graph_id": graph_id,
-        "from_version": from_version,
-        "to_version": int(target_version),
-        "actor": actor,
-        "reason": str(reason),
-        "grill_evidence": deepcopy(grill_evidence),
-        "active_graph": target,
-        "created_at": now,
-    }

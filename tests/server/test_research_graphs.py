@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import sqlite3
 import uuid
 
 from flask import Flask
@@ -17,6 +18,7 @@ from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs, research_runs
 from server.services import agent_flow
 from server.services.research_graph import versions as graph_versions
+from server.services.research_graph import active_pointer
 from server.services.research_graph.branch import (
     context as branch_context,
     runtime as branch_runtime,
@@ -63,6 +65,10 @@ def _descriptor(capability_id: str) -> dict:
 def _approve_proposal(
     version: int = 2,
     new_hash: str | None = None,
+    *,
+    pointer_action: str = "activate_graph",
+    pointer_from_version: int = 0,
+    pointer_reason: str = "",
 ) -> tuple[dict, dict]:
     proposer = _agent_execution("proposer")
     reviewer = _agent_execution("reviewer")
@@ -81,6 +87,9 @@ def _approve_proposal(
         evidence_refs=["test:proposal"],
         token_estimate=500,
         conversation_ref="auth-conversation:test-graph-governance",
+        pointer_action=pointer_action,
+        pointer_from_version=pointer_from_version,
+        pointer_reason=pointer_reason,
     )
     review = research_graphs.record_proposal_review(
         proposal_id=proposal["proposal_id"],
@@ -225,6 +234,9 @@ def _human_authorization(
     *,
     graph_version: int = 2,
     owner_user_id: str = "alice",
+    pointer_action: str = "activate_graph",
+    pointer_from_version: int = 0,
+    pointer_reason: str = "",
 ) -> dict:
     graph = research_graphs.load_graph(
         graph_id="factor-research",
@@ -243,6 +255,9 @@ def _human_authorization(
         diff_hash=proposal["diff_hash"],
         conversation_ref=proposal["conversation_ref"],
         approval_ref=f"auth-conversation-event:{uuid.uuid4().hex}",
+        pointer_action=pointer_action,
+        pointer_from_version=pointer_from_version,
+        pointer_reason=pointer_reason,
     )
 
 
@@ -253,6 +268,50 @@ def _activate(graph_version: int = 2) -> dict:
         source_version=graph_version,
         actor="alice",
         human_authorization_id=authorization["authorization_id"],
+    )
+
+
+def _authorize_rollback(
+    *,
+    from_version: int,
+    target_version: int,
+    reason: str,
+) -> dict:
+    target = research_graphs.load_graph(
+        graph_id="factor-research",
+        version=target_version,
+    )
+    proposal, _ = _approve_proposal(
+        version=target_version,
+        new_hash=target["content_hash"],
+        pointer_action="rollback_graph_pointer",
+        pointer_from_version=from_version,
+        pointer_reason=reason,
+    )
+    research_graphs.record_validation(
+        graph_id="factor-research",
+        version=target_version,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        evidence=_server_validation_evidence(version=target_version),
+    )
+    research_graphs.record_audit(
+        graph_id="factor-research",
+        version=target_version,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        disposition="approved",
+        grill_evidence=[{
+            "question": "pointer-only rollback?",
+            "answer": "approved for exact target",
+        }],
+        grill_ref=f"grill-with-docs:test-pointer-rollback-{uuid.uuid4().hex}",
+    )
+    return _human_authorization(
+        graph_version=target_version,
+        pointer_action="rollback_graph_pointer",
+        pointer_from_version=from_version,
+        pointer_reason=reason,
     )
 
 
@@ -577,7 +636,7 @@ def client(tmp_path, monkeypatch):
     return client
 
 
-def test_graph_versions_are_immutable_and_activation_creates_a_new_version(
+def test_graph_versions_are_immutable_and_activation_moves_only_pointer(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -618,9 +677,14 @@ def test_graph_versions_are_immutable_and_activation_creates_a_new_version(
     active = _activate()
 
     assert draft["lifecycle"] == "draft"
-    assert active["version"] == 3
-    assert active["lifecycle"] == "active"
-    assert active["parent_version"] == 2
+    assert active["version"] == 2
+    assert active["lifecycle"] == "draft"
+    assert active["content_hash"] == draft["content_hash"]
+    assert active["active_pointer"]["version"] == 2
+    assert active["is_active"] is True
+    assert len(research_graphs.list_graph_versions(
+        graph_id="factor-research",
+    )) == 1
     assert research_graphs.load_active_graph(
         graph_id="factor-research"
     )["content_hash"] == active["content_hash"]
@@ -754,13 +818,55 @@ def test_activation_requires_exact_one_time_human_authorization(
         )
 
     authorization = _human_authorization()
+    consume_activation = (
+        active_pointer.pointer_gate.consume_activation
+    )
+
+    def consume_then_fail(conn, **kwargs):
+        consume_activation(conn, **kwargs)
+        raise sqlite3.OperationalError("injected pointer write failure")
+
+    monkeypatch.setattr(
+        active_pointer.pointer_gate,
+        "consume_activation",
+        consume_then_fail,
+    )
+    with pytest.raises(sqlite3.OperationalError, match="pointer write failure"):
+        research_graphs.activate_graph(
+            graph_id="factor-research",
+            source_version=2,
+            actor="alice",
+            human_authorization_id=authorization["authorization_id"],
+        )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        gate_after_failure = conn.execute(
+            """
+            SELECT status FROM research_maintenance_cases
+            WHERE case_id=?
+            """,
+            (authorization["authorization_id"],),
+        ).fetchone()
+        pointer_after_failure = conn.execute(
+            """
+            SELECT version FROM active_research_graphs
+            WHERE graph_id='factor-research'
+            """
+        ).fetchone()
+    assert gate_after_failure["status"] == "blocked"
+    assert pointer_after_failure is None
+    monkeypatch.setattr(
+        active_pointer.pointer_gate,
+        "consume_activation",
+        consume_activation,
+    )
     active = research_graphs.activate_graph(
         graph_id="factor-research",
         source_version=2,
         actor="alice",
         human_authorization_id=authorization["authorization_id"],
     )
-    assert active["lifecycle"] == "active"
+    assert active["lifecycle"] == "draft"
+    assert active["active_pointer"]["version"] == 2
     with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         gate = conn.execute(
             """
@@ -857,14 +963,14 @@ def test_activation_gate_hot_path_is_one_transaction_with_bounded_sql(
     )
     authorization = _human_authorization()
     statements: list[str] = []
-    original_connect = research_graphs.connect_sqlite
+    original_connect = active_pointer.connect_sqlite
 
     def traced_connect(*args, **kwargs):
         connection = original_connect(*args, **kwargs)
         connection.set_trace_callback(statements.append)
         return connection
 
-    monkeypatch.setattr(research_graphs, "connect_sqlite", traced_connect)
+    monkeypatch.setattr(active_pointer, "connect_sqlite", traced_connect)
     active = research_graphs.activate_graph(
         graph_id="factor-research",
         source_version=2,
@@ -881,9 +987,15 @@ def test_activation_gate_hot_path_is_one_transaction_with_bounded_sql(
         statement for statement in normalized
         if statement.startswith(("INSERT ", "UPDATE ", "DELETE ", "REPLACE "))
     ]
-    assert active["lifecycle"] == "active"
-    assert len(reads) <= 3
-    assert len(writes) == 3
+    assert active["lifecycle"] == "draft"
+    assert active["active_pointer"]["version"] == 2
+    assert len(reads) <= 2
+    assert len(writes) == 2
+    assert not any(
+        "MAX(VERSION)" in statement
+        or "INSERT INTO RESEARCH_GRAPH_VERSIONS" in statement
+        for statement in normalized
+    )
     assert sum(
         statement.startswith("BEGIN IMMEDIATE")
         for statement in normalized
@@ -1097,6 +1209,44 @@ def test_immutable_graph_cache_uses_hash_and_returns_defensive_copies(
     )
 
 
+def test_active_pointer_read_is_two_selects_cold_and_one_warm(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    _active_instance(workspace_id="pointer-read-cache")
+    graph_versions.clear_graph_cache_for_current_db()
+    statements: list[str] = []
+    original_connect = active_pointer.connect_sqlite
+
+    def traced_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(active_pointer, "connect_sqlite", traced_connect)
+    cold = research_graphs.load_active_graph(graph_id="factor-research")
+    cold_statements = list(statements)
+    statements.clear()
+    warm = research_graphs.load_active_graph(graph_id="factor-research")
+
+    assert cold["content_hash"] == warm["content_hash"]
+    assert sum(
+        statement.lstrip().upper().startswith("SELECT ")
+        for statement in cold_statements
+    ) == 2
+    assert sum(
+        statement.lstrip().upper().startswith("SELECT ")
+        for statement in statements
+    ) == 1
+    assert not any(
+        statement.lstrip().upper().startswith(
+            ("INSERT ", "UPDATE ", "DELETE ", "REPLACE ")
+        )
+        for statement in cold_statements + statements
+    )
+
+
 def test_activation_requires_replay_shadow_capability_and_job_isolation(
     tmp_path,
     monkeypatch,
@@ -1255,7 +1405,8 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
         grill_ref="grill-with-docs:test-review-disagreement",
     )
     active = _activate()
-    assert active["lifecycle"] == "active"
+    assert active["lifecycle"] == "draft"
+    assert active["is_active"] is True
 
 
 @pytest.mark.parametrize(
@@ -1328,7 +1479,7 @@ def test_audited_rollback_moves_only_the_active_pointer(
     first_active = _activate()
     second_draft = _draft_graph()
     second_draft["version"] = 4
-    second_draft["parent_version"] = 3
+    second_draft["parent_version"] = 2
     second_draft["nodes"][0]["purpose"] = "freeze a refined hypothesis"
     second_draft["content_hash"] = _hash(second_draft)
     research_graphs.register_graph(second_draft, actor="curator-agent")
@@ -1353,28 +1504,132 @@ def test_audited_rollback_moves_only_the_active_pointer(
         grill_ref="grill-with-docs:test-second-active",
     )
     second_active = _activate(graph_version=4)
+    rollback_reason = "shadow regression after activation"
+    rollback_authorization = _authorize_rollback(
+        from_version=4,
+        target_version=2,
+        reason=rollback_reason,
+    )
+    statements: list[str] = []
+    original_connect = active_pointer.connect_sqlite
 
+    def traced_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(active_pointer, "connect_sqlite", traced_connect)
     rollback = research_graphs.rollback_active_graph(
         graph_id="factor-research",
         target_version=first_active["version"],
-        actor="human-auditor",
-        reason="shadow regression after activation",
-        grill_evidence=[{
-            "question": "preserve running jobs?",
-            "answer": "yes; only move the graph pointer",
-        }],
+        actor="alice",
+        reason=rollback_reason,
+        human_authorization_id=rollback_authorization["authorization_id"],
+    )
+    normalized = [statement.lstrip().upper() for statement in statements]
+    assert sum(
+        statement.startswith("SELECT ") for statement in normalized
+    ) <= 3
+    assert sum(
+        statement.startswith(("INSERT ", "UPDATE ", "DELETE ", "REPLACE "))
+        for statement in normalized
+    ) == 2
+    assert sum(
+        statement.startswith("BEGIN IMMEDIATE")
+        for statement in normalized
+    ) == 1
+    assert not any(
+        "RESEARCH_GRAPH_ROLLBACKS" in statement
+        or "INSERT INTO RESEARCH_GRAPH_VERSIONS" in statement
+        or "MAX(VERSION)" in statement
+        for statement in normalized
     )
 
-    assert second_active["version"] == 5
-    assert rollback["from_version"] == 5
-    assert rollback["to_version"] == 3
+    assert second_active["version"] == 4
+    assert rollback["from_version"] == 4
+    assert rollback["to_version"] == 2
     assert research_graphs.load_active_graph(
         graph_id="factor-research"
-    )["version"] == 3
-    assert research_graphs.load_graph(
-        graph_id="factor-research",
-        version=5,
-    )["lifecycle"] == "active"
+    )["version"] == 2
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type='table' AND name='research_graph_rollbacks'
+            """
+        ).fetchone() is None
+        conn.execute(
+            """
+            UPDATE active_research_graphs
+            SET version=4, activated_by='alice', activated_at=99
+            WHERE graph_id='factor-research'
+            """
+        )
+    with pytest.raises(
+        research_graphs.GraphActivationBlocked,
+        match="already consumed",
+    ):
+        research_graphs.rollback_active_graph(
+            graph_id="factor-research",
+            target_version=2,
+            actor="alice",
+            reason=rollback_reason,
+            human_authorization_id=rollback_authorization[
+                "authorization_id"
+            ],
+        )
+    cas_reason = rollback_reason + " after concurrent update"
+    fresh_authorization = _authorize_rollback(
+        from_version=4,
+        target_version=2,
+        reason=cas_reason,
+    )
+    consume_rollback = (
+        active_pointer.pointer_gate.consume_rollback
+    )
+
+    def consume_then_race(conn, **kwargs):
+        result = consume_rollback(conn, **kwargs)
+        conn.execute(
+            """
+            UPDATE active_research_graphs SET version=999
+            WHERE graph_id='factor-research'
+            """
+        )
+        return result
+
+    monkeypatch.setattr(
+        active_pointer.pointer_gate,
+        "consume_rollback",
+        consume_then_race,
+    )
+    with pytest.raises(
+        research_graphs.GraphActivationBlocked,
+        match="changed during rollback",
+    ):
+        research_graphs.rollback_active_graph(
+            graph_id="factor-research",
+            target_version=2,
+            actor="alice",
+            reason=cas_reason,
+            human_authorization_id=fresh_authorization["authorization_id"],
+        )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        pointer = conn.execute(
+            """
+            SELECT version FROM active_research_graphs
+            WHERE graph_id='factor-research'
+            """
+        ).fetchone()
+        gate = conn.execute(
+            """
+            SELECT status FROM research_maintenance_cases
+            WHERE case_id=?
+            """,
+            (fresh_authorization["authorization_id"],),
+        ).fetchone()
+    assert int(pointer["version"]) == 4
+    assert gate["status"] == "blocked"
 
 
 def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
@@ -1483,7 +1738,8 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
         },
     )
     assert activated.status_code == 201
-    assert activated.get_json()["graph"]["lifecycle"] == "active"
+    assert activated.get_json()["graph"]["lifecycle"] == "draft"
+    assert activated.get_json()["graph"]["active_pointer"]["version"] == 2
 
     receipt = _issue_receipt(
         node_id="hypothesis",
@@ -1516,7 +1772,6 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
     history = client.get("/api/research-graphs/factor-research/versions")
     assert [item["lifecycle"] for item in history.get_json()["versions"]] == [
         "draft",
-        "active",
     ]
 
 
@@ -1857,7 +2112,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "review_policy",
             "context_bytes",
     }
-    assert context["graph"] == "factor-research@v3"
+    assert context["graph"] == "factor-research@v2"
     assert "nodes" not in context
     assert "token_telemetry" not in context
     assert "review_gate" not in context
@@ -2203,4 +2458,4 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
     }]
     assert context["context_bytes"] == len(orjson.dumps(context))
     assert context["context_bytes"] <= 6000
-    assert active["version"] == 3
+    assert active["version"] == 2

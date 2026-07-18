@@ -60,6 +60,13 @@ def propose_research_graph_version(graph_id: str, version: int):
             evidence_refs=data.get("evidence_refs") or [],
             token_estimate=data.get("token_estimate", 0),
             conversation_ref=str(data.get("conversation_ref") or ""),
+            pointer_action=str(
+                data.get("pointer_action") or "activate_graph"
+            ),
+            pointer_from_version=int(
+                data.get("pointer_from_version") or 0
+            ),
+            pointer_reason=str(data.get("pointer_reason") or ""),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
@@ -208,6 +215,13 @@ def authorize_research_graph_activation():
             diff_hash=str(data.get("diff_hash") or ""),
             conversation_ref=str(data.get("conversation_ref") or ""),
             approval_ref=str(data.get("approval_ref") or ""),
+            pointer_action=str(
+                data.get("pointer_action") or "activate_graph"
+            ),
+            pointer_from_version=int(
+                data.get("pointer_from_version") or 0
+            ),
+            pointer_reason=str(data.get("pointer_reason") or ""),
         )
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
@@ -256,7 +270,9 @@ def rollback_research_graph(graph_id: str):
             target_version=int(data.get("target_version") or 0),
             actor=require_user(),
             reason=str(data.get("reason") or ""),
-            grill_evidence=data.get("grill_evidence") or [],
+            human_authorization_id=str(
+                data.get("human_authorization_id") or ""
+            ),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404

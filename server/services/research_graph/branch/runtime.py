@@ -19,11 +19,9 @@ from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
     verify_capability_receipt,
 )
+from server.services.research_graph.active_pointer import load_active_graph
 from server.services.research_graph.protocol import GraphActivationBlocked
-from server.services.research_graph.versions import (
-    load_active_graph,
-    load_graph,
-)
+from server.services.research_graph.versions import load_graph
 from tools.data.sqlite.db import connect_sqlite
 
 

@@ -17,6 +17,8 @@ class FakeClient:
         self.validation = None
         self.proposal = None
         self.review = None
+        self.authorization = None
+        self.rollback = None
         self.agent_budget_call = None
         self.agent_invocation_call = None
 
@@ -28,7 +30,13 @@ class FakeClient:
         return [{"graph_id": graph_id, "version": 2, "lifecycle": "draft"}]
 
     def get_active_research_graph(self, graph_id):
-        return {"graph_id": graph_id, "version": 3, "lifecycle": "active"}
+        return {
+            "graph_id": graph_id,
+            "version": 2,
+            "lifecycle": "draft",
+            "is_active": True,
+            "active_pointer": {"version": 2},
+        }
 
     def validate_research_graph(
         self, graph_id, version, evidence, *, proposal_id,
@@ -57,8 +65,10 @@ class FakeClient:
     ):
         return {
             "graph_id": graph_id,
-            "version": version + 1,
-            "lifecycle": "active",
+            "version": version,
+            "lifecycle": "draft",
+            "is_active": True,
+            "active_pointer": {"version": version},
             "human_authorization_id": human_authorization_id,
         }
 
@@ -71,7 +81,16 @@ class FakeClient:
         return {"review_id": "review-1", **kwargs}
 
     def rollback_research_graph(self, graph_id, **kwargs):
-        return {"graph_id": graph_id, "from_version": 5, "to_version": kwargs["target_version"]}
+        self.rollback = (graph_id, kwargs)
+        return {
+            "graph_id": graph_id,
+            "from_version": 4,
+            "to_version": kwargs["target_version"],
+        }
+
+    def authorize_research_graph_activation(self, **kwargs):
+        self.authorization = kwargs
+        return {"authorization_id": "gate-rollback-1", **kwargs}
 
     def evaluate_backend_assurance(self, **kwargs):
         return {
@@ -230,7 +249,8 @@ def test_research_graph_cli_publishes_and_reads_versions(
     assert published.exit_code == 0
     assert fake.published["version"] == 2
     assert '"lifecycle": "draft"' in listed.output
-    assert '"lifecycle": "active"' in active.output
+    assert '"is_active": true' in active.output
+    assert '"version": 2' in active.output
 
 
 def test_research_graph_cli_requires_explicit_gate_evidence(
@@ -355,6 +375,63 @@ def test_research_graph_next_and_bounded_review_commands(
         == "auth-conversation:test-cli"
     )
     assert fake.review[1]["scope_drift"] is False
+
+
+def test_research_graph_rollback_requires_exact_authorization(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    runner = CliRunner()
+    diff_file = tmp_path / "rollback-diff.json"
+    diff_file.write_text(json.dumps({"reason": "rollback pointer"}))
+    reason = "shadow regression"
+
+    proposed = runner.invoke(cli, [
+        "research-graph", "propose", "factor-research", "2",
+        "--risk-level", "L4",
+        "--change-diff-file", str(diff_file),
+        "--token-estimate", "100",
+        "--agent-execution-id", "proposer-execution",
+        "--conversation-ref", "auth-conversation:test-rollback",
+        "--pointer-action", "rollback_graph_pointer",
+        "--pointer-from-version", "4",
+        "--pointer-reason", reason,
+    ])
+    authorized = runner.invoke(cli, [
+        "research-graph", "human-authorize", "factor-research", "2",
+        "--proposal-id", "proposal-1",
+        "--graph-hash", "a" * 64,
+        "--diff-hash", "b" * 64,
+        "--conversation-ref", "auth-conversation:test-rollback",
+        "--approval-ref", "auth-conversation-event:test-rollback",
+        "--pointer-action", "rollback_graph_pointer",
+        "--pointer-from-version", "4",
+        "--pointer-reason", reason,
+    ])
+    rolled_back = runner.invoke(cli, [
+        "research-graph", "rollback", "factor-research",
+        "--target-version", "2",
+        "--reason", reason,
+        "--human-authorization-id", "gate-rollback-1",
+    ])
+
+    assert proposed.exit_code == 0
+    assert authorized.exit_code == 0
+    assert rolled_back.exit_code == 0
+    assert fake.proposal[2]["pointer_action"] == "rollback_graph_pointer"
+    assert fake.proposal[2]["pointer_from_version"] == 4
+    assert fake.proposal[2]["pointer_reason"] == reason
+    assert fake.authorization["pointer_action"] == "rollback_graph_pointer"
+    assert fake.rollback == (
+        "factor-research",
+        {
+            "target_version": 2,
+            "reason": reason,
+            "human_authorization_id": "gate-rollback-1",
+        },
+    )
 
 
 def test_research_graph_capability_attestation_cli(

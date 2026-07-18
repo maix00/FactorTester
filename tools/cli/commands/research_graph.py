@@ -121,6 +121,13 @@ def validate_graph(
 @click.option("--token-estimate", type=click.IntRange(min=0), required=True)
 @click.option("--agent-execution-id", required=True)
 @click.option("--conversation-ref", required=True)
+@click.option(
+    "--pointer-action",
+    type=click.Choice(["activate_graph", "rollback_graph_pointer"]),
+    default="activate_graph",
+)
+@click.option("--pointer-from-version", type=click.IntRange(min=0), default=0)
+@click.option("--pointer-reason", default="")
 def propose_graph(
     graph_id: str,
     version: int,
@@ -130,6 +137,9 @@ def propose_graph(
     token_estimate: int,
     agent_execution_id: str,
     conversation_ref: str,
+    pointer_action: str,
+    pointer_from_version: int,
+    pointer_reason: str,
 ) -> None:
     """提交紧凑图变更 diff；不提交整张图或具体 Skill 身份。"""
     change_diff = json.loads(
@@ -146,6 +156,9 @@ def propose_graph(
         token_estimate=token_estimate,
         agent_execution_id=agent_execution_id,
         conversation_ref=conversation_ref,
+        pointer_action=pointer_action,
+        pointer_from_version=pointer_from_version,
+        pointer_reason=pointer_reason,
     )))
 
 
@@ -346,7 +359,7 @@ def activate_graph(
     version: int,
     human_authorization_id: str,
 ) -> None:
-    """消费独立人工授权并生成新的 Active 版本。"""
+    """消费独立人工授权并原子移动 Active 指针。"""
     click.echo(_json(
         client_from_config().activate_research_graph(
             graph_id,
@@ -364,6 +377,13 @@ def activate_graph(
 @click.option("--diff-hash", required=True)
 @click.option("--conversation-ref", required=True)
 @click.option("--approval-ref", required=True)
+@click.option(
+    "--pointer-action",
+    type=click.Choice(["activate_graph", "rollback_graph_pointer"]),
+    default="activate_graph",
+)
+@click.option("--pointer-from-version", type=click.IntRange(min=0), default=0)
+@click.option("--pointer-reason", default="")
 def authorize_activation(
     graph_id: str,
     version: int,
@@ -372,6 +392,9 @@ def authorize_activation(
     diff_hash: str,
     conversation_ref: str,
     approval_ref: str,
+    pointer_action: str,
+    pointer_from_version: int,
+    pointer_reason: str,
 ) -> None:
     """记录当前认证会话对精确图变更的一次性授权。"""
     click.echo(_json(
@@ -383,6 +406,9 @@ def authorize_activation(
             diff_hash=diff_hash,
             conversation_ref=conversation_ref,
             approval_ref=approval_ref,
+            pointer_action=pointer_action,
+            pointer_from_version=pointer_from_version,
+            pointer_reason=pointer_reason,
         )
     ))
 
@@ -453,28 +479,19 @@ def verify_backend(
 @click.argument("graph_id")
 @click.option("--target-version", type=int, required=True)
 @click.option("--reason", required=True)
-@click.option(
-    "--grill-evidence-file",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
+@click.option("--human-authorization-id", required=True)
 def rollback_graph(
     graph_id: str,
     target_version: int,
     reason: str,
-    grill_evidence_file: Path,
+    human_authorization_id: str,
 ) -> None:
-    """由审计员将 Active 指针回滚到既有已审计 Active 版本。"""
-    evidence = json.loads(
-        grill_evidence_file.read_text(encoding="utf-8")
-    )
-    if not isinstance(evidence, list):
-        raise click.ClickException("grill evidence must be a JSON array")
+    """消费 exact-hash 授权，将 Active 指针回滚到既有版本。"""
     click.echo(_json(client_from_config().rollback_research_graph(
         graph_id,
         target_version=target_version,
         reason=reason,
-        grill_evidence=evidence,
+        human_authorization_id=human_authorization_id,
     )))
 
 

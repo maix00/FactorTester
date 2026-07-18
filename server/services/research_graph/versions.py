@@ -1,4 +1,4 @@
-"""Immutable Graph versions and the read-only active pointer."""
+"""Immutable Graph versions and their content-addressed cache."""
 
 from __future__ import annotations
 
@@ -182,21 +182,3 @@ def graph_lifecycle(
         (graph_id, int(version)),
     ).fetchone()
     return str(row["lifecycle"]) if row is not None else None
-
-
-def load_active_graph(*, graph_id: str) -> dict[str, Any] | None:
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        row = conn.execute(
-            """
-            SELECT version FROM active_research_graphs
-            WHERE graph_id=?
-            """,
-            (graph_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        return load_graph_from_conn(
-            conn,
-            graph_id=graph_id,
-            version=int(row["version"]),
-        )

@@ -106,6 +106,9 @@ class FactorTesterClient:
         token_estimate: int,
         agent_execution_id: str,
         conversation_ref: str,
+        pointer_action: str = "activate_graph",
+        pointer_from_version: int = 0,
+        pointer_reason: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graphs/{graph_id}/versions/{version}/proposals",
@@ -116,6 +119,9 @@ class FactorTesterClient:
                 "token_estimate": token_estimate,
                 "agent_execution_id": agent_execution_id,
                 "conversation_ref": conversation_ref,
+                "pointer_action": pointer_action,
+                "pointer_from_version": pointer_from_version,
+                "pointer_reason": pointer_reason,
             },
         ))
         return dict(data.get("proposal") or {})
@@ -370,6 +376,9 @@ class FactorTesterClient:
         diff_hash: str,
         conversation_ref: str,
         approval_ref: str,
+        pointer_action: str = "activate_graph",
+        pointer_from_version: int = 0,
+        pointer_reason: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             "/api/research-human-activation-authorizations",
@@ -381,6 +390,9 @@ class FactorTesterClient:
                 "diff_hash": diff_hash,
                 "conversation_ref": conversation_ref,
                 "approval_ref": approval_ref,
+                "pointer_action": pointer_action,
+                "pointer_from_version": pointer_from_version,
+                "pointer_reason": pointer_reason,
             },
         ))
         return dict(data.get("authorization") or {})
@@ -453,14 +465,14 @@ class FactorTesterClient:
         *,
         target_version: int,
         reason: str,
-        grill_evidence: list[dict[str, Any]],
+        human_authorization_id: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graphs/{graph_id}/rollback",
             {
                 "target_version": target_version,
                 "reason": reason,
-                "grill_evidence": grill_evidence,
+                "human_authorization_id": human_authorization_id,
             },
         ))
         return dict(data.get("rollback") or {})

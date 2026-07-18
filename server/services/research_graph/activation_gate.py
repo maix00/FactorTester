@@ -1,26 +1,23 @@
-"""Graph activation governance projected onto one Maintenance Case."""
+"""Graph pointer-change governance projected onto one Maintenance Case."""
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
-import sqlite3
 from typing import Any
-
-import orjson
 
 from server.services.maintenance_cases import (
     MaintenanceCaseStore,
     approve_gate,
-    consume_case_effect_in_connection,
     open_gate,
     record_gate_grill,
     record_gate_review,
     record_gate_validation,
 )
-
-
-ACTION = "activate_graph"
+from server.services.research_graph.pointer_gate import (
+    ACTIVATE_ACTION,
+    ROLLBACK_ACTION,
+    pointer_target_hash,
+)
 
 
 def activation_target_hash(
@@ -30,15 +27,20 @@ def activation_target_hash(
     graph_version: int,
     graph_hash: str,
     diff_hash: str,
+    action: str = ACTIVATE_ACTION,
+    from_version: int = 0,
+    reason_hash: str = "",
 ) -> str:
-    return _hash({
-        "action": ACTION,
-        "owner_user_id": owner_user_id,
-        "graph_id": graph_id,
-        "graph_version": int(graph_version),
-        "graph_hash": graph_hash,
-        "diff_hash": diff_hash,
-    })
+    return pointer_target_hash(
+        owner_user_id=owner_user_id,
+        graph_id=graph_id,
+        graph_version=graph_version,
+        graph_hash=graph_hash,
+        diff_hash=diff_hash,
+        action=action,
+        from_version=from_version,
+        reason_hash=reason_hash,
+    )
 
 
 def open_activation_gate(
@@ -52,17 +54,36 @@ def open_activation_gate(
     proposer_invocation_id: str,
     conversation_ref: str,
     proposal_evidence_refs: list[str],
+    action: str = ACTIVATE_ACTION,
+    from_version: int = 0,
+    reason_hash: str = "",
 ) -> dict[str, Any]:
+    _validate_pointer_action(
+        action=action,
+        from_version=from_version,
+        reason_hash=reason_hash,
+    )
     target_hash = activation_target_hash(
         owner_user_id=owner_user_id,
         graph_id=graph_id,
         graph_version=graph_version,
         graph_hash=graph_hash,
         diff_hash=diff_hash,
+        action=action,
+        from_version=from_version,
+        reason_hash=reason_hash,
     )
     proposal_ref = (
         f"graph-proposal:{graph_id}@{int(graph_version)}:"
         f"{graph_hash}:{diff_hash}"
+    )
+    pointer_refs = (
+        []
+        if action == ACTIVATE_ACTION
+        else [
+            f"graph-pointer-from:{int(from_version)}",
+            f"graph-pointer-reason-hash:{reason_hash}",
+        ]
     )
     case = open_gate(
         MaintenanceCaseStore(db_path),
@@ -70,10 +91,13 @@ def open_activation_gate(
         coordinator_agent_id=proposer_invocation_id,
         proposal_ref=proposal_ref,
         proposer_identity_ref=f"agent-invocation:{proposer_invocation_id}",
-        action=ACTION,
+        action=action,
         target_hash=target_hash,
         conversation_ref=conversation_ref,
-        proposal_evidence_refs=proposal_evidence_refs,
+        proposal_evidence_refs=[
+            *proposal_evidence_refs,
+            *pointer_refs,
+        ],
     )
     return _gate_projection(case, diff_hash=diff_hash)
 
@@ -191,7 +215,7 @@ def approve_activation(
         owner_user_id=owner_user_id,
         case_id=case_id,
         coordinator_agent_id=str(case["claimed_agent_id"]),
-        action=ACTION,
+        action=gate_action(case),
         target_hash=target_hash,
         approval_ref=approval_ref,
     )
@@ -205,63 +229,6 @@ def approve_activation(
         "target_hash": target_hash,
         "status": approved["status"],
     }
-
-
-def consume_activation_in_connection(
-    conn: sqlite3.Connection,
-    *,
-    owner_user_id: str,
-    case_id: str,
-    graph_id: str,
-    graph_version: int,
-    graph_hash: str,
-    effect_ref: str,
-) -> dict[str, Any]:
-    row = conn.execute(
-        """
-        SELECT * FROM research_maintenance_cases
-        WHERE owner_user_id=? AND case_id=?
-        """,
-        (owner_user_id, case_id),
-    ).fetchone()
-    if row is None:
-        raise KeyError("activation Gate not found")
-    affected_refs = orjson.loads(row["affected_refs_json"])
-    proposal_prefix = (
-        f"graph-proposal:{graph_id}@{int(graph_version)}:{graph_hash}:"
-    )
-    proposals = [
-        ref for ref in affected_refs if ref.startswith(proposal_prefix)
-    ]
-    if len(proposals) != 1:
-        raise ValueError("activation Gate graph target does not match")
-    diff_hash = proposals[0][len(proposal_prefix):]
-    target_hash = activation_target_hash(
-        owner_user_id=owner_user_id,
-        graph_id=graph_id,
-        graph_version=graph_version,
-        graph_hash=graph_hash,
-        diff_hash=diff_hash,
-    )
-    return consume_case_effect_in_connection(
-        conn,
-        owner_user_id=owner_user_id,
-        case_id=case_id,
-        agent_id="",
-        effect_ref=effect_ref,
-        change_refs=[f"gate-effect:{effect_ref}"],
-        expected_kind="approval_gate",
-        required_affected_refs=(
-            f"gate-action:{ACTION}",
-            f"gate-target-hash:{target_hash}",
-        ),
-        required_change_ref_prefixes=(
-            "gate-validation:",
-            "gate-grill:",
-            "gate-approval:",
-        ),
-        loaded_row=row,
-    )
 
 
 def proposer_invocation_id(case: dict[str, Any]) -> str:
@@ -285,6 +252,21 @@ def reviewer_invocation_ids(case: dict[str, Any]) -> list[str]:
     ]
 
 
+def gate_action(case: dict[str, Any]) -> str:
+    prefix = "gate-action:"
+    values = [
+        ref[len(prefix):]
+        for ref in case["affected_refs"]
+        if ref.startswith(prefix)
+    ]
+    if len(values) != 1 or values[0] not in {
+        ACTIVATE_ACTION,
+        ROLLBACK_ACTION,
+    }:
+        raise ValueError("activation Gate action is invalid")
+    return values[0]
+
+
 def require_graph_target(
     case: dict[str, Any],
     *,
@@ -297,6 +279,26 @@ def require_graph_target(
     )
     if not any(ref.startswith(prefix) for ref in case["affected_refs"]):
         raise ValueError("activation Gate graph target does not match")
+
+
+def _validate_pointer_action(
+    *,
+    action: str,
+    from_version: int,
+    reason_hash: str,
+) -> None:
+    if action == ACTIVATE_ACTION:
+        if int(from_version) != 0 or reason_hash:
+            raise ValueError("activation Gate cannot bind rollback fields")
+        return
+    if action != ROLLBACK_ACTION:
+        raise ValueError("unsupported Graph pointer action")
+    if int(from_version) < 1:
+        raise ValueError("rollback Gate requires from_version")
+    if len(reason_hash) != 64 or any(
+        character not in "0123456789abcdef" for character in reason_hash
+    ):
+        raise ValueError("rollback Gate requires reason_hash")
 
 
 def _gate_projection(
@@ -314,9 +316,3 @@ def _gate_projection(
         "status": case["status"],
         "created_at": case["created_at"],
     }
-
-
-def _hash(value: Any) -> str:
-    return hashlib.sha256(
-        orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
-    ).hexdigest()

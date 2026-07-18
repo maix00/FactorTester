@@ -585,7 +585,9 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             ],
             env=env,
         )
-        assert active["lifecycle"] == "active"
+        assert active["lifecycle"] == "draft"
+        assert active["version"] == graph["version"]
+        assert active["active_pointer"]["version"] == graph["version"]
 
         live_entry_receipt = _capability_receipt(
             factortester=factortester,
