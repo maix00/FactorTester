@@ -50,6 +50,33 @@ _MAX_CONTEXT_EVIDENCE_REFS = 8
 _MAX_EVIDENCE_REF_BYTES = 256
 
 
+def _merge_bounded_evidence_refs(
+    existing_refs: list[str],
+    omitted_count: int,
+    incoming_refs: Any,
+) -> tuple[list[str], int]:
+    """Keep a fixed-size recent evidence window for Agent context."""
+    refs = list(existing_refs)
+    omitted = int(omitted_count)
+    if not isinstance(incoming_refs, list):
+        return refs, omitted
+    for reference in incoming_refs:
+        if (
+            not isinstance(reference, str)
+            or not reference
+            or len(reference.encode()) > _MAX_EVIDENCE_REF_BYTES
+        ):
+            omitted += 1
+            continue
+        if reference in refs:
+            continue
+        refs.append(reference)
+        if len(refs) > _MAX_CONTEXT_EVIDENCE_REFS:
+            refs.pop(0)
+            omitted += 1
+    return refs, omitted
+
+
 def _loads(value: str | None) -> Any:
     return orjson.loads(value) if value else None
 
@@ -237,6 +264,19 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             label TEXT NOT NULL,
             current_node TEXT NOT NULL,
             status TEXT NOT NULL,
+            cumulative_input_tokens INTEGER NOT NULL DEFAULT 0,
+            cumulative_output_tokens INTEGER NOT NULL DEFAULT 0,
+            cumulative_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cumulative_skill_document_tokens INTEGER NOT NULL DEFAULT 0,
+            cumulative_artifact_summary_tokens INTEGER NOT NULL DEFAULT 0,
+            cumulative_reviewer_tokens INTEGER NOT NULL DEFAULT 0,
+            skill_document_load_count INTEGER NOT NULL DEFAULT 0,
+            skill_context_cache_hits INTEGER NOT NULL DEFAULT 0,
+            evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+            omitted_evidence_count INTEGER NOT NULL DEFAULT 0,
+            latest_trace_id TEXT NOT NULL DEFAULT '',
+            trace_count INTEGER NOT NULL DEFAULT 0,
+            aggregate_version INTEGER NOT NULL DEFAULT 1,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL
         );
@@ -321,6 +361,34 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE research_graph_instances ADD COLUMN token_budget INTEGER"
         )
+    branch_columns = {
+        str(row["name"])
+        for row in conn.execute(
+            "PRAGMA table_info(research_graph_branches)"
+        ).fetchall()
+    }
+    branch_aggregate_columns = {
+        "cumulative_input_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "cumulative_output_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "cumulative_cache_read_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "cumulative_skill_document_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "cumulative_artifact_summary_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "cumulative_reviewer_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "skill_document_load_count": "INTEGER NOT NULL DEFAULT 0",
+        "skill_context_cache_hits": "INTEGER NOT NULL DEFAULT 0",
+        "evidence_refs_json": "TEXT NOT NULL DEFAULT '[]'",
+        "omitted_evidence_count": "INTEGER NOT NULL DEFAULT 0",
+        "latest_trace_id": "TEXT NOT NULL DEFAULT ''",
+        "trace_count": "INTEGER NOT NULL DEFAULT 0",
+        "aggregate_version": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for column, declaration in branch_aggregate_columns.items():
+        if column not in branch_columns:
+            conn.execute(
+                f"ALTER TABLE research_graph_branches "
+                f"ADD COLUMN {column} {declaration}"
+            )
+    _backfill_branch_aggregates(conn)
     proposal_columns = {
         str(row["name"])
         for row in conn.execute(
@@ -371,6 +439,101 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         WHERE reservation_id<>''
         """
     )
+
+
+def _trace_aggregate(
+    rows: list[sqlite3.Row],
+) -> dict[str, Any]:
+    totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "skill_document_tokens": 0,
+        "artifact_summary_tokens": 0,
+        "reviewer_tokens": 0,
+        "skill_document_load_count": 0,
+        "skill_context_cache_hits": 0,
+    }
+    evidence_refs: list[str] = []
+    omitted_evidence_count = 0
+    latest_trace_id = ""
+    for row in rows:
+        telemetry = _loads(row["telemetry_json"]) or {}
+        for field in totals:
+            totals[field] += int(telemetry.get(field) or 0)
+        evidence = _loads(row["evidence_json"]) or {}
+        evidence_refs, omitted_evidence_count = (
+            _merge_bounded_evidence_refs(
+                evidence_refs,
+                omitted_evidence_count,
+                evidence.get("evidence_refs"),
+            )
+        )
+        latest_trace_id = str(row["trace_id"])
+    return {
+        **totals,
+        "evidence_refs": evidence_refs,
+        "omitted_evidence_count": omitted_evidence_count,
+        "latest_trace_id": latest_trace_id,
+        "trace_count": len(rows),
+    }
+
+
+def _backfill_branch_aggregates(conn: sqlite3.Connection) -> None:
+    """One-time cold migration from append-only traces to branch summaries."""
+    branches = conn.execute(
+        """
+        SELECT instance_id, branch_id
+        FROM research_graph_branches
+        WHERE aggregate_version=0
+        """
+    ).fetchall()
+    for branch in branches:
+        rows = conn.execute(
+            """
+            SELECT trace_id, evidence_json, telemetry_json
+            FROM research_graph_trace
+            WHERE instance_id=? AND branch_id=?
+            ORDER BY created_at, trace_id
+            """,
+            (branch["instance_id"], branch["branch_id"]),
+        ).fetchall()
+        aggregate = _trace_aggregate(rows)
+        conn.execute(
+            """
+            UPDATE research_graph_branches SET
+                cumulative_input_tokens=?,
+                cumulative_output_tokens=?,
+                cumulative_cache_read_tokens=?,
+                cumulative_skill_document_tokens=?,
+                cumulative_artifact_summary_tokens=?,
+                cumulative_reviewer_tokens=?,
+                skill_document_load_count=?,
+                skill_context_cache_hits=?,
+                evidence_refs_json=?,
+                omitted_evidence_count=?,
+                latest_trace_id=?,
+                trace_count=?,
+                aggregate_version=1
+            WHERE instance_id=? AND branch_id=?
+            """,
+            (
+                aggregate["input_tokens"],
+                aggregate["output_tokens"],
+                aggregate["cache_read_tokens"],
+                aggregate["skill_document_tokens"],
+                aggregate["artifact_summary_tokens"],
+                aggregate["reviewer_tokens"],
+                aggregate["skill_document_load_count"],
+                aggregate["skill_context_cache_hits"],
+                orjson.dumps(aggregate["evidence_refs"]).decode(),
+                aggregate["omitted_evidence_count"],
+                aggregate["latest_trace_id"],
+                aggregate["trace_count"],
+                branch["instance_id"],
+                branch["branch_id"],
+            ),
+        )
 
 
 def ensure_schema() -> None:
@@ -1905,8 +2068,8 @@ def create_graph_instance(
             """
             INSERT INTO research_graph_branches (
                 branch_id, instance_id, label, current_node, status,
-                created_at, updated_at
-            ) VALUES (?, ?, 'primary', ?, 'running', ?, ?)
+                aggregate_version, created_at, updated_at
+            ) VALUES (?, ?, 'primary', ?, 'running', 1, ?, ?)
             """,
             (branch_id, instance_id, entry_node, now, now),
         )
@@ -1998,8 +2161,8 @@ def fork_graph_branch(
             """
             INSERT INTO research_graph_branches (
                 branch_id, instance_id, label, current_node, status,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'running', ?, ?)
+                aggregate_version, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'running', 1, ?, ?)
             """,
             (
                 branch_id,
@@ -2100,6 +2263,7 @@ def advance_graph_branch(
                 f"token_telemetry.{field} must be a non-negative integer"
             )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         instance = _load_instance_row(
             conn, instance_id=instance_id, owner=owner,
         )
@@ -2264,13 +2428,52 @@ def advance_graph_branch(
             trace_evidence["target_capability_receipt_ref"] = (
                 f"node-resolution:{instance_id}:{branch_id}:{target_id}"
             )
+        bounded_evidence_refs, omitted_evidence_count = (
+            _merge_bounded_evidence_refs(
+                _loads(branch_row["evidence_refs_json"]) or [],
+                int(branch_row["omitted_evidence_count"]),
+                trace_evidence.get("evidence_refs"),
+            )
+        )
+        trace_id = uuid.uuid4().hex
         conn.execute(
             """
             UPDATE research_graph_branches
-            SET current_node=?, status=?, updated_at=?
+            SET current_node=?, status=?,
+                cumulative_input_tokens=cumulative_input_tokens+?,
+                cumulative_output_tokens=cumulative_output_tokens+?,
+                cumulative_cache_read_tokens=
+                    cumulative_cache_read_tokens+?,
+                cumulative_skill_document_tokens=
+                    cumulative_skill_document_tokens+?,
+                cumulative_artifact_summary_tokens=
+                    cumulative_artifact_summary_tokens+?,
+                cumulative_reviewer_tokens=cumulative_reviewer_tokens+?,
+                skill_document_load_count=skill_document_load_count+?,
+                skill_context_cache_hits=skill_context_cache_hits+?,
+                evidence_refs_json=?, omitted_evidence_count=?,
+                latest_trace_id=?, trace_count=trace_count+1,
+                aggregate_version=1, updated_at=?
             WHERE branch_id=? AND instance_id=?
             """,
-            (target_id, status, now, branch_id, instance_id),
+            (
+                target_id,
+                status,
+                int(telemetry.get("input_tokens") or 0),
+                int(telemetry.get("output_tokens") or 0),
+                int(telemetry.get("cache_read_tokens") or 0),
+                int(telemetry.get("skill_document_tokens") or 0),
+                int(telemetry.get("artifact_summary_tokens") or 0),
+                int(telemetry.get("reviewer_tokens") or 0),
+                int(telemetry.get("skill_document_load_count") or 0),
+                int(telemetry.get("skill_context_cache_hits") or 0),
+                orjson.dumps(bounded_evidence_refs).decode(),
+                omitted_evidence_count,
+                trace_id,
+                now,
+                branch_id,
+                instance_id,
+            ),
         )
         conn.execute(
             """
@@ -2280,7 +2483,7 @@ def advance_graph_branch(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                uuid.uuid4().hex,
+                trace_id,
                 instance_id,
                 branch_id,
                 edge_id,
@@ -2406,40 +2609,21 @@ def build_graph_branch_context(
             """,
             (f"instance:{instance_id}", owner),
         ).fetchone()
-        trace_rows = conn.execute(
-            """
-            SELECT evidence_json, telemetry_json
-            FROM research_graph_trace
-            WHERE instance_id=? AND branch_id=?
-            ORDER BY created_at
-            """,
-            (instance_id, branch_id),
-        ).fetchall()
     totals = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "skill_document_tokens": 0,
-        "artifact_summary_tokens": 0,
-        "reviewer_tokens": 0,
+        "input_tokens": int(branch_row["cumulative_input_tokens"]),
+        "output_tokens": int(branch_row["cumulative_output_tokens"]),
+        "cache_read_tokens": int(
+            branch_row["cumulative_cache_read_tokens"]
+        ),
+        "skill_document_tokens": int(
+            branch_row["cumulative_skill_document_tokens"]
+        ),
+        "artifact_summary_tokens": int(
+            branch_row["cumulative_artifact_summary_tokens"]
+        ),
+        "reviewer_tokens": int(branch_row["cumulative_reviewer_tokens"]),
     }
-    evidence_refs: list[str] = []
-    skill_document_load_count = 0
-    skill_context_cache_hits = 0
-    for row in trace_rows:
-        trace_evidence = _loads(row["evidence_json"]) or {}
-        for reference in trace_evidence.get("evidence_refs") or []:
-            if isinstance(reference, str) and reference not in evidence_refs:
-                evidence_refs.append(reference)
-        row_telemetry = _loads(row["telemetry_json"]) or {}
-        for field in totals:
-            totals[field] += int(row_telemetry.get(field) or 0)
-        skill_document_load_count += int(
-            row_telemetry.get("skill_document_load_count") or 0
-        )
-        skill_context_cache_hits += int(
-            row_telemetry.get("skill_context_cache_hits") or 0
-        )
+    evidence_refs = _loads(branch_row["evidence_refs_json"]) or []
     totals["primary_total_tokens"] = (
         totals["input_tokens"] + totals["output_tokens"]
     )
@@ -2447,8 +2631,12 @@ def build_graph_branch_context(
         totals["primary_total_tokens"] + totals["reviewer_tokens"]
     )
     totals["total_tokens"] = totals["team_total_tokens"]
-    totals["skill_document_load_count"] = skill_document_load_count
-    totals["skill_context_cache_hits"] = skill_context_cache_hits
+    totals["skill_document_load_count"] = int(
+        branch_row["skill_document_load_count"]
+    )
+    totals["skill_context_cache_hits"] = int(
+        branch_row["skill_context_cache_hits"]
+    )
     token_budget = int(budget_row["token_limit"])
     authoritative_used = int(budget_row["used_tokens"])
     authoritative_reserved = int(budget_row["reserved_tokens"])
@@ -2488,11 +2676,6 @@ def build_graph_branch_context(
             if isinstance(item, dict)
         })
     ]
-    evidence_refs = [
-        reference
-        for reference in evidence_refs[-_MAX_CONTEXT_EVIDENCE_REFS:]
-        if len(reference.encode()) <= _MAX_EVIDENCE_REF_BYTES
-    ]
     context = {
         "graph": f"{graph['graph_id']}@v{graph['version']}",
         "branch": {
@@ -2514,6 +2697,14 @@ def build_graph_branch_context(
             resolution.get("undetermined_conditions") or []
         ),
         "evidence_refs": evidence_refs,
+        "omitted_evidence_count": int(
+            branch_row["omitted_evidence_count"]
+        ),
+        "history_cursor": (
+            f"trace:{branch_row['latest_trace_id']}"
+            if branch_row["latest_trace_id"]
+            else None
+        ),
         "open_gaps": open_gaps,
         "skill_policy": {
             "match_on": "capability_description",

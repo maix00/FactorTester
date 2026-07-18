@@ -789,7 +789,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         edge_id="resolution__gap",
         evidence={
             "mandatory_binding_missing": True,
-            "evidence_refs": ["capability://missing/bootstrap-sharpe"],
+            "evidence_refs": [
+                f"artifact:capability-gap:{index}"
+                for index in range(10)
+            ],
             "token_telemetry": {
                 "agent_role": "primary",
                 "input_tokens": 120,
@@ -818,6 +821,15 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert untouched["status"] == "running"
     assert untouched["current_node"] == "hypothesis"
 
+    statements: list[str] = []
+    original_connect = research_graphs.connect_sqlite
+
+    def traced_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(research_graphs, "connect_sqlite", traced_connect)
     context = research_graphs.build_graph_branch_context(
         instance_id=instance["instance_id"],
         branch_id=first["branch_id"],
@@ -832,6 +844,8 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "triggered_capabilities",
             "undetermined_conditions",
             "evidence_refs",
+            "omitted_evidence_count",
+            "history_cursor",
         "open_gaps",
         "skill_policy",
         "token_telemetry",
@@ -845,6 +859,52 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert context["token_telemetry"]["team_total_tokens"] == 190
     assert context["token_telemetry"]["total_tokens"] == 190
     assert context["review_policy"]["L1"] == "deterministic_only"
+    assert context["evidence_refs"] == [
+        f"artifact:capability-gap:{index}"
+        for index in range(2, 10)
+    ]
+    assert context["omitted_evidence_count"] == 2
+    assert context["history_cursor"].startswith("trace:")
+    assert not any(
+        "FROM RESEARCH_GRAPH_TRACE" in statement.upper()
+        for statement in statements
+    )
+
+    monkeypatch.setattr(
+        research_graphs,
+        "connect_sqlite",
+        original_connect,
+    )
+    with original_connect(Settings.CACHE_DB_PATH) as connection:
+        connection.execute(
+            """
+            UPDATE research_graph_branches SET
+                cumulative_input_tokens=0,
+                cumulative_output_tokens=0,
+                cumulative_cache_read_tokens=0,
+                cumulative_skill_document_tokens=0,
+                cumulative_artifact_summary_tokens=0,
+                cumulative_reviewer_tokens=0,
+                skill_document_load_count=0,
+                skill_context_cache_hits=0,
+                evidence_refs_json='[]',
+                omitted_evidence_count=0,
+                latest_trace_id='',
+                trace_count=0,
+                aggregate_version=0
+            WHERE branch_id=?
+            """,
+            (first["branch_id"],),
+        )
+    research_graphs.ensure_schema()
+    migrated_context = research_graphs.build_graph_branch_context(
+        instance_id=instance["instance_id"],
+        branch_id=first["branch_id"],
+        owner="alice",
+    )
+    assert migrated_context["token_telemetry"]["team_total_tokens"] == 190
+    assert migrated_context["evidence_refs"] == context["evidence_refs"]
+    assert migrated_context["omitted_evidence_count"] == 2
 
 
 def test_transition_stores_only_target_node_resolution(
