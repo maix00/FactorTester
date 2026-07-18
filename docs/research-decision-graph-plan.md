@@ -263,7 +263,7 @@ The server will own:
 - immutable observed, draft, active, and retired graph versions;
 - one active-version pointer per graph;
 - proposals, independent reviews, validation evidence, and audit dispositions;
-- capability contracts and approved implementation bindings;
+- capability descriptions and approval receipts, never concrete Skill identity;
 - shadow replay reports and activation decisions.
 
 The existing `user -> ResearchWorkspace -> ResearchRun -> JobAttempt` ownership
@@ -314,9 +314,10 @@ use the minimum relevant specialist reviewers and may enter human audit.
 - separate diagnostic jobs from expensive backtest branches;
 - bind slice plans and hypothesis counts to frozen RunSpecs;
 - pause only branches whose guards or capabilities are unsatisfied.
-- return only current-node context through `research-graph context`;
-- expose the same packet under `research-graph next` as the default Agent
-  interface;
+- return only current-node state through `research-graph context`;
+- make `research-graph next` a distinct deterministic readiness interface with
+  candidate edges, missing guard/evidence fields, blockers, and explicit Agent
+  judgment triggers;
 - record per-transition input, output, cache-read, Skill-document, artifact
   summary, and reviewer token telemetry.
 
@@ -355,6 +356,8 @@ use the minimum relevant specialist reviewers and may enter human audit.
 | Existing Harness behavior preserved | old Harness unit and subprocess tests |
 | Default context is token-bounded | context schema excludes full graph, contracts, artifacts, and history |
 | Routine packet size is bounded | `routine_context_bytes <= 6000` activation gate |
+| Context and next have distinct leverage | context returns state; next deterministically returns readiness, blockers, and judgment triggers |
+| Next packet is also bounded | server measures final serialized next packet and rejects anything above 6000 bytes |
 | Runtime resolution is node-local | no untriggered conditionals or future-node gaps in context |
 | Full contracts are opt-in | CLI subprocess test for `--include-contracts` |
 | Reviewer use is risk-bounded | L1/L2 default zero; L3 one specialist; L4 proposer plus one reviewer, third only on disagreement |

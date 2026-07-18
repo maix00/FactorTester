@@ -94,7 +94,15 @@ class FakeClient:
             "graph": "factor-research@v3",
             "branch": {"instance_id": instance_id, "branch_id": branch_id},
             "node": {"node_id": "hypothesis"},
-            "available_edges": [],
+        }
+
+    def get_research_graph_branch_next(self, instance_id, branch_id):
+        return {
+            "graph": "factor-research@v3",
+            "branch": {"instance_id": instance_id, "branch_id": branch_id},
+            "node": {"node_id": "hypothesis"},
+            "candidate_edges": [],
+            "requires_agent_judgment": False,
         }
 
 
@@ -236,6 +244,7 @@ def test_research_graph_next_and_bounded_review_commands(
 
     assert next_result.exit_code == 0
     assert '"node_id": "hypothesis"' in next_result.output
+    assert '"candidate_edges": []' in next_result.output
     assert proposed.exit_code == 0
     assert reviewed.exit_code == 0
     assert fake.proposal[2]["token_estimate"] == 400

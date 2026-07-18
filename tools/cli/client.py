@@ -339,6 +339,17 @@ class FactorTesterClient:
         ))
         return dict(data.get("context") or {})
 
+    def get_research_graph_branch_next(
+        self,
+        instance_id: str,
+        branch_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/next"
+        ))
+        return dict(data.get("next") or {})
+
     def advance_research_graph_branch(
         self,
         instance_id: str,

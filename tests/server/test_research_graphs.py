@@ -819,6 +819,35 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
     assert activated.status_code == 201
     assert activated.get_json()["graph"]["lifecycle"] == "active"
 
+    receipt = _issue_receipt(
+        node_id="hypothesis",
+        product_group="equities",
+        capability_ids=["research-hypothesis.preregister"],
+    )
+    instance = research_graphs.create_graph_instance(
+        graph_id="factor-research",
+        owner="alice",
+        product_group="equities",
+        workspace_id="http-workspace",
+        token_budget=100,
+        capability_receipt=receipt,
+    )
+    branch_id = instance["branches"][0]["branch_id"]
+    context_response = client.get(
+        f"/api/research-graph-instances/{instance['instance_id']}"
+        f"/branches/{branch_id}/context"
+    )
+    next_response = client.get(
+        f"/api/research-graph-instances/{instance['instance_id']}"
+        f"/branches/{branch_id}/next"
+    )
+    assert context_response.status_code == 200
+    assert next_response.status_code == 200
+    assert "required_capabilities" in context_response.get_json()["context"]
+    assert "candidate_edges" not in context_response.get_json()["context"]
+    assert "candidate_edges" in next_response.get_json()["next"]
+    assert "required_capabilities" not in next_response.get_json()["next"]
+
     history = client.get("/api/research-graphs/factor-research/versions")
     assert [item["lifecycle"] for item in history.get_json()["versions"]] == [
         "draft",
@@ -916,6 +945,27 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         owner="alice",
         label="independent hypothesis",
     )
+    next_packet = research_graphs.build_graph_branch_next(
+        instance_id=instance["instance_id"],
+        branch_id=first["branch_id"],
+        owner="alice",
+    )
+    assert next_packet["candidate_edges"] == [{
+        "edge_id": "hypothesis__resolution",
+        "to_node": "capability_resolution",
+        "edge_type": "conditional",
+        "risk_level": "L1",
+        "readiness": "requires_evidence",
+        "required_guard_fields": ["hypothesis_frozen"],
+        "required_evidence": [],
+        "blockers": [],
+        "review_requirement": "none",
+    }]
+    assert next_packet["recommended_edge_ids"] == []
+    assert next_packet["requires_agent_judgment"] is False
+    assert next_packet["next_bytes"] == len(orjson.dumps(next_packet))
+    assert next_packet["next_bytes"] <= 6000
+    assert "required_capabilities" not in next_packet
 
     transition_statements: list[str] = []
     original_connect = research_graphs.connect_sqlite
@@ -1020,7 +1070,6 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "graph",
         "branch",
         "node",
-            "available_edges",
             "required_capabilities",
             "triggered_capabilities",
             "undetermined_conditions",

@@ -359,6 +359,23 @@ def get_research_graph_branch_context(instance_id: str, branch_id: str):
     return jsonify({"success": True, "context": context})
 
 
+@sft_bp.get(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>/next"
+)
+def get_research_graph_branch_next(instance_id: str, branch_id: str):
+    try:
+        packet = research_graphs.build_graph_branch_next(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "next": packet})
+
+
 @sft_bp.post(
     "/api/research-graph-instances/<instance_id>/branches/<branch_id>/advance"
 )

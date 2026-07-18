@@ -2848,13 +2848,13 @@ def advance_graph_branch(
     }
 
 
-def build_graph_branch_context(
+def _build_graph_branch_local_state(
     *,
     instance_id: str,
     branch_id: str,
     owner: str,
-) -> dict[str, Any]:
-    """Return only the local subgraph and compact evidence needed next."""
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Build compact current state plus internal candidate edge definitions."""
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         branch_row = _load_instance_branch_row(
             conn,
@@ -3022,7 +3022,6 @@ def build_graph_branch_context(
             "kind": str(node.get("kind") or ""),
             "purpose": str(node.get("purpose") or ""),
         },
-        "available_edges": available_edges,
         "required_capabilities": required_capabilities,
         "triggered_capabilities": triggered_capabilities,
         "undetermined_conditions": deepcopy(
@@ -3087,4 +3086,122 @@ def build_graph_branch_context(
             f"bounded context exceeds {_MAX_CONTEXT_BYTES} bytes: "
             f"{serialized_bytes}"
         )
+    return context, available_edges
+
+
+def build_graph_branch_context(
+    *,
+    instance_id: str,
+    branch_id: str,
+    owner: str,
+) -> dict[str, Any]:
+    """Return current state without edge-selection instructions."""
+    context, _ = _build_graph_branch_local_state(
+        instance_id=instance_id,
+        branch_id=branch_id,
+        owner=owner,
+    )
     return context
+
+
+def build_graph_branch_next(
+    *,
+    instance_id: str,
+    branch_id: str,
+    owner: str,
+) -> dict[str, Any]:
+    """Return deterministic edge readiness and only necessary Agent triggers."""
+    context, edges = _build_graph_branch_local_state(
+        instance_id=instance_id,
+        branch_id=branch_id,
+        owner=owner,
+    )
+    open_gap_ids = sorted({
+        str(item.get("capability_id") or "")
+        for item in context.get("open_gaps") or []
+        if isinstance(item, dict)
+    })
+    undetermined_ids = sorted({
+        str(item.get("capability_id") or "")
+        for item in context.get("undetermined_conditions") or []
+        if isinstance(item, dict)
+    })
+    candidates = []
+    for edge in edges:
+        guard_fields = sorted((edge.get("guard") or {}).keys())
+        required_evidence = list(edge.get("required_evidence") or [])
+        blockers = []
+        if open_gap_ids and edge.get("edge_type") != "failure":
+            blockers.append({
+                "code": "open_capability_gaps",
+                "capability_ids": open_gap_ids,
+            })
+        if undetermined_ids:
+            blockers.append({
+                "code": "semantic_conditions_undetermined",
+                "capability_ids": undetermined_ids,
+            })
+        if blockers:
+            readiness = "blocked"
+        elif guard_fields or required_evidence:
+            readiness = "requires_evidence"
+        else:
+            readiness = "ready"
+        risk_level = str(edge.get("risk_level") or "L1")
+        review_requirement = {
+            "L1": "none",
+            "L2": "self_check; one_reviewer_only_on_trigger",
+            "L3": "one_specialist",
+            "L4": "proposer_plus_independent_reviewer",
+        }.get(risk_level, "invalid")
+        candidates.append({
+            "edge_id": str(edge.get("edge_id") or ""),
+            "to_node": str(edge.get("to_node") or ""),
+            "edge_type": str(edge.get("edge_type") or ""),
+            "risk_level": risk_level,
+            "readiness": readiness,
+            "required_guard_fields": guard_fields,
+            "required_evidence": required_evidence,
+            "blockers": blockers,
+            "review_requirement": review_requirement,
+        })
+    ready_l1 = [
+        item["edge_id"]
+        for item in candidates
+        if item["readiness"] == "ready"
+        and item["risk_level"] == "L1"
+    ]
+    recommended_edge_ids = ready_l1 if len(ready_l1) == 1 else []
+    requires_agent_judgment = bool(
+        undetermined_ids
+        or len([
+            item for item in candidates
+            if item["readiness"] != "blocked"
+        ]) > 1
+    )
+    budget = (
+        (context.get("token_telemetry") or {}).get("budget") or {}
+    )
+    packet = {
+        "graph": context["graph"],
+        "branch": deepcopy(context["branch"]),
+        "node": deepcopy(context["node"]),
+        "context_ref": "sha256:" + hashlib.sha256(
+            orjson.dumps(context, option=orjson.OPT_SORT_KEYS)
+        ).hexdigest(),
+        "candidate_edges": candidates,
+        "recommended_edge_ids": recommended_edge_ids,
+        "requires_agent_judgment": requires_agent_judgment,
+        "new_llm_work_allowed": int(budget.get("remaining") or 0) > 0,
+        "running_backend_jobs_action": "continue",
+        "next_bytes": 0,
+    }
+    for _ in range(3):
+        packet["next_bytes"] = len(orjson.dumps(packet))
+    serialized_bytes = len(orjson.dumps(packet))
+    if serialized_bytes > _MAX_CONTEXT_BYTES:
+        raise ValueError(
+            f"bounded next packet exceeds {_MAX_CONTEXT_BYTES} bytes: "
+            f"{serialized_bytes}"
+        )
+    return packet

@@ -477,9 +477,9 @@ def graph_branch_context(instance_id: str, branch_id: str) -> None:
 @click.argument("instance_id")
 @click.argument("branch_id")
 def next_graph_step(instance_id: str, branch_id: str) -> None:
-    """返回当前节点、当前能力与候选边的紧凑 Agent 决策包。"""
+    """确定性计算候选边 readiness、缺失证据与 Agent 判断需求。"""
     click.echo(_json(
-        client_from_config().get_research_graph_branch_context(
+        client_from_config().get_research_graph_branch_next(
             instance_id,
             branch_id,
         )
