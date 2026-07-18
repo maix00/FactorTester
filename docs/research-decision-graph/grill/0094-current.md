@@ -1,7 +1,11 @@
-# Grill Record: Questions 94–117
+# Grill Record: Questions 94 onward
 
 Shared code, document, statistical sources, and per-question acceptance
 scenarios are indexed in [the evidence registry](evidence-registry.md).
+
+This reconstruction is not the primary transcript. Every implementation must
+reopen the original Codex task and review the relevant question, user response,
+and adjacent corrections before treating an entry as executable semantics.
 
 ## 94 — User authority over primary scope
 
@@ -320,3 +324,29 @@ rewriting history.
 Decision Governance context, and the context map implement the correction.
 The previous commit remains a traceable index-layer step rather than being
 amended.
+
+## 118 — Work Package versus graph and runtime budgets
+
+**Original question/proposal.** The proposal asked how “Work Package
+exploration budget and stopping conditions” should be defined, then placed
+formal attempt/outcome counts, token, compute, time, concurrency, statistical
+early stopping, multiplicity, running-job behavior, and user-approved budget
+extension into one answer.
+
+**User response.** “我觉得这些不是work package的语义？是否是active
+graph的语义？我不是很明白，你是不是想的太多了”.
+
+**Disposition.** Challenged and not accepted. The original proposal is
+withdrawn because it conflated three owners:
+
+- Work Package: user-authorized research scope;
+- Factor Research Graph: statistical research and evidence-transition
+  semantics;
+- Agent Flow: operational resource enforcement and waiting/resume behavior.
+
+**Additional user instruction.** Future records must follow
+`grill-with-docs` completely. Existing reconstruction may still be incomplete;
+real implementation must return to the original conversation record.
+
+**Pending question.** The exact narrow boundary is proposed below in the live
+conversation and remains unresolved until the user accepts or revises it.

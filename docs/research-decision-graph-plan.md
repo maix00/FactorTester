@@ -16,6 +16,13 @@ its detailed records and canonical governance language live under
 [`research-decision-graph/`](research-decision-graph/). Neither the full index
 nor the detailed records are loaded into routine Agent context.
 
+These records are a searchable reconstruction, not a substitute for the
+primary conversation. Before implementing a Grill-derived decision, the
+implementing Agent must reopen the original task, review the relevant question,
+user response, and surrounding corrections, and attach those turn references
+to implementation or release evidence. A discrepancy fails closed into a new
+document-grounded audit question.
+
 ## Objective
 
 Turn the existing FactorTester research harness into an evidence-driven,

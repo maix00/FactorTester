@@ -20,6 +20,7 @@ Provenance:
 - working plan: `docs/research-decision-graph-plan.md`
 - first continuously emitted question number: `48`
 - latest accepted question in this revision: `117`
+- latest discussed question in this revision: `118` (challenged; unresolved)
 
 The discussion before question 48 was not emitted with stable per-question
 numbers. It is therefore recorded as a pre-numbering phase rather than being
@@ -30,12 +31,20 @@ Detailed records:
 - [pre-numbering phase](research-decision-graph/grill/pre-numbered.md)
 - [questions 48–72](research-decision-graph/grill/0048-0072.md)
 - [questions 73–93](research-decision-graph/grill/0073-0093.md)
-- [questions 94–117](research-decision-graph/grill/0094-0117.md)
+- [questions 94 onward](research-decision-graph/grill/0094-current.md)
 - [Research Decision Governance language](research-decision-graph/CONTEXT.md)
 
 This index gives final dispositions for fast lookup. The detailed records are
 authoritative when a user correction, rejected alternative, evidence basis,
 scenario, acceptance condition, or supersession relationship matters.
+
+Neither this index nor the detailed reconstruction replaces the original Codex
+task record. Before implementing a decision, the implementing Agent must reopen
+task `019f6e0d-aa60-7160-9854-421bb564cb5b`, read the relevant original
+question, user response, and surrounding corrections, then record the reviewed
+turn references in the implementation or release evidence. If the conversation
+and this reconstruction differ, implementation pauses and the discrepancy
+returns to document-grounded audit.
 
 ## Record format
 
@@ -176,6 +185,7 @@ record. They are thematic decisions, not reconstructed verbatim questions:
 | 115 | Accepted | Maintain immutable `attempt_count` and `outcome_examined_count`. Input-quality/computability diagnostics are logged but are not outcome trials; selection-relevant outcome inspection requires a formal trial. Multiplicity uses the count required by its method. | Trial ledger |
 | 116 | Accepted | High-risk governance uses a Skill-neutral, document-grounded, one-question-at-a-time audit with persistent decision records. The graph stores the capability description; the local ledger records the actual approved Skill. This log records the present grill and future revisions without becoming runtime context. | `grill-with-docs`; governance and auditability |
 | 117 | Accepted | Keep this compact index, recover actual question/response and revision evidence into detailed records, move governance language out of the FactorTester domain context, and correct the documentation in a new commit rather than rewriting history. | `grill-with-docs`; documentation conformance |
+| 118 | Challenged; unresolved | The original proposal incorrectly mixed Work Package authorization, Active Graph statistical stopping semantics, and Agent Flow operational budgets. It is withdrawn pending a narrower boundary decision. | User correction; Work Package/Graph/Agent Flow boundary |
 
 ## Canonical audit boundary after decision 116
 
