@@ -138,6 +138,17 @@ def test_builtin_registry_distinguishes_backend_guidance_and_product_gaps() -> N
     capabilities = {
         item["capability_id"]: item for item in registry["capabilities"]
     }
+    skill_implementations = [
+        implementation
+        for capability in registry["capabilities"]
+        for implementation in capability.get("implementations") or []
+        if implementation.get("kind") == "skill"
+    ]
+    assert skill_implementations
+    assert all(
+        implementation.get("requires_execution_approval") is True
+        for implementation in skill_implementations
+    )
 
     factor_ic = capabilities["factor-validation.cross-sectional-ic"]
     implementations = {

@@ -171,6 +171,7 @@
           "kind": "skill",
           "approval_status": "approved",
           "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
           "product_scopes": ["all"],
           "source_path": "/Users/maxdeux/.agents/skills/quantitative-research/SKILL.md"
         }
@@ -629,6 +630,7 @@
           "kind": "skill",
           "approval_status": "approved",
           "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
           "product_scopes": ["all"],
           "source_path": "/Users/maxdeux/.agents/skills/diagnose/SKILL.md"
         },
@@ -655,6 +657,7 @@
           "kind": "skill",
           "approval_status": "approved",
           "execution_mode": "external_service",
+          "requires_execution_approval": true,
           "product_scopes": ["all"],
           "source_path": "/Users/maxdeux/.codex/skills/.system/skill-installer/SKILL.md"
         },
@@ -748,6 +751,7 @@
           "kind": "skill",
           "approval_status": "approved",
           "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
           "product_scopes": ["all"],
           "source_path": "agent/src/skills/research-discipline/SKILL.md"
         }
