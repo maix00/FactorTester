@@ -118,6 +118,23 @@ subsets; reviewer tokens are added to primary input/output to form team total.
     Skill reuse is decided from the local research session's hash-chained
     Skill-usage ledger; no server Skill registry or extra cache database is
     introduced.
+19. The first Active Graph activates single-factor research, including
+    auxiliary inputs used for factor construction or strategy conditioning.
+    It does not infer statistical class from the number of output columns.
+20. A construction that selects or weights independently predictive signals is
+    a multi-factor construction even when it produces one `FactorExpr` column.
+    Multi-factor estimation, selection, attribution, spanning, and portfolio
+    combination remain an explicit deferred capability and may not be
+    silently represented as validated single-factor research.
+21. A missing general operator or reusable backend capability required by an
+    admissible research hypothesis creates a mandatory platform-completion
+    obligation. It is not a factor rejection and may not be closed as
+    permanently unsupported merely because the current backend lacks it.
+22. Mandatory completion does not bypass change control. The affected branch
+    enters `capability_gap`, unrelated jobs continue, a server-maintenance
+    Agent implements the bounded change, and the capability becomes available
+    only after semantic, numerical, timing, SDK, execution, and release
+    conformance evidence passes the existing audit path.
 
 ## Existing Observed Workflow
 
@@ -224,6 +241,377 @@ semantic invariants. The terminal decision writes only a bounded reference to
 provisional local memory containing the hypothesis, code, data, RunSpec, trial
 ledger, result, failure cause, and decision. Full artifacts remain local and
 behind hashes; one experiment never promotes itself into a graph edge.
+
+## Single-Factor Enrichment and Deferred Multi-Factor Work
+
+The first Active Graph includes a conditional enrichment path. "Single factor"
+means one primary economic alpha hypothesis, not merely one output column. The
+graph records three independent dimensions:
+
+```text
+economic_hypothesis_count
+predictive_input_count
+selection_degrees_of_freedom
+```
+
+It also records one of these integration classes:
+
+```text
+unary_transform
+conditional_gate
+interaction_composite
+additive_composite
+strategy_conditioning
+neutralization
+portfolio_combination
+```
+
+Examples:
+
+- `tanh(main / scale)` is a bounded monotone unary transform. In the absence
+  of changed ties or missingness it should not improve rank order by itself,
+  although it may change magnitude-sensitive sizing, Pearson IC, tail
+  exposure, turnover, and net returns.
+- `main * tanh(aux / scale)` is a signed conditional interaction. It may be
+  treated as conditional single-factor research only when `main` is the sole
+  alpha hypothesis and `aux` is a predeclared state, confidence, or exposure
+  variable without an independent alpha claim. Negative gate values reverse
+  the main signal.
+- `main * (1 + tanh(aux / scale)) / 2` is a nonnegative smooth gate. It
+  attenuates or restores the main signal without reversing its direction.
+- `main + weight * tanh(aux / scale)` is multi-factor construction when `aux`
+  carries an independently testable return-prediction claim or when the
+  transform, scale, direction, or weight is selected from results. Storing the
+  expression as one output column does not change that classification.
+
+Every enrichment attempt freezes the formula or AST hash, main and auxiliary
+roles, normalization and fit window, lag and point-in-time availability,
+missing/stale policy, sign-reversal permission, parameters, candidate family,
+revision budget, and trial-ledger increment before selection results are read.
+The validation design compares `main-only`, `aux-only`, and `enriched`
+specifications where each comparison is semantically meaningful. It preserves
+failed candidates and reports both raw and multiplicity-adjusted evidence.
+
+The conditional local graph path is:
+
+```text
+candidate discovery
+  -> enrichment hypothesis
+  -> enrichment semantic classification
+  -> operator capability resolution
+  -> enriched factor construction
+  -> operator backend conformance
+  -> validation design
+  -> main/aux/enriched ablation
+  -> authoritative backtest
+  -> statistical robustness and audit
+```
+
+Routine single-factor research that does not propose enrichment does not load
+this subgraph or its capability descriptions.
+
+### Deferred multi-factor capability
+
+The following work is recorded as a non-blocking deferred capability, not as
+an implemented FactorTester feature:
+
+- jointly select or weight independently predictive factors;
+- estimate and stabilize weights out of sample;
+- test incremental contribution, spanning, redundancy, and ablation;
+- attribute returns and risk to retained component signals;
+- control the trial family across signal, transform, weight, horizon, universe,
+  and model searches;
+- combine the resulting signal with later auxiliary strategy conditioning;
+- distinguish signal construction from portfolio combination and risk or
+  execution overlays.
+
+The current ability to store multiple factor-family references or run multiple
+strategies does not satisfy this contract. Any capability binding that claims
+full multi-factor support must be downgraded until real execution and
+statistical-conformance tests pass.
+
+### Operator capability backlog
+
+Operator support is execution-surface specific. A capability receipt must
+distinguish:
+
+```text
+native_batch
+native_incremental
+external_precomputed_bridge
+external_incremental
+author_sdk
+```
+
+The initial mandatory completion set is:
+
+- `tanh`;
+- a public and typed `where` API;
+- explicit time-series or rolling standardization suitable for point-in-time
+  gate scaling;
+- first-class clipping with a declared boundary and missing-value contract;
+- explicit finite-value and missing/stale handling.
+
+The next reusable enrichment set includes sigmoid/logistic gates,
+signed-log/signed-power transforms, rolling percentile or rank, winsorization,
+median/MAD robust scaling, and volatility scaling. Residualization,
+neutralization, splines, regime switching, and mixture-of-experts are separate
+high-freedom capabilities rather than aliases for scalar operators.
+
+The list is a capability backlog, not a fixed operator zoo. When an admissible
+conditional single-factor hypothesis or another reusable research method needs
+a missing general operator, the resolver must:
+
+1. retain the hypothesis and classify the exact missing semantics;
+2. pause only affected graph branches and create a mandatory backend-completion
+   work item;
+3. reject silent fallback to a merely similar operator;
+4. route implementation to an authorized server-maintenance Agent;
+5. publish the capability, Author SDK change, and receipts after conformance;
+6. resume the original branch from its immutable checkpoint.
+
+The obligation is unconditional with respect to current backend availability.
+Execution remains conditional on the established audit, isolation, testing,
+and release gates. Unsafe arbitrary code, a result-selected one-off operator,
+or a request that contradicts point-in-time or market-accounting invariants is
+not a general operator; it must be reclassified or rejected with evidence.
+
+### Graph-driven operator discovery
+
+The Active Graph must preserve research affordances rather than present a
+closed operator checklist. At `enrichment_semantic_classification`, the Agent
+describes the intended effect and constraints before choosing syntax:
+
+```text
+economic role: primary alpha | state | confidence | exposure | cost | risk
+integration class: unary transform | conditional gate | interaction
+                   | strategy conditioning | neutralization | combination
+desired properties: bounded | monotone | signed | nonnegative | robust
+                    | rank-preserving | smooth | sparse | reversible
+scope: pointwise | cross-sectional | time-series | rolling | strategy state
+timing: input availability, fit window, lag, warm-up, execution alignment
+missingness: propagate | mask | explicit fallback | stale rejection
+```
+
+Deterministic capability resolution then returns a small set of matching
+descriptors:
+
+```text
+research purpose and mathematical effect
+declared semantic constraints
+implementation support by execution surface
+available | composable | partially exposed | missing
+evidence and approval references
+```
+
+The full backend operator catalog is a derived audit and discovery view, not
+the normative boundary of research. Routine Agent context contains only
+descriptors matched to the current node. It does not contain the full catalog,
+operator source, tests, or Skill documents.
+
+If no existing descriptor satisfies the declared research effect, the Agent
+does not conclude that the method is unavailable. It must:
+
+1. search approved local descriptions and relevant industry or statistical
+   semantics for a suitable method;
+2. determine whether the requirement is a scalar expression, a reusable
+   factor operator, strategy conditioning, risk/execution behavior, or a
+   multi-factor method;
+3. propose an exact capability contract and counterexamples;
+4. route a reusable missing backend capability to mandatory completion;
+5. add the accepted descriptor to the Draft Graph or capability registry so
+   later Agents can discover it without repeating the semantic search.
+
+This discovery step may consider, without being limited to, bounding and tail
+control, normalization, ordering, missingness, conditional gating,
+interactions, temporal transforms, cross-sectional relations, exposure
+control, and strategy conditioning. These are prompts for semantic review, not
+a finite list of permitted operators.
+
+Known implementations and known gaps should still be queryable so an Agent
+does not waste time rediscovering them. The query must include missing
+capabilities as well as callable ones. Selecting a missing descriptor creates
+the mandatory completion path; proposing a genuinely new descriptor creates a
+Draft capability change and the same bounded implementation path. Neither path
+may silently substitute a nearby operator or discard the research hypothesis.
+
+### Factor-role discovery and conditional improvement
+
+The local context for candidate discovery, factor diagnostics, and factor
+improvement must explicitly tell the Agent that it may:
+
+- search the authorized workspace for primary, auxiliary, reference, control,
+  state, exposure, liquidity, cost, and risk factors;
+- start from a proposed primary factor and seek auxiliary inputs, or start from
+  a useful state or auxiliary factor and discover which primary hypothesis it
+  can condition;
+- write a new experimental factor in its own branch;
+- combine one primary hypothesis with multiple bounded auxiliary inputs when
+  the integration semantics and complexity budget permit it;
+- condition factor construction or an applicable trading strategy;
+- reclassify a proposed construction as multi-factor, strategy, risk, or
+  execution work when the evidence no longer supports conditional
+  single-factor semantics;
+- request mandatory completion of a missing reusable operator or backend
+  policy without treating the gap as a negative factor result.
+
+These are research affordances, not automatic instructions to modify every
+factor. The Agent must first identify a falsifiable mechanism and preserve the
+main-only baseline. Multiple auxiliaries require a bounded candidate set,
+complexity and revision budgets, an authoritative trial count, incremental
+addition, leave-one-auxiliary-out ablation, and independent out-of-sample or
+walk-forward evidence.
+
+The graph separates observation from prescription:
+
+```text
+market state or backtest result pattern
+  -> diagnose plausible failure mechanism
+  -> retrieve candidate conditioning families
+  -> propose a falsifiable conditional hypothesis
+  -> freeze a new trial and holdout status
+  -> construct and validate the enriched factor
+  -> retain success, failure, and boundary evidence
+```
+
+Result patterns that may trigger diagnosis include, without implying a fixed
+answer:
+
+- alpha or IC sign changes across volatility, trend, liquidity, carry,
+  inventory, seasonality, or other point-in-time market states;
+- strong average IC with weak quantile monotonicity or unstable tail groups;
+- performance concentrated in a small product, regime, or time slice;
+- acceptable gross evidence erased by turnover, fees, spread, impact, margin,
+  or capacity;
+- unstable magnitude with mostly stable rank evidence;
+- missingness, stale data, sparse coverage, asynchronous sessions, or changing
+  universe composition;
+- decay, horizon mismatch, lag sensitivity, or execution-alignment failure;
+- high correlation or redundancy with an existing factor;
+- excessive exposure to a known risk, sector, curve, beta, or liquidity
+  dimension;
+- a conditional strategy that improves execution outcomes while leaving the
+  underlying factor values unchanged.
+
+For each pattern the Agent may retrieve one or more candidate mechanisms, such
+as scaling, bounding, robust tail treatment, state-dependent gating,
+interaction, lag or horizon adjustment, exposure control, strategy
+conditioning, or an explicit decision not to enrich. The graph stores why a
+mechanism might apply, its counterexamples, and its required evidence. It does
+not assert that a symptom proves the mechanism or that one operator is the
+unique remedy.
+
+Post-result adaptation always creates a new hypothesis version. A consumed
+holdout cannot be reused as pristine evidence for the enriched factor.
+Diagnostics may nominate a path, but may not tune an operator, auxiliary,
+threshold, scale, weight, horizon, or product subset against the same holdout
+and then report that result as confirmation.
+
+### Evidence-driven graph evolution
+
+The Active Graph learns from research through a controlled promotion pipeline:
+
+```text
+experiment evidence envelope
+  -> provisional local decision memory
+  -> retrieval by similar mechanism, market state, and result pattern
+  -> repeated-use and counterexample review
+  -> Draft edge or descriptor proposal
+  -> statistical and market-semantic review
+  -> replay and shadow comparison
+  -> independent grill audit
+  -> activate, revise, quarantine, or reject
+```
+
+A provisional record includes:
+
+- hypothesis, factor roles, integration class, formula or AST hash, and
+  capability receipts;
+- point-in-time market-state definition and data-availability contract;
+- frozen RunSpec, product profile, selection/holdout roles, and trial count;
+- main-only, auxiliary-only where meaningful, enriched, and ablation result
+  references;
+- gross and net results, coverage, turnover, effective sample size, stability,
+  uncertainty, and multiplicity treatment;
+- observed applicability boundary, failure mechanism, counterexamples, and
+  decision;
+- exact Skill usage in the local audit ledger and only bounded evidence
+  references in server records.
+
+One successful experiment is not a graph edge. A proposal may be made earlier
+when an attributable industry, statistical, market, or accounting rule already
+supports the transition; otherwise it requires repeated independent use with
+retained failures and counterexamples. Repetition count alone is not proof:
+the Graph Curator must test whether apparently similar cases share the same
+causal timing, product semantics, execution layer, and statistical design.
+
+Promoted edges remain conditional and falsifiable. They describe:
+
+```text
+applicability predicates
+candidate mechanism families
+required evidence
+known counterexamples
+risk level
+revision and trial-budget effects
+backend capabilities
+rollback target
+```
+
+They do not hard-code a profitable formula or expose user factor source.
+Normal research follows an already approved edge deterministically. A new or
+materially changed edge is reviewed as a diff; the Agent receives only the
+local subgraph and bounded evidence summaries. Process mining, graph curation,
+and audit presentation are output modes of the maintenance Agent by default,
+not three continuously running LLM reviewers.
+
+Graph evolution is evaluated against both research value and operational cost:
+
+- whether the edge improves out-of-sample decision quality, rejects weak ideas
+  earlier, or prevents a known invalid analysis;
+- whether it preserves failures, multiplicity, causal timing, market
+  accounting, and scope distinctions;
+- whether it reduces repeated semantic search without suppressing novel
+  methods;
+- whether context bytes, Agent/reviewer tokens, database statements, latency,
+  and cache behavior remain inside their frozen budgets.
+
+If an edge increases cost without producing useful evidence or creates
+premature routing, it remains Draft, is revised, or is removed. Active Graph
+evolution must make factor research more effective and more economical, not
+merely make the graph larger.
+
+### Enrichment acceptance gates
+
+An enriched operator or integration path is only available after all applicable
+gates pass:
+
+- contract: stable operator key, arity, parameter domain, shape, structural
+  hash, serialization, LaTeX or display metadata, and explicit support matrix;
+- mathematics: hand-computed oracles plus boundedness, monotonicity, symmetry,
+  saturation, broadcasting, ties, constants, `NaN`, infinity, and invalid
+  domain tests as applicable;
+- timing: prefix invariance, future-shock invariance, publication/effective
+  timestamps, warm-up, session boundaries, and next-tradable-position rules;
+- execution: batch versus incremental parity, native precomputed versus live
+  path parity, bridge-payload correctness, and explicit rejection of execution
+  surfaces that are not supported;
+- authoring: generated `.pyi` and package exports followed by real Pyright in a
+  clean generated factor workspace, including positive and negative consumer
+  examples;
+- research governance: authoritative append-only trial count, holdout seal,
+  preregistered main/aux/enriched comparisons, out-of-sample or walk-forward
+  evidence, costs, coverage, effective sample size, turnover, and stability;
+- graph and assurance: a missing surface becomes a scoped capability gap,
+  normal receipts use zero reviewers, an actual mismatch starts at most one
+  independent verifier, and sibling jobs continue;
+- cost: factor evaluation performs no per-observation database writes and no
+  LLM work; routine context remains current-node-only and within its frozen
+  token and database-statement budgets.
+
+Passing these gates proves conformance to the frozen research and execution
+contract. It does not by itself prove economic validity, future alpha, or
+profitability.
 
 The graph also borrows cross-domain research controls without copying
 domain-specific publication workflows:
