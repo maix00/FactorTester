@@ -32,6 +32,16 @@ FactorTester 或 `page_factors`。Web 与 CLI 统一通过 `/api/workspaces`、`
 属于单机 job daemon 内存，完整曲线/明细属于显式保留的文件 artifact。完整决策见
 ADR-037、ADR-038、ADR-039。
 
+### 文档约束式逐问审计 (Document-grounded Grill Audit)
+
+面向图边、统计口径、Skill 首次执行和后端变更的高风险治理审计；每次只解决一个问题，并以领域文档、代码事实、行业规范和反例为依据持久化结论，而不是审查普通研究状态转移。
+_避免称为_: Active Graph 常规节点、UI 审批、固定 `grill-me` Skill
+
+### Grill 决策日志 (Grill Decision Log)
+
+仍在演化中的逐问审计记录，保存问题编号、最终语义、证据来源、影响范围和修订关系；它不是 ADR，也不把完整对话或实现细节装入 Agent 的运行时上下文。
+_避免称为_: ADR、聊天转录、Active Graph 状态
+
 ### 因子 (Factor)
 
 从市场数据（价格、成交量、持仓量）计算出的量化信号。用于预测未来收益或对品种排序。每个因子是 `FactorFamily` 的子类。

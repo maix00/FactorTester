@@ -10,6 +10,10 @@ This document remains editable while the observed workflow, statistical
 semantics, and server control plane are being validated. An ADR is deferred
 until the draft graph has passed replay and shadow validation.
 
+The evolving one-question-at-a-time audit record is maintained separately in
+[`research-decision-graph-grill-log.md`](research-decision-graph-grill-log.md);
+it is not loaded into routine Agent context.
+
 ## Objective
 
 Turn the existing FactorTester research harness into an evidence-driven,
@@ -42,8 +46,8 @@ The system must:
 - keep unaffected research running when one branch encounters a capability or
   policy gap;
 - let agents propose and implement graph, Skill, Harness, and code changes;
-- reserve the only human user's role for server-side audit through a
-  grill-me-style evidence review;
+- reserve the only human user's role for server-side, document-grounded,
+  one-question-at-a-time audit of high-risk changes;
 - keep Draft Graph changes in replay/shadow mode until activation gates pass.
 
 The primary operational acceptance metric is token efficiency. The graph must
@@ -99,8 +103,11 @@ subsets; reviewer tokens are added to primary input/output to form team total.
 13. Skill metadata uses progressive disclosure. Full `SKILL.md` content is
     loaded only after a trigger matches and any required execution approval is
     present.
-14. Grill audit applies to graph, statistical-policy, Skill-execution, and
-    platform changes, not ordinary transitions on an already active edge.
+14. Document-grounded grill audit applies to graph, statistical-policy,
+    first-time Skill execution, and platform changes, not ordinary transitions
+    on an already active edge. The graph declares the audit capability by
+    description rather than naming a concrete Skill. The local Skill-usage
+    ledger records the actual approved implementation.
 15. The server persists capability/Skill need descriptions and descriptor
     hashes, never the selected Skill name, provider, path, body, or content
     fingerprint. The Agent chooses whether to reuse or load a matching Skill.
@@ -799,7 +806,8 @@ Use roles only when their outputs are independently useful:
 - **Capability Agent**: investigates missing Skills, CLI surfaces, data, or
   code.
 - **Implementation Agent**: changes the owning branch within approved scope.
-- **Audit Presenter**: produces the bounded grill-me evidence package.
+- **Audit Presenter**: produces the bounded document-grounded audit diff and
+  appends the accepted disposition to the Grill Decision Log.
 
 Do not spawn every role for every edge. L1/L2 changes may use one proposer and
 one independent reviewer only when deterministic checks are insufficient.
@@ -853,7 +861,11 @@ use the minimum relevant specialist reviewers and may enter human audit.
 
 - persist proposer and independent reviewer records;
 - detect reviewer disagreement and scope drift;
-- create grill-me evidence packages for the server auditor;
+- create document-grounded, one-question-at-a-time evidence diffs for the
+  server auditor;
+- persist accepted, rejected, revised, and superseded audit decisions in the
+  working Grill Decision Log without making that log part of routine Agent
+  context;
 - support freeze, reject, quarantine, rollback, and re-proposal dispositions.
 
 ### Slice 6: Replay and shadow activation
