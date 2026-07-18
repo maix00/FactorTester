@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import hmac
 import json
+import os
+import uuid
 
 from flask import Flask
+import orjson
 import pytest
 
 import settings as Settings
@@ -49,16 +53,8 @@ def _approve_proposal(
     version: int = 2,
     new_hash: str | None = None,
 ) -> tuple[dict, dict]:
-    proposer = research_graphs.create_agent_execution(
-        owner_user_id="alice",
-        actor_role="proposer",
-        model_id="test-model",
-    )
-    reviewer = research_graphs.create_agent_execution(
-        owner_user_id="alice",
-        actor_role="reviewer",
-        model_id="test-model",
-    )
+    proposer = _agent_execution("proposer")
+    reviewer = _agent_execution("reviewer")
     proposal = research_graphs.record_proposal(
         graph_id="factor-research",
         version=version,
@@ -86,17 +82,43 @@ def _approve_proposal(
     return proposal, review
 
 
+def _agent_execution(role: str) -> dict:
+    scope_id = f"test:{role}:{uuid.uuid4().hex}"
+    research_graphs.create_token_budget(
+        owner_user_id="alice",
+        scope_id=scope_id,
+        token_limit=1000,
+    )
+    reservation = research_graphs.reserve_tokens(
+        owner_user_id="alice",
+        scope_id=scope_id,
+        work_kind=role,
+        max_input_tokens=400,
+        max_output_tokens=200,
+    )
+    return research_graphs.create_agent_execution(
+        owner_user_id="alice",
+        actor_role=role,
+        model_id="test-model",
+        reservation_id=reservation["reservation_id"],
+    )
+
+
 def _issue_receipt(
     *,
     node_id: str,
     product_group: str,
     capability_ids: list[str],
+    triggered_capability_ids: list[str] | None = None,
+    undetermined_conditions: list[dict] | None = None,
 ) -> dict:
     active = research_graphs.load_active_graph(
         graph_id="factor-research"
     )
     approval_refs = {}
     bindings = []
+    triggered_bindings = []
+    triggered_ids = set(triggered_capability_ids or [])
     for capability_id in capability_ids:
         descriptor = active["capability_descriptors"][capability_id]
         approval = research_graphs.record_capability_approval(
@@ -108,7 +130,12 @@ def _issue_receipt(
             evidence_refs=[f"audit:capability:{capability_id}"],
         )
         approval_refs[capability_id] = approval["approval_id"]
-        bindings.append({
+        target = (
+            triggered_bindings
+            if capability_id in triggered_ids
+            else bindings
+        )
+        target.append({
             "capability_id": capability_id,
             **descriptor,
         })
@@ -125,10 +152,51 @@ def _issue_receipt(
             "node_id": node_id,
             "bindings": bindings,
             "gaps": [],
+            "triggered_conditional_bindings": triggered_bindings,
+            "undetermined_conditions": undetermined_conditions or [],
         },
         approval_refs=approval_refs,
         provider_conformance_hash="e" * 64,
     )
+
+
+def _commit_usage(
+    *,
+    instance_id: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> str:
+    secret = "test-provider-secret"
+    os.environ["RESEARCH_PROVIDER_USAGE_SECRET"] = secret
+    reservation = research_graphs.reserve_tokens(
+        owner_user_id="alice",
+        scope_id=f"instance:{instance_id}",
+        work_kind="researcher",
+        max_input_tokens=input_tokens,
+        max_output_tokens=output_tokens,
+    )
+    payload = {
+        "reservation_id": reservation["reservation_id"],
+        "provider": "test-provider",
+        "provider_request_id": uuid.uuid4().hex,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    }
+    signature = hmac.new(
+        secret.encode(),
+        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
+        hashlib.sha256,
+    ).hexdigest()
+    receipt = research_graphs.ingest_provider_usage_receipt(
+        **payload,
+        usage_attestation=signature,
+    )
+    research_graphs.commit_token_reservation(
+        owner_user_id="alice",
+        reservation_id=reservation["reservation_id"],
+        provider_receipt_id=receipt["provider_receipt_id"],
+    )
+    return reservation["reservation_id"]
 
 
 def _draft_graph() -> dict:
@@ -295,10 +363,7 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
         graph_id="factor-research",
         version=2,
         owner_user_id="alice",
-        actor_agent_id=research_graphs.create_agent_execution(
-            owner_user_id="alice",
-            actor_role="proposer",
-        )["execution_id"],
+        actor_agent_id=_agent_execution("proposer")["execution_id"],
         risk_level="L4",
         change_diff={"reason": "test disagreement path"},
         evidence_refs=["test:proposal"],
@@ -307,10 +372,7 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
     research_graphs.record_proposal_review(
         proposal_id=proposal["proposal_id"],
         owner_user_id="alice",
-        actor_agent_id=research_graphs.create_agent_execution(
-            owner_user_id="alice",
-            actor_role="reviewer",
-        )["execution_id"],
+        actor_agent_id=_agent_execution("reviewer")["execution_id"],
         disposition="disagreed",
         scope_drift=False,
         semantic_uncertainty=True,
@@ -351,11 +413,7 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
         research_graphs.record_proposal_review(
             proposal_id=proposal["proposal_id"],
             owner_user_id="alice",
-            actor_agent_id=research_graphs.create_agent_execution(
-                owner_user_id="alice",
-                actor_role="reviewer",
-                model_id=reviewer,
-            )["execution_id"],
+            actor_agent_id=_agent_execution("reviewer")["execution_id"],
             disposition="approved",
             scope_drift=False,
             semantic_uncertainty=False,
@@ -467,13 +525,38 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
         "graph": _draft_graph(),
     })
     assert created.status_code == 201
+    proposer_scope = f"http:proposer:{uuid.uuid4().hex}"
+    reviewer_scope = f"http:reviewer:{uuid.uuid4().hex}"
+    for scope in (proposer_scope, reviewer_scope):
+        assert client.post("/api/research-token-budgets", json={
+            "scope_id": scope,
+            "token_limit": 1000,
+        }).status_code == 201
+    proposer_reservation = client.post(
+        f"/api/research-token-budgets/{proposer_scope}/reserve",
+        json={
+            "work_kind": "proposer",
+            "max_input_tokens": 400,
+            "max_output_tokens": 200,
+        },
+    ).get_json()["reservation"]
+    reviewer_reservation = client.post(
+        f"/api/research-token-budgets/{reviewer_scope}/reserve",
+        json={
+            "work_kind": "reviewer",
+            "max_input_tokens": 400,
+            "max_output_tokens": 200,
+        },
+    ).get_json()["reservation"]
     proposer = client.post("/api/research-agent-executions", json={
         "actor_role": "proposer",
         "model_id": "test-proposer",
+        "reservation_id": proposer_reservation["reservation_id"],
     })
     reviewer = client.post("/api/research-agent-executions", json={
         "actor_role": "reviewer",
         "model_id": "test-reviewer",
+        "reservation_id": reviewer_reservation["reservation_id"],
     })
     assert proposer.status_code == 201
     assert reviewer.status_code == 201
@@ -627,6 +710,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         owner="alice",
         product_group="china_futures",
         workspace_id="workspace-1",
+        token_budget=1000,
         capability_receipt=_issue_receipt(
             node_id="hypothesis",
             product_group="china_futures",
@@ -663,9 +747,14 @@ def test_one_graph_branch_can_pause_without_stopping_another(
                 "cache_read_tokens": 80,
                 "skill_document_tokens": 0,
                 "artifact_summary_tokens": 20,
-                "reviewer_tokens": 0,
+                "reviewer_tokens": 40,
                 "loaded_skill_ids": [],
             },
+            "token_reservation_ids": [_commit_usage(
+                instance_id=instance["instance_id"],
+                input_tokens=160,
+                output_tokens=30,
+            )],
         },
     )
     untouched = research_graphs.load_graph_branch(
@@ -688,19 +777,23 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "graph",
         "branch",
         "node",
-        "available_edges",
-        "required_capabilities",
-        "conditional_capabilities",
-        "evidence_refs",
+            "available_edges",
+            "required_capabilities",
+            "triggered_capabilities",
+            "undetermined_conditions",
+            "evidence_refs",
         "open_gaps",
         "skill_policy",
         "token_telemetry",
-        "review_policy",
-        "review_gate",
+            "review_policy",
+            "review_gate",
+            "context_bytes",
     }
     assert context["graph"] == "factor-research@v3"
     assert "nodes" not in context
-    assert context["token_telemetry"]["total_tokens"] == 150
+    assert context["token_telemetry"]["primary_total_tokens"] == 150
+    assert context["token_telemetry"]["team_total_tokens"] == 190
+    assert context["token_telemetry"]["total_tokens"] == 190
     assert context["review_policy"]["L1"] == "deterministic_only"
 
 
@@ -763,7 +856,7 @@ def test_transition_stores_only_target_node_resolution(
         owner="alice",
         product_group="equities",
         workspace_id="workspace-2",
-        token_budget=10,
+        token_budget=12,
         capability_receipt=_issue_receipt(
             node_id="hypothesis",
             product_group="equities",
@@ -789,12 +882,17 @@ def test_transition_stores_only_target_node_resolution(
                 "input_tokens": 10,
                 "output_tokens": 2,
                 "cache_read_tokens": 8,
-                "skill_document_tokens": 50,
+                "skill_document_tokens": 5,
                 "artifact_summary_tokens": 0,
                 "reviewer_tokens": 0,
                 "skill_document_load_count": 1,
                 "skill_context_cache_hits": 0,
             },
+            "token_reservation_ids": [_commit_usage(
+                instance_id=instance["instance_id"],
+                input_tokens=10,
+                output_tokens=2,
+            )],
         },
     )
     context = research_graphs.build_graph_branch_context(
@@ -818,9 +916,12 @@ def test_transition_stores_only_target_node_resolution(
     assert len(json.dumps(context)) < 6000
     assert context["token_telemetry"]["skill_document_load_count"] == 1
     assert context["token_telemetry"]["budget"] == {
-        "limit": 10,
+        "limit": 12,
+        "used": 12,
+        "reserved": 0,
         "remaining": 0,
         "exceeded": True,
+        "authority": "trusted_provider_usage_receipts",
     }
     assert context["branch"]["status"] == "running"
     assert context["review_gate"]["max_new_reviewers"] == 0
@@ -831,3 +932,153 @@ def test_transition_stores_only_target_node_resolution(
     assert b"factortester.analysis.ic" not in (
         tmp_path / "graphs.sqlite"
     ).read_bytes()
+
+
+def test_token_budget_reservation_denies_before_launch_and_fails_closed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    research_graphs.create_token_budget(
+        owner_user_id="alice",
+        scope_id="hard-limit",
+        token_limit=100,
+    )
+    granted = research_graphs.reserve_tokens(
+        owner_user_id="alice",
+        scope_id="hard-limit",
+        work_kind="reviewer",
+        max_input_tokens=60,
+        max_output_tokens=20,
+    )
+
+    with pytest.raises(ValueError, match="reservation denied"):
+        research_graphs.reserve_tokens(
+            owner_user_id="alice",
+            scope_id="hard-limit",
+            work_kind="reviewer",
+            max_input_tokens=20,
+            max_output_tokens=10,
+        )
+    with pytest.raises(ValueError, match="reservation is required"):
+        research_graphs.create_agent_execution(
+            owner_user_id="alice",
+            actor_role="reviewer",
+        )
+    with pytest.raises(ValueError, match="not configured"):
+        monkeypatch.delenv("RESEARCH_PROVIDER_USAGE_SECRET", raising=False)
+        research_graphs.ingest_provider_usage_receipt(
+            reservation_id=granted["reservation_id"],
+            provider="untrusted",
+            provider_request_id="request-1",
+            input_tokens=10,
+            output_tokens=5,
+            usage_attestation="forged",
+        )
+
+    released = research_graphs.release_token_reservation(
+        owner_user_id="alice",
+        reservation_id=granted["reservation_id"],
+    )
+    budget = research_graphs.load_token_budget(
+        owner_user_id="alice",
+        scope_id="hard-limit",
+    )
+    assert released["released_tokens"] == 80
+    assert budget["available_tokens"] == 100
+
+
+def test_context_exposes_only_triggered_and_undetermined_conditions(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "graphs.sqlite")
+    graph = _draft_graph()
+    node = graph["nodes"][0]
+    node["conditional_capabilities"] = [
+        {
+            "capability_id": "market-microstructure.intraday-diagnose",
+            "predicate": {"field": "signal.frequency", "in": ["MIN1"]},
+            "explanation": "Use only for intraday signals.",
+        },
+        {
+            "capability_id": "factor-combination.multi-factor",
+            "predicate": {"field": "factor.is_multi", "equals": True},
+            "explanation": "Use only for multi-factor research.",
+        },
+    ]
+    for capability_id in (
+        "market-microstructure.intraday-diagnose",
+        "factor-combination.multi-factor",
+    ):
+        graph["capability_descriptors"][capability_id] = _descriptor(
+            capability_id
+        )
+    graph["content_hash"] = _hash(graph)
+    research_graphs.register_graph(graph, actor="curator")
+    _approve_proposal()
+    research_graphs.record_validation(
+        graph_id="factor-research",
+        version=2,
+        actor="reviewer",
+        evidence={
+            "replay_passed": True,
+            "shadow_passed": True,
+            "capability_resolution_complete": True,
+            "unaffected_jobs_preserved": True,
+            "token_efficiency_passed": True,
+            "token_metrics": _token_metrics(),
+        },
+    )
+    research_graphs.record_audit(
+        graph_id="factor-research",
+        version=2,
+        actor="auditor",
+        disposition="approved",
+        grill_evidence=[{"question": "conditional?", "answer": "bounded"}],
+    )
+    active = research_graphs.activate_graph(
+        graph_id="factor-research",
+        source_version=2,
+        actor="curator",
+    )
+    instance = research_graphs.create_graph_instance(
+        graph_id="factor-research",
+        owner="alice",
+        product_group="equities",
+        workspace_id="workspace-conditional",
+        token_budget=1000,
+        capability_receipt=_issue_receipt(
+            node_id="hypothesis",
+            product_group="equities",
+            capability_ids=[
+                "research-hypothesis.preregister",
+                "market-microstructure.intraday-diagnose",
+            ],
+            triggered_capability_ids=[
+                "market-microstructure.intraday-diagnose",
+            ],
+            undetermined_conditions=[{
+                "capability_id": "factor-combination.multi-factor",
+                "explanation": "factor.is_multi is unavailable",
+            }],
+        ),
+    )
+    context = research_graphs.build_graph_branch_context(
+        instance_id=instance["instance_id"],
+        branch_id=instance["branches"][0]["branch_id"],
+        owner="alice",
+    )
+
+    assert "conditional_capabilities" not in context
+    assert [
+        item["capability_id"]
+        for item in context["triggered_capabilities"]
+    ] == ["market-microstructure.intraday-diagnose"]
+    assert context["undetermined_conditions"] == [{
+        "capability_id": "factor-combination.multi-factor",
+        "explanation": "factor.is_multi is unavailable",
+    }]
+    assert context["context_bytes"] == len(orjson.dumps(context))
+    assert context["context_bytes"] <= 6000
+    assert active["version"] == 3

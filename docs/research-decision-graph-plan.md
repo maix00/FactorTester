@@ -49,6 +49,23 @@ The system must:
 The primary operational acceptance metric is token efficiency. The graph must
 reduce repeated interpretation rather than become another large prompt.
 
+Token control is pre-execution, not merely telemetry:
+
+```text
+create budget scope
+  -> reserve max input/output before Agent, reviewer, or Skill work
+  -> grant or deny atomically
+  -> launch only with reservation_id
+  -> ingest trusted provider/gateway usage receipt
+  -> commit actual usage and release unused reservation
+```
+
+Client-reported transition telemetry is diagnostic only. Authoritative budget
+usage comes from provider receipts whose HMAC is verified by the configured
+gateway adapter. If no trusted adapter is configured, commit fails closed.
+Skill-document, artifact-summary, and cache-read tokens are input attribution
+subsets; reviewer tokens are added to primary input/output to form team total.
+
 ## Fixed Governance Decisions
 
 1. The human is an auditor, not a research-flow author.
@@ -344,6 +361,10 @@ use the minimum relevant specialist reviewers and may enter human audit.
 | Token cost is attributable | per-node/role/Skill/artifact telemetry aggregation |
 | Token regression blocks activation | graph shadow token total cannot exceed the recorded baseline |
 | Token budget preserves work | over-budget context disables new reviewers and keeps backend jobs running |
+| Work cannot start beyond budget | Agent execution requires a live pre-execution reservation |
+| Usage cannot be self-reported as authoritative | commit requires a trusted provider/gateway receipt |
+| Attribution does not double count | Skill/artifact/cache subsets cannot exceed input tokens |
+| Context has a real response cap | server measures final serialized packet and rejects anything above 6000 bytes |
 | Graph protocol deterministic | stable hash tests over canonical JSON |
 | Invalid graphs rejected | public validator tests |
 | CLI is agent-readable | installed-command JSON subprocess tests |
@@ -381,8 +402,9 @@ Activation validation must include:
 ```
 
 The byte value above is a measured development snapshot, not a permanent
-allowance. The hard limit is 6000 bytes, and replay/shadow validation must
-replace the placeholder token totals before activation.
+allowance. The response path now enforces the 6000-byte hard limit. The
+activation gate still must replace client-submitted shadow totals with
+server-derived, non-zero provider usage before a real Draft can activate.
 
 ## Deferred Decisions
 

@@ -72,6 +72,23 @@ class FakeClient:
             **payload,
         }
 
+    def create_research_token_budget(self, **kwargs):
+        return {"used_tokens": 0, "reserved_tokens": 0, **kwargs}
+
+    def reserve_research_tokens(self, scope_id, **kwargs):
+        return {
+            "reservation_id": "reservation-1",
+            "scope_id": scope_id,
+            "status": "granted",
+            **kwargs,
+        }
+
+    def commit_research_tokens(self, reservation_id, **kwargs):
+        return {"reservation_id": reservation_id, "status": "committed"}
+
+    def release_research_tokens(self, reservation_id):
+        return {"reservation_id": reservation_id, "status": "released"}
+
     def get_research_graph_branch_context(self, instance_id, branch_id):
         return {
             "graph": "factor-research@v3",
@@ -259,3 +276,32 @@ def test_research_graph_capability_attestation_cli(
 
     assert result.exit_code == 0
     assert '"receipt_id": "receipt-1"' in result.output
+
+
+def test_research_graph_token_budget_cli_denies_work_before_agent_launch(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    runner = CliRunner()
+
+    created = runner.invoke(cli, [
+        "research-graph", "budget-create", "proposal:factor-research:2",
+        "--token-limit", "2000",
+    ])
+    reserved = runner.invoke(cli, [
+        "research-graph", "token-reserve", "proposal:factor-research:2",
+        "--work-kind", "reviewer",
+        "--max-input-tokens", "500",
+        "--max-output-tokens", "200",
+    ])
+    agent = runner.invoke(cli, [
+        "research-graph", "agent-start",
+        "--role", "reviewer",
+        "--reservation-id", "reservation-1",
+    ])
+
+    assert created.exit_code == 0
+    assert reserved.exit_code == 0
+    assert agent.exit_code == 0
+    assert '"reservation_id": "reservation-1"' in reserved.output

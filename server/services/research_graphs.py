@@ -45,6 +45,9 @@ _SERVER_FORBIDDEN_SKILL_FIELDS = {
     "loaded_skill_ids",
     "loaded_skill_receipts",
 }
+_MAX_CONTEXT_BYTES = 6000
+_MAX_CONTEXT_EVIDENCE_REFS = 8
+_MAX_EVIDENCE_REF_BYTES = 256
 
 
 def _loads(value: str | None) -> Any:
@@ -136,6 +139,38 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             actor_role TEXT NOT NULL,
             model_id TEXT NOT NULL,
             codex_version TEXT NOT NULL,
+            reservation_id TEXT NOT NULL UNIQUE,
+            created_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS research_token_budgets (
+            scope_id TEXT PRIMARY KEY,
+            owner_user_id TEXT NOT NULL,
+            token_limit INTEGER NOT NULL,
+            used_tokens INTEGER NOT NULL DEFAULT 0,
+            reserved_tokens INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS research_token_reservations (
+            reservation_id TEXT PRIMARY KEY,
+            scope_id TEXT NOT NULL,
+            owner_user_id TEXT NOT NULL,
+            work_kind TEXT NOT NULL,
+            max_input_tokens INTEGER NOT NULL,
+            max_output_tokens INTEGER NOT NULL,
+            max_total_tokens INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            expires_at REAL NOT NULL,
+            provider_receipt_id TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS research_provider_usage_receipts (
+            provider_receipt_id TEXT PRIMARY KEY,
+            reservation_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            provider_request_id TEXT NOT NULL UNIQUE,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            usage_attestation TEXT NOT NULL,
             created_at REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_research_agent_executions_owner
@@ -318,6 +353,24 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             "ALTER TABLE research_graph_reviews "
             "ADD COLUMN reviewer_execution_id TEXT NOT NULL DEFAULT ''"
         )
+    execution_columns = {
+        str(row["name"])
+        for row in conn.execute(
+            "PRAGMA table_info(research_agent_executions)"
+        ).fetchall()
+    }
+    if "reservation_id" not in execution_columns:
+        conn.execute(
+            "ALTER TABLE research_agent_executions "
+            "ADD COLUMN reservation_id TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_research_agent_reservation
+        ON research_agent_executions(reservation_id)
+        WHERE reservation_id<>''
+        """
+    )
 
 
 def ensure_schema() -> None:
@@ -513,6 +566,7 @@ def create_agent_execution(
     actor_role: str,
     model_id: str = "",
     codex_version: str = "",
+    reservation_id: str = "",
 ) -> dict[str, Any]:
     if actor_role not in {"proposer", "reviewer", "audit_presenter"}:
         raise ValueError("invalid Agent execution role")
@@ -520,12 +574,31 @@ def create_agent_execution(
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
+        reservation = conn.execute(
+            """
+            SELECT * FROM research_token_reservations
+            WHERE reservation_id=? AND owner_user_id=? AND status='granted'
+            AND expires_at>?
+            """,
+            (reservation_id, owner_user_id, time.time()),
+        ).fetchone()
+        if reservation is None:
+            raise ValueError(
+                "active token reservation is required before Agent launch"
+            )
+        expected_work_kind = {
+            "proposer": "proposer",
+            "reviewer": "reviewer",
+            "audit_presenter": "audit_presenter",
+        }[actor_role]
+        if str(reservation["work_kind"]) != expected_work_kind:
+            raise ValueError("token reservation work_kind does not match role")
         conn.execute(
             """
             INSERT INTO research_agent_executions (
                 execution_id, owner_user_id, actor_role, model_id,
-                codex_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                codex_version, reservation_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution_id,
@@ -533,6 +606,7 @@ def create_agent_execution(
                 actor_role,
                 str(model_id),
                 str(codex_version),
+                reservation_id,
                 now,
             ),
         )
@@ -543,6 +617,338 @@ def create_agent_execution(
         "model_id": str(model_id),
         "codex_version": str(codex_version),
         "created_at": now,
+        "reservation_id": reservation_id,
+    }
+
+
+def create_token_budget(
+    *,
+    owner_user_id: str,
+    scope_id: str,
+    token_limit: int,
+) -> dict[str, Any]:
+    if not scope_id.strip():
+        raise ValueError("token budget scope_id is required")
+    if (
+        not isinstance(token_limit, int)
+        or isinstance(token_limit, bool)
+        or token_limit <= 0
+    ):
+        raise ValueError("token_limit must be positive")
+    now = time.time()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        try:
+            conn.execute(
+                """
+                INSERT INTO research_token_budgets (
+                    scope_id, owner_user_id, token_limit, used_tokens,
+                    reserved_tokens, created_at
+                ) VALUES (?, ?, ?, 0, 0, ?)
+                """,
+                (scope_id, owner_user_id, token_limit, now),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("token budget scope already exists") from exc
+    return {
+        "scope_id": scope_id,
+        "owner_user_id": owner_user_id,
+        "token_limit": token_limit,
+        "used_tokens": 0,
+        "reserved_tokens": 0,
+        "created_at": now,
+    }
+
+
+def reserve_tokens(
+    *,
+    owner_user_id: str,
+    scope_id: str,
+    work_kind: str,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    ttl_seconds: int = 900,
+) -> dict[str, Any]:
+    if work_kind not in {
+        "researcher",
+        "proposer",
+        "reviewer",
+        "audit_presenter",
+        "skill",
+    }:
+        raise ValueError("invalid token reservation work_kind")
+    for field, value in (
+        ("max_input_tokens", max_input_tokens),
+        ("max_output_tokens", max_output_tokens),
+    ):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"{field} must be non-negative")
+    max_total = max_input_tokens + max_output_tokens
+    if max_total <= 0:
+        raise ValueError("token reservation must be positive")
+    if not isinstance(ttl_seconds, int) or not 1 <= ttl_seconds <= 3600:
+        raise ValueError("ttl_seconds must be between 1 and 3600")
+    reservation_id = uuid.uuid4().hex
+    now = time.time()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        budget = conn.execute(
+            """
+            SELECT * FROM research_token_budgets
+            WHERE scope_id=? AND owner_user_id=?
+            """,
+            (scope_id, owner_user_id),
+        ).fetchone()
+        if budget is None:
+            raise KeyError("token budget scope not found")
+        available = (
+            int(budget["token_limit"])
+            - int(budget["used_tokens"])
+            - int(budget["reserved_tokens"])
+        )
+        if max_total > available:
+            raise ValueError(
+                f"token reservation denied: requested={max_total}, "
+                f"available={available}"
+            )
+        conn.execute(
+            """
+            UPDATE research_token_budgets
+            SET reserved_tokens=reserved_tokens+?
+            WHERE scope_id=? AND owner_user_id=?
+            """,
+            (max_total, scope_id, owner_user_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO research_token_reservations (
+                reservation_id, scope_id, owner_user_id, work_kind,
+                max_input_tokens, max_output_tokens, max_total_tokens,
+                status, expires_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'granted', ?, ?)
+            """,
+            (
+                reservation_id,
+                scope_id,
+                owner_user_id,
+                work_kind,
+                max_input_tokens,
+                max_output_tokens,
+                max_total,
+                now + ttl_seconds,
+                now,
+            ),
+        )
+    return {
+        "reservation_id": reservation_id,
+        "scope_id": scope_id,
+        "work_kind": work_kind,
+        "max_input_tokens": max_input_tokens,
+        "max_output_tokens": max_output_tokens,
+        "max_total_tokens": max_total,
+        "status": "granted",
+        "expires_at": now + ttl_seconds,
+    }
+
+
+def ingest_provider_usage_receipt(
+    *,
+    reservation_id: str,
+    provider: str,
+    provider_request_id: str,
+    input_tokens: int,
+    output_tokens: int,
+    usage_attestation: str,
+) -> dict[str, Any]:
+    """Trusted gateway adapter: reject when no provider secret is configured."""
+    secret = os.environ.get("RESEARCH_PROVIDER_USAGE_SECRET", "")
+    if not secret:
+        raise ValueError("trusted provider usage adapter is not configured")
+    payload = {
+        "reservation_id": reservation_id,
+        "provider": provider,
+        "provider_request_id": provider_request_id,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    }
+    expected = hmac.new(
+        secret.encode(),
+        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, usage_attestation):
+        raise ValueError("provider usage attestation is invalid")
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+        for value in (input_tokens, output_tokens)
+    ):
+        raise ValueError("provider usage tokens must be non-negative")
+    provider_receipt_id = uuid.uuid4().hex
+    now = time.time()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        reservation = conn.execute(
+            """
+            SELECT * FROM research_token_reservations
+            WHERE reservation_id=? AND status='granted'
+            """,
+            (reservation_id,),
+        ).fetchone()
+        if reservation is None:
+            raise ValueError("active token reservation not found")
+        if input_tokens > int(reservation["max_input_tokens"]) or (
+            output_tokens > int(reservation["max_output_tokens"])
+        ):
+            raise ValueError("provider usage exceeded granted token maximum")
+        conn.execute(
+            """
+            INSERT INTO research_provider_usage_receipts (
+                provider_receipt_id, reservation_id, provider,
+                provider_request_id, input_tokens, output_tokens,
+                usage_attestation, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                provider_receipt_id,
+                reservation_id,
+                provider,
+                provider_request_id,
+                input_tokens,
+                output_tokens,
+                usage_attestation,
+                now,
+            ),
+        )
+    return {
+        "provider_receipt_id": provider_receipt_id,
+        **payload,
+        "created_at": now,
+    }
+
+
+def commit_token_reservation(
+    *,
+    owner_user_id: str,
+    reservation_id: str,
+    provider_receipt_id: str,
+) -> dict[str, Any]:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT r.*, p.input_tokens, p.output_tokens
+            FROM research_token_reservations r
+            JOIN research_provider_usage_receipts p
+              ON p.reservation_id=r.reservation_id
+            WHERE r.reservation_id=? AND r.owner_user_id=?
+              AND r.status='granted' AND p.provider_receipt_id=?
+            """,
+            (reservation_id, owner_user_id, provider_receipt_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("trusted provider usage receipt is required")
+        actual = int(row["input_tokens"]) + int(row["output_tokens"])
+        conn.execute(
+            """
+            UPDATE research_token_budgets
+            SET used_tokens=used_tokens+?,
+                reserved_tokens=reserved_tokens-?
+            WHERE scope_id=? AND owner_user_id=?
+            """,
+            (
+                actual,
+                int(row["max_total_tokens"]),
+                row["scope_id"],
+                owner_user_id,
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE research_token_reservations
+            SET status='committed', provider_receipt_id=?
+            WHERE reservation_id=?
+            """,
+            (provider_receipt_id, reservation_id),
+        )
+    return {
+        "reservation_id": reservation_id,
+        "scope_id": str(row["scope_id"]),
+        "status": "committed",
+        "used_tokens": actual,
+        "released_tokens": int(row["max_total_tokens"]) - actual,
+    }
+
+
+def release_token_reservation(
+    *,
+    owner_user_id: str,
+    reservation_id: str,
+) -> dict[str, Any]:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT * FROM research_token_reservations
+            WHERE reservation_id=? AND owner_user_id=? AND status='granted'
+            """,
+            (reservation_id, owner_user_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("active token reservation not found")
+        conn.execute(
+            """
+            UPDATE research_token_budgets
+            SET reserved_tokens=reserved_tokens-?
+            WHERE scope_id=? AND owner_user_id=?
+            """,
+            (
+                int(row["max_total_tokens"]),
+                row["scope_id"],
+                owner_user_id,
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE research_token_reservations SET status='released'
+            WHERE reservation_id=?
+            """,
+            (reservation_id,),
+        )
+    return {
+        "reservation_id": reservation_id,
+        "status": "released",
+        "released_tokens": int(row["max_total_tokens"]),
+    }
+
+
+def load_token_budget(
+    *,
+    owner_user_id: str,
+    scope_id: str,
+) -> dict[str, Any] | None:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            """
+            SELECT * FROM research_token_budgets
+            WHERE scope_id=? AND owner_user_id=?
+            """,
+            (scope_id, owner_user_id),
+        ).fetchone()
+    if row is None:
+        return None
+    limit = int(row["token_limit"])
+    used = int(row["used_tokens"])
+    reserved = int(row["reserved_tokens"])
+    return {
+        "scope_id": scope_id,
+        "token_limit": limit,
+        "used_tokens": used,
+        "reserved_tokens": reserved,
+        "available_tokens": max(limit - used - reserved, 0),
     }
 
 
@@ -1458,12 +1864,9 @@ def create_graph_instance(
         if str(node.get("node_id") or "") == entry_node
     )
     if (
-        token_budget is not None
-        and (
-            not isinstance(token_budget, int)
-            or isinstance(token_budget, bool)
-            or token_budget <= 0
-        )
+        not isinstance(token_budget, int)
+        or isinstance(token_budget, bool)
+        or token_budget <= 0
     ):
         raise ValueError("token_budget must be a positive integer")
     instance_id = uuid.uuid4().hex
@@ -1508,6 +1911,15 @@ def create_graph_instance(
                 token_budget,
                 now,
             ),
+        )
+        conn.execute(
+            """
+            INSERT INTO research_token_budgets (
+                scope_id, owner_user_id, token_limit, used_tokens,
+                reserved_tokens, created_at
+            ) VALUES (?, ?, ?, 0, 0, ?)
+            """,
+            (f"instance:{instance_id}", owner, token_budget, now),
         )
         conn.execute(
             """
@@ -1666,6 +2078,24 @@ def advance_graph_branch(
         value = telemetry.get(field, 0)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise ValueError(f"token_telemetry.{field} must be a non-negative integer")
+    input_tokens = int(telemetry.get("input_tokens") or 0)
+    for field in (
+        "cache_read_tokens",
+        "skill_document_tokens",
+        "artifact_summary_tokens",
+    ):
+        if int(telemetry.get(field) or 0) > input_tokens:
+            raise ValueError(
+                f"token_telemetry.{field} is an input attribution subset"
+            )
+    if (
+        int(telemetry.get("skill_document_tokens") or 0)
+        + int(telemetry.get("artifact_summary_tokens") or 0)
+        > input_tokens
+    ):
+        raise ValueError(
+            "Skill document and artifact attribution exceed input tokens"
+        )
     for field in ("model_id", "model_provider", "codex_version"):
         value = telemetry.get(field)
         if value is not None and not isinstance(value, str):
@@ -1698,6 +2128,51 @@ def advance_graph_branch(
         )
         if instance is None:
             raise KeyError("graph instance not found")
+        reported_team_tokens = (
+            int(telemetry.get("input_tokens") or 0)
+            + int(telemetry.get("output_tokens") or 0)
+            + int(telemetry.get("reviewer_tokens") or 0)
+        )
+        reservation_ids = evidence.get("token_reservation_ids") or []
+        if not isinstance(reservation_ids, list) or not all(
+            isinstance(item, str) and item for item in reservation_ids
+        ):
+            raise ValueError("token_reservation_ids must be an array")
+        if reported_team_tokens and not reservation_ids:
+            raise ValueError(
+                "trusted committed token reservation is required"
+            )
+        authoritative_tokens = 0
+        if reservation_ids:
+            placeholders = ",".join("?" for _ in reservation_ids)
+            rows = conn.execute(
+                f"""
+                SELECT r.reservation_id, p.input_tokens, p.output_tokens
+                FROM research_token_reservations r
+                JOIN research_provider_usage_receipts p
+                  ON p.provider_receipt_id=r.provider_receipt_id
+                WHERE r.reservation_id IN ({placeholders})
+                  AND r.owner_user_id=? AND r.scope_id=?
+                  AND r.status='committed'
+                """,
+                (
+                    *reservation_ids,
+                    owner,
+                    f"instance:{instance_id}",
+                ),
+            ).fetchall()
+            if len(rows) != len(set(reservation_ids)):
+                raise ValueError(
+                    "all token reservations must be committed and trusted"
+                )
+            authoritative_tokens = sum(
+                int(row["input_tokens"]) + int(row["output_tokens"])
+                for row in rows
+            )
+        if authoritative_tokens != reported_team_tokens:
+            raise ValueError(
+                "reported team token total does not match provider usage"
+            )
         branch_row = conn.execute(
             """
             SELECT * FROM research_graph_branches
@@ -1948,6 +2423,13 @@ def build_graph_branch_context(
                 "binding": deepcopy(binding_by_id.get(capability_id)),
                 "gap": deepcopy(gap_by_id.get(capability_id)),
             })
+        budget_row = conn.execute(
+            """
+            SELECT * FROM research_token_budgets
+            WHERE scope_id=? AND owner_user_id=?
+            """,
+            (f"instance:{instance_id}", owner),
+        ).fetchone()
         trace_rows = conn.execute(
             """
             SELECT evidence_json, telemetry_json
@@ -1982,26 +2464,31 @@ def build_graph_branch_context(
         skill_context_cache_hits += int(
             row_telemetry.get("skill_context_cache_hits") or 0
         )
-    totals["total_tokens"] = totals["input_tokens"] + totals["output_tokens"]
+    totals["primary_total_tokens"] = (
+        totals["input_tokens"] + totals["output_tokens"]
+    )
+    totals["team_total_tokens"] = (
+        totals["primary_total_tokens"] + totals["reviewer_tokens"]
+    )
+    totals["total_tokens"] = totals["team_total_tokens"]
     totals["skill_document_load_count"] = skill_document_load_count
     totals["skill_context_cache_hits"] = skill_context_cache_hits
-    token_budget = (
-        int(instance["token_budget"])
-        if instance["token_budget"] is not None
-        else None
+    token_budget = int(budget_row["token_limit"])
+    authoritative_used = int(budget_row["used_tokens"])
+    authoritative_reserved = int(budget_row["reserved_tokens"])
+    authoritative_remaining = max(
+        token_budget - authoritative_used - authoritative_reserved,
+        0,
     )
-    budget_exceeded = (
-        token_budget is not None
-        and totals["total_tokens"] >= token_budget
-    )
+    budget_exceeded = authoritative_remaining == 0
+    totals["authority"] = "client_reported_diagnostic_only"
     totals["budget"] = {
         "limit": token_budget,
-        "remaining": (
-            max(token_budget - totals["total_tokens"], 0)
-            if token_budget is not None
-            else None
-        ),
+        "used": authoritative_used,
+        "reserved": authoritative_reserved,
+        "remaining": authoritative_remaining,
         "exceeded": budget_exceeded,
+        "authority": "trusted_provider_usage_receipts",
     }
     current_ids = set(node.get("required_capabilities") or [])
     open_gaps = [
@@ -2009,7 +2496,28 @@ def build_graph_branch_context(
         for capability_id, gap in gap_by_id.items()
         if capability_id in current_ids or node.get("kind") == "capability_gap"
     ]
-    return {
+    triggered_capabilities = [
+        {
+            "capability_id": capability_id,
+            "binding": deepcopy(binding_by_id.get(capability_id)),
+            "gap": deepcopy(gap_by_id.get(capability_id)),
+        }
+        for capability_id in sorted({
+            str(item.get("capability_id") or "")
+            for key in (
+                "triggered_conditional_bindings",
+                "triggered_conditional_gaps",
+            )
+            for item in resolution.get(key) or []
+            if isinstance(item, dict)
+        })
+    ]
+    evidence_refs = [
+        reference
+        for reference in evidence_refs[-_MAX_CONTEXT_EVIDENCE_REFS:]
+        if len(reference.encode()) <= _MAX_EVIDENCE_REF_BYTES
+    ]
+    context = {
         "graph": f"{graph['graph_id']}@v{graph['version']}",
         "branch": {
             "instance_id": instance_id,
@@ -2025,8 +2533,9 @@ def build_graph_branch_context(
         },
         "available_edges": available_edges,
         "required_capabilities": required_capabilities,
-        "conditional_capabilities": deepcopy(
-            node.get("conditional_capabilities") or []
+        "triggered_capabilities": triggered_capabilities,
+        "undetermined_conditions": deepcopy(
+            resolution.get("undetermined_conditions") or []
         ),
         "evidence_refs": evidence_refs,
         "open_gaps": open_gaps,
@@ -2070,3 +2579,13 @@ def build_graph_branch_context(
             "running_backend_jobs_action": "continue",
         },
     }
+    context["context_bytes"] = 0
+    for _ in range(3):
+        context["context_bytes"] = len(orjson.dumps(context))
+    serialized_bytes = len(orjson.dumps(context))
+    if serialized_bytes > _MAX_CONTEXT_BYTES:
+        raise ValueError(
+            f"bounded context exceeds {_MAX_CONTEXT_BYTES} bytes: "
+            f"{serialized_bytes}"
+        )
+    return context

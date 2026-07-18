@@ -136,6 +136,7 @@ class FactorTesterClient:
         actor_role: str,
         model_id: str = "",
         codex_version: str = "",
+        reservation_id: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             "/api/research-agent-executions",
@@ -143,9 +144,64 @@ class FactorTesterClient:
                 "actor_role": actor_role,
                 "model_id": model_id,
                 "codex_version": codex_version,
+                "reservation_id": reservation_id,
             },
         ))
         return dict(data.get("execution") or {})
+
+    def create_research_token_budget(
+        self,
+        *,
+        scope_id: str,
+        token_limit: int,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/research-token-budgets",
+            {"scope_id": scope_id, "token_limit": token_limit},
+        ))
+        return dict(data.get("budget") or {})
+
+    def reserve_research_tokens(
+        self,
+        scope_id: str,
+        *,
+        work_kind: str,
+        max_input_tokens: int,
+        max_output_tokens: int,
+        ttl_seconds: int = 900,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-token-budgets/{scope_id}/reserve",
+            {
+                "work_kind": work_kind,
+                "max_input_tokens": max_input_tokens,
+                "max_output_tokens": max_output_tokens,
+                "ttl_seconds": ttl_seconds,
+            },
+        ))
+        return dict(data.get("reservation") or {})
+
+    def commit_research_tokens(
+        self,
+        reservation_id: str,
+        *,
+        provider_receipt_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-token-reservations/{reservation_id}/commit",
+            {"provider_receipt_id": provider_receipt_id},
+        ))
+        return dict(data.get("commit") or {})
+
+    def release_research_tokens(
+        self,
+        reservation_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-token-reservations/{reservation_id}/release",
+            {},
+        ))
+        return dict(data.get("release") or {})
 
     def audit_research_graph(
         self,

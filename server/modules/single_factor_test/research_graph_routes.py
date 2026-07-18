@@ -18,10 +18,87 @@ def create_research_agent_execution():
             actor_role=str(data.get("actor_role") or ""),
             model_id=str(data.get("model_id") or ""),
             codex_version=str(data.get("codex_version") or ""),
+            reservation_id=str(data.get("reservation_id") or ""),
         )
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     return jsonify({"success": True, "execution": execution}), 201
+
+
+@sft_bp.post("/api/research-token-budgets")
+def create_research_token_budget():
+    data = request.get_json(silent=True) or {}
+    try:
+        budget = research_graphs.create_token_budget(
+            owner_user_id=require_user(),
+            scope_id=str(data.get("scope_id") or ""),
+            token_limit=data.get("token_limit"),
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "budget": budget}), 201
+
+
+@sft_bp.post("/api/research-token-budgets/<scope_id>/reserve")
+def reserve_research_tokens(scope_id: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        reservation = research_graphs.reserve_tokens(
+            owner_user_id=require_user(),
+            scope_id=scope_id,
+            work_kind=str(data.get("work_kind") or ""),
+            max_input_tokens=data.get("max_input_tokens"),
+            max_output_tokens=data.get("max_output_tokens"),
+            ttl_seconds=data.get("ttl_seconds", 900),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "reservation": reservation}), 201
+
+
+@sft_bp.post("/api/research-provider-usage-receipts")
+def ingest_research_provider_usage():
+    data = request.get_json(silent=True) or {}
+    try:
+        receipt = research_graphs.ingest_provider_usage_receipt(
+            reservation_id=str(data.get("reservation_id") or ""),
+            provider=str(data.get("provider") or ""),
+            provider_request_id=str(data.get("provider_request_id") or ""),
+            input_tokens=data.get("input_tokens"),
+            output_tokens=data.get("output_tokens"),
+            usage_attestation=str(data.get("usage_attestation") or ""),
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "provider_receipt": receipt}), 201
+
+
+@sft_bp.post("/api/research-token-reservations/<reservation_id>/commit")
+def commit_research_tokens(reservation_id: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        result = research_graphs.commit_token_reservation(
+            owner_user_id=require_user(),
+            reservation_id=reservation_id,
+            provider_receipt_id=str(data.get("provider_receipt_id") or ""),
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "commit": result})
+
+
+@sft_bp.post("/api/research-token-reservations/<reservation_id>/release")
+def release_research_tokens(reservation_id: str):
+    try:
+        result = research_graphs.release_token_reservation(
+            owner_user_id=require_user(),
+            reservation_id=reservation_id,
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "release": result})
 
 
 @sft_bp.post("/api/research-graphs/versions")

@@ -166,10 +166,12 @@ def review_graph_proposal(
 )
 @click.option("--model-id", default="")
 @click.option("--codex-version", default="")
+@click.option("--reservation-id", required=True)
 def start_agent_execution(
     actor_role: str,
     model_id: str,
     codex_version: str,
+    reservation_id: str,
 ) -> None:
     """由服务器为同一用户签发一个有角色的独立 Agent execution。"""
     click.echo(_json(
@@ -177,7 +179,73 @@ def start_agent_execution(
             actor_role=actor_role,
             model_id=model_id,
             codex_version=codex_version,
+            reservation_id=reservation_id,
         )
+    ))
+
+
+@research_graph.command("budget-create")
+@click.argument("scope_id")
+@click.option("--token-limit", type=click.IntRange(min=1), required=True)
+def create_token_budget(scope_id: str, token_limit: int) -> None:
+    """创建执行前硬预算 scope。"""
+    click.echo(_json(
+        client_from_config().create_research_token_budget(
+            scope_id=scope_id,
+            token_limit=token_limit,
+        )
+    ))
+
+
+@research_graph.command("token-reserve")
+@click.argument("scope_id")
+@click.option(
+    "--work-kind",
+    type=click.Choice([
+        "researcher", "proposer", "reviewer", "audit_presenter", "skill",
+    ]),
+    required=True,
+)
+@click.option("--max-input-tokens", type=click.IntRange(min=0), required=True)
+@click.option("--max-output-tokens", type=click.IntRange(min=0), required=True)
+@click.option("--ttl-seconds", type=click.IntRange(min=1, max=3600), default=900)
+def reserve_token_budget(
+    scope_id: str,
+    work_kind: str,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    ttl_seconds: int,
+) -> None:
+    """在启动任何 LLM/Reviewer/Skill 工作前原子预留 token。"""
+    click.echo(_json(client_from_config().reserve_research_tokens(
+        scope_id,
+        work_kind=work_kind,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        ttl_seconds=ttl_seconds,
+    )))
+
+
+@research_graph.command("token-commit")
+@click.argument("reservation_id")
+@click.option("--provider-receipt-id", required=True)
+def commit_token_budget(
+    reservation_id: str,
+    provider_receipt_id: str,
+) -> None:
+    """只用可信 provider usage receipt 对账预留。"""
+    click.echo(_json(client_from_config().commit_research_tokens(
+        reservation_id,
+        provider_receipt_id=provider_receipt_id,
+    )))
+
+
+@research_graph.command("token-release")
+@click.argument("reservation_id")
+def release_token_budget(reservation_id: str) -> None:
+    """模型调用未发生时释放完整预留。"""
+    click.echo(_json(
+        client_from_config().release_research_tokens(reservation_id)
     ))
 
 
