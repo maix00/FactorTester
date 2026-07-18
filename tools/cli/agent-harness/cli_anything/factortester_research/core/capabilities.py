@@ -617,7 +617,11 @@ def resolve_graph_capabilities(
         "undetermined_conditions": undetermined_specs,
         "requires_agent_judgment": bool(undetermined_specs),
         "semantic_cache_key": semantic_cache_key,
-        "cache": {"key": cache_key, "hit": False},
+        "cache": {
+            "key": cache_key,
+            "hit": False,
+            "scope": "process",
+        },
     }
     _RESOLUTION_CACHE[cache_key] = deepcopy(result)
     return result

@@ -112,6 +112,8 @@ class TestCLISubprocess:
         assert payload["resolution"]["node_id"] == (
             "hypothesis_preregistration"
         )
+        assert payload["resolution"]["cache"]["scope"] == "process"
+        assert payload["resolution"]["cache"]["hit"] is False
         assert payload["resolution"]["gaps"] == []
         assert {
             item["capability_id"]

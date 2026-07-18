@@ -291,6 +291,7 @@ def test_same_local_resolution_uses_content_addressed_cache() -> None:
     assert second["cache"] == {
         "key": first["cache"]["key"],
         "hit": True,
+        "scope": "process",
     }
 
 

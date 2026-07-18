@@ -112,6 +112,12 @@ subsets; reviewer tokens are added to primary input/output to form team total.
     provider changes cannot alter graph hashes or guards. A changed external
     source invalidates the local resolution cache and fails closed until
     conformance review.
+18. Capability resolution cache entries are explicitly process-local. They
+    avoid duplicate deterministic work only inside one long-lived Agent
+    process and are not counted as cross-process or token savings. Cross-command
+    Skill reuse is decided from the local research session's hash-chained
+    Skill-usage ledger; no server Skill registry or extra cache database is
+    introduced.
 
 ## Existing Observed Workflow
 
@@ -386,6 +392,7 @@ use the minimum relevant specialist reviewers and may enter human audit.
 | Server stores no Skill identity | SQLite persistence inspection and server input rejection tests |
 | Local Skill usage is auditable | hash-chained session ledger records identity, approval, load/reuse, and tokens |
 | Provider updates fail closed | source fingerprint mismatch invalidates cache and creates an explicit gap |
+| Cache scope is truthful | capability output declares `cache.scope=process`; separate installed CLI calls do not claim a hit |
 | Model replacement is semantics-neutral | model/Codex telemetry changes do not change semantic cache or graph hash |
 | Provider roots are relocatable | environment-root conformance tests for Codex and external providers |
 | Scope drift re-enters audit | proposal lifecycle integration test |
