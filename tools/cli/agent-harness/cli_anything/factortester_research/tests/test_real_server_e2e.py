@@ -685,7 +685,9 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             job_spec={
                 "run_id": graph_run["run_id"],
                 "workspace_id": workspace_id,
+                "run_spec": run_spec,
             },
+            run_spec_hash=graph_run["run_spec_hash"],
         ))
         repository.transition(
             assurance_job.job_id,
@@ -708,24 +710,18 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             worker_exitcode=0,
             result_summary={"sharpe": 1.2, "observations": 1000},
         )
-        assurance = _run_json(
+        job_detail = _run_json(
             factortester,
             [
-                "research-graph",
-                "backend-assure",
+                "job",
+                "status",
                 assurance_job.job_id,
-                "--instance-id",
-                live_instance["instance_id"],
-                "--branch-id",
-                live_branch["branch_id"],
-                "--node-id",
-                live_branch["current_node"],
             ],
             env=env,
         )
+        assurance = job_detail["evidence"]["terminal_assurance"]
         assert assurance["disposition"] == "trusted"
-        assert assurance["requires_verifier"] is False
-        assert assurance["receipt_bytes"] <= 1024
+        assert assurance["anomaly_codes"] == []
         context = _run_json(
             factortester,
             [

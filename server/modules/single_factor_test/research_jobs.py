@@ -117,7 +117,7 @@ def _daemon_client() -> JobDaemonClient:
     return JobDaemonClient(socket_path)
 
 
-def _submit_kind(kind: str, payload: dict):
+def _submit_kind(kind: str, payload: dict, *, run_spec_hash: str):
     process_runners = {
         "backtest": "server.modules.single_factor_test.process_runners:run_group",
         "ic": "server.modules.single_factor_test.process_runners:run_ic",
@@ -143,6 +143,7 @@ def _submit_kind(kind: str, payload: dict):
         source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
         runner_path=runner,
         job_spec=deepcopy(payload),
+        run_spec_hash=run_spec_hash,
         entitlement=entitlement_for_owner(str(payload["_owner"])),
     ))
     try:
@@ -421,7 +422,11 @@ def submit_research_run():
             "step_mode": step_mode,
             "run_spec": run_spec,
         }
-        job = _submit_kind(kind, payload)
+        job = _submit_kind(
+            kind,
+            payload,
+            run_spec_hash=str(run["run_spec_hash"]),
+        )
         jobs.append(job.summary())
     return jsonify({"success": True, "run_id": run["run_id"], "run": run, "jobs": jobs}), 202
 

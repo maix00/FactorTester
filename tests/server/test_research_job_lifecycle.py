@@ -442,6 +442,10 @@ def test_all_analyses_dispatch_importable_process_runners(client) -> None:
     assert all(":run_" in job.runner_path for job in jobs)
     assert all(job.summary()["execution_mode"] == "process" for job in jobs)
     assert all("page_uuid" not in job.job_spec and "view_uuid" not in job.job_spec for job in jobs)
+    assert all(
+        job.run_spec_hash == response.get_json()["run"]["run_spec_hash"]
+        for job in jobs
+    )
 
 
 def test_submission_snapshots_server_side_scheduling_entitlement(client, monkeypatch) -> None:
@@ -467,6 +471,30 @@ def test_submission_snapshots_server_side_scheduling_entitlement(client, monkeyp
     assert job.entitlement.priority_class == "high"
     assert job.entitlement.weight == 2.0
     assert job.entitlement.max_concurrency == 2
+
+
+def test_submission_payload_cannot_write_terminal_assurance(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+        "terminal_assurance": {
+            "disposition": "trusted",
+            "policy_hash": "forged",
+        },
+    })
+
+    assert response.status_code == 202
+    job = JobRepository().list(
+        owner="alice",
+        run_id=response.get_json()["run_id"],
+    )[0]
+    assert job.terminal_assurance is None
+    assert job.summary()["has_terminal_assurance"] is False
+    assert "terminal_assurance" not in job.summary()
 
 
 def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monkeypatch) -> None:

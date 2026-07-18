@@ -8,6 +8,7 @@ from tools.cli.app import cli
 from tools.cli.client import FactorTesterClient
 from tools.cli.commands import agent_flow as agent_flow_commands
 from tools.cli.commands import research_graph as commands
+from tools.cli.http import HttpClientError
 
 
 class FakeClient:
@@ -679,11 +680,33 @@ def test_agent_flow_client_is_a_thin_http_adapter() -> None:
     ]
 
 
-def test_research_graph_backend_assurance_commands(monkeypatch) -> None:
-    fake = FakeClient()
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+def test_research_graph_backend_assurance_commands_are_deprecated(
+    monkeypatch,
+) -> None:
+    class GoneSession:
+        def post(self, path, payload):
+            raise HttpClientError(
+                410,
+                f"http://test{path}",
+                '{"error":"retired"}',
+            )
+
+    monkeypatch.setattr(
+        commands,
+        "client_from_config",
+        lambda: FactorTesterClient(GoneSession()),
+    )
     runner = CliRunner()
 
+    graph_help = runner.invoke(cli, ["research-graph", "--help"])
+    assure_help = runner.invoke(
+        cli,
+        ["research-graph", "backend-assure", "--help"],
+    )
+    verify_help = runner.invoke(
+        cli,
+        ["research-graph", "backend-verify", "--help"],
+    )
     assured = runner.invoke(cli, [
         "research-graph", "backend-assure", "job-1",
         "--instance-id", "instance-1",
@@ -697,7 +720,13 @@ def test_research_graph_backend_assurance_commands(monkeypatch) -> None:
         "--evidence-ref", "artifact:verification-1",
     ])
 
-    assert assured.exit_code == 0, assured.output
-    assert '"requires_verifier": false' in assured.output
-    assert verified.exit_code == 0, verified.output
-    assert '"verifier_execution_id": "verifier-1"' in verified.output
+    assert graph_help.exit_code == 0
+    for command_name in ("backend-assure", "backend-verify"):
+        assert command_name in graph_help.output
+    assert graph_help.output.count("(DEPRECATED)") >= 7
+    for result in (assure_help, verify_help, assured, verified):
+        assert "job show/detail" in result.output
+        assert "evidence.terminal_assurance" in result.output
+        assert "Maintenance Case" in result.output
+    assert assured.exit_code == 1
+    assert verified.exit_code == 1

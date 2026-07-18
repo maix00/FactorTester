@@ -280,12 +280,16 @@ def _succeeded_job(
     workspace_id: str,
     worker_exitcode: int = 0,
 ) -> dict:
+    run_spec = {
+        "workspace_id": workspace_id,
+        "factor": "test-factor",
+    }
     run = research_runs.create_run(
         owner="alice",
         workspace_id=workspace_id,
         configuration_id=uuid.uuid4().hex,
         configuration_revision=1,
-        run_spec={"workspace_id": workspace_id, "factor": "test-factor"},
+        run_spec=run_spec,
     )
     repository = JobRepository()
     job = repository.create(JobRecord(
@@ -297,7 +301,12 @@ def _succeeded_job(
         status=JobStatus.SUBMITTED,
         source_revision="test-backend-revision",
         runner_path="test:runner",
-        job_spec={"run_id": run["run_id"], "workspace_id": workspace_id},
+        job_spec={
+            "run_id": run["run_id"],
+            "workspace_id": workspace_id,
+            "run_spec": run_spec,
+        },
+        run_spec_hash=run["run_spec_hash"],
     ))
     repository.transition(job.job_id, JobStatus.PLANNING)
     repository.set_execution_plan(
@@ -781,15 +790,12 @@ def test_human_authorization_rejects_forged_adapter_attestation(
         )
 
 
-def test_backend_assurance_trusted_path_is_compact_and_uses_no_agent(
-    tmp_path,
-    monkeypatch,
+def test_terminal_job_owns_trusted_assurance_without_graph_agent(
+    client,
 ) -> None:
-    _initialize_graph_db(tmp_path, monkeypatch)
     workspace_id = f"assurance-{uuid.uuid4().hex}"
     instance = _active_instance(workspace_id=workspace_id)
     job = _succeeded_job(workspace_id=workspace_id)["job"]
-    branch = instance["branches"][0]
     flow_store = agent_flow.get_store()
     agent_id = f"instance:{instance['instance_id']}"
     before = flow_store.count_invocations(
@@ -797,19 +803,12 @@ def test_backend_assurance_trusted_path_is_compact_and_uses_no_agent(
         agent_id=agent_id,
     )
 
-    receipt = research_graphs.evaluate_backend_assurance(
-        owner_user_id="alice",
-        job_id=job.job_id,
-        instance_id=instance["instance_id"],
-        branch_id=branch["branch_id"],
-        node_id=branch["current_node"],
-    )
+    response = client.get(f"/api/jobs/{job.job_id}")
+    assurance = response.get_json()["evidence"]["terminal_assurance"]
 
-    assert receipt["disposition"] == "trusted"
-    assert receipt["requires_verifier"] is False
-    assert receipt["next_action"] == "continue"
-    assert receipt["anomaly_codes"] == []
-    assert receipt["receipt_bytes"] <= 1024
+    assert response.status_code == 200
+    assert assurance["disposition"] == "trusted"
+    assert assurance["anomaly_codes"] == []
     after = flow_store.count_invocations(
         owner_user_id="alice",
         agent_id=agent_id,
@@ -817,111 +816,90 @@ def test_backend_assurance_trusted_path_is_compact_and_uses_no_agent(
     assert after == before
 
 
-def test_backend_assurance_launches_one_independent_verifier_only_on_anomaly(
+def test_terminal_job_anomaly_opens_one_maintenance_case(
     tmp_path,
     monkeypatch,
 ) -> None:
     _initialize_graph_db(tmp_path, monkeypatch)
     workspace_id = f"assurance-anomaly-{uuid.uuid4().hex}"
-    instance = _active_instance(workspace_id=workspace_id)
-    implementation = _agent_execution(
-        "implementation_agent",
-        principal_label="implementation-principal",
-        lineage_label="implementation-lineage",
-    )
     job = _succeeded_job(
         workspace_id=workspace_id,
         worker_exitcode=1,
     )["job"]
-    branch = instance["branches"][0]
+    terminal = JobRepository().require(job.job_id, owner="alice")
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        cases = conn.execute(
+            """
+            SELECT * FROM research_maintenance_cases
+            WHERE owner_user_id='alice'
+            """
+        ).fetchall()
 
-    receipt = research_graphs.evaluate_backend_assurance(
-        owner_user_id="alice",
-        job_id=job.job_id,
-        instance_id=instance["instance_id"],
-        branch_id=branch["branch_id"],
-        node_id=branch["current_node"],
-        implementation_execution_id=implementation["execution_id"],
+    assert terminal.terminal_assurance is not None
+    assert terminal.terminal_assurance.disposition == "maintenance_required"
+    assert "succeeded_after_worker_crash" in (
+        terminal.terminal_assurance.anomaly_codes
+    )
+    assert len(cases) == 1
+    assert f"job:{job.job_id}" in orjson.loads(
+        cases[0]["affected_refs_json"]
     )
 
-    assert receipt["disposition"] == "verifier_required"
-    assert receipt["requires_verifier"] is True
-    assert receipt["next_action"] == "launch_one_backend_verifier"
-    assert receipt["anomaly_codes"] == ["succeeded_without_zero_exit"]
-    same_lineage_verifier = _agent_execution(
-        "backend_verifier",
-        lineage_label="implementation-lineage",
-    )
-    with pytest.raises(ValueError, match="principal and lineage"):
-        research_graphs.record_backend_assurance_verification(
-            owner_user_id="alice",
-            receipt_id=receipt["receipt_id"],
-            verifier_execution_id=same_lineage_verifier["execution_id"],
-            disposition="backend_change_proposed",
-            evidence_refs=["test:exitcode-anomaly"],
-        )
 
-    verifier = _agent_execution("backend_verifier")
-    verified = research_graphs.record_backend_assurance_verification(
-        owner_user_id="alice",
-        receipt_id=receipt["receipt_id"],
-        verifier_execution_id=verifier["execution_id"],
-        disposition="backend_change_proposed",
-        evidence_refs=["test:exitcode-anomaly"],
-    )
-    assert verified["requires_verifier"] is False
-    assert verified["verifier_disposition"] == "backend_change_proposed"
-    assert (
-        verified["next_action"]
-        == "route_capability_gap_and_propose_change"
-    )
-    with pytest.raises(ValueError, match="already verified"):
-        research_graphs.record_backend_assurance_verification(
-            owner_user_id="alice",
-            receipt_id=receipt["receipt_id"],
-            verifier_execution_id=_agent_execution(
-                "backend_verifier"
-            )["execution_id"],
-            disposition="confirmed_reliable",
-            evidence_refs=["test:duplicate-verifier"],
-        )
-
-
-def test_backend_assurance_http_rejects_nonterminal_job(
-    client,
-) -> None:
-    workspace_id = f"http-assurance-{uuid.uuid4().hex}"
-    instance = _active_instance(workspace_id=workspace_id)
-    run = research_runs.create_run(
-        owner="alice",
-        workspace_id=workspace_id,
-        configuration_id=uuid.uuid4().hex,
-        configuration_revision=1,
-        run_spec={"workspace_id": workspace_id},
-    )
-    job = JobRepository().create(JobRecord(
-        job_id=uuid.uuid4().hex,
-        run_id=run["run_id"],
-        owner="alice",
-        workspace_id=workspace_id,
-        kind="backtest",
-        status=JobStatus.SUBMITTED,
-        job_spec={"run_id": run["run_id"]},
-    ))
-    branch = instance["branches"][0]
-
-    response = client.post(
+@pytest.mark.parametrize(
+    "path",
+    [
         "/api/research-backend-assurance/evaluate",
-        json={
-            "job_id": job.job_id,
-            "instance_id": instance["instance_id"],
-            "branch_id": branch["branch_id"],
-            "node_id": branch["current_node"],
-        },
-    )
+        "/api/research-backend-assurance/legacy/verification",
+    ],
+)
+def test_backend_assurance_legacy_posts_point_to_job_evidence_and_case(
+    client,
+    path,
+) -> None:
+    response = client.post(path, json={})
 
-    assert response.status_code == 409
-    assert "terminal job" in response.get_json()["error"]
+    payload = response.get_json()
+    assert response.status_code == 410
+    assert payload["replacement"]["job_evidence"] == (
+        "GET /api/jobs/<job_id> -> evidence.terminal_assurance"
+    )
+    assert payload["replacement"]["verification"] == "MaintenanceCase"
+
+
+def test_graph_schema_refuses_unmigrated_backend_assurance_receipts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        Settings,
+        "CACHE_DB_PATH",
+        tmp_path / "legacy-receipt.sqlite",
+    )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE research_backend_assurance_receipts (
+                receipt_id TEXT PRIMARY KEY
+            )
+            """
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="migrate_backend_assurance",
+    ):
+        research_graphs.ensure_schema()
+
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        old_table = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type='table'
+              AND name='research_backend_assurance_receipts'
+            """
+        ).fetchone()
+    assert old_table is not None
 
 
 def test_graph_request_paths_do_not_run_schema_ddl(

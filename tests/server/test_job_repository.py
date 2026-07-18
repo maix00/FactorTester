@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import time
+from dataclasses import replace
 
+import orjson
 import pytest
 
+from server.jobs.assurance import BackendAssuranceValidator
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
+from tools.data.sqlite.db import connect_sqlite
 
 
 def _record(
@@ -17,6 +22,7 @@ def _record(
     status: JobStatus = JobStatus.SUBMITTED,
     step_mode: bool = False,
 ) -> JobRecord:
+    run_spec = {"workspace_id": "workspace-1", "products": ["A.DCE"]}
     return JobRecord(
         job_id=job_id,
         run_id="run-1",
@@ -28,7 +34,14 @@ def _record(
         deployment_id="issue-135",
         source_revision="abc123",
         runner_path="tests.server.long_lived_worker_fakes:cpu_runner",
-        job_spec={"run_id": "run-1", "products": ["A.DCE"]},
+        job_spec={
+            "run_id": "run-1",
+            "products": ["A.DCE"],
+            "run_spec": run_spec,
+        },
+        run_spec_hash=hashlib.sha256(
+            orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
+        ).hexdigest(),
         created_at=time.time(),
     )
 
@@ -75,6 +88,14 @@ def test_repository_schema_contains_only_durable_job_facts(tmp_path) -> None:
     assert "initiator_page_uuid" not in columns
     assert "lifecycle_policy" not in columns
     assert {"job_spec_json", "job_spec_hash"} <= columns
+    assert {"run_spec_hash", "terminal_assurance_json"} <= columns
+
+
+def test_repository_rejects_bypassing_terminalization_on_create(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+
+    with pytest.raises(ValueError, match="terminal jobs must use transition"):
+        repository.create(_record("bypass", status=JobStatus.SUCCEEDED))
 
 
 def test_repository_initializes_schema_once_per_instance(tmp_path, monkeypatch) -> None:
@@ -95,6 +116,24 @@ def test_repository_initializes_schema_once_per_instance(tmp_path, monkeypatch) 
     )
 
     assert len(calls) == 1
+
+
+def test_schema_upgrade_backfills_active_job_run_spec_hash(tmp_path) -> None:
+    path = tmp_path / "jobs.sqlite"
+    original = JobRepository(path)
+    original.create(replace(_record("legacy-active"), run_spec_hash=""))
+    assert original.require("legacy-active").run_spec_hash == ""
+
+    upgraded = JobRepository(path)
+    loaded = upgraded.require("legacy-active")
+
+    assert loaded.run_spec_hash == hashlib.sha256(
+        orjson.dumps(
+            loaded.job_spec["run_spec"],
+            option=orjson.OPT_SORT_KEYS,
+        )
+    ).hexdigest()
+    assert loaded.terminal_assurance is None
 
 
 def test_repository_freezes_plan_and_enforces_transitions(tmp_path) -> None:
@@ -136,6 +175,308 @@ def test_repository_freezes_plan_and_enforces_transitions(tmp_path) -> None:
         repository.transition(succeeded.job_id, JobStatus.RUNNING)
 
 
+def test_successful_terminalization_persists_trusted_assurance(tmp_path) -> None:
+    run_spec = {"workspace_id": "workspace-1", "factor": "momentum"}
+    run_spec_hash = hashlib.sha256(
+        orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
+    ).hexdigest()
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    created = repository.create(JobRecord(
+        job_id="assured",
+        run_id="run-assured",
+        owner="alice",
+        workspace_id="workspace-1",
+        kind="backtest",
+        status=JobStatus.SUBMITTED,
+        source_revision="backend-revision-1",
+        runner_path="tests.server.long_lived_worker_fakes:cpu_runner",
+        job_spec={"run_id": "run-assured", "run_spec": run_spec},
+        run_spec_hash=run_spec_hash,
+    ))
+    repository.transition(created.job_id, JobStatus.PLANNING)
+    repository.set_execution_plan(
+        created.job_id,
+        plan={"runner": created.runner_path, "steps": ["compute"]},
+        notices=[],
+        requires_confirmation=False,
+    )
+    repository.transition(created.job_id, JobStatus.RUNNING)
+
+    completed = repository.transition(
+        created.job_id,
+        JobStatus.SUCCEEDED,
+        expected=JobStatus.RUNNING,
+        result_summary={"success": True, "sharpe": 1.2},
+    )
+
+    assert completed.worker_exitcode is None
+    assert completed.terminal_assurance is not None
+    assert completed.terminal_assurance.disposition == "trusted"
+    assert completed.terminal_assurance.anomaly_codes == ()
+    assert completed.terminal_assurance.run_spec_hash == run_spec_hash
+    assert completed.terminal_assurance.backend_revision == "backend-revision-1"
+
+
+def test_ordinary_planning_failure_is_not_usable_without_maintenance(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    created = repository.create(_record("planning-failed"))
+    repository.transition(
+        created.job_id,
+        JobStatus.PLANNING,
+        expected=JobStatus.SUBMITTED,
+    )
+
+    failed = repository.transition(
+        created.job_id,
+        JobStatus.FAILED,
+        expected=JobStatus.PLANNING,
+        error={"code": "invalid_research_input", "message": "factor is invalid"},
+    )
+
+    assert failed.terminal_assurance is not None
+    assert failed.terminal_assurance.disposition == "not_usable"
+    assert (
+        "execution_plan_missing_or_changed"
+        in failed.terminal_assurance.anomaly_codes
+    )
+    with connect_sqlite(tmp_path / "jobs.sqlite") as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_maintenance_cases"
+        ).fetchone()[0] == 0
+
+
+def test_succeeded_assurance_anomaly_opens_one_case_in_terminal_transaction(
+    tmp_path,
+) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    created = repository.create(JobRecord(
+        **{
+            **_record("unattested-success").__dict__,
+            "source_revision": "",
+        }
+    ))
+    repository.transition(created.job_id, JobStatus.PLANNING)
+    repository.set_execution_plan(
+        created.job_id,
+        plan={"products": ["A.DCE"]},
+        notices=[],
+        requires_confirmation=False,
+    )
+    repository.transition(created.job_id, JobStatus.RUNNING)
+
+    completed = repository.transition(
+        created.job_id,
+        JobStatus.SUCCEEDED,
+        result_summary={"success": True},
+    )
+
+    assert completed.terminal_assurance is not None
+    assert completed.terminal_assurance.disposition == "maintenance_required"
+    with connect_sqlite(tmp_path / "jobs.sqlite") as conn:
+        case = conn.execute(
+            "SELECT * FROM research_maintenance_cases"
+        ).fetchone()
+    assert case is not None
+    assert case["owner_user_id"] == "alice"
+    assert case["kind"] == "backend_anomaly"
+
+
+def test_success_without_backend_revision_requires_maintenance(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.create(replace(_record("unattested-success"), source_revision=""))
+    repository.transition("unattested-success", JobStatus.PLANNING)
+    repository.set_execution_plan(
+        "unattested-success",
+        plan={"products": ["A.DCE"]},
+        notices=[],
+        requires_confirmation=False,
+    )
+    repository.transition("unattested-success", JobStatus.RUNNING)
+
+    completed = repository.transition(
+        "unattested-success",
+        JobStatus.SUCCEEDED,
+        result_summary={"success": True},
+    )
+
+    assert completed.terminal_assurance is not None
+    assert completed.terminal_assurance.disposition == "maintenance_required"
+    assert (
+        "backend_revision_unattested"
+        in completed.terminal_assurance.anomaly_codes
+    )
+
+
+def test_artifact_manifest_hash_is_independent_of_arrival_order(tmp_path) -> None:
+    hashes = []
+    for job_id, names in (
+        ("artifact-order-a", ("zeta", "alpha")),
+        ("artifact-order-b", ("alpha", "zeta")),
+    ):
+        repository = JobRepository(tmp_path / f"{job_id}.sqlite")
+        repository.create(_record(job_id))
+        repository.transition(job_id, JobStatus.PLANNING)
+        repository.set_execution_plan(
+            job_id,
+            plan={"products": ["A.DCE"]},
+            notices=[],
+            requires_confirmation=False,
+        )
+        repository.transition(job_id, JobStatus.RUNNING)
+        for name in names:
+            repository.record_artifact(
+                job_id=job_id,
+                name=name,
+                relative_path=f"{job_id}/{name}.json",
+                content_type="application/json",
+                content_hash=hashlib.sha256(name.encode()).hexdigest(),
+                size_bytes=len(name),
+            )
+        completed = repository.transition(
+            job_id,
+            JobStatus.SUCCEEDED,
+            result_summary={"success": True},
+        )
+        assert completed.terminal_assurance is not None
+        hashes.append(completed.terminal_assurance.artifact_manifest_hash)
+
+    assert hashes[0] == hashes[1]
+
+
+def test_terminal_artifact_manifest_is_immutable(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.create(_record("immutable-artifacts"))
+    repository.transition("immutable-artifacts", JobStatus.PLANNING)
+    repository.set_execution_plan(
+        "immutable-artifacts",
+        plan={"products": ["A.DCE"]},
+        notices=[],
+        requires_confirmation=False,
+    )
+    repository.transition("immutable-artifacts", JobStatus.RUNNING)
+    repository.record_artifact(
+        job_id="immutable-artifacts",
+        name="result",
+        relative_path="immutable-artifacts/result.json",
+        content_type="application/json",
+        content_hash="a" * 64,
+        size_bytes=10,
+    )
+    completed = repository.transition(
+        "immutable-artifacts",
+        JobStatus.SUCCEEDED,
+        result_summary={"success": True},
+    )
+
+    with pytest.raises(ValueError, match="artifacts are immutable"):
+        repository.record_artifact(
+            job_id="immutable-artifacts",
+            name="late",
+            relative_path="immutable-artifacts/late.json",
+            content_type="application/json",
+            content_hash="b" * 64,
+            size_bytes=12,
+        )
+
+    assert repository.require(
+        "immutable-artifacts"
+    ).terminal_assurance == completed.terminal_assurance
+
+
+def test_terminal_assurance_keeps_the_policy_used_at_completion(tmp_path) -> None:
+    path = tmp_path / "jobs.sqlite"
+    original_validator = BackendAssuranceValidator({
+        "policy_id": "backend-assurance@test-original",
+        "checks": ["terminal_state"],
+    })
+    repository = JobRepository(path, assurance_validator=original_validator)
+    repository.create(_record("historical-policy"))
+    repository.transition("historical-policy", JobStatus.PLANNING)
+    repository.set_execution_plan(
+        "historical-policy",
+        plan={"products": ["A.DCE"]},
+        notices=[],
+        requires_confirmation=False,
+    )
+    repository.transition("historical-policy", JobStatus.RUNNING)
+    completed = repository.transition(
+        "historical-policy",
+        JobStatus.SUCCEEDED,
+        result_summary={"success": True},
+    )
+
+    upgraded_repository = JobRepository(
+        path,
+        assurance_validator=BackendAssuranceValidator({
+            "policy_id": "backend-assurance@test-upgraded",
+            "checks": ["terminal_state", "new_check"],
+        }),
+    )
+    historical = upgraded_repository.require("historical-policy")
+
+    assert completed.terminal_assurance is not None
+    assert historical.terminal_assurance is not None
+    assert (
+        historical.terminal_assurance.policy_hash
+        == completed.terminal_assurance.policy_hash
+        == original_validator.policy_hash
+    )
+    assert (
+        historical.terminal_assurance.policy_hash
+        != upgraded_repository.assurance_validator.policy_hash
+    )
+
+
+def test_terminalization_has_two_canonical_reads_and_one_job_write(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.create(_record("traced-terminal"))
+    repository.transition("traced-terminal", JobStatus.PLANNING)
+    repository.set_execution_plan(
+        "traced-terminal",
+        plan={"products": ["A.DCE"]},
+        notices=[],
+        requires_confirmation=False,
+    )
+    repository.transition("traced-terminal", JobStatus.RUNNING)
+    statements: list[str] = []
+
+    def traced_connect(*args, **kwargs):
+        connection = connect_sqlite(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(
+        "server.jobs.repository.sqlite.connect_sqlite",
+        traced_connect,
+    )
+    repository.transition(
+        "traced-terminal",
+        JobStatus.SUCCEEDED,
+        expected=JobStatus.RUNNING,
+        result_summary={"success": True},
+    )
+
+    normalized = [" ".join(statement.split()) for statement in statements]
+    reads = [
+        statement for statement in normalized
+        if statement.upper().startswith("SELECT")
+    ]
+    writes = [
+        statement for statement in normalized
+        if statement.upper().startswith("UPDATE RESEARCH_JOBS")
+    ]
+    assert len(reads) == 2
+    assert len(writes) == 1
+    assert "RETURNING *" in writes[0].upper()
+    assert all(
+        "research_backend_assurance_receipts" not in statement
+        for statement in normalized
+    )
+
+
 def test_repository_allows_one_step_job_and_one_replaceable_pin_per_user(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     repository.create(_record("step-1", step_mode=True))
@@ -172,6 +513,8 @@ def test_cancel_is_immediate_before_running_and_durable_while_running(tmp_path) 
     )
     assert cancelled.status is JobStatus.CANCELLED
     assert cancelled.cancel_reason == "explicit_cancel"
+    assert cancelled.terminal_assurance is not None
+    assert cancelled.terminal_assurance.disposition == "not_usable"
 
     repository.create(_record("running"))
     repository.transition("running", JobStatus.PLANNING)
@@ -179,11 +522,34 @@ def test_cancel_is_immediate_before_running_and_durable_while_running(tmp_path) 
         "running", plan={"products": []}, notices=[], requires_confirmation=False
     )
     repository.transition("running", JobStatus.RUNNING)
+    assert repository.require("running").terminal_assurance is None
     requested = repository.request_cancel(
         "running", owner="alice", reason="explicit_cancel"
     )
     assert requested.status is JobStatus.RUNNING
     assert requested.cancel_requested_at is not None
+    assert requested.terminal_assurance is None
+
+
+@pytest.mark.parametrize("stage", ["submitted", "planning"])
+def test_early_cancel_always_persists_not_usable_assurance(
+    tmp_path,
+    stage,
+) -> None:
+    repository = JobRepository(tmp_path / f"{stage}.sqlite")
+    repository.create(_record(stage))
+    if stage == "planning":
+        repository.transition(stage, JobStatus.PLANNING)
+
+    cancelled = repository.request_cancel(
+        stage,
+        owner="alice",
+        reason="explicit_cancel",
+    )
+
+    assert cancelled.status is JobStatus.CANCELLED
+    assert cancelled.terminal_assurance is not None
+    assert cancelled.terminal_assurance.disposition == "not_usable"
 
 
 def test_repository_tracks_artifact_metadata_and_user_storage_quota(tmp_path) -> None:

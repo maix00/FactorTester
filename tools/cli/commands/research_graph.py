@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 
 from tools.cli.core.context import client_from_config
+from tools.cli.core.errors import friendly_errors
 
 
 def _json(value) -> str:
@@ -380,13 +381,14 @@ def authorize_activation(
     ))
 
 
-@research_graph.command("backend-assure")
+@research_graph.command("backend-assure", deprecated=True)
 @click.argument("job_id")
 @click.option("--instance-id", required=True)
 @click.option("--branch-id", required=True)
 @click.option("--node-id", required=True)
 @click.option("--policy-hash", default="")
 @click.option("--implementation-execution-id", default="")
+@friendly_errors
 def assure_backend(
     job_id: str,
     instance_id: str,
@@ -395,7 +397,10 @@ def assure_backend(
     policy_hash: str,
     implementation_execution_id: str,
 ) -> None:
-    """零 Agent 检查终态 job；仅异常时返回 verifier 请求。"""
+    """已退役；请使用 job show/detail 的 evidence.terminal_assurance。
+
+    异常证据未来将进入 Maintenance Case workflow。
+    """
     click.echo(_json(client_from_config().evaluate_backend_assurance(
         job_id=job_id,
         instance_id=instance_id,
@@ -406,7 +411,7 @@ def assure_backend(
     )))
 
 
-@research_graph.command("backend-verify")
+@research_graph.command("backend-verify", deprecated=True)
 @click.argument("receipt_id")
 @click.option("--verifier-execution-id", required=True)
 @click.option(
@@ -419,13 +424,17 @@ def assure_backend(
     required=True,
 )
 @click.option("--evidence-ref", "evidence_refs", multiple=True, required=True)
+@friendly_errors
 def verify_backend(
     receipt_id: str,
     verifier_execution_id: str,
     disposition: str,
     evidence_refs: tuple[str, ...],
 ) -> None:
-    """记录唯一异常 verifier 的有界结论。"""
+    """已退役；请使用 job show/detail 的 evidence.terminal_assurance。
+
+    异常证据未来将进入 Maintenance Case workflow。
+    """
     click.echo(_json(client_from_config().verify_backend_assurance(
         receipt_id,
         verifier_execution_id=verifier_execution_id,

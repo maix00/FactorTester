@@ -145,6 +145,13 @@ def get_test_job(job_id: str):
         "execution_plan": job.execution_plan,
         "result_summary": job.result_summary,
         "error": job.error,
+        "evidence": {
+            "terminal_assurance": (
+                job.terminal_assurance.to_dict()
+                if job.terminal_assurance is not None
+                else None
+            ),
+        },
         **_urls(job.job_id),
     })
 
@@ -381,6 +388,7 @@ def retry_test_job(job_id: str):
         source_revision=old.source_revision,
         runner_path=old.runner_path,
         job_spec=deepcopy(old.job_spec),
+        run_spec_hash=old.run_spec_hash,
         entitlement=old.entitlement,
         created_at=time.time(),
     ))

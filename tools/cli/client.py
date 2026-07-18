@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from .http import HttpSession
+from .http import HttpClientError, HttpSession
+
+
+BACKEND_ASSURANCE_RETIREMENT_GUIDANCE = (
+    "backend-assure/backend-verify are deprecated and are no longer canonical "
+    "research steps. Use job show/detail and inspect "
+    "evidence.terminal_assurance; anomalous evidence will move to a future "
+    "Maintenance Case workflow."
+)
 
 
 class FactorTesterClient:
@@ -395,10 +403,18 @@ class FactorTesterClient:
             payload["implementation_execution_id"] = (
                 implementation_execution_id
             )
-        data = self._expect_success(self.session.post(
-            "/api/research-backend-assurance/evaluate",
-            payload,
-        ))
+        try:
+            response = self.session.post(
+                "/api/research-backend-assurance/evaluate",
+                payload,
+            )
+        except HttpClientError as exc:
+            if exc.status == 410:
+                raise RuntimeError(
+                    BACKEND_ASSURANCE_RETIREMENT_GUIDANCE
+                ) from None
+            raise
+        data = self._expect_success(response)
         return dict(data.get("assurance") or {})
 
     def verify_backend_assurance(
@@ -409,14 +425,22 @@ class FactorTesterClient:
         disposition: str,
         evidence_refs: list[str],
     ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            f"/api/research-backend-assurance/{receipt_id}/verification",
-            {
-                "verifier_execution_id": verifier_execution_id,
-                "disposition": disposition,
-                "evidence_refs": evidence_refs,
-            },
-        ))
+        try:
+            response = self.session.post(
+                f"/api/research-backend-assurance/{receipt_id}/verification",
+                {
+                    "verifier_execution_id": verifier_execution_id,
+                    "disposition": disposition,
+                    "evidence_refs": evidence_refs,
+                },
+            )
+        except HttpClientError as exc:
+            if exc.status == 410:
+                raise RuntimeError(
+                    BACKEND_ASSURANCE_RETIREMENT_GUIDANCE
+                ) from None
+            raise
+        data = self._expect_success(response)
         return dict(data.get("assurance") or {})
 
     def rollback_research_graph(
