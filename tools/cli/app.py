@@ -9,6 +9,7 @@ from tools.cli.commands.auth import configure, login, logout
 from tools.cli.commands.navigation import list_modules
 from tools.cli.commands.settings import describe, edit
 from tools.cli.commands.research import external_factor, job, run, workspace
+from tools.cli.commands.research_graph import research_graph
 from tools.cli.modules.registry import register_cli_modules
 
 
@@ -45,6 +46,7 @@ cli.add_command(workspace)
 cli.add_command(external_factor)
 cli.add_command(run)
 cli.add_command(job)
+cli.add_command(research_graph)
 register_cli_modules(cli)
 
 

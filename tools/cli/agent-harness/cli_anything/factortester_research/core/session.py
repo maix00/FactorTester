@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -29,6 +30,8 @@ class ResearchSession:
     gaps: list[dict[str, Any]] = field(default_factory=list)
     factor_source: dict[str, Any] = field(default_factory=dict)
     hypotheses_tested: int = 0
+    skill_usage: list[dict[str, Any]] = field(default_factory=list)
+    evidence_envelopes: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ResearchSession":
@@ -44,6 +47,8 @@ class ResearchSession:
             gaps=list(payload.get("gaps") or []),
             factor_source=dict(payload.get("factor_source") or {}),
             hypotheses_tested=int(payload.get("hypotheses_tested") or 0),
+            skill_usage=list(payload.get("skill_usage") or []),
+            evidence_envelopes=list(payload.get("evidence_envelopes") or []),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -59,6 +64,8 @@ class ResearchSession:
             "gaps": self.gaps,
             "factor_source": self.factor_source,
             "hypotheses_tested": self.hypotheses_tested,
+            "skill_usage": self.skill_usage,
+            "evidence_envelopes": self.evidence_envelopes,
         }
 
 
@@ -93,6 +100,85 @@ def save_session(session: ResearchSession, path: str | os.PathLike[str] = DEFAUL
 def record_event(session: ResearchSession, event: str, **payload: Any) -> dict[str, Any]:
     row = {"time": utc_now(), "event": event, **payload}
     session.events.append(row)
+    return row
+
+
+def _sha256_json(value: dict[str, Any]) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def record_skill_usage(
+    session: ResearchSession,
+    *,
+    capability_description: str,
+    descriptor_hash: str,
+    skill_name: str,
+    skill_description: str,
+    provider: str,
+    version: str,
+    source_fingerprint: str,
+    approval_ref: str,
+    load_mode: str,
+    matching_rationale: str,
+    skill_document_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> dict[str, Any]:
+    """Append a tamper-evident local-only Skill usage audit record."""
+    text_fields = {
+        "capability_description": capability_description,
+        "skill_name": skill_name,
+        "skill_description": skill_description,
+        "provider": provider,
+        "version": version,
+        "source_fingerprint": source_fingerprint,
+        "approval_ref": approval_ref,
+        "matching_rationale": matching_rationale,
+    }
+    for field, value in text_fields.items():
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Skill usage requires {field}")
+    for field, value in (
+        ("descriptor_hash", descriptor_hash),
+        ("source_fingerprint", source_fingerprint),
+    ):
+        if len(value) != 64 or any(
+            character not in "0123456789abcdef" for character in value
+        ):
+            raise ValueError(f"Skill usage {field} must be sha256")
+    if load_mode not in {"loaded", "reused"}:
+        raise ValueError("Skill usage load_mode must be loaded or reused")
+    for field, value in (
+        ("skill_document_tokens", skill_document_tokens),
+        ("cache_read_tokens", cache_read_tokens),
+    ):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"Skill usage {field} must be non-negative")
+    if load_mode == "reused" and skill_document_tokens:
+        raise ValueError(
+            "reused Skill must not report newly loaded document tokens"
+        )
+    previous_hash = (
+        str(session.skill_usage[-1].get("record_hash") or "")
+        if session.skill_usage else ""
+    )
+    row = {
+        "usage_id": f"skill-use-{len(session.skill_usage) + 1}",
+        "time": utc_now(),
+        **text_fields,
+        "descriptor_hash": descriptor_hash,
+        "load_mode": load_mode,
+        "skill_document_tokens": skill_document_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "previous_record_hash": previous_hash,
+    }
+    row["record_hash"] = _sha256_json(row)
+    session.skill_usage.append(row)
     return row
 
 

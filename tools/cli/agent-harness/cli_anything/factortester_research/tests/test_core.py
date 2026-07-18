@@ -1,21 +1,413 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
+from cli_anything.factortester_research.core.capabilities import (
+    load_builtin_capability_registry,
+    resolve_graph_capabilities,
+)
 from cli_anything.factortester_research.core.plan import build_factor_research_plan, validation_checklist
+from cli_anything.factortester_research.core.replay import replay_graph_trace
 from cli_anything.factortester_research.core.external_factor import (
     validate_dataset_manifest,
     validate_factor_manifest,
     validate_handoff_manifest,
     vibe_pipeline_plan,
 )
+from cli_anything.factortester_research.core.evidence import (
+    persist_command_evidence,
+    validate_evidence_envelope,
+)
+from cli_anything.factortester_research.core.graph import (
+    build_draft_graph,
+    build_observed_graph,
+    graph_content_hash,
+    validate_graph,
+)
 from cli_anything.factortester_research.core.service import ManagedWorktree, select_worktree
-from cli_anything.factortester_research.core.session import ResearchSession, record_gap, resolve_gap
+from cli_anything.factortester_research.core.session import (
+    ResearchSession,
+    record_gap,
+    record_skill_usage,
+    resolve_gap,
+)
 from cli_anything.factortester_research.core.slices import default_factor_validation_plan
 
 
 HARNESS_ROOT = Path(__file__).resolve().parents[3]
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def test_observed_graph_distinguishes_advisory_plan_from_enforced_gap_state() -> None:
+    plan = build_factor_research_plan(
+        factor_families=["SgCCS"],
+        configuration_file="configuration.json",
+    )
+    graph = build_observed_graph(plan)
+
+    assert graph["lifecycle"] == "observed"
+    nodes = {item["node_id"]: item for item in graph["nodes"]}
+    assert nodes["inspect_factor_expr_dsl"]["enforcement"] == "advisory"
+    assert nodes["code_improvement_required"]["enforcement"] == "deterministic"
+    assert {
+        (item["from_node"], item["to_node"], item["edge_type"])
+        for item in graph["edges"]
+    } >= {
+        ("inspect_factor_expr_dsl", "prepare_factor_workspace", "recommended"),
+        ("research_ready", "code_improvement_required", "failure"),
+        ("code_improvement_required", "research_ready", "recovery"),
+    }
+
+
+def test_observed_graph_content_hash_is_stable() -> None:
+    plan = build_factor_research_plan(
+        factor_families=["SgCCS"],
+        configuration_file="configuration.json",
+    )
+    first = build_observed_graph(plan)
+    second = build_observed_graph(plan)
+
+    assert graph_content_hash(first) == graph_content_hash(second)
+    assert len(graph_content_hash(first)) == 64
+
+
+def test_graph_validation_rejects_a_dangling_edge() -> None:
+    graph = build_observed_graph(build_factor_research_plan(
+        factor_families=["SgCCS"],
+        configuration_file="configuration.json",
+    ))
+    graph["edges"][0]["to_node"] = "missing-node"
+
+    with pytest.raises(ValueError, match="unknown node"):
+        validate_graph(graph)
+
+
+def test_capability_resolution_reports_available_bindings_and_gaps() -> None:
+    graph = build_observed_graph(build_factor_research_plan(
+        factor_families=["SgCCS"],
+        configuration_file="configuration.json",
+    ))
+    registry = {
+        "schema_version": 1,
+        "catalog_id": "factor-research-capabilities",
+        "capabilities": [{
+            "capability_id": "factor-expr.operator-registry.inspect",
+            "industry_semantics": (
+                "Verify operator availability and causal semantics before "
+                "factor evaluation."
+            ),
+            "when_to_use": ["before evaluating a factor expression"],
+            "preconditions": [],
+            "prohibitions": [],
+            "implementations": [{
+                "implementation_id": "factortester.custom-factors.operators",
+                "provider": "factortester",
+                "kind": "cli",
+                "approval_status": "approved",
+                "execution_mode": "real_backend",
+                "product_scopes": ["china_futures"],
+            }],
+        }],
+    }
+
+    result = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="china_futures",
+        include_all=True,
+    )
+
+    assert result["bindings"][0]["capability_id"] == (
+        "factor-expr.operator-registry.inspect"
+    )
+    assert result["bindings"][0]["implementation_id"] == (
+        "factortester.custom-factors.operators"
+    )
+    assert "factor-workspace.prepare" in {
+        item["capability_id"] for item in result["gaps"]
+    }
+
+
+def test_builtin_registry_distinguishes_backend_guidance_and_product_gaps() -> None:
+    registry = load_builtin_capability_registry()
+    capabilities = {
+        item["capability_id"]: item for item in registry["capabilities"]
+    }
+
+    factor_ic = capabilities["factor-validation.cross-sectional-ic"]
+    implementations = {
+        item["implementation_id"]: item
+        for item in factor_ic["implementations"]
+    }
+    assert implementations["factortester.analysis.ic"]["execution_mode"] == (
+        "real_backend"
+    )
+    assert implementations["vibe.factor-research"]["execution_mode"] == (
+        "guidance_only"
+    )
+    assert implementations["vibe.factor-research"]["approval_status"] == (
+        "quarantined"
+    )
+
+    futures_accounting = capabilities["market-accounting.replay"]
+    assert futures_accounting["prohibitions"]
+    assert any(
+        item["implementation_id"] == "vibe.china-futures-engine"
+        and item["approval_status"] == "quarantined"
+        for item in futures_accounting["implementations"]
+    )
+
+
+def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> None:
+    graph = build_draft_graph()
+    edges = {item["edge_id"]: item for item in graph["edges"]}
+    nodes = {item["node_id"]: item for item in graph["nodes"]}
+
+    assert graph["lifecycle"] == "draft"
+    assert nodes["cheap_factor_diagnostics"]["required_capabilities"] == [
+        "factor-validation.cross-sectional-ic",
+        "factor-validation.quantile-monotonicity",
+    ]
+    assert edges["cheap_diagnostics__statistical_robustness"]["guard"] == {
+        "diagnostics_viable": True,
+        "selection_role": "in_sample",
+    }
+    assert edges["any_node__capability_gap"]["from_node"] == "*"
+    assert nodes["capability_gap"]["required_capabilities"] == [
+        "capability-gap.classify"
+    ]
+    conditional = {
+        item["capability_id"]
+        for item in nodes["factor_semantics"]["conditional_capabilities"]
+    }
+    assert conditional == {
+        "market-microstructure.intraday-diagnose",
+        "factor-combination.multi-factor",
+    }
+
+
+def test_external_skill_execution_requires_an_explicit_grant() -> None:
+    graph = build_draft_graph()
+    graph["nodes"] = [{
+        "node_id": "commodity_hypothesis",
+        "kind": "research",
+        "purpose": "generate a commodity hypothesis",
+        "enforcement": "audited",
+        "required_capabilities": ["hypothesis.commodity-structure"],
+        "entry_evidence": [],
+        "exit_evidence": [],
+    }]
+    graph["edges"] = []
+    registry = load_builtin_capability_registry()
+
+    blocked = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="china_futures",
+        node_id="commodity_hypothesis",
+    )
+    granted = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="china_futures",
+        approved_implementation_ids={"vibe.commodity-analysis"},
+        node_id="commodity_hypothesis",
+    )
+
+    assert blocked["gaps"][0]["capability_id"] == (
+        "hypothesis.commodity-structure"
+    )
+    assert blocked["gaps"][0]["reason"] == "execution_approval_required"
+    assert blocked["gaps"][0]["candidate_implementation_ids"] == [
+        "vibe.commodity-analysis"
+    ]
+    assert blocked["gaps"][0]["required_by"] == "commodity_hypothesis"
+    assert blocked["gaps"][0]["capability_description"]
+    assert len(blocked["gaps"][0]["descriptor_hash"]) == 64
+    assert granted["bindings"][0]["implementation_id"] == (
+        "vibe.commodity-analysis"
+    )
+
+
+def test_capability_resolution_keeps_conditional_skills_out_of_mandatory_gaps() -> None:
+    graph = build_draft_graph()
+    not_triggered = resolve_graph_capabilities(
+        graph,
+        load_builtin_capability_registry(),
+        product_group="china_futures",
+        facts={
+            "hypothesis": {"origin": "native", "features": ["momentum"]},
+            "research": {"needs_prior_art_dedup": False},
+        },
+    )
+    triggered = resolve_graph_capabilities(
+        build_draft_graph(),
+        load_builtin_capability_registry(),
+        product_group="china_futures",
+        facts={
+            "hypothesis": {
+                "origin": "native",
+                "features": ["inventory", "term_structure"],
+            },
+            "research": {"needs_prior_art_dedup": False},
+        },
+    )
+
+    assert not_triggered["triggered_conditional_bindings"] == []
+    assert not_triggered["triggered_conditional_gaps"] == []
+    triggered_ids = {
+        item["capability_id"]
+        for item in triggered["triggered_conditional_gaps"]
+    }
+    assert triggered_ids == {"hypothesis.commodity-structure"}
+
+
+def test_same_local_resolution_uses_content_addressed_cache() -> None:
+    kwargs = {
+        "product_group": "china_futures",
+        "node_id": "factor_semantics",
+        "facts": {
+            "signal": {"frequency": "DAY1"},
+            "hypothesis": {"features": ["momentum"]},
+            "factor": {"is_multi": False},
+        },
+    }
+    first = resolve_graph_capabilities(
+        build_draft_graph(),
+        load_builtin_capability_registry(),
+        **kwargs,
+    )
+    second = resolve_graph_capabilities(
+        build_draft_graph(),
+        load_builtin_capability_registry(),
+        **kwargs,
+    )
+
+    assert first["cache"]["hit"] is False
+    assert second["cache"] == {
+        "key": first["cache"]["key"],
+        "hit": True,
+    }
+
+
+def test_external_provider_change_invalidates_cache_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "SKILL.md"
+    source.write_text("# Approved skill\n", encoding="utf-8")
+    approved_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    graph = {
+        "entry_node": "research",
+        "nodes": [{
+            "node_id": "research",
+            "required_capabilities": ["research.external"],
+        }],
+        "edges": [],
+    }
+    registry = {
+        "schema_version": 1,
+        "catalog_id": "provider-fingerprint-test",
+        "capabilities": [{
+            "capability_id": "research.external",
+            "industry_semantics": "Use an approved external research method.",
+            "when_to_use": ["when the capability is required"],
+            "preconditions": [],
+            "prohibitions": [],
+            "implementations": [{
+                "implementation_id": "external.skill",
+                "provider": "external",
+                "kind": "skill",
+                "approval_status": "approved",
+                "execution_mode": "guidance_only",
+                "product_scopes": ["all"],
+                "source_path": str(source),
+                "approved_source_sha256": approved_hash,
+            }],
+        }],
+    }
+
+    approved = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="equities",
+    )
+    source.write_text("# Provider changed the skill\n", encoding="utf-8")
+    changed = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="equities",
+    )
+
+    assert approved["bindings"][0]["source_fingerprint"] == approved_hash
+    assert approved["cache"]["hit"] is False
+    assert changed["cache"]["hit"] is False
+    assert changed["cache"]["key"] != approved["cache"]["key"]
+    assert changed["bindings"] == []
+    assert changed["gaps"][0]["reason"] == "provider_fingerprint_mismatch"
+    assert changed["gaps"][0]["expected_sha256"] == approved_hash
+
+
+def test_model_identity_does_not_change_deterministic_resolution() -> None:
+    graph = build_draft_graph()
+    registry = load_builtin_capability_registry()
+    first = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="china_futures",
+        facts={"runtime": {"model_id": "model-a"}},
+    )
+    second = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="china_futures",
+        facts={"runtime": {"model_id": "model-b"}},
+    )
+
+    assert first["semantic_cache_key"] == second["semantic_cache_key"]
+    assert first["bindings"] == second["bindings"]
+    assert first["gaps"] == second["gaps"]
+
+
+def test_historical_preflight_replay_is_non_mutating_and_stops_at_real_gap() -> None:
+    trace = json.loads(
+        (FIXTURES / "historical_preflight_2026_07_16.json").read_text()
+    )
+    before = json.dumps(trace, sort_keys=True)
+
+    report = replay_graph_trace(build_draft_graph(), trace)
+
+    assert json.dumps(trace, sort_keys=True) == before
+    assert report["external_mutations"] == 0
+    assert report["status"] == "expected_block"
+    assert report["branches"]["primary"]["current_node"] == "capability_gap"
+    assert report["branches"]["primary"]["status"] == "paused"
+    assert report["source"]["stale_historical_evidence"] is True
+    assert report["coverage"]["edge_ids"] == [
+        "hypothesis__capability_resolution",
+        "capability_resolution__data_contract",
+        "any_node__capability_gap",
+    ]
+
+
+def test_replay_rejects_an_unsatisfied_guard_without_running_work() -> None:
+    report = replay_graph_trace(build_draft_graph(), {
+        "schema_version": 1,
+        "source": {"expected_outcome": "complete"},
+        "events": [{
+            "type": "transition",
+            "branch_id": "primary",
+            "edge_id": "hypothesis__capability_resolution",
+            "evidence": {"hypothesis_frozen": False},
+        }],
+    })
+
+    assert report["status"] == "failed"
+    assert report["external_mutations"] == 0
+    assert "hypothesis_frozen" in report["errors"][0]
 
 
 def test_plan_uses_one_workspace_run_job_contract() -> None:
@@ -66,6 +458,60 @@ def test_gap_state_machine_blocks_and_resumes_research() -> None:
     assert session.status == "code_improvement_required"
     resolve_gap(session, "gap-1", note="implemented")
     assert session.status == "research_ready"
+
+
+def test_local_skill_usage_ledger_records_identity_and_reuse_without_server() -> None:
+    session = ResearchSession()
+    common = {
+        "capability_description": "Challenge a graph change.",
+        "descriptor_hash": "a" * 64,
+        "skill_name": "grill-me",
+        "skill_description": "Challenge a plan through structured questions.",
+        "provider": "local",
+        "version": "1",
+        "source_fingerprint": "b" * 64,
+        "approval_ref": "audit:skill-execution:17",
+        "matching_rationale": "The capability requires adversarial review.",
+    }
+    loaded = record_skill_usage(
+        session,
+        **common,
+        load_mode="loaded",
+        skill_document_tokens=120,
+    )
+    reused = record_skill_usage(
+        session,
+        **common,
+        load_mode="reused",
+        cache_read_tokens=80,
+    )
+
+    assert loaded["record_hash"]
+    assert reused["previous_record_hash"] == loaded["record_hash"]
+    assert reused["skill_document_tokens"] == 0
+    assert session.to_dict()["skill_usage"][1]["skill_name"] == "grill-me"
+
+
+def test_local_evidence_envelope_keeps_output_behind_hashed_refs(
+    tmp_path: Path,
+) -> None:
+    session_path = tmp_path / "research.json"
+    envelope = persist_command_evidence(
+        session_path=str(session_path),
+        envelope_id="command-1",
+        argv=["factortester", "job", "show", "job-1"],
+        returncode=0,
+        stdout='{"status":"complete"}\n',
+        stderr="",
+        hypotheses_tested=3,
+        stop_condition=None,
+        decision="continue",
+    )
+
+    assert validate_evidence_envelope(envelope)["decision"] == "continue"
+    assert envelope["command"]["stdout_ref"].startswith("local-artifact:")
+    assert '{"status"' not in json.dumps(envelope)
+    assert len(envelope["envelope_hash"]) == 64
 
 
 def test_service_target_selection_requires_unambiguous_worktree() -> None:

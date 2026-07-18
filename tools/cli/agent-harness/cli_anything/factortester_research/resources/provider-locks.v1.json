@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "lock_id": "factor-research-provider-sources",
+  "providers": {
+    "vibe-trading": {
+      "root_env": "VIBE_TRADING_ROOT",
+      "root_hint": "/Users/maxdeux/Documents/Vibe-Trading-Integration/repos/Vibe-Trading",
+      "reviewed_revision": "e494ed06d75a290818be3d4e7a5133484b4d8d7e"
+    }
+  },
+  "implementations": {
+    "vibe.research-goal": {
+      "source_path": "agent/src/skills/research-goal/SKILL.md",
+      "sha256": "eeaf0bb21cbff865616369da85f638a091ad5adc687aad341791ba5569ae635f"
+    },
+    "local.quantitative-research": {
+      "source_path": "quantitative-research/SKILL.md",
+      "root_env": "AGENTS_SKILLS_ROOT",
+      "root_hint": "/Users/maxdeux/.agents/skills",
+      "sha256": "1844cedd18264e9c864a6e56718212e8fd9f8b462d01ef6cf0cf11c7128d75e0"
+    },
+    "vibe.factor-research": {
+      "source_path": "agent/src/skills/factor-research/SKILL.md",
+      "sha256": "df5e90c3fb39c41741314f24487abcbd80a40fe408ac0aa3f772f09bd2e4c880"
+    },
+    "vibe.quant-statistics.bootstrap": {
+      "source_path": "agent/src/skills/quant-statistics/SKILL.md",
+      "sha256": "45f3c6d5cd6f147e9668f39a2903c3023fe1332931627712410ec43922746bab"
+    },
+    "vibe.china-futures-engine": {
+      "source_path": "agent/backtest/engines/china_futures.py",
+      "sha256": "a30785bea4cc1b2dcde36f27ad337b9e37020c54823f7bf7b534c531dc9a6769"
+    },
+    "vibe.performance-attribution": {
+      "source_path": "agent/src/skills/performance-attribution/SKILL.md",
+      "sha256": "434df366d1ed46e9d16be2d2d3be891dd32112a18975a24f0dea81d1c88f0109"
+    },
+    "vibe.risk-analysis": {
+      "source_path": "agent/src/skills/risk-analysis/SKILL.md",
+      "sha256": "b9f4696fe645584e1bc5174f508963066cd5b062ceab21c2b89a1f6e71c4a599"
+    },
+    "vibe.alpha-zoo.registry": {
+      "source_path": "agent/src/tools/alpha_zoo_tool.py",
+      "sha256": "52abdd8bf2f278e78f2dab7fb613c2ccdd3a27159cd4930c923306f1efe0166c"
+    },
+    "vibe.alpha-zoo": {
+      "source_path": "agent/src/skills/alpha-zoo/SKILL.md",
+      "sha256": "38a2168fe94d8516a56224738d038ae23fbc209abdcbc143dfedf8aa092aaa2d"
+    },
+    "vibe.data-routing": {
+      "source_path": "agent/src/skills/data-routing/SKILL.md",
+      "sha256": "cf80d4e531466f45a63eff8fd8b134d2e7524b1b9eb62c4a7953803c2d8d73d5"
+    },
+    "vibe.quant-statistics": {
+      "source_path": "agent/src/skills/quant-statistics/SKILL.md",
+      "sha256": "45f3c6d5cd6f147e9668f39a2903c3023fe1332931627712410ec43922746bab"
+    },
+    "vibe.market-microstructure": {
+      "source_path": "agent/src/skills/market-microstructure/SKILL.md",
+      "sha256": "59fab51b6bea0b5d074e8f256888c3a2fd46a4f243e1e3cef2808aa40bc299c1"
+    },
+    "vibe.minute-analysis": {
+      "source_path": "agent/src/skills/minute-analysis/SKILL.md",
+      "sha256": "07738c13d374acd86430a76fe42c800e7714a77d7263cc280af4ea104aa9f048"
+    },
+    "vibe.multi-factor": {
+      "source_path": "agent/src/skills/multi-factor/SKILL.md",
+      "sha256": "15de8ecafdb65dfe8bfecbdb0e3cb08278fcd5e36f0b5c6e69a2a8dc67e6e80d"
+    },
+    "vibe.execution-model": {
+      "source_path": "agent/src/skills/execution-model/SKILL.md",
+      "sha256": "1d42ba51319d1b241472d8113e53ba2104ef0615e67f8c4fbe0bb9686dbdc900"
+    },
+    "vibe.commodity-analysis": {
+      "source_path": "agent/src/skills/commodity-analysis/SKILL.md",
+      "sha256": "1719e229159831bae3f02a4842b18e9cb9185508b58c7dc9840df0c559b9a517"
+    },
+    "local.diagnose": {
+      "source_path": "diagnose/SKILL.md",
+      "root_env": "AGENTS_SKILLS_ROOT",
+      "root_hint": "/Users/maxdeux/.agents/skills",
+      "sha256": "28886402bbfa0470248086eab9106a103b964b76ae9496e63ff0c8a6761b6d13"
+    },
+    "codex.skill-installer.list-search": {
+      "source_path": "skills/.system/skill-installer/SKILL.md",
+      "root_env": "CODEX_HOME",
+      "root_hint": "/Users/maxdeux/.codex",
+      "sha256": "d68b77e5bbb34dedab89d134da52855f140fc4b4299b80104f534e3b9e98f8ee"
+    },
+    "vibe.skills-loader.metadata": {
+      "source_path": "agent/src/agent/skills.py",
+      "sha256": "698f7946fb8aeb71a4a75f46c1d4e65c2ad9140da9696de940d936690f4a6c7a"
+    },
+    "vibe.load-skill": {
+      "source_path": "agent/src/tools/load_skill_tool.py",
+      "sha256": "c80e2ca961e196461f85586c4273363ceb12a432896536092ba87e8c09477443"
+    },
+    "codex.skill-creator": {
+      "source_path": "skills/.system/skill-creator/SKILL.md",
+      "root_env": "CODEX_HOME",
+      "root_hint": "/Users/maxdeux/.codex",
+      "sha256": "da44c88f6b3845a8fa8c60792ec9a722110a55a9793c279757b48fefb11f819c"
+    },
+    "vibe.skill-writer": {
+      "source_path": "agent/src/tools/skill_writer_tool.py",
+      "sha256": "69379c0cf0e72613354bbccc8bc732a753f2c6a369e58843d4c3158060a51d5c"
+    },
+    "local.grill-me": {
+      "source_path": "grill-me/SKILL.md",
+      "root_env": "AGENTS_SKILLS_ROOT",
+      "root_hint": "/Users/maxdeux/.agents/skills",
+      "sha256": "74147eb6010a65957efef2b9e0f0b3ff935c1def7fc117697151b1d0f3610556"
+    },
+    "vibe.research-discipline": {
+      "source_path": "agent/src/skills/research-discipline/SKILL.md",
+      "sha256": "be1a1297dbb3eeecbed1e8b3fd6898c031c30a2d79ba7a422480a6320c8fd89d"
+    }
+  }
+}

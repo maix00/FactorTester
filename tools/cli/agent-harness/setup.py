@@ -10,7 +10,10 @@ setup(
     packages=find_namespace_packages(include=["cli_anything.*"]),
     include_package_data=True,
     package_data={
-        "cli_anything.factortester_research": ["skills/*.md"],
+        "cli_anything.factortester_research": [
+            "resources/*.json",
+            "skills/*.md",
+        ],
     },
     install_requires=["click>=8.0"],
     python_requires=">=3.10",

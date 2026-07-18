@@ -51,6 +51,249 @@ class FactorTesterClient:
         data = self._expect_success(self.session.get(f"/api/workspaces/{workspace_id}/configuration"))
         return dict(data.get("configuration") or {})
 
+    def publish_research_graph(self, graph: dict[str, Any]) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/research-graphs/versions",
+            {"graph": graph},
+        ))
+        return dict(data.get("graph") or {})
+
+    def list_research_graph_versions(
+        self,
+        graph_id: str,
+    ) -> list[dict[str, Any]]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graphs/{graph_id}/versions"
+        ))
+        return list(data.get("versions") or [])
+
+    def get_active_research_graph(self, graph_id: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graphs/{graph_id}/active"
+        ))
+        return dict(data.get("graph") or {})
+
+    def validate_research_graph(
+        self,
+        graph_id: str,
+        version: int,
+        evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graphs/{graph_id}/versions/{version}/validation",
+            evidence,
+        ))
+        return dict(data.get("validation") or {})
+
+    def propose_research_graph(
+        self,
+        graph_id: str,
+        version: int,
+        *,
+        risk_level: str,
+        change_diff: dict[str, Any],
+        evidence_refs: list[str],
+        token_estimate: int,
+        agent_execution_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graphs/{graph_id}/versions/{version}/proposals",
+            {
+                "risk_level": risk_level,
+                "change_diff": change_diff,
+                "evidence_refs": evidence_refs,
+                "token_estimate": token_estimate,
+                "agent_execution_id": agent_execution_id,
+            },
+        ))
+        return dict(data.get("proposal") or {})
+
+    def review_research_graph_proposal(
+        self,
+        proposal_id: str,
+        *,
+        disposition: str,
+        scope_drift: bool,
+        semantic_uncertainty: bool,
+        evidence_refs: list[str],
+        agent_execution_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-proposals/{proposal_id}/reviews",
+            {
+                "disposition": disposition,
+                "scope_drift": scope_drift,
+                "semantic_uncertainty": semantic_uncertainty,
+                "evidence_refs": evidence_refs,
+                "agent_execution_id": agent_execution_id,
+            },
+        ))
+        return dict(data.get("review") or {})
+
+    def create_research_agent_execution(
+        self,
+        *,
+        actor_role: str,
+        model_id: str = "",
+        codex_version: str = "",
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/research-agent-executions",
+            {
+                "actor_role": actor_role,
+                "model_id": model_id,
+                "codex_version": codex_version,
+            },
+        ))
+        return dict(data.get("execution") or {})
+
+    def audit_research_graph(
+        self,
+        graph_id: str,
+        version: int,
+        *,
+        disposition: str,
+        grill_evidence: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graphs/{graph_id}/versions/{version}/audit",
+            {
+                "disposition": disposition,
+                "grill_evidence": grill_evidence,
+            },
+        ))
+        return dict(data.get("audit") or {})
+
+    def activate_research_graph(
+        self,
+        graph_id: str,
+        version: int,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graphs/{graph_id}/versions/{version}/activate",
+            {},
+        ))
+        return dict(data.get("graph") or {})
+
+    def rollback_research_graph(
+        self,
+        graph_id: str,
+        *,
+        target_version: int,
+        reason: str,
+        grill_evidence: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graphs/{graph_id}/rollback",
+            {
+                "target_version": target_version,
+                "reason": reason,
+                "grill_evidence": grill_evidence,
+            },
+        ))
+        return dict(data.get("rollback") or {})
+
+    def create_research_graph_instance(
+        self,
+        *,
+        graph_id: str,
+        product_group: str,
+        workspace_id: str,
+        capability_receipt: dict[str, Any],
+        token_budget: int | None = None,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/research-graph-instances",
+            {
+                "graph_id": graph_id,
+                "product_group": product_group,
+                "workspace_id": workspace_id,
+                "capability_receipt": capability_receipt,
+                "token_budget": token_budget,
+            },
+        ))
+        return dict(data.get("instance") or {})
+
+    def approve_research_capability(
+        self,
+        *,
+        capability_id: str,
+        descriptor_hash: str,
+        product_group: str,
+        evidence_refs: list[str],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/research-capability-approvals",
+            {
+                "capability_id": capability_id,
+                "descriptor_hash": descriptor_hash,
+                "product_group": product_group,
+                "evidence_refs": evidence_refs,
+            },
+        ))
+        return dict(data.get("approval") or {})
+
+    def attest_research_capabilities(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/research-capability-receipts",
+            payload,
+        ))
+        return dict(data.get("receipt") or {})
+
+    def fork_research_graph_branch(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        label: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/fork",
+            {"label": label},
+        ))
+        return dict(data.get("branch") or {})
+
+    def get_research_graph_branch(
+        self,
+        instance_id: str,
+        branch_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}"
+        ))
+        return dict(data.get("branch") or {})
+
+    def get_research_graph_branch_context(
+        self,
+        instance_id: str,
+        branch_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/context"
+        ))
+        return dict(data.get("context") or {})
+
+    def advance_research_graph_branch(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        edge_id: str,
+        evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/advance",
+            {"edge_id": edge_id, "evidence": evidence},
+        ))
+        return dict(data.get("branch") or {})
+
     def validate_external_factor_artifact(self, manifest_path: str) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             "/api/external-factor-artifacts/validate",

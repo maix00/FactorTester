@@ -1,0 +1,470 @@
+"""Research Decision Graph inspection, evidence, audit, and activation."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import click
+
+from tools.cli.core.context import client_from_config
+
+
+def _json(value) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+@click.group("research-graph")
+def research_graph() -> None:
+    """管理产品无关、不可变且经审计激活的研究决策图。"""
+
+
+@research_graph.command("publish")
+@click.argument(
+    "graph_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def publish_graph(graph_file: Path) -> None:
+    """将 Observed 或 Draft Graph 发布为不可变服务器版本。"""
+    graph = json.loads(graph_file.read_text(encoding="utf-8"))
+    click.echo(_json(client_from_config().publish_research_graph(graph)))
+
+
+@research_graph.command("versions")
+@click.argument("graph_id")
+def graph_versions(graph_id: str) -> None:
+    """列出服务器端不可变图版本。"""
+    click.echo(_json(
+        client_from_config().list_research_graph_versions(graph_id)
+    ))
+
+
+@research_graph.command("active")
+@click.argument("graph_id")
+def active_graph(graph_id: str) -> None:
+    """读取当前 Active Graph。"""
+    click.echo(_json(client_from_config().get_active_research_graph(graph_id)))
+
+
+@research_graph.command("validate")
+@click.argument("graph_id")
+@click.argument("version", type=int)
+@click.option("--replay-passed", is_flag=True, required=True)
+@click.option("--shadow-passed", is_flag=True, required=True)
+@click.option("--capability-resolution-complete", is_flag=True, required=True)
+@click.option("--unaffected-jobs-preserved", is_flag=True, required=True)
+@click.option("--token-efficiency-passed", is_flag=True, required=True)
+@click.option(
+    "--token-metrics-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def validate_graph(
+    graph_id: str,
+    version: int,
+    replay_passed: bool,
+    shadow_passed: bool,
+    capability_resolution_complete: bool,
+    unaffected_jobs_preserved: bool,
+    token_efficiency_passed: bool,
+    token_metrics_file: Path,
+) -> None:
+    """记录 Agent 生成的 replay、shadow、能力与任务隔离证据。"""
+    evidence = {
+        "replay_passed": replay_passed,
+        "shadow_passed": shadow_passed,
+        "capability_resolution_complete": capability_resolution_complete,
+        "unaffected_jobs_preserved": unaffected_jobs_preserved,
+        "token_efficiency_passed": token_efficiency_passed,
+        "token_metrics": json.loads(
+            token_metrics_file.read_text(encoding="utf-8")
+        ),
+    }
+    click.echo(_json(client_from_config().validate_research_graph(
+        graph_id,
+        version,
+        evidence,
+    )))
+
+
+@research_graph.command("propose")
+@click.argument("graph_id")
+@click.argument("version", type=int)
+@click.option("--risk-level", type=click.Choice(["L1", "L2", "L3", "L4"]), required=True)
+@click.option(
+    "--change-diff-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--evidence-ref", "evidence_refs", multiple=True)
+@click.option("--token-estimate", type=click.IntRange(min=0), required=True)
+@click.option("--agent-execution-id", required=True)
+def propose_graph(
+    graph_id: str,
+    version: int,
+    risk_level: str,
+    change_diff_file: Path,
+    evidence_refs: tuple[str, ...],
+    token_estimate: int,
+    agent_execution_id: str,
+) -> None:
+    """提交紧凑图变更 diff；不提交整张图或具体 Skill 身份。"""
+    change_diff = json.loads(
+        change_diff_file.read_text(encoding="utf-8")
+    )
+    if not isinstance(change_diff, dict):
+        raise click.ClickException("change diff must be a JSON object")
+    click.echo(_json(client_from_config().propose_research_graph(
+        graph_id,
+        version,
+        risk_level=risk_level,
+        change_diff=change_diff,
+        evidence_refs=list(evidence_refs),
+        token_estimate=token_estimate,
+        agent_execution_id=agent_execution_id,
+    )))
+
+
+@research_graph.command("review")
+@click.argument("proposal_id")
+@click.option(
+    "--disposition",
+    type=click.Choice(["approved", "rejected", "disagreed"]),
+    required=True,
+)
+@click.option("--scope-drift", is_flag=True)
+@click.option("--semantic-uncertainty", is_flag=True)
+@click.option("--evidence-ref", "evidence_refs", multiple=True)
+@click.option("--agent-execution-id", required=True)
+def review_graph_proposal(
+    proposal_id: str,
+    disposition: str,
+    scope_drift: bool,
+    semantic_uncertainty: bool,
+    evidence_refs: tuple[str, ...],
+    agent_execution_id: str,
+) -> None:
+    """记录最小数量的独立 reviewer 结论。"""
+    click.echo(_json(
+        client_from_config().review_research_graph_proposal(
+            proposal_id,
+            disposition=disposition,
+            scope_drift=scope_drift,
+            semantic_uncertainty=semantic_uncertainty,
+            evidence_refs=list(evidence_refs),
+            agent_execution_id=agent_execution_id,
+        )
+    ))
+
+
+@research_graph.command("agent-start")
+@click.option(
+    "--role",
+    "actor_role",
+    type=click.Choice(["proposer", "reviewer", "audit_presenter"]),
+    required=True,
+)
+@click.option("--model-id", default="")
+@click.option("--codex-version", default="")
+def start_agent_execution(
+    actor_role: str,
+    model_id: str,
+    codex_version: str,
+) -> None:
+    """由服务器为同一用户签发一个有角色的独立 Agent execution。"""
+    click.echo(_json(
+        client_from_config().create_research_agent_execution(
+            actor_role=actor_role,
+            model_id=model_id,
+            codex_version=codex_version,
+        )
+    ))
+
+
+@research_graph.command("audit")
+@click.argument("graph_id")
+@click.argument("version", type=int)
+@click.option(
+    "--disposition",
+    required=True,
+    type=click.Choice(["approved", "rejected", "quarantined", "frozen"]),
+)
+@click.option(
+    "--grill-evidence-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def audit_graph(
+    graph_id: str,
+    version: int,
+    disposition: str,
+    grill_evidence_file: Path,
+) -> None:
+    """记录审计员的 grill-me 问答；不直接编辑图。"""
+    evidence = json.loads(grill_evidence_file.read_text(encoding="utf-8"))
+    if not isinstance(evidence, list):
+        raise click.ClickException("grill evidence must be a JSON array")
+    click.echo(_json(client_from_config().audit_research_graph(
+        graph_id,
+        version,
+        disposition=disposition,
+        grill_evidence=evidence,
+    )))
+
+
+@research_graph.command("activate")
+@click.argument("graph_id")
+@click.argument("version", type=int)
+def activate_graph(graph_id: str, version: int) -> None:
+    """让 Agent 在全部验证和审计门通过后生成新的 Active 版本。"""
+    click.echo(_json(
+        client_from_config().activate_research_graph(graph_id, version)
+    ))
+
+
+@research_graph.command("rollback")
+@click.argument("graph_id")
+@click.option("--target-version", type=int, required=True)
+@click.option("--reason", required=True)
+@click.option(
+    "--grill-evidence-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def rollback_graph(
+    graph_id: str,
+    target_version: int,
+    reason: str,
+    grill_evidence_file: Path,
+) -> None:
+    """由审计员将 Active 指针回滚到既有已审计 Active 版本。"""
+    evidence = json.loads(
+        grill_evidence_file.read_text(encoding="utf-8")
+    )
+    if not isinstance(evidence, list):
+        raise click.ClickException("grill evidence must be a JSON array")
+    click.echo(_json(client_from_config().rollback_research_graph(
+        graph_id,
+        target_version=target_version,
+        reason=reason,
+        grill_evidence=evidence,
+    )))
+
+
+@research_graph.command("start")
+@click.argument("graph_id")
+@click.option("--product-group", required=True)
+@click.option("--workspace-id", required=True)
+@click.option("--token-budget", type=click.IntRange(min=1))
+@click.option(
+    "--capability-receipt-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def start_graph_instance(
+    graph_id: str,
+    product_group: str,
+    workspace_id: str,
+    token_budget: int | None,
+    capability_receipt_file: Path,
+) -> None:
+    """按当前 Active Graph 和产品实现解析启动研究实例。"""
+    payload = json.loads(
+        capability_receipt_file.read_text(encoding="utf-8")
+    )
+    receipt = payload.get("receipt") if isinstance(payload, dict) else None
+    if not isinstance(receipt, dict):
+        receipt = payload
+    if not isinstance(receipt, dict):
+        raise click.ClickException(
+            "capability receipt must be a JSON object"
+        )
+    click.echo(_json(client_from_config().create_research_graph_instance(
+        graph_id=graph_id,
+        product_group=product_group,
+        workspace_id=workspace_id,
+        capability_receipt=receipt,
+        token_budget=token_budget,
+    )))
+
+
+@research_graph.command("approve-capability")
+@click.argument("capability_id")
+@click.option("--descriptor-hash", required=True)
+@click.option("--product-group", required=True)
+@click.option("--evidence-ref", "evidence_refs", multiple=True, required=True)
+def approve_capability(
+    capability_id: str,
+    descriptor_hash: str,
+    product_group: str,
+    evidence_refs: tuple[str, ...],
+) -> None:
+    """审计员按 capability 描述批准执行范围，不登记具体 Skill。"""
+    click.echo(_json(
+        client_from_config().approve_research_capability(
+            capability_id=capability_id,
+            descriptor_hash=descriptor_hash,
+            product_group=product_group,
+            evidence_refs=list(evidence_refs),
+        )
+    ))
+
+
+@research_graph.command("attest")
+@click.argument("graph_id")
+@click.argument("graph_version", type=int)
+@click.option("--node", "node_id", required=True)
+@click.option("--product-group", required=True)
+@click.option(
+    "--resolution-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--approval-refs-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--product-profile-hash", required=True)
+@click.option("--resolver-version", required=True)
+def attest_capabilities(
+    graph_id: str,
+    graph_version: int,
+    node_id: str,
+    product_group: str,
+    resolution_file: Path,
+    approval_refs_file: Path,
+    product_profile_hash: str,
+    resolver_version: str,
+) -> None:
+    """把本地语义解析换成服务器签发、不可伪造的 receipt。"""
+    payload = json.loads(resolution_file.read_text(encoding="utf-8"))
+    resolution = (
+        payload.get("resolution") if isinstance(payload, dict) else None
+    )
+    if not isinstance(resolution, dict):
+        resolution = payload
+    approvals = json.loads(
+        approval_refs_file.read_text(encoding="utf-8")
+    )
+    if not isinstance(resolution, dict) or not isinstance(approvals, dict):
+        raise click.ClickException(
+            "resolution and approval refs must be JSON objects"
+        )
+    request_payload = {
+        "graph_id": graph_id,
+        "graph_version": graph_version,
+        "node_id": node_id,
+        "product_group": product_group,
+        "catalog_hash": str(resolution.get("catalog_hash") or ""),
+        "product_profile_hash": product_profile_hash,
+        "resolver_version": resolver_version,
+        "semantic_resolution": resolution,
+        "approval_refs": approvals,
+        "provider_conformance_hash": str(
+            resolution.get("provider_conformance_hash") or ""
+        ),
+    }
+    click.echo(_json(
+        client_from_config().attest_research_capabilities(request_payload)
+    ))
+
+
+@research_graph.command("branch")
+@click.argument("instance_id")
+@click.argument("branch_id")
+def show_graph_branch(instance_id: str, branch_id: str) -> None:
+    """读取一个研究分支的当前状态。"""
+    click.echo(_json(client_from_config().get_research_graph_branch(
+        instance_id,
+        branch_id,
+    )))
+
+
+@research_graph.command("context")
+@click.argument("instance_id")
+@click.argument("branch_id")
+def graph_branch_context(instance_id: str, branch_id: str) -> None:
+    """只返回当前节点的最小状态包，避免装载完整图和目录。"""
+    click.echo(_json(
+        client_from_config().get_research_graph_branch_context(
+            instance_id,
+            branch_id,
+        )
+    ))
+
+
+@research_graph.command("next")
+@click.argument("instance_id")
+@click.argument("branch_id")
+def next_graph_step(instance_id: str, branch_id: str) -> None:
+    """返回当前节点、当前能力与候选边的紧凑 Agent 决策包。"""
+    click.echo(_json(
+        client_from_config().get_research_graph_branch_context(
+            instance_id,
+            branch_id,
+        )
+    ))
+
+
+@research_graph.command("fork")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--label", required=True)
+def fork_graph_branch(
+    instance_id: str,
+    branch_id: str,
+    label: str,
+) -> None:
+    """仅在需要独立假设路径时分叉研究分支。"""
+    click.echo(_json(client_from_config().fork_research_graph_branch(
+        instance_id,
+        branch_id,
+        label=label,
+    )))
+
+
+@research_graph.command("advance")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--edge-id", required=True)
+@click.option(
+    "--evidence-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--target-capability-receipt-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def advance_graph_branch(
+    instance_id: str,
+    branch_id: str,
+    edge_id: str,
+    evidence_file: Path,
+    target_capability_receipt_file: Path | None,
+) -> None:
+    """提交证据并沿 Active Graph 的一条已声明边前进。"""
+    evidence = json.loads(evidence_file.read_text(encoding="utf-8"))
+    if not isinstance(evidence, dict):
+        raise click.ClickException("transition evidence must be a JSON object")
+    if target_capability_receipt_file is not None:
+        payload = json.loads(
+            target_capability_receipt_file.read_text(encoding="utf-8")
+        )
+        receipt = (
+            payload.get("receipt") if isinstance(payload, dict) else None
+        )
+        if not isinstance(receipt, dict):
+            receipt = payload
+        if not isinstance(receipt, dict):
+            raise click.ClickException(
+                "target capability receipt must be a JSON object"
+            )
+        evidence["target_capability_receipt"] = receipt
+    click.echo(_json(client_from_config().advance_research_graph_branch(
+        instance_id,
+        branch_id,
+        edge_id=edge_id,
+        evidence=evidence,
+    )))
