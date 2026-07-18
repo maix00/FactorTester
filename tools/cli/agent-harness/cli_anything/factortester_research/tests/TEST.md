@@ -52,6 +52,33 @@ added one observable behavior at a time.
   disagreement;
 - non-mutating historical replay and a hard token-efficiency activation gate.
 
+### Real installed CLI to server E2E
+
+The release gate must also start the complete `server.create_app()` application
+against an isolated temporary SQLite database and drive it over real HTTP. It
+must not use Flask `test_client`, fake routes, or source-module CLI fallbacks.
+
+The workflow must prove:
+
+- both `cli-anything-factortester-research` and `factortester` resolve to
+  installed console scripts;
+- one real login with `--keep-login` remains authenticated in later,
+  independently spawned CLI processes;
+- the installed Harness emits the real Draft Graph and the installed
+  FactorTester CLI publishes it;
+- proposer and reviewer use distinct server-issued Agent executions under the
+  same owner;
+- capability approvals and receipts, non-zero trusted provider usage,
+  like-for-like shadow runs, validation, grill audit, and activation all pass
+  through the real HTTP service;
+- a live instance returns separate bounded `context` and `next` packets and can
+  advance using a target-node capability receipt;
+- `logout` removes the local cookie and a later protected command fails.
+
+The test must use a temporary `FACTORTESTER_HOME`, temporary database, generated
+credentials, and a test-only provider-attestation secret. It must not read or
+mutate a developer's existing account, cookie, graph, or research data.
+
 Run:
 
 ```bash
@@ -88,3 +115,22 @@ The generated plan must create/select a workspace, write or import a revision, s
 
 Do not keep a hard-coded pass count here; the authoritative result is the
 current command exit status and collected test report.
+
+## Test Results
+
+Last release-gate run: 2026-07-18
+
+```text
+CLI_ANYTHING_FORCE_INSTALLED=1 conda run -n GTHT python -m pytest \
+  tools/cli/agent-harness/cli_anything/factortester_research/tests \
+  tests/server/test_research_graphs.py \
+  tests/server/test_research_job_lifecycle.py \
+  tests/cli/test_research_graph_commands.py \
+  tests/cli/test_factortester_client.py -q
+
+78 passed, 123 warnings in 16.56s
+```
+
+The real-server test printed installed paths for both console scripts and
+completed the isolated login-through-logout Active Graph workflow. The warnings
+are existing Pandas frequency-alias deprecations outside this refinement.

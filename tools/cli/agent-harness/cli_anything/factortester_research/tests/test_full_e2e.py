@@ -14,6 +14,7 @@ def _resolve_cli(name: str) -> list[str]:
     force = os.environ.get("CLI_ANYTHING_FORCE_INSTALLED", "").strip() == "1"
     path = shutil.which(name)
     if path:
+        print(f"[_resolve_cli] Using installed command: {path}")
         return [path]
     if force:
         raise RuntimeError(f"{name} not found in PATH. Install with: pip install -e .")
