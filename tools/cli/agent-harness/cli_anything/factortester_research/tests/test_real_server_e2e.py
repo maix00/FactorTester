@@ -11,10 +11,9 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from http.cookiejar import LWPCookieJar
 from pathlib import Path
 from typing import Any, Iterator
-from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
+from urllib.request import Request, urlopen
 
 import orjson
 from werkzeug.serving import make_server
@@ -89,23 +88,13 @@ def _post_json(url: str, payload: dict) -> dict:
 def _real_server(
     tmp_path: Path,
     monkeypatch,
-) -> Iterator[tuple[str, str, str, str]]:
+) -> Iterator[tuple[str, str]]:
     database = tmp_path / "server" / "factortester.sqlite"
     database.parent.mkdir(parents=True)
-    provider_secret = secrets.token_hex(32)
-    launcher_secret = secrets.token_hex(32)
     human_secret = secrets.token_hex(32)
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", database)
     monkeypatch.setattr(Settings, "CACHE_DIR", database.parent)
     monkeypatch.setenv("FLASK_SECRET_KEY", secrets.token_hex(32))
-    monkeypatch.setenv(
-        "RESEARCH_PROVIDER_USAGE_SECRET",
-        provider_secret,
-    )
-    monkeypatch.setenv(
-        "RESEARCH_AGENT_LAUNCHER_SECRET",
-        launcher_secret,
-    )
     monkeypatch.setenv(
         "RESEARCH_HUMAN_ACTIVATION_SECRET",
         human_secret,
@@ -117,8 +106,6 @@ def _real_server(
     try:
         yield (
             f"http://127.0.0.1:{httpd.server_port}",
-            provider_secret,
-            launcher_secret,
             human_secret,
         )
     finally:
@@ -127,175 +114,128 @@ def _real_server(
         httpd.server_close()
 
 
-def _provider_usage_receipt(
-    *,
-    base_url: str,
-    cli_home: Path,
-    provider_secret: str,
-    reservation_id: str,
-    input_tokens: int,
-    output_tokens: int,
-) -> dict:
-    payload = {
-        "reservation_id": reservation_id,
-        "provider": "e2e-provider-gateway",
-        "provider_request_id": uuid.uuid4().hex,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-    }
-    payload["usage_attestation"] = hmac.new(
-        provider_secret.encode(),
-        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
-        hashlib.sha256,
-    ).hexdigest()
-    cookie_jar = LWPCookieJar(str(cli_home / "cookies.lwp"))
-    cookie_jar.load(ignore_discard=True, ignore_expires=True)
-    opener = build_opener(HTTPCookieProcessor(cookie_jar))
-    request = Request(
-        f"{base_url}/api/research-provider-usage-receipts",
-        data=json.dumps(payload).encode(),
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with opener.open(request, timeout=30) as response:
-        value = json.loads(response.read().decode())
-    assert value["success"] is True
-    return value["provider_receipt"]
-
-
 def _commit_usage(
     *,
     factortester: list[str],
     env: dict[str, str],
-    base_url: str,
-    cli_home: Path,
-    provider_secret: str,
-    scope_id: str,
+    agent_id: str,
     input_tokens: int,
     output_tokens: int,
 ) -> str:
-    reservation = _run_json(
+    principal_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    lineage_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    invocation = _run_json(
         factortester,
         [
-            "research-graph",
-            "token-reserve",
-            scope_id,
-            "--work-kind",
+            "agent-flow",
+            "invocation",
+            "reserve",
+            agent_id,
+            "--role",
             "researcher",
+            "--authority-scope",
+            "local_research",
+            "--purpose",
+            "record real-server E2E token usage",
+            "--runtime-id",
+            "e2e-runtime",
+            "--model-id",
+            "e2e-model",
             "--max-input-tokens",
             str(input_tokens),
             "--max-output-tokens",
             str(output_tokens),
+            "--agent-principal-hash",
+            principal_hash,
+            "--lineage-hash",
+            lineage_hash,
+            "--idempotency-key",
+            f"e2e-usage-{uuid.uuid4().hex}",
         ],
         env=env,
     )
-    receipt = _provider_usage_receipt(
-        base_url=base_url,
-        cli_home=cli_home,
-        provider_secret=provider_secret,
-        reservation_id=reservation["reservation_id"],
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-    )
-    committed = _run_json(
+    settled = _run_json(
         factortester,
         [
-            "research-graph",
-            "token-commit",
-            reservation["reservation_id"],
-            "--provider-receipt-id",
-            receipt["provider_receipt_id"],
+            "agent-flow",
+            "invocation",
+            "settle",
+            invocation["invocation_id"],
+            "--input-tokens",
+            str(input_tokens),
+            "--output-tokens",
+            str(output_tokens),
+            "--provider-request-id",
+            f"e2e-provider-request-{uuid.uuid4().hex}",
         ],
         env=env,
     )
-    assert committed["status"] == "committed"
-    return reservation["reservation_id"]
+    assert settled["status"] == "settled"
+    return invocation["invocation_id"]
 
 
-def _agent_execution(
+def _agent_invocation(
     *,
     factortester: list[str],
     env: dict[str, str],
     role: str,
-    owner: str,
-    launcher_secret: str,
 ) -> dict:
     authority_scope = (
         "server_backend_code"
         if role in {"implementation_agent", "backend_verifier"}
         else "local_research"
     )
-    scope_id = f"e2e:{role}:{uuid.uuid4().hex}"
-    _run_json(
+    agent_id = f"e2e:{role}:{uuid.uuid4().hex}"
+    principal_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    lineage_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    invocation = _run_json(
         factortester,
         [
-            "research-graph",
-            "budget-create",
-            scope_id,
-            "--token-limit",
-            "1000",
-        ],
-        env=env,
-    )
-    reservation = _run_json(
-        factortester,
-        [
-            "research-graph",
-            "token-reserve",
-            scope_id,
-            "--work-kind",
+            "agent-flow",
+            "invocation",
+            "reserve",
+            agent_id,
+            "--role",
             role,
+            "--authority-scope",
+            authority_scope,
+            "--purpose",
+            f"real-server E2E {role}",
+            "--runtime-id",
+            "e2e-runtime",
+            "--model-id",
+            "e2e-model",
             "--max-input-tokens",
             "400",
             "--max-output-tokens",
             "200",
-        ],
-        env=env,
-    )
-    principal_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
-    lineage_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
-    attested_payload = {
-        "owner_user_id": owner,
-        "actor_role": role,
-        "model_id": "e2e-model",
-        "codex_version": "e2e",
-        "reservation_id": reservation["reservation_id"],
-        "authority_scope": authority_scope,
-        "agent_principal_hash": principal_hash,
-        "lineage_hash": lineage_hash,
-    }
-    launcher_attestation = hmac.new(
-        launcher_secret.encode(),
-        orjson.dumps(attested_payload, option=orjson.OPT_SORT_KEYS),
-        hashlib.sha256,
-    ).hexdigest()
-    return _run_json(
-        factortester,
-        [
-            "research-graph",
-            "agent-start",
-            "--role",
-            role,
-            "--model-id",
-            "e2e-model",
-            "--codex-version",
-            "e2e",
-            "--reservation-id",
-            reservation["reservation_id"],
-            "--authority-scope",
-            authority_scope,
             "--agent-principal-hash",
             principal_hash,
             "--lineage-hash",
             lineage_hash,
-            "--launcher-attestation",
-            launcher_attestation,
+            "--idempotency-key",
+            f"e2e-{role}-{uuid.uuid4().hex}",
         ],
         env=env,
     )
+    settled = _run_json(
+        factortester,
+        [
+            "agent-flow",
+            "invocation",
+            "settle",
+            invocation["invocation_id"],
+            "--input-tokens",
+            "10",
+            "--output-tokens",
+            "5",
+            "--provider-request-id",
+            f"e2e-provider-request-{uuid.uuid4().hex}",
+        ],
+        env=env,
+    )
+    assert settled["status"] == "settled"
+    return invocation | settled
 
 
 def _capability_receipt(
@@ -392,8 +332,6 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
     }
     with _real_server(tmp_path, monkeypatch) as (
         base_url,
-        provider_secret,
-        launcher_secret,
         human_secret,
     ):
         alias = f"e2e_{uuid.uuid4().hex[:10]}"
@@ -444,21 +382,17 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         )
         assert published["content_hash"] == graph["content_hash"]
 
-        proposer = _agent_execution(
+        proposer = _agent_invocation(
             factortester=factortester,
             env=env,
             role="proposer",
-            owner=owner,
-            launcher_secret=launcher_secret,
         )
-        reviewer = _agent_execution(
+        reviewer = _agent_invocation(
             factortester=factortester,
             env=env,
             role="reviewer",
-            owner=owner,
-            launcher_secret=launcher_secret,
         )
-        assert proposer["execution_id"] != reviewer["execution_id"]
+        assert proposer["invocation_id"] != reviewer["invocation_id"]
         assert proposer["owner_user_id"] == reviewer["owner_user_id"] == owner
 
         change_file = tmp_path / "change.json"
@@ -487,7 +421,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "--token-estimate",
                 "500",
                 "--agent-execution-id",
-                proposer["execution_id"],
+                proposer["invocation_id"],
             ],
             env=env,
         )
@@ -502,11 +436,11 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "--evidence-ref",
                 "e2e:independent-review",
                 "--agent-execution-id",
-                reviewer["execution_id"],
+                reviewer["invocation_id"],
             ],
             env=env,
         )
-        assert review["reviewer_execution_id"] == reviewer["execution_id"]
+        assert review["reviewer_execution_id"] == reviewer["invocation_id"]
 
         workspace_id = f"e2e-workspace-{uuid.uuid4().hex}"
         run_spec = {
@@ -569,10 +503,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         _commit_usage(
             factortester=factortester,
             env=env,
-            base_url=base_url,
-            cli_home=cli_home,
-            provider_secret=provider_secret,
-            scope_id=f"instance:{shadow_instance['instance_id']}",
+            agent_id=f"instance:{shadow_instance['instance_id']}",
             input_tokens=70,
             output_tokens=10,
         )
@@ -580,8 +511,9 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         _run_json(
             factortester,
             [
-                "research-graph",
-                "budget-create",
+                "agent-flow",
+                "budget",
+                "configure",
                 baseline_scope,
                 "--token-limit",
                 "1000",
@@ -591,10 +523,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         _commit_usage(
             factortester=factortester,
             env=env,
-            base_url=base_url,
-            cli_home=cli_home,
-            provider_secret=provider_secret,
-            scope_id=baseline_scope,
+            agent_id=baseline_scope,
             input_tokens=90,
             output_tokens=10,
         )
@@ -624,9 +553,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         assert metrics["shadow_graph_total_tokens"] == 80
         assert metrics["shadow_baseline_total_tokens"] == 100
         assert metrics["routine_context_bytes"] <= 6000
-        assert metrics["token_authority"] == (
-            "trusted_provider_usage_receipts"
-        )
+        assert metrics["token_authority"] == "normalized_agent_invocations"
 
         grill_file = tmp_path / "grill.json"
         grill_file.write_text(
@@ -829,6 +756,13 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             item for item in graph["edges"]
             if item["from_node"] == entry_node
         )
+        transition_invocation_id = _commit_usage(
+            factortester=factortester,
+            env=env,
+            agent_id=f"instance:{live_instance['instance_id']}",
+            input_tokens=12,
+            output_tokens=3,
+        )
         target_receipt = _capability_receipt(
             factortester=factortester,
             env=env,
@@ -847,6 +781,17 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         evidence = {
             **(edge.get("guard") or {}),
             "evidence_refs": ["e2e:transition"],
+            "token_telemetry": {
+                "agent_role": "primary",
+                "input_tokens": 12,
+                "output_tokens": 3,
+                "cache_read_tokens": 0,
+                "skill_document_tokens": 0,
+                "artifact_summary_tokens": 0,
+                "reviewer_tokens": 0,
+                "loaded_skill_ids": [],
+            },
+            "agent_invocation_ids": [transition_invocation_id],
         }
         evidence_file = tmp_path / "transition-evidence.json"
         evidence_file.write_text(json.dumps(evidence), encoding="utf-8")

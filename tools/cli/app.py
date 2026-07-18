@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from tools.cli.commands.agent import doctor, factor_plan
+from tools.cli.commands.agent_flow import agent_flow
 from tools.cli.commands.auth import configure, login, logout
 from tools.cli.commands.navigation import list_modules
 from tools.cli.commands.settings import describe, edit
@@ -46,6 +47,7 @@ cli.add_command(workspace)
 cli.add_command(external_factor)
 cli.add_command(run)
 cli.add_command(job)
+cli.add_command(agent_flow)
 cli.add_command(research_graph)
 register_cli_modules(cli)
 

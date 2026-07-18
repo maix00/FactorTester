@@ -19,6 +19,21 @@ def research_graph() -> None:
     """管理产品无关、不可变且经审计激活的研究决策图。"""
 
 
+_LEGACY_AGENT_FLOW_COMMANDS = frozenset({
+    "agent-start",
+    "budget-create",
+    "token-reserve",
+    "token-commit",
+    "token-release",
+})
+
+
+def _legacy_agent_flow_command(name: str):
+    if name not in _LEGACY_AGENT_FLOW_COMMANDS:
+        raise ValueError(f"{name!r} is not a registered legacy Agent Flow command")
+    return research_graph.command(name, deprecated=True)
+
+
 @research_graph.command("publish")
 @click.argument(
     "graph_file",
@@ -159,7 +174,7 @@ def review_graph_proposal(
     ))
 
 
-@research_graph.command("agent-start")
+@_legacy_agent_flow_command("agent-start")
 @click.option(
     "--role",
     "actor_role",
@@ -212,7 +227,7 @@ def start_agent_execution(
     ))
 
 
-@research_graph.command("budget-create")
+@_legacy_agent_flow_command("budget-create")
 @click.argument("scope_id")
 @click.option("--token-limit", type=click.IntRange(min=1), required=True)
 def create_token_budget(scope_id: str, token_limit: int) -> None:
@@ -225,7 +240,7 @@ def create_token_budget(scope_id: str, token_limit: int) -> None:
     ))
 
 
-@research_graph.command("token-reserve")
+@_legacy_agent_flow_command("token-reserve")
 @click.argument("scope_id")
 @click.option(
     "--work-kind",
@@ -255,7 +270,7 @@ def reserve_token_budget(
     )))
 
 
-@research_graph.command("token-commit")
+@_legacy_agent_flow_command("token-commit")
 @click.argument("reservation_id")
 @click.option("--provider-receipt-id", required=True)
 def commit_token_budget(
@@ -269,7 +284,7 @@ def commit_token_budget(
     )))
 
 
-@research_graph.command("token-release")
+@_legacy_agent_flow_command("token-release")
 @click.argument("reservation_id")
 def release_token_budget(reservation_id: str) -> None:
     """模型调用未发生时释放完整预留。"""

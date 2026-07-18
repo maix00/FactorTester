@@ -4,7 +4,6 @@ from copy import deepcopy
 import hashlib
 import hmac
 import json
-import os
 import time
 import uuid
 
@@ -18,6 +17,7 @@ from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs, research_runs
+from server.services import agent_flow
 
 
 def _initialize_graph_db(tmp_path, monkeypatch) -> None:
@@ -29,13 +29,10 @@ def _initialize_graph_db(tmp_path, monkeypatch) -> None:
     )
     research_graphs.ensure_schema()
     monkeypatch.setenv(
-        "RESEARCH_AGENT_LAUNCHER_SECRET",
-        "test-agent-launcher-secret",
-    )
-    monkeypatch.setenv(
         "RESEARCH_HUMAN_ACTIVATION_SECRET",
         "test-human-activation-secret",
     )
+    agent_flow.clear_store_cache()
 
 
 def _hash(graph: dict) -> str:
@@ -92,13 +89,15 @@ def _approve_proposal(
     return proposal, review
 
 
-def _create_attested_agent(
+def _create_agent_invocation(
     role: str,
-    reservation_id: str,
     *,
     principal_label: str | None = None,
     lineage_label: str | None = None,
     model_id: str = "test-model",
+    agent_id: str | None = None,
+    sponsor_agent_id: str = "",
+    settle: bool = True,
 ) -> dict:
     authority_scope = (
         "server_backend_code"
@@ -111,25 +110,34 @@ def _create_attested_agent(
     lineage_hash = hashlib.sha256(
         (lineage_label or uuid.uuid4().hex).encode()
     ).hexdigest()
-    payload = {
-        "owner_user_id": "alice",
-        "actor_role": role,
-        "model_id": model_id,
-        "codex_version": "",
-        "reservation_id": reservation_id,
-        "authority_scope": authority_scope,
-        "agent_principal_hash": principal_hash,
-        "lineage_hash": lineage_hash,
-    }
-    attestation = hmac.new(
-        b"test-agent-launcher-secret",
-        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
-        hashlib.sha256,
-    ).hexdigest()
-    return research_graphs.create_agent_execution(
-        **payload,
-        launcher_attestation=attestation,
+    store = agent_flow.get_store()
+    invocation = store.reserve_invocation(
+        owner_user_id="alice",
+        agent_id=agent_id or f"test:{role}:{uuid.uuid4().hex}",
+        sponsor_agent_id=sponsor_agent_id,
+        actor_role=role,
+        authority_scope=authority_scope,
+        purpose=role,
+        runtime_id="test-runtime",
+        model_id=model_id,
+        max_input_tokens=400,
+        max_output_tokens=200,
+        agent_principal_hash=principal_hash,
+        lineage_hash=lineage_hash,
     )
+    if settle:
+        store.settle_invocation(
+            owner_user_id="alice",
+            invocation_id=invocation["invocation_id"],
+            input_tokens=10,
+            output_tokens=5,
+            provider_request_id=uuid.uuid4().hex,
+        )
+    loaded = store.load_invocation(
+        owner_user_id="alice",
+        invocation_id=invocation["invocation_id"],
+    )
+    return loaded | {"execution_id": loaded["invocation_id"]}
 
 
 def _agent_execution(
@@ -138,22 +146,8 @@ def _agent_execution(
     principal_label: str | None = None,
     lineage_label: str | None = None,
 ) -> dict:
-    scope_id = f"test:{role}:{uuid.uuid4().hex}"
-    research_graphs.create_token_budget(
-        owner_user_id="alice",
-        scope_id=scope_id,
-        token_limit=1000,
-    )
-    reservation = research_graphs.reserve_tokens(
-        owner_user_id="alice",
-        scope_id=scope_id,
-        work_kind=role,
-        max_input_tokens=400,
-        max_output_tokens=200,
-    )
-    return _create_attested_agent(
+    return _create_agent_invocation(
         role,
-        reservation_id=reservation["reservation_id"],
         principal_label=principal_label,
         lineage_label=lineage_label,
     )
@@ -161,7 +155,6 @@ def _agent_execution(
 
 def _agent_http_payload(
     role: str,
-    reservation_id: str,
     *,
     model_id: str,
 ) -> dict:
@@ -172,23 +165,18 @@ def _agent_http_payload(
     )
     principal_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
     lineage_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
-    payload = {
-        "owner_user_id": "alice",
+    return {
+        "agent_id": f"http:{role}:{uuid.uuid4().hex}",
         "actor_role": role,
-        "model_id": model_id,
-        "codex_version": "",
-        "reservation_id": reservation_id,
         "authority_scope": authority_scope,
+        "purpose": role,
+        "runtime_id": "test-runtime",
+        "model_id": model_id,
+        "max_input_tokens": 400,
+        "max_output_tokens": 200,
         "agent_principal_hash": principal_hash,
         "lineage_hash": lineage_hash,
     }
-    payload["launcher_attestation"] = hmac.new(
-        b"test-agent-launcher-secret",
-        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
-        hashlib.sha256,
-    ).hexdigest()
-    payload.pop("owner_user_id")
-    return payload
 
 
 def _human_authorization(
@@ -400,37 +388,30 @@ def _commit_scope_usage(
     input_tokens: int,
     output_tokens: int,
 ) -> str:
-    secret = "test-provider-secret"
-    os.environ["RESEARCH_PROVIDER_USAGE_SECRET"] = secret
-    reservation = research_graphs.reserve_tokens(
+    store = agent_flow.get_store()
+    invocation = store.reserve_invocation(
         owner_user_id="alice",
-        scope_id=scope_id,
-        work_kind="researcher",
+        agent_id=scope_id,
+        actor_role="researcher",
+        authority_scope="local_research",
+        purpose="research",
+        runtime_id="test-runtime",
+        model_id="test-model",
         max_input_tokens=input_tokens,
         max_output_tokens=output_tokens,
+        agent_principal_hash=hashlib.sha256(scope_id.encode()).hexdigest(),
+        lineage_hash=hashlib.sha256(
+            f"{scope_id}:lineage".encode()
+        ).hexdigest(),
     )
-    payload = {
-        "reservation_id": reservation["reservation_id"],
-        "provider": "test-provider",
-        "provider_request_id": uuid.uuid4().hex,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-    }
-    signature = hmac.new(
-        secret.encode(),
-        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
-        hashlib.sha256,
-    ).hexdigest()
-    receipt = research_graphs.ingest_provider_usage_receipt(
-        **payload,
-        usage_attestation=signature,
-    )
-    research_graphs.commit_token_reservation(
+    store.settle_invocation(
         owner_user_id="alice",
-        reservation_id=reservation["reservation_id"],
-        provider_receipt_id=receipt["provider_receipt_id"],
+        invocation_id=invocation["invocation_id"],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        provider_request_id=uuid.uuid4().hex,
     )
-    return reservation["reservation_id"]
+    return invocation["invocation_id"]
 
 
 def _commit_usage(
@@ -496,6 +477,12 @@ def _server_validation_evidence(
         shadow_graph_version=version,
         shadow_run_id=graph_run["run_id"],
     )
+    flow_store = agent_flow.get_store()
+    flow_store.configure_token_limit(
+        owner_user_id="alice",
+        agent_id=f"instance:{instance['instance_id']}",
+        token_limit=1000,
+    )
     if graph_tokens:
         _commit_usage(
             instance_id=instance["instance_id"],
@@ -503,21 +490,15 @@ def _server_validation_evidence(
             output_tokens=min(graph_tokens, 10),
         )
     if launch_subagent:
-        reservation = research_graphs.reserve_tokens(
-            owner_user_id="alice",
-            scope_id=f"instance:{instance['instance_id']}",
-            work_kind="reviewer",
-            max_input_tokens=10,
-            max_output_tokens=5,
-        )
-        _create_attested_agent(
+        _create_agent_invocation(
             "reviewer",
-            reservation_id=reservation["reservation_id"],
+            agent_id=f"instance:{instance['instance_id']}",
+            sponsor_agent_id="primary-research-agent",
         )
     baseline_scope_id = f"research-run:{baseline_run['run_id']}"
-    research_graphs.create_token_budget(
+    flow_store.configure_token_limit(
         owner_user_id="alice",
-        scope_id=baseline_scope_id,
+        agent_id=baseline_scope_id,
         token_limit=1000,
     )
     if baseline_tokens:
@@ -627,34 +608,24 @@ def test_graph_versions_are_immutable_and_activation_creates_a_new_version(
     )["content_hash"] == active["content_hash"]
 
 
-def test_agent_execution_rejects_forged_launcher_attestation(
+def test_agent_invocation_rejects_incomplete_identity_provenance(
     tmp_path,
     monkeypatch,
 ) -> None:
     _initialize_graph_db(tmp_path, monkeypatch)
-    scope_id = "test:forged-launcher"
-    research_graphs.create_token_budget(
-        owner_user_id="alice",
-        scope_id=scope_id,
-        token_limit=1000,
-    )
-    reservation = research_graphs.reserve_tokens(
-        owner_user_id="alice",
-        scope_id=scope_id,
-        work_kind="proposer",
-        max_input_tokens=400,
-        max_output_tokens=200,
-    )
-
-    with pytest.raises(ValueError, match="launcher attestation is invalid"):
-        research_graphs.create_agent_execution(
+    with pytest.raises(ValueError, match="agent_principal_hash"):
+        agent_flow.get_store().reserve_invocation(
             owner_user_id="alice",
+            agent_id="test:invalid-identity",
             actor_role="proposer",
-            reservation_id=reservation["reservation_id"],
             authority_scope="local_research",
-            agent_principal_hash="a" * 64,
+            purpose="proposal",
+            runtime_id="test-runtime",
+            model_id="test-model",
+            max_input_tokens=400,
+            max_output_tokens=200,
+            agent_principal_hash="forged",
             lineage_hash="b" * 64,
-            launcher_attestation="forged",
         )
 
 
@@ -665,14 +636,18 @@ def test_local_research_agent_cannot_claim_backend_code_roles(
     _initialize_graph_db(tmp_path, monkeypatch)
     for role in ("backend_verifier", "implementation_agent"):
         with pytest.raises(ValueError, match="server_backend_code"):
-            research_graphs.create_agent_execution(
+            agent_flow.get_store().reserve_invocation(
                 owner_user_id="alice",
+                agent_id=f"test:{role}",
                 actor_role=role,
-                reservation_id="not-reached",
                 authority_scope="local_research",
+                purpose=role,
+                runtime_id="test-runtime",
+                model_id="test-model",
+                max_input_tokens=10,
+                max_output_tokens=5,
                 agent_principal_hash="a" * 64,
                 lineage_hash="b" * 64,
-                launcher_attestation="not-reached",
             )
 
 
@@ -815,10 +790,12 @@ def test_backend_assurance_trusted_path_is_compact_and_uses_no_agent(
     instance = _active_instance(workspace_id=workspace_id)
     job = _succeeded_job(workspace_id=workspace_id)["job"]
     branch = instance["branches"][0]
-    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        before = conn.execute(
-            "SELECT COUNT(*) FROM research_agent_executions"
-        ).fetchone()[0]
+    flow_store = agent_flow.get_store()
+    agent_id = f"instance:{instance['instance_id']}"
+    before = flow_store.count_invocations(
+        owner_user_id="alice",
+        agent_id=agent_id,
+    )
 
     receipt = research_graphs.evaluate_backend_assurance(
         owner_user_id="alice",
@@ -833,10 +810,10 @@ def test_backend_assurance_trusted_path_is_compact_and_uses_no_agent(
     assert receipt["next_action"] == "continue"
     assert receipt["anomaly_codes"] == []
     assert receipt["receipt_bytes"] <= 1024
-    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        after = conn.execute(
-            "SELECT COUNT(*) FROM research_agent_executions"
-        ).fetchone()[0]
+    after = flow_store.count_invocations(
+        owner_user_id="alice",
+        agent_id=agent_id,
+    )
     assert after == before
 
 
@@ -970,12 +947,6 @@ def test_graph_request_paths_do_not_run_schema_ddl(
     assert len(research_graphs.list_graph_versions(
         graph_id="factor-research",
     )) == 1
-    research_graphs.create_token_budget(
-        owner_user_id="alice",
-        scope_id="request-hot-path",
-        token_limit=100,
-    )
-
     normalized = [statement.strip().upper() for statement in statements]
     assert not any(
         statement.startswith(("CREATE ", "ALTER ", "DROP "))
@@ -1250,53 +1221,32 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
         "graph": _draft_graph(),
     })
     assert created.status_code == 201
-    proposer_scope = f"http:proposer:{uuid.uuid4().hex}"
-    reviewer_scope = f"http:reviewer:{uuid.uuid4().hex}"
-    for scope in (proposer_scope, reviewer_scope):
-        assert client.post("/api/research-token-budgets", json={
-            "scope_id": scope,
-            "token_limit": 1000,
-        }).status_code == 201
-    proposer_reservation = client.post(
-        f"/api/research-token-budgets/{proposer_scope}/reserve",
-        json={
-            "work_kind": "proposer",
-            "max_input_tokens": 400,
-            "max_output_tokens": 200,
-        },
-    ).get_json()["reservation"]
-    reviewer_reservation = client.post(
-        f"/api/research-token-budgets/{reviewer_scope}/reserve",
-        json={
-            "work_kind": "reviewer",
-            "max_input_tokens": 400,
-            "max_output_tokens": 200,
-        },
-    ).get_json()["reservation"]
     proposer = client.post(
-        "/api/research-agent-executions",
-        json=_agent_http_payload(
-            "proposer",
-            proposer_reservation["reservation_id"],
-            model_id="test-proposer",
-        ),
+        "/api/agent-flow/invocations",
+        json=_agent_http_payload("proposer", model_id="test-proposer"),
     )
     reviewer = client.post(
-        "/api/research-agent-executions",
-        json=_agent_http_payload(
-            "reviewer",
-            reviewer_reservation["reservation_id"],
-            model_id="test-reviewer",
-        ),
+        "/api/agent-flow/invocations",
+        json=_agent_http_payload("reviewer", model_id="test-reviewer"),
     )
     assert proposer.status_code == 201
     assert reviewer.status_code == 201
+    proposer_id = proposer.get_json()["invocation"]["invocation_id"]
+    reviewer_id = reviewer.get_json()["invocation"]["invocation_id"]
+    for invocation_id in (proposer_id, reviewer_id):
+        settled = client.post(
+            f"/api/agent-flow/invocations/{invocation_id}/settle",
+            json={
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "provider_request_id": uuid.uuid4().hex,
+            },
+        )
+        assert settled.status_code == 200
     proposal = client.post(
         "/api/research-graphs/factor-research/versions/2/proposals",
         json={
-            "agent_execution_id": proposer.get_json()["execution"][
-                "execution_id"
-            ],
+            "agent_execution_id": proposer_id,
             "risk_level": "L4",
             "change_diff": {"reason": "HTTP identity-chain test"},
             "evidence_refs": ["test:http-proposal"],
@@ -1308,9 +1258,7 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
         "/api/research-graph-proposals/"
         f"{proposal.get_json()['proposal']['proposal_id']}/reviews",
         json={
-            "agent_execution_id": reviewer.get_json()["execution"][
-                "execution_id"
-            ],
+            "agent_execution_id": reviewer_id,
             "disposition": "approved",
             "scope_drift": False,
             "semantic_uncertainty": False,
@@ -1598,7 +1546,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
                 "reviewer_tokens": 40,
                 "loaded_skill_ids": [],
             },
-            "token_reservation_ids": [_commit_usage(
+            "agent_invocation_ids": [_commit_usage(
                 instance_id=instance["instance_id"],
                 input_tokens=160,
                 output_tokens=30,
@@ -1667,7 +1615,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         statement for statement in statements
         if statement.lstrip().upper().startswith("SELECT ")
     ]
-    assert len(selects) == 3
+    assert len(selects) == 2
     assert not any(
         "RESEARCH_GRAPH_VERSIONS" in statement.upper()
         for statement in selects
@@ -1768,6 +1716,11 @@ def test_transition_stores_only_target_node_resolution(
             capability_ids=["research-hypothesis.preregister"],
         ),
     )
+    agent_flow.get_store().configure_token_limit(
+        owner_user_id="alice",
+        agent_id=f"instance:{instance['instance_id']}",
+        token_limit=12,
+    )
     branch = instance["branches"][0]
     target_receipt = _issue_receipt(
         node_id="validation",
@@ -1793,7 +1746,7 @@ def test_transition_stores_only_target_node_resolution(
                 "skill_document_load_count": 1,
                 "skill_context_cache_hits": 0,
             },
-            "token_reservation_ids": [_commit_usage(
+            "agent_invocation_ids": [_commit_usage(
                 instance_id=instance["instance_id"],
                 input_tokens=10,
                 output_tokens=2,
@@ -1826,7 +1779,7 @@ def test_transition_stores_only_target_node_resolution(
         "reserved": 0,
         "remaining": 0,
         "exceeded": True,
-        "authority": "trusted_provider_usage_receipts",
+        "authority": "normalized_agent_invocations",
     }
     assert context["branch"]["status"] == "running"
     assert context["review_gate"]["max_new_reviewers"] == 0
@@ -1887,47 +1840,62 @@ def test_token_budget_reservation_denies_before_launch_and_fails_closed(
     monkeypatch,
 ) -> None:
     _initialize_graph_db(tmp_path, monkeypatch)
-    research_graphs.create_token_budget(
+    store = agent_flow.get_store()
+    store.configure_token_limit(
         owner_user_id="alice",
-        scope_id="hard-limit",
+        agent_id="hard-limit",
         token_limit=100,
     )
-    granted = research_graphs.reserve_tokens(
+    granted = store.reserve_invocation(
         owner_user_id="alice",
-        scope_id="hard-limit",
-        work_kind="reviewer",
+        agent_id="hard-limit",
+        actor_role="reviewer",
+        authority_scope="local_research",
+        purpose="review",
+        runtime_id="test-runtime",
+        model_id="test-model",
         max_input_tokens=60,
         max_output_tokens=20,
+        agent_principal_hash="a" * 64,
+        lineage_hash="b" * 64,
     )
 
-    with pytest.raises(ValueError, match="reservation denied"):
-        research_graphs.reserve_tokens(
+    with pytest.raises(ValueError, match="agent_budget_exhausted"):
+        store.reserve_invocation(
             owner_user_id="alice",
-            scope_id="hard-limit",
-            work_kind="reviewer",
+            agent_id="hard-limit",
+            actor_role="reviewer",
+            authority_scope="local_research",
+            purpose="review",
+            runtime_id="test-runtime",
+            model_id="test-model",
             max_input_tokens=20,
             max_output_tokens=10,
+            agent_principal_hash="c" * 64,
+            lineage_hash="d" * 64,
         )
-    with pytest.raises(ValueError, match="reservation is required"):
-        _create_attested_agent("reviewer", "")
-    with pytest.raises(ValueError, match="not configured"):
-        monkeypatch.delenv("RESEARCH_PROVIDER_USAGE_SECRET", raising=False)
-        research_graphs.ingest_provider_usage_receipt(
-            reservation_id=granted["reservation_id"],
-            provider="untrusted",
-            provider_request_id="request-1",
-            input_tokens=10,
-            output_tokens=5,
-            usage_attestation="forged",
+    with pytest.raises(ValueError, match="agent_principal_hash"):
+        store.reserve_invocation(
+            owner_user_id="alice",
+            agent_id="hard-limit",
+            actor_role="reviewer",
+            authority_scope="local_research",
+            purpose="review",
+            runtime_id="test-runtime",
+            model_id="test-model",
+            max_input_tokens=10,
+            max_output_tokens=5,
+            agent_principal_hash="forged",
+            lineage_hash="d" * 64,
         )
 
-    released = research_graphs.release_token_reservation(
+    released = store.release_invocation(
         owner_user_id="alice",
-        reservation_id=granted["reservation_id"],
+        invocation_or_reservation_id=granted["invocation_id"],
     )
-    budget = research_graphs.load_token_budget(
+    budget = store.load_current_budget_period(
         owner_user_id="alice",
-        scope_id="hard-limit",
+        agent_id="hard-limit",
     )
     assert released["released_tokens"] == 80
     assert budget["available_tokens"] == 100

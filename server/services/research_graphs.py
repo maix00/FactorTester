@@ -14,6 +14,7 @@ from typing import Any
 import orjson
 
 import settings as Settings
+from server.services import agent_flow
 from cli_anything.factortester_research.core.graph import (
     graph_content_hash as protocol_graph_content_hash,
     validate_graph as validate_protocol_graph,
@@ -227,52 +228,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             token_estimate INTEGER NOT NULL,
             created_at REAL NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS research_agent_executions (
-            execution_id TEXT PRIMARY KEY,
-            owner_user_id TEXT NOT NULL,
-            actor_role TEXT NOT NULL,
-            model_id TEXT NOT NULL,
-            codex_version TEXT NOT NULL,
-            reservation_id TEXT NOT NULL UNIQUE,
-            authority_scope TEXT NOT NULL,
-            agent_principal_hash TEXT NOT NULL,
-            lineage_hash TEXT NOT NULL,
-            launcher_attestation TEXT NOT NULL,
-            created_at REAL NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS research_token_budgets (
-            scope_id TEXT PRIMARY KEY,
-            owner_user_id TEXT NOT NULL,
-            token_limit INTEGER NOT NULL,
-            used_tokens INTEGER NOT NULL DEFAULT 0,
-            reserved_tokens INTEGER NOT NULL DEFAULT 0,
-            created_at REAL NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS research_token_reservations (
-            reservation_id TEXT PRIMARY KEY,
-            scope_id TEXT NOT NULL,
-            owner_user_id TEXT NOT NULL,
-            work_kind TEXT NOT NULL,
-            max_input_tokens INTEGER NOT NULL,
-            max_output_tokens INTEGER NOT NULL,
-            max_total_tokens INTEGER NOT NULL,
-            status TEXT NOT NULL,
-            expires_at REAL NOT NULL,
-            provider_receipt_id TEXT NOT NULL DEFAULT '',
-            created_at REAL NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS research_provider_usage_receipts (
-            provider_receipt_id TEXT PRIMARY KEY,
-            reservation_id TEXT NOT NULL,
-            provider TEXT NOT NULL,
-            provider_request_id TEXT NOT NULL UNIQUE,
-            input_tokens INTEGER NOT NULL,
-            output_tokens INTEGER NOT NULL,
-            usage_attestation TEXT NOT NULL,
-            created_at REAL NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_research_agent_executions_owner
-        ON research_agent_executions(owner_user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_research_graph_proposals_version
         ON research_graph_proposals(graph_id, version, created_at);
         CREATE TABLE IF NOT EXISTS research_graph_reviews (
@@ -559,39 +514,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             "ALTER TABLE research_graph_reviews "
             "ADD COLUMN reviewer_execution_id TEXT NOT NULL DEFAULT ''"
         )
-    execution_columns = {
-        str(row["name"])
-        for row in conn.execute(
-            "PRAGMA table_info(research_agent_executions)"
-        ).fetchall()
-    }
-    if "reservation_id" not in execution_columns:
-        conn.execute(
-            "ALTER TABLE research_agent_executions "
-            "ADD COLUMN reservation_id TEXT NOT NULL DEFAULT ''"
-        )
-    if "authority_scope" not in execution_columns:
-        conn.execute(
-            "ALTER TABLE research_agent_executions "
-            "ADD COLUMN authority_scope TEXT NOT NULL DEFAULT 'local_research'"
-        )
-    for column in (
-        "agent_principal_hash",
-        "lineage_hash",
-        "launcher_attestation",
-    ):
-        if column not in execution_columns:
-            conn.execute(
-                "ALTER TABLE research_agent_executions "
-                f"ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
-            )
-    conn.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_research_agent_reservation
-        ON research_agent_executions(reservation_id)
-        WHERE reservation_id<>''
-        """
-    )
     receipt_columns = {
         str(row["name"])
         for row in conn.execute(
@@ -702,6 +624,24 @@ def _backfill_branch_aggregates(conn: sqlite3.Connection) -> None:
 
 def ensure_schema() -> None:
     _clear_graph_cache_for_current_db()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        legacy_accounting = conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name IN (
+                'research_agent_executions',
+                'research_token_budgets',
+                'research_token_reservations',
+                'research_provider_usage_receipts'
+            )
+            """
+        ).fetchall()
+    if legacy_accounting:
+        raise RuntimeError(
+            "legacy Graph accounting requires the offline Agent Flow "
+            "migration with an explicit Agent identity mapping"
+        )
+    agent_flow.get_store().ensure_schema()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
 
@@ -903,32 +843,25 @@ def derive_activation_token_metrics(
             )
         graph_scope_id = f"instance:{routine_instance_id}"
         baseline_scope_id = f"research-run:{baseline_run_id}"
-        budget_rows = conn.execute(
-            """
-            SELECT scope_id, used_tokens
-            FROM research_token_budgets
-            WHERE owner_user_id=? AND scope_id IN (?, ?)
-            """,
-            (owner, graph_scope_id, baseline_scope_id),
-        ).fetchall()
-        budgets = {
-            str(row["scope_id"]): int(row["used_tokens"])
-            for row in budget_rows
-        }
-        if set(budgets) != {graph_scope_id, baseline_scope_id}:
-            raise ValueError(
-                "graph and baseline token budgets are required"
-            )
-        subagent_count = int(conn.execute(
-            """
-            SELECT COUNT(*) AS count
-            FROM research_agent_executions e
-            JOIN research_token_reservations r
-              ON r.reservation_id=e.reservation_id
-            WHERE r.owner_user_id=? AND r.scope_id=?
-            """,
-            (owner, graph_scope_id),
-        ).fetchone()["count"])
+    flow_store = agent_flow.get_store()
+    graph_period = flow_store.load_current_budget_period(
+        owner_user_id=owner,
+        agent_id=graph_scope_id,
+    )
+    baseline_period = flow_store.load_current_budget_period(
+        owner_user_id=owner,
+        agent_id=baseline_scope_id,
+    )
+    if graph_period is None or baseline_period is None:
+        raise ValueError("graph and baseline Agent budget periods are required")
+    budgets = {
+        graph_scope_id: int(graph_period["used_tokens"]),
+        baseline_scope_id: int(baseline_period["used_tokens"]),
+    }
+    subagent_count = flow_store.count_subagent_invocations(
+        owner_user_id=owner,
+        agent_id=graph_scope_id,
+    )
     context = build_graph_branch_context(
         instance_id=routine_instance_id,
         branch_id=routine_branch_id,
@@ -981,7 +914,7 @@ def derive_activation_token_metrics(
         "graph_run_id": graph_run_id,
         "baseline_run_id": baseline_run_id,
         "run_spec_hash": str(runs[graph_run_id]["run_spec_hash"]),
-        "token_authority": "trusted_provider_usage_receipts",
+        "token_authority": "normalized_agent_invocations",
     }
 
 
@@ -1106,6 +1039,10 @@ def create_agent_execution(
     lineage_hash: str = "",
     launcher_attestation: str = "",
 ) -> dict[str, Any]:
+    raise RuntimeError(
+        "deprecated Agent accounting protocol; reserve one complete "
+        "AgentInvocation through /api/agent-flow/invocations"
+    )
     if actor_role not in {
         "proposer",
         "reviewer",
@@ -1225,6 +1162,9 @@ def create_token_budget(
     scope_id: str,
     token_limit: int,
 ) -> dict[str, Any]:
+    raise RuntimeError(
+        "deprecated Graph token budget; configure the Agent Profile budget"
+    )
     if not scope_id.strip():
         raise ValueError("token budget scope_id is required")
     if (
@@ -1266,6 +1206,10 @@ def reserve_tokens(
     max_output_tokens: int,
     ttl_seconds: int = 900,
 ) -> dict[str, Any]:
+    raise RuntimeError(
+        "deprecated split reservation protocol; reserve one complete "
+        "AgentInvocation"
+    )
     if work_kind not in {
         "researcher",
         "proposer",
@@ -1359,6 +1303,9 @@ def ingest_provider_usage_receipt(
     output_tokens: int,
     usage_attestation: str,
 ) -> dict[str, Any]:
+    raise RuntimeError(
+        "deprecated provider receipt protocol; settle the AgentInvocation"
+    )
     """Trusted gateway adapter: reject when no provider secret is configured."""
     secret = os.environ.get("RESEARCH_PROVIDER_USAGE_SECRET", "")
     if not secret:
@@ -1430,6 +1377,9 @@ def commit_token_reservation(
     reservation_id: str,
     provider_receipt_id: str,
 ) -> dict[str, Any]:
+    raise RuntimeError(
+        "deprecated token commit protocol; settle the AgentInvocation"
+    )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
@@ -1482,6 +1432,9 @@ def release_token_reservation(
     owner_user_id: str,
     reservation_id: str,
 ) -> dict[str, Any]:
+    raise RuntimeError(
+        "deprecated token reservation; release the AgentInvocation"
+    )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
@@ -1524,6 +1477,9 @@ def load_token_budget(
     owner_user_id: str,
     scope_id: str,
 ) -> dict[str, Any] | None:
+    raise RuntimeError(
+        "deprecated Graph token budget; load the Agent Profile budget"
+    )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         row = conn.execute(
             """
@@ -1552,18 +1508,22 @@ def _require_agent_execution(
     owner_user_id: str,
     execution_id: str,
     role: str,
-) -> sqlite3.Row:
-    row = conn.execute(
-        """
-        SELECT * FROM research_agent_executions
-        WHERE execution_id=? AND owner_user_id=? AND actor_role=?
-        """,
-        (execution_id, owner_user_id, role),
-    ).fetchone()
-    if row is None:
-        raise ValueError(
-            f"valid {role} Agent execution is required"
+) -> dict[str, Any]:
+    del conn
+    try:
+        row = agent_flow.get_store().load_invocation(
+            owner_user_id=owner_user_id,
+            invocation_id=execution_id,
         )
+    except KeyError as exc:
+        raise ValueError(
+            f"valid {role} Agent invocation is required"
+        ) from exc
+    if (
+        str(row["actor_role"]) != role
+        or str(row["status"]) != "settled"
+    ):
+        raise ValueError(f"valid {role} Agent invocation is required")
     return row
 
 
@@ -1702,16 +1662,23 @@ def record_proposal_review(
             raise ValueError(
                 "proposal reviewer principal and lineage must be independent"
             )
-        existing_review_principals = conn.execute(
+        existing_review_ids = [
+            str(row["reviewer_execution_id"])
+            for row in conn.execute(
             """
-            SELECT e.agent_principal_hash, e.lineage_hash
-            FROM research_graph_reviews r
-            JOIN research_agent_executions e
-              ON e.execution_id=r.reviewer_execution_id
-            WHERE r.proposal_id=?
+            SELECT reviewer_execution_id
+            FROM research_graph_reviews
+            WHERE proposal_id=?
             """,
             (proposal_id,),
-        ).fetchall()
+            ).fetchall()
+        ]
+        existing_review_principals = (
+            agent_flow.get_store().load_invocations(
+                owner_user_id=owner_user_id,
+                invocation_ids=existing_review_ids,
+            ).values()
+        )
         if any(
             str(row["agent_principal_hash"])
             == str(reviewer_execution["agent_principal_hash"])
@@ -3139,15 +3106,6 @@ def create_graph_instance(
         )
         conn.execute(
             """
-            INSERT INTO research_token_budgets (
-                scope_id, owner_user_id, token_limit, used_tokens,
-                reserved_tokens, created_at
-            ) VALUES (?, ?, ?, 0, 0, ?)
-            """,
-            (f"instance:{instance_id}", owner, token_budget, now),
-        )
-        conn.execute(
-            """
             INSERT INTO research_graph_branches (
                 branch_id, instance_id, label, current_node, status,
                 aggregate_version, created_at, updated_at
@@ -3366,45 +3324,27 @@ def advance_graph_branch(
             + int(telemetry.get("output_tokens") or 0)
             + int(telemetry.get("reviewer_tokens") or 0)
         )
-        reservation_ids = evidence.get("token_reservation_ids") or []
-        if not isinstance(reservation_ids, list) or not all(
-            isinstance(item, str) and item for item in reservation_ids
+        invocation_ids = evidence.get("agent_invocation_ids") or []
+        if not isinstance(invocation_ids, list) or not all(
+            isinstance(item, str) and item for item in invocation_ids
         ):
-            raise ValueError("token_reservation_ids must be an array")
-        if reported_team_tokens and not reservation_ids:
+            raise ValueError("agent_invocation_ids must be an array")
+        if reported_team_tokens and not invocation_ids:
             raise ValueError(
-                "trusted committed token reservation is required"
+                "settled Agent invocation evidence is required"
             )
         authoritative_tokens = 0
-        if reservation_ids:
-            placeholders = ",".join("?" for _ in reservation_ids)
-            rows = conn.execute(
-                f"""
-                SELECT r.reservation_id, p.input_tokens, p.output_tokens
-                FROM research_token_reservations r
-                JOIN research_provider_usage_receipts p
-                  ON p.provider_receipt_id=r.provider_receipt_id
-                WHERE r.reservation_id IN ({placeholders})
-                  AND r.owner_user_id=? AND r.scope_id=?
-                  AND r.status='committed'
-                """,
-                (
-                    *reservation_ids,
-                    owner,
-                    f"instance:{instance_id}",
-                ),
-            ).fetchall()
-            if len(rows) != len(set(reservation_ids)):
-                raise ValueError(
-                    "all token reservations must be committed and trusted"
+        if invocation_ids:
+            authoritative_tokens = (
+                agent_flow.get_store().settled_tokens_for_invocations(
+                    owner_user_id=owner,
+                    agent_id=f"instance:{instance_id}",
+                    invocation_ids=invocation_ids,
                 )
-            authoritative_tokens = sum(
-                int(row["input_tokens"]) + int(row["output_tokens"])
-                for row in rows
             )
         if authoritative_tokens != reported_team_tokens:
             raise ValueError(
-                "reported team token total does not match provider usage"
+                "reported team token total does not match Agent Flow usage"
             )
         graph = _load_graph_from_conn(
             conn,
@@ -3678,13 +3618,10 @@ def _build_graph_branch_local_state(
                 "binding": deepcopy(binding_by_id.get(capability_id)),
                 "gap": deepcopy(gap_by_id.get(capability_id)),
             })
-        budget_row = conn.execute(
-            """
-            SELECT * FROM research_token_budgets
-            WHERE scope_id=? AND owner_user_id=?
-            """,
-            (f"instance:{instance_id}", owner),
-        ).fetchone()
+    budget_period = agent_flow.get_store().load_current_budget_period(
+        owner_user_id=owner,
+        agent_id=f"instance:{instance_id}",
+    )
     totals = {
         "input_tokens": int(branch_row["cumulative_input_tokens"]),
         "output_tokens": int(branch_row["cumulative_output_tokens"]),
@@ -3713,14 +3650,32 @@ def _build_graph_branch_local_state(
     totals["skill_context_cache_hits"] = int(
         branch_row["skill_context_cache_hits"]
     )
-    token_budget = int(budget_row["token_limit"])
-    authoritative_used = int(budget_row["used_tokens"])
-    authoritative_reserved = int(budget_row["reserved_tokens"])
-    authoritative_remaining = max(
-        token_budget - authoritative_used - authoritative_reserved,
-        0,
+    token_budget = (
+        budget_period["token_limit"] if budget_period is not None else None
     )
-    budget_exceeded = authoritative_remaining == 0
+    authoritative_used = (
+        int(budget_period["used_tokens"]) if budget_period is not None else 0
+    )
+    authoritative_reserved = (
+        int(budget_period["reserved_tokens"])
+        if budget_period is not None
+        else 0
+    )
+    authoritative_remaining = (
+        max(
+            int(token_budget)
+            - authoritative_used
+            - authoritative_reserved,
+            0,
+        )
+        if token_budget is not None
+        else None
+    )
+    budget_exceeded = (
+        authoritative_remaining == 0
+        if authoritative_remaining is not None
+        else False
+    )
     totals["authority"] = "client_reported_diagnostic_only"
     totals["budget"] = {
         "limit": token_budget,
@@ -3728,7 +3683,7 @@ def _build_graph_branch_local_state(
         "reserved": authoritative_reserved,
         "remaining": authoritative_remaining,
         "exceeded": budget_exceeded,
-        "authority": "trusted_provider_usage_receipts",
+        "authority": "normalized_agent_invocations",
     }
     current_ids = set(node.get("required_capabilities") or [])
     open_gaps = [

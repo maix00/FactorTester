@@ -5,6 +5,8 @@ import json
 from click.testing import CliRunner
 
 from tools.cli.app import cli
+from tools.cli.client import FactorTesterClient
+from tools.cli.commands import agent_flow as agent_flow_commands
 from tools.cli.commands import research_graph as commands
 
 
@@ -14,6 +16,8 @@ class FakeClient:
         self.validation = None
         self.proposal = None
         self.review = None
+        self.agent_budget_call = None
+        self.agent_invocation_call = None
 
     def publish_research_graph(self, graph):
         self.published = graph
@@ -114,6 +118,67 @@ class FakeClient:
 
     def release_research_tokens(self, reservation_id):
         return {"reservation_id": reservation_id, "status": "released"}
+
+    def load_agent_budget_period(self, agent_id):
+        self.agent_budget_call = ("load", agent_id, {})
+        return {
+            "period_id": "period-1",
+            "agent_id": agent_id,
+            "token_limit": 2000,
+        }
+
+    def configure_agent_budget_period(self, agent_id, *, token_limit):
+        self.agent_budget_call = (
+            "configure",
+            agent_id,
+            {"token_limit": token_limit},
+        )
+        return {
+            "period_id": "period-1",
+            "agent_id": agent_id,
+            "token_limit": token_limit,
+        }
+
+    def reset_agent_budget_period(self, agent_id, *, token_limit=None):
+        self.agent_budget_call = (
+            "reset",
+            agent_id,
+            {"token_limit": token_limit},
+        )
+        return {
+            "period_id": "period-2",
+            "agent_id": agent_id,
+            "token_limit": token_limit,
+        }
+
+    def reserve_agent_invocation(self, **kwargs):
+        self.agent_invocation_call = ("reserve", kwargs)
+        return {
+            "invocation_id": "invocation-1",
+            "status": "reserved",
+            **kwargs,
+        }
+
+    def settle_agent_invocation(self, invocation_id, **kwargs):
+        self.agent_invocation_call = (
+            "settle",
+            {"invocation_id": invocation_id, **kwargs},
+        )
+        return {
+            "invocation_id": invocation_id,
+            "status": "settled",
+            **kwargs,
+        }
+
+    def release_agent_invocation(self, invocation_id):
+        self.agent_invocation_call = (
+            "release",
+            {"invocation_id": invocation_id},
+        )
+        return {
+            "invocation_id": invocation_id,
+            "status": "released",
+        }
 
     def get_research_graph_branch_context(self, instance_id, branch_id):
         return {
@@ -341,6 +406,277 @@ def test_research_graph_token_budget_cli_denies_work_before_agent_launch(
     assert reserved.exit_code == 0
     assert agent.exit_code == 0
     assert '"reservation_id": "reservation-1"' in reserved.output
+
+
+def test_agent_flow_budget_commands_are_canonical_and_machine_readable(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(
+        agent_flow_commands,
+        "client_from_config",
+        lambda: fake,
+    )
+    runner = CliRunner()
+
+    help_result = runner.invoke(cli, ["agent-flow", "--help"])
+    budget_help = runner.invoke(cli, ["agent-flow", "budget", "--help"])
+    configured = runner.invoke(cli, [
+        "agent-flow", "budget", "configure", "research-agent-1",
+        "--token-limit", "2000",
+    ])
+    loaded = runner.invoke(cli, [
+        "agent-flow", "budget", "load", "research-agent-1",
+    ])
+    reset = runner.invoke(cli, [
+        "agent-flow", "budget", "reset", "research-agent-1",
+    ])
+
+    assert help_result.exit_code == 0
+    assert "budget" in help_result.output
+    assert "invocation" in help_result.output
+    assert budget_help.exit_code == 0
+    assert "configure" in budget_help.output
+    assert "load" in budget_help.output
+    assert "reset" in budget_help.output
+    assert configured.exit_code == 0
+    assert json.loads(configured.output)["token_limit"] == 2000
+    assert loaded.exit_code == 0
+    assert json.loads(loaded.output)["period_id"] == "period-1"
+    assert reset.exit_code == 0
+    assert json.loads(reset.output)["period_id"] == "period-2"
+    assert fake.agent_budget_call == (
+        "reset",
+        "research-agent-1",
+        {"token_limit": None},
+    )
+
+
+def test_agent_flow_invocation_commands_preserve_provenance(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(
+        agent_flow_commands,
+        "client_from_config",
+        lambda: fake,
+    )
+    runner = CliRunner()
+    context_file = tmp_path / "context-cost.json"
+    context_file.write_text(json.dumps({
+        "base_instructions": 40,
+        "conversation": 60,
+    }))
+
+    reserved = runner.invoke(cli, [
+        "agent-flow", "invocation", "reserve", "research-agent-1",
+        "--sponsor-agent-id", "planner-agent-1",
+        "--role", "researcher",
+        "--authority-scope", "local_research",
+        "--task-ref", "work-package-1",
+        "--purpose", "test one preregistered hypothesis",
+        "--runtime-id", "codex-local-1",
+        "--model-id", "gpt-5",
+        "--max-input-tokens", "500",
+        "--max-output-tokens", "200",
+        "--agent-principal-hash", "a" * 64,
+        "--lineage-hash", "b" * 64,
+        "--input-hash", "c" * 64,
+        "--context-cost-file", str(context_file),
+        "--idempotency-key", "invoke-work-package-1",
+    ])
+
+    assert reserved.exit_code == 0, reserved.output
+    reserved_payload = json.loads(reserved.output)
+    assert reserved_payload["invocation_id"] == "invocation-1"
+    assert fake.agent_invocation_call == (
+        "reserve",
+        {
+            "agent_id": "research-agent-1",
+            "sponsor_agent_id": "planner-agent-1",
+            "actor_role": "researcher",
+            "authority_scope": "local_research",
+            "task_ref": "work-package-1",
+            "purpose": "test one preregistered hypothesis",
+            "runtime_id": "codex-local-1",
+            "model_id": "gpt-5",
+            "max_input_tokens": 500,
+            "max_output_tokens": 200,
+            "agent_principal_hash": "a" * 64,
+            "lineage_hash": "b" * 64,
+            "input_hash": "c" * 64,
+            "context_cost": {
+                "base_instructions": 40,
+                "conversation": 60,
+            },
+            "idempotency_key": "invoke-work-package-1",
+        },
+    )
+
+    settled = runner.invoke(cli, [
+        "agent-flow", "invocation", "settle", "invocation-1",
+        "--input-tokens", "320",
+        "--output-tokens", "120",
+        "--cache-read-tokens", "30",
+        "--provider-request-id", "provider-request-1",
+        "--provider-attestation", "provider-attestation-1",
+    ])
+    assert settled.exit_code == 0, settled.output
+    assert json.loads(settled.output)["status"] == "settled"
+    assert fake.agent_invocation_call == (
+        "settle",
+        {
+            "invocation_id": "invocation-1",
+            "input_tokens": 320,
+            "output_tokens": 120,
+            "cache_read_tokens": 30,
+            "provider_request_id": "provider-request-1",
+            "provider_attestation": "provider-attestation-1",
+        },
+    )
+
+    released = runner.invoke(cli, [
+        "agent-flow", "invocation", "release", "invocation-1",
+    ])
+    assert released.exit_code == 0
+    assert json.loads(released.output)["status"] == "released"
+
+
+def test_legacy_graph_agent_and_token_commands_are_deprecated() -> None:
+    help_result = CliRunner().invoke(cli, ["research-graph", "--help"])
+
+    assert help_result.exit_code == 0
+    for command_name in (
+        "agent-start",
+        "budget-create",
+        "token-reserve",
+        "token-commit",
+        "token-release",
+    ):
+        command_line = next(
+            line for line in help_result.output.splitlines()
+            if command_name in line
+        )
+        assert "deprecated" in command_line.lower()
+
+
+class _RecordingSession:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def get(self, path):
+        self.calls.append(("GET", path, None))
+        return {"success": True, "budget_period": {"period_id": "period-1"}}
+
+    def put(self, path, payload):
+        self.calls.append(("PUT", path, payload))
+        return {
+            "success": True,
+            "budget_period": {"token_limit": payload["token_limit"]},
+        }
+
+    def post(self, path, payload):
+        self.calls.append(("POST", path, payload))
+        if path.endswith("/settle"):
+            return {"success": True, "invocation": {"status": "settled"}}
+        if path.endswith("/release"):
+            return {"success": True, "invocation": {"status": "released"}}
+        if path == "/api/agent-flow/invocations":
+            return {
+                "success": True,
+                "invocation": {"invocation_id": "invocation-1"},
+            }
+        return {
+            "success": True,
+            "budget_period": {"period_id": "period-2"},
+        }
+
+
+def test_agent_flow_client_is_a_thin_http_adapter() -> None:
+    session = _RecordingSession()
+    client = FactorTesterClient(session)
+
+    client.load_agent_budget_period("agent-1")
+    client.configure_agent_budget_period("agent-1", token_limit=2000)
+    client.reset_agent_budget_period("agent-1", token_limit=None)
+    client.reserve_agent_invocation(
+        agent_id="agent-1",
+        sponsor_agent_id="",
+        actor_role="researcher",
+        authority_scope="local_research",
+        task_ref="task-1",
+        purpose="research",
+        runtime_id="codex-1",
+        model_id="gpt-5",
+        max_input_tokens=500,
+        max_output_tokens=200,
+        agent_principal_hash="a" * 64,
+        lineage_hash="b" * 64,
+        input_hash="c" * 64,
+        context_cost={"conversation": 10},
+        idempotency_key="request-1",
+    )
+    client.settle_agent_invocation(
+        "invocation-1",
+        input_tokens=300,
+        output_tokens=100,
+        cache_read_tokens=20,
+        provider_request_id="request-provider-1",
+        provider_attestation="attestation-1",
+    )
+    client.release_agent_invocation("invocation-1")
+
+    assert session.calls == [
+        ("GET", "/api/agent-flow/agents/agent-1/budget", None),
+        (
+            "PUT",
+            "/api/agent-flow/agents/agent-1/budget",
+            {"token_limit": 2000},
+        ),
+        (
+            "POST",
+            "/api/agent-flow/agents/agent-1/budget/reset",
+            {"token_limit": None},
+        ),
+        (
+            "POST",
+            "/api/agent-flow/invocations",
+            {
+                "agent_id": "agent-1",
+                "sponsor_agent_id": "",
+                "actor_role": "researcher",
+                "authority_scope": "local_research",
+                "task_ref": "task-1",
+                "purpose": "research",
+                "runtime_id": "codex-1",
+                "model_id": "gpt-5",
+                "max_input_tokens": 500,
+                "max_output_tokens": 200,
+                "agent_principal_hash": "a" * 64,
+                "lineage_hash": "b" * 64,
+                "input_hash": "c" * 64,
+                "context_cost": {"conversation": 10},
+                "idempotency_key": "request-1",
+            },
+        ),
+        (
+            "POST",
+            "/api/agent-flow/invocations/invocation-1/settle",
+            {
+                "input_tokens": 300,
+                "output_tokens": 100,
+                "cache_read_tokens": 20,
+                "provider_request_id": "request-provider-1",
+                "provider_attestation": "attestation-1",
+            },
+        ),
+        (
+            "POST",
+            "/api/agent-flow/invocations/invocation-1/release",
+            {},
+        ),
+    ]
 
 
 def test_research_graph_backend_assurance_commands(monkeypatch) -> None:
