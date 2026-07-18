@@ -135,17 +135,6 @@ def test_research_graph_cli_requires_explicit_gate_evidence(
     fake = FakeClient()
     monkeypatch.setattr(commands, "client_from_config", lambda: fake)
     runner = CliRunner()
-    token_metrics = {
-        "routine_context_bytes": 2400,
-        "full_graph_loaded_for_routine": False,
-        "untriggered_conditionals_in_context": 0,
-        "future_node_gaps_blocked": 0,
-        "routine_subagent_count": 0,
-        "shadow_graph_total_tokens": 800,
-        "shadow_baseline_total_tokens": 1000,
-    }
-    metrics_file = tmp_path / "token-metrics.json"
-    metrics_file.write_text(json.dumps(token_metrics))
 
     result = runner.invoke(cli, [
         "research-graph",
@@ -157,8 +146,12 @@ def test_research_graph_cli_requires_explicit_gate_evidence(
         "--capability-resolution-complete",
         "--unaffected-jobs-preserved",
         "--token-efficiency-passed",
-        "--token-metrics-file",
-        str(metrics_file),
+        "--routine-instance-id",
+        "instance-shadow-1",
+        "--routine-branch-id",
+        "branch-shadow-1",
+        "--baseline-run-id",
+        "run-baseline-1",
     ])
 
     assert result.exit_code == 0
@@ -171,7 +164,11 @@ def test_research_graph_cli_requires_explicit_gate_evidence(
             "capability_resolution_complete": True,
             "unaffected_jobs_preserved": True,
             "token_efficiency_passed": True,
-            "token_metrics": token_metrics,
+            "token_measurement_refs": {
+                "routine_instance_id": "instance-shadow-1",
+                "routine_branch_id": "branch-shadow-1",
+                "baseline_run_id": "run-baseline-1",
+            },
         },
     )
 

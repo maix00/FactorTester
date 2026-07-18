@@ -257,6 +257,8 @@ class FactorTesterClient:
         workspace_id: str,
         capability_receipt: dict[str, Any],
         token_budget: int | None = None,
+        shadow_graph_version: int | None = None,
+        shadow_run_id: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             "/api/research-graph-instances",
@@ -266,6 +268,8 @@ class FactorTesterClient:
                 "workspace_id": workspace_id,
                 "capability_receipt": capability_receipt,
                 "token_budget": token_budget,
+                "shadow_graph_version": shadow_graph_version,
+                "shadow_run_id": shadow_run_id,
             },
         ))
         return dict(data.get("instance") or {})

@@ -360,6 +360,8 @@ use the minimum relevant specialist reviewers and may enter human audit.
 | Reviewer use is risk-bounded | L1/L2 default zero; L3 one specialist; L4 proposer plus one reviewer, third only on disagreement |
 | Token cost is attributable | per-node/role/Skill/artifact telemetry aggregation |
 | Token regression blocks activation | graph shadow token total cannot exceed the recorded baseline |
+| Shadow comparison is like-for-like | distinct owned graph/baseline run IDs must share one immutable RunSpec hash |
+| Shadow totals are real and non-zero | server derives both totals from committed provider usage; `0/0` cannot activate |
 | Token budget preserves work | over-budget context disables new reviewers and keeps backend jobs running |
 | Work cannot start beyond budget | Agent execution requires a live pre-execution reservation |
 | Usage cannot be self-reported as authoritative | commit requires a trusted provider/gateway receipt |
@@ -395,22 +397,19 @@ Activation validation must include:
 ```json
 {
   "token_efficiency_passed": true,
-  "token_metrics": {
-    "routine_context_bytes": 2255,
-    "full_graph_loaded_for_routine": false,
-    "untriggered_conditionals_in_context": 0,
-    "future_node_gaps_blocked": 0,
-    "routine_subagent_count": 0,
-    "shadow_graph_total_tokens": 0,
-    "shadow_baseline_total_tokens": 0
+  "token_measurement_refs": {
+    "routine_instance_id": "shadow-instance-id",
+    "routine_branch_id": "shadow-branch-id",
+    "baseline_run_id": "baseline-research-run-id"
   }
 }
 ```
 
-The byte value above is a measured development snapshot, not a permanent
-allowance. The response path now enforces the 6000-byte hard limit. The
-activation gate still must replace client-submitted shadow totals with
-server-derived, non-zero provider usage before a real Draft can activate.
+The server requires distinct graph and baseline research runs with the same
+RunSpec hash. It recomputes context bytes, conditional/gap leakage, Agent
+execution count, and both non-zero token totals. Token totals come only from
+committed provider usage receipts; client-submitted metric values are ignored.
+Activation accepts only evidence marked `server_derived`.
 
 ## Deferred Decisions
 

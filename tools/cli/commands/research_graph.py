@@ -54,11 +54,9 @@ def active_graph(graph_id: str) -> None:
 @click.option("--capability-resolution-complete", is_flag=True, required=True)
 @click.option("--unaffected-jobs-preserved", is_flag=True, required=True)
 @click.option("--token-efficiency-passed", is_flag=True, required=True)
-@click.option(
-    "--token-metrics-file",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
+@click.option("--routine-instance-id", required=True)
+@click.option("--routine-branch-id", required=True)
+@click.option("--baseline-run-id", required=True)
 def validate_graph(
     graph_id: str,
     version: int,
@@ -67,7 +65,9 @@ def validate_graph(
     capability_resolution_complete: bool,
     unaffected_jobs_preserved: bool,
     token_efficiency_passed: bool,
-    token_metrics_file: Path,
+    routine_instance_id: str,
+    routine_branch_id: str,
+    baseline_run_id: str,
 ) -> None:
     """记录 Agent 生成的 replay、shadow、能力与任务隔离证据。"""
     evidence = {
@@ -76,9 +76,11 @@ def validate_graph(
         "capability_resolution_complete": capability_resolution_complete,
         "unaffected_jobs_preserved": unaffected_jobs_preserved,
         "token_efficiency_passed": token_efficiency_passed,
-        "token_metrics": json.loads(
-            token_metrics_file.read_text(encoding="utf-8")
-        ),
+        "token_measurement_refs": {
+            "routine_instance_id": routine_instance_id,
+            "routine_branch_id": routine_branch_id,
+            "baseline_run_id": baseline_run_id,
+        },
     }
     click.echo(_json(client_from_config().validate_research_graph(
         graph_id,
@@ -324,6 +326,8 @@ def rollback_graph(
 @click.option("--product-group", required=True)
 @click.option("--workspace-id", required=True)
 @click.option("--token-budget", type=click.IntRange(min=1))
+@click.option("--shadow-graph-version", type=click.IntRange(min=1))
+@click.option("--shadow-run-id", default="")
 @click.option(
     "--capability-receipt-file",
     required=True,
@@ -334,6 +338,8 @@ def start_graph_instance(
     product_group: str,
     workspace_id: str,
     token_budget: int | None,
+    shadow_graph_version: int | None,
+    shadow_run_id: str,
     capability_receipt_file: Path,
 ) -> None:
     """按当前 Active Graph 和产品实现解析启动研究实例。"""
@@ -353,6 +359,8 @@ def start_graph_instance(
         workspace_id=workspace_id,
         capability_receipt=receipt,
         token_budget=token_budget,
+        shadow_graph_version=shadow_graph_version,
+        shadow_run_id=shadow_run_id,
     )))
 
 
@@ -395,6 +403,7 @@ def approve_capability(
 )
 @click.option("--product-profile-hash", required=True)
 @click.option("--resolver-version", required=True)
+@click.option("--shadow-mode", is_flag=True)
 def attest_capabilities(
     graph_id: str,
     graph_version: int,
@@ -404,6 +413,7 @@ def attest_capabilities(
     approval_refs_file: Path,
     product_profile_hash: str,
     resolver_version: str,
+    shadow_mode: bool,
 ) -> None:
     """把本地语义解析换成服务器签发、不可伪造的 receipt。"""
     payload = json.loads(resolution_file.read_text(encoding="utf-8"))
@@ -432,6 +442,7 @@ def attest_capabilities(
         "provider_conformance_hash": str(
             resolution.get("provider_conformance_hash") or ""
         ),
+        "shadow_mode": shadow_mode,
     }
     click.echo(_json(
         client_from_config().attest_research_capabilities(request_payload)

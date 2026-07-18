@@ -13,7 +13,7 @@ import pytest
 
 import settings as Settings
 from server.modules.single_factor_test import sft_bp
-from server.services import research_graphs
+from server.services import research_graphs, research_runs
 
 
 def _initialize_graph_db(tmp_path, monkeypatch) -> None:
@@ -44,18 +44,6 @@ def _descriptor(capability_id: str) -> dict:
         "descriptor_hash": hashlib.sha256(
             capability_id.encode()
         ).hexdigest(),
-    }
-
-
-def _token_metrics() -> dict:
-    return {
-        "routine_context_bytes": 2400,
-        "full_graph_loaded_for_routine": False,
-        "untriggered_conditionals_in_context": 0,
-        "future_node_gaps_blocked": 0,
-        "routine_subagent_count": 0,
-        "shadow_graph_total_tokens": 800,
-        "shadow_baseline_total_tokens": 1000,
     }
 
 
@@ -121,9 +109,18 @@ def _issue_receipt(
     capability_ids: list[str],
     triggered_capability_ids: list[str] | None = None,
     undetermined_conditions: list[dict] | None = None,
+    graph_version: int | None = None,
+    shadow_mode: bool = False,
 ) -> dict:
-    active = research_graphs.load_active_graph(
-        graph_id="factor-research"
+    active = (
+        research_graphs.load_graph(
+            graph_id="factor-research",
+            version=graph_version,
+        )
+        if graph_version is not None
+        else research_graphs.load_active_graph(
+            graph_id="factor-research"
+        )
     )
     approval_refs = {}
     bindings = []
@@ -167,12 +164,13 @@ def _issue_receipt(
         },
         approval_refs=approval_refs,
         provider_conformance_hash="e" * 64,
+        shadow_mode=shadow_mode,
     )
 
 
-def _commit_usage(
+def _commit_scope_usage(
     *,
-    instance_id: str,
+    scope_id: str,
     input_tokens: int,
     output_tokens: int,
 ) -> str:
@@ -180,7 +178,7 @@ def _commit_usage(
     os.environ["RESEARCH_PROVIDER_USAGE_SECRET"] = secret
     reservation = research_graphs.reserve_tokens(
         owner_user_id="alice",
-        scope_id=f"instance:{instance_id}",
+        scope_id=scope_id,
         work_kind="researcher",
         max_input_tokens=input_tokens,
         max_output_tokens=output_tokens,
@@ -207,6 +205,115 @@ def _commit_usage(
         provider_receipt_id=receipt["provider_receipt_id"],
     )
     return reservation["reservation_id"]
+
+
+def _commit_usage(
+    *,
+    instance_id: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> str:
+    return _commit_scope_usage(
+        scope_id=f"instance:{instance_id}",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
+def _server_validation_evidence(
+    *,
+    version: int = 2,
+    shadow_passed: bool = True,
+    graph_tokens: int = 80,
+    baseline_tokens: int = 100,
+    matching_run_spec: bool = True,
+    launch_subagent: bool = False,
+) -> dict:
+    workspace_id = f"shadow-workspace-{uuid.uuid4().hex}"
+    run_spec = {
+        "workspace_id": workspace_id,
+        "factor": "test-factor",
+        "window": ["2020-01-01", "2024-12-31"],
+    }
+    graph_run = research_runs.create_run(
+        owner="alice",
+        workspace_id=workspace_id,
+        configuration_id=f"graph-{uuid.uuid4().hex}",
+        configuration_revision=1,
+        run_spec=run_spec,
+    )
+    baseline_run = research_runs.create_run(
+        owner="alice",
+        workspace_id=workspace_id,
+        configuration_id=f"baseline-{uuid.uuid4().hex}",
+        configuration_revision=1,
+        run_spec=(
+            run_spec
+            if matching_run_spec
+            else {**run_spec, "factor": "different-factor"}
+        ),
+    )
+    receipt = _issue_receipt(
+        node_id="hypothesis",
+        product_group="equities",
+        capability_ids=["research-hypothesis.preregister"],
+        graph_version=version,
+        shadow_mode=True,
+    )
+    instance = research_graphs.create_graph_instance(
+        graph_id="factor-research",
+        owner="alice",
+        product_group="equities",
+        workspace_id=workspace_id,
+        token_budget=1000,
+        capability_receipt=receipt,
+        shadow_graph_version=version,
+        shadow_run_id=graph_run["run_id"],
+    )
+    if graph_tokens:
+        _commit_usage(
+            instance_id=instance["instance_id"],
+            input_tokens=max(graph_tokens - 10, 0),
+            output_tokens=min(graph_tokens, 10),
+        )
+    if launch_subagent:
+        reservation = research_graphs.reserve_tokens(
+            owner_user_id="alice",
+            scope_id=f"instance:{instance['instance_id']}",
+            work_kind="reviewer",
+            max_input_tokens=10,
+            max_output_tokens=5,
+        )
+        research_graphs.create_agent_execution(
+            owner_user_id="alice",
+            actor_role="reviewer",
+            model_id="test-model",
+            reservation_id=reservation["reservation_id"],
+        )
+    baseline_scope_id = f"research-run:{baseline_run['run_id']}"
+    research_graphs.create_token_budget(
+        owner_user_id="alice",
+        scope_id=baseline_scope_id,
+        token_limit=1000,
+    )
+    if baseline_tokens:
+        _commit_scope_usage(
+            scope_id=baseline_scope_id,
+            input_tokens=max(baseline_tokens - 10, 0),
+            output_tokens=min(baseline_tokens, 10),
+        )
+    return {
+        "replay_passed": True,
+        "shadow_passed": shadow_passed,
+        "capability_resolution_complete": True,
+        "unaffected_jobs_preserved": True,
+        "token_efficiency_passed": True,
+        "token_measurement_refs": {
+            "routine_instance_id": instance["instance_id"],
+            "routine_branch_id": instance["branches"][0]["branch_id"],
+            "baseline_run_id": baseline_run["run_id"],
+        },
+    }
 
 
 def _draft_graph() -> dict:
@@ -264,19 +371,18 @@ def test_graph_versions_are_immutable_and_activation_creates_a_new_version(
         research_graphs.register_graph(changed, actor="curator-agent")
 
     _approve_proposal()
-    research_graphs.record_validation(
+    validation = research_graphs.record_validation(
         graph_id="factor-research",
         version=2,
         actor="review-agent",
-        evidence={
-            "replay_passed": True,
-            "shadow_passed": True,
-            "capability_resolution_complete": True,
-            "unaffected_jobs_preserved": True,
-            "token_efficiency_passed": True,
-            "token_metrics": _token_metrics(),
-        },
+        evidence=_server_validation_evidence(),
     )
+    metrics = validation["evidence"]["token_metrics"]
+    assert validation["evidence"]["token_metrics_authority"] == "server_derived"
+    assert metrics["shadow_graph_total_tokens"] == 80
+    assert metrics["shadow_baseline_total_tokens"] == 100
+    assert metrics["routine_context_bytes"] > 0
+    assert metrics["run_spec_hash"]
     research_graphs.record_audit(
         graph_id="factor-research",
         version=2,
@@ -396,14 +502,7 @@ def test_activation_requires_replay_shadow_capability_and_job_isolation(
         graph_id="factor-research",
         version=2,
         actor="review-agent",
-        evidence={
-            "replay_passed": True,
-            "shadow_passed": False,
-            "capability_resolution_complete": True,
-            "unaffected_jobs_preserved": True,
-            "token_efficiency_passed": True,
-            "token_metrics": _token_metrics(),
-        },
+        evidence=_server_validation_evidence(shadow_passed=False),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -427,23 +526,56 @@ def test_validation_rejects_a_token_efficient_claim_with_regression(
 ) -> None:
     _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
-    regressed = _token_metrics()
-    regressed["routine_context_bytes"] = 7000
-    regressed["routine_subagent_count"] = 1
 
-    with pytest.raises(ValueError, match="token efficiency checks failed"):
+    with pytest.raises(ValueError, match="client token_metrics"):
         research_graphs.record_validation(
             graph_id="factor-research",
             version=2,
             actor="review-agent",
             evidence={
-                "replay_passed": True,
-                "shadow_passed": True,
-                "capability_resolution_complete": True,
-                "unaffected_jobs_preserved": True,
                 "token_efficiency_passed": True,
-                "token_metrics": regressed,
+                "token_metrics": {
+                    "shadow_graph_total_tokens": 1,
+                    "shadow_baseline_total_tokens": 999999,
+                },
             },
+        )
+    with pytest.raises(ValueError, match="token efficiency checks failed"):
+        research_graphs.record_validation(
+            graph_id="factor-research",
+            version=2,
+            actor="review-agent",
+            evidence=_server_validation_evidence(
+                graph_tokens=120,
+                baseline_tokens=100,
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    ("evidence_kwargs", "message"),
+    [
+        ({"graph_tokens": 0}, "nonzero"),
+        ({"baseline_tokens": 0}, "nonzero"),
+        ({"matching_run_spec": False}, "RunSpec hash"),
+        ({"launch_subagent": True}, "routine_subagent_count"),
+    ],
+)
+def test_validation_rejects_untrusted_or_noncomparable_shadow_measurements(
+    tmp_path,
+    monkeypatch,
+    evidence_kwargs,
+    message,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+
+    with pytest.raises(ValueError, match=message):
+        research_graphs.record_validation(
+            graph_id="factor-research",
+            version=2,
+            actor="review-agent",
+            evidence=_server_validation_evidence(**evidence_kwargs),
         )
 
 
@@ -476,14 +608,7 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
         graph_id="factor-research",
         version=2,
         actor="validation-agent",
-        evidence={
-            "replay_passed": True,
-            "shadow_passed": True,
-            "capability_resolution_complete": True,
-            "unaffected_jobs_preserved": True,
-            "token_efficiency_passed": True,
-            "token_metrics": _token_metrics(),
-        },
+        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -532,14 +657,7 @@ def test_audited_rollback_moves_only_the_active_pointer(
         graph_id="factor-research",
         version=2,
         actor="validation-agent",
-        evidence={
-            "replay_passed": True,
-            "shadow_passed": True,
-            "capability_resolution_complete": True,
-            "unaffected_jobs_preserved": True,
-            "token_efficiency_passed": True,
-            "token_metrics": _token_metrics(),
-        },
+        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -567,14 +685,7 @@ def test_audited_rollback_moves_only_the_active_pointer(
         graph_id="factor-research",
         version=4,
         actor="validation-agent",
-        evidence={
-            "replay_passed": True,
-            "shadow_passed": True,
-            "capability_resolution_complete": True,
-            "unaffected_jobs_preserved": True,
-            "token_efficiency_passed": True,
-            "token_metrics": _token_metrics(),
-        },
+        evidence=_server_validation_evidence(version=4),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -684,14 +795,7 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
 
     validated = client.post(
         "/api/research-graphs/factor-research/versions/2/validation",
-        json={
-            "replay_passed": True,
-            "shadow_passed": True,
-            "capability_resolution_complete": True,
-            "unaffected_jobs_preserved": True,
-            "token_efficiency_passed": True,
-            "token_metrics": _token_metrics(),
-        },
+        json=_server_validation_evidence(),
     )
     assert validated.status_code == 201
 
@@ -781,13 +885,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         graph_id="factor-research",
         version=2,
         actor="reviewer",
-        evidence=({gate: True for gate in (
-            "replay_passed",
-            "shadow_passed",
-            "capability_resolution_complete",
-            "unaffected_jobs_preserved",
-            "token_efficiency_passed",
-        )} | {"token_metrics": _token_metrics()}),
+        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -1035,13 +1133,7 @@ def test_transition_stores_only_target_node_resolution(
         graph_id="factor-research",
         version=2,
         actor="reviewer",
-        evidence=({gate: True for gate in (
-            "replay_passed",
-            "shadow_passed",
-            "capability_resolution_complete",
-            "unaffected_jobs_preserved",
-            "token_efficiency_passed",
-        )} | {"token_metrics": _token_metrics()}),
+        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -1266,14 +1358,7 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
         graph_id="factor-research",
         version=2,
         actor="reviewer",
-        evidence={
-            "replay_passed": True,
-            "shadow_passed": True,
-            "capability_resolution_complete": True,
-            "unaffected_jobs_preserved": True,
-            "token_efficiency_passed": True,
-            "token_metrics": _token_metrics(),
-        },
+        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",

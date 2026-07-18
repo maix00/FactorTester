@@ -298,6 +298,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             workspace_id TEXT NOT NULL,
             capability_resolution_json TEXT NOT NULL,
             token_budget INTEGER,
+            mode TEXT NOT NULL DEFAULT 'live',
+            shadow_run_id TEXT NOT NULL DEFAULT '',
             created_at REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_research_graph_instances_owner
@@ -360,6 +362,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             approval_refs_json TEXT NOT NULL,
             provider_conformance_hash TEXT NOT NULL,
             resolver_attestation TEXT NOT NULL,
+            receipt_mode TEXT NOT NULL DEFAULT 'live',
             created_at REAL NOT NULL
         );
         CREATE TABLE IF NOT EXISTS research_graph_server_secrets (
@@ -402,6 +405,16 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     if "token_budget" not in instance_columns:
         conn.execute(
             "ALTER TABLE research_graph_instances ADD COLUMN token_budget INTEGER"
+        )
+    if "mode" not in instance_columns:
+        conn.execute(
+            "ALTER TABLE research_graph_instances "
+            "ADD COLUMN mode TEXT NOT NULL DEFAULT 'live'"
+        )
+    if "shadow_run_id" not in instance_columns:
+        conn.execute(
+            "ALTER TABLE research_graph_instances "
+            "ADD COLUMN shadow_run_id TEXT NOT NULL DEFAULT ''"
         )
     branch_columns = {
         str(row["name"])
@@ -484,6 +497,17 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         WHERE reservation_id<>''
         """
     )
+    receipt_columns = {
+        str(row["name"])
+        for row in conn.execute(
+            "PRAGMA table_info(research_capability_receipts)"
+        ).fetchall()
+    }
+    if "receipt_mode" not in receipt_columns:
+        conn.execute(
+            "ALTER TABLE research_capability_receipts "
+            "ADD COLUMN receipt_mode TEXT NOT NULL DEFAULT 'live'"
+        )
 
 
 def _trace_aggregate(
@@ -718,6 +742,154 @@ def _graph_lifecycle(
     return str(row["lifecycle"]) if row is not None else None
 
 
+def derive_activation_token_metrics(
+    *,
+    graph_id: str,
+    version: int,
+    routine_instance_id: str,
+    routine_branch_id: str,
+    baseline_run_id: str,
+) -> dict[str, Any]:
+    """Derive activation metrics from server-owned runs and usage receipts."""
+    if not all((
+        routine_instance_id,
+        routine_branch_id,
+        baseline_run_id,
+    )):
+        raise ValueError("complete token measurement references are required")
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        owner_row = conn.execute(
+            """
+            SELECT owner FROM research_graph_instances
+            WHERE instance_id=?
+            """,
+            (routine_instance_id,),
+        ).fetchone()
+        if owner_row is None:
+            raise ValueError("shadow graph instance or branch not found")
+        owner = str(owner_row["owner"])
+        runtime = _load_instance_branch_row(
+            conn,
+            instance_id=routine_instance_id,
+            branch_id=routine_branch_id,
+            owner=owner,
+        )
+        if runtime is None:
+            raise ValueError("shadow graph instance or branch not found")
+        if (
+            str(runtime["mode"]) != "shadow"
+            or str(runtime["graph_id"]) != graph_id
+            or int(runtime["graph_version"]) != int(version)
+        ):
+            raise ValueError(
+                "token measurement instance is not this draft shadow graph"
+            )
+        graph_run_id = str(runtime["shadow_run_id"])
+        if not graph_run_id or graph_run_id == baseline_run_id:
+            raise ValueError("shadow graph and baseline require distinct run IDs")
+        run_rows = conn.execute(
+            """
+            SELECT run_id, run_spec_hash, workspace_id
+            FROM research_runs
+            WHERE owner=? AND run_id IN (?, ?)
+              AND kind='factor_research'
+            """,
+            (owner, graph_run_id, baseline_run_id),
+        ).fetchall()
+        runs = {str(row["run_id"]): row for row in run_rows}
+        if set(runs) != {graph_run_id, baseline_run_id}:
+            raise ValueError("owned graph and baseline research runs are required")
+        if (
+            str(runs[graph_run_id]["run_spec_hash"])
+            != str(runs[baseline_run_id]["run_spec_hash"])
+        ):
+            raise ValueError(
+                "graph and baseline runs must share one RunSpec hash"
+            )
+        graph_scope_id = f"instance:{routine_instance_id}"
+        baseline_scope_id = f"research-run:{baseline_run_id}"
+        budget_rows = conn.execute(
+            """
+            SELECT scope_id, used_tokens
+            FROM research_token_budgets
+            WHERE owner_user_id=? AND scope_id IN (?, ?)
+            """,
+            (owner, graph_scope_id, baseline_scope_id),
+        ).fetchall()
+        budgets = {
+            str(row["scope_id"]): int(row["used_tokens"])
+            for row in budget_rows
+        }
+        if set(budgets) != {graph_scope_id, baseline_scope_id}:
+            raise ValueError(
+                "graph and baseline token budgets are required"
+            )
+        subagent_count = int(conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM research_agent_executions e
+            JOIN research_token_reservations r
+              ON r.reservation_id=e.reservation_id
+            WHERE r.owner_user_id=? AND r.scope_id=?
+            """,
+            (owner, graph_scope_id),
+        ).fetchone()["count"])
+    context = build_graph_branch_context(
+        instance_id=routine_instance_id,
+        branch_id=routine_branch_id,
+        owner=owner,
+    )
+    full_graph_loaded = any(
+        field in context
+        for field in (
+            "nodes",
+            "edges",
+            "capability_descriptors",
+            "capability_contracts",
+        )
+    )
+    untriggered_conditionals = (
+        len(context.get("conditional_capabilities") or [])
+        if "conditional_capabilities" in context
+        else 0
+    )
+    graph = load_graph(graph_id=graph_id, version=version) or {}
+    node = next(
+        (
+            item for item in graph.get("nodes") or []
+            if str(item.get("node_id") or "")
+            == str((context.get("node") or {}).get("node_id") or "")
+        ),
+        {},
+    )
+    allowed_gap_ids = set(node.get("required_capabilities") or []) | {
+        str(item.get("capability_id") or "")
+        for item in node.get("conditional_capabilities") or []
+    }
+    future_gap_count = (
+        0
+        if node.get("kind") == "capability_gap"
+        else sum(
+            str(item.get("capability_id") or "") not in allowed_gap_ids
+            for item in context.get("open_gaps") or []
+            if isinstance(item, dict)
+        )
+    )
+    return {
+        "routine_context_bytes": int(context["context_bytes"]),
+        "full_graph_loaded_for_routine": full_graph_loaded,
+        "untriggered_conditionals_in_context": untriggered_conditionals,
+        "future_node_gaps_blocked": future_gap_count,
+        "routine_subagent_count": subagent_count,
+        "shadow_graph_total_tokens": budgets[graph_scope_id],
+        "shadow_baseline_total_tokens": budgets[baseline_scope_id],
+        "graph_run_id": graph_run_id,
+        "baseline_run_id": baseline_run_id,
+        "run_spec_hash": str(runs[graph_run_id]["run_spec_hash"]),
+        "token_authority": "trusted_provider_usage_receipts",
+    }
+
+
 def record_validation(
     *,
     graph_id: str,
@@ -728,12 +900,26 @@ def record_validation(
     if not isinstance(evidence, dict):
         raise ValueError("validation evidence must be an object")
     _assert_no_skill_identity(evidence, location="validation evidence")
+    if "token_metrics" in evidence:
+        raise ValueError(
+            "client token_metrics are not accepted; submit measurement refs"
+        )
+    evidence_value = deepcopy(evidence)
     if evidence.get("token_efficiency_passed") is True:
-        metrics = evidence.get("token_metrics")
-        if not isinstance(metrics, dict):
+        refs = evidence.get("token_measurement_refs")
+        if not isinstance(refs, dict):
             raise ValueError(
-                "token_efficiency_passed requires token_metrics"
+                "token_efficiency_passed requires token_measurement_refs"
             )
+        metrics = derive_activation_token_metrics(
+            graph_id=graph_id,
+            version=version,
+            routine_instance_id=str(refs.get("routine_instance_id") or ""),
+            routine_branch_id=str(refs.get("routine_branch_id") or ""),
+            baseline_run_id=str(refs.get("baseline_run_id") or ""),
+        )
+        evidence_value["token_metrics"] = metrics
+        evidence_value["token_metrics_authority"] = "server_derived"
         required_metrics = {
             "routine_context_bytes": int,
             "full_graph_loaded_for_routine": bool,
@@ -766,6 +952,10 @@ def record_validation(
             > metrics["shadow_baseline_total_tokens"]
         ):
             failed_token_checks.append("shadow_graph_total_tokens")
+        if not metrics["shadow_graph_total_tokens"]:
+            failed_token_checks.append("shadow_graph_total_tokens_nonzero")
+        if not metrics["shadow_baseline_total_tokens"]:
+            failed_token_checks.append("shadow_baseline_total_tokens_nonzero")
         if failed_token_checks:
             raise ValueError(
                 "token efficiency checks failed: "
@@ -777,7 +967,7 @@ def record_validation(
         "graph_id": graph_id,
         "version": int(version),
         "actor": actor,
-        "evidence": deepcopy(evidence),
+        "evidence": deepcopy(evidence_value),
         "created_at": time.time(),
     }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -799,7 +989,10 @@ def record_validation(
                 graph_id,
                 int(version),
                 actor,
-                orjson.dumps(evidence, option=orjson.OPT_SORT_KEYS).decode(),
+                orjson.dumps(
+                    evidence_value,
+                    option=orjson.OPT_SORT_KEYS,
+                ).decode(),
                 row["created_at"],
             ),
         )
@@ -1536,6 +1729,10 @@ def activate_graph(
             raise GraphActivationBlocked(
                 "activation gates failed: " + ", ".join(failed)
             )
+        if validation.get("token_metrics_authority") != "server_derived":
+            raise GraphActivationBlocked(
+                "activation requires server-derived token metrics"
+            )
         if _latest_audit(
             conn, graph_id=graph_id, version=source_version,
         ) != "approved":
@@ -1888,6 +2085,7 @@ def issue_capability_receipt(
     semantic_resolution: dict[str, Any],
     approval_refs: dict[str, str],
     provider_conformance_hash: str,
+    shadow_mode: bool = False,
 ) -> dict[str, Any]:
     for field, value in (
         ("catalog_hash", catalog_hash),
@@ -1903,19 +2101,25 @@ def issue_capability_receipt(
     if not isinstance(approval_refs, dict):
         raise ValueError("approval_refs must be an object")
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        active = conn.execute(
-            """
-            SELECT version FROM active_research_graphs WHERE graph_id=?
-            """,
-            (graph_id,),
-        ).fetchone()
-        if active is None or int(active["version"]) != int(graph_version):
-            raise ValueError("receipt graph version is not active")
         graph = _load_graph_from_conn(
             conn,
             graph_id=graph_id,
             version=graph_version,
         ) or {}
+        if shadow_mode:
+            if graph.get("lifecycle") != "draft":
+                raise ValueError("shadow receipt requires a draft graph")
+            receipt_mode = "shadow"
+        else:
+            active = conn.execute(
+                """
+                SELECT version FROM active_research_graphs WHERE graph_id=?
+                """,
+                (graph_id,),
+            ).fetchone()
+            if active is None or int(active["version"]) != int(graph_version):
+                raise ValueError("receipt graph version is not active")
+            receipt_mode = "live"
         node = next(
             (
                 item for item in graph.get("nodes") or []
@@ -1985,6 +2189,7 @@ def issue_capability_receipt(
             "resolution": resolution,
             "approval_refs": approval_refs,
             "provider_conformance_hash": provider_conformance_hash,
+            "receipt_mode": receipt_mode,
         }
         signature = _receipt_signature(
             _attestation_secret(conn),
@@ -1997,8 +2202,9 @@ def issue_capability_receipt(
                 receipt_id, owner_user_id, graph_id, graph_version, graph_hash,
                 node_id, product_group, catalog_hash, product_profile_hash,
                 resolver_version, resolution_json, approval_refs_json,
-                provider_conformance_hash, resolver_attestation, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                provider_conformance_hash, resolver_attestation, receipt_mode,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 receipt_id,
@@ -2015,6 +2221,7 @@ def issue_capability_receipt(
                 orjson.dumps(approval_refs, option=orjson.OPT_SORT_KEYS).decode(),
                 provider_conformance_hash,
                 signature,
+                receipt_mode,
                 now,
             ),
         )
@@ -2034,6 +2241,7 @@ def _verify_capability_receipt(
     graph_version: int,
     node_id: str,
     product_group: str,
+    expected_mode: str,
 ) -> dict[str, Any]:
     receipt_id = str(receipt.get("receipt_id") or "")
     signature = str(receipt.get("resolver_attestation") or "")
@@ -2042,6 +2250,7 @@ def _verify_capability_receipt(
         SELECT * FROM research_capability_receipts
         WHERE receipt_id=? AND owner_user_id=? AND graph_id=?
         AND graph_version=? AND node_id=? AND product_group=?
+        AND receipt_mode=?
         """,
         (
             receipt_id,
@@ -2050,6 +2259,7 @@ def _verify_capability_receipt(
             int(graph_version),
             node_id,
             product_group,
+            expected_mode,
         ),
     ).fetchone()
     if row is None or not hmac.compare_digest(
@@ -2083,10 +2293,26 @@ def create_graph_instance(
     workspace_id: str,
     capability_receipt: dict[str, Any],
     token_budget: int | None = None,
+    shadow_graph_version: int | None = None,
+    shadow_run_id: str = "",
 ) -> dict[str, Any]:
-    active = load_active_graph(graph_id=graph_id)
-    if active is None:
-        raise GraphActivationBlocked("active graph not found")
+    if shadow_graph_version is not None:
+        active = load_graph(
+            graph_id=graph_id,
+            version=int(shadow_graph_version),
+        )
+        if active is None or active.get("lifecycle") != "draft":
+            raise GraphActivationBlocked("shadow draft graph not found")
+        if not shadow_run_id:
+            raise ValueError("shadow_run_id is required for a shadow instance")
+        mode = "shadow"
+    else:
+        if shadow_run_id:
+            raise ValueError("shadow_run_id is only valid in shadow mode")
+        active = load_active_graph(graph_id=graph_id)
+        if active is None:
+            raise GraphActivationBlocked("active graph not found")
+        mode = "live"
     entry_node = str(
         active.get("entry_node")
         or ((active.get("nodes") or [{}])[0].get("node_id") or "")
@@ -2110,6 +2336,25 @@ def create_graph_instance(
     branch_id = uuid.uuid4().hex
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        if mode == "shadow":
+            try:
+                run = conn.execute(
+                    """
+                    SELECT run_id FROM research_runs
+                    WHERE run_id=? AND owner=? AND workspace_id=?
+                    AND kind='factor_research'
+                    """,
+                    (shadow_run_id, owner, workspace_id),
+                ).fetchone()
+            except sqlite3.OperationalError as exc:
+                raise ValueError(
+                    "research run schema is not initialized"
+                ) from exc
+            if run is None:
+                raise ValueError(
+                    "shadow_run_id must reference an owned research run "
+                    "in the same workspace"
+                )
         local_resolution = _verify_capability_receipt(
             conn,
             owner_user_id=owner,
@@ -2118,6 +2363,7 @@ def create_graph_instance(
             graph_version=int(active["version"]),
             node_id=entry_node,
             product_group=product_group,
+            expected_mode=mode,
         )
         missing_entry = _missing_required_capabilities(entry, local_resolution)
         if missing_entry:
@@ -2130,8 +2376,8 @@ def create_graph_instance(
             INSERT INTO research_graph_instances (
                 instance_id, owner, graph_id, graph_version, product_group,
                 workspace_id, capability_resolution_json, token_budget,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                mode, shadow_run_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 instance_id,
@@ -2142,6 +2388,8 @@ def create_graph_instance(
                 workspace_id,
                 "{}",
                 token_budget,
+                mode,
+                shadow_run_id,
                 now,
             ),
         )
@@ -2188,6 +2436,8 @@ def create_graph_instance(
         "workspace_id": workspace_id,
         "capability_resolution": deepcopy(local_resolution),
         "token_budget": token_budget,
+        "mode": mode,
+        "shadow_run_id": shadow_run_id,
         "branches": [branch],
         "created_at": now,
     }
@@ -2468,6 +2718,7 @@ def advance_graph_branch(
                 graph_version=int(instance["graph_version"]),
                 node_id=target_id,
                 product_group=str(instance["product_group"]),
+                expected_mode=str(instance["mode"]),
             )
             target_resolution = _store_node_resolution(
                 conn,

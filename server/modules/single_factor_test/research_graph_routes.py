@@ -216,6 +216,7 @@ def attest_research_capabilities():
             provider_conformance_hash=str(
                 data.get("provider_conformance_hash") or ""
             ),
+            shadow_mode=bool(data.get("shadow_mode", False)),
         )
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
@@ -304,6 +305,8 @@ def create_research_graph_instance():
             workspace_id=str(data.get("workspace_id") or ""),
             capability_receipt=data.get("capability_receipt") or {},
             token_budget=data.get("token_budget"),
+            shadow_graph_version=data.get("shadow_graph_version"),
+            shadow_run_id=str(data.get("shadow_run_id") or ""),
         )
     except (ValueError, research_graphs.GraphActivationBlocked) as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
