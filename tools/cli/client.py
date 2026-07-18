@@ -137,6 +137,9 @@ class FactorTesterClient:
         model_id: str = "",
         codex_version: str = "",
         reservation_id: str,
+        agent_principal_hash: str,
+        lineage_hash: str,
+        launcher_attestation: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             "/api/research-agent-executions",
@@ -145,6 +148,9 @@ class FactorTesterClient:
                 "model_id": model_id,
                 "codex_version": codex_version,
                 "reservation_id": reservation_id,
+                "agent_principal_hash": agent_principal_hash,
+                "lineage_hash": lineage_hash,
+                "launcher_attestation": launcher_attestation,
             },
         ))
         return dict(data.get("execution") or {})
@@ -224,12 +230,43 @@ class FactorTesterClient:
         self,
         graph_id: str,
         version: int,
+        *,
+        human_authorization_id: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graphs/{graph_id}/versions/{version}/activate",
-            {},
+            {"human_authorization_id": human_authorization_id},
         ))
         return dict(data.get("graph") or {})
+
+    def authorize_research_graph_activation(
+        self,
+        *,
+        graph_id: str,
+        graph_version: int,
+        proposal_id: str,
+        graph_hash: str,
+        diff_hash: str,
+        nonce: str,
+        authorized_by: str,
+        expires_at: float,
+        human_attestation: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/research-human-activation-authorizations",
+            {
+                "graph_id": graph_id,
+                "graph_version": graph_version,
+                "proposal_id": proposal_id,
+                "graph_hash": graph_hash,
+                "diff_hash": diff_hash,
+                "nonce": nonce,
+                "authorized_by": authorized_by,
+                "expires_at": expires_at,
+                "human_attestation": human_attestation,
+            },
+        ))
+        return dict(data.get("authorization") or {})
 
     def rollback_research_graph(
         self,

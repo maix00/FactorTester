@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 import uuid
 
 from flask import Flask
@@ -24,6 +25,14 @@ def _initialize_graph_db(tmp_path, monkeypatch) -> None:
         tmp_path / "graphs.sqlite",
     )
     research_graphs.ensure_schema()
+    monkeypatch.setenv(
+        "RESEARCH_AGENT_LAUNCHER_SECRET",
+        "test-agent-launcher-secret",
+    )
+    monkeypatch.setenv(
+        "RESEARCH_HUMAN_ACTIVATION_SECRET",
+        "test-human-activation-secret",
+    )
 
 
 def _hash(graph: dict) -> str:
@@ -80,7 +89,46 @@ def _approve_proposal(
     return proposal, review
 
 
-def _agent_execution(role: str) -> dict:
+def _create_attested_agent(
+    role: str,
+    reservation_id: str,
+    *,
+    principal_label: str | None = None,
+    lineage_label: str | None = None,
+    model_id: str = "test-model",
+) -> dict:
+    principal_hash = hashlib.sha256(
+        (principal_label or uuid.uuid4().hex).encode()
+    ).hexdigest()
+    lineage_hash = hashlib.sha256(
+        (lineage_label or uuid.uuid4().hex).encode()
+    ).hexdigest()
+    payload = {
+        "owner_user_id": "alice",
+        "actor_role": role,
+        "model_id": model_id,
+        "codex_version": "",
+        "reservation_id": reservation_id,
+        "agent_principal_hash": principal_hash,
+        "lineage_hash": lineage_hash,
+    }
+    attestation = hmac.new(
+        b"test-agent-launcher-secret",
+        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
+        hashlib.sha256,
+    ).hexdigest()
+    return research_graphs.create_agent_execution(
+        **payload,
+        launcher_attestation=attestation,
+    )
+
+
+def _agent_execution(
+    role: str,
+    *,
+    principal_label: str | None = None,
+    lineage_label: str | None = None,
+) -> dict:
     scope_id = f"test:{role}:{uuid.uuid4().hex}"
     research_graphs.create_token_budget(
         owner_user_id="alice",
@@ -94,11 +142,101 @@ def _agent_execution(role: str) -> dict:
         max_input_tokens=400,
         max_output_tokens=200,
     )
-    return research_graphs.create_agent_execution(
-        owner_user_id="alice",
-        actor_role=role,
-        model_id="test-model",
+    return _create_attested_agent(
+        role,
         reservation_id=reservation["reservation_id"],
+        principal_label=principal_label,
+        lineage_label=lineage_label,
+    )
+
+
+def _agent_http_payload(
+    role: str,
+    reservation_id: str,
+    *,
+    model_id: str,
+) -> dict:
+    principal_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    lineage_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    payload = {
+        "owner_user_id": "alice",
+        "actor_role": role,
+        "model_id": model_id,
+        "codex_version": "",
+        "reservation_id": reservation_id,
+        "agent_principal_hash": principal_hash,
+        "lineage_hash": lineage_hash,
+    }
+    payload["launcher_attestation"] = hmac.new(
+        b"test-agent-launcher-secret",
+        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
+        hashlib.sha256,
+    ).hexdigest()
+    payload.pop("owner_user_id")
+    return payload
+
+
+def _human_authorization(
+    *,
+    graph_version: int = 2,
+    owner_user_id: str = "alice",
+) -> dict:
+    graph = research_graphs.load_graph(
+        graph_id="factor-research",
+        version=graph_version,
+    )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        proposal = conn.execute(
+            """
+            SELECT * FROM research_graph_proposals
+            WHERE graph_id='factor-research' AND version=?
+            ORDER BY created_at DESC, proposal_id DESC LIMIT 1
+            """,
+            (graph_version,),
+        ).fetchone()
+    change_diff = orjson.loads(proposal["change_diff_json"])
+    diff_hash = hashlib.sha256(
+        orjson.dumps(change_diff, option=orjson.OPT_SORT_KEYS)
+    ).hexdigest()
+    nonce = uuid.uuid4().hex
+    expires_at = time.time() + 300
+    payload = {
+        "owner_user_id": owner_user_id,
+        "graph_id": "factor-research",
+        "graph_version": graph_version,
+        "graph_hash": graph["content_hash"],
+        "proposal_id": proposal["proposal_id"],
+        "diff_hash": diff_hash,
+        "nonce_hash": hashlib.sha256(nonce.encode()).hexdigest(),
+        "authorized_by": "human-auditor",
+        "expires_at": expires_at,
+    }
+    attestation = hmac.new(
+        b"test-human-activation-secret",
+        orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
+        hashlib.sha256,
+    ).hexdigest()
+    return research_graphs.authorize_graph_activation(
+        owner_user_id=owner_user_id,
+        graph_id="factor-research",
+        graph_version=graph_version,
+        proposal_id=proposal["proposal_id"],
+        graph_hash=graph["content_hash"],
+        diff_hash=diff_hash,
+        nonce=nonce,
+        authorized_by="human-auditor",
+        expires_at=expires_at,
+        human_attestation=attestation,
+    )
+
+
+def _activate(graph_version: int = 2) -> dict:
+    authorization = _human_authorization(graph_version=graph_version)
+    return research_graphs.activate_graph(
+        graph_id="factor-research",
+        source_version=graph_version,
+        actor="alice",
+        human_authorization_id=authorization["authorization_id"],
     )
 
 
@@ -284,10 +422,8 @@ def _server_validation_evidence(
             max_input_tokens=10,
             max_output_tokens=5,
         )
-        research_graphs.create_agent_execution(
-            owner_user_id="alice",
-            actor_role="reviewer",
-            model_id="test-model",
+        _create_attested_agent(
+            "reviewer",
             reservation_id=reservation["reservation_id"],
         )
     baseline_scope_id = f"research-run:{baseline_run['run_id']}"
@@ -392,11 +528,7 @@ def test_graph_versions_are_immutable_and_activation_creates_a_new_version(
             {"question": "Can holdout select?", "answer": "No", "status": "pass"}
         ],
     )
-    active = research_graphs.activate_graph(
-        graph_id="factor-research",
-        source_version=2,
-        actor="curator-agent",
-    )
+    active = _activate()
 
     assert draft["lifecycle"] == "draft"
     assert active["version"] == 3
@@ -405,6 +537,166 @@ def test_graph_versions_are_immutable_and_activation_creates_a_new_version(
     assert research_graphs.load_active_graph(
         graph_id="factor-research"
     )["content_hash"] == active["content_hash"]
+
+
+def test_agent_execution_rejects_forged_launcher_attestation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    scope_id = "test:forged-launcher"
+    research_graphs.create_token_budget(
+        owner_user_id="alice",
+        scope_id=scope_id,
+        token_limit=1000,
+    )
+    reservation = research_graphs.reserve_tokens(
+        owner_user_id="alice",
+        scope_id=scope_id,
+        work_kind="proposer",
+        max_input_tokens=400,
+        max_output_tokens=200,
+    )
+
+    with pytest.raises(ValueError, match="launcher attestation is invalid"):
+        research_graphs.create_agent_execution(
+            owner_user_id="alice",
+            actor_role="proposer",
+            reservation_id=reservation["reservation_id"],
+            agent_principal_hash="a" * 64,
+            lineage_hash="b" * 64,
+            launcher_attestation="forged",
+        )
+
+
+@pytest.mark.parametrize(
+    ("principal_label", "lineage_label"),
+    [
+        ("same-principal", None),
+        (None, "same-lineage"),
+    ],
+)
+def test_proposal_review_requires_independent_principal_and_lineage(
+    tmp_path,
+    monkeypatch,
+    principal_label,
+    lineage_label,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    proposer = _agent_execution(
+        "proposer",
+        principal_label=principal_label,
+        lineage_label=lineage_label,
+    )
+    proposal = research_graphs.record_proposal(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+        actor_agent_id=proposer["execution_id"],
+        risk_level="L4",
+        change_diff={"reason": "test independent review"},
+        evidence_refs=["test:independence"],
+        token_estimate=100,
+    )
+    reviewer = _agent_execution(
+        "reviewer",
+        principal_label=principal_label,
+        lineage_label=lineage_label,
+    )
+
+    with pytest.raises(ValueError, match="principal and lineage"):
+        research_graphs.record_proposal_review(
+            proposal_id=proposal["proposal_id"],
+            owner_user_id="alice",
+            actor_agent_id=reviewer["execution_id"],
+            disposition="approved",
+            scope_drift=False,
+            semantic_uncertainty=False,
+            evidence_refs=["test:must-reject"],
+        )
+
+
+def test_activation_requires_exact_one_time_human_authorization(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    _approve_proposal()
+    research_graphs.record_validation(
+        graph_id="factor-research",
+        version=2,
+        actor="validation-agent",
+        evidence=_server_validation_evidence(),
+    )
+    research_graphs.record_audit(
+        graph_id="factor-research",
+        version=2,
+        actor="human-auditor",
+        disposition="approved",
+        grill_evidence=[{"question": "activate?", "answer": "yes"}],
+    )
+
+    with pytest.raises(
+        research_graphs.GraphActivationBlocked,
+        match="human activation authorization",
+    ):
+        research_graphs.activate_graph(
+            graph_id="factor-research",
+            source_version=2,
+            actor="alice",
+            human_authorization_id="missing",
+        )
+
+    authorization = _human_authorization()
+    active = research_graphs.activate_graph(
+        graph_id="factor-research",
+        source_version=2,
+        actor="alice",
+        human_authorization_id=authorization["authorization_id"],
+    )
+    assert active["lifecycle"] == "active"
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        consumed_at = conn.execute(
+            """
+            SELECT consumed_at FROM human_activation_authorizations
+            WHERE authorization_id=?
+            """,
+            (authorization["authorization_id"],),
+        ).fetchone()["consumed_at"]
+    assert consumed_at is not None
+
+
+def test_human_authorization_rejects_forged_adapter_attestation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    proposal, _ = _approve_proposal()
+    graph = research_graphs.load_graph(
+        graph_id="factor-research",
+        version=2,
+    )
+    diff_hash = hashlib.sha256(orjson.dumps(
+        proposal["change_diff"],
+        option=orjson.OPT_SORT_KEYS,
+    )).hexdigest()
+
+    with pytest.raises(ValueError, match="attestation is invalid"):
+        research_graphs.authorize_graph_activation(
+            owner_user_id="alice",
+            graph_id="factor-research",
+            graph_version=2,
+            proposal_id=proposal["proposal_id"],
+            graph_hash=graph["content_hash"],
+            diff_hash=diff_hash,
+            nonce=uuid.uuid4().hex,
+            authorized_by="ordinary-authenticated-session",
+            expires_at=time.time() + 300,
+            human_attestation="forged",
+        )
 
 
 def test_graph_request_paths_do_not_run_schema_ddl(
@@ -513,11 +805,7 @@ def test_activation_requires_replay_shadow_capability_and_job_isolation(
     )
 
     with pytest.raises(research_graphs.GraphActivationBlocked, match="shadow_passed"):
-        research_graphs.activate_graph(
-            graph_id="factor-research",
-            source_version=2,
-            actor="curator-agent",
-        )
+        _activate()
 
 
 def test_validation_rejects_a_token_efficient_claim_with_regression(
@@ -622,11 +910,7 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
         research_graphs.GraphActivationBlocked,
         match="third reviewer",
     ):
-        research_graphs.activate_graph(
-            graph_id="factor-research",
-            source_version=2,
-            actor="curator-agent",
-        )
+        _activate()
 
     for reviewer in ("reviewer-2", "reviewer-3"):
         research_graphs.record_proposal_review(
@@ -638,11 +922,7 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
             semantic_uncertainty=False,
             evidence_refs=[f"test:{reviewer}"],
         )
-    active = research_graphs.activate_graph(
-        graph_id="factor-research",
-        source_version=2,
-        actor="curator-agent",
-    )
+    active = _activate()
     assert active["lifecycle"] == "active"
 
 
@@ -666,11 +946,7 @@ def test_audited_rollback_moves_only_the_active_pointer(
         disposition="approved",
         grill_evidence=[{"question": "activate?", "answer": "yes"}],
     )
-    first_active = research_graphs.activate_graph(
-        graph_id="factor-research",
-        source_version=2,
-        actor="curator-agent",
-    )
+    first_active = _activate()
     second_draft = _draft_graph()
     second_draft["version"] = 4
     second_draft["parent_version"] = 3
@@ -694,11 +970,7 @@ def test_audited_rollback_moves_only_the_active_pointer(
         disposition="approved",
         grill_evidence=[{"question": "activate refined?", "answer": "yes"}],
     )
-    second_active = research_graphs.activate_graph(
-        graph_id="factor-research",
-        source_version=4,
-        actor="curator-agent",
-    )
+    second_active = _activate(graph_version=4)
 
     rollback = research_graphs.rollback_active_graph(
         graph_id="factor-research",
@@ -753,16 +1025,22 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
             "max_output_tokens": 200,
         },
     ).get_json()["reservation"]
-    proposer = client.post("/api/research-agent-executions", json={
-        "actor_role": "proposer",
-        "model_id": "test-proposer",
-        "reservation_id": proposer_reservation["reservation_id"],
-    })
-    reviewer = client.post("/api/research-agent-executions", json={
-        "actor_role": "reviewer",
-        "model_id": "test-reviewer",
-        "reservation_id": reviewer_reservation["reservation_id"],
-    })
+    proposer = client.post(
+        "/api/research-agent-executions",
+        json=_agent_http_payload(
+            "proposer",
+            proposer_reservation["reservation_id"],
+            model_id="test-proposer",
+        ),
+    )
+    reviewer = client.post(
+        "/api/research-agent-executions",
+        json=_agent_http_payload(
+            "reviewer",
+            reviewer_reservation["reservation_id"],
+            model_id="test-reviewer",
+        ),
+    )
     assert proposer.status_code == 201
     assert reviewer.status_code == 201
     proposal = client.post(
@@ -812,9 +1090,49 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
     )
     assert audited.status_code == 201
 
+    graph = created.get_json()["graph"]
+    proposal_row = proposal.get_json()["proposal"]
+    nonce = uuid.uuid4().hex
+    expires_at = time.time() + 300
+    diff_hash = hashlib.sha256(orjson.dumps(
+        {"reason": "HTTP identity-chain test"},
+        option=orjson.OPT_SORT_KEYS,
+    )).hexdigest()
+    human_payload = {
+        "owner_user_id": "alice",
+        "graph_id": "factor-research",
+        "graph_version": 2,
+        "graph_hash": graph["content_hash"],
+        "proposal_id": proposal_row["proposal_id"],
+        "diff_hash": diff_hash,
+        "nonce_hash": hashlib.sha256(nonce.encode()).hexdigest(),
+        "authorized_by": "human-auditor",
+        "expires_at": expires_at,
+    }
+    human_attestation = hmac.new(
+        b"test-human-activation-secret",
+        orjson.dumps(human_payload, option=orjson.OPT_SORT_KEYS),
+        hashlib.sha256,
+    ).hexdigest()
+    authorization = client.post(
+        "/api/research-human-activation-authorizations",
+        json={
+            **{
+                key: value for key, value in human_payload.items()
+                if key not in {"owner_user_id", "nonce_hash"}
+            },
+            "nonce": nonce,
+            "human_attestation": human_attestation,
+        },
+    )
+    assert authorization.status_code == 201
     activated = client.post(
         "/api/research-graphs/factor-research/versions/2/activate",
-        json={},
+        json={
+            "human_authorization_id": authorization.get_json()[
+                "authorization"
+            ]["authorization_id"],
+        },
     )
     assert activated.status_code == 201
     assert activated.get_json()["graph"]["lifecycle"] == "active"
@@ -923,9 +1241,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         disposition="approved",
         grill_evidence=[{"question": "isolated?", "answer": "yes"}],
     )
-    research_graphs.activate_graph(
-        graph_id="factor-research", source_version=2, actor="curator",
-    )
+    _activate()
     instance = research_graphs.create_graph_instance(
         graph_id="factor-research",
         owner="alice",
@@ -1191,9 +1507,7 @@ def test_transition_stores_only_target_node_resolution(
         disposition="approved",
         grill_evidence=[{"question": "local?", "answer": "yes"}],
     )
-    research_graphs.activate_graph(
-        graph_id="factor-research", source_version=2, actor="curator",
-    )
+    _activate()
     instance = research_graphs.create_graph_instance(
         graph_id="factor-research",
         owner="alice",
@@ -1347,10 +1661,7 @@ def test_token_budget_reservation_denies_before_launch_and_fails_closed(
             max_output_tokens=10,
         )
     with pytest.raises(ValueError, match="reservation is required"):
-        research_graphs.create_agent_execution(
-            owner_user_id="alice",
-            actor_role="reviewer",
-        )
+        _create_attested_agent("reviewer", "")
     with pytest.raises(ValueError, match="not configured"):
         monkeypatch.delenv("RESEARCH_PROVIDER_USAGE_SECRET", raising=False)
         research_graphs.ingest_provider_usage_receipt(
@@ -1416,11 +1727,7 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
         disposition="approved",
         grill_evidence=[{"question": "conditional?", "answer": "bounded"}],
     )
-    active = research_graphs.activate_graph(
-        graph_id="factor-research",
-        source_version=2,
-        actor="curator",
-    )
+    active = _activate()
     instance = research_graphs.create_graph_instance(
         graph_id="factor-research",
         owner="alice",

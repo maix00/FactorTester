@@ -38,8 +38,19 @@ class FakeClient:
             "grill_evidence": grill_evidence,
         }
 
-    def activate_research_graph(self, graph_id, version):
-        return {"graph_id": graph_id, "version": version + 1, "lifecycle": "active"}
+    def activate_research_graph(
+        self,
+        graph_id,
+        version,
+        *,
+        human_authorization_id,
+    ):
+        return {
+            "graph_id": graph_id,
+            "version": version + 1,
+            "lifecycle": "active",
+            "human_authorization_id": human_authorization_id,
+        }
 
     def propose_research_graph(self, graph_id, version, **kwargs):
         self.proposal = (graph_id, version, kwargs)
@@ -305,6 +316,9 @@ def test_research_graph_token_budget_cli_denies_work_before_agent_launch(
         "research-graph", "agent-start",
         "--role", "reviewer",
         "--reservation-id", "reservation-1",
+        "--agent-principal-hash", "a" * 64,
+        "--lineage-hash", "b" * 64,
+        "--launcher-attestation", "c" * 64,
     ])
 
     assert created.exit_code == 0

@@ -8,6 +8,7 @@ import secrets
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from http.cookiejar import LWPCookieJar
@@ -85,10 +86,12 @@ def _post_json(url: str, payload: dict) -> dict:
 def _real_server(
     tmp_path: Path,
     monkeypatch,
-) -> Iterator[tuple[str, str]]:
+) -> Iterator[tuple[str, str, str, str]]:
     database = tmp_path / "server" / "factortester.sqlite"
     database.parent.mkdir(parents=True)
     provider_secret = secrets.token_hex(32)
+    launcher_secret = secrets.token_hex(32)
+    human_secret = secrets.token_hex(32)
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", database)
     monkeypatch.setattr(Settings, "CACHE_DIR", database.parent)
     monkeypatch.setenv("FLASK_SECRET_KEY", secrets.token_hex(32))
@@ -96,12 +99,25 @@ def _real_server(
         "RESEARCH_PROVIDER_USAGE_SECRET",
         provider_secret,
     )
+    monkeypatch.setenv(
+        "RESEARCH_AGENT_LAUNCHER_SECRET",
+        launcher_secret,
+    )
+    monkeypatch.setenv(
+        "RESEARCH_HUMAN_ACTIVATION_SECRET",
+        human_secret,
+    )
     app = create_app()
     httpd = make_server("127.0.0.1", 0, app, threaded=True)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
-        yield f"http://127.0.0.1:{httpd.server_port}", provider_secret
+        yield (
+            f"http://127.0.0.1:{httpd.server_port}",
+            provider_secret,
+            launcher_secret,
+            human_secret,
+        )
     finally:
         httpd.shutdown()
         thread.join(timeout=10)
@@ -201,6 +217,8 @@ def _agent_execution(
     factortester: list[str],
     env: dict[str, str],
     role: str,
+    owner: str,
+    launcher_secret: str,
 ) -> dict:
     scope_id = f"e2e:{role}:{uuid.uuid4().hex}"
     _run_json(
@@ -229,6 +247,22 @@ def _agent_execution(
         ],
         env=env,
     )
+    principal_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    lineage_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    attested_payload = {
+        "owner_user_id": owner,
+        "actor_role": role,
+        "model_id": "e2e-model",
+        "codex_version": "e2e",
+        "reservation_id": reservation["reservation_id"],
+        "agent_principal_hash": principal_hash,
+        "lineage_hash": lineage_hash,
+    }
+    launcher_attestation = hmac.new(
+        launcher_secret.encode(),
+        orjson.dumps(attested_payload, option=orjson.OPT_SORT_KEYS),
+        hashlib.sha256,
+    ).hexdigest()
     return _run_json(
         factortester,
         [
@@ -242,6 +276,12 @@ def _agent_execution(
             "e2e",
             "--reservation-id",
             reservation["reservation_id"],
+            "--agent-principal-hash",
+            principal_hash,
+            "--lineage-hash",
+            lineage_hash,
+            "--launcher-attestation",
+            launcher_attestation,
         ],
         env=env,
     )
@@ -342,6 +382,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
     with _real_server(tmp_path, monkeypatch) as (
         base_url,
         provider_secret,
+        launcher_secret,
+        human_secret,
     ):
         alias = f"e2e_{uuid.uuid4().hex[:10]}"
         password = secrets.token_urlsafe(18)
@@ -395,11 +437,15 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             factortester=factortester,
             env=env,
             role="proposer",
+            owner=owner,
+            launcher_secret=launcher_secret,
         )
         reviewer = _agent_execution(
             factortester=factortester,
             env=env,
             role="reviewer",
+            owner=owner,
+            launcher_secret=launcher_secret,
         )
         assert proposer["execution_id"] != reviewer["execution_id"]
         assert proposer["owner_user_id"] == reviewer["owner_user_id"] == owner
@@ -594,6 +640,53 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             ],
             env=env,
         )
+        change_diff = json.loads(change_file.read_text(encoding="utf-8"))
+        diff_hash = hashlib.sha256(orjson.dumps(
+            change_diff,
+            option=orjson.OPT_SORT_KEYS,
+        )).hexdigest()
+        nonce = uuid.uuid4().hex
+        expires_at = time.time() + 300
+        human_payload = {
+            "owner_user_id": owner,
+            "graph_id": graph["graph_id"],
+            "graph_version": graph["version"],
+            "graph_hash": graph["content_hash"],
+            "proposal_id": proposal["proposal_id"],
+            "diff_hash": diff_hash,
+            "nonce_hash": hashlib.sha256(nonce.encode()).hexdigest(),
+            "authorized_by": "e2e-human-auditor",
+            "expires_at": expires_at,
+        }
+        human_attestation = hmac.new(
+            human_secret.encode(),
+            orjson.dumps(human_payload, option=orjson.OPT_SORT_KEYS),
+            hashlib.sha256,
+        ).hexdigest()
+        authorization = _run_json(
+            factortester,
+            [
+                "research-graph",
+                "human-authorize",
+                graph["graph_id"],
+                str(graph["version"]),
+                "--proposal-id",
+                proposal["proposal_id"],
+                "--graph-hash",
+                graph["content_hash"],
+                "--diff-hash",
+                diff_hash,
+                "--nonce",
+                nonce,
+                "--authorized-by",
+                "e2e-human-auditor",
+                "--expires-at",
+                str(expires_at),
+                "--human-attestation",
+                human_attestation,
+            ],
+            env=env,
+        )
         active = _run_json(
             factortester,
             [
@@ -601,6 +694,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "activate",
                 graph["graph_id"],
                 str(graph["version"]),
+                "--human-authorization-id",
+                authorization["authorization_id"],
             ],
             env=env,
         )

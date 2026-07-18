@@ -19,6 +19,13 @@ def create_research_agent_execution():
             model_id=str(data.get("model_id") or ""),
             codex_version=str(data.get("codex_version") or ""),
             reservation_id=str(data.get("reservation_id") or ""),
+            agent_principal_hash=str(
+                data.get("agent_principal_hash") or ""
+            ),
+            lineage_hash=str(data.get("lineage_hash") or ""),
+            launcher_attestation=str(
+                data.get("launcher_attestation") or ""
+            ),
         )
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -263,17 +270,46 @@ def audit_research_graph_version(graph_id: str, version: int):
     "/api/research-graphs/<graph_id>/versions/<int:version>/activate"
 )
 def activate_research_graph_version(graph_id: str, version: int):
+    data = request.get_json(silent=True) or {}
     try:
         graph = research_graphs.activate_graph(
             graph_id=graph_id,
             source_version=version,
             actor=require_user(),
+            human_authorization_id=str(
+                data.get("human_authorization_id") or ""
+            ),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
     except research_graphs.GraphActivationBlocked as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
     return jsonify({"success": True, "graph": graph}), 201
+
+
+@sft_bp.post("/api/research-human-activation-authorizations")
+def authorize_research_graph_activation():
+    data = request.get_json(silent=True) or {}
+    owner = require_user()
+    try:
+        authorization = research_graphs.authorize_graph_activation(
+            owner_user_id=owner,
+            graph_id=str(data.get("graph_id") or ""),
+            graph_version=int(data.get("graph_version") or 0),
+            proposal_id=str(data.get("proposal_id") or ""),
+            graph_hash=str(data.get("graph_hash") or ""),
+            diff_hash=str(data.get("diff_hash") or ""),
+            nonce=str(data.get("nonce") or ""),
+            authorized_by=str(data.get("authorized_by") or ""),
+            expires_at=data.get("expires_at"),
+            human_attestation=str(data.get("human_attestation") or ""),
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({
+        "success": True,
+        "authorization": authorization,
+    }), 201
 
 
 @sft_bp.post("/api/research-graphs/<graph_id>/rollback")

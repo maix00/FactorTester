@@ -129,6 +129,12 @@ def _content_hash(graph: dict[str, Any]) -> str:
     return protocol_graph_content_hash(graph)
 
 
+def _json_hash(value: Any) -> str:
+    return hashlib.sha256(
+        orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
+    ).hexdigest()
+
+
 def _assert_no_skill_identity(
     value: Any,
     *,
@@ -211,6 +217,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             model_id TEXT NOT NULL,
             codex_version TEXT NOT NULL,
             reservation_id TEXT NOT NULL UNIQUE,
+            agent_principal_hash TEXT NOT NULL,
+            lineage_hash TEXT NOT NULL,
+            launcher_attestation TEXT NOT NULL,
             created_at REAL NOT NULL
         );
         CREATE TABLE IF NOT EXISTS research_token_budgets (
@@ -278,6 +287,25 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             version INTEGER NOT NULL,
             activated_by TEXT NOT NULL,
             activated_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS human_activation_authorizations (
+            authorization_id TEXT PRIMARY KEY,
+            owner_user_id TEXT NOT NULL,
+            graph_id TEXT NOT NULL,
+            graph_version INTEGER NOT NULL,
+            graph_hash TEXT NOT NULL,
+            proposal_id TEXT NOT NULL,
+            diff_hash TEXT NOT NULL,
+            nonce_hash TEXT NOT NULL UNIQUE,
+            authorized_by TEXT NOT NULL,
+            human_attestation TEXT NOT NULL,
+            expires_at REAL NOT NULL,
+            consumed_at REAL,
+            created_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_human_activation_graph
+        ON human_activation_authorizations(
+            owner_user_id, graph_id, graph_version, created_at
         );
         CREATE TABLE IF NOT EXISTS research_graph_rollbacks (
             rollback_id TEXT PRIMARY KEY,
@@ -490,6 +518,16 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             "ALTER TABLE research_agent_executions "
             "ADD COLUMN reservation_id TEXT NOT NULL DEFAULT ''"
         )
+    for column in (
+        "agent_principal_hash",
+        "lineage_hash",
+        "launcher_attestation",
+    ):
+        if column not in execution_columns:
+            conn.execute(
+                "ALTER TABLE research_agent_executions "
+                f"ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+            )
     conn.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_research_agent_reservation
@@ -1006,9 +1044,48 @@ def create_agent_execution(
     model_id: str = "",
     codex_version: str = "",
     reservation_id: str = "",
+    agent_principal_hash: str = "",
+    lineage_hash: str = "",
+    launcher_attestation: str = "",
 ) -> dict[str, Any]:
-    if actor_role not in {"proposer", "reviewer", "audit_presenter"}:
+    if actor_role not in {
+        "proposer",
+        "reviewer",
+        "audit_presenter",
+        "implementation_agent",
+        "backend_verifier",
+    }:
         raise ValueError("invalid Agent execution role")
+    for field, value in (
+        ("agent_principal_hash", agent_principal_hash),
+        ("lineage_hash", lineage_hash),
+    ):
+        if len(value) != 64 or any(
+            character not in "0123456789abcdef" for character in value
+        ):
+            raise ValueError(f"{field} must be sha256")
+    launcher_secret = os.environ.get("RESEARCH_AGENT_LAUNCHER_SECRET", "")
+    if not launcher_secret:
+        raise ValueError("trusted Agent launcher is not configured")
+    attested_payload = {
+        "owner_user_id": owner_user_id,
+        "actor_role": actor_role,
+        "model_id": str(model_id),
+        "codex_version": str(codex_version),
+        "reservation_id": reservation_id,
+        "agent_principal_hash": agent_principal_hash,
+        "lineage_hash": lineage_hash,
+    }
+    expected_attestation = hmac.new(
+        launcher_secret.encode(),
+        orjson.dumps(attested_payload, option=orjson.OPT_SORT_KEYS),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(
+        expected_attestation,
+        launcher_attestation,
+    ):
+        raise ValueError("Agent launcher attestation is invalid")
     execution_id = uuid.uuid4().hex
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -1028,6 +1105,8 @@ def create_agent_execution(
             "proposer": "proposer",
             "reviewer": "reviewer",
             "audit_presenter": "audit_presenter",
+            "implementation_agent": "implementation_agent",
+            "backend_verifier": "backend_verifier",
         }[actor_role]
         if str(reservation["work_kind"]) != expected_work_kind:
             raise ValueError("token reservation work_kind does not match role")
@@ -1035,8 +1114,9 @@ def create_agent_execution(
             """
             INSERT INTO research_agent_executions (
                 execution_id, owner_user_id, actor_role, model_id,
-                codex_version, reservation_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                codex_version, reservation_id, agent_principal_hash,
+                lineage_hash, launcher_attestation, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution_id,
@@ -1045,6 +1125,9 @@ def create_agent_execution(
                 str(model_id),
                 str(codex_version),
                 reservation_id,
+                agent_principal_hash,
+                lineage_hash,
+                launcher_attestation,
                 now,
             ),
         )
@@ -1056,6 +1139,8 @@ def create_agent_execution(
         "codex_version": str(codex_version),
         "created_at": now,
         "reservation_id": reservation_id,
+        "agent_principal_hash": agent_principal_hash,
+        "lineage_hash": lineage_hash,
     }
 
 
@@ -1111,6 +1196,8 @@ def reserve_tokens(
         "proposer",
         "reviewer",
         "audit_presenter",
+        "implementation_agent",
+        "backend_verifier",
         "skill",
     }:
         raise ValueError("invalid token reservation work_kind")
@@ -1515,7 +1602,7 @@ def record_proposal_review(
         ).fetchone()
         if proposal is None:
             raise KeyError("graph proposal not found")
-        _require_agent_execution(
+        reviewer_execution = _require_agent_execution(
             conn,
             owner_user_id=owner_user_id,
             execution_id=actor_agent_id,
@@ -1525,6 +1612,41 @@ def record_proposal_review(
             raise ValueError("proposal belongs to a different owner")
         if str(proposal["proposer_execution_id"]) == actor_agent_id:
             raise ValueError("proposal reviewer execution must be independent")
+        proposer_execution = _require_agent_execution(
+            conn,
+            owner_user_id=owner_user_id,
+            execution_id=str(proposal["proposer_execution_id"]),
+            role="proposer",
+        )
+        if (
+            str(proposer_execution["agent_principal_hash"])
+            == str(reviewer_execution["agent_principal_hash"])
+            or str(proposer_execution["lineage_hash"])
+            == str(reviewer_execution["lineage_hash"])
+        ):
+            raise ValueError(
+                "proposal reviewer principal and lineage must be independent"
+            )
+        existing_review_principals = conn.execute(
+            """
+            SELECT e.agent_principal_hash, e.lineage_hash
+            FROM research_graph_reviews r
+            JOIN research_agent_executions e
+              ON e.execution_id=r.reviewer_execution_id
+            WHERE r.proposal_id=?
+            """,
+            (proposal_id,),
+        ).fetchall()
+        if any(
+            str(row["agent_principal_hash"])
+            == str(reviewer_execution["agent_principal_hash"])
+            or str(row["lineage_hash"])
+            == str(reviewer_execution["lineage_hash"])
+            for row in existing_review_principals
+        ):
+            raise ValueError(
+                "reviewer principal or lineage already reviewed this proposal"
+            )
         review_id = uuid.uuid4().hex
         now = time.time()
         try:
@@ -1698,13 +1820,172 @@ def _latest_audit(
     return str(row["disposition"]) if row is not None else ""
 
 
+def authorize_graph_activation(
+    *,
+    owner_user_id: str,
+    graph_id: str,
+    graph_version: int,
+    proposal_id: str,
+    graph_hash: str,
+    diff_hash: str,
+    nonce: str,
+    authorized_by: str,
+    expires_at: float,
+    human_attestation: str,
+) -> dict[str, Any]:
+    """Ingest an authorization signed by a human-presence adapter."""
+    secret = os.environ.get("RESEARCH_HUMAN_ACTIVATION_SECRET", "")
+    if not secret:
+        raise ValueError("trusted human activation adapter is not configured")
+    if not nonce or len(nonce.encode()) > 256:
+        raise ValueError("human activation nonce is required and bounded")
+    if not authorized_by.strip():
+        raise ValueError("authorized_by is required")
+    now = time.time()
+    if not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool):
+        raise ValueError("expires_at must be a timestamp")
+    if not now + 5 <= float(expires_at) <= now + 900:
+        raise ValueError("human activation authorization must expire within 15 minutes")
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        graph = _load_graph_from_conn(
+            conn,
+            graph_id=graph_id,
+            version=int(graph_version),
+        )
+        if graph is None or graph.get("lifecycle") != "draft":
+            raise ValueError("human activation requires a draft graph")
+        proposal = conn.execute(
+            """
+            SELECT * FROM research_graph_proposals
+            WHERE proposal_id=? AND graph_id=? AND version=?
+            """,
+            (proposal_id, graph_id, int(graph_version)),
+        ).fetchone()
+        if proposal is None:
+            raise ValueError("human activation proposal is invalid")
+        actual_graph_hash = str(graph["content_hash"])
+        actual_diff_hash = _json_hash(_loads(proposal["change_diff_json"]) or {})
+        if graph_hash != actual_graph_hash or diff_hash != actual_diff_hash:
+            raise ValueError("human activation target hash mismatch")
+        nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
+        signed_payload = {
+            "owner_user_id": owner_user_id,
+            "graph_id": graph_id,
+            "graph_version": int(graph_version),
+            "graph_hash": actual_graph_hash,
+            "proposal_id": proposal_id,
+            "diff_hash": actual_diff_hash,
+            "nonce_hash": nonce_hash,
+            "authorized_by": authorized_by,
+            "expires_at": float(expires_at),
+        }
+        expected = hmac.new(
+            secret.encode(),
+            orjson.dumps(signed_payload, option=orjson.OPT_SORT_KEYS),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected, human_attestation):
+            raise ValueError("human activation attestation is invalid")
+        authorization_id = uuid.uuid4().hex
+        try:
+            conn.execute(
+                """
+                INSERT INTO human_activation_authorizations (
+                    authorization_id, owner_user_id, graph_id, graph_version,
+                    graph_hash, proposal_id, diff_hash, nonce_hash,
+                    authorized_by, human_attestation, expires_at, consumed_at,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                """,
+                (
+                    authorization_id,
+                    owner_user_id,
+                    graph_id,
+                    int(graph_version),
+                    actual_graph_hash,
+                    proposal_id,
+                    actual_diff_hash,
+                    nonce_hash,
+                    authorized_by,
+                    human_attestation,
+                    float(expires_at),
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("human activation nonce was already used") from exc
+    return {
+        "authorization_id": authorization_id,
+        **signed_payload,
+        "created_at": now,
+    }
+
+
+def _consume_human_activation_authorization(
+    conn: sqlite3.Connection,
+    *,
+    owner_user_id: str,
+    graph: dict[str, Any],
+    authorization_id: str,
+) -> str:
+    proposal = conn.execute(
+        """
+        SELECT * FROM research_graph_proposals
+        WHERE graph_id=? AND version=?
+        ORDER BY created_at DESC, proposal_id DESC LIMIT 1
+        """,
+        (graph["graph_id"], int(graph["version"])),
+    ).fetchone()
+    if proposal is None:
+        raise GraphActivationBlocked("graph proposal is missing")
+    row = conn.execute(
+        """
+        SELECT * FROM human_activation_authorizations
+        WHERE authorization_id=? AND owner_user_id=? AND graph_id=?
+        AND graph_version=? AND graph_hash=? AND proposal_id=?
+        AND consumed_at IS NULL AND expires_at>?
+        """,
+        (
+            authorization_id,
+            owner_user_id,
+            graph["graph_id"],
+            int(graph["version"]),
+            graph["content_hash"],
+            proposal["proposal_id"],
+            time.time(),
+        ),
+    ).fetchone()
+    expected_diff_hash = _json_hash(
+        _loads(proposal["change_diff_json"]) or {}
+    )
+    if row is None or str(row["diff_hash"]) != expected_diff_hash:
+        raise GraphActivationBlocked(
+            "valid one-time human activation authorization is required"
+        )
+    consumed_at = time.time()
+    updated = conn.execute(
+        """
+        UPDATE human_activation_authorizations SET consumed_at=?
+        WHERE authorization_id=? AND consumed_at IS NULL
+        """,
+        (consumed_at, authorization_id),
+    )
+    if updated.rowcount != 1:
+        raise GraphActivationBlocked(
+            "human activation authorization was already consumed"
+        )
+    return str(row["authorized_by"])
+
+
 def activate_graph(
     *,
     graph_id: str,
     source_version: int,
     actor: str,
+    human_authorization_id: str,
 ) -> dict[str, Any]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         source = _load_graph_from_conn(
             conn,
             graph_id=graph_id,
@@ -1737,6 +2018,12 @@ def activate_graph(
             conn, graph_id=graph_id, version=source_version,
         ) != "approved":
             raise GraphActivationBlocked("latest grill audit is not approved")
+        human_actor = _consume_human_activation_authorization(
+            conn,
+            owner_user_id=actor,
+            graph=source,
+            authorization_id=human_authorization_id,
+        )
         next_version = int(conn.execute(
             """
             SELECT COALESCE(MAX(version), 0) + 1 AS next_version
@@ -1754,7 +2041,7 @@ def activate_graph(
             "activated_from_hash": source["content_hash"],
         })
         active["content_hash"] = _content_hash(active)
-        stored = _insert_graph(conn, active, actor=actor)
+        stored = _insert_graph(conn, active, actor=human_actor)
         conn.execute(
             """
             INSERT INTO active_research_graphs (
@@ -1765,7 +2052,7 @@ def activate_graph(
                 activated_by=excluded.activated_by,
                 activated_at=excluded.activated_at
             """,
-            (graph_id, next_version, actor, time.time()),
+            (graph_id, next_version, human_actor, time.time()),
         )
     return stored
 

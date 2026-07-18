@@ -59,6 +59,10 @@ added one observable behavior at a time.
 - provider fingerprint/cache invalidation and model-neutral semantics;
 - proposal/reviewer/audit lifecycle, including third reviewer only after
   disagreement;
+- trusted-launcher Agent principal and lineage attestations, so distinct
+  execution IDs cannot simulate independent reviewers;
+- one-time human activation authorization, separate from ordinary authenticated
+  Agent proposal, review, validation, and grill requests;
 - non-mutating historical replay and a hard token-efficiency activation gate.
 
 ### Real installed CLI to server E2E

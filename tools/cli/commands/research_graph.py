@@ -163,17 +163,29 @@ def review_graph_proposal(
 @click.option(
     "--role",
     "actor_role",
-    type=click.Choice(["proposer", "reviewer", "audit_presenter"]),
+    type=click.Choice([
+        "proposer",
+        "reviewer",
+        "audit_presenter",
+        "implementation_agent",
+        "backend_verifier",
+    ]),
     required=True,
 )
 @click.option("--model-id", default="")
 @click.option("--codex-version", default="")
 @click.option("--reservation-id", required=True)
+@click.option("--agent-principal-hash", required=True)
+@click.option("--lineage-hash", required=True)
+@click.option("--launcher-attestation", required=True)
 def start_agent_execution(
     actor_role: str,
     model_id: str,
     codex_version: str,
     reservation_id: str,
+    agent_principal_hash: str,
+    lineage_hash: str,
+    launcher_attestation: str,
 ) -> None:
     """由服务器为同一用户签发一个有角色的独立 Agent execution。"""
     click.echo(_json(
@@ -182,6 +194,9 @@ def start_agent_execution(
             model_id=model_id,
             codex_version=codex_version,
             reservation_id=reservation_id,
+            agent_principal_hash=agent_principal_hash,
+            lineage_hash=lineage_hash,
+            launcher_attestation=launcher_attestation,
         )
     ))
 
@@ -205,6 +220,7 @@ def create_token_budget(scope_id: str, token_limit: int) -> None:
     "--work-kind",
     type=click.Choice([
         "researcher", "proposer", "reviewer", "audit_presenter", "skill",
+        "implementation_agent", "backend_verifier",
     ]),
     required=True,
 )
@@ -285,10 +301,56 @@ def audit_graph(
 @research_graph.command("activate")
 @click.argument("graph_id")
 @click.argument("version", type=int)
-def activate_graph(graph_id: str, version: int) -> None:
-    """让 Agent 在全部验证和审计门通过后生成新的 Active 版本。"""
+@click.option("--human-authorization-id", required=True)
+def activate_graph(
+    graph_id: str,
+    version: int,
+    human_authorization_id: str,
+) -> None:
+    """消费独立人工授权并生成新的 Active 版本。"""
     click.echo(_json(
-        client_from_config().activate_research_graph(graph_id, version)
+        client_from_config().activate_research_graph(
+            graph_id,
+            version,
+            human_authorization_id=human_authorization_id,
+        )
+    ))
+
+
+@research_graph.command("human-authorize")
+@click.argument("graph_id")
+@click.argument("version", type=int)
+@click.option("--proposal-id", required=True)
+@click.option("--graph-hash", required=True)
+@click.option("--diff-hash", required=True)
+@click.option("--nonce", required=True)
+@click.option("--authorized-by", required=True)
+@click.option("--expires-at", required=True, type=float)
+@click.option("--human-attestation", required=True)
+def authorize_activation(
+    graph_id: str,
+    version: int,
+    proposal_id: str,
+    graph_hash: str,
+    diff_hash: str,
+    nonce: str,
+    authorized_by: str,
+    expires_at: float,
+    human_attestation: str,
+) -> None:
+    """供独立 human-presence adapter 提交一次性授权。"""
+    click.echo(_json(
+        client_from_config().authorize_research_graph_activation(
+            graph_id=graph_id,
+            graph_version=version,
+            proposal_id=proposal_id,
+            graph_hash=graph_hash,
+            diff_hash=diff_hash,
+            nonce=nonce,
+            authorized_by=authorized_by,
+            expires_at=expires_at,
+            human_attestation=human_attestation,
+        )
     ))
 
 
