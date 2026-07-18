@@ -65,6 +65,7 @@ def active_graph(graph_id: str) -> None:
 @research_graph.command("validate")
 @click.argument("graph_id")
 @click.argument("version", type=int)
+@click.option("--proposal-id", required=True)
 @click.option("--replay-passed", is_flag=True, required=True)
 @click.option("--shadow-passed", is_flag=True, required=True)
 @click.option("--capability-resolution-complete", is_flag=True, required=True)
@@ -76,6 +77,7 @@ def active_graph(graph_id: str) -> None:
 def validate_graph(
     graph_id: str,
     version: int,
+    proposal_id: str,
     replay_passed: bool,
     shadow_passed: bool,
     capability_resolution_complete: bool,
@@ -102,6 +104,7 @@ def validate_graph(
         graph_id,
         version,
         evidence,
+        proposal_id=proposal_id,
     )))
 
 
@@ -117,6 +120,7 @@ def validate_graph(
 @click.option("--evidence-ref", "evidence_refs", multiple=True)
 @click.option("--token-estimate", type=click.IntRange(min=0), required=True)
 @click.option("--agent-execution-id", required=True)
+@click.option("--conversation-ref", required=True)
 def propose_graph(
     graph_id: str,
     version: int,
@@ -125,6 +129,7 @@ def propose_graph(
     evidence_refs: tuple[str, ...],
     token_estimate: int,
     agent_execution_id: str,
+    conversation_ref: str,
 ) -> None:
     """提交紧凑图变更 diff；不提交整张图或具体 Skill 身份。"""
     change_diff = json.loads(
@@ -140,6 +145,7 @@ def propose_graph(
         evidence_refs=list(evidence_refs),
         token_estimate=token_estimate,
         agent_execution_id=agent_execution_id,
+        conversation_ref=conversation_ref,
     )))
 
 
@@ -307,11 +313,15 @@ def release_token_budget(reservation_id: str) -> None:
     required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
+@click.option("--proposal-id", required=True)
+@click.option("--grill-ref", required=True)
 def audit_graph(
     graph_id: str,
     version: int,
     disposition: str,
     grill_evidence_file: Path,
+    proposal_id: str,
+    grill_ref: str,
 ) -> None:
     """记录审计员的 grill-me 问答；不直接编辑图。"""
     evidence = json.loads(grill_evidence_file.read_text(encoding="utf-8"))
@@ -320,8 +330,10 @@ def audit_graph(
     click.echo(_json(client_from_config().audit_research_graph(
         graph_id,
         version,
+        proposal_id=proposal_id,
         disposition=disposition,
         grill_evidence=evidence,
+        grill_ref=grill_ref,
     )))
 
 
@@ -350,22 +362,18 @@ def activate_graph(
 @click.option("--proposal-id", required=True)
 @click.option("--graph-hash", required=True)
 @click.option("--diff-hash", required=True)
-@click.option("--nonce", required=True)
-@click.option("--authorized-by", required=True)
-@click.option("--expires-at", required=True, type=float)
-@click.option("--human-attestation", required=True)
+@click.option("--conversation-ref", required=True)
+@click.option("--approval-ref", required=True)
 def authorize_activation(
     graph_id: str,
     version: int,
     proposal_id: str,
     graph_hash: str,
     diff_hash: str,
-    nonce: str,
-    authorized_by: str,
-    expires_at: float,
-    human_attestation: str,
+    conversation_ref: str,
+    approval_ref: str,
 ) -> None:
-    """供独立 human-presence adapter 提交一次性授权。"""
+    """记录当前认证会话对精确图变更的一次性授权。"""
     click.echo(_json(
         client_from_config().authorize_research_graph_activation(
             graph_id=graph_id,
@@ -373,10 +381,8 @@ def authorize_activation(
             proposal_id=proposal_id,
             graph_hash=graph_hash,
             diff_hash=diff_hash,
-            nonce=nonce,
-            authorized_by=authorized_by,
-            expires_at=expires_at,
-            human_attestation=human_attestation,
+            conversation_ref=conversation_ref,
+            approval_ref=approval_ref,
         )
     ))
 

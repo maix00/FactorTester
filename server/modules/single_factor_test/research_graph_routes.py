@@ -59,6 +59,7 @@ def propose_research_graph_version(graph_id: str, version: int):
             change_diff=data.get("change_diff") or {},
             evidence_refs=data.get("evidence_refs") or [],
             token_estimate=data.get("token_estimate", 0),
+            conversation_ref=str(data.get("conversation_ref") or ""),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
@@ -90,20 +91,14 @@ def review_research_graph_proposal(proposal_id: str):
 
 @sft_bp.post("/api/research-capability-approvals")
 def approve_research_capability():
-    data = request.get_json(silent=True) or {}
-    owner = require_user()
-    try:
-        approval = research_graphs.record_capability_approval(
-            owner_user_id=owner,
-            capability_id=str(data.get("capability_id") or ""),
-            descriptor_hash=str(data.get("descriptor_hash") or ""),
-            product_group=str(data.get("product_group") or ""),
-            actor=owner,
-            evidence_refs=data.get("evidence_refs") or [],
-        )
-    except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
-    return jsonify({"success": True, "approval": approval}), 201
+    require_user()
+    return jsonify({
+        "success": False,
+        "error": (
+            "server capability approvals are retired; approve Skill execution "
+            "in the Agent conversation and retain actual-use audit locally"
+        ),
+    }), 410
 
 
 @sft_bp.post("/api/research-capability-receipts")
@@ -135,12 +130,19 @@ def attest_research_capabilities():
     "/api/research-graphs/<graph_id>/versions/<int:version>/validation"
 )
 def validate_research_graph_version(graph_id: str, version: int):
+    data = request.get_json(silent=True) or {}
+    owner = require_user()
     try:
         validation = research_graphs.record_validation(
             graph_id=graph_id,
             version=version,
-            actor=require_user(),
-            evidence=request.get_json(silent=True) or {},
+            actor=owner,
+            owner_user_id=owner,
+            proposal_id=str(data.get("proposal_id") or ""),
+            evidence={
+                key: value for key, value in data.items()
+                if key != "proposal_id"
+            },
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
@@ -152,13 +154,17 @@ def validate_research_graph_version(graph_id: str, version: int):
 @sft_bp.post("/api/research-graphs/<graph_id>/versions/<int:version>/audit")
 def audit_research_graph_version(graph_id: str, version: int):
     data = request.get_json(silent=True) or {}
+    owner = require_user()
     try:
         audit = research_graphs.record_audit(
             graph_id=graph_id,
             version=version,
-            actor=require_user(),
+            actor=owner,
+            owner_user_id=owner,
+            proposal_id=str(data.get("proposal_id") or ""),
             disposition=str(data.get("disposition") or ""),
             grill_evidence=data.get("grill_evidence") or [],
+            grill_ref=str(data.get("grill_ref") or ""),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
@@ -200,10 +206,8 @@ def authorize_research_graph_activation():
             proposal_id=str(data.get("proposal_id") or ""),
             graph_hash=str(data.get("graph_hash") or ""),
             diff_hash=str(data.get("diff_hash") or ""),
-            nonce=str(data.get("nonce") or ""),
-            authorized_by=str(data.get("authorized_by") or ""),
-            expires_at=data.get("expires_at"),
-            human_attestation=str(data.get("human_attestation") or ""),
+            conversation_ref=str(data.get("conversation_ref") or ""),
+            approval_ref=str(data.get("approval_ref") or ""),
         )
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409

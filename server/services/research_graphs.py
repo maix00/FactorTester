@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
-import hmac
-import os
 import sqlite3
 import time
 import uuid
@@ -14,7 +12,10 @@ from typing import Any
 import orjson
 
 import settings as Settings
-from server.services import agent_flow
+from server.services import agent_flow, graph_governance
+from server.services.maintenance_cases.schema import (
+    create_schema as create_maintenance_schema,
+)
 from cli_anything.factortester_research.core.graph import (
     graph_content_hash as protocol_graph_content_hash,
     validate_graph as validate_protocol_graph,
@@ -190,78 +191,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (graph_id, version),
             UNIQUE (graph_id, content_hash)
         );
-        CREATE TABLE IF NOT EXISTS research_graph_validations (
-            validation_id TEXT PRIMARY KEY,
-            graph_id TEXT NOT NULL,
-            version INTEGER NOT NULL,
-            actor TEXT NOT NULL,
-            evidence_json TEXT NOT NULL,
-            created_at REAL NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_research_graph_validations_version
-        ON research_graph_validations(graph_id, version, created_at);
-        CREATE TABLE IF NOT EXISTS research_graph_proposals (
-            proposal_id TEXT PRIMARY KEY,
-            graph_id TEXT NOT NULL,
-            version INTEGER NOT NULL,
-            proposer TEXT NOT NULL,
-            risk_level TEXT NOT NULL,
-            change_diff_json TEXT NOT NULL,
-            evidence_refs_json TEXT NOT NULL,
-            token_estimate INTEGER NOT NULL,
-            created_at REAL NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_research_graph_proposals_version
-        ON research_graph_proposals(graph_id, version, created_at);
-        CREATE TABLE IF NOT EXISTS research_graph_reviews (
-            review_id TEXT PRIMARY KEY,
-            proposal_id TEXT NOT NULL,
-            reviewer TEXT NOT NULL,
-            disposition TEXT NOT NULL,
-            scope_drift INTEGER NOT NULL,
-            semantic_uncertainty INTEGER NOT NULL,
-            evidence_refs_json TEXT NOT NULL,
-            created_at REAL NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_research_graph_reviews_proposal
-        ON research_graph_reviews(proposal_id, created_at);
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_research_graph_review_actor
-        ON research_graph_reviews(proposal_id, reviewer);
-        CREATE TABLE IF NOT EXISTS research_graph_audits (
-            audit_id TEXT PRIMARY KEY,
-            graph_id TEXT NOT NULL,
-            version INTEGER NOT NULL,
-            actor TEXT NOT NULL,
-            disposition TEXT NOT NULL,
-            grill_evidence_json TEXT NOT NULL,
-            created_at REAL NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_research_graph_audits_version
-        ON research_graph_audits(graph_id, version, created_at);
         CREATE TABLE IF NOT EXISTS active_research_graphs (
             graph_id TEXT PRIMARY KEY,
             version INTEGER NOT NULL,
             activated_by TEXT NOT NULL,
             activated_at REAL NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS human_activation_authorizations (
-            authorization_id TEXT PRIMARY KEY,
-            owner_user_id TEXT NOT NULL,
-            graph_id TEXT NOT NULL,
-            graph_version INTEGER NOT NULL,
-            graph_hash TEXT NOT NULL,
-            proposal_id TEXT NOT NULL,
-            diff_hash TEXT NOT NULL,
-            nonce_hash TEXT NOT NULL UNIQUE,
-            authorized_by TEXT NOT NULL,
-            human_attestation TEXT NOT NULL,
-            expires_at REAL NOT NULL,
-            consumed_at REAL,
-            created_at REAL NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_human_activation_graph
-        ON human_activation_authorizations(
-            owner_user_id, graph_id, graph_version, created_at
         );
         CREATE TABLE IF NOT EXISTS research_graph_rollbacks (
             rollback_id TEXT PRIMARY KEY,
@@ -321,16 +255,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             created_at REAL NOT NULL,
             PRIMARY KEY (instance_id, branch_id, node_id)
         );
-        CREATE TABLE IF NOT EXISTS research_capability_approvals (
-            approval_id TEXT PRIMARY KEY,
-            owner_user_id TEXT NOT NULL,
-            capability_id TEXT NOT NULL,
-            descriptor_hash TEXT NOT NULL,
-            product_group TEXT NOT NULL,
-            actor TEXT NOT NULL,
-            evidence_refs_json TEXT NOT NULL,
-            created_at REAL NOT NULL
-        );
         CREATE TABLE IF NOT EXISTS research_capability_receipts (
             receipt_id TEXT PRIMARY KEY,
             owner_user_id TEXT NOT NULL,
@@ -349,10 +273,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             receipt_mode TEXT NOT NULL DEFAULT 'live',
             created_at REAL NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS research_graph_server_secrets (
-            secret_id INTEGER PRIMARY KEY CHECK (secret_id=1),
-            secret BLOB NOT NULL
-        );
         CREATE TABLE IF NOT EXISTS research_graph_trace (
             trace_id TEXT PRIMARY KEY,
             instance_id TEXT NOT NULL,
@@ -369,6 +289,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         ON research_graph_trace(instance_id, branch_id, created_at);
         """
     )
+    create_maintenance_schema(conn)
     trace_columns = {
         str(row["name"])
         for row in conn.execute(
@@ -431,38 +352,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "DROP INDEX IF EXISTS idx_research_graph_node_resolutions_branch"
     )
-    proposal_columns = {
-        str(row["name"])
-        for row in conn.execute(
-            "PRAGMA table_info(research_graph_proposals)"
-        ).fetchall()
-    }
-    if "owner_user_id" not in proposal_columns:
-        conn.execute(
-            "ALTER TABLE research_graph_proposals "
-            "ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT ''"
-        )
-    if "proposer_execution_id" not in proposal_columns:
-        conn.execute(
-            "ALTER TABLE research_graph_proposals "
-            "ADD COLUMN proposer_execution_id TEXT NOT NULL DEFAULT ''"
-        )
-    review_columns = {
-        str(row["name"])
-        for row in conn.execute(
-            "PRAGMA table_info(research_graph_reviews)"
-        ).fetchall()
-    }
-    if "owner_user_id" not in review_columns:
-        conn.execute(
-            "ALTER TABLE research_graph_reviews "
-            "ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT ''"
-        )
-    if "reviewer_execution_id" not in review_columns:
-        conn.execute(
-            "ALTER TABLE research_graph_reviews "
-            "ADD COLUMN reviewer_execution_id TEXT NOT NULL DEFAULT ''"
-        )
     receipt_columns = {
         str(row["name"])
         for row in conn.execute(
@@ -592,6 +481,20 @@ def ensure_schema() -> None:
             )
             """
         ).fetchall()
+        legacy_governance = conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name IN (
+                'research_graph_validations',
+                'research_graph_proposals',
+                'research_graph_reviews',
+                'research_graph_audits',
+                'human_activation_authorizations',
+                'research_capability_approvals',
+                'research_graph_server_secrets'
+            )
+            """
+        ).fetchall()
     if legacy_assurance is not None:
         raise RuntimeError(
             "legacy backend assurance receipts require the explicit "
@@ -601,6 +504,11 @@ def ensure_schema() -> None:
         raise RuntimeError(
             "legacy Graph accounting requires the offline Agent Flow "
             "migration with an explicit Agent identity mapping"
+        )
+    if legacy_governance:
+        raise RuntimeError(
+            "legacy Graph governance requires the explicit "
+            "migrate_graph_governance cutover"
         )
     agent_flow.get_store().ensure_schema()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -884,7 +792,9 @@ def record_validation(
     graph_id: str,
     version: int,
     actor: str,
+    proposal_id: str,
     evidence: dict[str, Any],
+    owner_user_id: str = "",
 ) -> dict[str, Any]:
     if not isinstance(evidence, dict):
         raise ValueError("validation evidence must be an object")
@@ -950,7 +860,7 @@ def record_validation(
                 "token efficiency checks failed: "
                 + ", ".join(failed_token_checks)
             )
-    validation_id = uuid.uuid4().hex
+    validation_id = _json_hash(evidence_value)
     row = {
         "validation_id": validation_id,
         "graph_id": graph_id,
@@ -960,30 +870,37 @@ def record_validation(
         "created_at": time.time(),
     }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        if _graph_lifecycle(
+        graph = _load_graph_from_conn(
             conn,
             graph_id=graph_id,
             version=version,
-        ) is None:
+        )
+        if graph is None:
             raise KeyError("graph version not found")
-        conn.execute(
-            """
-            INSERT INTO research_graph_validations (
-                validation_id, graph_id, version, actor, evidence_json,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                validation_id,
-                graph_id,
-                int(version),
-                actor,
-                orjson.dumps(
-                    evidence_value,
-                    option=orjson.OPT_SORT_KEYS,
-                ).decode(),
-                row["created_at"],
-            ),
+    owner = owner_user_id or actor
+    case = graph_governance.load_activation_gate(
+        Settings.CACHE_DB_PATH,
+        owner_user_id=owner,
+        case_id=proposal_id,
+    )
+    graph_governance.require_graph_target(
+        case,
+        graph_id=graph_id,
+        graph_version=version,
+        graph_hash=str(graph["content_hash"]),
+    )
+    failed = [
+        gate for gate in _VALIDATION_GATES
+        if evidence_value.get(gate) is not True
+    ]
+    if not failed and (
+        evidence_value.get("token_metrics_authority") == "server_derived"
+    ):
+        graph_governance.record_activation_validation(
+            Settings.CACHE_DB_PATH,
+            owner_user_id=owner,
+            case_id=proposal_id,
+            validation_summary_hash=validation_id,
         )
     return row
 
@@ -1112,6 +1029,7 @@ def record_proposal(
     change_diff: dict[str, Any],
     evidence_refs: list[str],
     token_estimate: int,
+    conversation_ref: str,
 ) -> dict[str, Any]:
     if risk_level not in {"L1", "L2", "L3", "L4"}:
         raise ValueError("invalid proposal risk_level")
@@ -1128,16 +1046,15 @@ def record_proposal(
     ):
         raise ValueError("token_estimate must be non-negative")
     _assert_no_skill_identity(change_diff, location="proposal diff")
-    proposal_id = uuid.uuid4().hex
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        lifecycle = _graph_lifecycle(
+        graph = _load_graph_from_conn(
             conn,
             graph_id=graph_id,
             version=version,
         )
-        if lifecycle is None:
+        if graph is None:
             raise KeyError("graph version not found")
-        if lifecycle != "draft":
+        if graph["lifecycle"] != "draft":
             raise ValueError("only a draft graph accepts proposals")
         _require_agent_execution(
             conn,
@@ -1145,41 +1062,27 @@ def record_proposal(
             execution_id=actor_agent_id,
             role="proposer",
         )
-        now = time.time()
-        conn.execute(
-            """
-            INSERT INTO research_graph_proposals (
-                proposal_id, graph_id, version, proposer, risk_level,
-                change_diff_json, evidence_refs_json, token_estimate, created_at,
-                owner_user_id, proposer_execution_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                proposal_id,
-                graph_id,
-                int(version),
-                actor_agent_id,
-                risk_level,
-                orjson.dumps(change_diff, option=orjson.OPT_SORT_KEYS).decode(),
-                orjson.dumps(evidence_refs).decode(),
-                token_estimate,
-                now,
-                owner_user_id,
-                actor_agent_id,
-            ),
-        )
-    row = {
-        "proposal_id": proposal_id,
+    diff_hash = _json_hash(change_diff)
+    row = graph_governance.open_activation_gate(
+        Settings.CACHE_DB_PATH,
+        owner_user_id=owner_user_id,
+        graph_id=graph_id,
+        graph_version=int(version),
+        graph_hash=str(graph["content_hash"]),
+        diff_hash=diff_hash,
+        proposer_invocation_id=actor_agent_id,
+        conversation_ref=conversation_ref,
+        proposal_evidence_refs=evidence_refs,
+    )
+    row.update({
         "graph_id": graph_id,
         "version": int(version),
-        "owner_user_id": owner_user_id,
         "proposer_execution_id": actor_agent_id,
         "risk_level": risk_level,
         "change_diff": deepcopy(change_diff),
         "evidence_refs": list(evidence_refs),
         "token_estimate": token_estimate,
-        "created_at": now,
-    }
+    })
     return row
 
 
@@ -1203,95 +1106,70 @@ def record_proposal_review(
         isinstance(item, str) and item.strip() for item in evidence_refs
     ):
         raise ValueError("evidence_refs must be an array of references")
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        proposal = conn.execute(
-            """
-            SELECT * FROM research_graph_proposals WHERE proposal_id=?
-            """,
-            (proposal_id,),
-        ).fetchone()
-        if proposal is None:
-            raise KeyError("graph proposal not found")
-        reviewer_execution = _require_agent_execution(
-            conn,
+    case = graph_governance.load_activation_gate(
+        Settings.CACHE_DB_PATH,
+        owner_user_id=owner_user_id,
+        case_id=proposal_id,
+    )
+    proposer_execution_id = graph_governance.proposer_invocation_id(case)
+    reviewer_execution = _require_agent_execution(
+        None,
+        owner_user_id=owner_user_id,
+        execution_id=actor_agent_id,
+        role="reviewer",
+    )
+    if proposer_execution_id == actor_agent_id:
+        raise ValueError("proposal reviewer execution must be independent")
+    proposer_execution = _require_agent_execution(
+        None,
+        owner_user_id=owner_user_id,
+        execution_id=proposer_execution_id,
+        role="proposer",
+    )
+    if (
+        str(proposer_execution["agent_principal_hash"])
+        == str(reviewer_execution["agent_principal_hash"])
+        or str(proposer_execution["lineage_hash"])
+        == str(reviewer_execution["lineage_hash"])
+    ):
+        raise ValueError(
+            "proposal reviewer principal and lineage must be independent"
+        )
+    existing_review_ids = graph_governance.reviewer_invocation_ids(case)
+    existing_review_principals = (
+        agent_flow.get_store().load_invocations(
             owner_user_id=owner_user_id,
-            execution_id=actor_agent_id,
-            role="reviewer",
+            invocation_ids=existing_review_ids,
+        ).values()
+    )
+    if any(
+        str(row["agent_principal_hash"])
+        == str(reviewer_execution["agent_principal_hash"])
+        or str(row["lineage_hash"])
+        == str(reviewer_execution["lineage_hash"])
+        for row in existing_review_principals
+    ):
+        raise ValueError(
+            "reviewer principal or lineage already reviewed this proposal"
         )
-        if str(proposal["owner_user_id"]) != owner_user_id:
-            raise ValueError("proposal belongs to a different owner")
-        if str(proposal["proposer_execution_id"]) == actor_agent_id:
-            raise ValueError("proposal reviewer execution must be independent")
-        proposer_execution = _require_agent_execution(
-            conn,
-            owner_user_id=owner_user_id,
-            execution_id=str(proposal["proposer_execution_id"]),
-            role="proposer",
-        )
-        if (
-            str(proposer_execution["agent_principal_hash"])
-            == str(reviewer_execution["agent_principal_hash"])
-            or str(proposer_execution["lineage_hash"])
-            == str(reviewer_execution["lineage_hash"])
-        ):
-            raise ValueError(
-                "proposal reviewer principal and lineage must be independent"
-            )
-        existing_review_ids = [
-            str(row["reviewer_execution_id"])
-            for row in conn.execute(
-            """
-            SELECT reviewer_execution_id
-            FROM research_graph_reviews
-            WHERE proposal_id=?
-            """,
-            (proposal_id,),
-            ).fetchall()
-        ]
-        existing_review_principals = (
-            agent_flow.get_store().load_invocations(
-                owner_user_id=owner_user_id,
-                invocation_ids=existing_review_ids,
-            ).values()
-        )
-        if any(
-            str(row["agent_principal_hash"])
-            == str(reviewer_execution["agent_principal_hash"])
-            or str(row["lineage_hash"])
-            == str(reviewer_execution["lineage_hash"])
-            for row in existing_review_principals
-        ):
-            raise ValueError(
-                "reviewer principal or lineage already reviewed this proposal"
-            )
-        review_id = uuid.uuid4().hex
-        now = time.time()
-        try:
-            conn.execute(
-                """
-                INSERT INTO research_graph_reviews (
-                    review_id, proposal_id, reviewer, disposition, scope_drift,
-                    semantic_uncertainty, evidence_refs_json, created_at,
-                    owner_user_id, reviewer_execution_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    review_id,
-                    proposal_id,
-                    actor_agent_id,
-                    disposition,
-                    int(scope_drift),
-                    int(semantic_uncertainty),
-                    orjson.dumps(evidence_refs).decode(),
-                    now,
-                    owner_user_id,
-                    actor_agent_id,
-                ),
-            )
-        except sqlite3.IntegrityError as exc:
-            raise ValueError(
-                "reviewer already reviewed this proposal"
-            ) from exc
+    effective_disposition = (
+        "disagreed"
+        if scope_drift or semantic_uncertainty
+        else disposition
+    )
+    review = graph_governance.record_activation_review(
+        Settings.CACHE_DB_PATH,
+        owner_user_id=owner_user_id,
+        case_id=proposal_id,
+        reviewer_invocation_id=actor_agent_id,
+        disposition=effective_disposition,
+        evidence_refs=evidence_refs,
+    )
+    now = float(review["updated_at"])
+    review_id = _json_hash({
+        "proposal_id": proposal_id,
+        "reviewer_execution_id": actor_agent_id,
+    })
     return {
         "review_id": review_id,
         "proposal_id": proposal_id,
@@ -1305,65 +1183,29 @@ def record_proposal_review(
     }
 
 
-def _proposal_review_gate(
-    conn: sqlite3.Connection,
-    *,
-    graph_id: str,
-    version: int,
-) -> None:
-    proposal = conn.execute(
-        """
-        SELECT * FROM research_graph_proposals
-        WHERE graph_id=? AND version=?
-        ORDER BY created_at DESC, proposal_id DESC LIMIT 1
-        """,
-        (graph_id, int(version)),
-    ).fetchone()
-    if proposal is None:
-        raise GraphActivationBlocked("graph proposal is missing")
-    reviews = conn.execute(
-        """
-        SELECT * FROM research_graph_reviews
-        WHERE proposal_id=? ORDER BY created_at, review_id
-        """,
-        (proposal["proposal_id"],),
-    ).fetchall()
-    if not reviews:
-        raise GraphActivationBlocked("independent proposal review is missing")
-    if any(bool(row["scope_drift"]) for row in reviews):
-        raise GraphActivationBlocked("proposal review detected scope drift")
-    disagreement = any(
-        str(row["disposition"]) in {"rejected", "disagreed"}
-        or bool(row["semantic_uncertainty"])
-        for row in reviews
-    )
-    if disagreement and len(reviews) < 3:
-        raise GraphActivationBlocked(
-            "review disagreement requires a third reviewer"
-        )
-    approved_count = sum(
-        str(row["disposition"]) == "approved" for row in reviews
-    )
-    if approved_count <= len(reviews) // 2:
-        raise GraphActivationBlocked(
-            "proposal does not have an independent approval majority"
-        )
-
-
 def record_audit(
     *,
     graph_id: str,
     version: int,
     actor: str,
+    proposal_id: str,
     disposition: str,
     grill_evidence: list[dict[str, Any]],
+    grill_ref: str,
+    owner_user_id: str = "",
 ) -> dict[str, Any]:
     if disposition not in {"approved", "rejected", "quarantined", "frozen"}:
         raise ValueError("invalid audit disposition")
     if not isinstance(grill_evidence, list) or not grill_evidence:
         raise ValueError("grill_evidence must be a non-empty array")
     _assert_no_skill_identity(grill_evidence, location="grill evidence")
-    audit_id = uuid.uuid4().hex
+    audit_id = _json_hash({
+        "graph_id": graph_id,
+        "version": int(version),
+        "disposition": disposition,
+        "grill_ref": grill_ref,
+        "grill_evidence_hash": _json_hash(grill_evidence),
+    })
     row = {
         "audit_id": audit_id,
         "graph_id": graph_id,
@@ -1374,67 +1216,33 @@ def record_audit(
         "created_at": time.time(),
     }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        if _graph_lifecycle(
+        graph = _load_graph_from_conn(
             conn,
             graph_id=graph_id,
             version=version,
-        ) is None:
-            raise KeyError("graph version not found")
-        conn.execute(
-            """
-            INSERT INTO research_graph_audits (
-                audit_id, graph_id, version, actor, disposition,
-                grill_evidence_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                audit_id,
-                graph_id,
-                int(version),
-                actor,
-                disposition,
-                orjson.dumps(
-                    grill_evidence,
-                    option=orjson.OPT_SORT_KEYS,
-                ).decode(),
-                row["created_at"],
-            ),
         )
+        if graph is None:
+            raise KeyError("graph version not found")
+    owner = owner_user_id or actor
+    case = graph_governance.load_activation_gate(
+        Settings.CACHE_DB_PATH,
+        owner_user_id=owner,
+        case_id=proposal_id,
+    )
+    graph_governance.require_graph_target(
+        case,
+        graph_id=graph_id,
+        graph_version=version,
+        graph_hash=str(graph["content_hash"]),
+    )
+    graph_governance.record_activation_grill(
+        Settings.CACHE_DB_PATH,
+        owner_user_id=owner,
+        case_id=proposal_id,
+        disposition=disposition,
+        grill_ref=grill_ref,
+    )
     return row
-
-
-def _latest_validation(
-    conn: sqlite3.Connection,
-    *,
-    graph_id: str,
-    version: int,
-) -> dict[str, Any] | None:
-    row = conn.execute(
-        """
-        SELECT evidence_json FROM research_graph_validations
-        WHERE graph_id=? AND version=?
-        ORDER BY created_at DESC, validation_id DESC LIMIT 1
-        """,
-        (graph_id, int(version)),
-    ).fetchone()
-    return _loads(row["evidence_json"]) if row is not None else None
-
-
-def _latest_audit(
-    conn: sqlite3.Connection,
-    *,
-    graph_id: str,
-    version: int,
-) -> str:
-    row = conn.execute(
-        """
-        SELECT disposition FROM research_graph_audits
-        WHERE graph_id=? AND version=?
-        ORDER BY created_at DESC, audit_id DESC LIMIT 1
-        """,
-        (graph_id, int(version)),
-    ).fetchone()
-    return str(row["disposition"]) if row is not None else ""
 
 
 def authorize_graph_activation(
@@ -1445,24 +1253,10 @@ def authorize_graph_activation(
     proposal_id: str,
     graph_hash: str,
     diff_hash: str,
-    nonce: str,
-    authorized_by: str,
-    expires_at: float,
-    human_attestation: str,
+    conversation_ref: str,
+    approval_ref: str,
 ) -> dict[str, Any]:
-    """Ingest an authorization signed by a human-presence adapter."""
-    secret = os.environ.get("RESEARCH_HUMAN_ACTIVATION_SECRET", "")
-    if not secret:
-        raise ValueError("trusted human activation adapter is not configured")
-    if not nonce or len(nonce.encode()) > 256:
-        raise ValueError("human activation nonce is required and bounded")
-    if not authorized_by.strip():
-        raise ValueError("authorized_by is required")
-    now = time.time()
-    if not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool):
-        raise ValueError("expires_at must be a timestamp")
-    if not now + 5 <= float(expires_at) <= now + 900:
-        raise ValueError("human activation authorization must expire within 15 minutes")
+    """Bind an authenticated conversation decision to one exact Gate."""
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         graph = _load_graph_from_conn(
             conn,
@@ -1471,127 +1265,35 @@ def authorize_graph_activation(
         )
         if graph is None or graph.get("lifecycle") != "draft":
             raise ValueError("human activation requires a draft graph")
-        proposal = conn.execute(
-            """
-            SELECT * FROM research_graph_proposals
-            WHERE proposal_id=? AND graph_id=? AND version=?
-            """,
-            (proposal_id, graph_id, int(graph_version)),
-        ).fetchone()
-        if proposal is None:
-            raise ValueError("human activation proposal is invalid")
         actual_graph_hash = str(graph["content_hash"])
-        actual_diff_hash = _json_hash(_loads(proposal["change_diff_json"]) or {})
-        if graph_hash != actual_graph_hash or diff_hash != actual_diff_hash:
+        if graph_hash != actual_graph_hash:
             raise ValueError("human activation target hash mismatch")
-        nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
-        signed_payload = {
-            "owner_user_id": owner_user_id,
-            "graph_id": graph_id,
-            "graph_version": int(graph_version),
-            "graph_hash": actual_graph_hash,
-            "proposal_id": proposal_id,
-            "diff_hash": actual_diff_hash,
-            "nonce_hash": nonce_hash,
-            "authorized_by": authorized_by,
-            "expires_at": float(expires_at),
-        }
-        expected = hmac.new(
-            secret.encode(),
-            orjson.dumps(signed_payload, option=orjson.OPT_SORT_KEYS),
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(expected, human_attestation):
-            raise ValueError("human activation attestation is invalid")
-        authorization_id = uuid.uuid4().hex
-        try:
-            conn.execute(
-                """
-                INSERT INTO human_activation_authorizations (
-                    authorization_id, owner_user_id, graph_id, graph_version,
-                    graph_hash, proposal_id, diff_hash, nonce_hash,
-                    authorized_by, human_attestation, expires_at, consumed_at,
-                    created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-                """,
-                (
-                    authorization_id,
-                    owner_user_id,
-                    graph_id,
-                    int(graph_version),
-                    actual_graph_hash,
-                    proposal_id,
-                    actual_diff_hash,
-                    nonce_hash,
-                    authorized_by,
-                    human_attestation,
-                    float(expires_at),
-                    now,
-                ),
-            )
-        except sqlite3.IntegrityError as exc:
-            raise ValueError("human activation nonce was already used") from exc
-    return {
-        "authorization_id": authorization_id,
-        **signed_payload,
-        "created_at": now,
-    }
-
-
-def _consume_human_activation_authorization(
-    conn: sqlite3.Connection,
-    *,
-    owner_user_id: str,
-    graph: dict[str, Any],
-    authorization_id: str,
-) -> str:
-    proposal = conn.execute(
-        """
-        SELECT * FROM research_graph_proposals
-        WHERE graph_id=? AND version=?
-        ORDER BY created_at DESC, proposal_id DESC LIMIT 1
-        """,
-        (graph["graph_id"], int(graph["version"])),
-    ).fetchone()
-    if proposal is None:
-        raise GraphActivationBlocked("graph proposal is missing")
-    row = conn.execute(
-        """
-        SELECT * FROM human_activation_authorizations
-        WHERE authorization_id=? AND owner_user_id=? AND graph_id=?
-        AND graph_version=? AND graph_hash=? AND proposal_id=?
-        AND consumed_at IS NULL AND expires_at>?
-        """,
-        (
-            authorization_id,
-            owner_user_id,
-            graph["graph_id"],
-            int(graph["version"]),
-            graph["content_hash"],
-            proposal["proposal_id"],
-            time.time(),
-        ),
-    ).fetchone()
-    expected_diff_hash = _json_hash(
-        _loads(proposal["change_diff_json"]) or {}
+    case = graph_governance.load_activation_gate(
+        Settings.CACHE_DB_PATH,
+        owner_user_id=owner_user_id,
+        case_id=proposal_id,
     )
-    if row is None or str(row["diff_hash"]) != expected_diff_hash:
-        raise GraphActivationBlocked(
-            "valid one-time human activation authorization is required"
-        )
-    consumed_at = time.time()
-    updated = conn.execute(
-        """
-        UPDATE human_activation_authorizations SET consumed_at=?
-        WHERE authorization_id=? AND consumed_at IS NULL
-        """,
-        (consumed_at, authorization_id),
+    graph_governance.require_graph_target(
+        case,
+        graph_id=graph_id,
+        graph_version=graph_version,
+        graph_hash=actual_graph_hash,
     )
-    if updated.rowcount != 1:
-        raise GraphActivationBlocked(
-            "human activation authorization was already consumed"
-        )
-    return str(row["authorized_by"])
+    target_hash = graph_governance.activation_target_hash(
+        owner_user_id=owner_user_id,
+        graph_id=graph_id,
+        graph_version=graph_version,
+        graph_hash=actual_graph_hash,
+        diff_hash=diff_hash,
+    )
+    return graph_governance.approve_activation(
+        Settings.CACHE_DB_PATH,
+        owner_user_id=owner_user_id,
+        case_id=proposal_id,
+        target_hash=target_hash,
+        conversation_ref=conversation_ref,
+        approval_ref=approval_ref,
+    )
 
 
 def activate_graph(
@@ -1612,35 +1314,6 @@ def activate_graph(
             raise KeyError("graph version not found")
         if source["lifecycle"] != "draft":
             raise GraphActivationBlocked("only a draft graph can be activated")
-        _proposal_review_gate(
-            conn,
-            graph_id=graph_id,
-            version=source_version,
-        )
-        validation = _latest_validation(
-            conn, graph_id=graph_id, version=source_version,
-        )
-        if validation is None:
-            raise GraphActivationBlocked("validation evidence is missing")
-        failed = [gate for gate in _VALIDATION_GATES if validation.get(gate) is not True]
-        if failed:
-            raise GraphActivationBlocked(
-                "activation gates failed: " + ", ".join(failed)
-            )
-        if validation.get("token_metrics_authority") != "server_derived":
-            raise GraphActivationBlocked(
-                "activation requires server-derived token metrics"
-            )
-        if _latest_audit(
-            conn, graph_id=graph_id, version=source_version,
-        ) != "approved":
-            raise GraphActivationBlocked("latest grill audit is not approved")
-        human_actor = _consume_human_activation_authorization(
-            conn,
-            owner_user_id=actor,
-            graph=source,
-            authorization_id=human_authorization_id,
-        )
         next_version = int(conn.execute(
             """
             SELECT COALESCE(MAX(version), 0) + 1 AS next_version
@@ -1648,6 +1321,23 @@ def activate_graph(
             """,
             (graph_id,),
         ).fetchone()["next_version"])
+        try:
+            graph_governance.consume_activation_in_connection(
+                conn,
+                owner_user_id=actor,
+                case_id=human_authorization_id,
+                graph_id=graph_id,
+                graph_version=source_version,
+                graph_hash=str(source["content_hash"]),
+                effect_ref=f"active-graph:{graph_id}@{next_version}",
+            )
+        except KeyError as exc:
+            raise GraphActivationBlocked(
+                "human activation authorization Gate not found"
+            ) from exc
+        except ValueError as exc:
+            raise GraphActivationBlocked(str(exc)) from exc
+        human_actor = actor
         active = deepcopy(source)
         active.pop("created_by", None)
         active.pop("created_at", None)
@@ -1909,71 +1599,18 @@ def record_capability_approval(
     actor: str,
     evidence_refs: list[str],
 ) -> dict[str, Any]:
-    if not capability_id or not product_group:
-        raise ValueError("capability_id and product_group are required")
-    if len(descriptor_hash) != 64 or any(
-        character not in "0123456789abcdef"
-        for character in descriptor_hash
-    ):
-        raise ValueError("descriptor_hash must be sha256")
-    if not isinstance(evidence_refs, list) or not evidence_refs:
-        raise ValueError("capability approval requires evidence_refs")
-    approval_id = uuid.uuid4().hex
-    now = time.time()
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        conn.execute(
-            """
-            INSERT INTO research_capability_approvals (
-                approval_id, owner_user_id, capability_id, descriptor_hash,
-                product_group, actor, evidence_refs_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                approval_id,
-                owner_user_id,
-                capability_id,
-                descriptor_hash,
-                product_group,
-                actor,
-                orjson.dumps(evidence_refs).decode(),
-                now,
-            ),
-        )
-    return {
-        "approval_id": approval_id,
-        "owner_user_id": owner_user_id,
-        "capability_id": capability_id,
-        "descriptor_hash": descriptor_hash,
-        "product_group": product_group,
-        "actor": actor,
-        "evidence_refs": list(evidence_refs),
-        "created_at": now,
-    }
-
-
-def _attestation_secret(conn: sqlite3.Connection) -> bytes:
-    row = conn.execute(
-        "SELECT secret FROM research_graph_server_secrets WHERE secret_id=1"
-    ).fetchone()
-    if row is not None:
-        return bytes(row["secret"])
-    secret = os.urandom(32)
-    conn.execute(
-        """
-        INSERT INTO research_graph_server_secrets (secret_id, secret)
-        VALUES (1, ?)
-        """,
-        (secret,),
+    del (
+        owner_user_id,
+        capability_id,
+        descriptor_hash,
+        product_group,
+        actor,
+        evidence_refs,
     )
-    return secret
-
-
-def _receipt_signature(
-    secret: bytes,
-    payload: dict[str, Any],
-) -> str:
-    raw = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
-    return hmac.new(secret, raw, hashlib.sha256).hexdigest()
+    raise RuntimeError(
+        "server capability approvals are retired; approve Skill execution "
+        "in the Agent conversation and retain the actual-use audit locally"
+    )
 
 
 def issue_capability_receipt(
@@ -2004,6 +1641,10 @@ def issue_capability_receipt(
         raise ValueError("resolver_version is required")
     if not isinstance(approval_refs, dict):
         raise ValueError("approval_refs must be an object")
+    if approval_refs:
+        raise ValueError(
+            "server capability receipts do not accept local approval refs"
+        )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         graph = _load_graph_from_conn(
             conn,
@@ -2058,26 +1699,6 @@ def issue_capability_receipt(
                     raise ValueError(
                         f"capability descriptor mismatch: {capability_id}"
                     )
-                approval_id = str(approval_refs.get(capability_id) or "")
-                approval = conn.execute(
-                    """
-                    SELECT * FROM research_capability_approvals
-                    WHERE approval_id=? AND owner_user_id=?
-                    AND capability_id=? AND descriptor_hash=?
-                    AND product_group IN (?, 'all')
-                    """,
-                    (
-                        approval_id,
-                        owner_user_id,
-                        capability_id,
-                        binding["descriptor_hash"],
-                        product_group,
-                    ),
-                ).fetchone()
-                if approval is None:
-                    raise ValueError(
-                        f"approved capability receipt is missing: {capability_id}"
-                    )
         receipt_id = uuid.uuid4().hex
         signed_payload = {
             "receipt_id": receipt_id,
@@ -2095,10 +1716,7 @@ def issue_capability_receipt(
             "provider_conformance_hash": provider_conformance_hash,
             "receipt_mode": receipt_mode,
         }
-        signature = _receipt_signature(
-            _attestation_secret(conn),
-            signed_payload,
-        )
+        signature = _json_hash(signed_payload)
         now = time.time()
         conn.execute(
             """
@@ -2166,10 +1784,7 @@ def _verify_capability_receipt(
             expected_mode,
         ),
     ).fetchone()
-    if row is None or not hmac.compare_digest(
-        signature,
-        str(row["resolver_attestation"]),
-    ):
+    if row is None or signature != str(row["resolver_attestation"]):
         raise ValueError("valid server capability receipt is required")
     return _loads(row["resolution_json"]) or {}
 

@@ -86,10 +86,12 @@ class FactorTesterClient:
         graph_id: str,
         version: int,
         evidence: dict[str, Any],
+        *,
+        proposal_id: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graphs/{graph_id}/versions/{version}/validation",
-            evidence,
+            {**evidence, "proposal_id": proposal_id},
         ))
         return dict(data.get("validation") or {})
 
@@ -103,6 +105,7 @@ class FactorTesterClient:
         evidence_refs: list[str],
         token_estimate: int,
         agent_execution_id: str,
+        conversation_ref: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graphs/{graph_id}/versions/{version}/proposals",
@@ -112,6 +115,7 @@ class FactorTesterClient:
                 "evidence_refs": evidence_refs,
                 "token_estimate": token_estimate,
                 "agent_execution_id": agent_execution_id,
+                "conversation_ref": conversation_ref,
             },
         ))
         return dict(data.get("proposal") or {})
@@ -327,14 +331,18 @@ class FactorTesterClient:
         graph_id: str,
         version: int,
         *,
+        proposal_id: str,
         disposition: str,
         grill_evidence: list[dict[str, Any]],
+        grill_ref: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graphs/{graph_id}/versions/{version}/audit",
             {
+                "proposal_id": proposal_id,
                 "disposition": disposition,
                 "grill_evidence": grill_evidence,
+                "grill_ref": grill_ref,
             },
         ))
         return dict(data.get("audit") or {})
@@ -360,10 +368,8 @@ class FactorTesterClient:
         proposal_id: str,
         graph_hash: str,
         diff_hash: str,
-        nonce: str,
-        authorized_by: str,
-        expires_at: float,
-        human_attestation: str,
+        conversation_ref: str,
+        approval_ref: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             "/api/research-human-activation-authorizations",
@@ -373,10 +379,8 @@ class FactorTesterClient:
                 "proposal_id": proposal_id,
                 "graph_hash": graph_hash,
                 "diff_hash": diff_hash,
-                "nonce": nonce,
-                "authorized_by": authorized_by,
-                "expires_at": expires_at,
-                "human_attestation": human_attestation,
+                "conversation_ref": conversation_ref,
+                "approval_ref": approval_ref,
             },
         ))
         return dict(data.get("authorization") or {})

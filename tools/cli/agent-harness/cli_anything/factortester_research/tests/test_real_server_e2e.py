@@ -1,21 +1,18 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import os
 import secrets
 import shutil
 import subprocess
 import threading
-import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.request import Request, urlopen
 
-import orjson
 from werkzeug.serving import make_server
 
 import settings as Settings
@@ -88,26 +85,18 @@ def _post_json(url: str, payload: dict) -> dict:
 def _real_server(
     tmp_path: Path,
     monkeypatch,
-) -> Iterator[tuple[str, str]]:
+) -> Iterator[str]:
     database = tmp_path / "server" / "factortester.sqlite"
     database.parent.mkdir(parents=True)
-    human_secret = secrets.token_hex(32)
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", database)
     monkeypatch.setattr(Settings, "CACHE_DIR", database.parent)
     monkeypatch.setenv("FLASK_SECRET_KEY", secrets.token_hex(32))
-    monkeypatch.setenv(
-        "RESEARCH_HUMAN_ACTIVATION_SECRET",
-        human_secret,
-    )
     app = create_app()
     httpd = make_server("127.0.0.1", 0, app, threaded=True)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
-        yield (
-            f"http://127.0.0.1:{httpd.server_port}",
-            human_secret,
-        )
+        yield f"http://127.0.0.1:{httpd.server_port}"
     finally:
         httpd.shutdown()
         thread.join(timeout=10)
@@ -254,25 +243,8 @@ def _capability_receipt(
     )
     descriptors = graph["capability_descriptors"]
     bindings = []
-    approvals = {}
     for capability_id in node.get("required_capabilities") or []:
         descriptor = descriptors[capability_id]
-        approval = _run_json(
-            factortester,
-            [
-                "research-graph",
-                "approve-capability",
-                capability_id,
-                "--descriptor-hash",
-                descriptor["descriptor_hash"],
-                "--product-group",
-                product_group,
-                "--evidence-ref",
-                f"e2e:approval:{node_id}:{capability_id}",
-            ],
-            env=env,
-        )
-        approvals[capability_id] = approval["approval_id"]
         bindings.append({
             "capability_id": capability_id,
             "capability_description": descriptor[
@@ -294,7 +266,7 @@ def _capability_receipt(
     resolution_file = tmp_path / f"resolution-{suffix}.json"
     approvals_file = tmp_path / f"approvals-{suffix}.json"
     resolution_file.write_text(json.dumps(resolution), encoding="utf-8")
-    approvals_file.write_text(json.dumps(approvals), encoding="utf-8")
+    approvals_file.write_text("{}", encoding="utf-8")
     args = [
         "research-graph",
         "attest",
@@ -330,10 +302,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         "FACTORTESTER_HOME": str(cli_home),
         "CLI_ANYTHING_FORCE_INSTALLED": "1",
     }
-    with _real_server(tmp_path, monkeypatch) as (
-        base_url,
-        human_secret,
-    ):
+    with _real_server(tmp_path, monkeypatch) as base_url:
         alias = f"e2e_{uuid.uuid4().hex[:10]}"
         password = secrets.token_urlsafe(18)
         registered = _post_json(
@@ -422,6 +391,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "500",
                 "--agent-execution-id",
                 proposer["invocation_id"],
+                "--conversation-ref",
+                "auth-conversation:e2e-active-graph",
             ],
             env=env,
         )
@@ -535,6 +506,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "validate",
                 graph["graph_id"],
                 str(graph["version"]),
+                "--proposal-id",
+                proposal["proposal_id"],
                 "--replay-passed",
                 "--shadow-passed",
                 "--capability-resolution-complete",
@@ -575,32 +548,13 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "approved",
                 "--grill-evidence-file",
                 str(grill_file),
+                "--proposal-id",
+                proposal["proposal_id"],
+                "--grill-ref",
+                "grill-with-docs:e2e-active-graph",
             ],
             env=env,
         )
-        change_diff = json.loads(change_file.read_text(encoding="utf-8"))
-        diff_hash = hashlib.sha256(orjson.dumps(
-            change_diff,
-            option=orjson.OPT_SORT_KEYS,
-        )).hexdigest()
-        nonce = uuid.uuid4().hex
-        expires_at = time.time() + 300
-        human_payload = {
-            "owner_user_id": owner,
-            "graph_id": graph["graph_id"],
-            "graph_version": graph["version"],
-            "graph_hash": graph["content_hash"],
-            "proposal_id": proposal["proposal_id"],
-            "diff_hash": diff_hash,
-            "nonce_hash": hashlib.sha256(nonce.encode()).hexdigest(),
-            "authorized_by": "e2e-human-auditor",
-            "expires_at": expires_at,
-        }
-        human_attestation = hmac.new(
-            human_secret.encode(),
-            orjson.dumps(human_payload, option=orjson.OPT_SORT_KEYS),
-            hashlib.sha256,
-        ).hexdigest()
         authorization = _run_json(
             factortester,
             [
@@ -613,15 +567,11 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "--graph-hash",
                 graph["content_hash"],
                 "--diff-hash",
-                diff_hash,
-                "--nonce",
-                nonce,
-                "--authorized-by",
-                "e2e-human-auditor",
-                "--expires-at",
-                str(expires_at),
-                "--human-attestation",
-                human_attestation,
+                proposal["diff_hash"],
+                "--conversation-ref",
+                "auth-conversation:e2e-active-graph",
+                "--approval-ref",
+                "auth-conversation-event:e2e-approval",
             ],
             env=env,
         )

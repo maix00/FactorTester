@@ -180,6 +180,46 @@ class MaintenanceCaseStore:
             change_refs=change_refs,
         )
 
+    def record_progress(
+        self,
+        *,
+        owner_user_id: str,
+        case_id: str,
+        agent_id: str,
+        result_ref: str,
+        change_refs: list[str],
+    ) -> dict[str, Any]:
+        """Record material in-progress refs without changing lifecycle state."""
+        return self._change_status(
+            case_id=case_id,
+            owner_user_id=owner_user_id,
+            agent_id=agent_id,
+            target_status="claimed",
+            result_ref=result_ref,
+            change_refs=change_refs,
+        )
+
+    def consume_case_effect(
+        self,
+        *,
+        owner_user_id: str,
+        case_id: str,
+        agent_id: str,
+        effect_ref: str,
+        change_refs: list[str],
+    ) -> dict[str, Any]:
+        """Atomically consume one blocked case effect exactly once."""
+        with connect_maintenance_cases(self.db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            return consume_case_effect_in_connection(
+                conn,
+                owner_user_id=owner_user_id,
+                case_id=case_id,
+                agent_id=agent_id,
+                effect_ref=effect_ref,
+                change_refs=change_refs,
+            )
+
     def _change_status(
         self,
         *,
@@ -205,17 +245,22 @@ class MaintenanceCaseStore:
                 raise ValueError(
                     "Maintenance Case transition requires its claimed Agent"
                 )
+            current_status = str(row["status"])
+            if target_status == "claimed" and current_status != "claimed":
+                raise ValueError(
+                    "Maintenance Case progress is frozen after coordination"
+                )
             merged_refs = _bounded_refs(
                 "change_refs",
                 orjson.loads(row["change_refs_json"]) + new_refs,
             )
             if (
-                str(row["status"]) == target_status
+                current_status == target_status
                 and str(row["latest_result_ref"]) == result_ref
                 and merged_refs == orjson.loads(row["change_refs_json"])
             ):
                 return _case_value(row)
-            if str(row["status"]) not in {"claimed", "blocked"}:
+            if current_status not in {"claimed", "blocked"}:
                 raise ValueError(
                     "Maintenance Case is not open for this transition"
                 )
@@ -318,6 +363,88 @@ def open_case_in_connection(
         ),
     ).fetchone()
     return _case_value(row)
+
+
+def consume_case_effect_in_connection(
+    conn: sqlite3.Connection,
+    *,
+    owner_user_id: str,
+    case_id: str,
+    agent_id: str,
+    effect_ref: str,
+    change_refs: list[str],
+    now: float | None = None,
+    expected_kind: str = "",
+    expected_conversation_ref: str = "",
+    required_affected_refs: tuple[str, ...] = (),
+    required_change_ref_prefixes: tuple[str, ...] = (),
+    loaded_row: sqlite3.Row | None = None,
+) -> dict[str, Any]:
+    """Consume one effect inside the caller's existing transaction."""
+    if agent_id:
+        _require_text("agent_id", agent_id, max_length=128)
+    _require_text("effect_ref", effect_ref, max_length=_MAX_REF_LENGTH)
+    new_refs = _bounded_refs("change_refs", change_refs)
+    row = loaded_row or _load_case_row(conn, owner_user_id, case_id)
+    if (
+        str(row["owner_user_id"]) != owner_user_id
+        or str(row["case_id"]) != case_id
+    ):
+        raise ValueError("loaded Maintenance Case identity does not match")
+    if expected_kind and str(row["kind"]) != expected_kind:
+        raise ValueError("Maintenance Case effect kind does not match")
+    if (
+        expected_conversation_ref
+        and str(row["conversation_ref"]) != expected_conversation_ref
+    ):
+        raise ValueError("Maintenance Case conversation does not match")
+    affected_refs = orjson.loads(row["affected_refs_json"])
+    current_change_refs = orjson.loads(row["change_refs_json"])
+    if any(ref not in affected_refs for ref in required_affected_refs):
+        raise ValueError("Maintenance Case effect target does not match")
+    if any(
+        not any(ref.startswith(prefix) for ref in current_change_refs)
+        for prefix in required_change_ref_prefixes
+    ):
+        raise ValueError("Maintenance Case effect approval is incomplete")
+    claimed_agent_id = str(row["claimed_agent_id"])
+    if agent_id and claimed_agent_id != agent_id:
+        raise ValueError(
+            "Maintenance Case effect requires its claimed Agent"
+        )
+    if str(row["status"]) == "resolved":
+        raise ValueError("Maintenance Case effect already consumed")
+    if str(row["status"]) != "blocked":
+        raise ValueError(
+            "Maintenance Case effect is not approved for consumption"
+        )
+    merged_refs = _bounded_refs(
+        "change_refs",
+        current_change_refs + new_refs,
+    )
+    timestamp = time.time() if now is None else now
+    updated = conn.execute(
+        """
+        UPDATE research_maintenance_cases
+        SET status='resolved', change_refs_json=?,
+            latest_result_ref=?, updated_at=?, closed_at=?
+        WHERE owner_user_id=? AND case_id=? AND status='blocked'
+          AND claimed_agent_id=?
+        RETURNING *
+        """,
+        (
+            _dump_refs(merged_refs),
+            effect_ref,
+            timestamp,
+            timestamp,
+            owner_user_id,
+            case_id,
+            claimed_agent_id,
+        ),
+    ).fetchone()
+    if updated is None:
+        raise ValueError("Maintenance Case effect already consumed")
+    return _case_value(updated)
 
 
 def _load_case_row(

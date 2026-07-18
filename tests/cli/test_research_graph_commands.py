@@ -30,17 +30,22 @@ class FakeClient:
     def get_active_research_graph(self, graph_id):
         return {"graph_id": graph_id, "version": 3, "lifecycle": "active"}
 
-    def validate_research_graph(self, graph_id, version, evidence):
-        self.validation = (graph_id, version, evidence)
+    def validate_research_graph(
+        self, graph_id, version, evidence, *, proposal_id,
+    ):
+        self.validation = (graph_id, version, evidence, proposal_id)
         return {"validation_id": "validation-1", "evidence": evidence}
 
     def audit_research_graph(
-        self, graph_id, version, *, disposition, grill_evidence,
+        self, graph_id, version, *, proposal_id, disposition,
+        grill_evidence, grill_ref,
     ):
         return {
             "audit_id": "audit-1",
+            "proposal_id": proposal_id,
             "disposition": disposition,
             "grill_evidence": grill_evidence,
+            "grill_ref": grill_ref,
         }
 
     def activate_research_graph(
@@ -241,6 +246,8 @@ def test_research_graph_cli_requires_explicit_gate_evidence(
         "validate",
         "factor-research",
         "2",
+        "--proposal-id",
+        "proposal-1",
         "--replay-passed",
         "--shadow-passed",
         "--capability-resolution-complete",
@@ -270,6 +277,7 @@ def test_research_graph_cli_requires_explicit_gate_evidence(
                 "baseline_run_id": "run-baseline-1",
             },
         },
+        "proposal-1",
     )
 
 
@@ -326,6 +334,7 @@ def test_research_graph_next_and_bounded_review_commands(
         "--evidence-ref", "artifact:counterexample",
         "--token-estimate", "400",
         "--agent-execution-id", "proposer-execution",
+        "--conversation-ref", "auth-conversation:test-cli",
     ])
     reviewed = runner.invoke(cli, [
         "research-graph", "review", "proposal-1",
@@ -341,6 +350,10 @@ def test_research_graph_next_and_bounded_review_commands(
     assert reviewed.exit_code == 0
     assert fake.proposal[2]["token_estimate"] == 400
     assert fake.proposal[2]["agent_execution_id"] == "proposer-execution"
+    assert (
+        fake.proposal[2]["conversation_ref"]
+        == "auth-conversation:test-cli"
+    )
     assert fake.review[1]["scope_drift"] is False
 
 
