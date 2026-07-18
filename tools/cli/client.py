@@ -472,7 +472,6 @@ class FactorTesterClient:
         product_group: str,
         workspace_id: str,
         capability_receipt: dict[str, Any],
-        token_budget: int | None = None,
         shadow_graph_version: int | None = None,
         shadow_run_id: str = "",
     ) -> dict[str, Any]:
@@ -483,7 +482,6 @@ class FactorTesterClient:
                 "product_group": product_group,
                 "workspace_id": workspace_id,
                 "capability_receipt": capability_receipt,
-                "token_budget": token_budget,
                 "shadow_graph_version": shadow_graph_version,
                 "shadow_run_id": shadow_run_id,
             },

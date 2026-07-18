@@ -459,8 +459,6 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "equities",
                 "--workspace-id",
                 workspace_id,
-                "--token-budget",
-                "1000",
                 "--shadow-graph-version",
                 str(graph["version"]),
                 "--shadow-run-id",
@@ -614,8 +612,6 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "equities",
                 "--workspace-id",
                 workspace_id,
-                "--token-budget",
-                "1000",
                 "--capability-receipt-file",
                 str(live_entry_file),
             ],
@@ -727,16 +723,6 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         evidence = {
             **(edge.get("guard") or {}),
             "evidence_refs": ["e2e:transition"],
-            "token_telemetry": {
-                "agent_role": "primary",
-                "input_tokens": 12,
-                "output_tokens": 3,
-                "cache_read_tokens": 0,
-                "skill_document_tokens": 0,
-                "artifact_summary_tokens": 0,
-                "reviewer_tokens": 0,
-                "loaded_skill_ids": [],
-            },
             "agent_invocation_ids": [transition_invocation_id],
         }
         evidence_file = tmp_path / "transition-evidence.json"

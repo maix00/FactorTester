@@ -275,7 +275,6 @@ def create_research_graph_instance():
             product_group=str(data.get("product_group") or ""),
             workspace_id=str(data.get("workspace_id") or ""),
             capability_receipt=data.get("capability_receipt") or {},
-            token_budget=data.get("token_budget"),
             shadow_graph_version=data.get("shadow_graph_version"),
             shadow_run_id=str(data.get("shadow_run_id") or ""),
         )

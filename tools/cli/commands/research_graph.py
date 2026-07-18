@@ -482,7 +482,6 @@ def rollback_graph(
 @click.argument("graph_id")
 @click.option("--product-group", required=True)
 @click.option("--workspace-id", required=True)
-@click.option("--token-budget", type=click.IntRange(min=1))
 @click.option("--shadow-graph-version", type=click.IntRange(min=1))
 @click.option("--shadow-run-id", default="")
 @click.option(
@@ -494,7 +493,6 @@ def start_graph_instance(
     graph_id: str,
     product_group: str,
     workspace_id: str,
-    token_budget: int | None,
     shadow_graph_version: int | None,
     shadow_run_id: str,
     capability_receipt_file: Path,
@@ -515,7 +513,6 @@ def start_graph_instance(
         product_group=product_group,
         workspace_id=workspace_id,
         capability_receipt=receipt,
-        token_budget=token_budget,
         shadow_graph_version=shadow_graph_version,
         shadow_run_id=shadow_run_id,
     )))
@@ -572,7 +569,7 @@ def attest_capabilities(
     resolver_version: str,
     shadow_mode: bool,
 ) -> None:
-    """把本地语义解析换成服务器签发、不可伪造的 receipt。"""
+    """让服务器校验一次紧凑的当前节点语义投影（兼容命令）。"""
     payload = json.loads(resolution_file.read_text(encoding="utf-8"))
     resolution = (
         payload.get("resolution") if isinstance(payload, dict) else None

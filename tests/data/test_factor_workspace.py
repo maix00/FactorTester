@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -236,6 +237,32 @@ def test_author_sdk_is_explicit_resolvable_and_excludes_runtime_internals(tmp_pa
             assert module_path.with_suffix(".pyi").exists() or (module_path / "__init__.pyi").exists(), (
                 f"{stub_path.relative_to(workspace_root)} imports missing {node.module}"
             )
+
+
+def test_generated_factor_workspace_passes_real_pyright(tmp_path):
+    workspace_root = tmp_path / "workspace"
+    factor_workspace_construct._ensure_workspace_layout(str(workspace_root))
+    factor_workspace_construct._sync_tools_sdk(str(workspace_root))
+    (workspace_root / "custom_factors" / "ClientAlpha.py").write_text(
+        "from tools.factors import FactorFamily\n\n"
+        "class ClientAlpha(FactorFamily):\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+
+    pyright = shutil.which("pyright")
+    assert pyright is not None, "real Pyright is required for factor-workspace acceptance"
+    completed = subprocess.run(
+        [pyright, "--outputjson"],
+        cwd=workspace_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    report = json.loads(completed.stdout)
+    assert report["summary"]["errorCount"] == 0, report
+    assert report["generalDiagnostics"] == [], report
 
 
 def test_workspace_hooks_target_stable_feat_root(monkeypatch, tmp_path):
