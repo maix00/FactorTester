@@ -23,6 +23,24 @@ An immutable research path beginning when a testable candidate is
 preregistered and bound to its trial records.
 _Avoid_: Draft idea, mutable experiment
 
+**Trial Plan**:
+A versioned statistical-design contract for one hypothesis branch containing
+outcomes, sample roles, planned comparisons, stopping, multiplicity, and
+decision criteria.
+_Avoid_: Work Package budget, graph edge threshold, mutable run note
+
+**Job Evidence Receipt**:
+A source-free read projection of one JobAttempt's execution status, hashes,
+exit code, terminal-assurance summary, and
+stdout/stderr/metric/artifact references. It is not independently persisted.
+_Avoid_: New receipt table, duplicate write, full log, research conclusion
+
+**Evidence Envelope**:
+The validated bounded schema stored in an existing append-only graph trace's
+`evidence_json`. It references canonical Job/assurance facts and binds required
+evidence, trial counts, stopping, gaps, and decision rationale.
+_Avoid_: Second event store, parent-hash subsystem, artifact container
+
 **Provisional Memory**:
 Local, reviewable process evidence from one research path that has not been
 promoted into a reusable graph rule.
@@ -97,12 +115,113 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 - A **Workspace Research Objective** produces one or more **Work Packages**.
 - A **Work Package** is owned by one Research Agent at a time and may create
   many independent **Hypothesis Branches**.
+- The persisted graph instance is the Work Package projection and references,
+  but does not own, its Agent Flow resource scope.
 - A **Work Package** may reference an Agent Flow resource-budget scope, but
   does not define token, compute, time, concurrency, statistical stopping, or
   multiplicity semantics.
 - **Candidate Discovery** may short-circuit for **Targeted Research** or
   generate bounded candidates for **Open Discovery**.
 - A **Hypothesis Branch** follows one pinned **Factor Research Graph** version.
+- The persisted graph branch is the Hypothesis Branch owner. It contains
+  research/statistical state, not token, compute, concurrency, fee, or
+  reviewer-usage aggregates.
+- A **Hypothesis Branch** binds one current immutable **Trial Plan** before
+  selection-relevant outcome inspection.
+- The **Factor Research Graph** requires and evaluates a **Trial Plan**
+  reference but does not hard-code that plan's product- or hypothesis-specific
+  numeric thresholds into graph topology.
+- The server persists the compact immutable **Trial Plan** and binds its hash
+  to submitted runs and returned evidence; full rationale and private
+  references remain local.
+- The compact plan is stored once in existing graph-trace evidence; the
+  Hypothesis Branch retains only its current-plan hash projection, and no
+  dedicated TrialPlan service/table is required.
+- A trace containing a referenced TrialPlan is retention-pinned until its
+  dependent run/job/conclusion history is explicitly deleted.
+- A Research Agent drafts the **Trial Plan**; deterministic protocol validation
+  is the default review path, with one Statistical Reviewer only for
+  non-standard, ambiguous, protocol-deviating, or high-risk design.
+- A **Trial Plan** may coordinate multiple immutable RunSpecs; each ResearchRun
+  binds exactly one plan version, one RunSpec hash, one trial role, and one
+  comparison identity, which its JobAttempts inherit.
+- Existing persistence objects are implementation candidates, not frozen
+  semantics. Implementation may refactor them when an ownership and query-path
+  audit proves fewer duplicate facts, reads, or writes.
+- Agent Flow alone owns resource budgets, usage aggregation, and wait/resume;
+  graph traces carry only bounded transition evidence and references to
+  resource-usage facts.
+- UI configures the total token limit per Agent Profile and displays Agent Flow
+  usage; UI/browser state is not the accounting owner.
+- Agent Flow keeps one compact restart-safe budget state per claimed Agent ID,
+  with at most one atomic reservation and one settlement around a real model
+  invocation. Cache hits and unchanged state produce zero writes.
+- The settlement transaction also appends one source-free usage item for UI
+  task attribution; it never stores prompt, full context, factor source, or
+  response body.
+- UI may change a current limit or manually reset into a new immutable budget
+  period. Reset retains history and waits for an active invocation to settle.
+- Budget exhaustion is a derived Agent Flow pause. It preserves the Agent
+  checkpoint, leaves graph/hypothesis state unchanged, and never stops an
+  already submitted backend Job.
+- A changed budget revision emits one deduplicated wake; unchanged budget and
+  wait state create no polling, Agent invocation, or database write.
+- UI initially reads only the selected Agent Profile and current budget
+  aggregate. Task usage is lazy, cursor-paginated, and grouped at read time;
+  v1 has no summary/compaction scheduler.
+- A deterministic provider-neutral usage adapter emits input/output/cache,
+  charged amount, measurement quality, and charging-policy version. Model or
+  runtime changes do not change Agent budget identity or rewrite history.
+- Missing actual provider usage settles conservatively from the reservation;
+  it does not block Agent startup or require another Agent/Skill invocation.
+- Agent Flow persists only two deep lifecycle objects: Agent Budget Period and
+  Agent Invocation. Invocation unifies execution provenance, reservation, and
+  provider-neutral settlement; overlapping legacy tables are migrated and
+  removed rather than dual-written.
+- Agent Invocation may include one bounded fixed-category context-cost
+  breakdown generated deterministically. It contains counts, not context
+  content or per-document rows, and adds no settlement transaction.
+- Usage follows the Agent Flow execution owner: local Agent records remain in
+  the local manager store and Server Agent records in the server store. UI
+  routes and merges views but owns no accounting database or default sync.
+- Agent ID is owner-pinned in v1. Model/runtime changes within one owner are
+  seamless; cross-owner movement is an explicit atomic
+  profile/budget/checkpoint transfer that revokes the old claim.
+- Context-cost diagnostics belong to Agent Flow. Routine invocations do not
+  wake an optimizer; repeated/threshold breaches create one deduplicated
+  proposal, and semantic/code changes route to Maintenance/grill.
+- Startup/resume is deterministic and role-specific. It returns only current
+  authorized scope, one local branch packet, changed refs, node-local
+  capability descriptions/reuse hints, and next action; it omits full
+  graph/catalog/history/output and writes nothing for an unchanged revision.
+- Agent Profiles are unlimited until UI sets a cap, so budget setup is not a
+  prerequisite for work.
+- Server packets contain only capability description/hash. Local packets may
+  add an opaque approved reuse ref from local audit state; actual Skill
+  identity/version/execution remains local and changed content/authority
+  requires conversation approval.
+- Backend assurance is deterministic validation inside the existing JobAttempt
+  terminal transaction. Conforming results require no reviewer or separate
+  receipt lookup; concrete anomalies/suspicion route to Maintenance.
+- An anomalous Job remains immutable. Evidence ineligibility is derived from
+  Job assurance and Maintenance disposition, not a branch-pause row. Confirmed
+  fixes produce a new backend revision and JobAttempt; old/new coexist.
+- One durable Maintenance Case queue coordinates all maintenance kinds using
+  bounded refs to canonical owners. It has no per-kind/event tables, writes
+  only material state changes, and UI cannot approve/disposition it.
+- Runtime trust uses checkpoint/history, hash, and resource AuthN/AuthZ.
+  High-risk effects consume one exact-hash authenticated conversation approval;
+  cryptographic attestation is reserved for real cross-boundary release
+  provenance rather than same-server routine transitions.
+- Final persistence is six Graph owners (versions, active pointer, instances,
+  branches, trace, Maintenance Cases) and two independent Agent Flow owners
+  (budget periods, invocations). Assurance belongs to JobAttempt, current
+  resolution to branch, and rollback to an approved pointer change.
+- A **Job Evidence Receipt** is projected from existing JobAttempt, artifact,
+  and terminal-assurance summary fields without a new write.
+- A graph transition or research decision stores one validated
+  **Evidence Envelope** inside its existing graph trace without copying full
+  stdout, metrics, or artifacts.
 - An affected **Hypothesis Branch** emits at most one deduplicated
   **Capability Gap** for the same gap hash.
 - A **Capability Gap** creates a **Maintenance Case** outside the
@@ -127,7 +246,8 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 > counterexamples one question at a time."
 >
 > **Auditor:** "The capability intent is accepted. Implement it without
-> changing existing operator semantics, then publish a conformance receipt."
+> changing existing operator semantics, then publish the bounded conformance
+> result reference."
 
 ## Flagged ambiguities
 

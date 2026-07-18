@@ -62,22 +62,27 @@ The system must:
 The primary operational acceptance metric is token efficiency. The graph must
 reduce repeated interpretation rather than become another large prompt.
 
-Token control is pre-execution, not merely telemetry:
+Token control is pre-execution, not merely telemetry, and belongs to Agent
+Flow rather than the Factor Research Graph:
 
 ```text
-create budget scope
-  -> reserve max input/output before Agent, reviewer, or Skill work
-  -> grant or deny atomically
-  -> launch only with reservation_id
-  -> ingest trusted provider/gateway usage receipt
-  -> commit actual usage and release unused reservation
+load current Agent Budget Period, if capped
+  -> create one reserved Agent Invocation and update the period atomically
+  -> invoke the model only when the deterministic reservation fits
+  -> normalize provider usage when available
+  -> settle the same invocation and period atomically
+  -> conservatively charge the reservation when actual usage is unavailable
 ```
 
 Client-reported transition telemetry is diagnostic only. Authoritative budget
-usage comes from provider receipts whose HMAC is verified by the configured
-gateway adapter. If no trusted adapter is configured, commit fails closed.
-Skill-document, artifact-summary, and cache-read tokens are input attribution
-subsets; reviewer tokens are added to primary input/output to form team total.
+usage is the provider-neutral settlement recorded by the Agent Flow owner,
+including its measurement quality and charging-policy version. No
+provider-specific receipt, HMAC, trusted launcher, or configured cap is a
+prerequisite for an Agent to start: profiles are unlimited until UI sets a
+cap, and unavailable actual usage settles as `reserved_fallback`.
+Skill-document, artifact-summary, and cache-read counts are attribution
+subsets rather than separate budgets; reviewer calls are ordinary sponsored
+Agent Invocations.
 
 ## Fixed Governance Decisions
 
@@ -155,6 +160,9 @@ subsets; reviewer tokens are added to primary input/output to form team total.
     runtime-budget owner. It records the research objective and mode,
     factor/product/data scope, permissions, exclusions, expected evidence, and
     optional references to separately owned graph and Agent Flow state.
+24. Concrete statistical design belongs to an immutable, versioned TrialPlan,
+    not to Work Package or hard-coded graph-edge thresholds. The graph requires
+    a valid `trial_plan_ref` and evaluates evidence governed by that plan.
 
 ## Work Package, Graph, and Agent Flow Ownership
 
@@ -187,6 +195,464 @@ research decision. Changing runtime resources updates the referenced Agent Flow
 budget through the applicable Agent conversation. These changes may be
 presented together to a user, but must not be persisted as one owner or
 evaluated by one state machine.
+
+## TrialPlan Boundary
+
+The `validation_design` node produces a versioned TrialPlan containing at
+least:
+
+```text
+hypothesis and trial family
+primary and secondary outcomes
+diagnostic, selection, confirmation, and holdout sample roles
+planned comparisons
+outcome-aware stopping rules
+multiplicity method and dependence assumptions
+rejection, revision, and continuation criteria
+```
+
+The Factor Research Graph declares that a valid `trial_plan_ref` and its
+required evidence must exist. It does not embed one universal IC, Sharpe,
+sample-size, or stopping threshold in graph topology. Product and research
+profiles may validate different TrialPlan contracts without creating different
+research graphs.
+
+Deterministic code checks the TrialPlan schema, identity, version, hash,
+required fields, and whether result evidence was produced under the bound
+version. Agent judgment supplies and reviews economic/statistical meaning only
+where the applicable protocol does not decide it. Once selection-relevant
+outcomes have been inspected, changing the plan requires a new immutable
+version and the trial-ledger consequences required by decisions 114–115.
+
+The server persists the compact immutable TrialPlan as the authoritative
+run/result binding. It contains the executable statistical contract and opaque
+evidence references, but no factor source, reconstructable formula, full Agent
+reasoning, or private local paths. The local research record retains full
+rationale and permitted private references.
+
+A TrialPlan version is written once. Run submission freezes its hash, and
+result evidence must return the same hash. Execution progress does not rewrite
+the plan; attempts and results append their own bounded references. This lets
+the server reject an unbound or mismatched run without adding TrialPlan writes
+to the database hot path.
+
+The minimum accepted persistence shape does not introduce a `trial_plans`
+table or service. The `validation_design` transition stores the compact plan
+once in existing append-only graph-trace evidence. The current hypothesis
+branch keeps only a current-plan hash projection needed for constant-bounded
+validation. A ResearchRun binds that hash, its `trial_role`, and
+`comparison_id`; JobAttempts inherit through the run rather than duplicating
+the plan. Routine submission reuses the already-loaded branch/run decision
+packet and does not scan historical traces.
+
+A graph trace containing a TrialPlan body is retention-pinned while any
+ResearchRun, JobAttempt, or accepted research conclusion references its plan
+hash. Closing a branch or activating a new graph version does not delete it.
+Explicit deletion of the complete dependent research history may release the
+pin. This preserves one canonical plan body without creating a second
+TrialPlan store.
+
+This is a semantic ownership decision, not a requirement to preserve the
+current physical schema. Before implementation, apply deletion, read-path,
+write-path, and owner-locality audits to the existing Workspace, ResearchRun,
+JobAttempt, graph branch, and graph trace structures. Refactor or consolidate
+an existing persistence object when that produces a deeper owner and fewer
+reads/writes; do not mechanically add fields merely because the current table
+exists. Any alternative physical layout must preserve the same immutable
+bindings and demonstrate no greater routine query/write count.
+
+The existing graph persistence must also be refactored to respect the
+three-layer boundary. A graph instance is the persisted Work Package
+projection: user authorization scope, workspace, and pinned graph version,
+plus an opaque Agent Flow scope reference. It does not own a token budget. A
+graph branch is the Hypothesis Branch: current research node, hypothesis and
+factor identities, current TrialPlan hash, statistical trial counters, and
+factor-evidence status. It does not own token, compute, concurrency, fee, or
+reviewer-usage aggregates.
+
+ResearchRun remains the immutable RunSpec execution binding for one branch;
+JobAttempt owns one execution attempt; graph trace owns one transition's
+bounded evidence. Agent Flow owns resource budgets, usage aggregation, and
+wait/resume. Existing graph-instance and graph-branch tables should be
+deepened or migrated to those meanings instead of adding parallel WorkPackage,
+Hypothesis, or CoordinationCheckpoint tables.
+
+Token limits are configured per Agent Profile through UI and enforced by Agent
+Flow under the claimed `research_agent_id`, not per graph instance. Planning,
+Research, and Server Maintenance profiles have independent limits. Calls made
+by conditional reviewers are charged to the sponsoring Research Agent unless
+they execute under another explicitly budgeted profile.
+
+For a hard restart-safe limit, Agent Flow persists only the compact budget
+state needed for atomic enforcement: agent identity, limit, used amount,
+temporary reservation, and revision. Active state may be cached in memory.
+Before a real model invocation Agent Flow atomically reserves the maximum
+charge; after termination it settles actual usage. Cache hits, unchanged
+heartbeats, backend Job execution, and graph transitions create no budget
+writes. Budget state should be isolated from the FactorTester backtest/result
+database so these low-frequency writes cannot contend with computation.
+
+Agent Flow appends one compact usage item in the same settlement transaction
+so UI can group usage by Agent Profile and task. The item contains only task,
+Work Package/branch references where applicable, invocation purpose,
+runtime/model identity, input/output/cache/charged counts, status, timestamp,
+measurement quality, and budget-period identity. It contains no prompt,
+complete context, factor source, or response body.
+
+UI displays limit, used, temporary reservation, remaining amount, current
+period, pause state, and grouped task/invocation usage. Changing the current
+limit does not erase usage. Reset starts a new immutable budget period and
+retains historical usage; if an invocation is active, reset becomes effective
+after that invocation settles. Version 1 supports manual reset only, avoiding
+another scheduler and recurring database activity.
+
+Budget exhaustion is a derived Agent Flow pause, not research evidence or a
+new persisted pause object. Agent Flow refuses a call before model execution
+when remaining allowance cannot cover its safe reservation, preserves the
+local checkpoint, and returns a provider-neutral
+`agent_budget_exhausted` result. The graph node and hypothesis status remain
+unchanged, and submitted backend Jobs continue.
+
+Increasing the limit or opening a new budget period changes the budget
+revision. One deduplicated revision event wakes the affected Agent once; no
+polling Agent or LLM heartbeat waits for it. Unaffected Agents, branches, and
+Jobs continue. Provider usage beyond a reservation blocks subsequent calls and
+records a metering anomaly, but does not alter research evidence.
+
+UI token reads are lazy and bounded. Opening settings reads only Agent Profile
+and current budget aggregate. Task usage is fetched only when expanded, by
+Agent, budget period, and settled-time cursor. The UI groups invocation rows at
+read time; v1 creates no materialized daily/task summary, scheduled compactor,
+or retention worker. A budget revision event identifies one Agent and refreshes
+only that aggregate rather than polling or rescanning usage history.
+
+Token accounting is runtime- and provider-neutral. A deterministic usage
+adapter normalizes provider facts into input, output, cache-read, charged-token,
+measurement-quality, and charging-policy fields. The Agent ID remains the
+budget identity when model or runtime changes. Each immutable budget period
+pins one charging-policy version; historical rows retain their original
+model/runtime, measurement quality, and policy and are never recomputed.
+
+The default policy charges provider-normalized total input plus output while
+showing cache-read separately and never double charging a cache subset already
+included in input. Before invocation, deterministic tokenization/estimation
+plus maximum output determines the safe reservation. When actual provider
+usage is unavailable, settlement conservatively charges the reservation and
+marks `reserved_fallback`. This preserves a hard upper bound without blocking
+a newly claimed Agent merely because its runtime exposes a different receipt
+shape. The adapter is code, not an Agent or context-loaded Skill.
+
+Agent Flow persistence uses two deep lifecycle objects rather than separate
+execution, reservation, provider-receipt, and budget tables:
+
+- `AgentBudgetPeriod` owns one Agent's immutable period identity, limit,
+  used/reserved amounts, charging policy, revision, and open/close times;
+- `AgentInvocation` owns execution provenance, principal/lineage/input hashes,
+  task/purpose, runtime/model, reservation, normalized settlement,
+  measurement quality, provider request/attestation hash, status, and
+  timestamps.
+
+The pre-call transaction inserts one reserved invocation and updates its
+period. Settlement updates that same invocation and period. An unfinished
+invocation is the recoverable reservation; no separate reservation row is
+needed. UI paginates settled invocations. These objects live in an independent
+Agent Flow Module/store, not `research_graphs.py`. Existing overlapping tables
+are migrated and removed without a long-lived dual-write compatibility path.
+
+Each AgentInvocation may carry one bounded context-cost breakdown produced by
+the deterministic context assembler: base instructions, conversation, local
+graph packet, evidence summaries, Skill documents, review material, and
+output. It stores counts and measurement quality only—never prompt/content,
+file names, artifact bodies, or per-Skill/evidence rows. UI hides the breakdown
+until an invocation is expanded and may aggregate the fixed categories by
+task. The breakdown is settled in the existing invocation transaction and is
+not copied into graph state.
+
+Agent Flow usage follows its execution owner. Local Research Agents persist
+periods and invocations in the local Agent Flow store exposed by the local
+manager API; Server Agents persist them in the server Agent Flow store. UI
+routes settings to the owner and merges read views, but has no browser/UI
+accounting database and never enforces a balance. Version 1 uses only
+in-memory page caching, does not default-sync local invocation history to the
+server, and defers cross-device summary synchronization until explicitly
+required.
+
+Agent Profiles are owner-pinned in v1. An Agent ID may change model/runtime
+seamlessly within the same Agent Flow owner. Moving it to another client/owner
+requires an explicit atomic transfer of profile, current budget period,
+checkpoint, and necessary hashes; the old owner loses claim authority before
+the new owner can invoke a model. Version 1 does not add a global per-call
+budget broker merely to provide zero-coordination cross-device roaming.
+
+Context-cost telemetry is optimized inside Agent Flow, not by adding Factor
+Research Graph edges or a standing Token Optimizer Agent. Deterministic rules
+may detect repeated Skill loads, oversized local packets/evidence summaries,
+or disproportionate reviewer cost. A single anomaly is a UI diagnostic.
+Repeated or hard-threshold breaches produce one deduplicated Agent Flow
+optimization proposal.
+
+Only semantics-preserving configuration/cache actions may run
+deterministically. Changes to context assembly, Skill conditions, reviewer
+policy, or Agent Flow semantics become a Maintenance Case; high-risk changes
+use document-grounded grill. Every optimization compares completion rate,
+effective evidence, token, and database I/O before/after rather than minimizing
+tokens alone.
+
+Agent startup/resume is a deterministic, provider-neutral local-context
+operation. It returns a role-specific small packet rather than infrastructure
+documentation. Research receives Agent/profile and remaining-budget summary,
+current Work Package scope, one current branch/node with candidate edges,
+TrialPlan reference, changed Job references, node-local capability
+descriptions, local Skill-reuse hints, and one next action. Planning receives
+only pending scope decisions and bounded workspace-factor summary. Server
+Maintenance receives only unresolved cases and diffs.
+
+The packet omits complete graph, factor/Skill catalogs, historical trace,
+usage history, Job output, and future-node gaps. It is assembled without an
+LLM. Identical checkpoint/revision returns identical content with zero write.
+Profiles are unlimited until the user configures a cap, so missing budget
+configuration cannot block work. An exhausted profile can inspect deterministic
+status/checkpoint but cannot start another model invocation. No role must open
+UI, configure paths manually, or read architecture documents before its first
+authorized action.
+
+Server graph/capability state remains Skill-neutral: it provides only a
+capability description and hash. The local manager may enrich the current
+task's packet with an opaque local reuse reference, content hash, approval
+scope/hash, and context-cache availability derived from local audit state.
+Matching description/content/approval/runtime state lets the Agent reuse the
+local implementation without rediscovery, download, or duplicate approval.
+
+A fresh runtime context still follows that runtime's Skill-loading rules; reuse
+must not pretend the model remembers absent instructions. When no matching
+local implementation exists, the Agent may search locally or online. Download
+or inspection is not execution. First execution and changed content/authority
+require approval in the corresponding Agent conversation. UI displays
+completed approvals but cannot grant them. Actual Skill name/source/version,
+hash, approval, execution, and result refs remain in the local research audit
+and are never graph/catalog/hash inputs.
+
+Backend assurance is a deterministic validation Module, not a separate
+persistence owner. During the existing JobAttempt terminal transaction it
+checks RunSpec/ExecutionPlan/backend identities, terminal facts, compact result
+and artifact-manifest hashes, and configured numerical/structural invariants.
+Its bounded policy hash, backend revision, checks bitmap, anomaly codes, hashes,
+and disposition are stored inside the JobAttempt terminal summary.
+
+The validator never reruns the backtest. A conforming summary is trusted by
+default and travels in the existing Job decision packet; no reviewer wake or
+assurance-table lookup occurs. Only a concrete anomaly/hash conflict,
+implausible calculation, or explicit evidence-backed Agent suspicion opens a
+Maintenance Case. Backend policy changes do not rewrite historical Jobs, which
+retain their original policy hash. Independent assurance receipt persistence is
+migrated away rather than dual-written.
+
+An anomalous JobAttempt remains immutable and queryable. Its assurance and any
+open Maintenance disposition make its evidence ineligible through a derived
+guard; no branch-pause row is written. Only transitions that require that
+evidence wait. Unaffected branches and Jobs continue. One case is deduplicated
+by Job/policy/anomaly hash.
+
+Maintenance first gathers deterministic bounded evidence. It invokes at most
+one Backend Reviewer only when computation semantics remain unresolved, and
+only a Server Agent or source-authorized local Agent may inspect/change backend
+code. A false-positive disposition references but does not rewrite the old
+Job. A confirmed defect is fixed and validated on the backend owner branch,
+released under a new backend revision, and rerun as a new JobAttempt. Old and
+new attempts coexist; no historical result is promoted to the new revision.
+
+Maintenance coordination uses one durable object across backend anomaly,
+capability gap, graph/platform change, and context optimization. A
+MaintenanceCase owns only kind, dedup descriptor hash, current status, bounded
+affected/change references, conversation ref, claimed Agent, latest result ref,
+and timestamps. It does not copy source, diffs, logs, approval text, Job facts,
+graph proposals, commits, or tests from their owners.
+
+There is no separate case-events table or per-kind queue. Case status changes
+only on material open/claim/block/resolve/reject transitions; heartbeat,
+duplicate observation, and unchanged resume write nothing. UI may inspect and
+filter cases but cannot approve or disposition them. Approval remains in the
+corresponding Agent conversation. Resolution emits one deduplicated wake to
+affected work.
+
+Graph governance uses proportional trust controls. Ordinary research runtime
+relies on canonical checkpoint/history, deterministic hashes, and resource-level
+authentication/authorization; it does not require per-transition HMAC,
+provider-specific receipts, or a trusted launcher adapter. High-risk effects
+bind one authenticated conversation approval event to the exact
+action/diff/content hash and consume that event once.
+
+Independent cryptographic provenance is required only where actors, builders,
+code, or release artifacts cross a configured software-supply-chain trust
+boundary. Same-process/same-database launcher, capability, provider, backend,
+and human HMAC layers do not protect against compromise of that same owner and
+must not remain as startup or transition dependencies. This preserves
+fail-closed authorization while allowing runtime/model replacement and
+reducing database/secret machinery.
+
+## Minimal Persistence Target
+
+The current twenty-table Graph Module is a migration source, not the target.
+After the accepted deletion audit, the Graph Module has exactly six semantic
+owners:
+
+1. immutable graph versions;
+2. one active-version pointer per graph;
+3. graph instances as Work Package projections;
+4. graph branches as Hypothesis Branch owners;
+5. append-only graph transition trace;
+6. one cross-kind Maintenance Case queue.
+
+Agent Flow has exactly two accounting/execution owners in an independent
+store: Agent Budget Period and Agent Invocation. JobAttempt owns terminal
+backend assurance. Graph branch owns only its current node capability
+resolution. Maintenance Case owns bounded validation/review/grill/approval
+gate facts and refs. Rollback is an approved active-pointer change, not a
+separate record type, and activation does not copy graph JSON into a second
+active definition.
+
+Migration proceeds in independent commits:
+
+1. move/consolidate Agent Flow;
+2. merge backend assurance into JobAttempt;
+3. consolidate graph governance and exact-hash approval into Maintenance Case;
+4. deepen branch resolution and remove resource aggregates;
+5. simplify activation/version/rollback;
+6. shadow-compare and remove legacy tables/APIs.
+
+This order preserves the previously accepted dependency: establish hard
+resource enforcement and the trust/evidence chain before changing routine
+context semantics, then measure and minimize the database hot path only after
+the owner schemas are stable.
+
+### Migration deletion map
+
+The current twenty-table schema is mapped once; no table is retained merely
+because an API currently exposes it:
+
+| Current persistence object | Final owner or disposition | Migration batch |
+|---|---|---:|
+| `research_graph_versions` | Graph Version | 5 |
+| `active_research_graphs` | Active Graph Pointer | 5 |
+| `research_graph_instances` | Work Package projection | 4 |
+| `research_graph_branches` | Hypothesis Branch plus current node resolution and TrialPlan hash | 4 |
+| `research_graph_trace` | bounded append-only transition evidence | 4 |
+| `research_graph_validations` | bounded Maintenance Case gate/ref | 3 |
+| `research_graph_proposals` | bounded Maintenance Case gate/ref | 3 |
+| `research_graph_reviews` | bounded Maintenance Case gate/ref; calls live in Agent Invocation | 3 |
+| `research_graph_audits` | bounded Maintenance Case grill disposition/ref | 3 |
+| `human_activation_authorizations` | exact-hash, authenticated, single-use approval fact in Maintenance Case | 3 |
+| `research_agent_executions` | Agent Invocation | 1 |
+| `research_token_budgets` | Agent Budget Period | 1 |
+| `research_token_reservations` | reserved lifecycle state in Agent Invocation and Period | 1 |
+| `research_provider_usage_receipts` | normalized settlement fields in Agent Invocation | 1 |
+| `research_backend_assurance_receipts` | JobAttempt terminal-assurance summary | 2 |
+| `research_graph_node_resolutions` | current projection on Hypothesis Branch | 4 |
+| `research_capability_receipts` | current branch resolution or Maintenance Case conformance ref; no generic receipt owner | 3/4 |
+| `research_capability_approvals` | local conversation approval and local Skill audit; rejected from server Graph persistence | 3 |
+| `research_graph_rollbacks` | approved active-pointer change referenced by Maintenance Case and graph trace | 5 |
+| `research_graph_server_secrets` | delete; no same-owner HMAC trust boundary | 3 |
+
+Batch 1 introduces the independent Agent Flow Module behind an Interface that
+can read legacy rows during the migration command, writes only the two target
+owners, switches all callers in the same commit, and deletes the four legacy
+accounting tables after verified conversion. Batch 2 extends the canonical
+JobAttempt terminal Interface, converts assurance summaries, switches readers,
+and deletes the receipt table in the same commit. Batch 3 creates the sole
+Maintenance Case owner, converts still-live governance state and bounded
+references, switches high-risk gates, then deletes the old governance,
+approval, and secret tables.
+
+Batch 4 changes the branch schema and local context resolver together. It
+converts only current projections, preserves immutable history in trace, and
+removes the separate resolution table and resource aggregates. Batch 5 makes
+the immutable Graph Version plus Active Pointer the sole activation Interface;
+it migrates only the current pointer and bounded case/trace history, never an
+active graph copy or rollback row. Batch 6 removes compatibility reads and
+obsolete APIs, then pins the final eight-owner schema and measured query/write
+floor.
+
+Every batch must run forward migration, compatibility fixture replay, target
+API tests, restart/resume, rollback-to-parent, and SQL trace measurement before
+its commit. A failed batch rolls back to its parent commit and pre-migration
+database backup; later batches do not begin. Compatibility is an offline/read
+adapter inside the migration command, not a long-lived runtime dual-write
+seam.
+
+Every batch pins before/after schema count, SQL read/write/transaction count,
+latency, replay/resume equivalence, compatibility behavior, and rollback
+target. No batch introduces long-lived dual write.
+
+The Research Agent drafts the TrialPlan from the hypothesis, product profile,
+and applicable approved statistical protocol. Deterministic validation checks
+schema, identity/hash, sample-role separation, required fields, protocol
+predicates, and consistency with referenced RunSpec state. A conforming routine
+plan requires no LLM reviewer.
+
+One Statistical Reviewer is invoked only when the design uses a non-standard
+method, leaves outcome/stopping/dependence semantics ambiguous, deviates from
+an approved protocol, or crosses the configured independent-review risk level.
+An unchanged input/protocol/review hash reuses the prior valid review. The user
+does not design the statistical plan; user confirmation is required only when
+the proposal changes authorized research scope, fees, permissions, or an
+irreducible risk preference. Result-related computation cannot start until the
+plan is frozen.
+
+TrialPlan and RunSpec are complementary rather than one-to-one:
+
+- RunSpec freezes one concrete execution configuration, including factor
+  version/configuration, products, data, time window, strategy, and accounting;
+- TrialPlan freezes the statistical interpretation and may coordinate multiple
+  RunSpecs, such as main-only/aux-only/enriched comparisons or multiple
+  walk-forward and diagnostic/selection/confirmation slices;
+- each ResearchRun binds exactly one TrialPlan ID/hash, one RunSpec hash, one
+  `trial_role`, and one `comparison_id`;
+- every JobAttempt inherits those bindings and cannot change them;
+- TrialPlan references RunSpec identity and role without copying the complete
+  execution configuration.
+
+A RunSpec not present in the frozen plan cannot be attached to the current
+evidence after outcomes are known. Adding or changing it requires a new
+TrialPlan version and the corresponding trial-ledger effect.
+
+## Evidence Interface
+
+Execution evidence and graph-decision evidence use two bounded read interfaces
+over existing persistence owners:
+
+```text
+JobEvidenceReceipt projection
+  execution status and exit code
+  RunSpec / TrialPlan / backend hashes
+  stdout / stderr references
+  metric / artifact references
+
+EvidenceEnvelope schema in research_graph_trace.evidence_json
+  graph node and proposed transition
+  existing JobAttempt terminal-assurance references
+  factor / data / product identities
+  attempt_count / outcome_examined_count
+  stopping reason
+  required evidence fields
+  conflicts and capability gaps
+  research disposition and rationale references
+```
+
+`JobEvidenceReceipt` is not a new table or write path. It is a source-free
+projection from the canonical JobAttempt terminal summary and artifact
+metadata. `EvidenceEnvelope` is not a second event store. It is the validated
+bounded schema of the existing append-only graph trace evidence. Full stdout,
+result tables, curves, source, and local process files remain in their owning
+artifact/local stores.
+
+Deterministic graph guards read only bounded structured fields, identities,
+hashes, and references. An Agent follows a reference only when semantic review
+requires the underlying evidence. Missing execution status/exit code, RunSpec
+or TrialPlan hash, stopping reason, or node-required evidence fails the
+transition closed. Routine graph execution must not add receipt/envelope
+writes or tables. It reads only the current branch's required canonical rows,
+reuses data already present in the local decision packet, and performs no
+database read for unchanged heartbeat or progress state.
 
 ## Existing Observed Workflow
 
@@ -384,8 +850,8 @@ statistical-conformance tests pass.
 
 ### Operator capability backlog
 
-Operator support is execution-surface specific. A capability receipt must
-distinguish:
+Operator support is execution-surface specific. A capability conformance
+result must distinguish:
 
 ```text
 native_batch
@@ -419,7 +885,8 @@ a missing general operator, the resolver must:
    work item;
 3. reject silent fallback to a merely similar operator;
 4. route implementation to an authorized server-maintenance Agent;
-5. publish the capability, Author SDK change, and receipts after conformance;
+5. publish the capability, Author SDK change, and bounded conformance
+   reference after validation;
 6. resume the original branch from its immutable checkpoint.
 
 The obligation is unconditional with respect to current backend availability.
@@ -564,7 +1031,7 @@ and then report that result as confirmation.
 The Active Graph learns from research through a controlled promotion pipeline:
 
 ```text
-experiment evidence envelope
+validated graph-trace evidence
   -> provisional local decision memory
   -> retrieval by similar mechanism, market state, and result pattern
   -> repeated-use and counterexample review
@@ -578,7 +1045,7 @@ experiment evidence envelope
 A provisional record includes:
 
 - hypothesis, factor roles, integration class, formula or AST hash, and
-  capability receipts;
+  capability descriptor and resolution references;
 - point-in-time market-state definition and data-availability contract;
 - frozen RunSpec, product profile, selection/holdout roles, and trial count;
 - main-only, auxiliary-only where meaningful, enriched, and ablation result
@@ -594,8 +1061,9 @@ One successful experiment is not a graph edge. A proposal may be made earlier
 when an attributable industry, statistical, market, or accounting rule already
 supports the transition; otherwise it requires repeated independent use with
 retained failures and counterexamples. Repetition count alone is not proof:
-the Graph Curator must test whether apparently similar cases share the same
-causal timing, product semantics, execution layer, and statistical design.
+the Server Maintenance Agent in graph-curation review mode must test whether
+apparently similar cases share the same causal timing, product semantics,
+execution layer, and statistical design.
 
 Promoted edges remain conditional and falsifiable. They describe:
 
@@ -655,8 +1123,8 @@ gates pass:
   preregistered main/aux/enriched comparisons, out-of-sample or walk-forward
   evidence, costs, coverage, effective sample size, turnover, and stability;
 - graph and assurance: a missing surface becomes a scoped capability gap,
-  normal receipts use zero reviewers, an actual mismatch starts at most one
-  independent verifier, and sibling jobs continue;
+  conforming JobAttempt assurance uses zero reviewers, an actual mismatch
+  starts at most one independent verifier, and sibling jobs continue;
 - cost: factor evaluation performs no per-observation database writes and no
   LLM work; routine context remains current-node-only and within its frozen
   token and database-statement budgets.
@@ -716,17 +1184,18 @@ Knowledge-graph standards are useful only as a compact metadata vocabulary:
   to `Activity`, and human or software reviewers to `Agent`, following
   [W3C PROV-O](https://www.w3.org/TR/prov-o/);
 - retain equivalents of `used`, `wasGeneratedBy`, `wasDerivedFrom`,
-  `wasAssociatedWith`, and `wasRevisionOf` in evidence envelopes;
+  `wasAssociatedWith`, and `wasRevisionOf` in bounded graph-trace evidence;
 - use the constraint-oriented idea from
   [W3C SHACL](https://www.w3.org/TR/shacl/) when validating bounded evidence
   shapes, without introducing RDF or SPARQL into the runtime hot path.
 
-The server continues to store normalized JSON, hashes, receipts, and bounded
-references. It does not serialize the whole research history as RDF, load an
-ontology into every Agent context, or ask an LLM to infer routine transitions.
-If cross-project semantic discovery later becomes necessary, a read-only
-knowledge projection can be derived from the authoritative state/evidence
-records. It must not become a second source of transition truth.
+The server continues to store normalized JSON, hashes, bounded evidence and
+authorization references, and canonical state. It does not serialize the
+whole research history as RDF, load an ontology into every Agent context, or
+ask an LLM to infer routine transitions. If cross-project semantic discovery
+later becomes necessary, a read-only knowledge projection can be derived from
+the authoritative state/evidence records. It must not become a second source
+of transition truth.
 
 ## Graph Protocol
 
@@ -829,9 +1298,13 @@ The server will own:
 
 - immutable observed, draft, active, and retired graph versions;
 - one active-version pointer per graph;
-- proposals, independent reviews, validation evidence, and audit dispositions;
-- capability descriptions and approval receipts, never concrete Skill identity;
-- shadow replay reports and activation decisions.
+- graph instances, hypothesis branches, and bounded append-only transition
+  evidence;
+- one cross-kind Maintenance Case queue containing bounded proposal,
+  validation, review, grill, approval, and activation facts or references;
+- capability descriptions and descriptor hashes, never concrete Skill
+  identity;
+- shadow replay references and approved active-pointer changes.
 
 The existing `user -> ResearchWorkspace -> ResearchRun -> JobAttempt` ownership
 remains unchanged. Graph state must reference these identities rather than
@@ -839,25 +1312,29 @@ becoming another job owner.
 
 ## Agent Roles
 
-Use roles only when their outputs are independently useful:
+Persist only principals whose ownership must survive a restart:
 
-- **Process Miner**: converts existing traces into an Observed Graph.
-- **Semantic Reviewer**: checks market and data meaning.
-- **Statistical Reviewer**: checks causal alignment, selection, multiple
-  testing, sample sufficiency, and robustness.
-- **Counterexample Reviewer**: searches for invalid transitions and missing
-  alternatives.
-- **Graph Curator**: merges evidence into a versioned proposal.
-- **Capability Agent**: investigates missing Skills, CLI surfaces, data, or
-  code.
-- **Implementation Agent**: changes the owning branch within approved scope.
-- **Audit Presenter**: produces the bounded document-grounded audit diff and
-  appends the accepted disposition to the Grill Decision Log.
+- **Planning Agent** owns workspace-wide research planning and asks the user
+  to confirm or revise Work Package scope.
+- **Research Agent** owns one claimed Work Package and its authorized factor
+  research.
+- **Server Maintenance Agent** owns claimed Maintenance Cases and is the only
+  ordinary server-side principal allowed to coordinate graph, capability,
+  statistical-policy, or backend changes.
 
-Do not spawn every role for every edge. L1/L2 changes may use one proposer and
-one independent reviewer only when deterministic checks are insufficient.
-L1 ordinary transitions use no reviewer. L3/L4 semantic or capability changes
-use the minimum relevant specialist reviewers and may enter human audit.
+Process mining, semantic/statistical/counterexample review, graph curation,
+capability investigation, implementation, and audit presentation are bounded
+tasks or output modes. They do not create standing Agent identities, queues,
+profiles, or continuously running reviewers. A specialist reviewer is an
+ephemeral Agent Invocation sponsored by the relevant Research or Server
+Maintenance Agent.
+
+L1 uses deterministic execution and zero reviewers. L2 defaults to zero and
+may invoke one reviewer only for evidence conflict or semantic uncertainty.
+L3 invokes at most one relevant specialist. L4 uses one proposer plus one
+independent reviewer; a third is allowed only to resolve an actual
+disagreement. Existing valid review hashes are reused when inputs and policy
+are unchanged.
 
 ## Delivery Slices
 
@@ -887,7 +1364,8 @@ use the minimum relevant specialist reviewers and may enter human audit.
   candidate edges, missing guard/evidence fields, blockers, and explicit Agent
   judgment triggers;
 - record per-transition input, output, cache-read, Skill-document, artifact
-  summary, and reviewer token telemetry.
+  summary, and reviewer token attribution by reference to the sponsoring
+  Agent Invocation; graph state does not duplicate usage rows.
 
 ### Slice 4: Capability contracts
 
@@ -904,7 +1382,9 @@ use the minimum relevant specialist reviewers and may enter human audit.
 
 ### Slice 5: Proposal, review, and audit
 
-- persist proposer and independent reviewer records;
+- persist one bounded Maintenance Case with proposal, independent-review,
+  validation, audit, and exact-hash approval facts or references;
+- persist actual proposer/reviewer model calls only as Agent Invocations;
 - detect reviewer disagreement and scope drift;
 - create document-grounded, one-question-at-a-time evidence diffs for the
   server auditor;
@@ -933,38 +1413,46 @@ use the minimum relevant specialist reviewers and may enter human audit.
 | Runtime resolution is node-local | no untriggered conditionals or future-node gaps in context |
 | Full contracts are opt-in | CLI subprocess test for `--include-contracts` |
 | Reviewer use is risk-bounded | L1/L2 default zero; L3 one specialist; L4 proposer plus one reviewer, third only on disagreement |
-| Token cost is attributable | per-node/role/Skill/artifact telemetry aggregation |
+| Token cost is attributable | Agent Invocation stores one bounded category breakdown and sponsoring task/branch refs without graph usage rows |
 | Token regression blocks activation | graph shadow token total cannot exceed the recorded baseline |
 | Shadow comparison is like-for-like | distinct owned graph/baseline run IDs must share one immutable RunSpec hash |
-| Shadow totals are real and non-zero | server derives both totals from committed provider usage; `0/0` cannot activate |
+| Shadow totals are real and non-zero | Agent Flow derives both totals from normalized settled invocations; `0/0` cannot activate |
 | Token budget preserves work | over-budget context disables new reviewers and keeps backend jobs running |
-| Work cannot start beyond budget | Agent execution requires a live pre-execution reservation |
-| Usage cannot be self-reported as authoritative | commit requires a trusted provider/gateway receipt |
+| Work cannot start beyond a configured cap | one atomic Agent Invocation reservation must fit its current Agent Budget Period |
+| Missing provider usage remains bounded | settlement charges the reservation as `reserved_fallback` and records measurement quality |
+| Runtime replacement cannot block startup | provider-neutral adapter accepts a changed runtime/model without changing Agent identity or requiring HMAC receipts |
 | Attribution does not double count | Skill/artifact/cache subsets cannot exceed input tokens |
 | Context has a real response cap | server measures final serialized packet and rejects anything above 6000 bytes |
 | Request hot paths are schema-free | startup migration runs once; traced graph requests execute 0 DDL and 0 `PRAGMA table_info` |
-| Context database cost is history-independent | branch aggregates are updated atomically; routine context performs 0 trace-history scans |
-| Context reads have a fixed upper bound | warm-cache context uses three SELECTs: owner/branch JOIN, current resolution, and token budget |
-| Routine transition has bounded I/O | warm-cache zero-token transition uses two SELECTs, one branch UPDATE, and one trace INSERT |
+| Context database cost is history-independent | current node/resolution/plan projections live on the branch; routine context performs 0 trace-history scans and 0 Agent Flow reads |
+| Context reads have a measured fixed upper bound | query-count tests pin a constant owner/instance/branch read path independent of trace, catalog, and usage-history size |
+| Routine transition has bounded I/O | query-count tests permit only bounded canonical reads, one changed branch update, and one trace insert; unchanged readiness performs zero writes |
 | Immutable graph reads are cached safely | cache key includes database path, graph ID, version, and content hash; callers receive defensive copies |
-| Unchanged resolution does not write | content-addressed UPSERT reports zero changed rows for identical semantics |
+| Unchanged resolution does not write | identical branch resolution/hash readiness reports zero changed rows |
+| Graph persistence is minimal | migrated schema has exactly six Graph owners and no legacy proposal/review/authorization/resolution/budget/rollback tables |
+| Agent Flow persistence is minimal | independent store has exactly Agent Budget Period and Agent Invocation lifecycle owners |
+| Instance creation avoids duplicate owners | creation writes one instance and initial branch only; it creates no graph token-budget or node-resolution row |
+| Job completion avoids duplicate assurance | terminal transaction updates JobAttempt assurance summary and creates no assurance row |
+| Activation avoids graph duplication | activation validates one immutable version and one satisfied Maintenance Case, then changes only the active pointer |
+| Rollback avoids a second history | approved rollback is an active-pointer change referenced by Maintenance Case and graph trace |
+| TrialPlan retention is safe | trace holding a referenced TrialPlan remains retention-pinned while dependent run/job/conclusion records exist |
 | Graph protocol deterministic | stable hash tests over canonical JSON |
 | Invalid graphs rejected | public validator tests |
 | CLI is agent-readable | installed-command JSON subprocess tests |
 | Server graph is authenticated | Flask route tests with distinct users |
 | Active graph immutable/versioned | SQLite service tests and API history |
 | Unaffected jobs continue | integration test with two independent branches |
-| Skill cannot execute unapproved | capability registry and execution-gate test |
+| Skill cannot execute unapproved | local runtime gate requires a matching conversation approval for first or changed execution |
 | Server stores no Skill identity | SQLite persistence inspection and server input rejection tests |
-| Local Skill usage is auditable | hash-chained session ledger records identity, approval, load/reuse, and tokens |
-| Provider updates fail closed | source fingerprint mismatch invalidates cache and creates an explicit gap |
+| Local Skill usage is auditable | append-only local audit records identity, content hash, approval, load/reuse, invocation, and result refs |
+| Changed Skill content cannot reuse stale authority | content/authority mismatch invalidates only the local reuse hint and requires fresh runtime load/approval |
 | Cache scope is truthful | capability output declares `cache.scope=process`; separate installed CLI calls do not claim a hit |
 | Model replacement is semantics-neutral | model/Codex telemetry changes do not change semantic cache or graph hash |
 | Provider roots are relocatable | environment-root conformance tests for Codex and external providers |
 | Scope drift re-enters audit | proposal lifecycle integration test |
 | Auditor cannot edit graph directly | API authorization/transition tests |
 | Draft does not constrain live work | shadow-mode integration test |
-| Active graph can roll back | activation-pointer and audit-trace test |
+| Active graph can roll back | approved active-pointer change plus Maintenance Case and trace reference test |
 | Historical replay is non-mutating | run/job count and artifact integrity test |
 | Real backend remains authoritative | end-to-end CLI against FactorTester API |
 
@@ -983,9 +1471,9 @@ Activation validation must include:
 
 The server requires distinct graph and baseline research runs with the same
 RunSpec hash. It recomputes context bytes, conditional/gap leakage, Agent
-execution count, and both non-zero token totals. Token totals come only from
-committed provider usage receipts; client-submitted metric values are ignored.
-Activation accepts only evidence marked `server_derived`.
+execution count, and both non-zero token totals from normalized settled Agent
+Invocations. Client-submitted metric values are diagnostic only. Activation
+accepts only evidence derived by the authoritative Agent Flow/Graph owners.
 
 ## Deferred Decisions
 
