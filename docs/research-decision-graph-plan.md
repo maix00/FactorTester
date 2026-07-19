@@ -1250,6 +1250,12 @@ The immutable Graph may retain `required_evidence` as the exact concatenation
 of the two typed arrays for protocol compatibility. Routine Agent packets omit
 that ambiguous field.
 
+Research Cycle discovery, adjudication, and closure at `research_decision` use
+one declared self-edge. The ordinary atomic transition writes the existing
+trace and checkpoint while keeping `from_node == to_node`; a server-derived
+guard rejects an empty event list. This avoids another API, node, table, or
+replay path.
+
 ### Capability contract
 
 ```yaml

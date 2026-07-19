@@ -198,6 +198,16 @@ def build_draft_edges() -> list[dict[str, Any]]:
             risk_level="L2",
         ),
         edge(
+            "research_decision__cycle_event",
+            "research_decision",
+            "research_decision",
+            guard={"research_cycle_delta_applied": True},
+            risk_level="L2",
+            required_transition_facts=[
+                "validated Research Cycle proposal or decision delta",
+            ],
+        ),
+        edge(
             "factor_improvement__hypothesis",
             "factor_improvement_required",
             "hypothesis_preregistration",

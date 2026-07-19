@@ -385,6 +385,15 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     assert edges["result_audit__research_decision"]["guard"][
         "adjudication_applied_or_explicit_noop"
     ] is True
+    assert edges["research_decision__cycle_event"]["from_node"] == (
+        "research_decision"
+    )
+    assert edges["research_decision__cycle_event"]["to_node"] == (
+        "research_decision"
+    )
+    assert edges["research_decision__cycle_event"]["guard"] == {
+        "research_cycle_delta_applied": True,
+    }
     assert edges["any_node__capability_gap"]["from_node"] == "*"
     assert nodes["capability_gap"]["required_capabilities"] == [
         "capability-gap.classify"
@@ -784,7 +793,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "51fd0e71ed754e94771189ab51bac2a9867927dc3fde8af943e3080f1be1a329"
+        "9013bbe62f491f173658cb73c81cb8e5d6bd443a33599223c9decdc638a0a391"
     )
 
 

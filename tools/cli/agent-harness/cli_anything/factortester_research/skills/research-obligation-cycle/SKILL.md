@@ -39,6 +39,9 @@ return a capability gap instead of guessing.
 - Put the settled local research/proposer Agent invocation ID that authored
   the proposal in `proposer_invocation_id` and include it in the transition's
   `agent_invocation_ids`. This is execution provenance, not Skill identity.
+- When the current node is `research_decision`, carry a material discovery,
+  adjudication, or closure event on its declared self-edge. Do not create a
+  second Graph, move the branch, or emit an empty Research Cycle event.
 - Express interpretation as a proposal. Only an authority-bearing decision
   changes accepted Claim, obligation, or closure state.
 - Keep exploratory support exploratory and open a confirmation obligation.

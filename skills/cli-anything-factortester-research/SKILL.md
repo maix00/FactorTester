@@ -84,6 +84,12 @@ closure. Methodology impact remains a separate Maintenance Case with
 documented grill and human audit, and it must leave unaffected branches and
 Jobs running.
 
+At `research_decision`, submit discovery, adjudication, or closure events
+through the declared `research_decision__cycle_event` self-edge. It records a
+node-local Research Cycle update without inventing a new node or moving the
+branch. The server derives `research_cycle_delta_applied`; never submit or
+self-certify that guard, and do not write an empty event trace.
+
 Before advancing, validate Research Cycle proposals locally. Then use the thin
 Harness adapter to submit through the installed FactorTester client:
 

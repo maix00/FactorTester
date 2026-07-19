@@ -518,7 +518,7 @@ def test_graph_transition_persists_one_canonical_plan_body(
     with connect_sqlite(path) as conn:
         latest = conn.execute(
             """
-            SELECT evidence_json FROM research_graph_trace
+            SELECT trace_id, evidence_json FROM research_graph_trace
             WHERE trace_id=(
                 SELECT latest_trace_id FROM research_graph_branches
                 WHERE branch_id='branch-1'
@@ -530,3 +530,91 @@ def test_graph_transition_persists_one_canonical_plan_body(
     )["research_cycle_checkpoint"]
     assert projected["claims"][0]["evidence_state"] == "contradicted"
     assert projected["obligations"][0]["status"] == "discharged"
+
+    with pytest.raises(ValueError, match="research_cycle_delta_applied"):
+        advance_graph_branch(
+            instance_id="instance-1",
+            branch_id="branch-1",
+            owner="alice",
+            edge_id="result-cycle-event",
+            evidence={"research_cycle_delta_applied": True},
+        )
+
+    reopen_proposal = validate_adjudication_proposal({
+        "schema_version": 2,
+        "proposal_id": "proposal-reopen-plan",
+        "proposer_invocation_id": invocation["invocation_id"],
+        "contract_hash": checkpoint["contract_hash"],
+        "trial_plan_hash": plan_hash,
+        "methodology_hash": checkpoint["methodology_hash"],
+        "evidence_refs": ["evidence:new-question"],
+        "claim_evidence_delta": [],
+        "claim_delta_noop_reason": "new question does not change prior facts",
+        "obligation_delta": [{
+            "obligation_id": "obligation-plan",
+            "from_state": "discharged",
+            "to_state": "reopened",
+            "criterion_ref": "methodology:reentry",
+        }],
+        "recommended_action": "continue_execution",
+        "decision_warrant": {
+            "finding_refs": ["evidence:new-question"],
+            "rule_refs": ["methodology:reentry"],
+            "inference_type": "preregistered",
+            "preregistered": True,
+            "alternative_refs": [],
+            "limitation_refs": [],
+            "reentry_predicates": [],
+            "required_authority": "preregistered_rule",
+        },
+    })
+    reopen_decision = validate_adjudication_decision({
+        "schema_version": 1,
+        "decision_id": "decision-reopen-plan",
+        "proposal_hash": reopen_proposal["proposal_hash"],
+        "disposition": "accepted",
+        "authority_class": "preregistered_rule",
+        "authority_ref": "methodology:reentry",
+        "methodology_hash": checkpoint["methodology_hash"],
+    })
+    stayed = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="result-cycle-event",
+        evidence={
+            "agent_invocation_ids": [invocation["invocation_id"]],
+            "research_cycle": {
+                "schema_version": 1,
+                "parent_trace_ref": f"trace:{latest['trace_id']}",
+                "expected_base_hash": projected["projection_hash"],
+                "events": [
+                    {
+                        "event_type": "adjudication_proposed",
+                        "proposal": reopen_proposal,
+                    },
+                    {
+                        "event_type": "adjudication_decided",
+                        "decision": reopen_decision,
+                    },
+                ],
+            },
+        },
+    )
+    assert stayed["current_node"] == "result"
+    with connect_sqlite(path) as conn:
+        local_event = conn.execute(
+            """
+            SELECT from_node, to_node, evidence_json
+            FROM research_graph_trace
+            WHERE trace_id=(
+                SELECT latest_trace_id FROM research_graph_branches
+                WHERE branch_id='branch-1'
+            )
+            """
+        ).fetchone()
+    assert local_event["from_node"] == local_event["to_node"] == "result"
+    local_projection = orjson.loads(
+        local_event["evidence_json"]
+    )["research_cycle_checkpoint"]
+    assert local_projection["obligations"][0]["status"] == "reopened"

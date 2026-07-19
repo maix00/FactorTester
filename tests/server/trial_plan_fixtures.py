@@ -148,6 +148,13 @@ def initialize_graph_version(path) -> None:
                 },
                 "required_evidence": [],
             },
+            {
+                "edge_id": "result-cycle-event",
+                "from_node": "result",
+                "to_node": "result",
+                "guard": {"research_cycle_delta_applied": True},
+                "required_evidence": [],
+            },
         ],
     }
     with connect_sqlite(path) as conn:

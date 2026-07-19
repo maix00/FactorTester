@@ -148,9 +148,15 @@ def advance_graph_branch(
                 else []
             ),
         )
+        cycle_events = (
+            cycle_update.get("events") or []
+            if isinstance(cycle_update, dict)
+            else []
+        )
         guard_evidence = {
             **prepared_evidence,
             **adjudication_route_guards(route_action),
+            "research_cycle_delta_applied": bool(cycle_events),
         }
         failed_guards = [
             key
