@@ -48,23 +48,32 @@ factortester research-graph start factor-research \
   --product-group china_futures \
   --workspace-id <workspace_id> \
   --capability-resolution-file capability-resolution.json
-factortester research-graph context <instance_id> <branch_id>
-factortester research-graph next <instance_id> <branch_id>
+cli-anything-factortester-research cycle next \
+  <instance_id> <branch_id> --json
 ```
 
 Do not search for or call capability `attest`/receipt APIs; they do not exist.
 Submit the node-local resolution directly. Use `--all` only for explicit
 activation audit and `--include-contracts` only for human inspection.
 
-When advancing, submit a compact evidence envelope and resolve only the target
-node when it differs:
+Before advancing, validate Research Cycle proposals locally. Then use the thin
+Harness adapter to submit through the installed FactorTester client:
 
 ```bash
-factortester research-graph advance <instance_id> <branch_id> \
+cli-anything-factortester-research cycle validate \
+  --evidence-file evidence.json --json
+cli-anything-factortester-research cycle advance \
+  <instance_id> <branch_id> \
   --edge-id <edge_id> \
   --evidence-file evidence.json \
-  --target-capability-resolution-file target-resolution.json
+  --target-capability-resolution-file target-resolution.json \
+  --json
 ```
+
+`cycle next` performs no local write and rejects an oversized packet, raw
+stdout/stderr, full graph/catalog content, artifacts, trace history, or legacy
+evidence. `cycle advance` validates before backend mutation and records only a
+local factual command envelope plus compact event metadata.
 
 Submit only factual `EvidenceEnvelope` schema version 2. Never request, read,
 reuse, or submit schema-version-1 evidence; it is unavailable to Agents. If a

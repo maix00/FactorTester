@@ -1,7 +1,7 @@
 # Research Obligation Cycle Implementation Work Package
 
 Status: implementation in progress; Grill 143 semantics accepted; Batches 0
-through 3 are complete and Batch 4 is next.
+through 4 are complete and Batch 5 is next.
 
 Baseline: `56d36913` on `fix/issue-140-active-graph-agentflow`.
 
@@ -628,5 +628,42 @@ Release evidence on 2026-07-19:
 - a clean wheel contains all 10 Skill files, and an isolated `python -S`
   import recomputes the same manifest without source-tree or editable-install
   fallback;
+- all changed production modules remain below 300 lines;
+- `git diff --check` is clean.
+
+## Batch 4 release evidence
+
+Batch 4 keeps the Harness as a thin CLI-Anything adapter. `cycle next` calls
+the installed FactorTester client and performs no local write. `cycle
+validate` runs the bundled deterministic proposal validator locally. `cycle
+advance` validates before invoking the real backend and then records one
+factual local command envelope; it does not copy the HTTP client or research
+computation.
+
+The server `next` packet now adds only current capability descriptions, current
+open obligation summaries, a truthful TrialPlan-selection frontier, and
+bounded changed references. It contains no concrete Skill identity or body,
+full Graph/catalog, trace history, artifact bodies, or raw stdout/stderr.
+Splitting deterministic readiness into `branch/next_packet.py` reduced both
+changed server modules below 300 lines without creating another persistence
+owner.
+
+Release evidence on 2026-07-19:
+
+- complete server suite: 236 passed;
+- complete forced-installed Harness suite: 49 passed;
+- Harness plus reference-Skill conformance suite: 52 passed;
+- Pyright on changed server and Harness core: zero errors and warnings;
+- canonical and packaged Harness Skills are byte-identical and the canonical
+  Skill passes `skill-creator` validation;
+- routine `next` performs one SELECT, zero writes, no trace-history scan, and
+  remains below the stricter 4000-byte measured target;
+- local packet validation rejects legacy evidence, raw output, full
+  Graph/catalog content, artifacts, and trace history before Agent use;
+- local transition validation rejects invalid proposal/Skill identity before
+  backend invocation;
+- a clean wheel contains the new command/core modules and Harness Skill, and a
+  temporary installed-package invocation exposes `cycle next`, `validate`,
+  and `advance` without source-tree fallback;
 - all changed production modules remain below 300 lines;
 - `git diff --check` is clean.

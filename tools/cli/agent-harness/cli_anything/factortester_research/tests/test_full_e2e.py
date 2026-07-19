@@ -170,6 +170,114 @@ class TestCLISubprocess:
         assert payload["status"] == "expected_block"
         assert payload["external_mutations"] == 0
 
+    def test_cycle_next_reads_only_the_compact_backend_packet(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "factortester"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "assert sys.argv[1:] == [\n"
+            "  'research-graph', 'next', 'instance-1', 'branch-1'\n"
+            "]\n"
+            "print(json.dumps({\n"
+            "  'graph': 'factor-research@v2',\n"
+            "  'node': {'node_id': 'factor_semantics'},\n"
+            "  'current_obligations': [],\n"
+            "  'candidate_trial_frontier': [],\n"
+            "  'capabilities': [],\n"
+            "  'changed_refs': ['trace:7'],\n"
+            "  'next_bytes': 311\n"
+            "}))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+        result = self._run(
+            ["cycle", "next", "instance-1", "branch-1", "--json"],
+            env={"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")},
+        )
+        packet = json.loads(result.stdout)
+
+        assert packet["node"]["node_id"] == "factor_semantics"
+        assert packet["changed_refs"] == ["trace:7"]
+        assert "stdout" not in packet
+        assert not (tmp_path / "session.json").exists()
+
+    def test_cycle_advance_validates_before_real_backend_submission(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        marker = tmp_path / "backend-called"
+        fake = bindir / "factortester"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, pathlib, sys\n"
+            f"pathlib.Path({str(marker)!r}).write_text('called')\n"
+            "print(json.dumps({'branch_id': 'branch-1', 'status': 'active'}))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+        session = tmp_path / "session.json"
+        invalid = tmp_path / "legacy.json"
+        invalid.write_text(json.dumps({
+            "evidence_envelope": {
+                "schema_version": 1,
+                "envelope_id": "legacy-1",
+                "decision": "continue",
+            },
+        }), encoding="utf-8")
+        env = {
+            "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")
+        }
+
+        rejected = self._run([
+            "--session",
+            str(session),
+            "cycle",
+            "advance",
+            "instance-1",
+            "branch-1",
+            "--edge-id",
+            "edge-1",
+            "--evidence-file",
+            str(invalid),
+            "--json",
+        ], env=env, check=False)
+
+        assert rejected.returncode != 0
+        assert not marker.exists()
+        valid = tmp_path / "current.json"
+        valid.write_text(json.dumps({
+            "research_cycle": {"schema_version": 1, "events": []},
+        }), encoding="utf-8")
+        accepted = self._run([
+            "--session",
+            str(session),
+            "cycle",
+            "advance",
+            "instance-1",
+            "branch-1",
+            "--edge-id",
+            "edge-1",
+            "--evidence-file",
+            str(valid),
+            "--json",
+        ], env=env)
+        payload = json.loads(accepted.stdout)
+
+        assert marker.exists()
+        assert payload["backend"]["branch_id"] == "branch-1"
+        assert payload["local_validation"]["proposal_count"] == 0
+        persisted = json.loads(session.read_text(encoding="utf-8"))
+        assert persisted["events"][-1]["event"] == "research_cycle_advanced"
+        assert persisted["evidence_envelopes"][-1]["schema_version"] == 2
+
     def test_run_step_records_platform_gap_with_fake_factortester(self, tmp_path: Path) -> None:
         bindir = tmp_path / "bin"
         bindir.mkdir()

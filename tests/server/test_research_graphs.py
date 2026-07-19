@@ -2037,6 +2037,22 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert next_packet["next_bytes"] == len(orjson.dumps(next_packet))
     assert next_packet["next_bytes"] <= 6000
     assert "required_capabilities" not in next_packet
+    assert next_packet["capabilities"] == [{
+        "capability_id": "research-hypothesis.preregister",
+        "capability_description": (
+            "Test contract for research-hypothesis.preregister."
+        ),
+        "descriptor_hash": graph["capability_descriptors"][
+            "research-hypothesis.preregister"
+        ]["descriptor_hash"],
+        "status": "bound",
+    }]
+    assert next_packet["current_obligations"] == []
+    assert next_packet["candidate_trial_frontier"] == {
+        "current_trial_plan_hash": None,
+        "candidate_plan_refs": [],
+        "unassessed_obligation_ids": [],
+    }
 
     transition_statements: list[str] = []
     original_connect = branch_transition.connect_sqlite
@@ -2066,7 +2082,20 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "evidence_state": "unknown",
             "evidence_refs": [],
         }],
-        "obligations": [],
+        "obligations": [{
+            "schema_version": 1,
+            "obligation_id": "obligation-roll-window",
+            "contract_hash": "1" * 64,
+            "claim_ids": ["claim-branch"],
+            "obligation_kind": "roll_window_artifact",
+            "epistemic_question": "Does roll proximity explain the signal?",
+            "scope": {"product_group": "china_futures"},
+            "discharge_criterion": {"method": "window exclusion"},
+            "status": "open",
+            "materiality": "decision_blocking",
+            "methodology_hash": "2" * 64,
+            "created_event_ref": "trace:first-principles",
+        }],
         "pending_adjudications": [],
         "pending_closure": None,
     })
@@ -2162,6 +2191,18 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         branch_id=first["branch_id"],
         owner="alice",
     )
+    cycle_next = research_graphs.build_graph_branch_next(
+        instance_id=instance["instance_id"],
+        branch_id=first["branch_id"],
+        owner="alice",
+    )
+    assert cycle_next["current_obligations"][0][
+        "obligation_id"
+    ] == "obligation-roll-window"
+    assert cycle_next["candidate_trial_frontier"][
+        "unassessed_obligation_ids"
+    ] == ["obligation-roll-window"]
+    assert cycle_context["history_cursor"] in cycle_next["changed_refs"]
     with pytest.raises(ValueError, match="base projection hash is stale"):
         research_graphs.advance_graph_branch(
             instance_id=instance["instance_id"],
@@ -2391,6 +2432,24 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "RESEARCH_GRAPH_VERSIONS" in statement.upper()
         for statement in selects
     )
+    statements.clear()
+    next_packet = research_graphs.build_graph_branch_next(
+        instance_id=instance["instance_id"],
+        branch_id=first["branch_id"],
+        owner="alice",
+    )
+    next_selects = [
+        statement for statement in statements
+        if statement.lstrip().upper().startswith("SELECT ")
+    ]
+    assert len(next_selects) == 1
+    assert not any(
+        statement.lstrip().upper().startswith(
+            ("INSERT ", "UPDATE ", "DELETE ")
+        )
+        for statement in statements
+    )
+    assert next_packet["next_bytes"] <= 4000
 
     monkeypatch.setattr(branch_context, "connect_sqlite", original_connect)
 

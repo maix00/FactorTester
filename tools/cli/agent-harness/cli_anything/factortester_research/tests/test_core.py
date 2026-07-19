@@ -40,10 +40,57 @@ from cli_anything.factortester_research.core.slices import default_factor_valida
 from cli_anything.factortester_research.core.capability_sources import (
     source_manifest_sha256,
 )
+from cli_anything.factortester_research.core.cycle import (
+    validate_next_packet,
+    validate_transition_evidence,
+)
 
 
 HARNESS_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def _research_cycle_discovery_proposal() -> dict:
+    return {
+        "schema_version": 1,
+        "proposal_id": "proposal-discovery",
+        "contract_hash": "1" * 64,
+        "trial_plan_hash": "2" * 64,
+        "methodology_hash": "3" * 64,
+        "evidence_refs": ["trace:first-principles-review"],
+        "claim_evidence_delta": [],
+        "claim_delta_noop_reason": "question is not empirical support",
+        "obligation_delta": [{
+            "obligation_id": "obligation-roll",
+            "from_state": "absent",
+            "to_state": "open",
+            "criterion_ref": "methodology:roll-window",
+            "obligation": {
+                "schema_version": 1,
+                "obligation_id": "obligation-roll",
+                "contract_hash": "1" * 64,
+                "claim_ids": ["claim-1"],
+                "obligation_kind": "roll_window_artifact",
+                "epistemic_question": "Does roll proximity explain it?",
+                "scope": {"product_group": "china_futures"},
+                "discharge_criterion": {"method": "window exclusion"},
+                "status": "open",
+                "materiality": "decision_blocking",
+                "methodology_hash": "3" * 64,
+                "created_event_ref": "trace:first-principles-review",
+            },
+        }],
+        "decision_warrant": {
+            "finding_refs": ["trace:first-principles-review"],
+            "rule_refs": ["methodology:obligation-discovery"],
+            "inference_type": "semantic",
+            "preregistered": False,
+            "alternative_refs": [],
+            "limitation_refs": [],
+            "reentry_predicates": [],
+            "required_authority": "independent_reviewer",
+        },
+    }
 
 
 def test_observed_graph_distinguishes_advisory_plan_from_enforced_gap_state() -> None:
@@ -592,6 +639,41 @@ def test_reference_change_invalidates_whole_skill_manifest(
     assert approved["bindings"][0]["source_fingerprint"] == before
     assert changed["bindings"] == []
     assert changed["gaps"][0]["reason"] == "provider_fingerprint_mismatch"
+
+
+def test_cycle_evidence_validation_is_local_and_rejects_skill_identity() -> None:
+    evidence = {
+        "research_cycle": {
+            "schema_version": 1,
+            "events": [{
+                "event_type": "adjudication_proposed",
+                "proposal": _research_cycle_discovery_proposal(),
+            }],
+        },
+    }
+
+    validated = validate_transition_evidence(evidence)
+
+    assert validated["proposal_count"] == 1
+    assert validated["proposal_kinds"] == ["obligation_discovery"]
+    evidence["research_cycle"]["events"][0]["proposal"]["skill_name"] = (
+        "must-stay-local"
+    )
+    with pytest.raises(ValueError, match="Skill identity"):
+        validate_transition_evidence(evidence)
+
+
+def test_cycle_next_packet_rejects_full_graph_and_raw_output() -> None:
+    packet = {
+        "graph": "factor-research@v2",
+        "node": {"node_id": "factor_semantics"},
+        "candidate_edges": [],
+    }
+    assert validate_next_packet(packet) == packet
+    with pytest.raises(ValueError, match="routine packet field"):
+        validate_next_packet({**packet, "stdout": "large raw output"})
+    with pytest.raises(ValueError, match="graph must be a reference"):
+        validate_next_packet({**packet, "graph": {"nodes": []}})
 
 
 def test_model_identity_does_not_change_deterministic_resolution() -> None:

@@ -152,12 +152,12 @@ CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
 
 [_resolve_cli] Using installed command:
   /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
-collected 45 items
+collected 49 items
 
 test_core.py
-  32 passed
+  34 passed
 test_full_e2e.py::TestCLISubprocess
-  12 passed
+  14 passed
 test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
   [_resolve_cli] Using installed command:
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/factortester
@@ -165,7 +165,7 @@ test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
 
-45 passed, 123 warnings
+49 passed, 123 warnings
 ```
 
 All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in

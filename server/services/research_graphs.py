@@ -11,6 +11,8 @@ from server.services.research_graph.active_pointer import (
 )
 from server.services.research_graph.branch.context import (
     build_graph_branch_context,
+)
+from server.services.research_graph.branch.next_packet import (
     build_graph_branch_next,
 )
 from server.services.research_graph.branch.repository import (

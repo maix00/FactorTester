@@ -658,13 +658,17 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             ],
             env=env,
         )
+        cycle_session = tmp_path / "cycle-session.json"
         next_packet = _run_json(
-            factortester,
+            harness,
             [
-                "research-graph",
+                "--session",
+                str(cycle_session),
+                "cycle",
                 "next",
                 live_instance["instance_id"],
                 live_branch["branch_id"],
+                "--json",
             ],
             env=env,
         )
@@ -707,10 +711,12 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         }
         evidence_file = tmp_path / "transition-evidence.json"
         evidence_file.write_text(json.dumps(evidence), encoding="utf-8")
-        advanced = _run_json(
-            factortester,
+        cycle_advanced = _run_json(
+            harness,
             [
-                "research-graph",
+                "--session",
+                str(cycle_session),
+                "cycle",
                 "advance",
                 live_instance["instance_id"],
                 live_branch["branch_id"],
@@ -720,10 +726,14 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 str(evidence_file),
                 "--target-capability-resolution-file",
                 str(target_resolution_file),
+                "--json",
             ],
             env=env,
         )
+        advanced = cycle_advanced["backend"]
         assert advanced["current_node"] == edge["to_node"]
+        assert cycle_advanced["local_validation"]["proposal_count"] == 0
+        assert cycle_session.is_file()
 
         _run(factortester, ["logout"], env=env)
         after_logout = _run(

@@ -62,12 +62,16 @@ factortester research-graph start factor-research \
   --workspace-id <workspace_id> \
   --capability-resolution-file capability-resolution.json
 
-factortester research-graph context <instance_id> <branch_id>
-factortester research-graph next <instance_id> <branch_id>
-factortester research-graph advance <instance_id> <branch_id> \
+cli-anything-factortester-research cycle next \
+  <instance_id> <branch_id> --json
+cli-anything-factortester-research cycle validate \
+  --evidence-file transition-evidence.json --json
+cli-anything-factortester-research cycle advance \
+  <instance_id> <branch_id> \
   --edge-id <edge_id> \
   --evidence-file transition-evidence.json \
-  --target-capability-resolution-file target-resolution.json
+  --target-capability-resolution-file target-resolution.json \
+  --json
 ```
 
 There is no capability `attest` command and no capability-receipt round trip.
@@ -78,6 +82,11 @@ server validates it against the immutable graph descriptor.
 complete graph, catalog, artifacts, stdout/stderr, or untriggered future gaps.
 Conditional capabilities use machine predicates first and ask an Agent only
 when the predicate is genuinely undetermined.
+
+The Harness `cycle next` wrapper is read-only and fails closed if an older or
+changed backend returns more than 6000 bytes or leaks a heavy/legacy field.
+`cycle advance` validates local Research Cycle proposals before invoking the
+real client and retains only a factual local command envelope for audit.
 
 Graph activation validation accepts canonical references only:
 
