@@ -6,8 +6,6 @@ import hashlib
 import sqlite3
 from typing import Any
 
-import orjson
-
 import settings as Settings
 from server.services.research_graph.branch.context import (
     build_graph_branch_context,
@@ -16,6 +14,7 @@ from server.services.research_graph.branch.repository import (
     load_instance_branch_row,
 )
 from server.services.research_graph.protocol import json_hash
+from server.services.research_graph.shadow_trace import replay_shadow_trace
 from server.services.research_graph.shadow_tokens import (
     derive_token_metrics,
     token_failures,
@@ -48,9 +47,8 @@ def derive_activation_evidence(
         branch_id=routine_branch_id,
         baseline_run_id=baseline_run_id,
     )
-    replay = _replay_persisted_trace(
+    replay = replay_shadow_trace(
         graph=graph,
-        owner=owner,
         runtime=runtime,
     )
     outcomes = _compare_run_outcomes(
@@ -144,99 +142,6 @@ def _load_comparison_scope(
     if graph is None or graph.get("lifecycle") != "draft":
         raise ValueError("shadow comparison requires an immutable draft Graph")
     return graph, owner, runtime, graph_run_id, runs
-
-
-def _replay_persisted_trace(
-    *,
-    graph: dict[str, Any],
-    owner: str,
-    runtime: sqlite3.Row,
-) -> dict[str, Any]:
-    instance_id = str(runtime["instance_id"])
-    branch_id = str(runtime["branch_id"])
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        rows = conn.execute(
-            """
-            SELECT trace_id, edge_id, from_node, to_node, evidence_json
-            FROM research_graph_trace
-            WHERE instance_id=? AND branch_id=?
-            ORDER BY created_at, trace_id
-            LIMIT ?
-            """,
-            (instance_id, branch_id, _MAX_COMPARISON_ROWS + 1),
-        ).fetchall()
-    if len(rows) > _MAX_COMPARISON_ROWS:
-        raise ValueError("shadow replay trace exceeds bounded comparison rows")
-    edges = {
-        str(edge["edge_id"]): edge for edge in graph.get("edges") or []
-    }
-    current = str(
-        graph.get("entry_node")
-        or ((graph.get("nodes") or [{}])[0].get("node_id") or "")
-    )
-    if not current:
-        raise ValueError("shadow Graph entry node is invalid")
-    evidence_count = 0
-    path: list[str] = []
-    for row in rows:
-        edge = edges.get(str(row["edge_id"]))
-        if (
-            edge is None
-            or str(row["from_node"]) != current
-            or str(edge["from_node"]) not in {current, "*"}
-            or str(row["to_node"]) != str(edge["to_node"])
-        ):
-            return _replay_summary(
-                passed=False,
-                current=current,
-                expected=str(runtime["current_node"]),
-                path=path,
-                evidence_count=evidence_count,
-            )
-        evidence = orjson.loads(row["evidence_json"])
-        if not isinstance(evidence, dict):
-            return _replay_summary(
-                passed=False,
-                current=current,
-                expected=str(runtime["current_node"]),
-                path=path,
-                evidence_count=evidence_count,
-            )
-        evidence_count += len(evidence.get("evidence_refs") or [])
-        path.append(str(row["edge_id"]))
-        current = str(row["to_node"])
-    latest_matches = (
-        (not rows and not str(runtime["latest_trace_id"]))
-        or (
-            bool(rows)
-            and str(rows[-1]["trace_id"]) == str(runtime["latest_trace_id"])
-        )
-    )
-    return _replay_summary(
-        passed=current == str(runtime["current_node"]) and latest_matches,
-        current=current,
-        expected=str(runtime["current_node"]),
-        path=path,
-        evidence_count=evidence_count,
-    )
-
-
-def _replay_summary(
-    *,
-    passed: bool,
-    current: str,
-    expected: str,
-    path: list[str],
-    evidence_count: int,
-) -> dict[str, Any]:
-    return {
-        "passed": passed,
-        "transition_count": len(path),
-        "path_hash": json_hash(path),
-        "evidence_ref_count": evidence_count,
-        "derived_node": current,
-        "projected_node": expected,
-    }
 
 
 def _compare_run_outcomes(

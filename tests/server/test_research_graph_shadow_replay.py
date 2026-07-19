@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import orjson
 import pytest
 
 import settings as Settings
@@ -11,6 +12,9 @@ from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.services import research_graphs, research_runs
+from server.services.research_graph.research_cycle.replay import (
+    validate_research_cycle_checkpoint,
+)
 from tests.server.test_research_graphs import (
     _approve_proposal,
     _capability_resolution,
@@ -51,6 +55,16 @@ def _advance_shadow(evidence: dict) -> tuple[str, str]:
     refs = evidence["shadow_comparison_refs"]
     instance_id = refs["routine_instance_id"]
     branch_id = refs["routine_branch_id"]
+    checkpoint = validate_research_cycle_checkpoint({
+        "schema_version": 1,
+        "contract_hash": "1" * 64,
+        "trial_plan_hash": "",
+        "methodology_hash": "2" * 64,
+        "claims": [],
+        "obligations": [],
+        "pending_adjudications": [],
+        "pending_closure": None,
+    })
     research_graphs.advance_graph_branch(
         instance_id=instance_id,
         branch_id=branch_id,
@@ -66,6 +80,13 @@ def _advance_shadow(evidence: dict) -> tuple[str, str]:
                 capability_ids=[],
                 graph_version=2,
             ),
+            "research_cycle": {
+                "schema_version": 1,
+                "parent_trace_ref": "",
+                "initial_checkpoint": checkpoint,
+                "expected_base_hash": checkpoint["projection_hash"],
+                "events": [],
+            },
         },
     )
     return instance_id, branch_id
@@ -188,6 +209,7 @@ def test_validation_replays_trace_and_never_mutates_execution_history(
     replay = validation["evidence"]["replay_summary"]
     assert replay["passed"] is True
     assert replay["transition_count"] == 1
+    assert replay["research_cycle_status"] == "current"
     assert validation["evidence"]["shadow_summary"]["equivalent"] is True
     assert _canonical_execution_rows() == before
 
@@ -238,6 +260,49 @@ def test_tampered_trace_cannot_create_an_accepted_validation(
             (proposal["proposal_id"],),
         ).fetchone()["latest_result_ref"])
     assert after_ref == before_ref
+
+
+def test_tampered_cycle_checkpoint_fails_shadow_replay(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(
+        _graph_with_transition(),
+        actor="curator-agent",
+    )
+    proposal, _ = _approve_proposal()
+    evidence = _server_validation_evidence()
+    instance_id, branch_id = _advance_shadow(evidence)
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT trace_id, evidence_json FROM research_graph_trace
+            WHERE instance_id=? AND branch_id=?
+            """,
+            (instance_id, branch_id),
+        ).fetchone()
+        payload = orjson.loads(row["evidence_json"])
+        payload["research_cycle_checkpoint"]["contract_hash"] = "9" * 64
+        conn.execute(
+            """
+            UPDATE research_graph_trace SET evidence_json=?
+            WHERE trace_id=?
+            """,
+            (orjson.dumps(payload).decode(), row["trace_id"]),
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="research cycle projection_hash mismatch",
+    ):
+        research_graphs.record_validation(
+            graph_id="factor-research",
+            version=2,
+            proposal_id=proposal["proposal_id"],
+            actor="alice",
+            evidence=evidence,
+        )
 
 
 def test_shadow_comparison_rejects_different_job_semantics(

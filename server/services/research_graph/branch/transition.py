@@ -18,7 +18,11 @@ from server.services.research_graph.branch.projection import (
 from server.services.research_graph.branch.repository import (
     branch_payload,
     load_current_branch_resolution,
-    load_instance_branch_row,
+    load_instance_branch_with_latest_trace,
+)
+from server.services.research_graph.branch.research_cycle import (
+    checkpoint_from_branch_row,
+    prepare_research_cycle_trace,
 )
 from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
@@ -75,7 +79,7 @@ def advance_graph_branch(
     )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        branch_row = load_instance_branch_row(
+        branch_row = load_instance_branch_with_latest_trace(
             conn,
             instance_id=instance_id,
             branch_id=branch_id,
@@ -84,6 +88,7 @@ def advance_graph_branch(
         if branch_row is None:
             raise KeyError("graph branch not found")
         branch = branch_payload(branch_row) or {}
+        previous_cycle_checkpoint = checkpoint_from_branch_row(branch_row)
         graph = load_graph_from_conn(
             conn,
             graph_id=str(branch_row["graph_id"]),
@@ -169,7 +174,35 @@ def advance_graph_branch(
             or target_id == "code_improvement_required"
             else "running"
         )
+        _, resolution_json, resolution_hash = (
+            serialize_capability_resolution(
+                target_resolution,
+                node_id=target_id,
+            )
+        )
+        projected_trial_plan_hash = validate_trial_plan_transition(
+            current_hash=str(branch_row["current_trial_plan_hash"]),
+            proposed_hash=proposed_trial_plan_hash,
+            has_body=has_trial_plan_body,
+        )
+        cycle_event, cycle_checkpoint = prepare_research_cycle_trace(
+            update=prepared_evidence.get("research_cycle"),
+            previous_checkpoint=previous_cycle_checkpoint,
+            latest_trace_id=str(branch_row["latest_trace_id"]),
+        )
+        if (
+            cycle_checkpoint is not None
+            and cycle_checkpoint["trial_plan_hash"]
+            != projected_trial_plan_hash
+        ):
+            raise ValueError(
+                "research_cycle TrialPlan hash does not match branch"
+            )
         trace_evidence = deepcopy(persisted_evidence)
+        trace_evidence.pop("research_cycle", None)
+        if cycle_event is not None and cycle_checkpoint is not None:
+            trace_evidence["research_cycle"] = cycle_event
+            trace_evidence["research_cycle_checkpoint"] = cycle_checkpoint
         if supplied_resolution is not None:
             trace_evidence["target_capability_resolution_ref"] = (
                 f"branch-resolution:{instance_id}:{branch_id}"
@@ -181,17 +214,6 @@ def advance_graph_branch(
                 int(branch_row["omitted_evidence_count"]),
                 trace_evidence.get("evidence_refs"),
             )
-        )
-        _, resolution_json, resolution_hash = (
-            serialize_capability_resolution(
-                target_resolution,
-                node_id=target_id,
-            )
-        )
-        projected_trial_plan_hash = validate_trial_plan_transition(
-            current_hash=str(branch_row["current_trial_plan_hash"]),
-            proposed_hash=proposed_trial_plan_hash,
-            has_body=has_trial_plan_body,
         )
         trace_id = uuid.uuid4().hex
         now = time.time()

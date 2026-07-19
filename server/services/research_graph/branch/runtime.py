@@ -15,13 +15,20 @@ from server.services.research_graph.branch.projection import (
 from server.services.research_graph.branch.repository import (
     branch_payload,
     load_instance_branch_row,
+    load_instance_branch_with_latest_trace,
+)
+from server.services.research_graph.branch.research_cycle import (
+    checkpoint_from_branch_row,
 )
 from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
     validate_resolution_against_node,
 )
 from server.services.research_graph.active_pointer import load_active_graph
-from server.services.research_graph.protocol import GraphActivationBlocked
+from server.services.research_graph.protocol import (
+    GraphActivationBlocked,
+    serialize_bounded_trace_evidence,
+)
 from server.services.research_graph.versions import load_graph
 from tools.data.sqlite.db import connect_sqlite
 
@@ -202,7 +209,7 @@ def fork_graph_branch(
     label: str,
 ) -> dict[str, Any]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        source = load_instance_branch_row(
+        source = load_instance_branch_with_latest_trace(
             conn,
             instance_id=instance_id,
             branch_id=source_branch_id,
@@ -211,7 +218,32 @@ def fork_graph_branch(
         if source is None:
             raise KeyError("source branch not found")
         branch_id = uuid.uuid4().hex
+        trace_id = uuid.uuid4().hex
         now = time.time()
+        checkpoint = checkpoint_from_branch_row(source)
+        fork_evidence: dict[str, Any] = {
+            "branch_fork": {
+                "schema_version": 1,
+                "source_branch_id": source_branch_id,
+                "source_trace_ref": (
+                    f"trace:{source['latest_trace_id']}"
+                    if str(source["latest_trace_id"])
+                    else None
+                ),
+                "checkpoint_node": str(source["current_node"]),
+            },
+        }
+        if checkpoint is not None:
+            fork_evidence.update({
+                "research_cycle": {
+                    "schema_version": 1,
+                    "parent_trace_ref": "",
+                    "checkpoint_before_hash": checkpoint["projection_hash"],
+                    "events": [],
+                    "bootstrap_checkpoint": True,
+                },
+                "research_cycle_checkpoint": checkpoint,
+            })
         conn.execute(
             """
             INSERT INTO research_graph_branches (
@@ -233,8 +265,26 @@ def fork_graph_branch(
                 str(source["current_trial_plan_hash"]),
                 str(source["evidence_refs_json"]),
                 int(source["omitted_evidence_count"]),
-                str(source["latest_trace_id"]),
+                trace_id,
                 now,
+                now,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id, from_node, to_node,
+                evidence_json, telemetry_json, actor, created_at
+            ) VALUES (?, ?, ?, '__branch_fork__', ?, ?, ?, '{}', ?, ?)
+            """,
+            (
+                trace_id,
+                instance_id,
+                branch_id,
+                str(source["current_node"]),
+                str(source["current_node"]),
+                serialize_bounded_trace_evidence(fork_evidence),
+                owner,
                 now,
             ),
         )

@@ -391,10 +391,15 @@ def test_forward_migration_is_atomic_replayable_and_restart_safe(
     assert context["history_cursor"] is None
     assert "token_telemetry" not in context
     assert next_packet["next_bytes"] <= 6000
-    assert not any(
-        "RESEARCH_GRAPH_TRACE" in statement.upper()
+    assert all(
+        "FROM RESEARCH_GRAPH_TRACE" not in statement.upper()
         for statement in context_only_statements + context_statements
     )
+    assert any(
+        "LEFT JOIN RESEARCH_GRAPH_TRACE" in statement.upper()
+        for statement in context_only_statements
+    )
+    assert context["research_cycle"]["protocol_status"] == "uninitialized"
     assert not any(
         "PRAGMA " in statement.upper()
         for statement in context_only_statements + context_statements

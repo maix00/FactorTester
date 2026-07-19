@@ -25,6 +25,15 @@ _DISPOSITIONS = {
     "stopped_by_resource_boundary",
     "superseded",
 }
+_DECISION_DISPOSITIONS = {
+    "accepted",
+    "rejected",
+    "revision_requested",
+}
+_CLOSURE_AUTHORITIES = {
+    "human_audit",
+    "independent_reviewer",
+}
 
 
 def validate_search_exhaustion_proposal(
@@ -95,6 +104,37 @@ def validate_search_exhaustion_proposal(
     ) != computed_hash:
         raise ValueError("search exhaustion proposal_hash mismatch")
     value["proposal_hash"] = computed_hash
+    serialize_bounded_trace_evidence(value)
+    return value
+
+
+def validate_search_exhaustion_decision(
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate the independent challenge decision for bounded closure."""
+    if not isinstance(decision, dict):
+        raise ValueError("search exhaustion decision must be an object")
+    if decision.get("schema_version") != 1:
+        raise ValueError("search exhaustion decision schema_version must be 1")
+    assert_no_skill_identity(
+        decision,
+        location="search exhaustion decision",
+    )
+    value = deepcopy(decision)
+    required_text(value.get("decision_id"), field="decision_id")
+    value["proposal_hash"] = sha256(
+        value.get("proposal_hash"),
+        field="proposal_hash",
+    )
+    value["methodology_hash"] = sha256(
+        value.get("methodology_hash"),
+        field="methodology_hash",
+    )
+    if value.get("disposition") not in _DECISION_DISPOSITIONS:
+        raise ValueError("invalid search exhaustion decision disposition")
+    if value.get("authority_class") not in _CLOSURE_AUTHORITIES:
+        raise ValueError("bounded closure requires independent authority")
+    required_text(value.get("authority_ref"), field="authority_ref")
     serialize_bounded_trace_evidence(value)
     return value
 

@@ -120,14 +120,28 @@ def initialize_graph_version(path) -> None:
                 "kind": "research",
                 "required_capabilities": [],
             },
+            {
+                "node_id": "result",
+                "kind": "research",
+                "required_capabilities": [],
+            },
         ],
-        "edges": [{
-            "edge_id": "freeze-plan",
-            "from_node": "validation_design",
-            "to_node": "diagnostics",
-            "guard": {},
-            "required_evidence": [],
-        }],
+        "edges": [
+            {
+                "edge_id": "freeze-plan",
+                "from_node": "validation_design",
+                "to_node": "diagnostics",
+                "guard": {},
+                "required_evidence": [],
+            },
+            {
+                "edge_id": "adjudicate-result",
+                "from_node": "diagnostics",
+                "to_node": "result",
+                "guard": {},
+                "required_evidence": [],
+            },
+        ],
     }
     with connect_sqlite(path) as conn:
         conn.execute(

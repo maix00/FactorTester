@@ -24,6 +24,13 @@ from server.services.research_graph.branch import (
     runtime as branch_runtime,
     transition as branch_transition,
 )
+from server.services.research_graph.research_cycle.replay import (
+    validate_research_cycle_checkpoint,
+)
+from server.services.research_graph.branch.repository import (
+    load_instance_branch_row,
+)
+from server.services.research_graph.shadow_trace import replay_shadow_trace
 
 
 def _initialize_graph_db(tmp_path, monkeypatch) -> None:
@@ -2044,6 +2051,25 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "connect_sqlite",
         traced_transition_connect,
     )
+    initial_cycle = validate_research_cycle_checkpoint({
+        "schema_version": 1,
+        "contract_hash": "1" * 64,
+        "trial_plan_hash": "",
+        "methodology_hash": "2" * 64,
+        "claims": [{
+            "schema_version": 1,
+            "claim_id": "claim-branch",
+            "contract_hash": "1" * 64,
+            "claim_ref": "factor-claim:branch",
+            "claim_type": "bounded_predictive_relationship",
+            "scope": {"product_group": "china_futures"},
+            "evidence_state": "unknown",
+            "evidence_refs": [],
+        }],
+        "obligations": [],
+        "pending_adjudications": [],
+        "pending_closure": None,
+    })
     transitioned = research_graphs.advance_graph_branch(
         instance_id=instance["instance_id"],
         branch_id=first["branch_id"],
@@ -2063,6 +2089,13 @@ def test_one_graph_branch_can_pause_without_stopping_another(
                 "stop_condition": None,
                 "limitations": [],
                 "conflicts": [],
+            },
+            "research_cycle": {
+                "schema_version": 1,
+                "parent_trace_ref": "",
+                "initial_checkpoint": initial_cycle,
+                "expected_base_hash": initial_cycle["projection_hash"],
+                "events": [],
             },
         },
     )
@@ -2124,6 +2157,77 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             """,
             (instance["instance_id"], first["branch_id"]),
         ).fetchone()["count"]
+    cycle_context = research_graphs.build_graph_branch_context(
+        instance_id=instance["instance_id"],
+        branch_id=first["branch_id"],
+        owner="alice",
+    )
+    with pytest.raises(ValueError, match="base projection hash is stale"):
+        research_graphs.advance_graph_branch(
+            instance_id=instance["instance_id"],
+            branch_id=first["branch_id"],
+            owner="alice",
+            edge_id="resolution__gap",
+            evidence={
+                "mandatory_binding_missing": True,
+                "evidence_refs": ["artifact:stale-cycle"],
+                "research_cycle": {
+                    "schema_version": 1,
+                    "parent_trace_ref": cycle_context["history_cursor"],
+                    "expected_base_hash": "9" * 64,
+                    "events": [],
+                },
+            },
+        )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        trace_count_after_stale = conn.execute(
+            """
+            SELECT COUNT(*) AS count FROM research_graph_trace
+            WHERE instance_id=? AND branch_id=?
+            """,
+            (instance["instance_id"], first["branch_id"]),
+        ).fetchone()["count"]
+    assert trace_count_after_stale == trace_count_before
+    assert research_graphs.load_graph_branch(
+        instance_id=instance["instance_id"],
+        branch_id=first["branch_id"],
+        owner="alice",
+    ) == before_oversized
+    inherited = research_graphs.fork_graph_branch(
+        instance_id=instance["instance_id"],
+        source_branch_id=first["branch_id"],
+        owner="alice",
+        label="checkpoint inheritance",
+    )
+    inherited_context = research_graphs.build_graph_branch_context(
+        instance_id=instance["instance_id"],
+        branch_id=inherited["branch_id"],
+        owner="alice",
+    )
+    assert inherited_context["research_cycle"]["projection_hash"] == (
+        cycle_context["research_cycle"]["projection_hash"]
+    )
+    assert inherited_context["history_cursor"] != cycle_context["history_cursor"]
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        inherited_trace = conn.execute(
+            """
+            SELECT edge_id FROM research_graph_trace
+            WHERE trace_id=?
+            """,
+            (inherited_context["history_cursor"].removeprefix("trace:"),),
+        ).fetchone()
+        inherited_row = load_instance_branch_row(
+            conn,
+            instance_id=instance["instance_id"],
+            branch_id=inherited["branch_id"],
+            owner="alice",
+        )
+    assert inherited_trace["edge_id"] == "__branch_fork__"
+    assert inherited_row is not None
+    assert replay_shadow_trace(
+        graph=graph,
+        runtime=inherited_row,
+    )["research_cycle_status"] == "current"
     monkeypatch.setattr(
         branch_transition,
         "connect_sqlite",
@@ -2205,6 +2309,25 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert untouched["status"] == "running"
     assert untouched["current_node"] == "hypothesis"
 
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.executemany(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id, from_node, to_node,
+                evidence_json, telemetry_json, actor, created_at
+            ) VALUES (?, ?, ?, 'historical-only', 'x', 'x', '{}', '{}',
+                      'history-fixture', ?)
+            """,
+            [
+                (
+                    f"historical-trace-{index}",
+                    instance["instance_id"],
+                    first["branch_id"],
+                    float(index),
+                )
+                for index in range(250)
+            ],
+        )
     statements: list[str] = []
     original_connect = branch_context.connect_sqlite
 
@@ -2229,6 +2352,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "evidence_refs",
             "omitted_evidence_count",
             "history_cursor",
+        "research_cycle",
         "open_gaps",
         "skill_policy",
             "review_policy",
@@ -2245,6 +2369,15 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     ]
     assert context["omitted_evidence_count"] == 2
     assert context["history_cursor"].startswith("trace:")
+    assert context["research_cycle"]["protocol_status"] == "current"
+    assert context["research_cycle"]["claim_states"] == [{
+        "claim_id": "claim-branch",
+        "scope": {"product_group": "china_futures"},
+        "evidence_state": "unknown",
+    }]
+    assert "LEFT JOIN RESEARCH_GRAPH_TRACE" in " ".join(
+        statement.upper() for statement in statements
+    )
     assert not any(
         "FROM RESEARCH_GRAPH_TRACE" in statement.upper()
         for statement in statements

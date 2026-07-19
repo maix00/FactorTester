@@ -1,7 +1,7 @@
 # Research Obligation Cycle Implementation Work Package
 
-Status: implementation in progress; Grill 143 semantics accepted; Batch 0 is
-complete and Batch 1 is at its release gate.
+Status: implementation in progress; Grill 143 semantics accepted; Batches 0
+and 1 are complete and Batch 2 is at its release gate.
 
 Baseline: `56d36913` on `fix/issue-140-active-graph-agentflow`.
 
@@ -555,4 +555,43 @@ The release gate must be rerun immediately before commit. Its expected proof is:
 - Pyright reports zero errors on the changed protocol and Harness core;
 - canonical and packaged Harness Skills both validate and remain
   byte-identical;
+- `git diff --check` is clean.
+
+## Batch 2 release evidence
+
+Batch 2 uses no new table or column. The existing branch `latest_trace_id`
+points to a bounded checkpoint carrier in the immutable trace. Context and
+transition load it by trace primary-key LEFT JOIN in the existing branch
+SELECT; they never scan trace history.
+
+The implemented replay rules are:
+
+- initialization accepts only unknown/evidence-free Claims, open obligations,
+  no pending adjudication, and no closure;
+- proposal alone and rejected/revision-requested decisions do not change
+  accepted Claim or obligation state;
+- an accepted authority-matched pair applies both deltas into one checkpoint
+  or applies neither;
+- newly discovered obligations require their complete validated body;
+- bounded closure binds current Claim/obligation projection hashes and requires
+  an independent closure decision;
+- ordinary transitions copy checkpoint continuity, while forks create one
+  bounded child-owned bootstrap trace instead of inheriting an unverifiable
+  parent cursor;
+- shadow replay recomputes Graph path, parent linkage, paired events, and every
+  checkpoint hash; legacy EvidenceEnvelope v1 references are not counted as
+  current evidence.
+
+Release evidence on 2026-07-19:
+
+- complete server suite: 236 passed;
+- complete Harness suite: 43 passed with only the existing Pandas alias
+  deprecation warnings;
+- focused protocol/Graph/TrialPlan/migration suite: 78 passed;
+- Pyright: zero errors and warnings;
+- a 250-row irrelevant trace-history fixture leaves routine context at one
+  SELECT, zero writes, no history scan, and under the existing 6000-byte
+  packet ceiling;
+- routine transition remains one branch UPDATE plus one trace INSERT;
+- all changed production modules remain below 300 lines;
 - `git diff --check` is clean.

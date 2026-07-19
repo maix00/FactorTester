@@ -12,7 +12,11 @@ import settings as Settings
 from server.services.research_graph.branch.repository import (
     branch_payload,
     load_current_branch_resolution,
-    load_instance_branch_row,
+    load_instance_branch_with_latest_trace,
+)
+from server.services.research_graph.branch.research_cycle import (
+    agent_cycle_summary,
+    checkpoint_from_branch_row,
 )
 from server.services.research_graph.protocol import (
     MAX_AGENT_PACKET_BYTES,
@@ -30,7 +34,7 @@ def _build_local_state(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Build compact current state plus internal candidate edge definitions."""
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        branch_row = load_instance_branch_row(
+        branch_row = load_instance_branch_with_latest_trace(
             conn,
             instance_id=instance_id,
             branch_id=branch_id,
@@ -109,6 +113,9 @@ def _build_local_state(
         trial_plan_hash = (
             str(branch_row["current_trial_plan_hash"]) or None
         )
+        research_cycle = agent_cycle_summary(
+            checkpoint_from_branch_row(branch_row)
+        )
     triggered_gap_ids = {
         str(item.get("capability_id") or "")
         for item in resolution.get("triggered_conditional_gaps") or []
@@ -165,6 +172,7 @@ def _build_local_state(
         "history_cursor": (
             f"trace:{latest_trace_id}" if latest_trace_id else None
         ),
+        "research_cycle": research_cycle,
         "open_gaps": open_gaps,
         "skill_policy": {
             "match_on": "capability_description",
