@@ -83,7 +83,10 @@ def inspect_cutover(
                 ("agent_flow", bool(graph_tables & _ACCOUNTING_TABLES)),
                 (
                     "backend_assurance",
-                    "research_backend_assurance_receipts" in graph_tables,
+                    _needs_backend_assurance_cutover(
+                        graph_path,
+                        graph_tables,
+                    ),
                 ),
                 (
                     "graph_governance",
@@ -168,7 +171,7 @@ def finalize_cutover(
                 store=store,
                 agent_id_by_scope=agent_id_by_scope,
             )
-        if "research_backend_assurance_receipts" in graph_tables:
+        if _needs_backend_assurance_cutover(graph_path, graph_tables):
             reports["backend_assurance"] = migrate_backend_assurance(
                 graph_path,
             )
@@ -307,6 +310,39 @@ def _needs_branch_cutover(path: Path, tables: set[str]) -> bool:
             ).fetchall()
         }
     return "current_capability_resolution_json" not in columns
+
+
+def _needs_backend_assurance_cutover(
+    path: Path,
+    tables: set[str],
+) -> bool:
+    if "research_backend_assurance_receipts" in tables:
+        return True
+    if "research_jobs" not in tables:
+        return False
+    with connect_sqlite(path) as conn:
+        columns = {
+            str(row["name"])
+            for row in conn.execute(
+                "PRAGMA table_info(research_jobs)"
+            ).fetchall()
+        }
+        if "status" not in columns:
+            return False
+        assurance_predicate = (
+            "terminal_assurance_json IS NULL"
+            if "terminal_assurance_json" in columns
+            else "1=1"
+        )
+        row = conn.execute(
+            f"""
+            SELECT 1 FROM research_jobs
+            WHERE status IN ('succeeded', 'failed', 'cancelled')
+              AND {assurance_predicate}
+            LIMIT 1
+            """
+        ).fetchone()
+    return row is not None
 
 
 def _backup_database(source: Path, target: Path) -> None:

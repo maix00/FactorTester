@@ -241,6 +241,38 @@ def test_dry_run_reports_required_mappings_without_writing(
     assert not flow_path.exists()
 
 
+def test_dry_run_reports_unassured_terminal_jobs_without_legacy_receipts(
+    tmp_path,
+) -> None:
+    graph_path = tmp_path / "unassured.sqlite"
+    flow_path = tmp_path / "flow.sqlite"
+    with connect_sqlite(graph_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE research_jobs (
+                job_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                terminal_assurance_json TEXT
+            );
+            INSERT INTO research_jobs VALUES (
+                'historical-success',
+                'succeeded',
+                NULL
+            );
+            """
+        )
+    before = graph_path.read_bytes()
+
+    report = inspect_cutover(
+        graph_db_path=graph_path,
+        agent_flow_db_path=flow_path,
+    )
+
+    assert report["planned_batches"] == ["backend_assurance"]
+    assert graph_path.read_bytes() == before
+    assert not flow_path.exists()
+
+
 def test_cli_defaults_to_machine_readable_dry_run(
     tmp_path,
     monkeypatch,
