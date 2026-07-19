@@ -157,6 +157,7 @@ def _apply_accepted_deltas(
     obligations = {
         item["obligation_id"]: item for item in checkpoint["obligations"]
     }
+    invalidates_closure = False
     for delta in proposal["claim_evidence_delta"]:
         claim = claims.get(delta["claim_id"])
         if claim is None or claim["evidence_state"] != delta["from_state"]:
@@ -194,6 +195,13 @@ def _apply_accepted_deltas(
                 )
             checkpoint["obligations"].append(obligation)
             obligations[obligation["obligation_id"]] = obligation
+            invalidates_closure = (
+                invalidates_closure
+                or (
+                    obligation["materiality"] == "decision_blocking"
+                    and obligation["status"] in {"open", "reopened"}
+                )
+            )
             continue
         if delta["from_state"] == "absent":
             raise ValueError(
@@ -204,6 +212,16 @@ def _apply_accepted_deltas(
                 "obligation delta does not match current projection"
             )
         obligation["status"] = delta["to_state"]
+        invalidates_closure = (
+            invalidates_closure
+            or (
+                obligation["materiality"] == "decision_blocking"
+                and obligation["status"] in {"open", "reopened"}
+            )
+        )
+    if invalidates_closure:
+        checkpoint["closure"] = None
+        checkpoint["pending_closure"] = None
 
 
 def _propose_closure(

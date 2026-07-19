@@ -1266,7 +1266,9 @@ Research Cycle discovery, adjudication, and closure at `research_decision` use
 one declared self-edge. The ordinary atomic transition writes the existing
 trace and checkpoint while keeping `from_node == to_node`; a server-derived
 guard rejects an empty event list. This avoids another API, node, table, or
-replay path.
+replay path. Accepted creation or reopening of a decision-blocking obligation
+invalidates accepted and pending closure within that same replay event;
+rejected or non-blocking deltas preserve closure.
 
 ### Capability contract
 

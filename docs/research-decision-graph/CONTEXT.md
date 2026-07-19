@@ -334,7 +334,9 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   relevant independent reviewer.
 - **Bounded Closure** is recorded as one compact trace checkpoint plus a current
   branch disposition/hash. It requires one compact independent closure
-  challenge and does not create a closure service/table.
+  challenge and does not create a closure service/table. An accepted new or
+  reopened decision-blocking obligation clears accepted or pending closure in
+  the same replay event; rejected and non-blocking deltas do not.
 - New evidence, scope, Factor versions, Graph/methodology, product rules,
   operators, or backend semantics reopen only Contracts matched by explicit
   impact or re-entry predicates. Unrelated jobs and branches continue.

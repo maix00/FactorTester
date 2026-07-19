@@ -17,7 +17,9 @@ server proposal.
 Construct a deterministic predicate over Contract scope, graph/methodology
 hashes, product/frequency facts, evidence kind, and closure re-entry
 predicates. Reopen only matching research. Unaffected branches and Jobs
-continue.
+continue. When an accepted impact adjudication creates or reopens a
+decision-blocking obligation, the same Research Cycle event invalidates any
+accepted or pending closure; do not add a separate closure service.
 
 An updated local Skill can suggest a MethodologyChangeProposal, but cannot
 self-authorize its execution or activate a Graph. Graph, statistical,

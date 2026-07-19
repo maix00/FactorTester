@@ -140,6 +140,9 @@ node can run; protected-sample reuse cannot be hidden behind a shared
 Factor-revision lineage tests preserve the old plan and exposure, release only
 on the server-owned new-hypothesis edge, and bind the replacement as version 1
 of a new plan identity.
+Research Cycle reopening tests clear accepted or pending closure only for an
+accepted new or reopened decision-blocking obligation; rejected and
+non-blocking deltas preserve closure.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.

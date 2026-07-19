@@ -50,3 +50,8 @@ the decision's `authority_ref`, and include both current invocations in the
 transition's `agent_invocation_ids`. The reviewer principal and lineage must
 differ from the proposal author. A rejected or revision-requested closure
 changes no accepted state.
+
+Closure remains defeasible. An accepted adjudication that creates or reopens a
+decision-blocking obligation invalidates both accepted and pending closure in
+the same replay event. A rejected proposal or a non-blocking obligation does
+not.

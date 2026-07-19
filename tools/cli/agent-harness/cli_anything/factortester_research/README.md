@@ -149,6 +149,10 @@ Submission is accepted only for the branch's current stage at the plan-bound
 execution node. `ResearchRun` persists that server-derived stage, and every
 child `Job` inherits the binding through `run_id`.
 
+Bounded closure is defeasible: an accepted new or reopened
+decision-blocking obligation clears accepted or pending closure atomically.
+Rejected or non-blocking deltas leave closure unchanged.
+
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its
 observations were sealed after the factor, selection boundary, and TrialPlan
