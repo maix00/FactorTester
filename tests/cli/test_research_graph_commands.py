@@ -507,11 +507,56 @@ def test_agent_flow_invocation_commands_preserve_provenance(
         },
     )
 
+    fallback = runner.invoke(cli, [
+        "agent-flow", "invocation", "settle", "invocation-2",
+        "--reserved-fallback",
+        "--provider-request-id", "provider-request-without-usage",
+    ])
+    assert fallback.exit_code == 0, fallback.output
+    assert fake.agent_invocation_call == (
+        "settle",
+        {
+            "invocation_id": "invocation-2",
+            "input_tokens": None,
+            "output_tokens": None,
+            "cache_read_tokens": 0,
+            "provider_request_id": "provider-request-without-usage",
+            "provider_attestation": "",
+        },
+    )
+
     released = runner.invoke(cli, [
         "agent-flow", "invocation", "release", "invocation-1",
     ])
     assert released.exit_code == 0
     assert json.loads(released.output)["status"] == "released"
+
+
+def test_agent_invocation_settle_rejects_ambiguous_usage_mode(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(
+        agent_flow_commands,
+        "client_from_config",
+        lambda: fake,
+    )
+    runner = CliRunner()
+
+    mixed = runner.invoke(cli, [
+        "agent-flow", "invocation", "settle", "invocation-1",
+        "--reserved-fallback",
+        "--input-tokens", "10",
+        "--output-tokens", "5",
+    ])
+    missing = runner.invoke(cli, [
+        "agent-flow", "invocation", "settle", "invocation-1",
+    ])
+
+    assert mixed.exit_code != 0
+    assert "不能与" in mixed.output
+    assert missing.exit_code != 0
+    assert "--reserved-fallback" in missing.output
 
 
 def test_obsolete_research_graph_commands_are_absent() -> None:

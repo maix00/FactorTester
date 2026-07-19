@@ -160,20 +160,42 @@ def reserve_agent_invocation(
 
 @agent_invocation.command("settle")
 @click.argument("invocation_id")
-@click.option("--input-tokens", type=click.IntRange(min=0), required=True)
-@click.option("--output-tokens", type=click.IntRange(min=0), required=True)
+@click.option("--input-tokens", type=click.IntRange(min=0))
+@click.option("--output-tokens", type=click.IntRange(min=0))
 @click.option("--cache-read-tokens", type=click.IntRange(min=0), default=0)
 @click.option("--provider-request-id", default="")
 @click.option("--provider-attestation", default="")
+@click.option(
+    "--reserved-fallback",
+    is_flag=True,
+    help="Provider 未返回可信 token 用量时，按完整预留量结算。",
+)
 def settle_agent_invocation(
     invocation_id: str,
-    input_tokens: int,
-    output_tokens: int,
+    input_tokens: int | None,
+    output_tokens: int | None,
     cache_read_tokens: int,
     provider_request_id: str,
     provider_attestation: str,
+    reserved_fallback: bool,
 ) -> None:
     """使用 provider-neutral usage 结算同一个 AgentInvocation。"""
+    supplied_usage = input_tokens is not None or output_tokens is not None
+    if reserved_fallback and supplied_usage:
+        raise click.ClickException(
+            "--reserved-fallback 不能与 --input-tokens/--output-tokens 同时使用"
+        )
+    if not reserved_fallback and (
+        input_tokens is None or output_tokens is None
+    ):
+        raise click.ClickException(
+            "必须同时提供 --input-tokens/--output-tokens；"
+            "无可信 provider 用量时使用 --reserved-fallback"
+        )
+    if reserved_fallback and cache_read_tokens:
+        raise click.ClickException(
+            "--reserved-fallback 不接受 --cache-read-tokens"
+        )
     click.echo(_json(
         client_from_config().settle_agent_invocation(
             invocation_id,
