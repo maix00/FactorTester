@@ -96,12 +96,20 @@ def test_skill_routes_to_exactly_one_progressive_reference() -> None:
     canonical_files = {
         path.relative_to(SKILL): path.read_bytes()
         for path in SKILL.rglob("*")
-        if path.is_file()
+        if (
+            path.is_file()
+            and "__pycache__" not in path.parts
+            and path.suffix != ".pyc"
+        )
     }
     packaged_files = {
         path.relative_to(PACKAGED): path.read_bytes()
         for path in PACKAGED.rglob("*")
-        if path.is_file()
+        if (
+            path.is_file()
+            and "__pycache__" not in path.parts
+            and path.suffix != ".pyc"
+        )
     }
     assert packaged_files == canonical_files
 
