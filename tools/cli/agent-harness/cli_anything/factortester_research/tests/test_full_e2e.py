@@ -114,17 +114,14 @@ class TestCLISubprocess:
         )
         assert payload["resolution"]["cache"]["scope"] == "process"
         assert payload["resolution"]["cache"]["hit"] is False
-        assert {
-            item["capability_id"]
-            for item in payload["resolution"]["gaps"]
-        } == {"research-obligation.discover"}
-        assert payload["resolution"]["gaps"][0]["reason"] == (
-            "execution_approval_required"
-        )
+        assert payload["resolution"]["gaps"] == []
         assert {
             item["capability_id"]
             for item in payload["resolution"]["bindings"]
-        } == {"research-hypothesis.preregister"}
+        } == {
+            "research-hypothesis.preregister",
+            "research-obligation.discover",
+        }
 
         approved = self._run([
             "graph",
@@ -164,7 +161,6 @@ class TestCLISubprocess:
             item["capability_id"]
             for item in detailed_payload["resolution"]["gaps"]
         } >= {
-            "multiple-testing.trial-ledger",
             "performance.bootstrap-sharpe",
         }
         assert {

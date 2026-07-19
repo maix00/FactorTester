@@ -313,7 +313,17 @@
       "when_to_use": ["before the first test and whenever the search family expands"],
       "preconditions": ["the primary hypothesis has been preregistered"],
       "prohibitions": ["do not count only the winning configurations"],
-      "implementations": []
+      "implementations": [
+        {
+          "implementation_id": "factortester-harness.trial-plan-ledger",
+          "provider": "factortester-harness",
+          "kind": "guidance",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "product_scopes": ["all"],
+          "limitation": "the deterministic ledger covers the frozen Decision Contract, TrialPlan, and RunSpec family; the Planning Agent must add prior informal, rejected, and adaptive trials that cannot be inferred from those objects"
+        }
+      ]
     },
     {
       "capability_id": "multiple-testing.false-discovery-control",
@@ -519,7 +529,20 @@
       "when_to_use": ["when signal frequency is intraday", "when the thesis depends on order flow, volume, spread, or market impact"],
       "preconditions": ["exchange session and timestamp conventions are explicit"],
       "prohibitions": ["do not reuse equity or crypto session defaults for another product profile", "do not infer fillability from bar OHLCV alone"],
+      "evidence_sources": [
+        {"kind": "exchange-guidance", "url": "https://www.cmegroup.com/education/courses/trading-and-analysis/liquidity-and-immediacy", "topic": "cross-market spread, liquidity, and trading-hours review dimensions"},
+        {"kind": "exchange-rule", "url": "https://www.cffex.com.cn/cn/ssxz/20230414/43079.html", "topic": "China-futures price limits, margin changes, and position controls"}
+      ],
       "implementations": [
+        {
+          "implementation_id": "factortester-harness.china-futures-microstructure",
+          "provider": "factortester-harness",
+          "kind": "guidance",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "product_scopes": ["china_futures"],
+          "limitation": "reuse cross-market spread, depth, volume, liquidity, timing, and impact dimensions, but resolve sessions, contract roll, tick size, limits, margin, fees, settlement, and fillability from the China-futures product profile; retain unknowns when only bars are available"
+        },
         {
           "implementation_id": "vibe.market-microstructure",
           "provider": "vibe-trading",
@@ -527,7 +550,7 @@
           "approval_status": "approved",
           "execution_mode": "guidance_only",
           "requires_execution_approval": true,
-          "product_scopes": ["all"],
+          "product_scopes": ["equities"],
           "source_path": "agent/src/skills/market-microstructure/SKILL.md"
         },
         {
@@ -537,7 +560,7 @@
           "approval_status": "quarantined",
           "execution_mode": "guidance_only",
           "requires_execution_approval": true,
-          "product_scopes": ["all"],
+          "product_scopes": ["equities"],
           "source_path": "agent/src/skills/minute-analysis/SKILL.md",
           "limitation": "generic data and fee examples are not product-profile authority"
         }

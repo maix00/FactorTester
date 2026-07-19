@@ -85,6 +85,7 @@ def resolve_capability_ids(
             implementation
             for implementation in verified_candidates
             if not implementation.get("requires_execution_approval", False)
+            or implementation.get("kind") == "skill"
             or implementation["implementation_id"] in grants
         ]
         if not candidates:
@@ -111,7 +112,8 @@ def resolve_capability_ids(
             "kind": implementation["kind"],
             "execution_mode": implementation["execution_mode"],
             "execution_approval_granted": (
-                implementation["implementation_id"] in grants
+                implementation.get("kind") == "skill"
+                or implementation["implementation_id"] in grants
             ),
             **({
                 "source_fingerprint": source_state["observed_sha256"],

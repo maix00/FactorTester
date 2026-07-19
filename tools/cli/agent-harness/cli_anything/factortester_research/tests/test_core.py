@@ -442,7 +442,7 @@ def test_trial_family_capabilities_are_triggered_only_when_applicable() -> None:
     }
 
 
-def test_external_skill_execution_requires_an_explicit_grant() -> None:
+def test_reviewed_skill_may_use_default_local_authorization() -> None:
     graph = build_draft_graph()
     graph["nodes"] = [{
         "node_id": "commodity_hypothesis",
@@ -456,7 +456,7 @@ def test_external_skill_execution_requires_an_explicit_grant() -> None:
     graph["edges"] = []
     registry = load_builtin_capability_registry()
 
-    blocked = resolve_graph_capabilities(
+    resolved = resolve_graph_capabilities(
         graph,
         registry,
         product_group="china_futures",
@@ -470,19 +470,66 @@ def test_external_skill_execution_requires_an_explicit_grant() -> None:
         node_id="commodity_hypothesis",
     )
 
-    assert blocked["gaps"][0]["capability_id"] == (
-        "hypothesis.commodity-structure"
-    )
-    assert blocked["gaps"][0]["reason"] == "execution_approval_required"
-    assert blocked["gaps"][0]["candidate_implementation_ids"] == [
+    assert resolved["gaps"] == []
+    assert resolved["bindings"][0]["implementation_id"] == (
         "vibe.commodity-analysis"
-    ]
-    assert blocked["gaps"][0]["required_by"] == "commodity_hypothesis"
-    assert blocked["gaps"][0]["capability_description"]
-    assert len(blocked["gaps"][0]["descriptor_hash"]) == 64
+    )
+    assert resolved["bindings"][0]["execution_approval_granted"] is True
     assert granted["bindings"][0]["implementation_id"] == (
         "vibe.commodity-analysis"
     )
+
+
+def test_microstructure_resolution_is_product_specific() -> None:
+    graph = build_draft_graph()
+    facts = {
+        "signal": {"frequency": "MIN1"},
+        "hypothesis": {"features": ["intraday_volume"]},
+        "factor": {"is_multi": False},
+    }
+
+    futures = resolve_graph_capabilities(
+        graph,
+        load_builtin_capability_registry(),
+        product_group="china_futures",
+        node_id="factor_semantics",
+        facts=facts,
+    )
+    equities = resolve_graph_capabilities(
+        graph,
+        load_builtin_capability_registry(),
+        product_group="equities",
+        node_id="factor_semantics",
+        facts=facts,
+    )
+
+    futures_binding = futures["triggered_conditional_bindings"][0]
+    equities_binding = equities["triggered_conditional_bindings"][0]
+    assert futures_binding["implementation_id"] == (
+        "factortester-harness.china-futures-microstructure"
+    )
+    assert equities_binding["implementation_id"] == (
+        "vibe.market-microstructure"
+    )
+
+
+def test_validation_design_has_builtin_trial_ledger() -> None:
+    resolution = resolve_graph_capabilities(
+        build_draft_graph(),
+        load_builtin_capability_registry(),
+        product_group="china_futures",
+        node_id="validation_design",
+        facts={"research": {"trial_count": 1}},
+    )
+
+    assert resolution["gaps"] == []
+    assert {
+        item["capability_id"] for item in resolution["bindings"]
+    } == {
+        "multiple-testing.trial-ledger",
+        "research-validation.slice-plan",
+        "research-trial.synthesize",
+    }
 
 
 def test_capability_resolution_keeps_conditional_skills_out_of_mandatory_gaps() -> None:
@@ -513,7 +560,7 @@ def test_capability_resolution_keeps_conditional_skills_out_of_mandatory_gaps() 
     assert not_triggered["triggered_conditional_gaps"] == []
     triggered_ids = {
         item["capability_id"]
-        for item in triggered["triggered_conditional_gaps"]
+        for item in triggered["triggered_conditional_bindings"]
     }
     assert triggered_ids == {"hypothesis.commodity-structure"}
 
@@ -604,7 +651,7 @@ def test_external_provider_change_invalidates_cache_and_fails_closed(
     assert changed["gaps"][0]["expected_sha256"] == approved_hash
 
 
-def test_reference_cycle_skill_requires_exact_manifest_approval() -> None:
+def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     graph = {
         "entry_node": "discover",
         "nodes": [{
@@ -615,7 +662,7 @@ def test_reference_cycle_skill_requires_exact_manifest_approval() -> None:
     }
     registry = load_builtin_capability_registry()
 
-    blocked = resolve_graph_capabilities(
+    reused = resolve_graph_capabilities(
         graph,
         registry,
         product_group="china_futures",
@@ -627,8 +674,8 @@ def test_reference_cycle_skill_requires_exact_manifest_approval() -> None:
         approved_implementation_ids={"local.research-obligation-cycle"},
     )
 
-    assert blocked["bindings"] == []
-    assert blocked["gaps"][0]["reason"] == "execution_approval_required"
+    assert reused["gaps"] == []
+    assert reused["bindings"][0]["execution_approval_granted"] is True
     assert approved["gaps"] == []
     assert approved["bindings"][0]["source_fingerprint"] == (
         "3199189a952664aacb8947a4804a65644354f77ec913bce5105ca5d0d0adb2da"
