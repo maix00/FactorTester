@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
+import sys
 
 import pandas as pd
 from flask import Flask
 
 from server.modules.shared import shared_bp
 from server.modules.shared import data_availability as availability_routes
+from server.services.data_availability import availability_for_scope
+from sources.Tiger.connector import TigerConnectorConfig
 from tools.data.availability import build_availability_profile
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
 from tools.products.Product import Product
@@ -115,3 +119,62 @@ def test_data_availability_endpoint_requires_and_preserves_explicit_scope(
         "probe": False,
         "expanded": False,
     }
+
+
+def test_tiger_scope_returns_only_tiger_cache_and_probe_entries(
+    monkeypatch,
+    tmp_path,
+):
+    props = tmp_path / "paper.properties"
+    props.write_text("private_key=never-return-this\n", encoding="utf-8")
+    bridge = tmp_path / "bridge.py"
+    bridge.write_text(
+        """
+import json
+import sys
+
+request = json.load(sys.stdin)
+print(json.dumps({
+    "status": "ok",
+    "received_at_ms": 1784322010000,
+    "permissions": [{"name": "OSEFuturesQuoteLv2", "expire_at": -1}],
+    "quotes": [{
+        "identifier": request["products"][0]["identifier"],
+        "latest_time": 1784322001028,
+    }],
+}))
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FACTORTESTER_TIGER_PYTHON", sys.executable)
+    monkeypatch.setenv("FACTORTESTER_TIGEROPEN_PROPS_PATH", str(props))
+    monkeypatch.setenv("FACTORTESTER_TIGER_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        "sources.Tiger.connector.TigerConnectorConfig.from_env",
+        lambda: TigerConnectorConfig(
+            python_path=sys.executable,
+            props_path=str(props),
+            bridge_path=str(bridge),
+            timeout_seconds=5,
+        ),
+    )
+
+    profile = availability_for_scope(
+        product_names=["JNI.OSE"],
+        source_names=["Tiger"],
+        probe=True,
+        expanded=False,
+    )
+
+    assert [entry["source"] for entry in profile["entries"]] == [
+        "TigerOSEFuturesMIN1",
+        "TigerOSEFuturesDAY1",
+        "Tiger",
+    ]
+    assert all(
+        not entry["source"].startswith("Local")
+        for entry in profile["entries"]
+    )
+    assert profile["entries"][-1]["entitled_realtime"] is True
+    assert profile["entries"][-1]["latency_class"] == "unverified"
+    assert "never-return-this" not in json.dumps(profile)

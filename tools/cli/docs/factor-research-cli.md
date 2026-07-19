@@ -60,3 +60,22 @@ The default command performs a low-cost static inspection. `--probe` explicitly
 authorizes a registered connector to perform a network or stream probe. A
 provider being installed, reachable, or entitled does not by itself prove
 real-time latency or point-in-time coverage.
+
+Tiger is a selectable source for the first-class OSE products `JNI.OSE`,
+`JMI.OSE`, `JTM.OSE`, `JTI.OSE`, and `NK225MC.OSE`. Its SDK runtime and
+protected properties path are server-side settings; they are never returned
+to the CLI.
+
+```bash
+factortester products availability \
+  --product JNI.OSE \
+  --product JMI.OSE \
+  --source Tiger \
+  --probe \
+  --json
+```
+
+The response reports the file-backed MIN1/DAY1 cache independently from the
+L2 probe. An active `OSEFuturesQuoteLv2` entitlement is reported separately
+from `latency_class`; the latter remains `unverified` until a market-session
+latency test has been accepted.
