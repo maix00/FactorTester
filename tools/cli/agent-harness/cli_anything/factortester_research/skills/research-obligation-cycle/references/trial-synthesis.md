@@ -45,9 +45,12 @@ regime evidence seen during selection remains regime validation, not holdout.
 
 ## Output
 
-Return the canonical TrialPlan body plus the selected obligation reference and
-expected evidence kind. If a required operator, strategy behavior, timing rule,
+Return a canonical TrialPlan schema version 3. Bind its
+`decision_contract_hash` and `methodology_hash` to the current checkpoint, and
+put every selected serviceable obligation ID in the bounded
+`obligation_refs`; do not copy obligation bodies. Return the expected evidence
+kind separately. If a required operator, strategy behavior, timing rule,
 authoritative data field, frozen identity, or pre-outcome decision rule is
-unavailable, return a Capability Gap without approximating it. You may return a
-clearly labeled `provisional_outline` to preserve useful design work, but it is
-not a canonical TrialPlan and cannot authorize execution.
+unavailable, return a Capability Gap without approximating it. You may return
+a clearly labeled `provisional_outline` to preserve useful design work, but it
+is not a canonical TrialPlan and cannot authorize execution.

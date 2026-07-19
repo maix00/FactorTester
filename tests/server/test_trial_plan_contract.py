@@ -16,6 +16,7 @@ from server.services.research_graph.trial_plan import (
     canonical_trial_plan,
     prepare_trial_plan_evidence,
     trial_plan_hash,
+    validate_trial_plan_cycle_binding,
     validate_trial_plan_transition,
 )
 from server.services.research_graph.trial_plan.sample_identity import (
@@ -62,6 +63,56 @@ def test_trial_plan_hash_is_canonical_and_source_free() -> None:
     }
     with pytest.raises(ValueError, match="private/source fields"):
         canonical_trial_plan(hidden_source)
+
+
+def test_trial_plan_v3_freezes_bounded_obligation_refs_without_changing_v2(
+) -> None:
+    legacy = trial_plan("a" * 64)
+    version_two = {**legacy, "schema_version": 2}
+    legacy_hash = trial_plan_hash(version_two)
+    version_three = {
+        **legacy,
+        "schema_version": 3,
+        "decision_contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "obligation_refs": ["obligation-liquidity", "obligation-timing"],
+    }
+
+    canonical = canonical_trial_plan(version_three)
+
+    assert canonical["obligation_refs"] == [
+        "obligation-liquidity",
+        "obligation-timing",
+    ]
+    assert trial_plan_hash(version_two) == legacy_hash == (
+        "1092d34f815edafbb6646f726ff93f9fc1a83e1944d66ee367f00d5f02500bff"
+    )
+    assert "obligation_refs" not in canonical_trial_plan(version_two)
+    with pytest.raises(
+        ValueError,
+        match=(
+            "missing fields: decision_contract_hash, methodology_hash, "
+            "obligation_refs"
+        ),
+    ):
+        canonical_trial_plan({**legacy, "schema_version": 3})
+    with pytest.raises(ValueError, match="must not contain duplicates"):
+        canonical_trial_plan({
+            **version_three,
+            "obligation_refs": ["obligation-liquidity"] * 2,
+        })
+    with pytest.raises(ValueError, match="at most 32"):
+        canonical_trial_plan({
+            **version_three,
+            "obligation_refs": [
+                f"obligation-{index}" for index in range(33)
+            ],
+        })
+    with pytest.raises(ValueError, match="unsupported fields"):
+        canonical_trial_plan({
+            **version_two,
+            "obligation_refs": ["obligation-liquidity"],
+        })
 
 
 def test_sample_identity_is_scope_based_and_role_neutral() -> None:
@@ -201,6 +252,71 @@ def test_transition_freezes_one_body_then_accepts_only_matching_hash() -> None:
         )
 
 
+def test_v3_obligation_binding_uses_current_cycle_projection() -> None:
+    base = trial_plan("a" * 64)
+    plan = {
+        **base,
+        "schema_version": 3,
+        "decision_contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "obligation_refs": ["obligation-plan"],
+    }
+    checkpoint = {
+        "contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "obligations": [{
+            "obligation_id": "obligation-plan",
+            "status": "open",
+        }],
+    }
+
+    validate_trial_plan_cycle_binding(
+        trial_plan=canonical_trial_plan(plan),
+        cycle_checkpoint=checkpoint,
+    )
+    with pytest.raises(ValueError, match="decision_contract_hash"):
+        validate_trial_plan_cycle_binding(
+            trial_plan=canonical_trial_plan({
+                **plan,
+                "decision_contract_hash": "3" * 64,
+            }),
+            cycle_checkpoint=checkpoint,
+        )
+    with pytest.raises(ValueError, match="methodology_hash"):
+        validate_trial_plan_cycle_binding(
+            trial_plan=canonical_trial_plan({
+                **plan,
+                "methodology_hash": "4" * 64,
+            }),
+            cycle_checkpoint=checkpoint,
+        )
+    with pytest.raises(ValueError, match="unknown or inactive"):
+        validate_trial_plan_cycle_binding(
+            trial_plan=canonical_trial_plan({
+                **plan,
+                "obligation_refs": ["obligation-unknown"],
+            }),
+            cycle_checkpoint=checkpoint,
+        )
+    with pytest.raises(ValueError, match="unknown or inactive"):
+        validate_trial_plan_cycle_binding(
+            trial_plan=canonical_trial_plan(plan),
+            cycle_checkpoint={
+                "contract_hash": "1" * 64,
+                "methodology_hash": "2" * 64,
+                "obligations": [{
+                    "obligation_id": "obligation-plan",
+                    "status": "discharged",
+                }],
+            },
+        )
+    with pytest.raises(ValueError, match="Research Cycle checkpoint"):
+        validate_trial_plan_cycle_binding(
+            trial_plan=canonical_trial_plan(plan),
+            cycle_checkpoint=None,
+        )
+
+
 def test_graph_transition_persists_one_canonical_plan_body(
     tmp_path,
     monkeypatch,
@@ -210,7 +326,13 @@ def test_graph_transition_persists_one_canonical_plan_body(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
     monkeypatch.setenv("AGENT_FLOW_DB_PATH", str(agent_flow_path))
     agent_flow.clear_store_cache()
-    plan = trial_plan("a" * 64)
+    plan = {
+        **trial_plan("a" * 64),
+        "schema_version": 3,
+        "decision_contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "obligation_refs": ["obligation-plan"],
+    }
     plan_hash = trial_plan_hash(plan)
     initialize_branch(path, "")
     initialize_graph_version(path)
@@ -282,6 +404,13 @@ def test_graph_transition_persists_one_canonical_plan_body(
     evidence = orjson.loads(trace["evidence_json"])
     assert str(branch["current_trial_plan_hash"]) == plan_hash
     assert evidence["trial_plan"] == canonical_trial_plan(plan)
+    assert evidence["trial_plan"]["obligation_refs"] == ["obligation-plan"]
+    assert evidence["trial_plan"]["decision_contract_hash"] == (
+        checkpoint["contract_hash"]
+    )
+    assert evidence["trial_plan"]["methodology_hash"] == (
+        checkpoint["methodology_hash"]
+    )
     assert evidence["trial_plan_hash"] == plan_hash
     assert evidence["research_cycle"]["bootstrap_checkpoint"] is True
     assert evidence["research_cycle_checkpoint"] == checkpoint

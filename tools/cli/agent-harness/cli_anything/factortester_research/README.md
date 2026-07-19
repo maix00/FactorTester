@@ -127,6 +127,10 @@ product/source scope, compact availability evidence, factor/data/timing
 semantics, product accounting, market-regime comparisons, selection and
 multiplicity history, costs, capacity, resource limits, sample roles, freeze
 proof, methodology, and graph branch. Availability alone is not sufficient.
+New plans use schema version 3: `decision_contract_hash`,
+`methodology_hash`, and bounded `obligation_refs` are validated against the
+current Research Cycle checkpoint. Older v1/v2 plans remain replayable but
+cannot claim this stronger obligation-binding assurance.
 Submitting a run may include `trial_binding` with:
 
 - `instance_id` and `branch_id`;

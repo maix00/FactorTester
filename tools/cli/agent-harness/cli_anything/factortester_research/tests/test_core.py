@@ -714,7 +714,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert reused["bindings"][0]["execution_approval_granted"] is True
     assert approved["gaps"] == []
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "af3c1c9d25b0e83f77cd151db9a2fdd3c105c90fa35ebe11eeed78a80bf1d9cb"
+        "6203c662787a488e067de35ba94ba0a0c5bc9f564d45c99cd6a1e92a7445ff0f"
     )
 
 

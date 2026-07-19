@@ -51,3 +51,40 @@ def validate_trial_plan_transition(
                 "changing TrialPlan hash requires a new immutable body"
             )
     return current_hash
+
+
+def validate_trial_plan_cycle_binding(
+    *,
+    trial_plan: dict[str, Any],
+    cycle_checkpoint: dict[str, Any] | None,
+) -> None:
+    """Bind schema-v3 plan identity to the current Research Cycle."""
+    plan = canonical_trial_plan(trial_plan)
+    if plan["schema_version"] < 3:
+        return
+    if not isinstance(cycle_checkpoint, dict):
+        raise ValueError(
+            "TrialPlan schema_version 3 requires a Research Cycle checkpoint"
+        )
+    if plan["decision_contract_hash"] != cycle_checkpoint.get(
+        "contract_hash"
+    ):
+        raise ValueError(
+            "TrialPlan decision_contract_hash does not match Research Cycle"
+        )
+    if plan["methodology_hash"] != cycle_checkpoint.get("methodology_hash"):
+        raise ValueError(
+            "TrialPlan methodology_hash does not match Research Cycle"
+        )
+    active_ids = {
+        str(item.get("obligation_id") or "")
+        for item in cycle_checkpoint.get("obligations") or []
+        if isinstance(item, dict)
+        and item.get("status") in {"open", "reopened", "serviced"}
+    }
+    invalid = sorted(set(plan["obligation_refs"]) - active_ids)
+    if invalid:
+        raise ValueError(
+            "TrialPlan obligation_refs are unknown or inactive: "
+            + ", ".join(invalid)
+        )

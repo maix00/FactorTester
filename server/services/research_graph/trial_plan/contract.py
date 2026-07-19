@@ -21,9 +21,10 @@ from .fields import (
 )
 
 
-TRIAL_PLAN_SCHEMA_VERSION = 2
-SUPPORTED_TRIAL_PLAN_SCHEMA_VERSIONS = frozenset({1, 2})
+TRIAL_PLAN_SCHEMA_VERSION = 3
+SUPPORTED_TRIAL_PLAN_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 MAX_TRIAL_PLAN_BYTES = 4096
+MAX_OBLIGATION_REFS = 32
 _SAMPLE_ROLES = frozenset({
     "diagnostic",
     "selection",
@@ -31,7 +32,7 @@ _SAMPLE_ROLES = frozenset({
     "confirmation",
     "holdout",
 })
-_ROOT_FIELDS = frozenset({
+_ROOT_FIELDS = {
     "schema_version",
     "trial_plan_id",
     "version",
@@ -44,20 +45,36 @@ _ROOT_FIELDS = frozenset({
     "stopping",
     "multiplicity",
     "criteria",
-})
+}
+_ROOT_FIELDS_BY_VERSION = {
+    1: frozenset(_ROOT_FIELDS),
+    2: frozenset(_ROOT_FIELDS),
+    3: frozenset({
+        *_ROOT_FIELDS,
+        "decision_contract_hash",
+        "methodology_hash",
+        "obligation_refs",
+    }),
+}
 
 
 def canonical_trial_plan(value: Any) -> dict[str, Any]:
     """Return one canonical, bounded TrialPlan or fail closed."""
-    plan = object_field(value, "trial_plan", fields=_ROOT_FIELDS)
+    if not isinstance(value, dict):
+        raise ValueError("trial_plan must be an object")
     schema_version = integer_field(
-        plan.get("schema_version"),
+        value.get("schema_version"),
         "trial_plan.schema_version",
     )
     if schema_version not in SUPPORTED_TRIAL_PLAN_SCHEMA_VERSIONS:
         raise ValueError(
             f"unsupported TrialPlan schema_version: {schema_version}"
         )
+    plan = object_field(
+        value,
+        "trial_plan",
+        fields=_ROOT_FIELDS_BY_VERSION[schema_version],
+    )
     normalized = {
         "schema_version": schema_version,
         "trial_plan_id": identifier_field(
@@ -98,6 +115,26 @@ def canonical_trial_plan(value: Any) -> dict[str, Any]:
         "multiplicity": _multiplicity(plan.get("multiplicity")),
         "criteria": _criteria(plan.get("criteria")),
     })
+    if schema_version >= 3:
+        normalized["decision_contract_hash"] = sha256_field(
+            plan.get("decision_contract_hash"),
+            "trial_plan.decision_contract_hash",
+        )
+        normalized["methodology_hash"] = sha256_field(
+            plan.get("methodology_hash"),
+            "trial_plan.methodology_hash",
+        )
+        obligation_refs = identifier_list(
+            plan.get("obligation_refs"),
+            "trial_plan.obligation_refs",
+            allow_empty=False,
+        )
+        if len(obligation_refs) > MAX_OBLIGATION_REFS:
+            raise ValueError(
+                "trial_plan.obligation_refs must contain at most "
+                f"{MAX_OBLIGATION_REFS} items"
+            )
+        normalized["obligation_refs"] = obligation_refs
     encoded = _encode(normalized)
     if len(encoded) > MAX_TRIAL_PLAN_BYTES:
         raise ValueError(

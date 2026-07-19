@@ -42,6 +42,7 @@ from server.services.research_graph.protocol import (
 )
 from server.services.research_graph.trial_plan.transition import (
     prepare_trial_plan_evidence,
+    validate_trial_plan_cycle_binding,
     validate_trial_plan_transition,
 )
 from server.services.research_graph.versions import load_graph_from_conn
@@ -215,6 +216,11 @@ def advance_graph_branch(
         ):
             raise ValueError(
                 "research_cycle TrialPlan hash does not match branch"
+            )
+        if has_trial_plan_body:
+            validate_trial_plan_cycle_binding(
+                trial_plan=prepared_evidence["trial_plan"],
+                cycle_checkpoint=cycle_checkpoint,
             )
         trace_evidence = deepcopy(persisted_evidence)
         trace_evidence.pop("research_cycle", None)
