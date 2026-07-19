@@ -100,6 +100,12 @@ def resolve_capability_ids(
             })
             continue
         implementation = candidates[0]
+        requires_execution_approval = bool(
+            implementation.get("requires_execution_approval", False)
+        )
+        explicitly_granted = (
+            implementation["implementation_id"] in grants
+        )
         source_state = source_states.get(
             str(implementation["implementation_id"]),
             {"status": "internal"},
@@ -112,8 +118,21 @@ def resolve_capability_ids(
             "kind": implementation["kind"],
             "execution_mode": implementation["execution_mode"],
             "execution_approval_granted": (
+                not requires_execution_approval or explicitly_granted
+            ),
+            "local_execution_approval_required": (
                 implementation.get("kind") == "skill"
-                or implementation["implementation_id"] in grants
+                and requires_execution_approval
+                and not explicitly_granted
+            ),
+            "execution_approval_source": (
+                "explicit_grant"
+                if explicitly_granted
+                else (
+                    "catalog_default"
+                    if not requires_execution_approval
+                    else "none"
+                )
             ),
             **({
                 "source_fingerprint": source_state["observed_sha256"],

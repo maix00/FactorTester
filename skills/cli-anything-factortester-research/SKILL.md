@@ -147,9 +147,14 @@ skill names.
 
 1. Match the current description to an already loaded, fingerprint-valid skill.
 2. If none matches, discover metadata without reading the skill body.
-3. Obtain approval in the Agent conversation before first execution.
-4. Load only the selected `SKILL.md`.
-5. Record actual use locally with `skill-usage record`, including provider,
+3. Treat a capability binding as discovery, not execution authority. If it
+   reports `local_execution_approval_required=true`, obtain approval in the
+   Agent conversation and re-resolve with that implementation grant. Do not
+   load or execute until `execution_approval_granted=true`.
+4. A fingerprint-valid local usage record may authorize reuse; changed content
+   requires a new approval.
+5. Load only the selected `SKILL.md`.
+6. Record actual use locally with `skill-usage record`, including provider,
    version, fingerprint, approval reference, `loaded|reused`, rationale, and
    token counts.
 

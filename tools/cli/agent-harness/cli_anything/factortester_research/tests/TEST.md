@@ -133,8 +133,9 @@ They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.
 Capability-resolution tests verify that registered, approved, whole-bundle
-fingerprint-valid Skill implementations receive default local authorization,
-while changed source still fails closed; they also keep equity-only
+fingerprint-valid Skill implementations may be bound without rediscovery but
+cannot self-authorize execution: a local conversation grant is required before
+use, and changed source always fails closed. They also keep equity-only
 microstructure guidance out of China-futures resolution and bind the built-in
 TrialPlan/RunSpec trial ledger plus reviewed false-discovery guidance.
 

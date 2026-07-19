@@ -482,7 +482,7 @@ def test_trial_family_capabilities_are_triggered_only_when_applicable() -> None:
     }
 
 
-def test_reviewed_skill_may_use_default_local_authorization() -> None:
+def test_skill_binding_does_not_self_authorize_execution() -> None:
     graph = build_draft_graph()
     graph["nodes"] = [{
         "node_id": "commodity_hypothesis",
@@ -514,9 +514,14 @@ def test_reviewed_skill_may_use_default_local_authorization() -> None:
     assert resolved["bindings"][0]["implementation_id"] == (
         "vibe.commodity-analysis"
     )
-    assert resolved["bindings"][0]["execution_approval_granted"] is True
+    assert resolved["bindings"][0]["execution_approval_granted"] is False
+    assert resolved["bindings"][0]["local_execution_approval_required"] is True
+    assert resolved["bindings"][0]["execution_approval_source"] == "none"
     assert granted["bindings"][0]["implementation_id"] == (
         "vibe.commodity-analysis"
+    )
+    assert granted["bindings"][0]["execution_approval_source"] == (
+        "explicit_grant"
     )
 
 
@@ -587,7 +592,8 @@ def test_validation_design_binds_reviewed_false_discovery_guidance() -> None:
         "multiple-testing.false-discovery-control"
     )
     assert binding["implementation_id"] == "local.quantitative-research"
-    assert binding["execution_approval_granted"] is True
+    assert binding["execution_approval_granted"] is False
+    assert binding["local_execution_approval_required"] is True
     assert len(binding["source_fingerprint"]) == 64
 
 
@@ -734,8 +740,10 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     )
 
     assert reused["gaps"] == []
-    assert reused["bindings"][0]["execution_approval_granted"] is True
+    assert reused["bindings"][0]["execution_approval_granted"] is False
+    assert reused["bindings"][0]["local_execution_approval_required"] is True
     assert approved["gaps"] == []
+    assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
         "3f1a4baec84b980b4326fc9cc865b6c669146ed5fa076884c6eeb83f8d5e0702"
     )
@@ -789,6 +797,11 @@ def test_reference_change_invalidates_whole_skill_manifest(
             },
         },
     }
+    unapproved = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="equities",
+    )
     approved = resolve_graph_capabilities(
         graph,
         registry,
@@ -804,7 +817,17 @@ def test_reference_change_invalidates_whole_skill_manifest(
         approved_implementation_ids={"bundle.skill"},
     )
 
+    assert unapproved["gaps"] == []
+    assert unapproved["bindings"][0]["execution_approval_granted"] is False
+    assert unapproved["bindings"][0]["local_execution_approval_required"] is True
     assert approved["bindings"][0]["source_fingerprint"] == before
+    assert approved["bindings"][0]["execution_approval_granted"] is True
+    assert approved["bindings"][0][
+        "local_execution_approval_required"
+    ] is False
+    assert approved["bindings"][0]["execution_approval_source"] == (
+        "explicit_grant"
+    )
     assert changed["bindings"] == []
     assert changed["gaps"][0]["reason"] == "provider_fingerprint_mismatch"
 
