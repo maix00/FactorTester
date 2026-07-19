@@ -756,6 +756,101 @@
           "source_path": "agent/src/skills/research-discipline/SKILL.md"
         }
       ]
+    },
+    {
+      "capability_id": "research-obligation.discover",
+      "industry_semantics": "Derive material, falsifiable, factor-specific Verification Obligations from the current Decision Contract, Claim state, evidence boundary, and first-principles alternatives without strengthening a Claim.",
+      "when_to_use": ["when a Contract or Claim is first initialized", "when evidence or semantic review exposes a material untracked question"],
+      "preconditions": ["current Decision Contract and compact Claim/obligation checkpoint are available"],
+      "prohibitions": ["do not apply a universal checklist", "do not convert a new question into empirical Claim support"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-trial.synthesize",
+      "industry_semantics": "Select an actionable Verification Obligation and freeze a TrialPlan whose outcomes, samples, alternatives, multiplicity, stopping rules, identities, and resource boundary can resolve it.",
+      "when_to_use": ["when an open material obligation has a feasible authoritative test"],
+      "preconditions": ["the obligation and current Contract scope are known", "required backend capability is available"],
+      "prohibitions": ["do not create a TrialPlan for every obligation", "do not select outcome rules after seeing results"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-evidence.adjudicate",
+      "industry_semantics": "Interpret factual EvidenceEnvelope v2 through a bounded Decision Warrant and propose atomic paired Claim-evidence and obligation deltas under the required authority.",
+      "when_to_use": ["when current factual evidence may change Claim or obligation state"],
+      "preconditions": ["current v2 evidence, checkpoint, Contract, TrialPlan when applicable, and methodology identities are available"],
+      "prohibitions": ["do not treat an EvidenceEnvelope as a decision", "do not read or reuse legacy EvidenceEnvelope v1"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-exhaustion.assess",
+      "industry_semantics": "Assess whether the bounded TrialPlan and obligation frontier is exhausted, blocked, resource-stopped, unsupported, or decision-ready, and require an independent closure challenge with re-entry predicates.",
+      "when_to_use": ["when no further meaningful obligation or TrialPlan is currently proposed"],
+      "preconditions": ["current projection hashes, attempted trials, remaining unknowns, discovery lenses, and resource boundary are available"],
+      "prohibitions": ["do not equate having no idea with exhaustion", "do not close with unresolved decision-blocking obligations"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-methodology.impact",
+      "industry_semantics": "Describe a provider-neutral methodology change, identify affected Decision Contracts deterministically, estimate token and backend cost, and propose selective reopening with validation and rollback evidence.",
+      "when_to_use": ["when repeated omissions, new evidence, statistical guidance, Graph semantics, or backend corrections may change the research method"],
+      "preconditions": ["semantic diff, evidence, counterexamples, validation, compatibility, and rollback target are available"],
+      "prohibitions": ["do not persist concrete Skill identity on the server", "do not stop unaffected branches or Jobs"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
     }
   ]
 }

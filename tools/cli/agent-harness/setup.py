@@ -13,6 +13,10 @@ setup(
         "cli_anything.factortester_research": [
             "resources/*.json",
             "skills/*.md",
+            "skills/research-obligation-cycle/*.md",
+            "skills/research-obligation-cycle/agents/*.yaml",
+            "skills/research-obligation-cycle/references/*.md",
+            "skills/research-obligation-cycle/scripts/*.py",
         ],
     },
     install_requires=["click>=8.0"],

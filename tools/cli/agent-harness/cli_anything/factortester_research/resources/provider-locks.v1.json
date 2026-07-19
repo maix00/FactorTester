@@ -6,6 +6,9 @@
       "root_env": "VIBE_TRADING_ROOT",
       "root_hint": "/Users/maxdeux/Documents/Vibe-Trading-Integration/repos/Vibe-Trading",
       "reviewed_revision": "e494ed06d75a290818be3d4e7a5133484b4d8d7e"
+    },
+    "factortester-research-package": {
+      "root_package": "cli_anything.factortester_research"
     }
   },
   "implementations": {
@@ -114,6 +117,21 @@
     "vibe.research-discipline": {
       "source_path": "agent/src/skills/research-discipline/SKILL.md",
       "sha256": "be1a1297dbb3eeecbed1e8b3fd6898c031c30a2d79ba7a422480a6320c8fd89d"
+    },
+    "local.research-obligation-cycle": {
+      "source_paths": [
+        "skills/research-obligation-cycle/SKILL.md",
+        "skills/research-obligation-cycle/agents/openai.yaml",
+        "skills/research-obligation-cycle/references/evidence-adjudication.md",
+        "skills/research-obligation-cycle/references/methodology-impact.md",
+        "skills/research-obligation-cycle/references/obligation-discovery.md",
+        "skills/research-obligation-cycle/references/search-exhaustion.md",
+        "skills/research-obligation-cycle/references/trial-synthesis.md",
+        "skills/research-obligation-cycle/scripts/_proposal_validation.py",
+        "skills/research-obligation-cycle/scripts/validate-adjudication-proposal.py",
+        "skills/research-obligation-cycle/scripts/validate-obligation-proposal.py"
+      ],
+      "sha256": "a91fd64b149fd6a05aa3aececafa9703885846e94c42a701c091da78bcc6fc3d"
     }
   }
 }

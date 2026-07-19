@@ -53,10 +53,23 @@ artifact contracts produced by the workflow.
 - Preserve gap and factor-improvement state transitions.
 - Keep selection slices separate from OOS annotation.
 
+### Research Obligation Cycle Skill
+
+- Package one canonical and installed reference Skill with five progressively
+  loaded modes.
+- Resolve its five capability descriptions through one exact whole-bundle
+  manifest fingerprint.
+- Require conversation approval before the first execution and reuse only the
+  unchanged approved fingerprint.
+- Validate obligation-discovery and paired-adjudication proposals with
+  standalone deterministic scripts.
+- Reject server proposal payloads containing concrete Skill identity.
+- Keep canonical and packaged Skill trees byte-identical.
+
 ### Packaging
 
 - Keep canonical and packaged `SKILL.md` bytes identical.
-- Keep every new production module below 500 lines.
+- Keep every new production module below 300 lines.
 - Preserve the original Click command names, options, help, and JSON shapes
   after command-domain extraction.
 
@@ -139,10 +152,10 @@ CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
 
 [_resolve_cli] Using installed command:
   /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
-collected 43 items
+collected 45 items
 
 test_core.py
-  30 passed
+  32 passed
 test_full_e2e.py::TestCLISubprocess
   12 passed
 test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
@@ -152,7 +165,7 @@ test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
 
-43 passed, 123 warnings in 12.70s
+45 passed, 123 warnings
 ```
 
 All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in

@@ -1,7 +1,7 @@
 # Research Obligation Cycle Implementation Work Package
 
 Status: implementation in progress; Grill 143 semantics accepted; Batches 0
-and 1 are complete and Batch 2 is at its release gate.
+through 3 are complete and Batch 4 is next.
 
 Baseline: `56d36913` on `fix/issue-140-active-graph-agentflow`.
 
@@ -593,5 +593,40 @@ Release evidence on 2026-07-19:
   SELECT, zero writes, no history scan, and under the existing 6000-byte
   packet ceiling;
 - routine transition remains one branch UPDATE plus one trace INSERT;
+- all changed production modules remain below 300 lines;
+- `git diff --check` is clean.
+
+## Batch 3 release evidence
+
+Batch 3 adds one provider-neutral, progressively loaded local reference Skill
+and maps five semantic capability descriptions to its exact whole-bundle
+manifest. The server still stores neither Skill identity nor Skill content.
+The local Harness requires approval before first execution, reuses only the
+same approved fingerprint, and fails closed when any routed reference or
+validator changes.
+
+Fresh-Agent forward tests received only bounded fixtures. One Agent exercised
+discovery, TrialPlan synthesis, and evidence adjudication and loaded exactly
+the router plus those three selected references. A second Agent exercised
+search exhaustion and methodology impact and loaded exactly the router plus
+those two references. Neither read this work package, server source, tests,
+legacy evidence, or an unselected mode. Their ambiguity findings tightened
+checkpoint ownership, missing-input gaps, Claim no-ops, obligation-state
+vocabulary, and bounded-closure disposition selection without adding another
+runtime object.
+
+Release evidence on 2026-07-19:
+
+- canonical and packaged Skill trees are byte-identical across 10 files;
+- both trees pass `skill-creator` validation;
+- the whole-bundle manifest is
+  `a91fd64b149fd6a05aa3aececafa9703885846e94c42a701c091da78bcc6fc3d`;
+- Harness plus Skill conformance tests: 48 passed;
+- forced-installed CLI subprocess tests: 12 passed;
+- Pyright on changed production and validation scripts: zero errors and
+  warnings;
+- a clean wheel contains all 10 Skill files, and an isolated `python -S`
+  import recomputes the same manifest without source-tree or editable-install
+  fallback;
 - all changed production modules remain below 300 lines;
 - `git diff --check` is clean.

@@ -37,6 +37,9 @@ from cli_anything.factortester_research.core.session import (
     resolve_gap,
 )
 from cli_anything.factortester_research.core.slices import default_factor_validation_plan
+from cli_anything.factortester_research.core.capability_sources import (
+    source_manifest_sha256,
+)
 
 
 HARNESS_ROOT = Path(__file__).resolve().parents[3]
@@ -490,6 +493,105 @@ def test_external_provider_change_invalidates_cache_and_fails_closed(
     assert changed["bindings"] == []
     assert changed["gaps"][0]["reason"] == "provider_fingerprint_mismatch"
     assert changed["gaps"][0]["expected_sha256"] == approved_hash
+
+
+def test_reference_cycle_skill_requires_exact_manifest_approval() -> None:
+    graph = {
+        "entry_node": "discover",
+        "nodes": [{
+            "node_id": "discover",
+            "required_capabilities": ["research-obligation.discover"],
+        }],
+        "edges": [],
+    }
+    registry = load_builtin_capability_registry()
+
+    blocked = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="china_futures",
+    )
+    approved = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="china_futures",
+        approved_implementation_ids={"local.research-obligation-cycle"},
+    )
+
+    assert blocked["bindings"] == []
+    assert blocked["gaps"][0]["reason"] == "execution_approval_required"
+    assert approved["gaps"] == []
+    assert approved["bindings"][0]["source_fingerprint"] == (
+        "a91fd64b149fd6a05aa3aececafa9703885846e94c42a701c091da78bcc6fc3d"
+    )
+
+
+def test_reference_change_invalidates_whole_skill_manifest(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "SKILL.md").write_text("# Router\n", encoding="utf-8")
+    (tmp_path / "mode.md").write_text("# Mode v1\n", encoding="utf-8")
+    paths = ["SKILL.md", "mode.md"]
+    before = source_manifest_sha256(tmp_path, paths)
+    graph = {
+        "entry_node": "research",
+        "nodes": [{
+            "node_id": "research",
+            "required_capabilities": ["research.bundle"],
+        }],
+        "edges": [],
+    }
+    registry = {
+        "schema_version": 1,
+        "catalog_id": "bundle-fingerprint-test",
+        "capabilities": [{
+            "capability_id": "research.bundle",
+            "industry_semantics": "Use one approved research bundle.",
+            "when_to_use": ["when requested"],
+            "preconditions": [],
+            "prohibitions": [],
+            "implementations": [{
+                "implementation_id": "bundle.skill",
+                "provider": "bundle",
+                "kind": "skill",
+                "approval_status": "approved",
+                "execution_mode": "guidance_only",
+                "requires_execution_approval": True,
+                "product_scopes": ["all"],
+                "source_path": "SKILL.md",
+            }],
+        }],
+        "provider_lock": {
+            "schema_version": 1,
+            "providers": {
+                "bundle": {"root_hint": str(tmp_path)},
+            },
+            "implementations": {
+                "bundle.skill": {
+                    "source_paths": paths,
+                    "sha256": before,
+                },
+            },
+        },
+    }
+    approved = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="equities",
+        approved_implementation_ids={"bundle.skill"},
+    )
+
+    (tmp_path / "mode.md").write_text("# Mode v2\n", encoding="utf-8")
+    changed = resolve_graph_capabilities(
+        graph,
+        registry,
+        product_group="equities",
+        approved_implementation_ids={"bundle.skill"},
+    )
+
+    assert approved["bindings"][0]["source_fingerprint"] == before
+    assert changed["bindings"] == []
+    assert changed["gaps"][0]["reason"] == "provider_fingerprint_mismatch"
 
 
 def test_model_identity_does_not_change_deterministic_resolution() -> None:
