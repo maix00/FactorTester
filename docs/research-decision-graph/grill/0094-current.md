@@ -1759,3 +1759,28 @@ once, and restores the previously accepted order:
 This addendum introduces no new semantic choice. It makes decision 142
 consistent with accepted decisions 118 and 124–141 and supplies the deletion,
 conversion, test, and rollback coverage required before implementation.
+
+## 143 — Research Obligation Cycle
+
+**Final resolution.** Accepted through Grill 143.6 and the subsequent legacy
+access refinement.
+
+Factor research uses scoped Research Claims, extensible Verification
+Obligations, factual Evidence Envelopes, paired atomic adjudication, and
+defeasible bounded closure. These semantics reuse the existing Work
+Package/Hypothesis Branch, graph trace, Maintenance Case, capability, and local
+Skill-audit owners. They do not create a second graph or dedicated persistence
+services.
+
+Legacy Evidence Envelopes are privileged historical audit records and are
+unavailable to Research Agents, Reviewers, Skills, and ordinary Agent
+retrieval. Deterministic compatibility sees only bounded
+version/hash/eligibility metadata; reopened work creates new current-schema
+evidence.
+
+The complete question-by-question record, source qualifications,
+counterexamples, accepted ownership, and implementation boundary are preserved
+in
+[`0143-cognitive-obligation-cycle.md`](0143-cognitive-obligation-cycle.md).
+Delivery batches and gates are defined in
+[`research-obligation-cycle-work-package.md`](../research-obligation-cycle-work-package.md).

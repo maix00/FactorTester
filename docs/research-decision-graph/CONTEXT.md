@@ -38,8 +38,48 @@ _Avoid_: New receipt table, duplicate write, full log, research conclusion
 **Evidence Envelope**:
 The validated bounded schema stored in an existing append-only graph trace's
 `evidence_json`. It references canonical Job/assurance facts and binds required
-evidence, trial counts, stopping, gaps, and decision rationale.
+evidence, trial counts, stopping facts, metrics, conflicts, and limitations.
+It does not authoritatively interpret a Claim or discharge an obligation.
 _Avoid_: Second event store, parent-hash subsystem, artifact container
+
+**Research Decision Contract**:
+A versioned normalized view over one Work Package and its Hypothesis Branch
+that fixes the decision, permitted-use boundary, research scope, search and
+coverage design, applicable methodology, and decision-blocking obligation
+policy. It is not a separate persistence owner.
+_Avoid_: Universal truth claim, new contract table, token budget
+
+**Research Claim**:
+A falsifiable, scope-bound statement whose current evidence interpretation is
+maintained in the Hypothesis Branch projection.
+_Avoid_: Factor is valid, narrative mechanism, Evidence Envelope
+
+**Verification Obligation**:
+A scoped, revisable epistemic responsibility tied to a Research Claim,
+decision, assumption, alternative explanation, failure condition, or transfer
+boundary. The accepted current projection is branch-local; immutable proposals
+and changes remain in graph trace.
+_Avoid_: Workflow stage, hard-coded checklist, missing machine field
+
+**Adjudication Proposal**:
+A reviewable proposal containing a paired Claim-evidence delta and obligation
+delta, either of which may explicitly be a no-op, plus a compact Decision
+Warrant and evidence references.
+_Avoid_: Hidden chain-of-thought, direct state mutation, backtest conclusion
+
+**Adjudication Decision**:
+The authority-bearing accept, reject, or revise disposition that applies the
+paired deltas atomically. Evidence Envelopes and Agent assertions alone cannot
+change the accepted projection.
+_Avoid_: Reviewer for every transition, Evidence Envelope status
+
+**Bounded Closure**:
+A defeasible, Research-Decision-Contract-scoped pause reached when
+decision-blocking obligations are resolved or explicitly bounded, declared
+coverage/stopping rules are satisfied, and no currently justifiable admissible
+positive-information-value TrialPlan remains. It carries limitations and
+re-entry predicates.
+_Avoid_: Research is complete, metric threshold, universal factor validity
 
 **Provisional Memory**:
 Local, reviewable process evidence from one research path that has not been
@@ -47,9 +87,10 @@ promoted into a reusable graph rule.
 _Avoid_: Active edge, global memory, chat history
 
 **Factor Evidence Status**:
-A scope-bound statement that a factor is untested, evaluated, supported,
-contradicted, inconclusive, or superseded for a specific immutable
-configuration and research scope.
+A reader-facing projection of bounded Research Claim evidence that a factor is
+untested, evaluated, supported, contradicted, inconclusive, or superseded for a
+specific immutable configuration and research scope. It is not independently
+mutable.
 _Avoid_: Valid factor, invalid factor, `$Rev`
 
 **Market State Snapshot**:
@@ -126,8 +167,17 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 - The persisted graph branch is the Hypothesis Branch owner. It contains
   research/statistical state, not token, compute, concurrency, fee, or
   reviewer-usage aggregates.
+- A **Research Decision Contract** is derived from one Work Package and its
+  Hypothesis Branch; it adds no persistence owner or operational budget.
+- A versioned obligation-discovery method proposes **Research Claims** and
+  **Verification Obligations** from the Contract and current accepted
+  projection. The inventory is extensible rather than a closed checklist.
+- Machine-invalid identity, chronology, scope, or timing remains a deterministic
+  guard instead of being inflated into a Verification Obligation.
 - A **Hypothesis Branch** binds one current immutable **Trial Plan** before
   selection-relevant outcome inspection.
+- A **Trial Plan** is generated only for selected actionable obligations; not
+  every obligation requires a backend run.
 - The **Factor Research Graph** requires and evaluates a **Trial Plan**
   reference but does not hard-code that plan's product- or hypothesis-specific
   numeric thresholds into graph topology.
@@ -222,6 +272,27 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 - A graph transition or research decision stores one validated
   **Evidence Envelope** inside its existing graph trace without copying full
   stdout, metrics, or artifacts.
+- An **Evidence Envelope** records facts and never directly changes Claim or
+  obligation state.
+- Legacy Evidence Envelopes are audit-retained but are not available to
+  Research Agents, Reviewers, Skills, or ordinary Agent retrieval. A
+  deterministic compatibility path may inspect only the minimum
+  version/hash/eligibility metadata needed to mark them legacy-ineligible.
+  Reopened research produces new current-schema evidence.
+- One accepted **Adjudication Decision** applies its proposal's Claim-evidence
+  and obligation deltas atomically to separate replayable projections. Routine
+  deterministic or exactly preregistered judgments need no reviewer; material
+  semantic, post-hoc, non-standard, or conflicting judgments require one
+  relevant independent reviewer.
+- **Bounded Closure** is recorded as one compact trace checkpoint plus a current
+  branch disposition/hash. It requires one compact independent closure
+  challenge and does not create a closure service/table.
+- New evidence, scope, Factor versions, Graph/methodology, product rules,
+  operators, or backend semantics reopen only Contracts matched by explicit
+  impact or re-entry predicates. Unrelated jobs and branches continue.
+- The server stores methodology/capability descriptions and bounded semantic
+  change proposals, never concrete Skill identity or body. The local audit
+  records the actual progressively loaded reference Skill, approval, and use.
 - An affected **Hypothesis Branch** emits at most one deduplicated
   **Capability Gap** for the same gap hash.
 - A **Capability Gap** creates a **Maintenance Case** outside the

@@ -100,6 +100,24 @@ are stable enough for review, while a release receipt pins the final commit.
   Characteristics Nonparametrically,” supporting nonlinear characteristic
   transformations while requiring disciplined validation:
   [paper](https://ewfs.org/wp-content/uploads/2018/02/Freyberer-Dissecting-Characteristics-Nonparametrically-137.pdf).
+- **S-COGDEBT** — Meng, “Cognitive Debt: AI as Intellectual Leverage and the
+  Dynamics of Systemic Fragility,” a preliminary conceptual account of
+  unverified reasoning obligations and AI-amplified fragility; its empirical
+  magnitude remains an open question:
+  [arXiv](https://arxiv.org/abs/2606.15078).
+- **S-FACTORMAD** — FactorMAD, a bounded multi-Agent factor-discovery design
+  reference. Open primary sources do not expose enough implementation and
+  statistical-isolation detail to treat it as an approved validation method:
+  [DOI](https://doi.org/10.1145/3768292.3770377).
+- **S-SHAP-LIMITS** — Kumar et al., “Problems with Shapley-value-based
+  explanations as feature importance measures,” supporting the boundary
+  between attribution and causal/mechanistic understanding:
+  [PMLR](https://proceedings.mlr.press/v119/kumar20e.html).
+- **S-ALPHA-CROWDING** — Khandani and Lo, “What Happened to the Quants in
+  August 2007? Evidence from Factors and Transactions Data,” used only for
+  bounded liquidity/crowding considerations rather than a universal
+  factor-research requirement:
+  [NBER](https://www.nber.org/papers/w14465).
 
 These papers support statistical principles, not exact FactorTester thresholds
 or graph edges. Numeric gates require product-specific validation and may not
@@ -156,6 +174,7 @@ be inferred from a citation alone.
 | 140 | D-MAP, D-PLAN, C-GRAPH | A backend anomaly already has canonical Job, conversation, commit, and test refs. One compact case tracks dedup/claim/status; no copied bodies, per-kind queue, event table, unchanged-state write, or UI approval is required. |
 | 141 | D-MAP, D-PLAN, C-GRAPH, I-LANGGRAPH, I-OPENAI-HITL, I-TEMPORAL, I-INTOTO, I-NIST-RMF | Owner-pinned transfer prevents double spending; plan-bearing trace retention prevents orphaned Run hashes. Runtime uses checkpoint/hash/AuthN-Z, high-risk effects use exact-hash single-use conversation approval, and signed attestation is reserved for real cross-boundary supply chains. |
 | 142 | D-MAP, D-PLAN, C-GRAPH, D-IDENTITY, I-LANGGRAPH, I-OPENAI-HITL, I-TEMPORAL | Current activation spans six gate/version reads plus authorization consumption, active-copy insertion, and pointer update. Target activation reads one immutable version and one satisfied Maintenance Case then updates one pointer; final ownership is six Graph tables plus two Agent Flow tables. |
+| 143 | D-MAP, D-PLAN, C-GRAPH, C-HARNESS, S-COGDEBT, S-FACTORMAD, S-SHAP-LIMITS, S-MHT, S-ML, S-ALPHA-CROWDING | A favorable exploratory backtest may narrow a Claim while opening confirmatory or transfer obligations; a failed preregistered test can discharge the test obligation while contradicting the Claim. Both changes require one paired adjudication. Closure records bounded search coverage and a reviewer challenge, never universal truth. New method/evidence reopens only matched Contracts, without a second graph, full-history context, or new per-concept tables. |
 
 ## Release-time evidence rule
 

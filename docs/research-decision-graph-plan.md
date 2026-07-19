@@ -1519,6 +1519,20 @@ merge, or push the branch.
   `0 errors, 0 warnings`; both canonical and packaged Skills pass
   `skill-creator` validation and are byte-identical.
 
+## Decision 143 follow-on
+
+The accepted Research Obligation Cycle is a follow-on version, not a
+retroactive amendment to the completed issue-140 cutover. Its canonical
+semantics are indexed as Grill decision 143 and its independently committed
+schema/conformance, shadow replay, local reference Skill, Harness, Graph
+shadow, and measured activation batches are defined in
+[`research-obligation-cycle-work-package.md`](research-decision-graph/research-obligation-cycle-work-package.md).
+
+Legacy Evidence Envelopes are excluded from every Agent-facing retrieval and
+context surface. Deterministic compatibility may inspect only bounded
+version/hash/eligibility metadata; reopened research must create new
+current-schema evidence.
+
 ## Deferred Decisions
 
 These are empirical engineering questions for agents to resolve, not questions
