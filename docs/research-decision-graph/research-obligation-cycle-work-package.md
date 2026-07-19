@@ -423,3 +423,28 @@ release gates; they are not invented in documentation.
 - every commit message references the eventual issue/work-package identifier;
 - after each commit, report changed owners, tests, token/I/O evidence, rollback
   target, and remaining risk.
+
+## Overall repository release remains required
+
+Completing this work package does not complete the server/client release. The
+accepted [`server-client-release-plan.md`](../server-client-release-plan.md)
+still requires:
+
+1. a secure repository topology that no longer exposes server implementation
+   through a public history;
+2. the reviewed integration chain into the stable branch;
+3. stable-branch migration from `master` to `main`;
+4. checksummed macOS and Python client artifacts published from `main`;
+5. clean installation from the real GitHub Release with database, login,
+   macOS UI, Vibe UI, and bounded-research recovery evidence;
+6. verification that the remote default is `main`;
+7. remote branch and local worktree cleanup only after the published release
+   and rollback path have been verified.
+
+The recommended secure topology is to make the existing FactorTester
+repository the private server repository and publish a separate history-clean
+public client repository. Making the current repository private reduces
+exposure but does not itself create a valid public client distribution.
+
+As last verified on 2026-07-19, `maix00/FactorTester` remains `PUBLIC` with
+default branch `master`; this is an unresolved product-release blocker.
