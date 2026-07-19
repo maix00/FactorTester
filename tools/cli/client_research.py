@@ -121,6 +121,27 @@ class ResearchClientMixin(ClientMixinBase):
             payload["trial_binding"] = trial_binding
         return self._expect_success(self.session.post("/api/runs", payload))
 
+    def preview_run(
+        self,
+        workspace_id: str,
+        configuration_revision: int,
+        *,
+        analyses: list[str],
+        retention_mode: str = "summary",
+        step_mode: bool = False,
+    ) -> dict[str, Any]:
+        """Derive the exact frozen RunSpec identity without creating a run."""
+        payload = {
+            "workspace_id": workspace_id,
+            "configuration_revision": configuration_revision,
+            "analyses": analyses,
+            "retention_mode": retention_mode,
+            "step_mode": bool(step_mode),
+        }
+        return self._expect_success(
+            self.session.post("/api/runs/preview", payload)
+        )
+
     def get_run(self, run_id: str) -> dict[str, Any]:
         data = self._expect_success(self.session.get(f"/api/runs/{run_id}"))
         return dict(data.get("run") or {})

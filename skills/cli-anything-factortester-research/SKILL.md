@@ -106,9 +106,15 @@ hash must be a planned member. Child Jobs inherit the binding through `run_id`.
 Create a new TrialPlan version instead of mutating the frozen body.
 
 ```bash
+factortester run preview --analysis ic
 factortester run submit --analysis ic \
   --trial-binding-file trial-binding.json
 ```
+
+Call `run preview` first. It performs the same server-side configuration and
+product-selection freeze as submission but creates no ResearchRun or Job.
+Use its `run_spec_hash` in the immutable TrialPlan, then submit with the same
+workspace revision and options.
 
 ## Load skills progressively
 

@@ -147,7 +147,7 @@ def create_run(
 ) -> dict[str, Any]:
     run_id = uuid.uuid4().hex
     raw = orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
-    run_spec_hash = hashlib.sha256(raw).hexdigest()
+    run_spec_hash = hash_run_spec(run_spec)
     binding = _normalize_trial_binding(
         trial_binding,
         run_spec_hash=run_spec_hash,
@@ -212,6 +212,13 @@ def create_run(
         ),
         "created_at": created_at,
     }
+
+
+def hash_run_spec(run_spec: dict[str, Any]) -> str:
+    """Return the canonical immutable identity used by ResearchRun."""
+    return hashlib.sha256(
+        orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
+    ).hexdigest()
 
 
 def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:

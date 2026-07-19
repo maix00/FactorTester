@@ -126,6 +126,9 @@ It proves:
 Companion server tests, outside this Harness package suite, validate the
 TrialPlan schema, transition freeze rules, TrialPlan-to-ResearchRun binding,
 Job inheritance through `run_id`, retention, and exact-hash rollback gates.
+They also verify that `run preview` derives the exact immutable RunSpec hash
+through the same server-side freeze path without creating a ResearchRun or Job,
+so an Agent can preregister a TrialPlan before submission.
 
 ## Commands
 

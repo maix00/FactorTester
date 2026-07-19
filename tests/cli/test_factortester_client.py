@@ -71,6 +71,28 @@ def fake_server() -> Iterator[str]:
         }
         return jsonify(success=True, run_id="run-1", jobs=[{"job_id": "job-1", "kind": "ic"}]), 202
 
+    @app.post("/api/runs/preview")
+    def preview_run():
+        payload = request.get_json()
+        assert payload == {
+            "workspace_id": "workspace-1",
+            "configuration_revision": 1,
+            "analyses": ["ic"],
+            "retention_mode": "summary",
+            "step_mode": False,
+        }
+        return jsonify(
+            success=True,
+            run_spec_hash="a" * 64,
+            run_spec_version=1,
+            configuration_id="configuration-1",
+            configuration_revision=1,
+            configuration_fingerprint="b" * 64,
+            analyses=["ic"],
+            retention_mode="summary",
+            step_mode=False,
+        )
+
     @app.post("/api/external-factor-artifacts/validate")
     def validate_external_factor_artifact():
         payload = request.get_json()
@@ -143,6 +165,11 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
             "branch_id": "branch-1",
         },
     )["run_id"] == "run-1"
+    assert client.preview_run(
+        "workspace-1",
+        1,
+        analyses=["ic"],
+    )["run_spec_hash"] == "a" * 64
     assert client.validate_external_factor_artifact(
         "/research/gtht_handoff.json"
     )["artifact_id"] == "academic_mom:abc"

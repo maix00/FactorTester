@@ -215,6 +215,35 @@ def run() -> None:
     """Submit and inspect immutable research runs."""
 
 
+@run.command("preview")
+@click.option("--analysis", "analyses", multiple=True, type=click.Choice([
+    "backtest", "ic", "factor_evaluation", "factor_type_analysis",
+]), required=True)
+@click.option("--retain-full", is_flag=True, help="预览完整结果保留模式。")
+@click.option(
+    "--step",
+    "step_mode",
+    is_flag=True,
+    help="预览逐 flow backtest 模式。",
+)
+@friendly_errors
+def run_preview(
+    analyses: tuple[str, ...],
+    retain_full: bool,
+    step_mode: bool,
+) -> None:
+    """Preview the exact frozen RunSpec identity without creating state."""
+    state = _require_workspace()
+    result = client_from_config().preview_run(
+        state.workspace_id,
+        state.configuration_revision,
+        analyses=list(analyses),
+        retention_mode="full" if retain_full else "summary",
+        step_mode=step_mode,
+    )
+    click.echo(_json(result))
+
+
 @run.command("submit")
 @click.option("--analysis", "analyses", multiple=True, type=click.Choice([
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",

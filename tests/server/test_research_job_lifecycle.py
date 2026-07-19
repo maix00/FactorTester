@@ -287,6 +287,45 @@ def test_run_freezes_configuration_while_workspace_keeps_editing(client) -> None
     assert frozen["run_spec"]["configuration"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
 
 
+def test_run_preview_matches_submission_without_persisting(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic", "backtest"],
+        "retention_mode": "summary",
+        "step_mode": False,
+    }
+
+    preview = client.post(
+        "/api/runs/preview",
+        json=request_payload,
+    )
+
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    preview_payload = preview.get_json()
+    assert preview_payload["success"] is True
+    assert len(preview_payload["run_spec_hash"]) == 64
+    assert JobRepository().list(owner="alice") == []
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            """
+            SELECT COUNT(*) FROM sqlite_master
+            WHERE type='table' AND name='research_runs'
+            """
+        ).fetchone()[0] == 0
+
+    submitted = client.post("/api/runs", json=request_payload)
+
+    assert submitted.status_code == 202, submitted.get_data(as_text=True)
+    run = submitted.get_json()["run"]
+    assert preview_payload["run_spec_hash"] == run["run_spec_hash"]
+    assert preview_payload["configuration_fingerprint"] == (
+        run["run_spec"]["configuration_fingerprint"]
+    )
+
+
 def test_run_revalidates_and_freezes_external_factor_artifact(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)

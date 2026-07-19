@@ -124,9 +124,14 @@ The RunSpec hash must be a planned member of that role/comparison. The
 `run_id`; changing the plan requires a new plan version rather than mutation.
 
 ```bash
+factortester run preview --analysis ic
 factortester run submit --analysis ic \
   --trial-binding-file trial-binding.json
 ```
+
+`run preview` is read-only and returns the exact server-frozen RunSpec hash
+without creating a ResearchRun or Job. Put that hash in the TrialPlan before
+freezing it, then submit with the unchanged workspace revision and options.
 
 ## Skill discovery and audit
 
