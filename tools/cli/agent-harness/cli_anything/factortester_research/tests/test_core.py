@@ -54,6 +54,7 @@ def _research_cycle_discovery_proposal() -> dict:
     return {
         "schema_version": 1,
         "proposal_id": "proposal-discovery",
+        "proposer_invocation_id": "agent-invocation-proposal-discovery",
         "contract_hash": "1" * 64,
         "trial_plan_hash": "2" * 64,
         "methodology_hash": "3" * 64,
@@ -630,7 +631,7 @@ def test_reference_cycle_skill_requires_exact_manifest_approval() -> None:
     assert blocked["gaps"][0]["reason"] == "execution_approval_required"
     assert approved["gaps"] == []
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "95c58ec11017ee82554c0ef2bc455380e51eb0263331a107d0c1afcd8ed42149"
+        "3199189a952664aacb8947a4804a65644354f77ec913bce5105ca5d0d0adb2da"
     )
 
 

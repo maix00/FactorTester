@@ -43,5 +43,10 @@ backend changes.
 ## Independent challenge
 
 Submit a SearchExhaustionProposal bound to current Claim and obligation
-projection hashes. Closure requires one independent challenge decision. A
-rejected or revision-requested closure changes no accepted state.
+projection hashes and its settled `proposer_invocation_id`. Closure requires
+one independent challenge decision. Reserve and settle that reviewer with task
+reference `research-cycle-closure:<proposal_hash>`, put its invocation ID in
+the decision's `authority_ref`, and include both current invocations in the
+transition's `agent_invocation_ids`. The reviewer principal and lineage must
+differ from the proposal author. A rejected or revision-requested closure
+changes no accepted state.

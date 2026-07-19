@@ -65,6 +65,15 @@ artifact contracts produced by the workflow.
   standalone deterministic scripts.
 - Reject server proposal payloads containing concrete Skill identity.
 - Keep canonical and packaged Skill trees byte-identical.
+- Require every newly persisted adjudication or closure proposal to name the
+  settled proposer invocation that produced it.
+- Resolve all proposer and independent-reviewer authority references for one
+  transition with one bounded Agent Flow lookup.
+- Bind independent-reviewer invocations to the exact proposal hash and reject
+  missing, unsettled, wrong-role, wrong-scope, same-principal, or same-lineage
+  authority.
+- Keep ordinary factual transitions and deterministic historical replay free
+  of Agent Flow database reads.
 
 ### Packaging
 

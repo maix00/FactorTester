@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import orjson
 import pytest
 
 import settings as Settings
+from server.services import agent_flow
 from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
@@ -141,7 +144,10 @@ def test_graph_transition_persists_one_canonical_plan_body(
     monkeypatch,
 ) -> None:
     path = tmp_path / "transition.sqlite"
+    agent_flow_path = tmp_path / "agent-flow.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    monkeypatch.setenv("AGENT_FLOW_DB_PATH", str(agent_flow_path))
+    agent_flow.clear_store_cache()
     plan = trial_plan("a" * 64)
     plan_hash = trial_plan_hash(plan)
     initialize_branch(path, "")
@@ -218,9 +224,31 @@ def test_graph_transition_persists_one_canonical_plan_body(
     assert evidence["research_cycle"]["bootstrap_checkpoint"] is True
     assert evidence["research_cycle_checkpoint"] == checkpoint
 
+    store = agent_flow.get_store()
+    invocation = store.reserve_invocation(
+        owner_user_id="alice",
+        agent_id="research:test",
+        actor_role="researcher",
+        authority_scope="local_research",
+        purpose="propose preregistered adjudication",
+        runtime_id="pytest",
+        model_id="test-model",
+        max_input_tokens=10,
+        max_output_tokens=10,
+        agent_principal_hash=hashlib.sha256(b"researcher").hexdigest(),
+        lineage_hash=hashlib.sha256(b"research-lineage").hexdigest(),
+    )
+    store.settle_invocation(
+        owner_user_id="alice",
+        invocation_id=invocation["invocation_id"],
+        input_tokens=1,
+        output_tokens=1,
+        provider_request_id="trial-plan-contract-proposal",
+    )
     proposal = validate_adjudication_proposal({
         "schema_version": 1,
         "proposal_id": "proposal-plan",
+        "proposer_invocation_id": invocation["invocation_id"],
         "contract_hash": checkpoint["contract_hash"],
         "trial_plan_hash": plan_hash,
         "methodology_hash": checkpoint["methodology_hash"],
@@ -264,6 +292,7 @@ def test_graph_transition_persists_one_canonical_plan_body(
         owner="alice",
         edge_id="adjudicate-result",
         evidence={
+            "agent_invocation_ids": [invocation["invocation_id"]],
             "research_cycle": {
                 "schema_version": 1,
                 "parent_trace_ref": f"trace:{trace['trace_id']}",

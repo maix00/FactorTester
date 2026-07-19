@@ -20,6 +20,7 @@ def _proposal() -> dict:
     return {
         "schema_version": 1,
         "proposal_id": "proposal-discovery",
+        "proposer_invocation_id": "agent-invocation-proposal-discovery",
         "contract_hash": "1" * 64,
         "trial_plan_hash": "2" * 64,
         "methodology_hash": "3" * 64,

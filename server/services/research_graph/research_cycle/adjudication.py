@@ -70,6 +70,11 @@ def validate_adjudication_proposal(
     value = deepcopy(proposal)
     declared_hash = value.pop("proposal_hash", "")
     required_text(value.get("proposal_id"), field="proposal_id")
+    if "proposer_invocation_id" in value:
+        required_text(
+            value.get("proposer_invocation_id"),
+            field="proposer_invocation_id",
+        )
     value["contract_hash"] = sha256(
         value.get("contract_hash"),
         field="contract_hash",

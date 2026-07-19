@@ -31,6 +31,9 @@ return a capability gap instead of guessing.
   applicable, methodology, and Claim scope. The Harness binds submission and
   replay to the current checkpoint hash; do not invent or copy that hash into
   a server proposal field that does not define it.
+- Put the settled local research/proposer Agent invocation ID that authored
+  the proposal in `proposer_invocation_id` and include it in the transition's
+  `agent_invocation_ids`. This is execution provenance, not Skill identity.
 - Express interpretation as a proposal. Only an authority-bearing decision
   changes accepted Claim, obligation, or closure state.
 - Keep exploratory support exploratory and open a confirmation obligation.

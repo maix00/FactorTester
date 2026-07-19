@@ -36,7 +36,7 @@ def validate_adjudication(value: dict[str, Any]) -> dict[str, Any]:
     _reject_skill_identity(value)
     if value.get("schema_version") != 1:
         raise ValueError("schema_version must be 1")
-    for field in ("proposal_id",):
+    for field in ("proposal_id", "proposer_invocation_id"):
         _text(value.get(field), field)
     for field in ("contract_hash", "trial_plan_hash", "methodology_hash"):
         _sha(value.get(field), field)

@@ -31,6 +31,9 @@ from server.services.research_graph.capability_resolution import (
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_payload,
 )
+from server.services.research_graph.research_cycle.authority import (
+    validate_live_event_authorities,
+)
 from server.services.research_graph.protocol import (
     assert_no_skill_identity,
     loads,
@@ -89,6 +92,21 @@ def advance_graph_branch(
             raise KeyError("graph branch not found")
         branch = branch_payload(branch_row) or {}
         previous_cycle_checkpoint = checkpoint_from_branch_row(branch_row)
+        cycle_update = prepared_evidence.get("research_cycle")
+        if isinstance(cycle_update, dict):
+            validate_live_event_authorities(
+                owner_user_id=owner,
+                events=cycle_update.get("events") or [],
+                pending_adjudications=(
+                    previous_cycle_checkpoint["pending_adjudications"]
+                    if previous_cycle_checkpoint is not None else []
+                ),
+                pending_closure=(
+                    previous_cycle_checkpoint["pending_closure"]
+                    if previous_cycle_checkpoint is not None else None
+                ),
+                transition_invocation_ids=invocation_ids,
+            )
         graph = load_graph_from_conn(
             conn,
             graph_id=str(branch_row["graph_id"]),

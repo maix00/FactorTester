@@ -7,11 +7,15 @@ from server.services.research_graph.research_cycle.adjudication import (
     validate_adjudication_decision,
     validate_adjudication_proposal,
 )
+from server.services.research_graph.research_cycle.authority import (
+    validate_live_event_authorities,
+)
 from server.services.research_graph.research_cycle.contracts import (
     validate_decision_contract,
     validate_research_claim,
 )
 from server.services.research_graph.research_cycle.closure import (
+    validate_search_exhaustion_decision,
     validate_search_exhaustion_proposal,
 )
 from server.services.research_graph.research_cycle.evidence import (
@@ -26,6 +30,47 @@ from server.services.research_graph.research_cycle.methodology import (
     build_methodology_impact_plan,
     validate_methodology_change_proposal,
 )
+
+
+class _AuthorityStore:
+    def __init__(self, rows: dict[str, dict]) -> None:
+        self.rows = rows
+        self.calls = 0
+
+    def load_invocations(
+        self,
+        *,
+        owner_user_id: str,
+        invocation_ids: list[str],
+    ) -> dict[str, dict]:
+        self.calls += 1
+        return {
+            invocation_id: self.rows[invocation_id]
+            for invocation_id in invocation_ids
+            if invocation_id in self.rows
+            and self.rows[invocation_id]["owner_user_id"] == owner_user_id
+        }
+
+
+def _invocation(
+    invocation_id: str,
+    *,
+    role: str,
+    principal: str,
+    lineage: str,
+    task_ref: str = "",
+    status: str = "settled",
+) -> dict:
+    return {
+        "invocation_id": invocation_id,
+        "owner_user_id": "alice",
+        "status": status,
+        "actor_role": role,
+        "authority_scope": "local_research",
+        "agent_principal_hash": principal,
+        "lineage_hash": lineage,
+        "task_ref": task_ref,
+    }
 
 
 def test_agent_cannot_read_legacy_evidence_payload() -> None:
@@ -352,6 +397,223 @@ def test_adjudication_pair_rejects_stale_design_or_wrong_authority() -> None:
             expected_contract_hash="1" * 64,
             expected_trial_plan_hash="2" * 64,
             expected_methodology_hash="3" * 64,
+        )
+
+
+def test_live_independent_authority_is_batched_and_bound() -> None:
+    proposal = validate_adjudication_proposal({
+        "schema_version": 1,
+        "proposal_id": "authority-pair",
+        "proposer_invocation_id": "proposal-invocation",
+        "contract_hash": "1" * 64,
+        "trial_plan_hash": "2" * 64,
+        "methodology_hash": "3" * 64,
+        "evidence_refs": ["evidence:authority"],
+        "claim_evidence_delta": [],
+        "claim_delta_noop_reason": "authority test has no empirical delta",
+        "obligation_delta": [{
+            "obligation_id": "authority-obligation",
+            "from_state": "absent",
+            "to_state": "open",
+            "criterion_ref": "methodology:authority",
+        }],
+        "decision_warrant": {
+            "finding_refs": ["evidence:authority"],
+            "rule_refs": ["methodology:authority"],
+            "inference_type": "semantic",
+            "preregistered": False,
+            "alternative_refs": [],
+            "limitation_refs": [],
+            "reentry_predicates": [],
+            "required_authority": "independent_reviewer",
+        },
+    })
+    task_ref = (
+        "research-cycle-adjudication:" + proposal["proposal_hash"]
+    )
+    decision = validate_adjudication_decision({
+        "schema_version": 1,
+        "decision_id": "authority-decision",
+        "proposal_hash": proposal["proposal_hash"],
+        "disposition": "accepted",
+        "authority_class": "independent_reviewer",
+        "authority_ref": "review-invocation",
+        "methodology_hash": "3" * 64,
+    })
+    rows = {
+        "proposal-invocation": _invocation(
+            "proposal-invocation",
+            role="researcher",
+            principal="a" * 64,
+            lineage="b" * 64,
+        ),
+        "review-invocation": _invocation(
+            "review-invocation",
+            role="reviewer",
+            principal="c" * 64,
+            lineage="d" * 64,
+            task_ref=task_ref,
+        ),
+    }
+    store = _AuthorityStore(rows)
+    events = [
+        {"event_type": "adjudication_proposed", "proposal": proposal},
+        {"event_type": "adjudication_decided", "decision": decision},
+    ]
+
+    validate_live_event_authorities(
+        owner_user_id="alice",
+        events=events,
+        pending_adjudications=[],
+        pending_closure=None,
+        transition_invocation_ids=[
+            "proposal-invocation",
+            "review-invocation",
+        ],
+        store=store,
+    )
+
+    assert store.calls == 1
+
+    for field, value, message in (
+        ("status", "reserved", "must be settled"),
+        ("actor_role", "researcher", "invalid role"),
+        ("task_ref", "research-cycle-adjudication:" + "9" * 64, "not bound"),
+        ("agent_principal_hash", "a" * 64, "must differ"),
+        ("lineage_hash", "b" * 64, "must differ"),
+    ):
+        invalid_rows = {
+            key: dict(row) for key, row in rows.items()
+        }
+        invalid_rows["review-invocation"][field] = value
+        with pytest.raises(ValueError, match=message):
+            validate_live_event_authorities(
+                owner_user_id="alice",
+                events=events,
+                pending_adjudications=[],
+                pending_closure=None,
+                transition_invocation_ids=[
+                    "proposal-invocation",
+                    "review-invocation",
+                ],
+                store=_AuthorityStore(invalid_rows),
+            )
+
+    with pytest.raises(ValueError, match="not found"):
+        validate_live_event_authorities(
+            owner_user_id="alice",
+            events=events,
+            pending_adjudications=[],
+            pending_closure=None,
+            transition_invocation_ids=[
+                "proposal-invocation",
+                "review-invocation",
+            ],
+            store=_AuthorityStore({
+                "proposal-invocation": rows["proposal-invocation"],
+            }),
+        )
+
+
+def test_routine_research_cycle_event_does_not_read_authority_store() -> None:
+    store = _AuthorityStore({})
+
+    validate_live_event_authorities(
+        owner_user_id="alice",
+        events=[{
+            "event_type": "trial_plan_bound",
+            "from_hash": "1" * 64,
+            "to_hash": "2" * 64,
+        }],
+        pending_adjudications=[],
+        pending_closure=None,
+        transition_invocation_ids=[],
+        store=store,
+    )
+
+    assert store.calls == 0
+
+
+def test_live_closure_challenge_uses_bound_independent_invocation() -> None:
+    proposal = validate_search_exhaustion_proposal({
+        "schema_version": 1,
+        "proposal_id": "closure-authority",
+        "proposer_invocation_id": "closure-proposer",
+        "contract_hash": "1" * 64,
+        "claim_projection_hash": "2" * 64,
+        "obligation_projection_hash": "3" * 64,
+        "graph_hash": "4" * 64,
+        "methodology_hash": "5" * 64,
+        "coverage_summary": {
+            "declared_scope_assessed": True,
+            "stopping_rules_assessed": True,
+            "frontier_assessed": True,
+        },
+        "blocking_obligations": [],
+        "remaining_unknowns": [],
+        "attempted_trial_refs": ["trial:closure"],
+        "candidate_trial_frontier": [],
+        "frontier_exclusions": [],
+        "discovery_lens_refs": ["methodology:first-principles"],
+        "reentry_predicates": [{"field": "methodology_hash"}],
+        "disposition": "decision_ready",
+        "closure_challenge_required": True,
+    })
+    decision = validate_search_exhaustion_decision({
+        "schema_version": 1,
+        "decision_id": "closure-authority-decision",
+        "proposal_hash": proposal["proposal_hash"],
+        "disposition": "accepted",
+        "authority_class": "independent_reviewer",
+        "authority_ref": "closure-reviewer",
+        "methodology_hash": "5" * 64,
+    })
+    rows = {
+        "closure-proposer": _invocation(
+            "closure-proposer",
+            role="researcher",
+            principal="a" * 64,
+            lineage="b" * 64,
+        ),
+        "closure-reviewer": _invocation(
+            "closure-reviewer",
+            role="reviewer",
+            principal="c" * 64,
+            lineage="d" * 64,
+            task_ref=(
+                "research-cycle-closure:" + proposal["proposal_hash"]
+            ),
+        ),
+    }
+    store = _AuthorityStore(rows)
+
+    validate_live_event_authorities(
+        owner_user_id="alice",
+        events=[
+            {"event_type": "closure_proposed", "proposal": proposal},
+            {"event_type": "closure_decided", "decision": decision},
+        ],
+        pending_adjudications=[],
+        pending_closure=None,
+        transition_invocation_ids=[
+            "closure-proposer",
+            "closure-reviewer",
+        ],
+        store=store,
+    )
+
+    assert store.calls == 1
+    with pytest.raises(ValueError, match="missing from agent_invocation_ids"):
+        validate_live_event_authorities(
+            owner_user_id="alice",
+            events=[
+                {"event_type": "closure_proposed", "proposal": proposal},
+                {"event_type": "closure_decided", "decision": decision},
+            ],
+            pending_adjudications=[],
+            pending_closure=None,
+            transition_invocation_ids=["closure-proposer"],
+            store=_AuthorityStore(rows),
         )
 
 

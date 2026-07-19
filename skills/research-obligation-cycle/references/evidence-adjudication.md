@@ -36,13 +36,19 @@ verification instead produce a Capability Gap and no submittable proposal.
 
 Use deterministic or preregistered authority only for exact predeclared rules.
 Material semantic, post-hoc, non-standard, or conflicting inference requires
-one relevant independent reviewer. Do not add routine reviewers.
+one relevant independent reviewer. Reserve and settle that reviewer invocation
+with actor role `reviewer`, authority scope `local_research`, and task reference
+`research-cycle-adjudication:<proposal_hash>`. Put its invocation ID in the
+decision's `authority_ref` and in the transition's `agent_invocation_ids`.
+The reviewer must have a different principal and lineage from the proposal
+author. Do not add routine reviewers.
 
 ## Output
 
 Produce one bounded AdjudicationProposal. A separate authority-bearing
 AdjudicationDecision accepts, rejects, or requests revision. Never partially
 apply a paired delta. The proposal contains `schema_version`, `proposal_id`,
-the Contract, TrialPlan, and methodology hashes, evidence references, Claim
-and obligation delta arrays or their explicit no-op reasons, and one Decision
-Warrant. Validate that exact object with the script named in the parent Skill.
+`proposer_invocation_id`, the Contract, TrialPlan, and methodology hashes,
+evidence references, Claim and obligation delta arrays or their explicit
+no-op reasons, and one Decision Warrant. Validate that exact object with the
+script named in the parent Skill.
