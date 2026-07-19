@@ -745,7 +745,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "3f1a4baec84b980b4326fc9cc865b6c669146ed5fa076884c6eeb83f8d5e0702"
+        "51fd0e71ed754e94771189ab51bac2a9867927dc3fde8af943e3080f1be1a329"
     )
 
 
@@ -1077,9 +1077,21 @@ def test_local_evidence_envelope_keeps_output_behind_hashed_refs(
 
     assert validate_evidence_envelope(envelope)["schema_version"] == 2
     assert "decision" not in envelope
+    assert envelope["evidence_kind"] == "control_command"
+    assert envelope["identity_refs"] == {}
     assert envelope["command"]["stdout_ref"].startswith("local-artifact:")
     assert '{"status"' not in json.dumps(envelope)
     assert len(envelope["envelope_hash"]) == 64
+
+    run_evidence = {
+        **envelope,
+        "evidence_kind": "job_attempt",
+    }
+    with pytest.raises(
+        ValueError,
+        match="job_attempt evidence requires identity_refs.contract_hash",
+    ):
+        validate_evidence_envelope(run_evidence)
 
 
 def test_agent_session_view_hides_legacy_evidence_but_persistence_retains_it(

@@ -26,6 +26,18 @@ _IDENTITY_HASH_FIELDS = {
     "run_spec_hash",
     "trial_plan_hash",
 }
+_CONTRACT_EVIDENCE_KINDS = frozenset({
+    "hypothesis_semantics",
+    "data_availability",
+    "data_contract",
+    "factor_semantics",
+})
+_RUN_EVIDENCE_KINDS = frozenset({
+    "trial_diagnostics",
+    "authoritative_backtest",
+    "statistical_robustness",
+    "job_attempt",
+})
 
 
 class LegacyEvidenceAccessDenied(ValueError):
@@ -120,14 +132,29 @@ def validate_agent_evidence_envelope(
             + ", ".join(forbidden)
         )
     _required_text(value.get("envelope_id"), field="envelope_id")
-    _required_text(value.get("evidence_kind"), field="evidence_kind")
+    evidence_kind = _required_text(
+        value.get("evidence_kind"),
+        field="evidence_kind",
+    )
     _references(value.get("source_refs"), field="source_refs", required=True)
     identity_refs = value.get("identity_refs")
     if not isinstance(identity_refs, dict):
         raise ValueError("identity_refs must be an object")
+    unsupported_identity_fields = sorted(
+        set(identity_refs) - _IDENTITY_HASH_FIELDS
+    )
+    if unsupported_identity_fields:
+        raise ValueError(
+            "identity_refs contains unsupported fields: "
+            + ", ".join(unsupported_identity_fields)
+        )
     for field in _IDENTITY_HASH_FIELDS:
         if field in identity_refs:
             _sha256(identity_refs[field], field=f"identity_refs.{field}")
+    _validate_research_identity(
+        evidence_kind=evidence_kind,
+        identity_refs=identity_refs,
+    )
     command = value.get("command")
     if command is not None:
         _command(command)
@@ -154,6 +181,31 @@ def validate_agent_evidence_envelope(
     value["envelope_hash"] = computed_hash
     serialize_bounded_trace_evidence(value)
     return value
+
+
+def _validate_research_identity(
+    *,
+    evidence_kind: str,
+    identity_refs: dict[str, Any],
+) -> None:
+    if evidence_kind in _CONTRACT_EVIDENCE_KINDS:
+        required = ("contract_hash", "methodology_hash")
+    elif evidence_kind in _RUN_EVIDENCE_KINDS:
+        required = (
+            "contract_hash",
+            "methodology_hash",
+            "trial_plan_hash",
+            "run_spec_hash",
+        )
+    else:
+        raise ValueError(
+            f"unsupported research evidence_kind: {evidence_kind}"
+        )
+    for field in required:
+        if field not in identity_refs:
+            raise ValueError(
+                f"{evidence_kind} evidence requires identity_refs.{field}"
+            )
 
 
 def _looks_like_legacy_envelope(value: dict[str, Any]) -> bool:

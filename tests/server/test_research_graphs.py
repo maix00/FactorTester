@@ -2109,9 +2109,12 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "evidence_envelope": {
                 "schema_version": 2,
                 "envelope_id": "evidence-canonical",
-                "evidence_kind": "analysis",
+                "evidence_kind": "hypothesis_semantics",
                 "source_refs": ["analysis:canonical"],
-                "identity_refs": {},
+                "identity_refs": {
+                    "contract_hash": "1" * 64,
+                    "methodology_hash": "2" * 64,
+                },
                 "metric_refs": [],
                 "artifact_refs": [],
                 "hypotheses_tested": 1,

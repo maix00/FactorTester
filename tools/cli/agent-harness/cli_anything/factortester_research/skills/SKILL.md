@@ -109,6 +109,12 @@ session reports `legacy_evidence_unavailable_count`, create new current-schema
 evidence. Put Claim/obligation interpretation in a separate adjudication
 proposal, never inside the EvidenceEnvelope.
 
+Use a specific research `evidence_kind`. Hypothesis, data, and factor-semantics
+evidence must bind `contract_hash` and `methodology_hash`; diagnostics,
+backtests, robustness, and JobAttempt evidence must additionally bind
+`trial_plan_hash` and `run_spec_hash`. A local `control_command` envelope audits
+CLI execution only and is not admissible research evidence.
+
 For activation validation, send canonical instance/branch/baseline-run
 references. The server derives replay, shadow comparison, and token evidence;
 never invent client-side pass booleans.

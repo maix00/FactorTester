@@ -17,6 +17,24 @@ _INTERPRETATION_FIELDS = {
     "decision_warrant",
     "obligation_delta",
 }
+_IDENTITY_HASH_FIELDS = frozenset({
+    "contract_hash",
+    "methodology_hash",
+    "run_spec_hash",
+    "trial_plan_hash",
+})
+_CONTRACT_EVIDENCE_KINDS = frozenset({
+    "hypothesis_semantics",
+    "data_availability",
+    "data_contract",
+    "factor_semantics",
+})
+_RUN_EVIDENCE_KINDS = frozenset({
+    "trial_diagnostics",
+    "authoritative_backtest",
+    "statistical_robustness",
+    "job_attempt",
+})
 
 
 def assert_no_legacy_evidence_payload(value: Any) -> None:
@@ -46,15 +64,21 @@ def validate_evidence_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
         )
     if not isinstance(envelope.get("envelope_id"), str):
         raise ValueError("evidence envelope requires envelope_id")
-    if not isinstance(envelope.get("evidence_kind"), str):
+    evidence_kind = envelope.get("evidence_kind")
+    if not isinstance(evidence_kind, str):
         raise ValueError("evidence envelope requires evidence_kind")
     source_refs = envelope.get("source_refs")
     if not isinstance(source_refs, list) or not source_refs or not all(
         isinstance(item, str) and item.strip() for item in source_refs
     ):
         raise ValueError("evidence source_refs must be a non-empty array")
-    if not isinstance(envelope.get("identity_refs"), dict):
+    identity_refs = envelope.get("identity_refs")
+    if not isinstance(identity_refs, dict):
         raise ValueError("evidence identity_refs must be an object")
+    _validate_identity_refs(
+        evidence_kind=evidence_kind,
+        identity_refs=identity_refs,
+    )
     command = envelope.get("command")
     if not isinstance(command, dict):
         raise ValueError("evidence envelope requires command")
@@ -123,7 +147,7 @@ def persist_command_evidence(
     envelope = {
         "schema_version": 2,
         "envelope_id": envelope_id,
-        "evidence_kind": "command_execution",
+        "evidence_kind": "control_command",
         "source_refs": [f"local-command:{envelope_id}"],
         "identity_refs": {},
         "command": {
@@ -149,6 +173,47 @@ def persist_command_evidence(
         ).encode()
     ).hexdigest()
     return value
+
+
+def _validate_identity_refs(
+    *,
+    evidence_kind: str,
+    identity_refs: dict[str, Any],
+) -> None:
+    unsupported = sorted(set(identity_refs) - _IDENTITY_HASH_FIELDS)
+    if unsupported:
+        raise ValueError(
+            "evidence identity_refs contains unsupported fields: "
+            + ", ".join(unsupported)
+        )
+    for field, value in identity_refs.items():
+        if (
+            not isinstance(value, str)
+            or len(value.removeprefix("sha256:")) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in value.removeprefix("sha256:")
+            )
+        ):
+            raise ValueError(f"evidence identity_refs.{field} must be sha256")
+    if evidence_kind == "control_command":
+        required: tuple[str, ...] = ()
+    elif evidence_kind in _CONTRACT_EVIDENCE_KINDS:
+        required = ("contract_hash", "methodology_hash")
+    elif evidence_kind in _RUN_EVIDENCE_KINDS:
+        required = (
+            "contract_hash",
+            "methodology_hash",
+            "trial_plan_hash",
+            "run_spec_hash",
+        )
+    else:
+        raise ValueError(f"unsupported evidence_kind: {evidence_kind}")
+    for field in required:
+        if field not in identity_refs:
+            raise ValueError(
+                f"{evidence_kind} evidence requires identity_refs.{field}"
+            )
 
 
 def _find_fields(value: Any, forbidden: set[str]) -> set[str]:

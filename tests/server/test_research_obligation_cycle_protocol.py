@@ -151,6 +151,58 @@ def test_current_evidence_accepts_facts_but_rejects_decisions() -> None:
             **envelope,
             "envelope_hash": "f" * 64,
         })
+    with pytest.raises(
+        ValueError,
+        match="job_attempt evidence requires identity_refs.run_spec_hash",
+    ):
+        validate_agent_evidence_envelope({
+            **envelope,
+            "identity_refs": {
+                key: value
+                for key, value in envelope["identity_refs"].items()
+                if key != "run_spec_hash"
+            },
+        })
+
+
+def test_research_evidence_identity_requirements_are_kind_specific() -> None:
+    semantic = {
+        "schema_version": 2,
+        "envelope_id": "factor-semantics-1",
+        "evidence_kind": "factor_semantics",
+        "source_refs": ["factor-workspace:revision-1"],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+        },
+        "metric_refs": [],
+        "artifact_refs": ["artifact:factor-ast-1"],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    }
+
+    assert validate_agent_evidence_envelope(semantic)["envelope_hash"]
+    with pytest.raises(
+        ValueError,
+        match="factor_semantics evidence requires identity_refs.contract_hash",
+    ):
+        validate_agent_evidence_envelope({
+            **semantic,
+            "identity_refs": {"methodology_hash": "2" * 64},
+        })
+    with pytest.raises(ValueError, match="unsupported research evidence_kind"):
+        validate_agent_evidence_envelope({
+            **semantic,
+            "evidence_kind": "analysis",
+        })
+    with pytest.raises(ValueError, match="unsupported research evidence_kind"):
+        validate_agent_evidence_envelope({
+            **semantic,
+            "evidence_kind": "control_command",
+            "identity_refs": {},
+        })
 
 
 def test_contract_can_add_a_novel_factor_specific_obligation() -> None:

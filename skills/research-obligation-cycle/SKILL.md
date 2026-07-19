@@ -26,6 +26,9 @@ return a capability gap instead of guessing.
 ## Preserve the protocol boundary
 
 - Treat `EvidenceEnvelope` v2 as facts, never as a conclusion.
+- Reject generic or unbound research evidence. Semantics evidence must bind the
+  current Contract and methodology; trial-derived evidence must also bind the
+  TrialPlan and RunSpec. Local `control_command` audit is not research evidence.
 - Treat the adjudication next action as a proposal; only an accepted decision
   authorizes a server-derived route.
 - Never request or read legacy EvidenceEnvelope v1.

@@ -630,12 +630,12 @@ JobEvidenceReceipt projection
 EvidenceEnvelope schema in research_graph_trace.evidence_json
   graph node and proposed transition
   existing JobAttempt terminal-assurance references
-  factor / data / product identities
+  Contract / methodology identity for semantics evidence
+  TrialPlan / RunSpec identity for trial-derived evidence
+  factor / data / product references
   attempt_count / outcome_examined_count
   stopping reason
-  required evidence fields
   conflicts and capability gaps
-  research disposition and rationale references
 ```
 
 `JobEvidenceReceipt` is not a new table or write path. It is a source-free
@@ -643,7 +643,10 @@ projection from the canonical JobAttempt terminal summary and artifact
 metadata. `EvidenceEnvelope` is not a second event store. It is the validated
 bounded schema of the existing append-only graph trace evidence. Full stdout,
 result tables, curves, source, and local process files remain in their owning
-artifact/local stores.
+artifact/local stores. It contains facts only; disposition, rationale, Claim,
+and obligation changes belong to the separate adjudication protocol. Local
+`control_command` envelopes audit CLI execution and are not admissible research
+evidence.
 
 Deterministic graph guards read only bounded structured fields, identities,
 hashes, and references. An Agent follows a reference only when semantic review
