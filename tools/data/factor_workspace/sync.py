@@ -137,7 +137,9 @@ def sync_factor_workspace(username: str, branch_mode: str = "force") -> dict[str
     result = sync_database_to_workspace(username, branch_mode=branch_mode)
     if branch_mode == "force":
         root = str(result.get("workspace_root") or _workspace_root(username))
-        commit_sha = FactorWorkspaceRepository(username).commit("chore: sync database to workspace")
+        commit_sha = FactorWorkspaceRepository(username).commit_generated(
+            "chore: sync database to workspace"
+        )
         if commit_sha:
             result["git_commit_sha"] = commit_sha
     return result

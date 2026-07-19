@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +27,18 @@ class FactorWorkspaceRepository:
 
     def commit(self, message: str) -> str | None:
         return git._git_commit_all(self.root, message)
+
+    def commit_generated(self, message: str) -> str | None:
+        """Commit generated files without recursively invoking user autosync."""
+        previous = os.environ.get("FACTOR_WORKSPACE_SKIP_AUTOSYNC")
+        os.environ["FACTOR_WORKSPACE_SKIP_AUTOSYNC"] = "1"
+        try:
+            return self.commit(message)
+        finally:
+            if previous is None:
+                os.environ.pop("FACTOR_WORKSPACE_SKIP_AUTOSYNC", None)
+            else:
+                os.environ["FACTOR_WORKSPACE_SKIP_AUTOSYNC"] = previous
 
     def materialize_branches(self) -> list[str]:
         return git._materialize_workspace_branches(self.root, self.username)

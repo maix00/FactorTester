@@ -112,6 +112,7 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert settings["python.analysis.diagnosticSeverityOverrides"]["reportMissingModuleSource"] == "none"
     pyright_config = json.loads((workspace_root / "pyrightconfig.json").read_text(encoding="utf-8"))
     assert pyright_config["include"] == ["custom_factors", "public_factors", "policies", "tools", "pandas"]
+    assert pyright_config["pythonVersion"] == "3.10"
     assert pyright_config["reportMissingModuleSource"] == "none"
     assert "venv" not in pyright_config
     assert "venvPath" not in pyright_config
@@ -171,6 +172,24 @@ def test_factor_workspace_build_refuses_nonempty_unmanaged_root(monkeypatch, tmp
         factor_workspace.build_factor_workspace("default$alice@1")
 
     assert protected_file.read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_generated_workspace_commit_suppresses_recursive_autosync(monkeypatch):
+    observed: list[str | None] = []
+    monkeypatch.delenv("FACTOR_WORKSPACE_SKIP_AUTOSYNC", raising=False)
+    monkeypatch.setattr(
+        FactorWorkspaceRepository,
+        "commit",
+        lambda self, message: observed.append(
+            __import__("os").environ.get("FACTOR_WORKSPACE_SKIP_AUTOSYNC")
+        ),
+    )
+
+    repository = FactorWorkspaceRepository("default$alice@1")
+    repository.commit_generated("chore: generated")
+
+    assert observed == ["1"]
+    assert __import__("os").environ.get("FACTOR_WORKSPACE_SKIP_AUTOSYNC") is None
 
 
 def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, tmp_path):
