@@ -532,6 +532,25 @@ def test_validation_design_has_builtin_trial_ledger() -> None:
     }
 
 
+def test_validation_design_binds_reviewed_false_discovery_guidance() -> None:
+    resolution = resolve_graph_capabilities(
+        build_draft_graph(),
+        load_builtin_capability_registry(),
+        product_group="china_futures",
+        node_id="validation_design",
+        facts={"research": {"trial_count": 10}},
+    )
+
+    assert resolution["triggered_conditional_gaps"] == []
+    binding = resolution["triggered_conditional_bindings"][0]
+    assert binding["capability_id"] == (
+        "multiple-testing.false-discovery-control"
+    )
+    assert binding["implementation_id"] == "local.quantitative-research"
+    assert binding["execution_approval_granted"] is True
+    assert len(binding["source_fingerprint"]) == 64
+
+
 def test_capability_resolution_keeps_conditional_skills_out_of_mandatory_gaps() -> None:
     graph = build_draft_graph()
     not_triggered = resolve_graph_capabilities(

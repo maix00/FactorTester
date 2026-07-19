@@ -17,10 +17,15 @@
       "sha256": "eeaf0bb21cbff865616369da85f638a091ad5adc687aad341791ba5569ae635f"
     },
     "local.quantitative-research": {
-      "source_path": "quantitative-research/SKILL.md",
+      "source_paths": [
+        "quantitative-research/SKILL.md",
+        "quantitative-research/references/patterns.md",
+        "quantitative-research/references/sharp_edges.md",
+        "quantitative-research/references/validations.md"
+      ],
       "root_env": "AGENTS_SKILLS_ROOT",
       "root_hint": "/Users/maxdeux/.agents/skills",
-      "sha256": "1844cedd18264e9c864a6e56718212e8fd9f8b462d01ef6cf0cf11c7128d75e0"
+      "sha256": "fb3b71ba85f30476a41d3215f1a54a7594971304aedd1e76eaa53bda2977cab3"
     },
     "vibe.factor-research": {
       "source_path": "agent/src/skills/factor-research/SKILL.md",
@@ -67,8 +72,12 @@
       "sha256": "07738c13d374acd86430a76fe42c800e7714a77d7263cc280af4ea104aa9f048"
     },
     "vibe.multi-factor": {
-      "source_path": "agent/src/skills/multi-factor/SKILL.md",
-      "sha256": "15de8ecafdb65dfe8bfecbdb0e3cb08278fcd5e36f0b5c6e69a2a8dc67e6e80d"
+      "source_paths": [
+        "agent/src/skills/multi-factor/SKILL.md",
+        "agent/src/skills/multi-factor/example_signal_engine.py",
+        "agent/src/skills/multi-factor/zoo_signal_engine.py"
+      ],
+      "sha256": "59bef3d34af35178cd42459d814569e8c48bb1b7dfdecb9bcbde0daeb6d8e7ec"
     },
     "vibe.execution-model": {
       "source_path": "agent/src/skills/execution-model/SKILL.md",
@@ -79,16 +88,25 @@
       "sha256": "1719e229159831bae3f02a4842b18e9cb9185508b58c7dc9840df0c559b9a517"
     },
     "local.diagnose": {
-      "source_path": "diagnose/SKILL.md",
+      "source_paths": [
+        "diagnose/SKILL.md",
+        "diagnose/scripts/hitl-loop.template.sh"
+      ],
       "root_env": "AGENTS_SKILLS_ROOT",
       "root_hint": "/Users/maxdeux/.agents/skills",
-      "sha256": "28886402bbfa0470248086eab9106a103b964b76ae9496e63ff0c8a6761b6d13"
+      "sha256": "515f2b6afade25c8283bb4413e949ff980fe5ef1e8e2c40c6f9b2a22a9776afb"
     },
     "codex.skill-installer.list-search": {
-      "source_path": "skills/.system/skill-installer/SKILL.md",
+      "source_paths": [
+        "skills/.system/skill-installer/SKILL.md",
+        "skills/.system/skill-installer/agents/openai.yaml",
+        "skills/.system/skill-installer/scripts/github_utils.py",
+        "skills/.system/skill-installer/scripts/install-skill-from-github.py",
+        "skills/.system/skill-installer/scripts/list-skills.py"
+      ],
       "root_env": "CODEX_HOME",
       "root_hint": "/Users/maxdeux/.codex",
-      "sha256": "d68b77e5bbb34dedab89d134da52855f140fc4b4299b80104f534e3b9e98f8ee"
+      "sha256": "c2eae6c8dd90b59b44ed42c21553154d70de1cb5de3305ef434ea00f7e5d6b1b"
     },
     "vibe.skills-loader.metadata": {
       "source_path": "agent/src/agent/skills.py",
@@ -99,10 +117,17 @@
       "sha256": "c80e2ca961e196461f85586c4273363ceb12a432896536092ba87e8c09477443"
     },
     "codex.skill-creator": {
-      "source_path": "skills/.system/skill-creator/SKILL.md",
+      "source_paths": [
+        "skills/.system/skill-creator/SKILL.md",
+        "skills/.system/skill-creator/agents/openai.yaml",
+        "skills/.system/skill-creator/references/openai_yaml.md",
+        "skills/.system/skill-creator/scripts/generate_openai_yaml.py",
+        "skills/.system/skill-creator/scripts/init_skill.py",
+        "skills/.system/skill-creator/scripts/quick_validate.py"
+      ],
       "root_env": "CODEX_HOME",
       "root_hint": "/Users/maxdeux/.codex",
-      "sha256": "da44c88f6b3845a8fa8c60792ec9a722110a55a9793c279757b48fefb11f819c"
+      "sha256": "80e419afc5e33a21143a1addd50bd95a6bfe39f7cd0cedb63665c7b4a4bf3e2c"
     },
     "vibe.skill-writer": {
       "source_path": "agent/src/tools/skill_writer_tool.py",

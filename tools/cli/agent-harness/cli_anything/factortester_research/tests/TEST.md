@@ -34,6 +34,8 @@ artifact contracts produced by the workflow.
   `requires_agent_judgment`.
 - Exclude model/provider/Codex runtime identity from semantic cache keys.
 - Verify approved provider fingerprints before selecting an implementation.
+- Hash every progressively loaded instruction, reference, and executable file
+  used by an approved multi-file Skill into one provider identity.
 - Invalidate cache results when provider source content changes.
 - Reuse a registered approved Skill by default when its reviewed fingerprint is
   unchanged, while changed, newly discovered, and quarantined providers remain
@@ -130,10 +132,11 @@ Job inheritance through `run_id`, retention, and exact-hash rollback gates.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.
-Capability-resolution tests verify that registered, approved, fingerprint-valid
-Skill implementations receive default local authorization, while changed source
-still fails closed; they also keep equity-only microstructure guidance out of
-China-futures resolution and bind the built-in TrialPlan/RunSpec trial ledger.
+Capability-resolution tests verify that registered, approved, whole-bundle
+fingerprint-valid Skill implementations receive default local authorization,
+while changed source still fails closed; they also keep equity-only
+microstructure guidance out of China-futures resolution and bind the built-in
+TrialPlan/RunSpec trial ledger plus reviewed false-discovery guidance.
 
 ## Commands
 
@@ -169,10 +172,10 @@ CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
 
 [_resolve_cli] Using installed command:
   /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
-collected 51 items
+collected 52 items
 
 test_core.py
-  36 passed
+  37 passed
 test_full_e2e.py::TestCLISubprocess
   14 passed
 test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
@@ -182,7 +185,7 @@ test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
 
-51 passed, 123 warnings
+52 passed, 123 warnings
 ```
 
 All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in

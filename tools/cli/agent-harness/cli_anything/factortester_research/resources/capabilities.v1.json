@@ -334,7 +334,19 @@
       "evidence_sources": [
         {"kind": "paper", "url": "https://academic.oup.com/rfs/article/29/1/5/1843824", "topic": "multiple-testing framework for expected returns"}
       ],
-      "implementations": []
+      "implementations": [
+        {
+          "implementation_id": "local.quantitative-research",
+          "provider": "codex-local",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "/Users/maxdeux/.agents/skills/quantitative-research/SKILL.md",
+          "limitation": "Bonferroni and Benjamini-Hochberg guidance requires the complete trial ledger and explicit dependence caveats; it does not manufacture p-values for backtest-only outcomes"
+        }
+      ]
     },
     {
       "capability_id": "performance.bootstrap-sharpe",
