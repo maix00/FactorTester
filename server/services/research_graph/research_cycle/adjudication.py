@@ -56,6 +56,12 @@ _AUTHORITIES = {
     "preregistered_rule",
 }
 _DISPOSITIONS = {"accepted", "rejected", "revision_requested"}
+_RECOMMENDED_ACTIONS = {
+    "advance_trial_stage",
+    "continue_execution",
+    "research_decision",
+    "revise_factor",
+}
 
 
 def validate_adjudication_proposal(
@@ -64,8 +70,11 @@ def validate_adjudication_proposal(
     """Validate paired deltas and produce a canonical proposal hash."""
     if not isinstance(proposal, dict):
         raise ValueError("adjudication proposal must be an object")
-    if proposal.get("schema_version") != 1:
-        raise ValueError("adjudication proposal schema_version must be 1")
+    schema_version = proposal.get("schema_version")
+    if schema_version not in {1, 2}:
+        raise ValueError(
+            "adjudication proposal schema_version must be 1 or 2"
+        )
     assert_no_skill_identity(proposal, location="adjudication proposal")
     value = deepcopy(proposal)
     declared_hash = value.pop("proposal_hash", "")
@@ -111,6 +120,16 @@ def validate_adjudication_proposal(
     value["decision_warrant"] = _decision_warrant(
         value.get("decision_warrant")
     )
+    recommended_action = value.get("recommended_action")
+    if schema_version == 1 and recommended_action is not None:
+        raise ValueError(
+            "recommended_action requires adjudication schema_version 2"
+        )
+    if (
+        schema_version == 2
+        and recommended_action not in _RECOMMENDED_ACTIONS
+    ):
+        raise ValueError("invalid adjudication recommended_action")
     computed_hash = json_hash(value)
     if declared_hash and sha256(
         declared_hash,

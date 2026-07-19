@@ -23,6 +23,12 @@ AUTHORITIES = {
     "independent_reviewer",
     "preregistered_rule",
 }
+RECOMMENDED_ACTIONS = {
+    "advance_trial_stage",
+    "continue_execution",
+    "research_decision",
+    "revise_factor",
+}
 
 
 def load_payload(path: str) -> dict[str, Any]:
@@ -34,8 +40,9 @@ def load_payload(path: str) -> dict[str, Any]:
 
 def validate_adjudication(value: dict[str, Any]) -> dict[str, Any]:
     _reject_skill_identity(value)
-    if value.get("schema_version") != 1:
-        raise ValueError("schema_version must be 1")
+    schema_version = value.get("schema_version")
+    if schema_version not in {1, 2}:
+        raise ValueError("schema_version must be 1 or 2")
     for field in ("proposal_id", "proposer_invocation_id"):
         _text(value.get(field), field)
     for field in ("contract_hash", "trial_plan_hash", "methodology_hash"):
@@ -93,6 +100,13 @@ def validate_adjudication(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("preregistered must be boolean")
     if warrant.get("required_authority") not in AUTHORITIES:
         raise ValueError("invalid required_authority")
+    action = value.get("recommended_action")
+    if schema_version == 1 and action is not None:
+        raise ValueError(
+            "recommended_action requires adjudication schema_version 2"
+        )
+    if schema_version == 2 and action not in RECOMMENDED_ACTIONS:
+        raise ValueError("invalid recommended_action")
     return _finish(value)
 
 

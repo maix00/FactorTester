@@ -849,7 +849,7 @@
     },
     {
       "capability_id": "research-evidence.adjudicate",
-      "industry_semantics": "Interpret factual EvidenceEnvelope v2 through a bounded Decision Warrant and propose atomic paired Claim-evidence and obligation deltas under the required authority.",
+      "industry_semantics": "Interpret factual EvidenceEnvelope v2 through a bounded Decision Warrant and propose atomic paired Claim-evidence and obligation deltas plus one next action; only an accepted authority-bearing decision may authorize the server-derived route.",
       "when_to_use": ["when current factual evidence may change Claim or obligation state"],
       "preconditions": ["current v2 evidence, checkpoint, Contract, TrialPlan when applicable, and methodology identities are available"],
       "prohibitions": ["do not treat an EvidenceEnvelope as a decision", "do not read or reuse legacy EvidenceEnvelope v1"],

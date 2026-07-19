@@ -437,7 +437,7 @@ def test_graph_transition_persists_one_canonical_plan_body(
         provider_request_id="trial-plan-contract-proposal",
     )
     proposal = validate_adjudication_proposal({
-        "schema_version": 1,
+        "schema_version": 2,
         "proposal_id": "proposal-plan",
         "proposer_invocation_id": invocation["invocation_id"],
         "contract_hash": checkpoint["contract_hash"],
@@ -457,6 +457,7 @@ def test_graph_transition_persists_one_canonical_plan_body(
             "to_state": "discharged",
             "criterion_ref": "trial-plan:reject",
         }],
+        "recommended_action": "research_decision",
         "decision_warrant": {
             "finding_refs": ["evidence:plan-result"],
             "rule_refs": ["trial-plan:reject"],
@@ -477,6 +478,18 @@ def test_graph_transition_persists_one_canonical_plan_body(
         "authority_ref": "trial-plan:reject",
         "methodology_hash": checkpoint["methodology_hash"],
     })
+    with pytest.raises(ValueError, match="adjudication_route_bound"):
+        advance_graph_branch(
+            instance_id="instance-1",
+            branch_id="branch-1",
+            owner="alice",
+            edge_id="adjudicate-result",
+            evidence={
+                "adjudication_route_bound": True,
+                "factor_revision_authorized": False,
+                "next_trial_stage_required": False,
+            },
+        )
     advanced = advance_graph_branch(
         instance_id="instance-1",
         branch_id="branch-1",

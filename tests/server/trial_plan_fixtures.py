@@ -141,7 +141,11 @@ def initialize_graph_version(path) -> None:
                 "edge_id": "adjudicate-result",
                 "from_node": "diagnostics",
                 "to_node": "result",
-                "guard": {},
+                "guard": {
+                    "adjudication_route_bound": True,
+                    "factor_revision_authorized": False,
+                    "next_trial_stage_required": False,
+                },
                 "required_evidence": [],
             },
         ],

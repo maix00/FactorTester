@@ -26,6 +26,8 @@ return a capability gap instead of guessing.
 ## Preserve the protocol boundary
 
 - Treat `EvidenceEnvelope` v2 as facts, never as a conclusion.
+- Treat the adjudication next action as a proposal; only an accepted decision
+  authorizes a server-derived route.
 - Never request or read legacy EvidenceEnvelope v1.
 - Bind every proposal to the current Decision Contract, TrialPlan when
   applicable, methodology, and Claim scope. The Harness binds submission and

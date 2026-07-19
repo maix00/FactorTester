@@ -12,6 +12,9 @@ from server.services.research_graph.research_cycle.replay import (
     replay_research_cycle_events,
     validate_research_cycle_checkpoint,
 )
+from server.services.research_graph.research_cycle.routing import (
+    accepted_adjudication_action,
+)
 from server.services.research_graph.research_cycle.closure import (
     validate_search_exhaustion_decision,
     validate_search_exhaustion_proposal,
@@ -124,6 +127,67 @@ def test_accepted_pair_replays_atomically_into_one_checkpoint() -> None:
     assert after["obligations"][0]["status"] == "discharged"
     assert after["pending_adjudications"] == []
     assert after["projection_hash"] != before["projection_hash"]
+
+
+def test_adjudication_v2_binds_an_authoritative_next_action() -> None:
+    before = _checkpoint()
+    proposal = _proposal()
+    proposal.pop("proposal_hash")
+    proposal["schema_version"] = 2
+    proposal["recommended_action"] = "revise_factor"
+    proposal = validate_adjudication_proposal(proposal)
+    decision = _decision(proposal["proposal_hash"])
+    events = [
+        {
+            "event_type": "adjudication_proposed",
+            "proposal": proposal,
+        },
+        {
+            "event_type": "adjudication_decided",
+            "decision": decision,
+        },
+    ]
+
+    assert accepted_adjudication_action(
+        previous_checkpoint=before,
+        events=events,
+    ) == "revise_factor"
+    pending = replay_research_cycle_events(
+        before,
+        events=[events[0]],
+        expected_base_hash=before["projection_hash"],
+    )
+    assert accepted_adjudication_action(
+        previous_checkpoint=pending,
+        events=[events[1]],
+    ) == "revise_factor"
+    assert accepted_adjudication_action(
+        previous_checkpoint=before,
+        events=[
+            events[0],
+            {
+                "event_type": "adjudication_decided",
+                "decision": _decision(
+                    proposal["proposal_hash"],
+                    disposition="rejected",
+                ),
+            },
+        ],
+    ) is None
+    with pytest.raises(ValueError, match="recommended_action"):
+        validate_adjudication_proposal({
+            **proposal,
+            "schema_version": 2,
+            "proposal_hash": "",
+            "recommended_action": "invent_a_route",
+        })
+    legacy = _proposal()
+    with pytest.raises(ValueError, match="schema_version 2"):
+        validate_adjudication_proposal({
+            **legacy,
+            "proposal_hash": "",
+            "recommended_action": "revise_factor",
+        })
 
 
 def test_pending_or_rejected_adjudication_changes_no_accepted_state() -> None:

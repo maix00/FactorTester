@@ -20,6 +20,12 @@ The envelope does not decide anything. Never read EvidenceEnvelope v1.
    re-entry references.
 5. Use an explicit no-op when one side does not change.
 
+For result-driven routing, emit AdjudicationProposal schema version 2 and set
+exactly one `recommended_action`: `continue_execution`,
+`advance_trial_stage`, `revise_factor`, or `research_decision`. This is a
+proposal, not a client guard. Only an accepted authority-bearing decision lets
+the server derive the matching route. Do not set route booleans yourself.
+
 A failed preregistered test may discharge the test obligation while
 contradicting its Claim. A favorable post-hoc result remains exploratory and
 opens a confirmation obligation. A provenance failure may open an obligation

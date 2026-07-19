@@ -127,6 +127,15 @@ def test_standalone_validators_accept_discovery_and_reject_identity(
     assert adjudication.returncode == 0
     assert json.loads(obligation.stdout)["valid"] is True
 
+    routed = {
+        **_proposal(),
+        "schema_version": 2,
+        "recommended_action": "research_decision",
+    }
+    path.write_text(json.dumps(routed), encoding="utf-8")
+    routed_result = _run("validate-adjudication-proposal.py", path)
+    assert routed_result.returncode == 0, routed_result.stdout
+
     invalid = {**_proposal(), "skill_name": "must-stay-local"}
     path.write_text(json.dumps(invalid), encoding="utf-8")
     rejected = _run("validate-adjudication-proposal.py", path)

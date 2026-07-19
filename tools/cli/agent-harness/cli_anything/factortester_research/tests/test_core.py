@@ -294,31 +294,54 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "factor-validation.quantile-monotonicity",
     ]
     assert edges["cheap_diagnostics__backtest"]["guard"] == {
-        "diagnostics_viable": True,
-        "selection_role": "in_sample",
+        "preregistered_execution_eligibility_satisfied": True,
+        "current_trial_stage_executable": True,
     }
     assert edges["backtest__statistical_robustness"]["guard"] == {
         "terminal_job_evidence_retained": True,
         "net_return_series_available": True,
     }
     assert edges["statistical_robustness__result_audit"]["guard"] == {
-        "uncertainty_review_passed": True,
+        "uncertainty_evidence_complete": True,
     }
     assert "cheap_diagnostics__statistical_robustness" not in edges
     assert "statistical_robustness__backtest" not in edges
     assert "backtest__result_audit" not in edges
     assert edges["cheap_diagnostics__result_audit"]["guard"] == {
-        "diagnostics_reject": True,
+        "diagnostic_evidence_complete": True,
+        "further_execution_eligible": False,
     }
-    assert edges["statistical_robustness__result_audit_reject"]["guard"] == {
-        "robustness_reject": True,
-    }
-    assert edges["statistical_robustness__factor_improvement"]["guard"] == {
-        "robustness_revise": True,
+    assert "cheap_diagnostics__factor_improvement" not in edges
+    assert "statistical_robustness__result_audit_reject" not in edges
+    assert "statistical_robustness__factor_improvement" not in edges
+    assert edges["result_audit__factor_improvement"]["guard"] == {
+        "audit_complete": True,
+        "no_unresolved_evidence_integrity_or_capability_gap": True,
+        "adjudication_applied_or_explicit_noop": True,
+        "adjudication_route_bound": True,
+        "factor_revision_authorized": True,
+        "next_trial_stage_required": False,
+        "current_trial_stage_allows_revision": True,
         "new_falsifiable_hypothesis_proposed": True,
-        "selection_holdout_not_reused": True,
+        "protected_sample_reuse_forbidden": True,
         "remaining_revision_budget_positive": True,
     }
+    assert edges["result_audit__validation_design"]["guard"] == {
+        "audit_complete": True,
+        "adjudication_applied_or_explicit_noop": True,
+        "adjudication_route_bound": True,
+        "next_trial_stage_required": True,
+        "trial_stage_advance_authorized": True,
+    }
+    assert edges["result_audit__research_decision"]["guard"][
+        "next_trial_stage_required"
+    ] is False
+    assert edges["result_audit__research_decision"]["guard"][
+        "factor_revision_authorized"
+    ] is False
+    assert "unresolved_material_gap" not in edges[
+        "result_audit__research_decision"
+    ]["guard"]
     assert "result_audit__statistical_robustness" not in edges
     assert edges["factor_improvement__hypothesis"]["guard"] == {
         "new_hypothesis_version_recorded": True,
@@ -714,7 +737,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert reused["bindings"][0]["execution_approval_granted"] is True
     assert approved["gaps"] == []
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "6203c662787a488e067de35ba94ba0a0c5bc9f564d45c99cd6a1e92a7445ff0f"
+        "3f1a4baec84b980b4326fc9cc865b6c669146ed5fa076884c6eeb83f8d5e0702"
     )
 
 

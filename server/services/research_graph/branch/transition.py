@@ -31,6 +31,10 @@ from server.services.research_graph.capability_resolution import (
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_payload,
 )
+from server.services.research_graph.research_cycle.routing import (
+    accepted_adjudication_action,
+    adjudication_route_guards,
+)
 from server.services.research_graph.research_cycle.authority import (
     validate_live_event_authorities,
 )
@@ -131,10 +135,27 @@ def advance_graph_branch(
             )
         if branch["status"] == "paused" and edge.get("edge_type") != "recovery":
             raise ValueError("paused branch only accepts a recovery edge")
+        cycle_event, cycle_checkpoint = prepare_research_cycle_trace(
+            update=cycle_update,
+            previous_checkpoint=previous_cycle_checkpoint,
+            latest_trace_id=str(branch_row["latest_trace_id"]),
+        )
+        route_action = accepted_adjudication_action(
+            previous_checkpoint=previous_cycle_checkpoint,
+            events=(
+                cycle_update.get("events") or []
+                if isinstance(cycle_update, dict)
+                else []
+            ),
+        )
+        guard_evidence = {
+            **prepared_evidence,
+            **adjudication_route_guards(route_action),
+        }
         failed_guards = [
             key
             for key, expected in (edge.get("guard") or {}).items()
-            if prepared_evidence.get(key) != expected
+            if guard_evidence.get(key) != expected
         ]
         if failed_guards:
             raise ValueError(
@@ -203,11 +224,6 @@ def advance_graph_branch(
             current_hash=str(branch_row["current_trial_plan_hash"]),
             proposed_hash=proposed_trial_plan_hash,
             has_body=has_trial_plan_body,
-        )
-        cycle_event, cycle_checkpoint = prepare_research_cycle_trace(
-            update=prepared_evidence.get("research_cycle"),
-            previous_checkpoint=previous_cycle_checkpoint,
-            latest_trace_id=str(branch_row["latest_trace_id"]),
         )
         if (
             cycle_checkpoint is not None
