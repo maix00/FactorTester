@@ -295,6 +295,31 @@ def get_research_graph_branch_next(instance_id: str, branch_id: str):
     return jsonify({"success": True, "next": packet})
 
 
+@sft_bp.get(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/cycle-objects/<object_type>/<object_id>"
+)
+def get_research_cycle_object(
+    instance_id: str,
+    branch_id: str,
+    object_type: str,
+    object_id: str,
+):
+    try:
+        value = research_graphs.load_research_cycle_object(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+            object_type=object_type,
+            object_id=object_id,
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "object": value})
+
+
 @sft_bp.post(
     "/api/research-graph-instances/<instance_id>/branches/<branch_id>/advance"
 )

@@ -332,6 +332,10 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   deterministic or exactly preregistered judgments need no reviewer; material
   semantic, post-hoc, non-standard, or conflicting judgments require one
   relevant independent reviewer.
+- Routine Agent packets expose Claim identity plus a bounded obligation
+  question summary and criterion ref/hash. Full current Claim or obligation
+  bodies are read explicitly by ID from the latest checkpoint with one
+  primary-key join; routine work never loads the whole checkpoint or history.
 - **Bounded Closure** is recorded as one compact trace checkpoint plus a current
   branch disposition/hash. It requires one compact independent closure
   challenge and does not create a closure service/table. An accepted new or

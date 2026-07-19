@@ -272,6 +272,38 @@ class TestCLISubprocess:
         assert "stdout" not in packet
         assert not (tmp_path / "session.json").exists()
 
+    def test_cycle_inspect_loads_only_one_referenced_obligation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "factortester"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "assert sys.argv[1:] == [\n"
+            "  'research-graph', 'cycle-object', 'instance-1', 'branch-1',\n"
+            "  'obligation', 'obligation-1'\n"
+            "]\n"
+            "print(json.dumps({\n"
+            "  'obligation_id': 'obligation-1',\n"
+            "  'epistemic_question': 'Does the mechanism survive?'\n"
+            "}))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+        result = self._run(
+            [
+                "cycle", "inspect", "instance-1", "branch-1",
+                "obligation", "obligation-1", "--json",
+            ],
+            env={"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")},
+        )
+
+        assert json.loads(result.stdout)["obligation_id"] == "obligation-1"
+
     def test_cycle_advance_validates_before_real_backend_submission(
         self,
         tmp_path: Path,

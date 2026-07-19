@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from server.services.research_graph.protocol import loads
+from server.services.research_graph.protocol import json_hash, loads
 from server.services.research_graph.research_cycle.replay import (
     replay_research_cycle_events,
     validate_research_cycle_checkpoint,
@@ -134,14 +134,30 @@ def agent_cycle_summary(
         "methodology_hash": checkpoint["methodology_hash"],
         "claim_states": [{
             "claim_id": item["claim_id"],
+            "claim_ref": item["claim_ref"],
+            "claim_type": item["claim_type"],
             "scope": deepcopy(item["scope"]),
             "evidence_state": item["evidence_state"],
+            "detail_ref": (
+                "research-cycle-object:claim:" + item["claim_id"]
+            ),
         } for item in checkpoint["claims"]],
         "open_obligations": [{
             "obligation_id": item["obligation_id"],
             "claim_ids": deepcopy(item["claim_ids"]),
             "materiality": item["materiality"],
             "status": item["status"],
+            "question_summary": _bounded_text(
+                item["epistemic_question"],
+                max_bytes=240,
+            ),
+            "criterion_ref": _criterion_ref(
+                item["discharge_criterion"]
+            ),
+            "detail_ref": (
+                "research-cycle-object:obligation:"
+                + item["obligation_id"]
+            ),
         } for item in checkpoint["obligations"] if item["status"] in {
             "open",
             "reopened",
@@ -159,6 +175,21 @@ def agent_cycle_summary(
             else None
         ),
     }
+
+
+def _criterion_ref(value: dict[str, Any]) -> str:
+    for key in ("rule_ref", "method_ref", "criterion_ref"):
+        candidate = value.get(key)
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return "sha256:" + json_hash(value)
+
+
+def _bounded_text(value: str, *, max_bytes: int) -> str:
+    encoded = str(value).encode()
+    if len(encoded) <= max_bytes:
+        return str(value)
+    return encoded[: max_bytes - 3].decode(errors="ignore") + "..."
 
 
 def _validate_initial_checkpoint(value: Any) -> dict[str, Any]:

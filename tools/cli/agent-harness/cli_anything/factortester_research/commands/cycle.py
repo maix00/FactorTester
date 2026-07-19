@@ -54,6 +54,39 @@ def cycle_next(
     click.echo(f"next_bytes: {packet.get('next_bytes', 0)}")
 
 
+@cycle.command("inspect")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.argument("object_type", type=click.Choice(["claim", "obligation"]))
+@click.argument("object_id")
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+def cycle_inspect(
+    instance_id: str,
+    branch_id: str,
+    object_type: str,
+    object_id: str,
+    as_json: bool,
+) -> None:
+    """Only load one Claim or obligation body after a packet references it."""
+    result = run_factortester([
+        "research-graph",
+        "cycle-object",
+        instance_id,
+        branch_id,
+        object_type,
+        object_id,
+    ], timeout=60)
+    value = _backend_json(
+        result.returncode,
+        result.stdout,
+        result.stderr,
+    )
+    if as_json:
+        echo_json(value)
+        return
+    click.echo(f"{object_type}: {object_id}")
+
+
 @cycle.command("validate")
 @click.option(
     "--evidence-file",

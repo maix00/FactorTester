@@ -1270,6 +1270,12 @@ replay path. Accepted creation or reopening of a decision-blocking obligation
 invalidates accepted and pending closure within that same replay event;
 rejected or non-blocking deltas preserve closure.
 
+The routine packet contains only Claim refs/types and bounded open-obligation
+question summaries with criterion and detail refs. When an Agent needs one
+full body, the explicit cycle-object read resolves that ID from the latest
+checkpoint with one primary-key join. It does not scan trace history or add a
+persistence object.
+
 ### Capability contract
 
 ```yaml

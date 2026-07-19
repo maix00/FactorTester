@@ -2426,8 +2426,11 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert context["research_cycle"]["protocol_status"] == "current"
     assert context["research_cycle"]["claim_states"] == [{
         "claim_id": "claim-branch",
+        "claim_ref": "factor-claim:branch",
+        "claim_type": "bounded_predictive_relationship",
         "scope": {"product_group": "china_futures"},
         "evidence_state": "unknown",
+        "detail_ref": "research-cycle-object:claim:claim-branch",
     }]
     assert "LEFT JOIN RESEARCH_GRAPH_TRACE" in " ".join(
         statement.upper() for statement in statements

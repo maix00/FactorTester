@@ -362,6 +362,26 @@ def next_graph_step(instance_id: str, branch_id: str) -> None:
     ))
 
 
+@research_graph.command("cycle-object")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.argument("object_type", type=click.Choice(["claim", "obligation"]))
+@click.argument("object_id")
+def show_research_cycle_object(
+    instance_id: str,
+    branch_id: str,
+    object_type: str,
+    object_id: str,
+) -> None:
+    """按 ID 读取一个当前 Claim 或义务正文。"""
+    click.echo(_json(client_from_config().get_research_cycle_object(
+        instance_id,
+        branch_id,
+        object_type,
+        object_id,
+    )))
+
+
 @research_graph.command("fork")
 @click.argument("instance_id")
 @click.argument("branch_id")

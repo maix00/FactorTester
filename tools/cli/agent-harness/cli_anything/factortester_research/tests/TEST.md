@@ -143,6 +143,9 @@ of a new plan identity.
 Research Cycle reopening tests clear accepted or pending closure only for an
 accepted new or reopened decision-blocking obligation; rejected and
 non-blocking deltas preserve closure.
+Compact-cycle tests expose bounded question/criterion/detail refs in the
+routine packet and load exactly one referenced Claim or obligation body with
+one database read and no trace-history scan.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.

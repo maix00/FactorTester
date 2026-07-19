@@ -12,6 +12,9 @@ from server.services.research_graph.active_pointer import (
 from server.services.research_graph.branch.context import (
     build_graph_branch_context,
 )
+from server.services.research_graph.branch.cycle_objects import (
+    load_research_cycle_object,
+)
 from server.services.research_graph.branch.next_packet import (
     build_graph_branch_next,
 )
@@ -61,6 +64,7 @@ __all__ = [
     "load_active_graph",
     "load_graph",
     "load_graph_branch",
+    "load_research_cycle_object",
     "record_audit",
     "record_proposal",
     "record_proposal_review",

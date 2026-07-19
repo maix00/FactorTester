@@ -15,6 +15,9 @@ from server.services.research_graph.research_cycle.replay import (
 from server.services.research_graph.research_cycle.routing import (
     accepted_adjudication_action,
 )
+from server.services.research_graph.branch.research_cycle import (
+    agent_cycle_summary,
+)
 from server.services.research_graph.research_cycle.closure import (
     validate_search_exhaustion_decision,
     validate_search_exhaustion_proposal,
@@ -127,6 +130,30 @@ def test_accepted_pair_replays_atomically_into_one_checkpoint() -> None:
     assert after["obligations"][0]["status"] == "discharged"
     assert after["pending_adjudications"] == []
     assert after["projection_hash"] != before["projection_hash"]
+
+
+def test_agent_cycle_summary_exposes_bounded_question_not_full_criterion(
+) -> None:
+    summary = agent_cycle_summary(_checkpoint())
+
+    assert summary["claim_states"] == [{
+        "claim_id": "claim-1",
+        "claim_ref": "factor-claim:1",
+        "claim_type": "bounded_predictive_relationship",
+        "scope": {"sample": "confirmatory"},
+        "evidence_state": "unknown",
+        "detail_ref": "research-cycle-object:claim:claim-1",
+    }]
+    assert summary["open_obligations"] == [{
+        "obligation_id": "obligation-1",
+        "claim_ids": ["claim-1"],
+        "materiality": "decision_blocking",
+        "status": "open",
+        "question_summary": "Does the preregistered test reject?",
+        "criterion_ref": "trial-plan:1#reject",
+        "detail_ref": "research-cycle-object:obligation:obligation-1",
+    }]
+    assert "discharge_criterion" not in summary["open_obligations"][0]
 
 
 def test_adjudication_v2_binds_an_authoritative_next_action() -> None:

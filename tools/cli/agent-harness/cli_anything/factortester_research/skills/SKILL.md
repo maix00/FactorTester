@@ -143,6 +143,11 @@ Submit only the current stage from the plan-bound execution node; past,
 future, or legacy-unbound stages fail closed. Child Jobs inherit the binding
 through `run_id`.
 
+Keep routine context local. Read Claim and obligation summaries from
+`cycle next`; only when one `detail_ref` is needed, load that single body with
+`cycle inspect <instance> <branch> <claim|obligation> <id>`. Do not reload the
+full checkpoint or trace history.
+
 Availability is only one TrialPlan input. Also bind the Decision Contract,
 actionable obligations, factor/data/timing semantics, product accounting,
 market-regime comparisons, selection and multiplicity history, costs,

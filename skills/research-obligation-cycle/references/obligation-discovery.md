@@ -8,6 +8,9 @@ question, or the current checkpoint may omit a first-principles alternative.
 Read only the current Decision Contract, compact Claim and obligation state,
 applicable evidence references, permitted use, and current methodology hash.
 Do not read legacy evidence or a sealed baseline conclusion.
+Load only the single current Claim or obligation body referenced by
+`detail_ref` when its full question, scope, or discharge criterion is
+necessary; do not load the whole checkpoint or trace history.
 
 ## Discover
 

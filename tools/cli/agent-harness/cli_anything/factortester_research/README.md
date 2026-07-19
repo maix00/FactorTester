@@ -153,6 +153,11 @@ Bounded closure is defeasible: an accepted new or reopened
 decision-blocking obligation clears accepted or pending closure atomically.
 Rejected or non-blocking deltas leave closure unchanged.
 
+`cycle next` returns bounded Claim and open-obligation summaries. Use
+`cycle inspect <instance> <branch> <claim|obligation> <id>` only when the
+referenced full current body is necessary; it performs one current-checkpoint
+read and never scans the full trace.
+
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its
 observations were sealed after the factor, selection boundary, and TrialPlan
