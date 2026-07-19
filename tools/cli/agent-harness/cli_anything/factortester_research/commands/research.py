@@ -151,7 +151,6 @@ def run_step(ctx: click.Context, dry_run: bool, timeout: int, as_json: bool) -> 
         stop_condition=(
             "platform_capability_gap" if platform_gap else None
         ),
-        decision="capability_gap" if platform_gap else "continue",
     )
     session.evidence_envelopes.append(envelope)
     save_session(session, session_path)

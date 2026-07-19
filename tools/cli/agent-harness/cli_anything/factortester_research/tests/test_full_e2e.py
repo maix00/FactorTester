@@ -195,8 +195,45 @@ class TestCLISubprocess:
         envelope = payload["session"]["evidence_envelopes"][0]
         assert envelope["command"]["returncode"] == 2
         assert envelope["command"]["stderr_ref"].startswith("local-artifact:")
-        assert envelope["decision"] == "capability_gap"
+        assert envelope["schema_version"] == 2
+        assert "decision" not in envelope
         assert envelope["stop_condition"] == "platform_capability_gap"
+
+    def test_status_hides_legacy_evidence_without_deleting_audit_record(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        session = tmp_path / "legacy-session.json"
+        legacy = {
+            "schema_version": 1,
+            "envelope_id": "legacy-1",
+            "envelope_hash": "a" * 64,
+            "decision": "continue",
+            "metric_refs": ["metric:private"],
+            "artifact_refs": ["artifact:private"],
+        }
+        session.write_text(json.dumps({
+            "evidence_envelopes": [legacy],
+            "events": [{
+                "event": "historical_decision",
+                "evidence": legacy,
+            }],
+        }), encoding="utf-8")
+
+        result = self._run([
+            "--session",
+            str(session),
+            "status",
+            "--json",
+        ])
+        payload = json.loads(result.stdout)
+
+        assert payload["evidence_envelopes"] == []
+        assert payload["legacy_evidence_unavailable_count"] == 1
+        assert "metric:private" not in result.stdout
+        assert json.loads(
+            session.read_text(encoding="utf-8")
+        )["evidence_envelopes"] == [legacy]
 
     def test_gap_resolve_returns_to_research_ready(self, tmp_path: Path) -> None:
         session = tmp_path / "session.json"

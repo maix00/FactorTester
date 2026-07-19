@@ -646,13 +646,51 @@ def test_local_evidence_envelope_keeps_output_behind_hashed_refs(
         stderr="",
         hypotheses_tested=3,
         stop_condition=None,
-        decision="continue",
     )
 
-    assert validate_evidence_envelope(envelope)["decision"] == "continue"
+    assert validate_evidence_envelope(envelope)["schema_version"] == 2
+    assert "decision" not in envelope
     assert envelope["command"]["stdout_ref"].startswith("local-artifact:")
     assert '{"status"' not in json.dumps(envelope)
     assert len(envelope["envelope_hash"]) == 64
+
+
+def test_agent_session_view_hides_legacy_evidence_but_persistence_retains_it(
+) -> None:
+    legacy = {
+        "schema_version": 1,
+        "envelope_id": "legacy-1",
+        "envelope_hash": "a" * 64,
+        "decision": "continue",
+        "metric_refs": ["metric:private"],
+        "artifact_refs": ["artifact:private"],
+    }
+    session = ResearchSession.from_dict({
+        "evidence_envelopes": [legacy],
+        "events": [{
+            "event": "historical_decision",
+            "evidence": legacy,
+        }],
+    })
+
+    agent_view = session.to_dict()
+    persisted = session.to_persisted_dict()
+
+    assert agent_view["evidence_envelopes"] == []
+    assert agent_view["legacy_evidence_unavailable_count"] == 1
+    assert "metric:private" not in json.dumps(agent_view)
+    assert agent_view["events"][0]["evidence"] == {
+        "legacy_evidence_unavailable": True,
+    }
+    assert persisted["evidence_envelopes"] == [legacy]
+    assert persisted["events"][0]["evidence"] == legacy
+
+    with pytest.raises(ValueError, match="legacy evidence is unavailable"):
+        validate_evidence_envelope({
+            "schema_version": 1,
+            "envelope_id": "minimal-legacy",
+            "envelope_hash": "b" * 64,
+        })
 
 
 def test_service_target_selection_requires_unambiguous_worktree() -> None:

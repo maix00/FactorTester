@@ -670,6 +670,127 @@ def test_graph_versions_are_immutable_and_activation_moves_only_pointer(
     )["content_hash"] == active["content_hash"]
 
 
+def test_branch_transition_rejects_legacy_evidence_before_database_access(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    instance = _active_instance(workspace_id="workspace-legacy-denial")
+    branch = instance["branches"][0]
+    original_connect = branch_transition.connect_sqlite
+    monkeypatch.setattr(
+        branch_transition,
+        "connect_sqlite",
+        lambda *_args, **_kwargs: pytest.fail(
+            "legacy evidence reached the database"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="legacy evidence is unavailable to Agents",
+    ):
+        research_graphs.advance_graph_branch(
+            instance_id=instance["instance_id"],
+            branch_id=branch["branch_id"],
+            owner="alice",
+            edge_id="hypothesis__resolution",
+            evidence={
+                "hypothesis_frozen": True,
+                "evidence_envelope": {
+                    "schema_version": 1,
+                    "envelope_id": "legacy-1",
+                    "envelope_hash": "a" * 64,
+                    "decision": "continue",
+                    "metric_refs": ["metric:private"],
+                    "artifact_refs": ["artifact:private"],
+                },
+            },
+        )
+
+    monkeypatch.setattr(
+        branch_transition,
+        "connect_sqlite",
+        original_connect,
+    )
+
+
+def test_branch_advance_http_rejects_legacy_evidence(
+    client,
+) -> None:
+    instance = _active_instance(workspace_id="workspace-legacy-http")
+    branch = instance["branches"][0]
+
+    response = client.post(
+        (
+            f"/api/research-graph-instances/{instance['instance_id']}"
+            f"/branches/{branch['branch_id']}/advance"
+        ),
+        json={
+            "edge_id": "hypothesis__resolution",
+            "evidence": {
+                "hypothesis_frozen": True,
+                "evidence_envelope": {
+                    "schema_version": 1,
+                    "envelope_id": "legacy-http",
+                    "envelope_hash": "a" * 64,
+                    "decision": "continue",
+                    "artifact_refs": ["artifact:private"],
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 409
+    assert "legacy evidence is unavailable to Agents" in (
+        response.get_json()["error"]
+    )
+
+
+def test_branch_transition_rejects_decision_inside_current_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    instance = _active_instance(workspace_id="workspace-v2-factual")
+    branch = instance["branches"][0]
+    monkeypatch.setattr(
+        branch_transition,
+        "connect_sqlite",
+        lambda *_args, **_kwargs: pytest.fail(
+            "non-factual evidence reached the database"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="factual evidence must not contain decision",
+    ):
+        research_graphs.advance_graph_branch(
+            instance_id=instance["instance_id"],
+            branch_id=branch["branch_id"],
+            owner="alice",
+            edge_id="hypothesis__resolution",
+            evidence={
+                "hypothesis_frozen": True,
+                "evidence_envelope": {
+                    "schema_version": 2,
+                    "envelope_id": "evidence-2",
+                    "evidence_kind": "analysis",
+                    "source_refs": ["analysis:2"],
+                    "identity_refs": {},
+                    "metric_refs": [],
+                    "artifact_refs": [],
+                    "hypotheses_tested": 1,
+                    "stop_condition": None,
+                    "limitations": [],
+                    "conflicts": [],
+                    "decision": "supported_in_scope",
+                },
+            },
+        )
+
+
 def test_agent_invocation_rejects_incomplete_identity_provenance(
     tmp_path,
     monkeypatch,
@@ -1923,12 +2044,27 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "connect_sqlite",
         traced_transition_connect,
     )
-    research_graphs.advance_graph_branch(
+    transitioned = research_graphs.advance_graph_branch(
         instance_id=instance["instance_id"],
         branch_id=first["branch_id"],
         owner="alice",
         edge_id="hypothesis__resolution",
-        evidence={"hypothesis_frozen": True},
+        evidence={
+            "hypothesis_frozen": True,
+            "evidence_envelope": {
+                "schema_version": 2,
+                "envelope_id": "evidence-canonical",
+                "evidence_kind": "analysis",
+                "source_refs": ["analysis:canonical"],
+                "identity_refs": {},
+                "metric_refs": [],
+                "artifact_refs": [],
+                "hypotheses_tested": 1,
+                "stop_condition": None,
+                "limitations": [],
+                "conflicts": [],
+            },
+        },
     )
     monkeypatch.setattr(
         branch_transition,
@@ -1960,6 +2096,21 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         )
         for statement in transition_statements
     ) == 1
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        trace = conn.execute(
+            """
+            SELECT evidence_json FROM research_graph_trace
+            WHERE instance_id=? AND branch_id=?
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (
+                transitioned["instance_id"],
+                transitioned["branch_id"],
+            ),
+        ).fetchone()
+    envelope = orjson.loads(trace["evidence_json"])["evidence_envelope"]
+    assert len(envelope["envelope_hash"]) == 64
+    assert "decision" not in envelope
     before_oversized = research_graphs.load_graph_branch(
         instance_id=instance["instance_id"],
         branch_id=first["branch_id"],

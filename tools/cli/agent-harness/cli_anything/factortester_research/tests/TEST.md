@@ -44,8 +44,12 @@ artifact contracts produced by the workflow.
 
 - Preserve hash-chained Skill usage with provider, version, fingerprint,
   approval reference, load/reuse mode, rationale, and token counts.
-- Persist compact EvidenceEnvelopes with command exit status and artifact
-  references instead of inline stdout/stderr bodies.
+- Persist compact factual EvidenceEnvelope v2 records with command exit status
+  and artifact references instead of inline stdout/stderr bodies or research
+  decisions.
+- Keep legacy EvidenceEnvelope v1 payloads in the persistence-only historical
+  record while excluding their decisions, metrics, artifacts, paths, and
+  nested copies from every Agent-facing session JSON view.
 - Preserve gap and factor-improvement state transitions.
 - Keep selection slices separate from OOS annotation.
 
@@ -135,12 +139,12 @@ CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
 
 [_resolve_cli] Using installed command:
   /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
-collected 41 items
+collected 43 items
 
 test_core.py
-  29 passed
+  30 passed
 test_full_e2e.py::TestCLISubprocess
-  11 passed
+  12 passed
 test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
   [_resolve_cli] Using installed command:
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/factortester
@@ -148,7 +152,7 @@ test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
 
-41 passed, 123 warnings in 12.24s
+43 passed, 123 warnings in 12.70s
 ```
 
 All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in

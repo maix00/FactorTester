@@ -17,6 +17,26 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _looks_like_legacy_evidence(value: dict[str, Any]) -> bool:
+    return (
+        value.get("schema_version") == 1
+        and isinstance(value.get("envelope_id"), str)
+    )
+
+
+def _agent_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        if _looks_like_legacy_evidence(value):
+            return {"legacy_evidence_unavailable": True}
+        return {
+            str(key): _agent_safe(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_agent_safe(item) for item in value]
+    return value
+
+
 @dataclass
 class ResearchSession:
     status: str = "research_ready"
@@ -52,6 +72,27 @@ class ResearchSession:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the Agent-facing view without legacy evidence content."""
+        payload = _agent_safe(self._base_dict())
+        current_evidence = [
+            _agent_safe(item)
+            for item in self.evidence_envelopes
+            if isinstance(item, dict)
+            and item.get("schema_version") == 2
+        ]
+        payload["evidence_envelopes"] = current_evidence
+        payload["legacy_evidence_unavailable_count"] = (
+            len(self.evidence_envelopes) - len(current_evidence)
+        )
+        return payload
+
+    def to_persisted_dict(self) -> dict[str, Any]:
+        """Preserve historical records without exposing them to Agents."""
+        payload = self._base_dict()
+        payload["evidence_envelopes"] = self.evidence_envelopes
+        return payload
+
+    def _base_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "operator_mode": self.operator_mode,
@@ -65,7 +106,6 @@ class ResearchSession:
             "factor_source": self.factor_source,
             "hypotheses_tested": self.hypotheses_tested,
             "skill_usage": self.skill_usage,
-            "evidence_envelopes": self.evidence_envelopes,
         }
 
 
@@ -89,7 +129,12 @@ def save_session(session: ResearchSession, path: str | os.PathLike[str] = DEFAUL
                 handle.flush()
             handle.seek(0)
             handle.truncate()
-            json.dump(session.to_dict(), handle, ensure_ascii=False, indent=2)
+            json.dump(
+                session.to_persisted_dict(),
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())

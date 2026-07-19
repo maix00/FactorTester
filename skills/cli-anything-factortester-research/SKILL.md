@@ -66,6 +66,12 @@ factortester research-graph advance <instance_id> <branch_id> \
   --target-capability-resolution-file target-resolution.json
 ```
 
+Submit only factual `EvidenceEnvelope` schema version 2. Never request, read,
+reuse, or submit schema-version-1 evidence; it is unavailable to Agents. If a
+session reports `legacy_evidence_unavailable_count`, create new current-schema
+evidence. Put Claim/obligation interpretation in a separate adjudication
+proposal, never inside the EvidenceEnvelope.
+
 For activation validation, send canonical instance/branch/baseline-run
 references. The server derives replay, shadow comparison, and token evidence;
 never invent client-side pass booleans.

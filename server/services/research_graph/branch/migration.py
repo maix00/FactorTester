@@ -189,6 +189,14 @@ def _project_branches(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             resolution,
             node_id=node_id,
         )
+        legacy_evidence_refs = orjson.loads(
+            str(row["evidence_refs_json"] or "[]")
+        )
+        legacy_evidence_ref_count = (
+            len(legacy_evidence_refs)
+            if isinstance(legacy_evidence_refs, list)
+            else 0
+        )
         projected.append({
             "branch_id": branch_id,
             "instance_id": instance_id,
@@ -201,11 +209,11 @@ def _project_branches(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 (instance_id, branch_id),
                 "",
             ),
-            "evidence_refs_json": str(row["evidence_refs_json"] or "[]"),
+            "evidence_refs_json": "[]",
             "omitted_evidence_count": int(
                 row["omitted_evidence_count"] or 0
-            ),
-            "latest_trace_id": str(row["latest_trace_id"] or ""),
+            ) + legacy_evidence_ref_count,
+            "latest_trace_id": "",
             "created_at": float(row["created_at"]),
             "updated_at": float(row["updated_at"]),
         })

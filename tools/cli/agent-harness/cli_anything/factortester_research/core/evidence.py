@@ -1,4 +1,4 @@
-"""Bounded, local-only research evidence envelopes."""
+"""Bounded, factual, local-only research evidence envelopes."""
 
 from __future__ import annotations
 
@@ -9,21 +9,52 @@ from pathlib import Path
 from typing import Any
 
 
-_DECISIONS = {
-    "continue",
-    "capability_gap",
-    "factor_improvement",
-    "candidate",
-    "watchlist",
-    "reject",
+_INTERPRETATION_FIELDS = {
+    "adjudication",
+    "claim_evidence_delta",
+    "conclusion",
+    "decision",
+    "decision_warrant",
+    "obligation_delta",
 }
+
+
+def assert_no_legacy_evidence_payload(value: Any) -> None:
+    """Reject a legacy envelope anywhere in an Agent command payload."""
+    if isinstance(value, dict):
+        if _looks_like_legacy_envelope(value):
+            raise ValueError("legacy evidence is unavailable to Agents")
+        for item in value.values():
+            assert_no_legacy_evidence_payload(item)
+    elif isinstance(value, list):
+        for item in value:
+            assert_no_legacy_evidence_payload(item)
 
 
 def validate_evidence_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(envelope, dict):
         raise ValueError("evidence envelope must be an object")
-    if int(envelope.get("schema_version") or 0) != 1:
+    if int(envelope.get("schema_version") or 0) == 1:
+        raise ValueError("legacy evidence is unavailable to Agents")
+    if int(envelope.get("schema_version") or 0) != 2:
         raise ValueError("unsupported evidence envelope schema_version")
+    forbidden = sorted(_find_fields(envelope, _INTERPRETATION_FIELDS))
+    if forbidden:
+        raise ValueError(
+            "factual evidence must not contain decision fields: "
+            + ", ".join(forbidden)
+        )
+    if not isinstance(envelope.get("envelope_id"), str):
+        raise ValueError("evidence envelope requires envelope_id")
+    if not isinstance(envelope.get("evidence_kind"), str):
+        raise ValueError("evidence envelope requires evidence_kind")
+    source_refs = envelope.get("source_refs")
+    if not isinstance(source_refs, list) or not source_refs or not all(
+        isinstance(item, str) and item.strip() for item in source_refs
+    ):
+        raise ValueError("evidence source_refs must be a non-empty array")
+    if not isinstance(envelope.get("identity_refs"), dict):
+        raise ValueError("evidence identity_refs must be an object")
     command = envelope.get("command")
     if not isinstance(command, dict):
         raise ValueError("evidence envelope requires command")
@@ -54,8 +85,12 @@ def validate_evidence_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     stop_condition = envelope.get("stop_condition")
     if stop_condition is not None and not isinstance(stop_condition, str):
         raise ValueError("stop_condition must be a string or null")
-    if envelope.get("decision") not in _DECISIONS:
-        raise ValueError("invalid evidence decision")
+    for field in ("limitations", "conflicts"):
+        value = envelope.get(field)
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) and item.strip() for item in value
+        ):
+            raise ValueError(f"evidence {field} must be a text array")
     return deepcopy(envelope)
 
 
@@ -69,7 +104,6 @@ def persist_command_evidence(
     stderr: str,
     hypotheses_tested: int,
     stop_condition: str | None,
-    decision: str,
 ) -> dict[str, Any]:
     """Persist stdout/stderr locally and return a bounded auditable envelope."""
     session_file = Path(session_path)
@@ -87,8 +121,11 @@ def persist_command_evidence(
         refs[stream] = f"local-artifact:{path}:{digest}"
         artifact_refs.append(refs[stream])
     envelope = {
-        "schema_version": 1,
+        "schema_version": 2,
         "envelope_id": envelope_id,
+        "evidence_kind": "command_execution",
+        "source_refs": [f"local-command:{envelope_id}"],
+        "identity_refs": {},
         "command": {
             "argv": list(argv),
             "returncode": int(returncode),
@@ -99,7 +136,8 @@ def persist_command_evidence(
         "artifact_refs": artifact_refs,
         "hypotheses_tested": hypotheses_tested,
         "stop_condition": stop_condition,
-        "decision": decision,
+        "limitations": [],
+        "conflicts": [],
     }
     value = validate_evidence_envelope(envelope)
     value["envelope_hash"] = hashlib.sha256(
@@ -111,3 +149,23 @@ def persist_command_evidence(
         ).encode()
     ).hexdigest()
     return value
+
+
+def _find_fields(value: Any, forbidden: set[str]) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                found.add(str(key))
+            found.update(_find_fields(item, forbidden))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(_find_fields(item, forbidden))
+    return found
+
+
+def _looks_like_legacy_envelope(value: dict[str, Any]) -> bool:
+    return (
+        value.get("schema_version") == 1
+        and isinstance(value.get("envelope_id"), str)
+    )

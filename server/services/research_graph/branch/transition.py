@@ -24,6 +24,9 @@ from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
     validate_resolution_against_node,
 )
+from server.services.research_graph.research_cycle.evidence import (
+    validate_agent_evidence_payload,
+)
 from server.services.research_graph.protocol import (
     assert_no_skill_identity,
     loads,
@@ -48,6 +51,7 @@ def advance_graph_branch(
 ) -> dict[str, Any]:
     if not isinstance(evidence, dict):
         raise ValueError("transition evidence must be an object")
+    evidence = validate_agent_evidence_payload(evidence)
     prepared_evidence, proposed_trial_plan_hash, has_trial_plan_body = (
         prepare_trial_plan_evidence(evidence)
     )

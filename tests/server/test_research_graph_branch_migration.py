@@ -348,7 +348,9 @@ def test_forward_migration_is_atomic_replayable_and_restart_safe(
         branch["current_capability_resolution_json"]
     ) == fixture["resolution"]
     assert branch["current_trial_plan_hash"] == "a" * 64
-    assert branch["evidence_refs_json"] == '["artifact:one"]'
+    assert branch["evidence_refs_json"] == "[]"
+    assert branch["omitted_evidence_count"] == 1
+    assert branch["latest_trace_id"] == ""
     assert orjson.loads(trace["telemetry_json"]) == {"input_tokens": 100}
 
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
@@ -385,6 +387,8 @@ def test_forward_migration_is_atomic_replayable_and_restart_safe(
     )
     assert context["node"]["node_id"] == fixture["graph"]["entry_node"]
     assert context["branch"]["trial_plan_hash"] == "a" * 64
+    assert context["evidence_refs"] == []
+    assert context["history_cursor"] is None
     assert "token_telemetry" not in context
     assert next_packet["next_bytes"] <= 6000
     assert not any(

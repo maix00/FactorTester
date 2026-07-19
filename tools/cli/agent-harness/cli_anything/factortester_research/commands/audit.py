@@ -6,6 +6,7 @@ import json
 
 import click
 
+from ..core.evidence import assert_no_legacy_evidence_payload
 from ..core.session import (
     load_session,
     mark_factor_improvement_required,
@@ -121,6 +122,7 @@ def decision_poor_result(ctx: click.Context, reason: str, evidence: str, as_json
             evidence_payload = parsed if isinstance(parsed, dict) else {"value": parsed}
         except Exception:
             evidence_payload = {"text": evidence}
+    assert_no_legacy_evidence_payload(evidence_payload)
     row = mark_factor_improvement_required(session, reason, evidence=evidence_payload)
     save_session(session, ctx.obj["session_path"])
     if as_json:

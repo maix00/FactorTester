@@ -1,7 +1,7 @@
 # Research Obligation Cycle Implementation Work Package
 
-Status: proposed implementation package; Grill 143 semantics accepted; no
-runtime implementation started.
+Status: implementation in progress; Grill 143 semantics accepted; Batch 0 is
+complete and Batch 1 is at its release gate.
 
 Baseline: `56d36913` on `fix/issue-140-active-graph-agentflow`.
 
@@ -240,7 +240,15 @@ Gates:
 - pure unit and stable-hash tests;
 - legacy v1 fixtures remain readable only by the privileged deterministic
   compatibility test surface and are rejected by every Agent-facing surface;
-- zero database schema or runtime-route changes.
+- direct service and HTTP transition entry reject v1 and non-factual v2 before
+  database access;
+- Harness persistence and Agent JSON projection are distinct: history retains
+  v1 while every Agent view removes its payload, decisions, metrics, artifacts,
+  paths, and nested copies;
+- branch migration clears legacy evidence refs/history cursor from the current
+  Agent projection and counts them only as omitted;
+- no database schema change; runtime changes are limited to enforcing the
+  legacy/factual boundary and producing EvidenceEnvelope v2.
 
 ### Batch 2 — shadow trace replay and branch projection
 
@@ -353,6 +361,11 @@ Gates:
 Deliver:
 
 - baseline-versus-shadow evidence;
+- one blind targeted-research acceptance using a pinned valid SgCCS Factor
+  Family version/configuration;
+- one blind open-discovery acceptance that creates and studies a new
+  point-in-time trend-following Factor Family after checking the workspace for
+  semantic duplicates;
 - versioned Graph/methodology activation through the existing pointer gate;
 - affected-Contract impact plan;
 - rollback target and release receipt.
@@ -369,6 +382,83 @@ Activation blocks unless:
 - no new persistence owner or server Skill identity exists;
 - legacy evidence remains semantically unchanged;
 - rollback is one approved pointer/version operation.
+
+## Blind real-factor acceptance
+
+The final Graph and reference Skill are not accepted only from synthetic
+fixtures. Run two real FactorTester studies:
+
+### Case A — pinned SgCCS targeted research
+
+The Planning role creates a bounded Work Package over one explicitly pinned,
+previously usable SgCCS Factor Family version and configuration. Pin the
+RunSpec, product scope, time slices, costs/accounting, data snapshot, backend
+revision, and TrialPlan before outcome inspection.
+
+The Research role then runs the vNext Graph without receiving any legacy
+Evidence Envelope, v1 decision, metric, artifact, or path. It must exercise:
+
+- Decision Contract projection;
+- initial obligation discovery;
+- TrialPlan synthesis;
+- real FactorTester JobAttempt and Evidence Envelope v2;
+- paired adjudication;
+- diagnostics/revision routing where triggered;
+- search exhaustion and bounded closure.
+
+After closure, a non-Agent acceptance comparator or privileged human audit may
+compare the sealed v1 baseline with vNext. Comparison uses identical immutable
+execution identities and checks factual metric/direction/scope compatibility,
+not matching prose. Any difference is classified as:
+
+- corrected v1 defect or stronger epistemic boundary;
+- expected result of an explicitly changed method/scope;
+- unexplained regression that blocks activation.
+
+The v1 baseline remains inaccessible to Planning, Research, Reviewer, Skills,
+and ordinary context throughout the run.
+
+### Case B — new trend-following open discovery
+
+The Planning role creates an Open Discovery Work Package inside the
+user-authorized workspace scope. Before writing code it searches the current
+Factor library for a semantically equivalent trend factor. If none is
+equivalent, it specifies a simple point-in-time trend hypothesis, information
+timing, parameter space, falsifiers, market-state boundaries, and permitted
+single-factor use.
+
+The Research role:
+
+- creates the Factor Family through the existing generated factor-workspace
+  method and public Factor Author SDK;
+- passes Pylance/Pyright with zero errors;
+- verifies batch/incremental semantics and no look-ahead;
+- runs real diagnostics and backtests under an immutable TrialPlan;
+- creates factor-specific obligations rather than relying on a fixed list;
+- uses discover, synthesize, adjudicate, exhaustion, and impact modes where
+  their trigger conditions apply;
+- records missing general operators/strategy behavior as Capability Gaps
+  rather than approximating or rejecting the factor;
+- reaches a truthful positive, negative, blocked, or resource-stopped bounded
+  disposition.
+
+This case has no v1 conclusion target. Its purpose is to prove the Graph can
+start from a user-authorized workspace, create a new factor, obtain real
+evidence, revise it, and stop honestly.
+
+### Role and token boundary
+
+One Agent may perform the Planning role and then claim the bounded Research
+role, provided the accepted Work Package, hashes, and role transition are
+recorded. Do not spawn a second Agent merely to rename the role. Use one
+independent reviewer only for a triggered material adjudication or the final
+closure challenge.
+
+Both cases record context bytes, settled tokens by category, reviewer count,
+SQL reads/writes, cache reuse, Job duration, and accepted evidence count. The
+real-factor acceptance fails if either Agent sees sealed v1 content, if a
+routine node loads the complete Graph/catalog/Skill/history, or if database
+cost grows with trace history.
 
 ## Acceptance matrix
 
@@ -448,3 +538,21 @@ exposure but does not itself create a valid public client distribution.
 
 As last verified on 2026-07-19, `maix00/FactorTester` remains `PUBLIC` with
 default branch `master`; this is an unresolved product-release blocker.
+
+## Batch 1 release evidence
+
+Batch 1 introduces no database schema or new persistence owner. It adds the
+provider-neutral protocol validators, factual Evidence Envelope v2 boundary,
+legacy Agent-access denial, Harness persistence/Agent-view separation, and
+legacy branch-projection cutover described above.
+
+The release gate must be rerun immediately before commit. Its expected proof is:
+
+- protocol counterexamples, Graph transition, migration, final-schema, and
+  shadow-replay server tests pass;
+- the complete Harness suite reports 43 passing tests;
+- the forced-installed Harness subprocess suite reports 12 passing tests;
+- Pyright reports zero errors on the changed protocol and Harness core;
+- canonical and packaged Harness Skills both validate and remain
+  byte-identical;
+- `git diff --check` is clean.
