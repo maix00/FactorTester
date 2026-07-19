@@ -156,6 +156,63 @@ def test_factor_workspace_build_refuses_root_owned_by_another_profile(monkeypatc
     assert protected_source.read_text(encoding="utf-8") == "owner source\n"
 
 
+def test_factor_workspace_sync_refuses_root_owned_by_another_profile(
+    monkeypatch,
+    tmp_path,
+):
+    workspace_root = tmp_path / "shared-factor-root"
+    custom_dir = workspace_root / "custom_factors"
+    custom_dir.mkdir(parents=True)
+    protected_source = custom_dir / "OwnerFactor.py"
+    protected_source.write_text("owner source\n", encoding="utf-8")
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$owner@1"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(workspace_root),
+    )
+
+    with pytest.raises(PermissionError, match="default\\$owner@1"):
+        factor_workspace.sync_factor_workspace(
+            "default$other@1",
+            branch_mode="force",
+        )
+
+    assert protected_source.read_text(encoding="utf-8") == "owner source\n"
+
+
+def test_factor_workspace_push_refuses_root_owned_by_another_profile(
+    monkeypatch,
+    tmp_path,
+):
+    workspace_root = tmp_path / "shared-factor-root"
+    custom_dir = workspace_root / "custom_factors"
+    custom_dir.mkdir(parents=True)
+    protected_source = custom_dir / "OwnerFactor.py"
+    protected_source.write_text("owner source\n", encoding="utf-8")
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$owner@1"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(workspace_root),
+    )
+
+    with pytest.raises(PermissionError, match="default\\$owner@1"):
+        factor_workspace.push_factor_workspace("default$other@1")
+
+    assert protected_source.read_text(encoding="utf-8") == "owner source\n"
+
+
 def test_factor_workspace_build_refuses_nonempty_unmanaged_root(monkeypatch, tmp_path):
     workspace_root = tmp_path / "unmanaged-root"
     workspace_root.mkdir()
@@ -196,6 +253,12 @@ def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, 
     workspace_root = tmp_path / "factor-root"
     public_dir = workspace_root / "public_factors"
     public_dir.mkdir(parents=True)
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$alice@1"}),
+        encoding="utf-8",
+    )
     (public_dir / "PublicFactor.py").write_text("class PublicFactor(FactorFamily):\n    pass\n", encoding="utf-8")
 
     factor_storage = factor_workspace_storage
@@ -213,6 +276,12 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
     subprocess.run(["git", "-C", str(workspace_root), "config", "user.name", "Test User"], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(workspace_root), "config", "user.email", "test@example.com"], check=True, capture_output=True, text=True)
     (workspace_root / "README.md").write_text("hello\n", encoding="utf-8")
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$alice@1"}),
+        encoding="utf-8",
+    )
     subprocess.run(["git", "-C", str(workspace_root), "add", "README.md"], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(workspace_root), "commit", "-m", "init"], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(workspace_root), "checkout", "-b", "download"], check=True, capture_output=True, text=True)
