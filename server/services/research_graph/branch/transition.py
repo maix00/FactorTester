@@ -269,6 +269,7 @@ def advance_graph_branch(
                     branch_row["current_trial_plan_hash"]
                 ),
                 current_projection=current_stage_projection,
+                execution_node=target_id,
             )
         if route_action == "advance_trial_stage":
             projected_stage = advance_trial_stage(

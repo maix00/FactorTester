@@ -766,6 +766,7 @@ def migrate_legacy_workspaces_and_runs(*, apply: bool = False) -> dict[str, Any]
                         trial_plan_hash TEXT NOT NULL DEFAULT '',
                         trial_plan_version INTEGER NOT NULL DEFAULT 0,
                         trial_role TEXT NOT NULL DEFAULT '',
+                        trial_stage TEXT NOT NULL DEFAULT '',
                         comparison_id TEXT NOT NULL DEFAULT '',
                         created_at REAL NOT NULL
                     )

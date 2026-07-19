@@ -244,12 +244,13 @@ table or service. The `validation_design` transition stores the compact plan
 once in existing append-only graph-trace evidence. The current hypothesis
 branch keeps a current-plan hash and compact stage projection needed for
 constant-bounded validation. The stage projection contains only plan/version,
-current stage, completed mask, and frozen commitment hashes; it is not another
-research state owner. A ResearchRun binds the plan hash, server-derived sample
-stage, comparison-arm `trial_role`, and `comparison_id`; JobAttempts inherit
-through the run rather than duplicating the plan. Routine submission reuses
-the already-loaded branch/run decision packet and does not scan historical
-traces.
+current stage, completed mask, plan-bound execution node, and frozen commitment
+hashes; it is not another research state owner. A ResearchRun binds the plan
+hash, server-derived sample stage, comparison-arm `trial_role`, and
+`comparison_id`; JobAttempts inherit through the run rather than duplicating
+the plan. Routine submission reuses one branch read to reject a non-current
+stage, wrong execution node, or protected-sample reuse and does not scan
+historical traces.
 
 A graph trace containing a TrialPlan body is retention-pinned while any
 ResearchRun, JobAttempt, or accepted research conclusion references its plan

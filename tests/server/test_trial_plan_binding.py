@@ -119,6 +119,7 @@ def test_research_run_binds_plan_and_jobs_inherit_through_run(
         "trial_plan_hash": plan_hash,
         "trial_plan_version": 1,
         "trial_role": "selection",
+        "trial_stage": "selection",
         "comparison_id": "main-comparison",
         "sample_ref": "selection-2020-2023",
         "sample_hash": "d" * 64,
@@ -157,6 +158,7 @@ def test_research_run_binds_plan_and_jobs_inherit_through_run(
         "trial_plan_hash",
         "trial_plan_version",
         "trial_role",
+        "trial_stage",
         "comparison_id",
     }.isdisjoint(job_columns)
 

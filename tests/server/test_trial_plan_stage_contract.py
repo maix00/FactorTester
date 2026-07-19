@@ -60,6 +60,7 @@ def test_stage_projection_enforces_lineage_and_frozen_trial_design() -> None:
         trial_plan_hash=first_hash,
         current_trial_plan_hash="",
         current_projection={},
+        execution_node="cheap_factor_diagnostics",
     )
 
     assert projection["current_stage"] == "selection"
@@ -81,6 +82,7 @@ def test_stage_projection_enforces_lineage_and_frozen_trial_design() -> None:
             trial_plan_hash=trial_plan_hash(changed_run),
             current_trial_plan_hash=first_hash,
             current_projection=advanced,
+            execution_node="cheap_factor_diagnostics",
         )
 
     child = deepcopy(first)
@@ -91,6 +93,7 @@ def test_stage_projection_enforces_lineage_and_frozen_trial_design() -> None:
         trial_plan_hash=trial_plan_hash(child),
         current_trial_plan_hash=first_hash,
         current_projection=advanced,
+        execution_node="cheap_factor_diagnostics",
     )
     assert child_projection["plan_version"] == 2
     assert child_projection["current_stage"] == "validation"
@@ -103,6 +106,7 @@ def test_stage_projection_enforces_lineage_and_frozen_trial_design() -> None:
             trial_plan_hash=trial_plan_hash(changed_partition),
             current_trial_plan_hash=first_hash,
             current_projection=advanced,
+            execution_node="cheap_factor_diagnostics",
         )
 
 
@@ -123,6 +127,7 @@ def test_direct_confirmation_is_terminal_and_not_revision_eligible() -> None:
         trial_plan_hash=trial_plan_hash(canonical),
         current_trial_plan_hash="",
         current_projection={},
+        execution_node="cheap_factor_diagnostics",
     )
 
     assert trial_stage_guard_facts(

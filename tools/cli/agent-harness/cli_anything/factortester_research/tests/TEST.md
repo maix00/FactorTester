@@ -133,6 +133,10 @@ Schema-v4 tests distinguish sample stage from comparison arm, freeze stage
 partitions plus RunSpec/comparison membership across child versions, validate
 direct-confirmation entry, persist one compact branch stage projection, and
 keep the Agent packet below its existing byte limit.
+ResearchRun boundary tests verify that stage comes from the planned sample,
+not the comparison arm; only the current stage at the plan-bound execution
+node can run; protected-sample reuse cannot be hidden behind a shared
+`candidate` role; and the hot path remains one branch read plus one run write.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.

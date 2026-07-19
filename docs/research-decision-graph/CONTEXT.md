@@ -236,8 +236,10 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   is the default review path, with one Statistical Reviewer only for
   non-standard, ambiguous, protocol-deviating, or high-risk design.
 - A **Trial Plan** may coordinate multiple immutable RunSpecs; each ResearchRun
-  binds exactly one plan version, one RunSpec hash, one trial role, and one
-  comparison identity, which its JobAttempts inherit.
+  binds exactly one plan version, one RunSpec hash, one server-derived current
+  sample stage, one comparison-arm trial role, and one comparison identity,
+  which its JobAttempts inherit. Submission outside the plan-bound execution
+  node fails closed.
 - Existing persistence objects are implementation candidates, not frozen
   semantics. Implementation may refactor them when an ownership and query-path
   audit proves fewer duplicate facts, reads, or writes.

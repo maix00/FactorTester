@@ -21,7 +21,7 @@ from .stage_policy import (
 )
 
 
-_PROJECTION_FIELDS = frozenset({
+_PROJECTION_FIELDS_V1 = frozenset({
     "schema_version",
     "trial_plan_id",
     "plan_version",
@@ -32,6 +32,10 @@ _PROJECTION_FIELDS = frozenset({
     "partition_commitment_hash",
     "frozen_design_hash",
 })
+_PROJECTION_FIELDS_V2 = frozenset({
+    *_PROJECTION_FIELDS_V1,
+    "execution_node",
+})
 
 
 def project_trial_plan_stage(
@@ -40,6 +44,7 @@ def project_trial_plan_stage(
     trial_plan_hash: str,
     current_trial_plan_hash: str,
     current_projection: dict[str, Any],
+    execution_node: str,
 ) -> dict[str, Any]:
     """Bind one v4 Plan to a compact O(1) branch stage projection."""
     if trial_plan.get("schema_version") != 4:
@@ -55,6 +60,10 @@ def project_trial_plan_stage(
     partition_hash = _partition_commitment_hash(trial_plan)
     design_hash = _frozen_design_hash(trial_plan)
     parent_hash = trial_plan["parent_trial_plan_hash"]
+    normalized_execution_node = identifier_field(
+        execution_node,
+        "trial_stage_projection.execution_node",
+    )
     if not current_projection:
         if current_hash:
             raise ValueError(
@@ -66,7 +75,7 @@ def project_trial_plan_stage(
             )
         policy = trial_plan["stage_policy"]
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "trial_plan_id": trial_plan["trial_plan_id"],
             "plan_version": 1,
             "ordered_stages": deepcopy(policy["ordered_stages"]),
@@ -75,6 +84,7 @@ def project_trial_plan_stage(
             "completed_mask": 0,
             "partition_commitment_hash": partition_hash,
             "frozen_design_hash": design_hash,
+            "execution_node": normalized_execution_node,
         }
     current = validate_trial_stage_projection(current_projection)
     if parent_hash != current_hash:
@@ -94,7 +104,9 @@ def project_trial_plan_stage(
     if design_hash != current["frozen_design_hash"]:
         raise ValueError("TrialPlan lineage changed frozen trial design")
     value = deepcopy(current)
+    value["schema_version"] = 2
     value["plan_version"] = trial_plan["version"]
+    value["execution_node"] = normalized_execution_node
     return value
 
 
@@ -162,16 +174,25 @@ def agent_trial_stage_summary(
 
 
 def validate_trial_stage_projection(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("trial_stage_projection must be an object")
+    schema_version = integer_field(
+        value.get("schema_version"),
+        "trial_stage_projection.schema_version",
+    )
+    if schema_version not in {1, 2}:
+        raise ValueError(
+            "trial stage projection schema_version must be 1 or 2"
+        )
     projection = object_field(
         value,
         "trial_stage_projection",
-        fields=_PROJECTION_FIELDS,
+        fields=(
+            _PROJECTION_FIELDS_V2
+            if schema_version == 2
+            else _PROJECTION_FIELDS_V1
+        ),
     )
-    if integer_field(
-        projection.get("schema_version"),
-        "trial_stage_projection.schema_version",
-    ) != 1:
-        raise ValueError("trial stage projection schema_version must be 1")
     stages = canonical_stage_order(
         projection.get("ordered_stages"),
         field="trial_stage_projection.ordered_stages",
@@ -193,7 +214,7 @@ def validate_trial_stage_projection(value: Any) -> dict[str, Any]:
     if completed_mask < 0 or completed_mask >= (1 << len(stages)):
         raise ValueError("trial stage projection completed_mask is invalid")
     return {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "trial_plan_id": identifier_field(
             projection.get("trial_plan_id"),
             "trial_stage_projection.trial_plan_id",
@@ -213,6 +234,14 @@ def validate_trial_stage_projection(value: Any) -> dict[str, Any]:
         "frozen_design_hash": sha256_field(
             projection.get("frozen_design_hash"),
             "trial_stage_projection.frozen_design_hash",
+        ),
+        "execution_node": (
+            identifier_field(
+                projection.get("execution_node"),
+                "trial_stage_projection.execution_node",
+            )
+            if schema_version == 2
+            else None
         ),
     }
 

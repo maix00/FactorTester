@@ -5,7 +5,10 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+import orjson
+
 from .contract import canonical_trial_plan, trial_plan_hash
+from .stage_projection import validate_trial_stage_projection
 
 
 def normalize_run_binding(
@@ -71,6 +74,7 @@ def normalize_run_binding(
     return {
         "trial_plan_id": str(plan["trial_plan_id"]),
         "trial_plan_hash": actual_hash,
+        "trial_plan_schema_version": int(plan["schema_version"]),
         "trial_plan_version": int(plan["version"]),
         "trial_role": str(trial_role),
         "trial_stage": trial_stage,
@@ -108,8 +112,10 @@ def validate_branch_binding(
     instance_id: str,
     branch_id: str,
     trial_plan_hash: str,
+    trial_plan_schema_version: int,
     trial_plan_version: int,
     trial_role: str,
+    trial_stage: str,
     sample_identity_hash: str,
     sample_start: str,
     sample_end: str,
@@ -119,7 +125,8 @@ def validate_branch_binding(
     """Bind current plan and reject reuse of protected sample evidence."""
     row = conn.execute(
         """
-        SELECT b.current_trial_plan_hash,
+        SELECT b.current_trial_plan_hash, b.current_node,
+               b.trial_stage_projection_json,
                (
                    SELECT MAX(r.trial_plan_version)
                    FROM research_runs AS r
@@ -135,14 +142,14 @@ def validate_branch_binding(
                      AND r.sample_end>=?
                      AND (
                          r.trial_plan_hash<>?
-                         OR r.trial_role<>?
+                         OR r.trial_stage<>?
                      )
                ) AS prior_protected_sample_exposure,
                (
                    SELECT COUNT(*)
                    FROM research_runs AS r
                    WHERE r.owner=? AND r.run_spec_hash=?
-                     AND r.trial_role<>?
+                     AND r.trial_stage<>?
                ) AS cross_role_runspec_reuse
         FROM research_graph_instances AS i
         JOIN research_graph_branches AS b
@@ -158,10 +165,10 @@ def validate_branch_binding(
             sample_end,
             sample_start,
             trial_plan_hash,
-            trial_role,
+            trial_stage,
             owner,
             run_spec_hash,
-            trial_role,
+            trial_stage,
             instance_id,
             branch_id,
             owner,
@@ -174,10 +181,30 @@ def validate_branch_binding(
         raise ValueError(
             "TrialPlan is not the current plan for the hypothesis branch"
         )
+    projection_value = orjson.loads(
+        str(row["trial_stage_projection_json"]) or "{}"
+    )
+    if trial_plan_schema_version >= 4 and not projection_value:
+        raise ValueError(
+            "TrialPlan schema v4 requires a bound stage projection"
+        )
+    if projection_value:
+        projection = validate_trial_stage_projection(projection_value)
+        if projection["current_stage"] != trial_stage:
+            raise ValueError(
+                "RunSpec sample role is not the current TrialPlan stage"
+            )
+        if (
+            not projection["execution_node"]
+            or projection["execution_node"] != str(row["current_node"])
+        ):
+            raise ValueError(
+                "ResearchRun is not at the TrialPlan execution node"
+            )
     previous_version = int(row["previous_trial_plan_version"] or 0)
     if previous_version > int(trial_plan_version):
         raise ValueError("TrialPlan version regresses bound run history")
-    protected = trial_role in {"confirmation", "holdout", "validation"}
+    protected = trial_stage in {"confirmation", "holdout", "validation"}
     if protected and not sample_identity_hash:
         raise ValueError(
             "protected sample role requires server-derived sample identity"
@@ -187,4 +214,4 @@ def validate_branch_binding(
             "sample identity was already exposed outside the frozen plan"
         )
     if int(row["cross_role_runspec_reuse"] or 0):
-        raise ValueError("RunSpec was already opened under another role")
+        raise ValueError("RunSpec was already opened under another stage")

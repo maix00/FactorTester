@@ -14,6 +14,9 @@ from typing import Any
 import orjson
 
 import settings as Settings
+from server.services.research_run_schema import (
+    ensure_schema as ensure_research_run_schema,
+)
 from server.services.research_graph.trial_plan.binding import (
     normalize_run_binding,
     validate_branch_binding,
@@ -34,125 +37,7 @@ def _loads(value: str | None) -> Any:
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
-    existing = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_runs'"
-    ).fetchone()
-    if existing is not None:
-        columns = {
-            str(row["name"])
-            for row in conn.execute("PRAGMA table_info(research_runs)").fetchall()
-        }
-        if "configuration_id" not in columns:
-            raise RuntimeError(
-                "legacy research run schema detected; run "
-                "python -m tools.migrations.migrate_research_configurations --apply"
-            )
-        if "lifecycle_policy" in columns:
-            conn.executescript(
-                """
-                ALTER TABLE research_runs RENAME TO research_runs_with_lifecycle;
-                CREATE TABLE research_runs (
-                    run_id TEXT PRIMARY KEY,
-                    owner TEXT NOT NULL,
-                    workspace_id TEXT NOT NULL,
-                    configuration_id TEXT NOT NULL,
-                    configuration_revision INTEGER NOT NULL,
-                    kind TEXT NOT NULL,
-                    run_spec_version INTEGER NOT NULL,
-                    run_spec_hash TEXT NOT NULL,
-                    run_spec_json TEXT NOT NULL,
-                    trial_plan_id TEXT NOT NULL DEFAULT '',
-                    trial_plan_hash TEXT NOT NULL DEFAULT '',
-                    trial_plan_version INTEGER NOT NULL DEFAULT 0,
-                    trial_role TEXT NOT NULL DEFAULT '',
-                    comparison_id TEXT NOT NULL DEFAULT '',
-                    graph_instance_id TEXT NOT NULL DEFAULT '',
-                    graph_branch_id TEXT NOT NULL DEFAULT '',
-                    sample_ref TEXT NOT NULL DEFAULT '',
-                    sample_hash TEXT NOT NULL DEFAULT '',
-                    sample_identity_hash TEXT NOT NULL DEFAULT '',
-                    sample_start TEXT NOT NULL DEFAULT '',
-                    sample_end TEXT NOT NULL DEFAULT '',
-                    sample_universe_hash TEXT NOT NULL DEFAULT '',
-                    sample_design_context_hash TEXT NOT NULL DEFAULT '',
-                    sample_identity_assurance TEXT NOT NULL DEFAULT '',
-                    created_at REAL NOT NULL
-                );
-                INSERT INTO research_runs (
-                    run_id, owner, workspace_id, configuration_id,
-                    configuration_revision, kind, run_spec_version,
-                    run_spec_hash, run_spec_json, created_at
-                )
-                SELECT run_id, owner, workspace_id, configuration_id,
-                       configuration_revision, kind, run_spec_version,
-                       run_spec_hash, run_spec_json, created_at
-                FROM research_runs_with_lifecycle;
-                DROP TABLE research_runs_with_lifecycle;
-                """
-            )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS research_runs (
-            run_id TEXT PRIMARY KEY,
-            owner TEXT NOT NULL,
-            workspace_id TEXT NOT NULL,
-            configuration_id TEXT NOT NULL,
-            configuration_revision INTEGER NOT NULL,
-            kind TEXT NOT NULL,
-            run_spec_version INTEGER NOT NULL,
-            run_spec_hash TEXT NOT NULL,
-            run_spec_json TEXT NOT NULL,
-            trial_plan_id TEXT NOT NULL DEFAULT '',
-            trial_plan_hash TEXT NOT NULL DEFAULT '',
-            trial_plan_version INTEGER NOT NULL DEFAULT 0,
-            trial_role TEXT NOT NULL DEFAULT '',
-            comparison_id TEXT NOT NULL DEFAULT '',
-            graph_instance_id TEXT NOT NULL DEFAULT '',
-            graph_branch_id TEXT NOT NULL DEFAULT '',
-            sample_ref TEXT NOT NULL DEFAULT '',
-            sample_hash TEXT NOT NULL DEFAULT '',
-            created_at REAL NOT NULL
-        )
-        """
-    )
-    columns = {
-        str(row["name"])
-        for row in conn.execute("PRAGMA table_info(research_runs)").fetchall()
-    }
-    additions = (
-        ("trial_plan_id", "TEXT NOT NULL DEFAULT ''"),
-        ("trial_plan_hash", "TEXT NOT NULL DEFAULT ''"),
-        ("trial_plan_version", "INTEGER NOT NULL DEFAULT 0"),
-        ("trial_role", "TEXT NOT NULL DEFAULT ''"),
-        ("comparison_id", "TEXT NOT NULL DEFAULT ''"),
-        ("graph_instance_id", "TEXT NOT NULL DEFAULT ''"),
-        ("graph_branch_id", "TEXT NOT NULL DEFAULT ''"),
-        ("sample_ref", "TEXT NOT NULL DEFAULT ''"),
-        ("sample_hash", "TEXT NOT NULL DEFAULT ''"),
-        ("sample_identity_hash", "TEXT NOT NULL DEFAULT ''"),
-        ("sample_start", "TEXT NOT NULL DEFAULT ''"),
-        ("sample_end", "TEXT NOT NULL DEFAULT ''"),
-        ("sample_universe_hash", "TEXT NOT NULL DEFAULT ''"),
-        ("sample_design_context_hash", "TEXT NOT NULL DEFAULT ''"),
-        ("sample_identity_assurance", "TEXT NOT NULL DEFAULT ''"),
-    )
-    for column, declaration in additions:
-        if column not in columns:
-            conn.execute(
-                f"ALTER TABLE research_runs ADD COLUMN {column} {declaration}"
-            )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_workspace "
-        "ON research_runs(owner, workspace_id, created_at)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_graph_branch "
-        "ON research_runs(owner, graph_branch_id, created_at)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_sample_scope "
-        "ON research_runs(owner, sample_universe_hash, sample_start, sample_end)"
-    )
+    ensure_research_run_schema(conn)
 
 
 def _connect() -> sqlite3.Connection:
@@ -204,8 +89,12 @@ def create_run(
                 instance_id=str(binding["instance_id"]),
                 branch_id=str(binding["branch_id"]),
                 trial_plan_hash=binding["trial_plan_hash"],
+                trial_plan_schema_version=int(
+                    binding["trial_plan_schema_version"]
+                ),
                 trial_plan_version=int(binding["trial_plan_version"]),
                 trial_role=str(binding["trial_role"]),
+                trial_stage=str(binding["trial_stage"]),
                 sample_identity_hash=str(
                     binding["sample_identity_hash"]
                 ),
@@ -222,15 +111,16 @@ def create_run(
                 run_id, owner, workspace_id, configuration_id,
                 configuration_revision, kind, run_spec_version,
                 run_spec_hash, run_spec_json, trial_plan_id, trial_plan_hash,
-                trial_plan_version, trial_role, comparison_id,
+                trial_plan_version, trial_role, trial_stage, comparison_id,
                 graph_instance_id, graph_branch_id, sample_ref, sample_hash,
                 sample_identity_hash, sample_start, sample_end,
                 sample_universe_hash, sample_design_context_hash,
                 sample_identity_assurance,
                 created_at
             ) VALUES (
-                ?, ?, ?, ?, ?, 'factor_research', ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, 'factor_research',
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             (
@@ -241,6 +131,7 @@ def create_run(
                 str((binding or {}).get("trial_plan_hash") or ""),
                 int((binding or {}).get("trial_plan_version") or 0),
                 str((binding or {}).get("trial_role") or ""),
+                str((binding or {}).get("trial_stage") or ""),
                 str((binding or {}).get("comparison_id") or ""),
                 str((binding or {}).get("instance_id") or ""),
                 str((binding or {}).get("branch_id") or ""),
@@ -275,6 +166,7 @@ def create_run(
             persisted_binding.get("trial_plan_version") or 0
         ),
         "trial_role": str(persisted_binding.get("trial_role") or ""),
+        "trial_stage": str(persisted_binding.get("trial_stage") or ""),
         "comparison_id": str(
             persisted_binding.get("comparison_id") or ""
         ),
@@ -319,6 +211,7 @@ def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:
         "trial_plan_hash": str(row["trial_plan_hash"]),
         "trial_plan_version": int(row["trial_plan_version"]),
         "trial_role": str(row["trial_role"]),
+        "trial_stage": str(row["trial_stage"]),
         "comparison_id": str(row["comparison_id"]),
         "graph_instance_id": str(row["graph_instance_id"]),
         "graph_branch_id": str(row["graph_branch_id"]),
@@ -350,6 +243,7 @@ def load_job_trial_binding(
                 """
                 SELECT runs.trial_plan_id, runs.trial_plan_hash,
                        runs.trial_plan_version, runs.trial_role,
+                       runs.trial_stage,
                        runs.comparison_id, runs.sample_ref, runs.sample_hash
                        , runs.sample_identity_hash,
                        runs.sample_identity_assurance
@@ -372,6 +266,7 @@ def load_job_trial_binding(
         "trial_plan_hash": str(row["trial_plan_hash"]),
         "trial_plan_version": int(row["trial_plan_version"]),
         "trial_role": str(row["trial_role"]),
+        "trial_stage": str(row["trial_stage"]),
         "comparison_id": str(row["comparison_id"]),
         "sample_ref": str(row["sample_ref"]),
         "sample_hash": str(row["sample_hash"]),

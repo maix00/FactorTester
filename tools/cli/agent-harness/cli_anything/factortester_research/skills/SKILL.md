@@ -137,7 +137,9 @@ server derives the sample stage from the RunSpec's planned sample role; never
 use `trial_role` as the stage. The initial schema-v4 plan freezes stage
 partitions, RunSpecs, and comparisons. A child plan cannot replace that design
 after outcome inspection. Factor or design revision starts a new hypothesis
-and TrialPlan lineage. Child Jobs inherit the binding through `run_id`.
+and TrialPlan lineage. Submit only the current stage from the plan-bound
+execution node; past, future, or legacy-unbound stages fail closed. Child Jobs
+inherit the binding through `run_id`.
 
 Availability is only one TrialPlan input. Also bind the Decision Contract,
 actionable obligations, factor/data/timing semantics, product accounting,

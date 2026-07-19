@@ -143,7 +143,9 @@ derived from the TrialPlan sample role, not from `trial_role`. The initial plan
 freezes stage partitions, RunSpecs, comparisons, outcomes, criteria, and
 stopping/multiplicity rules. A child version cannot replace them after outcome
 inspection; factor or trial-design revision starts a new hypothesis and plan
-lineage. Every child `Job` inherits the ResearchRun binding through `run_id`.
+lineage. Submission is accepted only for the branch's current stage at the
+plan-bound execution node. `ResearchRun` persists that server-derived stage,
+and every child `Job` inherits the binding through `run_id`.
 
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its
