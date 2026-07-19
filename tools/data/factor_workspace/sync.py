@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -25,8 +26,34 @@ from .construct import (
 )
 
 
+def _assert_destructive_sync_owner(root: str, username: str) -> None:
+    """Refuse to clear a non-empty workspace without matching ownership."""
+    if not os.path.isdir(root) or not os.listdir(root):
+        return
+
+    manifest_path = os.path.join(root, ".factor_workspace", "manifest.json")
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as file:
+            manifest = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+
+    owner = str(manifest.get("username") or "").strip() if isinstance(manifest, dict) else ""
+    if not owner:
+        raise PermissionError(
+            f"拒绝清空非空目录 {root!r}：没有有效的 Factor Workspace 所有权标记"
+        )
+    if owner != username:
+        raise PermissionError(
+            f"拒绝清空 Factor Workspace {root!r}：所有者为 {owner!r}，"
+            f"当前 profile 为 {username!r}"
+        )
+
+
 def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_existing: bool = False) -> dict[str, Any]:
     root = _workspace_root(username)
+    if clear_existing:
+        _assert_destructive_sync_owner(root, username)
     _ensure_workspace_layout(root)
     repository = FactorWorkspaceRepository(username)
     git_info = repository.ensure()

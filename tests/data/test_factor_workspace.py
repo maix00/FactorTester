@@ -23,6 +23,12 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     public_dir = workspace_root / "public_factors"
     custom_dir.mkdir(parents=True)
     public_dir.mkdir(parents=True)
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$alice@1"}),
+        encoding="utf-8",
+    )
 
     stale_custom = custom_dir / "OldFactor.py"
     stale_public = public_dir / "OldPublic.py"
@@ -122,6 +128,49 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert not (workspace_root / "tools" / "factors" / "FactorFamily.py").exists()
     manifest = json.loads((workspace_root / ".factor_workspace" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["git_selected_branch"] == "upload"
+
+
+def test_factor_workspace_build_refuses_root_owned_by_another_profile(monkeypatch, tmp_path):
+    workspace_root = tmp_path / "shared-factor-root"
+    custom_dir = workspace_root / "custom_factors"
+    custom_dir.mkdir(parents=True)
+    protected_source = custom_dir / "OwnerFactor.py"
+    protected_source.write_text("owner source\n", encoding="utf-8")
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$owner@1"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(workspace_root),
+    )
+
+    with pytest.raises(PermissionError, match="default\\$owner@1"):
+        factor_workspace.build_factor_workspace("default$other@1")
+
+    assert protected_source.read_text(encoding="utf-8") == "owner source\n"
+
+
+def test_factor_workspace_build_refuses_nonempty_unmanaged_root(monkeypatch, tmp_path):
+    workspace_root = tmp_path / "unmanaged-root"
+    workspace_root.mkdir()
+    protected_file = workspace_root / "research-notes.md"
+    protected_file.write_text("keep me\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(workspace_root),
+    )
+
+    with pytest.raises(PermissionError, match="没有有效的 Factor Workspace 所有权标记"):
+        factor_workspace.build_factor_workspace("default$alice@1")
+
+    assert protected_file.read_text(encoding="utf-8") == "keep me\n"
 
 
 def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, tmp_path):
