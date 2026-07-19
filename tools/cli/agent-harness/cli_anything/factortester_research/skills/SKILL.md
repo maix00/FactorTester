@@ -42,6 +42,7 @@ cli-anything-factortester-research graph capabilities \
   --product-group china_futures \
   --node hypothesis_preregistration \
   --facts-file local-facts.json \
+  --approve-implementation local.research-obligation-cycle \
   --json > capability-resolution.json
 
 factortester research-graph start factor-research \
@@ -55,6 +56,17 @@ cli-anything-factortester-research cycle next \
 Do not search for or call capability `attest`/receipt APIs; they do not exist.
 Submit the node-local resolution directly. Use `--all` only for explicit
 activation audit and `--include-contracts` only for human inspection.
+Pass `--approve-implementation` only after this conversation approves that
+exact local fingerprint.
+
+The Research Cycle modes are capabilities required by existing lifecycle
+nodes and guards, not extra nodes or edges. Discovery may be required after a
+frozen boundary, a material semantic/evidence change, or before closure;
+TrialPlan synthesis occurs only for selected actionable obligations;
+adjudication proposes paired deltas; exhaustion contributes to bounded
+closure. Methodology impact remains a separate Maintenance Case with
+documented grill and human audit, and it must leave unaffected branches and
+Jobs running.
 
 Before advancing, validate Research Cycle proposals locally. Then use the thin
 Harness adapter to submit through the installed FactorTester client:

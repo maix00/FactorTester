@@ -131,7 +131,7 @@
         "skills/research-obligation-cycle/scripts/validate-adjudication-proposal.py",
         "skills/research-obligation-cycle/scripts/validate-obligation-proposal.py"
       ],
-      "sha256": "a91fd64b149fd6a05aa3aececafa9703885846e94c42a701c091da78bcc6fc3d"
+      "sha256": "95c58ec11017ee82554c0ef2bc455380e51eb0263331a107d0c1afcd8ed42149"
     }
   }
 }

@@ -217,7 +217,12 @@ def test_bounded_closure_requires_current_projection_and_challenge() -> None:
         ),
         "graph_hash": "4" * 64,
         "methodology_hash": adjudicated["methodology_hash"],
-        "coverage_summary": {"attempted_regions": 1},
+        "coverage_summary": {
+            "attempted_regions": 1,
+            "declared_scope_assessed": True,
+            "stopping_rules_assessed": True,
+            "frontier_assessed": True,
+        },
         "blocking_obligations": [],
         "remaining_unknowns": [],
         "attempted_trial_refs": ["trial:1"],

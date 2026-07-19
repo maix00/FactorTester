@@ -23,6 +23,7 @@ from server.services.research_graph.research_cycle.obligations import (
     validate_verification_obligation,
 )
 from server.services.research_graph.research_cycle.methodology import (
+    build_methodology_impact_plan,
     validate_methodology_change_proposal,
 )
 
@@ -366,6 +367,9 @@ def test_decision_ready_closure_rejects_unresolved_blocking_obligations() -> Non
         "coverage_summary": {
             "declared_regions": 12,
             "attempted_regions": 12,
+            "declared_scope_assessed": True,
+            "stopping_rules_assessed": True,
+            "frontier_assessed": True,
         },
         "blocking_obligations": [],
         "remaining_unknowns": [{
@@ -391,6 +395,19 @@ def test_decision_ready_closure_rejects_unresolved_blocking_obligations() -> Non
         proposal
     )["disposition"] == "decision_ready"
 
+    no_idea = {
+        **proposal,
+        "proposal_id": "exhaustion-no-idea",
+        "coverage_summary": {
+            "declared_scope_assessed": False,
+            "stopping_rules_assessed": False,
+            "frontier_assessed": False,
+            "reason": "no idea",
+        },
+    }
+    with pytest.raises(ValueError, match="requires assessed scope"):
+        validate_search_exhaustion_proposal(no_idea)
+
     proposal["blocking_obligations"] = ["obligation:unresolved"]
     with pytest.raises(
         ValueError,
@@ -413,7 +430,16 @@ def test_methodology_change_is_semantic_and_rejects_skill_identity() -> None:
         "validation_refs": ["validation:17"],
         "failed_case_refs": [],
         "affected_contract_predicate": {
-            "scope.product_group": {"eq": "CN_FUTURES"}
+            "all": [
+                {
+                    "field": "scope.product_group",
+                    "equals": "CN_FUTURES",
+                },
+                {
+                    "field": "factor.uses_continuous_contract",
+                    "equals": True,
+                },
+            ],
         },
         "expected_cost": {
             "context_bytes": 500,
@@ -424,9 +450,45 @@ def test_methodology_change_is_semantic_and_rejects_skill_identity() -> None:
         "implementation_validation_refs": ["opaque-local-validation:17"],
     }
 
-    assert validate_methodology_change_proposal(
-        proposal
-    )["compatibility"] == "semantic_change"
+    validated = validate_methodology_change_proposal(proposal)
+    assert validated["compatibility"] == "semantic_change"
+    same_review = validate_methodology_change_proposal({
+        **proposal,
+        "proposal_id": "methodology-18",
+    })
+    changed_review = validate_methodology_change_proposal({
+        **proposal,
+        "affected_contract_predicate": {
+            "field": "scope.product_group",
+            "equals": "EQUITIES",
+        },
+    })
+    assert same_review["review_input_hash"] == validated["review_input_hash"]
+    assert changed_review["review_input_hash"] != validated[
+        "review_input_hash"
+    ]
+    impact = build_methodology_impact_plan(validated, [
+        {
+            "contract_ref": "contract:trend-cn",
+            "scope": {"product_group": "CN_FUTURES"},
+            "factor": {"uses_continuous_contract": True},
+        },
+        {
+            "contract_ref": "contract:equity",
+            "scope": {"product_group": "EQUITIES"},
+            "factor": {"uses_continuous_contract": False},
+        },
+        {
+            "contract_ref": "contract:unknown",
+            "scope": {"product_group": "CN_FUTURES"},
+            "factor": {},
+        },
+    ])
+    assert impact["affected_contract_refs"] == ["contract:trend-cn"]
+    assert impact["unaffected_contract_refs"] == ["contract:equity"]
+    assert impact["undetermined_contract_refs"] == ["contract:unknown"]
+    assert impact["proposed_reopen_refs"] == ["contract:trend-cn"]
+    assert impact["unaffected_branches_and_jobs_action"] == "continue"
 
     proposal["skill_name"] = "research-obligation-cycle"
     with pytest.raises(

@@ -114,11 +114,36 @@ class TestCLISubprocess:
         )
         assert payload["resolution"]["cache"]["scope"] == "process"
         assert payload["resolution"]["cache"]["hit"] is False
-        assert payload["resolution"]["gaps"] == []
+        assert {
+            item["capability_id"]
+            for item in payload["resolution"]["gaps"]
+        } == {"research-obligation.discover"}
+        assert payload["resolution"]["gaps"][0]["reason"] == (
+            "execution_approval_required"
+        )
         assert {
             item["capability_id"]
             for item in payload["resolution"]["bindings"]
         } == {"research-hypothesis.preregister"}
+
+        approved = self._run([
+            "graph",
+            "capabilities",
+            "--product-group",
+            "china_futures",
+            "--approve-implementation",
+            "local.research-obligation-cycle",
+            "--json",
+        ])
+        approved_payload = json.loads(approved.stdout)
+        assert approved_payload["resolution"]["gaps"] == []
+        assert {
+            item["capability_id"]
+            for item in approved_payload["resolution"]["bindings"]
+        } == {
+            "research-hypothesis.preregister",
+            "research-obligation.discover",
+        }
 
         detailed = self._run([
             "graph",
@@ -167,8 +192,12 @@ class TestCLISubprocess:
         ])
         payload = json.loads(result.stdout)
 
-        assert payload["status"] == "expected_block"
+        assert payload["status"] == "failed"
         assert payload["external_mutations"] == 0
+        assert payload["errors"] == [
+            "event 0: unsatisfied guards: "
+            "obligation_discovery_checkpoint_fresh"
+        ]
 
     def test_cycle_next_reads_only_the_compact_backend_packet(
         self,

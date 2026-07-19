@@ -10,6 +10,12 @@ remaining unknowns, discovery lenses used, candidate next trials, and why each
 excluded candidate cannot change the decision or exceeds an explicit resource
 boundary.
 
+The proposal's coverage summary must truthfully mark
+`declared_scope_assessed`, `stopping_rules_assessed`, and `frontier_assessed`.
+The two closure dispositions `decision_ready` and
+`exhausted_without_support` require all three to be true. Do not set them from
+the absence of a new idea; cite the corresponding bounded references.
+
 “No idea” is not exhaustion. Challenge the checkpoint from factor semantics,
 timing, measurement, alternative mechanisms, regime dependence, selection,
 execution, and provenance. Load no other mode reference while doing so.

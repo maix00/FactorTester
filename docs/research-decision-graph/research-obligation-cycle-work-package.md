@@ -1,7 +1,7 @@
 # Research Obligation Cycle Implementation Work Package
 
 Status: implementation in progress; Grill 143 semantics accepted; Batches 0
-through 4 are complete and Batch 5 is next.
+through 5 are complete and Batch 6 is next.
 
 Baseline: `56d36913` on `fix/issue-140-active-graph-agentflow`.
 
@@ -666,4 +666,51 @@ Release evidence on 2026-07-19:
   temporary installed-package invocation exposes `cycle next`, `validate`,
   and `advance` without source-tree fallback;
 - all changed production modules remain below 300 lines;
+- `git diff --check` is clean.
+
+## Batch 5 release evidence
+
+Draft Graph v4 governs the four routine Research Cycle operations through
+existing lifecycle nodes, conditional triggers, output kinds, and freshness
+guards. It does not create operation-shaped nodes or edges. Methodology impact
+is declared separately as a Maintenance Case capability requiring
+document-grounded grill and human audit.
+
+The methodology protocol now accepts only machine-evaluable affected-Contract
+predicates. Its pure impact plan separates affected, unaffected, and
+undetermined Contracts; proposes reopening only the affected semantic-change
+set; and explicitly continues unaffected branches and Jobs. A stable
+`review_input_hash` permits exact unchanged-review reuse without a per-call
+reviewer or new database object.
+
+Search exhaustion now requires explicit assessment of declared scope,
+stopping rules, and the remaining TrialPlan frontier. “No idea” cannot produce
+`decision_ready` or `exhausted_without_support`; closure still requires the
+existing independent challenge.
+
+Shadow replay of the representative sealed v3 historical preflight stops
+truthfully at the new first-principles discovery freshness guard. It neither
+loads sealed conclusions nor pretends the old trace satisfied the new
+methodology. This is classified as a methodology re-entry requirement for
+Batch 6 comparison, not as an unexplained backend failure.
+
+Release evidence on 2026-07-19:
+
+- complete server suite: 236 passed;
+- complete forced-installed Harness plus Skill suite: 52 passed;
+- Pyright on changed Graph, closure, and methodology modules: zero errors and
+  warnings;
+- unapproved entry-node resolution exposes only the current discovery
+  approval gap; approved entry resolution contains no future-node gap;
+- default entry resolution is 3082 bytes and approved entry resolution is
+  3259 bytes; the 36441-byte full Draft Graph remains an explicit
+  developer/audit surface, never routine Agent context;
+- canonical and packaged Skills are byte-identical and both Skill validators
+  pass;
+- changed Research Obligation Cycle bundle fingerprint:
+  `95c58ec11017ee82554c0ef2bc455380e51eb0263331a107d0c1afcd8ed42149`;
+- a clean temporary wheel imports Graph v4 and recomputes the same Skill
+  fingerprint from installed package resources;
+- no database schema, persistence owner, routine reviewer, or Skill identity
+  was added;
 - `git diff --check` is clean.

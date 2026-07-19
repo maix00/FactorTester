@@ -55,6 +55,7 @@ cli-anything-factortester-research graph capabilities \
   --product-group china_futures \
   --node hypothesis_preregistration \
   --facts-file local-facts.json \
+  --approve-implementation local.research-obligation-cycle \
   --json > capability-resolution.json
 
 factortester research-graph start factor-research \
@@ -77,6 +78,13 @@ cli-anything-factortester-research cycle advance \
 There is no capability `attest` command and no capability-receipt round trip.
 The client submits the node-local deterministic resolution directly; the
 server validates it against the immutable graph descriptor.
+The approval option is valid only after the current Agent conversation
+approves that exact local Skill fingerprint.
+
+Research Cycle operations remain capabilities of existing lifecycle
+nodes/guards, not additional Graph edges. A semantic methodology change is a
+Maintenance Case and deterministic Contract-impact plan; unaffected branches
+and Jobs continue.
 
 `context` and `next` return bounded current-node packets. They do not load the
 complete graph, catalog, artifacts, stdout/stderr, or untriggered future gaps.

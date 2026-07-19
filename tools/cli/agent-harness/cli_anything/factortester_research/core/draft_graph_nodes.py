@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from .draft_graph_cycle import (
+    node_conditional_operations,
+    node_required_operations,
+)
+
 
 def build_draft_nodes() -> list[dict[str, Any]]:
     """Return audited nodes and their node-local capability requirements."""
@@ -320,14 +325,22 @@ def build_draft_nodes() -> list[dict[str, Any]]:
             "data, RunSpec, trial ledger, result, failure cause, and decision",
         ],
     }
+    required_operations = node_required_operations()
+    conditional_operations = node_conditional_operations()
     nodes = [
         {
             "node_id": node_id,
             "kind": kind,
             "purpose": purpose,
             "enforcement": "audited",
-            "required_capabilities": capabilities,
-            "conditional_capabilities": conditional_by_node.get(node_id, []),
+            "required_capabilities": [
+                *capabilities,
+                *required_operations.get(node_id, []),
+            ],
+            "conditional_capabilities": [
+                *conditional_by_node.get(node_id, []),
+                *conditional_operations.get(node_id, []),
+            ],
             "entry_evidence": entry_evidence_by_node.get(node_id, []),
             "exit_evidence": exit_evidence_by_node.get(node_id, []),
         }

@@ -230,8 +230,56 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     nodes = {item["node_id"]: item for item in graph["nodes"]}
 
     assert graph["lifecycle"] == "draft"
-    assert graph["version"] == 3
-    assert graph["parent_version"] == 2
+    assert graph["version"] == 4
+    assert graph["parent_version"] == 3
+    assert {
+        item["capability_id"]
+        for item in graph["research_cycle_operations"]
+    } == {
+        "research-obligation.discover",
+        "research-trial.synthesize",
+        "research-evidence.adjudicate",
+        "research-exhaustion.assess",
+    }
+    assert graph["maintenance_operations"] == [{
+        "capability_id": "research-methodology.impact",
+        "trigger_predicate": {
+            "field": "maintenance.semantic_change_proposed",
+            "equals": True,
+        },
+        "output_kind": "MethodologyChangeProposal",
+        "authority": "maintenance_case_and_human_audit",
+    }]
+    operation_ids = {
+        item["capability_id"]
+        for item in [
+            *graph["research_cycle_operations"],
+            *graph["maintenance_operations"],
+        ]
+    }
+    assert not any(
+        edge["edge_id"] in operation_ids
+        or edge["from_node"] in operation_ids
+        or edge["to_node"] in operation_ids
+        for edge in graph["edges"]
+    )
+    assert "research-obligation.discover" in nodes[
+        "hypothesis_preregistration"
+    ]["required_capabilities"]
+    assert "research-trial.synthesize" in nodes[
+        "validation_design"
+    ]["required_capabilities"]
+    assert "research-evidence.adjudicate" in nodes[
+        "result_audit"
+    ]["required_capabilities"]
+    decision_conditionals = {
+        item["capability_id"]: item["predicate"]
+        for item in nodes["research_decision"]["conditional_capabilities"]
+    }
+    assert decision_conditionals["research-exhaustion.assess"] == {
+        "field": "research.closure_requested",
+        "equals": True,
+    }
     assert nodes["cheap_factor_diagnostics"]["required_capabilities"] == [
         "factor-validation.cross-sectional-ic",
         "factor-validation.quantile-monotonicity",
@@ -269,6 +317,18 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "holdout_status_recorded": True,
         "factor_change_retained": True,
     }
+    assert edges["hypothesis__capability_resolution"]["guard"][
+        "obligation_discovery_checkpoint_fresh"
+    ] is True
+    assert edges["factor_semantics__validation_design"]["guard"][
+        "semantic_discovery_fresh_or_not_triggered"
+    ] is True
+    assert edges["validation_design__cheap_diagnostics"]["guard"][
+        "actionable_obligations_planned_or_bounded"
+    ] is True
+    assert edges["result_audit__research_decision"]["guard"][
+        "adjudication_applied_or_explicit_noop"
+    ] is True
     assert edges["any_node__capability_gap"]["from_node"] == "*"
     assert nodes["capability_gap"]["required_capabilities"] == [
         "capability-gap.classify"
@@ -280,6 +340,7 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     assert conditional == {
         "market-microstructure.intraday-diagnose",
         "factor-combination.multi-factor",
+        "research-obligation.discover",
     }
     validation_required = set(
         nodes["validation_design"]["required_capabilities"]
@@ -569,7 +630,7 @@ def test_reference_cycle_skill_requires_exact_manifest_approval() -> None:
     assert blocked["gaps"][0]["reason"] == "execution_approval_required"
     assert approved["gaps"] == []
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "a91fd64b149fd6a05aa3aececafa9703885846e94c42a701c091da78bcc6fc3d"
+        "95c58ec11017ee82554c0ef2bc455380e51eb0263331a107d0c1afcd8ed42149"
     )
 
 
@@ -697,7 +758,7 @@ def test_model_identity_does_not_change_deterministic_resolution() -> None:
     assert first["gaps"] == second["gaps"]
 
 
-def test_historical_preflight_replay_is_non_mutating_and_stops_at_real_gap() -> None:
+def test_historical_preflight_replay_requires_v4_discovery_reentry() -> None:
     trace = json.loads(
         (FIXTURES / "historical_preflight_2026_07_16.json").read_text()
     )
@@ -707,14 +768,16 @@ def test_historical_preflight_replay_is_non_mutating_and_stops_at_real_gap() -> 
 
     assert json.dumps(trace, sort_keys=True) == before
     assert report["external_mutations"] == 0
-    assert report["status"] == "expected_block"
-    assert report["branches"]["primary"]["current_node"] == "capability_gap"
-    assert report["branches"]["primary"]["status"] == "paused"
+    assert report["status"] == "failed"
+    assert report["branches"]["primary"]["current_node"] == (
+        "hypothesis_preregistration"
+    )
+    assert report["branches"]["primary"]["status"] == "running"
     assert report["source"]["stale_historical_evidence"] is True
-    assert report["coverage"]["edge_ids"] == [
-        "hypothesis__capability_resolution",
-        "capability_resolution__data_contract",
-        "any_node__capability_gap",
+    assert report["coverage"]["edge_ids"] == []
+    assert report["errors"] == [
+        "event 0: unsatisfied guards: "
+        "obligation_discovery_checkpoint_fresh"
     ]
 
 

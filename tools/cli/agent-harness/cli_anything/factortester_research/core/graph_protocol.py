@@ -92,6 +92,38 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"invalid edge_type: {edge_id}")
         if str(edge.get("risk_level") or "") not in _RISK_LEVELS:
             raise ValueError(f"invalid risk_level: {edge_id}")
+    operation_ids: set[str] = set()
+    for field in ("research_cycle_operations", "maintenance_operations"):
+        operations = graph.get(field, [])
+        if not isinstance(operations, list) or not all(
+            isinstance(item, dict)
+            and isinstance(item.get("capability_id"), str)
+            and bool(item["capability_id"].strip())
+            and isinstance(item.get("output_kind"), str)
+            and bool(item["output_kind"].strip())
+            for item in operations
+        ):
+            raise ValueError(
+                f"{field} requires capability_id and output_kind"
+            )
+        for item in operations:
+            capability_id = str(item["capability_id"])
+            if capability_id in operation_ids:
+                raise ValueError(
+                    f"duplicate graph-governed operation: {capability_id}"
+                )
+            operation_ids.add(capability_id)
+    if operation_ids & (set(node_ids) | set(edge_ids)):
+        raise ValueError("graph-governed operations are not nodes or edges")
+    review_policy = graph.get("review_policy", {})
+    if not isinstance(review_policy, dict) or not all(
+        isinstance(key, str)
+        and key
+        and isinstance(value, str)
+        and value
+        for key, value in review_policy.items()
+    ):
+        raise ValueError("review_policy must contain text rules")
     descriptors = graph.get("capability_descriptors")
     if str(graph.get("lifecycle") or "") in {"draft", "active"}:
         if not isinstance(descriptors, dict):
@@ -110,7 +142,7 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
             str(capability_id)
             for edge in edges
             for capability_id in edge.get("required_capabilities") or []
-        }
+        } | operation_ids
         missing_descriptors = sorted(
             used_capabilities - set(descriptors)
         )

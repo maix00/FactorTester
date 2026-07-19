@@ -56,7 +56,20 @@ def validate_search_exhaustion_proposal(
         "methodology_hash",
     ):
         value[field] = sha256(value.get(field), field=field)
-    object_value(value.get("coverage_summary"), field="coverage_summary")
+    coverage = object_value(
+        value.get("coverage_summary"),
+        field="coverage_summary",
+    )
+    for field in (
+        "declared_scope_assessed",
+        "stopping_rules_assessed",
+        "frontier_assessed",
+    ):
+        if not isinstance(coverage.get(field), bool):
+            raise ValueError(
+                f"coverage_summary.{field} must be boolean"
+            )
+    value["coverage_summary"] = coverage
     string_array(
         value.get("blocking_obligations"),
         field="blocking_obligations",
@@ -94,6 +107,18 @@ def validate_search_exhaustion_proposal(
     ):
         raise ValueError(
             "decision_ready cannot retain an actionable TrialPlan frontier"
+        )
+    if value["disposition"] in {
+        "decision_ready",
+        "exhausted_without_support",
+    } and not all((
+        coverage["declared_scope_assessed"],
+        coverage["stopping_rules_assessed"],
+        coverage["frontier_assessed"],
+    )):
+        raise ValueError(
+            "bounded closure requires assessed scope, stopping rules, "
+            "and frontier"
         )
     if not value["reentry_predicates"]:
         raise ValueError("bounded closure requires reentry_predicates")

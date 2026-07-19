@@ -45,7 +45,10 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "hypothesis_preregistration",
             "capability_resolution",
             edge_type="recommended",
-            guard={"hypothesis_frozen": True},
+            guard={
+                "hypothesis_frozen": True,
+                "obligation_discovery_checkpoint_fresh": True,
+            },
         ),
         edge(
             "capability_resolution__data_contract",
@@ -72,13 +75,19 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "factor_semantics__validation_design",
             "factor_semantics",
             "validation_design",
-            guard={"causal_semantics_valid": True},
+            guard={
+                "causal_semantics_valid": True,
+                "semantic_discovery_fresh_or_not_triggered": True,
+            },
         ),
         edge(
             "validation_design__cheap_diagnostics",
             "validation_design",
             "cheap_factor_diagnostics",
-            guard={"selection_and_trial_plan_frozen": True},
+            guard={
+                "selection_and_trial_plan_frozen": True,
+                "actionable_obligations_planned_or_bounded": True,
+            },
         ),
         edge(
             "cheap_diagnostics__backtest",
@@ -161,7 +170,12 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "result_audit__research_decision",
             "result_audit",
             "research_decision",
-            guard={"audit_complete": True, "unresolved_material_gap": False},
+            guard={
+                "audit_complete": True,
+                "unresolved_material_gap": False,
+                "adjudication_applied_or_explicit_noop": True,
+                "closure_discovery_fresh_or_not_requested": True,
+            },
             risk_level="L2",
         ),
         edge(

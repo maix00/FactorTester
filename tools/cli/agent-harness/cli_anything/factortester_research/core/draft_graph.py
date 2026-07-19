@@ -6,6 +6,11 @@ from typing import Any
 
 from .capabilities import capability_descriptor, load_builtin_capability_registry
 from .draft_graph_edges import build_draft_edges
+from .draft_graph_cycle import (
+    maintenance_operations,
+    research_cycle_operations,
+    review_policy,
+)
 from .draft_graph_nodes import build_draft_nodes
 from .graph_protocol import graph_content_hash, validate_graph
 
@@ -17,13 +22,16 @@ def build_draft_graph() -> dict[str, Any]:
     graph = {
         "schema_version": 1,
         "graph_id": "factor-research",
-        "version": 3,
+        "version": 4,
         "lifecycle": "draft",
-        "parent_version": 2,
+        "parent_version": 3,
         "research_semantics": "product_neutral",
         "entry_node": "hypothesis_preregistration",
         "nodes": nodes,
         "edges": edges,
+        "research_cycle_operations": research_cycle_operations(),
+        "maintenance_operations": maintenance_operations(),
+        "review_policy": review_policy(),
         "provenance": {
             "source": "observed-harness-plus-reviewed-industry-semantics",
             "description": (
@@ -53,6 +61,12 @@ def build_draft_graph() -> dict[str, Any]:
         str(capability_id)
         for item in edges
         for capability_id in item.get("required_capabilities") or []
+    } | {
+        str(item["capability_id"])
+        for item in [
+            *graph["research_cycle_operations"],
+            *graph["maintenance_operations"],
+        ]
     }
     graph["capability_descriptors"] = {
         capability_id: capability_descriptor(contracts[capability_id])

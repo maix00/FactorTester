@@ -19,7 +19,10 @@ from .evidence import (
     validate_agent_evidence_envelope,
     validate_agent_evidence_payload,
 )
-from .methodology import validate_methodology_change_proposal
+from .methodology import (
+    build_methodology_impact_plan,
+    validate_methodology_change_proposal,
+)
 from .obligations import validate_verification_obligation
 from .replay import (
     replay_research_cycle_events,
@@ -31,6 +34,7 @@ from .trace_replay import verify_research_cycle_trace
 __all__ = [
     "LegacyEvidenceAccessDenied",
     "legacy_evidence_metadata",
+    "build_methodology_impact_plan",
     "validate_adjudication_pair",
     "validate_adjudication_decision",
     "validate_adjudication_proposal",
