@@ -92,6 +92,31 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"invalid edge_type: {edge_id}")
         if str(edge.get("risk_level") or "") not in _RISK_LEVELS:
             raise ValueError(f"invalid risk_level: {edge_id}")
+        for field in (
+            "required_evidence",
+            "required_research_evidence",
+            "required_transition_facts",
+        ):
+            items = edge.get(field, [])
+            if not isinstance(items, list) or not all(
+                isinstance(item, str) and item.strip() for item in items
+            ):
+                raise ValueError(
+                    f"{field} must contain text requirements: {edge_id}"
+                )
+        if (
+            "required_research_evidence" in edge
+            or "required_transition_facts" in edge
+        ):
+            typed = [
+                *(edge.get("required_research_evidence") or []),
+                *(edge.get("required_transition_facts") or []),
+            ]
+            if list(edge.get("required_evidence") or []) != typed:
+                raise ValueError(
+                    "typed edge requirements must match required_evidence: "
+                    f"{edge_id}"
+                )
     operation_ids: set[str] = set()
     for field in ("research_cycle_operations", "maintenance_operations"):
         operations = graph.get(field, [])

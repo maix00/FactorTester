@@ -2028,7 +2028,8 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "risk_level": "L1",
         "readiness": "requires_evidence",
         "required_guard_fields": ["hypothesis_frozen"],
-        "required_evidence": [],
+        "required_research_evidence": [],
+        "required_transition_facts": [],
         "blockers": [],
         "review_requirement": "none",
     }]
@@ -2205,6 +2206,13 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert cycle_next["candidate_trial_frontier"][
         "unassessed_obligation_ids"
     ] == ["obligation-roll-window"]
+    assert cycle_next["candidate_edges"][0][
+        "required_research_evidence"
+    ] == []
+    assert cycle_next["candidate_edges"][0][
+        "required_transition_facts"
+    ] == ["missing capability id"]
+    assert "required_evidence" not in cycle_next["candidate_edges"][0]
     assert cycle_context["history_cursor"] in cycle_next["changed_refs"]
     with pytest.raises(ValueError, match="base projection hash is stale"):
         research_graphs.advance_graph_branch(

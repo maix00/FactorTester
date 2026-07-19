@@ -55,13 +55,23 @@ def node_conditional_operations() -> dict[str, list[dict[str, Any]]]:
     return {
         "factor_semantics": [{
             "capability_id": "research-obligation.discover",
-            "predicate": {
-                "field": "research.semantic_discovery_stale",
-                "equals": True,
-            },
+            "predicate": {"any": [
+                {
+                    "field": "research.semantic_discovery_stale",
+                    "equals": True,
+                },
+                {
+                    "field": (
+                        "research."
+                        "semantic_inspection_exposed_material_question"
+                    ),
+                    "equals": True,
+                },
+            ]},
             "explanation": (
                 "factor, data, timing, product, strategy, or permitted-use "
-                "semantics changed after the last discovery checkpoint"
+                "semantics changed, or their inspection exposed a material "
+                "unresolved research question"
             ),
         }],
         "result_audit": [{

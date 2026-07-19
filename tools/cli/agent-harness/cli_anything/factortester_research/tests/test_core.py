@@ -311,6 +311,12 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "diagnostic_evidence_complete": True,
         "further_execution_eligible": False,
     }
+    assert edges["cheap_diagnostics__result_audit"][
+        "required_research_evidence"
+    ] == ["frozen diagnostic specification and factual evidence"]
+    assert edges["cheap_diagnostics__result_audit"][
+        "required_transition_facts"
+    ] == []
     assert "cheap_diagnostics__factor_improvement" not in edges
     assert "statistical_robustness__result_audit_reject" not in edges
     assert "statistical_robustness__factor_improvement" not in edges
@@ -326,6 +332,15 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "protected_sample_reuse_forbidden": True,
         "remaining_revision_budget_positive": True,
     }
+    assert edges["result_audit__factor_improvement"][
+        "required_research_evidence"
+    ] == []
+    assert edges["result_audit__factor_improvement"][
+        "required_transition_facts"
+    ] == [
+        "accepted adjudication, new falsifiable mechanism, and remaining "
+        "revision budget",
+    ]
     assert edges["result_audit__validation_design"]["guard"] == {
         "audit_complete": True,
         "adjudication_applied_or_explicit_noop": True,
@@ -383,6 +398,21 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "factor-combination.multi-factor",
         "research-obligation.discover",
     }
+    semantic_discovery = next(
+        item
+        for item in nodes["factor_semantics"]["conditional_capabilities"]
+        if item["capability_id"] == "research-obligation.discover"
+    )
+    assert semantic_discovery["predicate"] == {"any": [
+        {
+            "field": "research.semantic_discovery_stale",
+            "equals": True,
+        },
+        {
+            "field": "research.semantic_inspection_exposed_material_question",
+            "equals": True,
+        },
+    ]}
     validation_required = set(
         nodes["validation_design"]["required_capabilities"]
     )
@@ -427,6 +457,15 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "provisional local memory reference containing hypothesis, code, data, "
         "RunSpec, trial ledger, result, failure cause, and decision",
     ]
+
+
+def test_graph_rejects_mismatched_typed_edge_requirements() -> None:
+    graph = build_draft_graph()
+    graph["edges"][0]["required_transition_facts"] = []
+    graph["content_hash"] = graph_content_hash(graph)
+
+    with pytest.raises(ValueError, match="typed edge requirements"):
+        validate_graph(graph)
 
 
 def test_numeric_capability_predicates_fail_closed() -> None:
@@ -858,13 +897,26 @@ def test_cycle_next_packet_rejects_full_graph_and_raw_output() -> None:
     packet = {
         "graph": "factor-research@v2",
         "node": {"node_id": "factor_semantics"},
-        "candidate_edges": [],
+        "candidate_edges": [{
+            "edge_id": "factor_semantics__validation_design",
+            "required_research_evidence": ["factor semantics evidence"],
+            "required_transition_facts": ["semantic discovery is fresh"],
+        }],
     }
     assert validate_next_packet(packet) == packet
     with pytest.raises(ValueError, match="routine packet field"):
         validate_next_packet({**packet, "stdout": "large raw output"})
     with pytest.raises(ValueError, match="graph must be a reference"):
         validate_next_packet({**packet, "graph": {"nodes": []}})
+    with pytest.raises(ValueError, match="routine packet field"):
+        validate_next_packet({
+            **packet,
+            "candidate_edges": [{
+                "required_evidence": ["ambiguous requirement"],
+                "required_research_evidence": [],
+                "required_transition_facts": [],
+            }],
+        })
 
 
 def test_model_identity_does_not_change_deterministic_resolution() -> None:

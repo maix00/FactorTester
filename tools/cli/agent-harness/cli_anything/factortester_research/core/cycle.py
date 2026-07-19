@@ -20,6 +20,7 @@ _FORBIDDEN_PACKET_FIELDS = {
     "artifacts",
     "capability_catalog",
     "contracts",
+    "required_evidence",
     "skill_body",
     "stderr",
     "stdout",
@@ -89,6 +90,20 @@ def validate_next_packet(packet: dict[str, Any]) -> dict[str, Any]:
     _reject_fields(packet, _FORBIDDEN_PACKET_FIELDS, "routine packet field")
     if not isinstance(packet.get("graph"), str):
         raise ValueError("FactorTester next packet graph must be a reference")
+    for edge in packet.get("candidate_edges") or []:
+        if not isinstance(edge, dict):
+            raise ValueError("candidate_edges must contain objects")
+        for field in (
+            "required_research_evidence",
+            "required_transition_facts",
+        ):
+            value = edge.get(field)
+            if not isinstance(value, list) or not all(
+                isinstance(item, str) and item.strip() for item in value
+            ):
+                raise ValueError(
+                    f"candidate edge {field} must be a text array"
+                )
     size = len(json.dumps(
         packet,
         ensure_ascii=False,

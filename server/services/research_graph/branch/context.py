@@ -67,6 +67,12 @@ def _build_local_state(
                 "required_evidence": deepcopy(
                     edge.get("required_evidence") or []
                 ),
+                "required_research_evidence": deepcopy(
+                    edge.get("required_research_evidence") or []
+                ),
+                "required_transition_facts": deepcopy(
+                    edge.get("required_transition_facts") or []
+                ),
             }
             for edge in graph.get("edges") or []
             if str(edge.get("from_node") or "") in {

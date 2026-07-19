@@ -127,7 +127,19 @@ def _edge_candidate(
     undetermined_ids: list[str],
 ) -> dict[str, Any]:
     guard_fields = sorted((edge.get("guard") or {}).keys())
-    required_evidence = list(edge.get("required_evidence") or [])
+    legacy_required = list(edge.get("required_evidence") or [])
+    required_research_evidence = list(
+        edge.get("required_research_evidence") or []
+    )
+    required_transition_facts = list(
+        edge.get("required_transition_facts") or []
+    )
+    if (
+        legacy_required
+        and not required_research_evidence
+        and not required_transition_facts
+    ):
+        required_transition_facts = legacy_required
     blockers = []
     if open_gap_ids and edge.get("edge_type") != "failure":
         blockers.append({
@@ -143,7 +155,11 @@ def _edge_candidate(
         "blocked"
         if blockers
         else "requires_evidence"
-        if guard_fields or required_evidence
+        if (
+            guard_fields
+            or required_research_evidence
+            or required_transition_facts
+        )
         else "ready"
     )
     risk_level = str(edge.get("risk_level") or "L1")
@@ -160,7 +176,8 @@ def _edge_candidate(
         "risk_level": risk_level,
         "readiness": readiness,
         "required_guard_fields": guard_fields,
-        "required_evidence": required_evidence,
+        "required_research_evidence": required_research_evidence,
+        "required_transition_facts": required_transition_facts,
         "blockers": blockers,
         "review_requirement": review_requirement,
     }

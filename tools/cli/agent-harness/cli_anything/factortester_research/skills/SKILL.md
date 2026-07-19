@@ -102,6 +102,9 @@ cli-anything-factortester-research cycle advance \
 stdout/stderr, full graph/catalog content, artifacts, trace history, or legacy
 evidence. `cycle advance` validates before backend mutation and records only a
 local factual command envelope plus compact event metadata.
+Candidate edges expose `required_research_evidence` separately from
+`required_transition_facts`; never use a permission, budget, Job status, or
+approval fact to adjudicate a research obligation.
 
 Submit only factual `EvidenceEnvelope` schema version 2. Never request, read,
 reuse, or submit schema-version-1 evidence; it is unavailable to Agents. If a

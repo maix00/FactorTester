@@ -12,16 +12,21 @@ def edge(
     edge_type: str = "conditional",
     guard: dict[str, Any] | None = None,
     risk_level: str = "L1",
-    required_evidence: list[str] | None = None,
+    required_research_evidence: list[str] | None = None,
+    required_transition_facts: list[str] | None = None,
     counterexamples: list[str] | None = None,
 ) -> dict[str, Any]:
+    research_evidence = required_research_evidence or []
+    transition_facts = required_transition_facts or []
     return {
         "edge_id": edge_id,
         "from_node": from_node,
         "to_node": to_node,
         "edge_type": edge_type,
         "guard": guard or {},
-        "required_evidence": required_evidence or [],
+        "required_evidence": [*research_evidence, *transition_facts],
+        "required_research_evidence": research_evidence,
+        "required_transition_facts": transition_facts,
         "counterexamples": counterexamples or [],
         "risk_level": risk_level,
     }
@@ -36,7 +41,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
             edge_type="failure",
             guard={"mandatory_binding_missing": True},
             risk_level="L2",
-            required_evidence=[
+            required_transition_facts=[
                 "target node and missing capability ids",
             ],
         ),
@@ -63,7 +68,9 @@ def build_draft_edges() -> list[dict[str, Any]]:
             edge_type="failure",
             guard={"mandatory_binding_missing": True},
             risk_level="L2",
-            required_evidence=["missing capability ids and attempted bindings"],
+            required_transition_facts=[
+                "missing capability ids and attempted bindings",
+            ],
         ),
         edge(
             "data_contract__factor_semantics",
@@ -112,7 +119,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
                 "further_execution_eligible": False,
             },
             risk_level="L2",
-            required_evidence=[
+            required_research_evidence=[
                 "frozen diagnostic specification and factual evidence",
             ],
         ),
@@ -131,7 +138,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "result_audit",
             guard={"uncertainty_evidence_complete": True},
             risk_level="L2",
-            required_evidence=[
+            required_research_evidence=[
                 "predeclared uncertainty method and factual evidence",
             ],
         ),
@@ -153,7 +160,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
                 "remaining_revision_budget_positive": True,
             },
             risk_level="L2",
-            required_evidence=[
+            required_transition_facts=[
                 "accepted adjudication, new falsifiable mechanism, and "
                 "remaining revision budget",
             ],
@@ -171,7 +178,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
                 "trial_stage_advance_authorized": True,
             },
             risk_level="L2",
-            required_evidence=[
+            required_transition_facts=[
                 "accepted adjudication and server-derived next stage",
             ],
         ),
@@ -202,7 +209,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
                 "factor_change_retained": True,
             },
             risk_level="L2",
-            required_evidence=[
+            required_transition_facts=[
                 "new hypothesis version, trial-ledger delta, and holdout status",
             ],
         ),
@@ -235,7 +242,9 @@ def build_draft_edges() -> list[dict[str, Any]]:
             edge_type="recovery",
             guard={"skill_execution_approved": True},
             risk_level="L3",
-            required_evidence=["grill audit and implementation validation"],
+            required_transition_facts=[
+                "grill audit and implementation validation",
+            ],
         ),
         edge(
             "code_improvement__capability_resolution",

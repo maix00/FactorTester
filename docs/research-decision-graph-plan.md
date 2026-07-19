@@ -1240,10 +1240,15 @@ from_node: inspect_factor_expr_dsl
 to_node: prepare_factor_workspace
 edge_type: recommended | conditional | failure | recovery
 guard: {}
-required_evidence: []
+required_research_evidence: []
+required_transition_facts: []
 counterexamples: []
 risk_level: L1 | L2 | L3 | L4
 ```
+
+The immutable Graph may retain `required_evidence` as the exact concatenation
+of the two typed arrays for protocol compatibility. Routine Agent packets omit
+that ambiguous field.
 
 ### Capability contract
 
