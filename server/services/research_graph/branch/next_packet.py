@@ -58,6 +58,7 @@ def build_graph_branch_next(
         "current_obligations": obligations,
         "candidate_trial_frontier": {
             "current_trial_plan_hash": cycle.get("trial_plan_hash"),
+            "trial_stage": deepcopy(context.get("trial_stage")),
             "candidate_plan_refs": [],
             "unassessed_obligation_ids": [
                 item["obligation_id"] for item in obligations

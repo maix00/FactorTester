@@ -22,6 +22,9 @@ from server.services.research_graph.protocol import (
     loads,
 )
 from server.services.research_graph.versions import load_graph_from_conn
+from server.services.research_graph.trial_plan.stage_projection import (
+    agent_trial_stage_summary,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -118,6 +121,9 @@ def _build_local_state(
         trial_plan_hash = (
             str(branch_row["current_trial_plan_hash"]) or None
         )
+        trial_stage = agent_trial_stage_summary(
+            loads(branch_row["trial_stage_projection_json"]) or {}
+        )
         research_cycle = agent_cycle_summary(
             checkpoint_from_branch_row(branch_row)
         )
@@ -178,6 +184,7 @@ def _build_local_state(
             f"trace:{latest_trace_id}" if latest_trace_id else None
         ),
         "research_cycle": research_cycle,
+        "trial_stage": trial_stage,
         "open_gaps": open_gaps,
         "skill_policy": {
             "match_on": "capability_description",

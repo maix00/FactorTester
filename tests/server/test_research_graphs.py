@@ -2051,6 +2051,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert next_packet["current_obligations"] == []
     assert next_packet["candidate_trial_frontier"] == {
         "current_trial_plan_hash": None,
+        "trial_stage": None,
         "candidate_plan_refs": [],
         "unassessed_obligation_ids": [],
     }
@@ -2404,7 +2405,8 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "evidence_refs",
             "omitted_evidence_count",
             "history_cursor",
-        "research_cycle",
+            "trial_stage",
+            "research_cycle",
         "open_gaps",
         "skill_policy",
             "review_policy",

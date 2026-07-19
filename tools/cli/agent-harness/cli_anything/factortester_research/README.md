@@ -127,19 +127,23 @@ product/source scope, compact availability evidence, factor/data/timing
 semantics, product accounting, market-regime comparisons, selection and
 multiplicity history, costs, capacity, resource limits, sample roles, freeze
 proof, methodology, and graph branch. Availability alone is not sufficient.
-New plans use schema version 3: `decision_contract_hash`,
-`methodology_hash`, and bounded `obligation_refs` are validated against the
-current Research Cycle checkpoint. Older v1/v2 plans remain replayable but
-cannot claim this stronger obligation-binding assurance.
+New plans use schema version 4: `decision_contract_hash`,
+`methodology_hash`, bounded `obligation_refs`, `stage_policy`, and
+`parent_trial_plan_hash` are validated against the current Research Cycle
+checkpoint and branch projection. Older v1-v3 plans remain replayable but do
+not receive stage-lineage enforcement.
 Submitting a run may include `trial_binding` with:
 
 - `instance_id` and `branch_id`;
 - the canonical `trial_plan`, hash, and version;
-- `trial_role` and declared `comparison_id`.
+- comparison-arm `trial_role` and declared `comparison_id`.
 
-The RunSpec hash must be a planned member of that role/comparison. The
-`ResearchRun` retains the binding and every child `Job` inherits it through
-`run_id`; changing the plan requires a new plan version rather than mutation.
+The RunSpec hash must be a planned comparison member. Its sample stage is
+derived from the TrialPlan sample role, not from `trial_role`. The initial plan
+freezes stage partitions, RunSpecs, comparisons, outcomes, criteria, and
+stopping/multiplicity rules. A child version cannot replace them after outcome
+inspection; factor or trial-design revision starts a new hypothesis and plan
+lineage. Every child `Job` inherits the ResearchRun binding through `run_id`.
 
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its

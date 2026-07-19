@@ -30,26 +30,40 @@ services it first or return a bounded gap; never infer missing data.
 Specify:
 
 - primary and secondary outcomes;
-- selection, validation, and untouched sample roles;
+- an obligation-driven ordered stage policy and its sample roles;
 - comparisons and relevant alternatives;
 - rejection, revision, continuation, and stopping rules;
 - multiplicity family and correction or a justified no-adjustment rule;
 - diagnostics that distinguish mechanism from implementation failure;
 - resource boundary and expected information gain.
 
-Never select a threshold after looking at the outcome. A changed frozen body is
-a new TrialPlan version. Recency alone does not create out-of-sample status:
+Do not confuse sample stage with comparison arm: `selection`, `validation`,
+`confirmation`, and `holdout` describe sample use; `candidate`, `control`, or
+another declared `trial_role` describes a comparison member. The initial plan
+freezes all stage sample identities, RunSpecs, comparisons, outcomes, criteria,
+and stopping/multiplicity rules. A child version may update bounded obligation
+references, but may not replace that frozen trial design after outcome
+inspection. A new factor or design starts a new hypothesis and TrialPlan
+lineage; it does not reuse a protected sample.
+
+Use only the stages justified by the obligations. Direct confirmation is
+allowed only with an explicit entry-basis reference. Stage advancement is an
+adjudication recommendation and becomes effective only after an accepted
+decision; never invent a client completion boolean.
+
+Never select a threshold after looking at the outcome. Recency alone does not create out-of-sample status:
 the latest interval or prospective stream is untouched only when it was sealed
 after the factor, selection boundary, and TrialPlan were frozen. Historical
 regime evidence seen during selection remains regime validation, not holdout.
 
 ## Output
 
-Return a canonical TrialPlan schema version 3. Bind its
+Return a canonical TrialPlan schema version 4. Bind its
 `decision_contract_hash` and `methodology_hash` to the current checkpoint, and
 put every selected serviceable obligation ID in the bounded
-`obligation_refs`; do not copy obligation bodies. Return the expected evidence
-kind separately. If a required operator, strategy behavior, timing rule,
+`obligation_refs`; do not copy obligation bodies. Include `stage_policy` and
+`parent_trial_plan_hash` (`null` for the first version). Return the expected
+evidence kind separately. If a required operator, strategy behavior, timing rule,
 authoritative data field, frozen identity, or pre-outcome decision rule is
 unavailable, return a Capability Gap without approximating it. You may return
 a clearly labeled `provisional_outline` to preserve useful design work, but it

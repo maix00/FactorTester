@@ -75,6 +75,64 @@ def trial_plan(run_spec_hash: str) -> dict:
     }
 
 
+def trial_plan_v4() -> dict:
+    value = trial_plan("a" * 64)
+    value.update({
+        "schema_version": 4,
+        "decision_contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "obligation_refs": ["obligation-stage"],
+        "parent_trial_plan_hash": None,
+        "stage_policy": {
+            "ordered_stages": [
+                "selection",
+                "validation",
+                "confirmation",
+            ],
+            "entry_stage": "selection",
+            "entry_basis_ref": "decision-contract:new-research",
+        },
+        "sample_roles": [
+            {
+                "sample_ref": "selection-2020-2022",
+                "sample_hash": "d" * 64,
+                "role": "selection",
+                "run_spec_hashes": ["a" * 64],
+            },
+            {
+                "sample_ref": "validation-2023",
+                "sample_hash": "e" * 64,
+                "role": "validation",
+                "run_spec_hashes": ["b" * 64],
+            },
+            {
+                "sample_ref": "confirmation-2024",
+                "sample_hash": "f" * 64,
+                "role": "confirmation",
+                "run_spec_hashes": ["c" * 64],
+            },
+        ],
+        "comparisons": [{
+            "comparison_id": "main-comparison",
+            "members": [
+                {
+                    "run_spec_hash": "a" * 64,
+                    "trial_role": "candidate",
+                },
+                {
+                    "run_spec_hash": "b" * 64,
+                    "trial_role": "candidate",
+                },
+                {
+                    "run_spec_hash": "c" * 64,
+                    "trial_role": "candidate",
+                },
+            ],
+        }],
+    })
+    return value
+
+
 def initialize_branch(path, plan_hash: str) -> None:
     with connect_sqlite(path) as conn:
         create_instance_branch_schema(conn)
@@ -145,6 +203,18 @@ def initialize_graph_version(path) -> None:
                     "adjudication_route_bound": True,
                     "factor_revision_authorized": False,
                     "next_trial_stage_required": False,
+                },
+                "required_evidence": [],
+            },
+            {
+                "edge_id": "advance-stage",
+                "from_node": "diagnostics",
+                "to_node": "validation_design",
+                "guard": {
+                    "adjudication_route_bound": True,
+                    "factor_revision_authorized": False,
+                    "next_trial_stage_required": True,
+                    "trial_stage_advance_authorized": True,
                 },
                 "required_evidence": [],
             },

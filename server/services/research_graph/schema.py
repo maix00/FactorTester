@@ -11,6 +11,7 @@ from server.services.maintenance_cases.schema import (
 )
 from server.services.research_graph.branch.schema import (
     create_instance_branch_schema,
+    ensure_instance_branch_schema,
 )
 from server.services.research_graph.versions import (
     clear_graph_cache_for_current_db,
@@ -51,7 +52,8 @@ def ensure_schema() -> None:
     clear_graph_cache_for_current_db()
     agent_flow.get_store().ensure_schema()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        tables = _table_names(conn)
+        definitions = _table_definitions(conn)
+        tables = set(definitions)
         legacy = sorted(tables & LEGACY_GRAPH_TABLES)
         if legacy:
             raise RuntimeError(
@@ -64,7 +66,13 @@ def ensure_schema() -> None:
             )
         if not GRAPH_OWNER_TABLES.issubset(tables):
             create_schema(conn)
-            tables = _table_names(conn)
+            definitions = _table_definitions(conn)
+            tables = set(definitions)
+        if "trial_stage_projection_json" not in definitions.get(
+            "research_graph_branches",
+            "",
+        ):
+            ensure_instance_branch_schema(conn)
         missing = sorted(GRAPH_OWNER_TABLES - tables)
         if missing:
             raise RuntimeError(
@@ -113,11 +121,15 @@ def final_schema_report(conn: sqlite3.Connection) -> dict[str, object]:
 
 
 def _table_names(conn: sqlite3.Connection) -> set[str]:
+    return set(_table_definitions(conn))
+
+
+def _table_definitions(conn: sqlite3.Connection) -> dict[str, str]:
     return {
-        str(row["name"])
+        str(row["name"]): str(row["sql"] or "")
         for row in conn.execute(
             """
-            SELECT name FROM sqlite_master
+            SELECT name, sql FROM sqlite_master
             WHERE type='table' AND name NOT LIKE 'sqlite_%'
             """
         ).fetchall()

@@ -129,6 +129,10 @@ It proves:
 Companion server tests, outside this Harness package suite, validate the
 TrialPlan schema, transition freeze rules, TrialPlan-to-ResearchRun binding,
 Job inheritance through `run_id`, retention, and exact-hash rollback gates.
+Schema-v4 tests distinguish sample stage from comparison arm, freeze stage
+partitions plus RunSpec/comparison membership across child versions, validate
+direct-confirmation entry, persist one compact branch stage projection, and
+keep the Agent packet below its existing byte limit.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.
@@ -163,7 +167,7 @@ CLI_ANYTHING_FORCE_INSTALLED=1 \
 
 ## Test results
 
-Last release-gate run: 2026-07-19
+Last release-gate run: 2026-07-20
 
 ```text
 CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
@@ -173,12 +177,12 @@ CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
 
 [_resolve_cli] Using installed command:
   /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
-collected 52 items
+collected 55 items
 
 test_core.py
-  37 passed
+  39 passed
 test_full_e2e.py::TestCLISubprocess
-  14 passed
+  15 passed
 test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
   [_resolve_cli] Using installed command:
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/factortester
@@ -186,7 +190,7 @@ test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
 
-52 passed, 123 warnings
+55 passed, 123 warnings in 13.64s
 ```
 
 All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in

@@ -211,9 +211,10 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   scopes. The Planning Agent first confirms the user-authorized product range;
   data-source availability never broadens it implicitly.
 - The server derives **Sample Scope Identity** from the exact RunSpec and
-  records creation of a ResearchRun as exposure. Trial roles remain
-  obligation-driven rather than a hard-coded selection/validation/confirmation
-  sequence.
+  records creation of a ResearchRun as exposure. Each Trial Plan declares only
+  the ordered sample stages justified by its obligations; the Graph does not
+  impose one universal sequence. Sample stage remains distinct from a
+  comparison-arm trial role.
 - **Historical Regime Evidence** may discharge robustness or transfer
   obligations. A final **Prospective Holdout** remains sealed until its
   decision-blocking obligation is opened; **Prequential Evidence** requires
@@ -227,8 +228,8 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   to submitted runs and returned evidence; full rationale and private
   references remain local.
 - The compact plan is stored once in existing graph-trace evidence; the
-  Hypothesis Branch retains only its current-plan hash projection, and no
-  dedicated TrialPlan service/table is required.
+  Hypothesis Branch retains its current-plan hash plus a compact current-stage
+  projection, and no dedicated TrialPlan service/table is required.
 - A trace containing a referenced TrialPlan is retention-pinned until its
   dependent run/job/conclusion history is explicitly deleted.
 - A Research Agent drafts the **Trial Plan**; deterministic protocol validation

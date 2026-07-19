@@ -204,7 +204,7 @@ least:
 ```text
 hypothesis and trial family
 primary and secondary outcomes
-diagnostic, selection, confirmation, and holdout sample roles
+obligation-driven ordered sample stages and their immutable scope identities
 planned comparisons
 outcome-aware stopping rules
 multiplicity method and dependence assumptions
@@ -221,8 +221,11 @@ Deterministic code checks the TrialPlan schema, identity, version, hash,
 required fields, and whether result evidence was produced under the bound
 version. Agent judgment supplies and reviews economic/statistical meaning only
 where the applicable protocol does not decide it. Once selection-relevant
-outcomes have been inspected, changing the plan requires a new immutable
-version and the trial-ledger consequences required by decisions 114–115.
+outcomes have been inspected, a child version may not replace frozen sample
+partitions, RunSpecs, comparisons, outcomes, criteria, or
+stopping/multiplicity rules. A factor or trial-design change creates a new
+hypothesis and TrialPlan lineage with the trial-ledger consequences required
+by decisions 114–115.
 
 The server persists the compact immutable TrialPlan as the authoritative
 run/result binding. It contains the executable statistical contract and opaque
@@ -239,11 +242,14 @@ to the database hot path.
 The minimum accepted persistence shape does not introduce a `trial_plans`
 table or service. The `validation_design` transition stores the compact plan
 once in existing append-only graph-trace evidence. The current hypothesis
-branch keeps only a current-plan hash projection needed for constant-bounded
-validation. A ResearchRun binds that hash, its `trial_role`, and
-`comparison_id`; JobAttempts inherit through the run rather than duplicating
-the plan. Routine submission reuses the already-loaded branch/run decision
-packet and does not scan historical traces.
+branch keeps a current-plan hash and compact stage projection needed for
+constant-bounded validation. The stage projection contains only plan/version,
+current stage, completed mask, and frozen commitment hashes; it is not another
+research state owner. A ResearchRun binds the plan hash, server-derived sample
+stage, comparison-arm `trial_role`, and `comparison_id`; JobAttempts inherit
+through the run rather than duplicating the plan. Routine submission reuses
+the already-loaded branch/run decision packet and does not scan historical
+traces.
 
 A graph trace containing a TrialPlan body is retention-pinned while any
 ResearchRun, JobAttempt, or accepted research conclusion references its plan
@@ -606,14 +612,16 @@ TrialPlan and RunSpec are complementary rather than one-to-one:
   RunSpecs, such as main-only/aux-only/enriched comparisons or multiple
   walk-forward and diagnostic/selection/confirmation slices;
 - each ResearchRun binds exactly one TrialPlan ID/hash, one RunSpec hash, one
-  `trial_role`, and one `comparison_id`;
+  server-derived sample stage, one comparison-arm `trial_role`, and one
+  `comparison_id`;
 - every JobAttempt inherits those bindings and cannot change them;
 - TrialPlan references RunSpec identity and role without copying the complete
   execution configuration.
 
-A RunSpec not present in the frozen plan cannot be attached to the current
-evidence after outcomes are known. Adding or changing it requires a new
-TrialPlan version and the corresponding trial-ledger effect.
+A RunSpec not present in the frozen initial plan cannot be attached to the
+current lineage after outcomes are known. A child version cannot replace
+RunSpecs or comparison membership. Adding or changing either requires a new
+hypothesis and TrialPlan lineage with the corresponding trial-ledger effect.
 
 ## Evidence Interface
 

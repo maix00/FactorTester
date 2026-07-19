@@ -132,9 +132,12 @@ never invent client-side pass booleans.
 
 Persist one canonical TrialPlan body before validation design is frozen; later
 transitions refer to its hash. Bind a submitted ResearchRun with the plan,
-version, graph instance/branch, trial role, and declared comparison. The RunSpec
-hash must be a planned member. Child Jobs inherit the binding through `run_id`.
-Create a new TrialPlan version instead of mutating the frozen body.
+version, graph instance/branch, comparison role, and declared comparison. The
+server derives the sample stage from the RunSpec's planned sample role; never
+use `trial_role` as the stage. The initial schema-v4 plan freezes stage
+partitions, RunSpecs, and comparisons. A child plan cannot replace that design
+after outcome inspection. Factor or design revision starts a new hypothesis
+and TrialPlan lineage. Child Jobs inherit the binding through `run_id`.
 
 Availability is only one TrialPlan input. Also bind the Decision Contract,
 actionable obligations, factor/data/timing semantics, product accounting,

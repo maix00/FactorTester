@@ -34,6 +34,7 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
             current_capability_resolution_json TEXT NOT NULL,
             current_capability_resolution_hash TEXT NOT NULL,
             current_trial_plan_hash TEXT NOT NULL DEFAULT '',
+            trial_stage_projection_json TEXT NOT NULL DEFAULT '{}',
             evidence_refs_json TEXT NOT NULL DEFAULT '[]',
             omitted_evidence_count INTEGER NOT NULL DEFAULT 0,
             latest_trace_id TEXT NOT NULL DEFAULT '',
@@ -66,6 +67,18 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
     )
     for statement in statements:
         conn.execute(statement)
+
+
+def ensure_instance_branch_schema(conn: sqlite3.Connection) -> None:
+    """Create owners and add the compact stage projection on older targets."""
+    create_instance_branch_schema(conn)
+    columns = table_columns(conn, "research_graph_branches")
+    if "trial_stage_projection_json" not in columns:
+        conn.execute(
+            "ALTER TABLE research_graph_branches "
+            "ADD COLUMN trial_stage_projection_json "
+            "TEXT NOT NULL DEFAULT '{}'"
+        )
 
 
 def table_columns(

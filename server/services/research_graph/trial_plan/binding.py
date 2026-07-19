@@ -53,7 +53,8 @@ def normalize_run_binding(
         for item in plan["sample_roles"]
         if normalized_run_hash in item["run_spec_hashes"]
     )
-    protected = trial_role in {"confirmation", "holdout", "validation"}
+    trial_stage = str(sample["role"])
+    protected = trial_stage in {"confirmation", "holdout", "validation"}
     if plan["schema_version"] < 2 and protected:
         raise ValueError(
             "protected sample roles require TrialPlan schema_version 2"
@@ -72,6 +73,7 @@ def normalize_run_binding(
         "trial_plan_hash": actual_hash,
         "trial_plan_version": int(plan["version"]),
         "trial_role": str(trial_role),
+        "trial_stage": trial_stage,
         "comparison_id": str(comparison_id),
         "sample_ref": str(sample["sample_ref"]),
         "sample_hash": str(sample["sample_hash"]),

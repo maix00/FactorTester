@@ -49,6 +49,11 @@ from server.services.research_graph.trial_plan.transition import (
     validate_trial_plan_cycle_binding,
     validate_trial_plan_transition,
 )
+from server.services.research_graph.trial_plan.stage_projection import (
+    advance_trial_stage,
+    project_trial_plan_stage,
+    trial_stage_guard_facts,
+)
 from server.services.research_graph.versions import load_graph_from_conn
 from tools.data.sqlite.db import connect_sqlite
 
@@ -96,6 +101,9 @@ def advance_graph_branch(
         if branch_row is None:
             raise KeyError("graph branch not found")
         branch = branch_payload(branch_row) or {}
+        current_stage_projection = (
+            loads(branch_row["trial_stage_projection_json"]) or {}
+        )
         previous_cycle_checkpoint = checkpoint_from_branch_row(branch_row)
         cycle_update = prepared_evidence.get("research_cycle")
         if isinstance(cycle_update, dict):
@@ -156,6 +164,10 @@ def advance_graph_branch(
         guard_evidence = {
             **prepared_evidence,
             **adjudication_route_guards(route_action),
+            **trial_stage_guard_facts(
+                projection=current_stage_projection,
+                adjudication_action=route_action,
+            ),
             "research_cycle_delta_applied": bool(cycle_events),
         }
         failed_guards = [
@@ -244,6 +256,24 @@ def advance_graph_branch(
                 trial_plan=prepared_evidence["trial_plan"],
                 cycle_checkpoint=cycle_checkpoint,
             )
+        if has_trial_plan_body and route_action == "advance_trial_stage":
+            raise ValueError(
+                "advance the stage before freezing its child TrialPlan"
+            )
+        projected_stage = current_stage_projection
+        if has_trial_plan_body:
+            projected_stage = project_trial_plan_stage(
+                trial_plan=prepared_evidence["trial_plan"],
+                trial_plan_hash=projected_trial_plan_hash,
+                current_trial_plan_hash=str(
+                    branch_row["current_trial_plan_hash"]
+                ),
+                current_projection=current_stage_projection,
+            )
+        if route_action == "advance_trial_stage":
+            projected_stage = advance_trial_stage(
+                current_stage_projection
+            )
         trace_evidence = deepcopy(persisted_evidence)
         trace_evidence.pop("research_cycle", None)
         if cycle_event is not None and cycle_checkpoint is not None:
@@ -270,6 +300,7 @@ def advance_graph_branch(
                 current_capability_resolution_json=?,
                 current_capability_resolution_hash=?,
                 current_trial_plan_hash=?,
+                trial_stage_projection_json=?,
                 evidence_refs_json=?, omitted_evidence_count=?,
                 latest_trace_id=?, updated_at=?
             WHERE branch_id=? AND instance_id=?
@@ -280,6 +311,7 @@ def advance_graph_branch(
                 resolution_json,
                 resolution_hash,
                 projected_trial_plan_hash,
+                orjson.dumps(projected_stage).decode(),
                 orjson.dumps(bounded_evidence_refs).decode(),
                 omitted_evidence_count,
                 trace_id,

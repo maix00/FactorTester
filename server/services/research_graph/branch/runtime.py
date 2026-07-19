@@ -250,10 +250,11 @@ def fork_graph_branch(
                 branch_id, instance_id, label, current_node, status,
                 current_capability_resolution_json,
                 current_capability_resolution_hash,
-                current_trial_plan_hash, evidence_refs_json,
+                current_trial_plan_hash, trial_stage_projection_json,
+                evidence_refs_json,
                 omitted_evidence_count, latest_trace_id,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 branch_id,
@@ -263,6 +264,7 @@ def fork_graph_branch(
                 str(source["current_capability_resolution_json"]),
                 str(source["current_capability_resolution_hash"]),
                 str(source["current_trial_plan_hash"]),
+                str(source["trial_stage_projection_json"]),
                 str(source["evidence_refs_json"]),
                 int(source["omitted_evidence_count"]),
                 trace_id,
