@@ -26,6 +26,8 @@ and durable `Job` records own execution:
 cli-anything-factortester-research plan \
   --factor-family SgCCS \
   --factor 'SgCCS=SgCCS|P:CA|N:10d' \
+  --product A.DCE \
+  --source Local \
   --configuration-file research-configuration.json \
   --json
 
@@ -44,6 +46,13 @@ cli-anything-factortester-research run-step -- job list
 and each `Job` owns status, progress, cancellation, errors, results, and
 artifacts. Observe, cancel, and retry by `job_id`; never use `page_uuid` as
 execution ownership.
+
+The Planning Agent must confirm the concrete product list and requested sources
+with the user before calling `plan`. The first executable phase records a
+compact real-backend availability probe. It never expands scope or silently
+falls back. The probe is feasibility evidence: obligation discovery still
+defines the exact coverage, field/frequency, visibility, latency, and
+permitted-use facts that the research decision needs.
 
 ## Token-efficient Active Graph flow
 
@@ -113,6 +122,11 @@ token-efficiency evidence. Client-supplied pass booleans are not authoritative.
 
 Before the validation design is frozen, persist one bounded immutable
 `TrialPlan` in transition evidence. Later transitions refer to its hash.
+Synthesis consumes the Decision Contract, actionable obligations, exact
+product/source scope, compact availability evidence, factor/data/timing
+semantics, product accounting, market-regime comparisons, selection and
+multiplicity history, costs, capacity, resource limits, sample roles, freeze
+proof, methodology, and graph branch. Availability alone is not sufficient.
 Submitting a run may include `trial_binding` with:
 
 - `instance_id` and `branch_id`;
@@ -122,6 +136,12 @@ Submitting a run may include `trial_binding` with:
 The RunSpec hash must be a planned member of that role/comparison. The
 `ResearchRun` retains the binding and every child `Job` inherits it through
 `run_id`; changing the plan requires a new plan version rather than mutation.
+
+Do not infer OOS from a calendar date. A recent historical interval, delayed
+stream, paper stream, or live stream is untouched/prospective only if its
+observations were sealed after the factor, selection boundary, and TrialPlan
+were frozen. Previously inspected historical regimes are validation evidence,
+not untouched holdout.
 
 ```bash
 factortester run preview --analysis ic

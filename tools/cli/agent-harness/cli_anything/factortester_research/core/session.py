@@ -44,6 +44,8 @@ class ResearchSession:
     admin_port: int = 7998
     factor_families: list[str] = field(default_factory=list)
     factors: list[str] = field(default_factory=list)
+    products: list[str] = field(default_factory=list)
+    data_sources: list[str] = field(default_factory=list)
     configuration_file: str = ""
     plan: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
@@ -61,6 +63,10 @@ class ResearchSession:
             admin_port=int(payload.get("admin_port") or 7998),
             factor_families=[str(item) for item in payload.get("factor_families") or []],
             factors=[str(item) for item in payload.get("factors") or []],
+            products=[str(item) for item in payload.get("products") or []],
+            data_sources=[
+                str(item) for item in payload.get("data_sources") or []
+            ],
             configuration_file=str(payload.get("configuration_file") or ""),
             plan=list(payload.get("plan") or []),
             events=list(payload.get("events") or []),
@@ -99,6 +105,8 @@ class ResearchSession:
             "admin_port": self.admin_port,
             "factor_families": self.factor_families,
             "factors": self.factors,
+            "products": self.products,
+            "data_sources": self.data_sources,
             "configuration_file": self.configuration_file,
             "plan": self.plan,
             "events": self.events,

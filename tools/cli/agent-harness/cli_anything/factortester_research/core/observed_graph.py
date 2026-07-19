@@ -7,10 +7,11 @@ from typing import Any
 from .graph_protocol import validate_graph
 
 _KIND_BY_PHASE = {
+    "inspect_data_availability": "validation",
     "inspect_factor_expr_dsl": "validation",
     "prepare_factor_workspace": "research",
     "understand_factor_source": "research",
-    "build_validation_slices": "validation",
+    "design_trial_plan": "validation",
     "create_research_workspace": "execution",
     "freeze_configuration": "execution",
     "submit_run": "execution",
@@ -20,10 +21,11 @@ _KIND_BY_PHASE = {
 }
 
 _CAPABILITY_BY_PHASE = {
+    "inspect_data_availability": "data-availability.inspect",
     "inspect_factor_expr_dsl": "factor-expr.operator-registry.inspect",
     "prepare_factor_workspace": "factor-workspace.prepare",
     "understand_factor_source": "factor-workspace.source.inspect",
-    "build_validation_slices": "research-validation.slice-plan",
+    "design_trial_plan": "research-trial.synthesize",
     "create_research_workspace": "research-workspace.create",
     "freeze_configuration": "research-configuration.freeze",
     "submit_run": "research-run.submit",

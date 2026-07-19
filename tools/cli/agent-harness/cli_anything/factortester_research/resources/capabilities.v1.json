@@ -109,6 +109,23 @@
       ]
     },
     {
+      "capability_id": "data-availability.inspect",
+      "industry_semantics": "Inspect actual historical coverage and delayed, paper, or live stream reachability for the exact user-confirmed products and sources before designing samples, without treating entitlement as verified latency or point-in-time provenance.",
+      "when_to_use": ["after the Planning Agent confirms product and source scope", "before synthesizing a TrialPlan"],
+      "preconditions": ["the exact product identifiers and requested sources are known"],
+      "prohibitions": ["do not expand products or fall back to another source implicitly", "do not return the full provider catalog or raw probe output to the Agent"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.products.availability",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["all"]
+        }
+      ]
+    },
+    {
       "capability_id": "data-provenance.point-in-time",
       "industry_semantics": "Bind every observation to source version, trading calendar, session, timezone, availability time, membership, contract identity, and checksum so future information cannot enter the signal.",
       "when_to_use": ["before computing a factor panel", "when joining contract, macro, inventory, fundamental, or membership data"],

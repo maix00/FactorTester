@@ -97,6 +97,8 @@ def _research_cycle_discovery_proposal() -> dict:
 def test_observed_graph_distinguishes_advisory_plan_from_enforced_gap_state() -> None:
     plan = build_factor_research_plan(
         factor_families=["SgCCS"],
+        products=["A.DCE"],
+        sources=["Local"],
         configuration_file="configuration.json",
     )
     graph = build_observed_graph(plan)
@@ -118,6 +120,8 @@ def test_observed_graph_distinguishes_advisory_plan_from_enforced_gap_state() ->
 def test_observed_graph_content_hash_is_stable() -> None:
     plan = build_factor_research_plan(
         factor_families=["SgCCS"],
+        products=["A.DCE"],
+        sources=["Local"],
         configuration_file="configuration.json",
     )
     first = build_observed_graph(plan)
@@ -130,6 +134,8 @@ def test_observed_graph_content_hash_is_stable() -> None:
 def test_graph_validation_rejects_a_dangling_edge() -> None:
     graph = build_observed_graph(build_factor_research_plan(
         factor_families=["SgCCS"],
+        products=["A.DCE"],
+        sources=["Local"],
         configuration_file="configuration.json",
     ))
     graph["edges"][0]["to_node"] = "missing-node"
@@ -141,6 +147,8 @@ def test_graph_validation_rejects_a_dangling_edge() -> None:
 def test_capability_resolution_reports_available_bindings_and_gaps() -> None:
     graph = build_observed_graph(build_factor_research_plan(
         factor_families=["SgCCS"],
+        products=["A.DCE"],
+        sources=["Local"],
         configuration_file="configuration.json",
     ))
     registry = {
@@ -320,6 +328,15 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     }
     assert edges["hypothesis__capability_resolution"]["guard"][
         "obligation_discovery_checkpoint_fresh"
+    ] is True
+    assert edges["data_contract__factor_semantics"]["guard"][
+        "data_availability_profile_bound"
+    ] is True
+    assert edges["data_contract__factor_semantics"]["guard"][
+        "data_availability_constraints_satisfied"
+    ] is True
+    assert edges["data_contract__factor_semantics"]["guard"][
+        "material_data_obligations_adjudicated_or_not_triggered"
     ] is True
     assert edges["factor_semantics__validation_design"]["guard"][
         "semantic_discovery_fresh_or_not_triggered"
@@ -697,7 +714,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert reused["bindings"][0]["execution_approval_granted"] is True
     assert approved["gaps"] == []
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "3199189a952664aacb8947a4804a65644354f77ec913bce5105ca5d0d0adb2da"
+        "af3c1c9d25b0e83f77cd151db9a2fdd3c105c90fa35ebe11eeed78a80bf1d9cb"
     )
 
 
@@ -869,12 +886,42 @@ def test_plan_uses_one_workspace_run_job_contract() -> None:
     plan = build_factor_research_plan(
         factor_families=["SgCCS", "MmRet"],
         factors=["SgCCS=SgCCS|P:CA|N:10d", "MmRet=MmRet|P:CA|N:5d"],
+        products=["A.DCE", "RB.SHF"],
+        sources=["Local", "Tiger"],
         configuration_file="run spec.json",
         analyses=["ic", "factor_type_analysis", "backtest"],
     )
     commands = "\n".join(item["command"] for item in plan)
     phases = [item["phase"] for item in plan]
+    assert phases[0] == "inspect_data_availability"
+    assert phases.index("inspect_data_availability") < phases.index("design_trial_plan")
     assert phases.index("understand_factor_source") < phases.index("submit_run")
+    assert (
+        "products availability --product A.DCE --product RB.SHF "
+        "--source Local --source Tiger --probe --json"
+    ) in commands
+    assert "slice-plan" not in commands
+    assert "2024-01-01" not in commands
+    assert "2026-01-01" not in commands
+    trial_design = next(
+        item for item in plan if item["phase"] == "design_trial_plan"
+    )
+    assert set(trial_design["required_inputs"]) >= {
+        "confirmed_product_scope",
+        "data_availability_profile_ref",
+        "decision_contract_ref",
+        "actionable_obligation_refs",
+        "factor_semantics_ref",
+        "signal_timing_ref",
+        "product_accounting_ref",
+        "trial_ledger_ref",
+        "sample_role_and_freeze_policy",
+    }
+    assert trial_design["conditional_inputs"] == [{
+        "input": "material_data_obligation_refs",
+        "when": "material_data_question_triggered",
+    }]
+    assert "availability payload" not in json.dumps(plan)
     assert "workspace create --factor-family SgCCS --factor-family MmRet" in commands
     assert "--factor 'SgCCS=SgCCS|P:CA|N:10d'" in commands
     assert "workspace update --file 'run spec.json'" in commands
@@ -888,6 +935,8 @@ def test_plan_uses_one_workspace_run_job_contract() -> None:
 def test_plan_treats_factor_families_as_values() -> None:
     plan = build_factor_research_plan(
         factor_families=["MyCustomFamily", "AnotherFamily"],
+        products=["A.DCE"],
+        sources=["Local"],
         configuration_file="configuration.json",
     )
     commands = "\n".join(item["command"] for item in plan)
@@ -896,11 +945,29 @@ def test_plan_treats_factor_families_as_values() -> None:
     assert "SgCCS" not in commands
 
 
+def test_plan_requires_explicit_product_and_source_scope() -> None:
+    with pytest.raises(ValueError, match="at least one product"):
+        build_factor_research_plan(
+            factor_families=["SgCCS"],
+            products=[],
+            sources=["Local"],
+            configuration_file="configuration.json",
+        )
+    with pytest.raises(ValueError, match="at least one data source"):
+        build_factor_research_plan(
+            factor_families=["SgCCS"],
+            products=["A.DCE"],
+            sources=[],
+            configuration_file="configuration.json",
+        )
+
+
 def test_validation_checklist_encodes_durable_and_quant_contracts() -> None:
     text = "\n".join(validation_checklist())
     for required in (
         "RunSpec", "ranking universe", "product mask", "多重检验", "未来函数",
-        "费用", "ResearchSlice/ValidationPlan", "traceback", "TTL", "retry_of",
+        "费用", "TrialPlan", "untouched/prospective holdout", "traceback",
+        "TTL", "retry_of",
         "page_uuid",
     ):
         assert required in text
@@ -1015,8 +1082,13 @@ def test_service_target_selection_requires_unambiguous_worktree() -> None:
     assert select_worktree(worktrees, target_port=8123).branch == "fix/issue-123"
 
 
-def test_default_validation_plan_separates_selection_from_oos_annotation() -> None:
-    payload = default_factor_validation_plan().to_dict()
+def test_explicit_legacy_validation_plan_separates_selection_from_holdout() -> None:
+    payload = default_factor_validation_plan(
+        in_sample_start="2024-01-01",
+        in_sample_end="2025-12-31",
+        oos_start="2026-01-01",
+        oos_end="2026-12-31",
+    ).to_dict()
     assert payload["in_sample_end"] == "2025-12-31"
     assert payload["oos_start"] == "2026-01-01"
     all_slices = [item for group in payload["slice_sets"] for item in group["slices"]]

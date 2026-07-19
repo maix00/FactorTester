@@ -35,6 +35,20 @@ def doctor(as_json: bool) -> None:
 @click.command("plan")
 @click.option("--factor-family", "factor_families", multiple=True, required=True, help="因子家族 alias，可重复。")
 @click.option("--factor", "factors", multiple=True, help="具体 factor，格式 FAMILY_ALIAS=FACTOR_ALIAS，可重复。")
+@click.option(
+    "--product",
+    "products",
+    multiple=True,
+    required=True,
+    help="用户在当前对话确认的研究产品，可重复。",
+)
+@click.option(
+    "--source",
+    "sources",
+    multiple=True,
+    required=True,
+    help="用户确认用于该产品范围的数据源，可重复。",
+)
 @click.option("--configuration-file", required=True, type=click.Path(dir_okay=False), help="canonical ResearchConfiguration JSON。")
 @click.option(
     "--analysis", "analyses", multiple=True,
@@ -47,6 +61,8 @@ def plan(
     ctx: click.Context,
     factor_families: tuple[str, ...],
     factors: tuple[str, ...],
+    products: tuple[str, ...],
+    sources: tuple[str, ...],
     configuration_file: str,
     analyses: tuple[str, ...],
     dry_run: bool,
@@ -57,16 +73,25 @@ def plan(
     session = load_session(session_path)
     session.factor_families = list(factor_families)
     session.factors = list(factors)
+    session.products = list(products)
+    session.data_sources = list(sources)
     session.configuration_file = configuration_file
     session.plan = build_factor_research_plan(
         factor_families=list(factor_families),
         factors=list(factors),
+        products=list(products),
+        sources=list(sources),
         configuration_file=configuration_file,
         analyses=list(analyses) or None,
     )
     record_event(
-        session, "plan_created", factor_families=list(factor_families),
-        factors=list(factors), configuration_file=configuration_file,
+        session,
+        "product_scope_confirmed",
+        products=list(products),
+        data_sources=list(sources),
+        factor_families=list(factor_families),
+        factors=list(factors),
+        configuration_file=configuration_file,
     )
     payload = {"session": session.to_dict(), "validation_checklist": validation_checklist()}
     if not dry_run:
@@ -79,10 +104,10 @@ def plan(
         click.echo(f"{index}. [{item['phase']}] {item['purpose']}")
         click.echo(f"   {item['command']}")
 @click.command("slice-plan")
-@click.option("--in-sample-start", default="2024-01-01", show_default=True)
-@click.option("--in-sample-end", default="2025-12-31", show_default=True)
-@click.option("--oos-start", default="2026-01-01", show_default=True)
-@click.option("--oos-end", default="2026-12-31", show_default=True)
+@click.option("--in-sample-start", required=True)
+@click.option("--in-sample-end", required=True)
+@click.option("--oos-start", required=True)
+@click.option("--oos-end", required=True)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 def slice_plan(
     in_sample_start: str,
@@ -91,7 +116,7 @@ def slice_plan(
     oos_end: str,
     as_json: bool,
 ) -> None:
-    """Print the standard factor-research time-slice validation plan."""
+    """Print an explicit legacy slice plan; ordinary planning uses TrialPlan."""
     plan = default_factor_validation_plan(
         in_sample_start=in_sample_start,
         in_sample_end=in_sample_end,

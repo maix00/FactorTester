@@ -83,16 +83,17 @@ class ValidationPlan:
 
 def default_factor_validation_plan(
     *,
-    in_sample_start: str = "2024-01-01",
-    in_sample_end: str = "2025-12-31",
-    oos_start: str = "2026-01-01",
-    oos_end: str = "2026-12-31",
+    in_sample_start: str,
+    in_sample_end: str,
+    oos_start: str,
+    oos_end: str,
 ) -> ValidationPlan:
-    """Standard factor-research validation plan.
+    """Build an explicit legacy factor-research validation plan.
 
-    Selection is allowed only on in-sample windows. OOS windows are generated
-    for risk annotation and must not be used to choose factor parameters,
-    product groups, or strategy policies.
+    Ordinary planning uses an immutable TrialPlan. This compatibility helper
+    requires callers to provide every boundary and never assigns OOS from the
+    current date. The caller remains responsible for proving that the holdout
+    was untouched after factor and plan freeze.
     """
 
     calendar = ResearchSliceSet(
@@ -123,12 +124,12 @@ def default_factor_validation_plan(
         name="oos_annotation",
         description="Holdout risk annotation windows; not eligible for selection.",
         slices=(ResearchSlice(
-            name="oos_2026",
+            name=f"oos_{oos_start}_{oos_end}",
             start=oos_start,
             end=oos_end,
             kind="custom",
             purpose="oos_annotation",
-            rule="fixed holdout period",
+            rule="explicit caller-assigned holdout; freeze proof required",
         ),),
     )
     return ValidationPlan(

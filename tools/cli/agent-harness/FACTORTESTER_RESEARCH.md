@@ -16,19 +16,29 @@ The harness adapts two research skill systems:
 
 ## Research Loop
 
-1. Define the factor family, factor alias or parameter grid, product groups,
-   time range, and cost/capacity settings. Product groups/product paths define
+1. Confirm the concrete product range and requested sources with the user.
+   Run compact `products availability` inspection before sample design, then
+   define factor family, factor alias or parameter grid, time range, and
+   cost/capacity settings. Product groups/product paths define
    the cross-sectional ranking universe; product masks only filter the already
    computed membership or targets for trading/evaluation. Do not treat a masked
    broad-universe run as equivalent to reranking inside the masked subset.
-2. Inspect backend FactorExpr operators. If the research idea needs operators
+2. Use obligation discovery to state the exact data coverage, field/frequency,
+   visibility-time, latency, provenance, and permitted-use facts that the
+   decision requires. Availability inspection collects facts; it does not
+   discharge those obligations by itself.
+3. Inspect backend FactorExpr operators. If the research idea needs operators
    that are not covered, record the missing operator semantics/signature/tests
    and fix the platform before testing the factor.
-3. Prepare/sync the factor workspace and read the factor family source before
+4. Prepare/sync the factor workspace and read the factor family source before
    testing it.
-4. Run cheap diagnostics first: factor sequence sanity, IC/IR, IC decay, factor
+5. Synthesize a TrialPlan only for actionable obligations. Bind the Decision
+   Contract, compact availability evidence, factor/data/timing semantics,
+   product accounting, market-regime comparisons, trial ledger, costs,
+   capacity, resource limits, sample roles, freeze proof, and graph branch.
+6. Run cheap diagnostics first: factor sequence sanity, IC/IR, IC decay, factor
    type analysis, product-group coverage, and transaction-cost feasibility.
-5. Query the factor research result store before repeating runs. Import existing
+7. Query the factor research result store before repeating runs. Import existing
    report artifacts with `factor-library import-result` or write script results
    directly with `factor-library save-result`, use
    `factor-library metrics` for canonical metric names, and use
@@ -37,10 +47,10 @@ The harness adapts two research skill systems:
    Prefer structured metadata on every saved run: `sample_role`,
    `regime_label`, `slice_name`, `test_count`, `grid_size`, `oos_pass`,
    `multi_product_group_pass`, and `costed_pass`.
-6. Run group/backtest grids only after diagnostics pass.
-7. Audit order flow, snapshots, ledger results, volume-capacity constraints,
+8. Run group/backtest grids only after diagnostics pass.
+9. Audit order flow, snapshots, ledger results, volume-capacity constraints,
    margin mode, fee mode, and runtime summaries.
-8. If a CLI/backend feature is missing, a FactorExpr operator is missing, an
+10. If a CLI/backend feature is missing, a FactorExpr operator is missing, an
    operator semantic is wrong, or calculations are incorrect, stop research,
    record a gap, fix the codebase in the owning branch/worktree, validate
    thoroughly, merge only through the approved workflow, restart the service, and
@@ -77,5 +87,8 @@ ignored.
 - New IC/type/backtest runs are queryable through `factor-library history` and
   old artifacts are backfilled through `factor-library import-result`.
 - `factor-library rank` is a candidate-generation query only; it never replaces
-  sliced validation, cost/capacity checks, or OOS review.
-- Final claims are out-of-sample or explicitly marked exploratory.
+  sliced validation, cost/capacity checks, or untouched/prospective review.
+- Recency alone does not make a sample OOS. A recent interval or stream is
+  untouched only when sealed after the factor, selection boundary, and
+  TrialPlan freeze; otherwise report it as historical validation or exploratory
+  evidence.

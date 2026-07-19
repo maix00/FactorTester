@@ -18,6 +18,15 @@ factor-family version, parameter coverage, product universe, data snapshot,
 signal availability, outcome horizon, sample roles, costs, margin/accounting,
 RunSpec members, methodology, and graph branch.
 
+Before freezing the plan, require compact references for the user-confirmed
+product/source scope, the current Data Availability Profile, and every
+material data-availability obligation. Also bind relevant trading calendars,
+market-regime/comparison definitions, selection history and multiplicity
+ledger, execution timing, capacity, resource limits, and permitted use.
+Availability is one input, not sufficient authority to synthesize a plan.
+If a required availability obligation remains open, either design a trial that
+services it first or return a bounded gap; never infer missing data.
+
 Specify:
 
 - primary and secondary outcomes;
@@ -29,7 +38,10 @@ Specify:
 - resource boundary and expected information gain.
 
 Never select a threshold after looking at the outcome. A changed frozen body is
-a new TrialPlan version.
+a new TrialPlan version. Recency alone does not create out-of-sample status:
+the latest interval or prospective stream is untouched only when it was sealed
+after the factor, selection boundary, and TrialPlan were frozen. Historical
+regime evidence seen during selection remains regime validation, not holdout.
 
 ## Output
 

@@ -25,6 +25,13 @@ contradicting its Claim. A favorable post-hoc result remains exploratory and
 opens a confirmation obligation. A provenance failure may open an obligation
 without strengthening any Claim.
 
+For data availability, compare the EvidenceEnvelope's exact product, source,
+field/frequency, coverage, mode, probe time, and profile hash with the
+obligation's discharge criterion. Configuration or entitlement alone cannot
+discharge latency, point-in-time, coverage, or reproducibility obligations.
+Newly observed gaps or ambiguous delayed/live status may narrow one obligation
+while opening another.
+
 Use the protocol states `absent`, `open`, `serviced`, `discharged`, `bounded`,
 `rejected`, or `reopened`. When evidence satisfies an obligation's declared
 criterion but cannot change the Claim because its proposition, preregistered

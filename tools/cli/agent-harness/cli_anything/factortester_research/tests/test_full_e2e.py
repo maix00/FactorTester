@@ -46,6 +46,10 @@ class TestCLISubprocess:
             "MmRet",
             "--factor",
             "SgCCS=SgCCS|P:CA|N:10d",
+            "--product",
+            "A.DCE",
+            "--source",
+            "Local",
             "--configuration-file",
             "run-spec.json",
             "--json",
@@ -53,6 +57,10 @@ class TestCLISubprocess:
         data = json.loads(result.stdout)
         assert data["session"]["factor_families"] == ["SgCCS", "MmRet"]
         assert data["session"]["factors"] == ["SgCCS=SgCCS|P:CA|N:10d"]
+        assert data["session"]["products"] == ["A.DCE"]
+        assert data["session"]["data_sources"] == ["Local"]
+        assert data["session"]["events"][-1]["event"] == "product_scope_confirmed"
+        assert data["session"]["plan"][0]["phase"] == "inspect_data_availability"
         assert any(item["phase"] == "inspect_factor_expr_dsl" for item in data["session"]["plan"])
         assert any(item["phase"] == "submit_run" for item in data["session"]["plan"])
         assert any(item["phase"] == "prepare_factor_workspace" for item in data["session"]["plan"])
@@ -60,6 +68,34 @@ class TestCLISubprocess:
         assert any(item["phase"] == "platform_gap_loop" for item in data["session"]["plan"])
         assert data["session"]["configuration_file"] == "run-spec.json"
         assert session.exists()
+
+    def test_plan_rejects_unconfirmed_product_or_source_scope(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        base = [
+            "--session",
+            str(tmp_path / "session.json"),
+            "plan",
+            "--factor-family",
+            "SgCCS",
+            "--configuration-file",
+            "run-spec.json",
+            "--json",
+        ]
+        missing_product = self._run(
+            [*base, "--source", "Local"],
+            check=False,
+        )
+        missing_source = self._run(
+            [*base, "--product", "A.DCE"],
+            check=False,
+        )
+
+        assert missing_product.returncode != 0
+        assert "Missing option '--product'" in missing_product.stderr
+        assert missing_source.returncode != 0
+        assert "Missing option '--source'" in missing_source.stderr
 
     def test_graph_observed_json_projects_the_saved_plan(self, tmp_path: Path) -> None:
         session = tmp_path / "session.json"
@@ -69,6 +105,10 @@ class TestCLISubprocess:
             "plan",
             "--factor-family",
             "SgCCS",
+            "--product",
+            "A.DCE",
+            "--source",
+            "Local",
             "--configuration-file",
             "run-spec.json",
             "--json",

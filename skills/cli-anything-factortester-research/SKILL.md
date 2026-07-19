@@ -14,10 +14,17 @@ cli-anything-factortester-research \
 
 ## Run the ordinary research loop
 
+Before planning, confirm the products and requested sources with the user in
+the current Planning Agent conversation. Do not delegate this choice or infer
+extra products from a factor family. Pass the exact scope to `plan`; it places
+a compact, real-backend availability probe before TrialPlan design:
+
 ```bash
 cli-anything-factortester-research plan \
   --factor-family SgCCS \
   --factor 'SgCCS=SgCCS|P:CA|N:10d' \
+  --product A.DCE \
+  --source Local \
   --configuration-file research-configuration.json \
   --json
 cli-anything-factortester-research workspace prepare --build --sync --json
@@ -28,6 +35,15 @@ cli-anything-factortester-research run-step -- \
   --analysis factor_type_analysis --analysis backtest
 cli-anything-factortester-research run-step -- job list
 ```
+
+Keep only the availability profile hash/reference in Agent context. Do not
+load a provider catalog, broaden scope, or fall back to another source.
+Distinguish cached history, delayed streams, paper streams, and live streams;
+configuration or entitlement does not prove usable coverage, latency, or
+point-in-time integrity. Keep exact routine checks deterministic. When a
+remaining data question could change the bounded decision, use obligation
+discovery to define it, availability inspection to collect facts, and evidence
+adjudication to resolve or bound it.
 
 Treat the workspace as editable configuration, the `ResearchRun` as immutable
 RunSpec ownership, and `Job` as lifecycle/result/artifact ownership. Never use
@@ -104,6 +120,14 @@ transitions refer to its hash. Bind a submitted ResearchRun with the plan,
 version, graph instance/branch, trial role, and declared comparison. The RunSpec
 hash must be a planned member. Child Jobs inherit the binding through `run_id`.
 Create a new TrialPlan version instead of mutating the frozen body.
+
+Availability is only one TrialPlan input. Also bind the Decision Contract,
+actionable obligations, factor/data/timing semantics, product accounting,
+market-regime comparisons, selection and multiplicity history, costs,
+capacity, resource limits, sample roles, freeze proof, methodology, and graph
+branch. Return a Capability Gap when a material input is absent. Treat recent
+or prospective data as untouched holdout only when it was sealed after the
+factor, selection boundary, and TrialPlan were frozen.
 
 ```bash
 factortester run preview --analysis ic

@@ -69,7 +69,12 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "data_contract__factor_semantics",
             "data_contract",
             "factor_semantics",
-            guard={"point_in_time_contract_valid": True},
+            guard={
+                "point_in_time_contract_valid": True,
+                "data_availability_profile_bound": True,
+                "data_availability_constraints_satisfied": True,
+                "material_data_obligations_adjudicated_or_not_triggered": True,
+            },
         ),
         edge(
             "factor_semantics__validation_design",
