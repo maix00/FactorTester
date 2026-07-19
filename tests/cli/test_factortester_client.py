@@ -140,6 +140,23 @@ def fake_server() -> Iterator[str]:
     def product_groups():
         return jsonify(success=True, product_groups=[{"id": "pg-1", "name": "中国期货日盘"}])
 
+    @app.post("/api/data-availability")
+    def data_availability():
+        payload = request.get_json()
+        assert payload == {
+            "products": ["A.DCE"],
+            "sources": ["Local"],
+            "probe": False,
+            "expanded": False,
+        }
+        return jsonify(
+            success=True,
+            schema_version=1,
+            profile_hash="sha256:availability",
+            product_scope=["A.DCE"],
+            entries=[],
+        )
+
     @app.get("/api/factor-library-overview")
     def factor_library():
         return jsonify(success=True, factors=[{"alias": "SgCCS|N:2m"}])
@@ -176,6 +193,10 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     assert client.list_jobs(workspace_id="workspace-1")[0]["job_id"] == "job-1"
     assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
+    assert client.data_availability(
+        products=["A.DCE"],
+        sources=["Local"],
+    )["profile_hash"] == "sha256:availability"
 
 
 def test_client_login_persists_across_processes_and_logout_clears_cookie(

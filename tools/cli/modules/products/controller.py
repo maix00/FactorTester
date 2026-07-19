@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import click
@@ -74,6 +75,73 @@ def product_info(name: str, fields: tuple[str, ...], notes: bool) -> None:
         ("字段", "key", "值", "类型", "注释"),
         rows,
         max_widths=(18, 28, 36, 12, None),
+    ):
+        click.echo(line)
+
+
+@products.command("availability")
+@click.option(
+    "--product",
+    "product_names",
+    multiple=True,
+    required=True,
+    help="用户已确认研究范围内的产品，可重复传入。",
+)
+@click.option(
+    "--source",
+    "source_names",
+    multiple=True,
+    default=("Local",),
+    show_default=True,
+    help="要检查的数据源，可重复传入。",
+)
+@click.option(
+    "--probe",
+    is_flag=True,
+    help="允许执行显式网络/实时探针；默认只做低成本静态检查。",
+)
+@click.option(
+    "--expanded",
+    is_flag=True,
+    help="返回逐产品详细信息；默认输出紧凑结果。",
+)
+@click.option("--json", "json_output", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def product_availability(
+    product_names: tuple[str, ...],
+    source_names: tuple[str, ...],
+    probe: bool,
+    expanded: bool,
+    json_output: bool,
+) -> None:
+    """检查明确产品范围内的历史、延迟、仿真或实时数据可用性。"""
+    profile = client_from_config().data_availability(
+        products=product_names,
+        sources=source_names,
+        probe=probe,
+        expanded=expanded,
+    )
+    if json_output:
+        click.echo(json.dumps(profile, ensure_ascii=False, sort_keys=True))
+        return
+    click.echo(f"数据可用性: {profile.get('profile_hash', '')}")
+    rows = []
+    for entry in profile.get("entries") or []:
+        coverage = entry.get("coverage") or {}
+        rows.append((
+            entry.get("product", ""),
+            entry.get("source", ""),
+            entry.get("mode", ""),
+            entry.get("frequency", ""),
+            entry.get("status", ""),
+            coverage.get("start", ""),
+            coverage.get("end", ""),
+            entry.get("latency_class", ""),
+        ))
+    for line in render_table(
+        ("产品", "数据源", "模式", "频率", "状态", "起始", "结束", "延迟"),
+        rows,
+        max_widths=(20, 28, 20, 10, 14, 22, 22, 18),
     ):
         click.echo(line)
 

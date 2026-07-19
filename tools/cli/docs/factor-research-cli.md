@@ -42,3 +42,21 @@ Saved templates use the same open ResearchConfiguration schema as a workspace. L
 CLI jobs use the `durable` lifecycle and do not depend on `page_uuid` or a browser view lease. Web observer-bound jobs may be cancelled after their view lease expires; refresh can reclaim the same view UUID during its grace period.
 
 Every comparison must keep the ranking universe/product mask, signal visibility, forward-return window, next-open execution, fees, capacity, and sample slices aligned. Failed jobs retain their traceback, cancelled jobs retain a reason, and terminal records remain queryable until the configured TTL.
+
+## Confirm data availability before sample design
+
+The Planning Agent first confirms the product range with the user. It then
+requests only that scope; availability must never widen it through an implicit
+provider fallback.
+
+```bash
+factortester products availability \
+  --product A.DCE \
+  --source Local \
+  --json
+```
+
+The default command performs a low-cost static inspection. `--probe` explicitly
+authorizes a registered connector to perform a network or stream probe. A
+provider being installed, reachable, or entitled does not by itself prove
+real-time latency or point-in-time coverage.

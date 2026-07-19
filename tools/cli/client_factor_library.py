@@ -25,6 +25,12 @@ class FactorLibraryClientMixin(ClientMixinBase):
                     "kind": "module",
                     "has_children": False,
                 },
+                {
+                    "key": "products/availability",
+                    "label": "数据可用性",
+                    "kind": "module",
+                    "has_children": False,
+                },
             ]
         if parent == "custom_factors":
             return [
@@ -191,6 +197,25 @@ class FactorLibraryClientMixin(ClientMixinBase):
         return self._expect_success(
             self.session.get("/api/product_fields", query={"name": name})
         )
+
+    def data_availability(
+        self,
+        *,
+        products: list[str] | tuple[str, ...],
+        sources: list[str] | tuple[str, ...],
+        probe: bool = False,
+        expanded: bool = False,
+    ) -> dict[str, Any]:
+        """Inspect only the explicitly requested market-data scope."""
+        return self._expect_success(self.session.post(
+            "/api/data-availability",
+            {
+                "products": list(products),
+                "sources": list(sources),
+                "probe": bool(probe),
+                "expanded": bool(expanded),
+            },
+        ))
 
     def factor_library_overview(
         self,
