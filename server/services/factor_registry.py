@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from flask import session
 
 from tools.factors.FactorFamily import FactorFamily
+from tools.data.account_manage import can_view_user_scope
 from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source, public_factor_path
 
 if TYPE_CHECKING:
@@ -160,23 +161,60 @@ def _public_factor_source_exists(factor_id: str) -> bool:
     return os.path.isfile(public_factor_path(factor_id)) or bool(load_public_factor_source(factor_id))
 
 
+def _is_registered_shared_factor(
+    owner_username: str,
+    factor_id: str,
+) -> bool:
+    """Return whether an owner explicitly registered a factor for research."""
+    try:
+        with sqlite3.connect(Settings.CACHE_DB_PATH, timeout=5.0) as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM account_factor_param_configs
+                WHERE username=? AND ff_alias=?
+                LIMIT 1
+                """,
+                (owner_username, factor_id),
+            ).fetchone()
+    except (OSError, sqlite3.Error):
+        return False
+    return row is not None
+
+
 def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[str, str, str, str]:
     """Resolve an optional owner-qualified factor family reference.
 
-    Long-lived factor sources are intentionally limited to public factor
-    families and the current user's own custom factor families. Page UUIDs may
-    cache live objects, but they are not an authority for resolving new factor
-    identities.
+    Long-lived custom sources remain owner-qualified. Another visible account
+    may execute one only after the owner has explicitly registered that factor
+    family in the factor library. Page UUIDs remain a cache, never an authority
+    for source identity or sharing.
     """
     owner, factor_id = _split_factor_owner_ref(module_name)
     active_user = str(username or session.get('username') or "").strip() or None
     if owner == "$COMMON":
         return "public", "$COMMON", factor_id, f"$COMMON:{factor_id}"
     if owner:
-        if not active_user or owner != active_user:
+        owner_visible = bool(
+            active_user
+            and (
+                owner == active_user
+                or can_view_user_scope(active_user, owner)
+            )
+        )
+        visible_shared_factor = bool(
+            owner != active_user
+            and owner_visible
+            and _is_registered_shared_factor(owner, factor_id)
+        )
+        if owner != active_user and not visible_shared_factor:
+            sharing_reason = (
+                "not present in the owner's registered factor library"
+                if owner_visible
+                else f"owner {owner!r} is not accessible"
+            )
             raise PermissionError(
-                f"Cannot load factor family {module_name!r}: owner {owner!r} is not accessible "
-                f"for current user {active_user!r}"
+                f"Cannot load factor family {module_name!r}: "
+                f"{sharing_reason} for current user {active_user!r}"
             )
         return "custom", owner, factor_id, f"{owner}:{factor_id}"
     if _public_factor_source_exists(factor_id):

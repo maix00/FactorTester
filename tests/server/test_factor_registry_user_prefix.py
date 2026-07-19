@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from server.services import factor_registry
@@ -73,6 +75,91 @@ def test_factor_family_rejects_other_users_custom_factor(monkeypatch) -> None:
 
     with pytest.raises(PermissionError):
         get_factor_family_instance("18800000000:UserAlpha", username="18717974771")
+
+
+def test_visible_but_unregistered_other_user_factor_remains_private(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "factor-sharing.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE account_factor_param_configs (
+                username TEXT NOT NULL,
+                scope_key TEXT NOT NULL,
+                ff_alias TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (username, scope_key, ff_alias)
+            )
+            """
+        )
+    monkeypatch.setattr(factor_registry.Settings, "CACHE_DB_PATH", db_path)
+    monkeypatch.setattr(
+        factor_registry,
+        "can_view_user_scope",
+        lambda current, owner: (current, owner) == ("MaxA", "18717974771"),
+        raising=False,
+    )
+    monkeypatch.setattr(factor_registry, "load_public_factor_source", lambda factor_id: None)
+    monkeypatch.setattr(factor_registry.os.path, "isfile", lambda path: False)
+
+    with pytest.raises(PermissionError, match="registered factor library"):
+        get_factor_family_instance("18717974771:UserAlpha", username="MaxA")
+
+
+def test_visible_registered_other_user_factor_is_executable_with_owner_identity(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "factor-sharing.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE account_factor_param_configs (
+                username TEXT NOT NULL,
+                scope_key TEXT NOT NULL,
+                ff_alias TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (username, scope_key, ff_alias)
+            );
+            INSERT INTO account_factor_param_configs VALUES (
+                '18717974771',
+                'default',
+                'UserAlpha',
+                '{}',
+                1.0
+            );
+            """
+        )
+    monkeypatch.setattr(factor_registry.Settings, "CACHE_DB_PATH", db_path)
+    monkeypatch.setattr(
+        factor_registry,
+        "can_view_user_scope",
+        lambda current, owner: (current, owner) == ("MaxA", "18717974771"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        factor_registry,
+        "load_factor_source",
+        lambda username, factor_id: (
+            _FACTOR_SOURCE
+            if (username, factor_id) == ("18717974771", "UserAlpha")
+            else None
+        ),
+    )
+    monkeypatch.setattr(factor_registry, "load_public_factor_source", lambda factor_id: None)
+    monkeypatch.setattr(factor_registry.os.path, "isfile", lambda path: False)
+
+    factor = factor_from_alias(
+        "18717974771:UserAlpha",
+        username="MaxA",
+    )
+
+    assert factor.alias.startswith("UserAlpha")
+    assert factor.name.startswith("18717974771:UserAlpha")
 
 
 def test_page_cache_is_not_factor_family_existence_authority(monkeypatch) -> None:
