@@ -29,6 +29,37 @@ outcomes, sample roles, planned comparisons, stopping, multiplicity, and
 decision criteria.
 _Avoid_: Work Package budget, graph edge threshold, mutable run note
 
+**Data Availability Profile**:
+A compact point-in-time description of the product scope, frequencies, actual
+coverage, update time, permissions, and registered historical, delayed,
+paper-stream, or live-stream modes available to research planning. It does not
+assign sample roles or prove that a stream is real-time.
+_Avoid_: Full provider catalog, requested date range, `live=true`
+
+**Sample Scope Identity**:
+A server-derived identity for one RunSpec's time and product scope, independent
+of factor expression, sample role, or result. It supports exposure audit but
+does not by itself prove that data was unseen outside the server.
+_Avoid_: Client-declared sample hash, market-regime label, conclusion
+
+**Prospective Holdout**:
+A Sample Scope whose outcomes remain unavailable until the current hypothesis,
+factor version, Trial Plan, and decision rule are frozen. The most recent
+available sealed range is normally preferred for forward relevance, but
+recency alone does not make a sample a holdout.
+_Avoid_: Latest date, fixed validation stage, any later historical range
+
+**Historical Regime Evidence**:
+Evidence from already known historical market backgrounds used for temporal
+stability, regime robustness, and transfer obligations. It is not relabelled
+as untouched out-of-sample evidence after inspection.
+_Avoid_: Universal OOS, final confirmation
+
+**Prequential Evidence**:
+Prospective paper or live observations evaluated test-then-train against a
+factor and decision version frozen before each observation became available.
+_Avoid_: Any live feed, post-hoc replay, broker permission
+
 **Job Evidence Receipt**:
 A source-free read projection of one JobAttempt's execution status, hashes,
 exit code, terminal-assurance summary, and
@@ -176,6 +207,17 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   guard instead of being inflated into a Verification Obligation.
 - A **Hypothesis Branch** binds one current immutable **Trial Plan** before
   selection-relevant outcome inspection.
+- Planning queries one **Data Availability Profile** before proposing sample
+  scopes. The Planning Agent first confirms the user-authorized product range;
+  data-source availability never broadens it implicitly.
+- The server derives **Sample Scope Identity** from the exact RunSpec and
+  records creation of a ResearchRun as exposure. Trial roles remain
+  obligation-driven rather than a hard-coded selection/validation/confirmation
+  sequence.
+- **Historical Regime Evidence** may discharge robustness or transfer
+  obligations. A final **Prospective Holdout** remains sealed until its
+  decision-blocking obligation is opened; **Prequential Evidence** requires
+  version freeze and point-in-time event records in addition to a live source.
 - A **Trial Plan** is generated only for selected actionable obligations; not
   every obligation requires a backend run.
 - The **Factor Research Graph** requires and evaluates a **Trial Plan**

@@ -23,6 +23,9 @@ from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.services.session_runtime import require_user
+from server.services.research_graph.trial_plan.sample_identity import (
+    derive_sample_identity,
+)
 
 
 SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analysis"}
@@ -506,6 +509,13 @@ def preview_research_run():
         return _run_request_error_response(exc)
     run_spec = prepared["run_spec"]
     configuration = prepared["configuration"]
+    try:
+        sample_identity = derive_sample_identity(run_spec)
+    except ValueError as exc:
+        sample_identity = {
+            "authority": "unavailable",
+            "error": str(exc),
+        }
     return jsonify({
         "success": True,
         "run_spec_hash": research_runs.hash_run_spec(run_spec),
@@ -516,6 +526,7 @@ def preview_research_run():
         "analyses": prepared["analyses"],
         "retention_mode": prepared["retention_mode"],
         "step_mode": prepared["step_mode"],
+        "sample_identity": sample_identity,
     })
 
 

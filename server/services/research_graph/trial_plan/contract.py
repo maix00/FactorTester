@@ -21,11 +21,13 @@ from .fields import (
 )
 
 
-TRIAL_PLAN_SCHEMA_VERSION = 1
+TRIAL_PLAN_SCHEMA_VERSION = 2
+SUPPORTED_TRIAL_PLAN_SCHEMA_VERSIONS = frozenset({1, 2})
 MAX_TRIAL_PLAN_BYTES = 4096
 _SAMPLE_ROLES = frozenset({
     "diagnostic",
     "selection",
+    "validation",
     "confirmation",
     "holdout",
 })
@@ -52,7 +54,7 @@ def canonical_trial_plan(value: Any) -> dict[str, Any]:
         plan.get("schema_version"),
         "trial_plan.schema_version",
     )
-    if schema_version != TRIAL_PLAN_SCHEMA_VERSION:
+    if schema_version not in SUPPORTED_TRIAL_PLAN_SCHEMA_VERSIONS:
         raise ValueError(
             f"unsupported TrialPlan schema_version: {schema_version}"
         )
@@ -80,10 +82,10 @@ def canonical_trial_plan(value: Any) -> dict[str, Any]:
         ),
     }
     outcomes, outcome_ids = _outcomes(plan.get("outcomes"))
-    sample_roles, planned_hashes = _sample_roles(plan.get("sample_roles"))
+    sample_roles, planned_samples = _sample_roles(plan.get("sample_roles"))
     comparisons = _comparisons(
         plan.get("comparisons"),
-        planned_hashes=planned_hashes,
+        planned_samples=planned_samples,
     )
     normalized.update({
         "outcomes": outcomes,
@@ -131,12 +133,14 @@ def _outcomes(value: Any) -> tuple[dict[str, list[str]], set[str]]:
     }, set(primary + secondary)
 
 
-def _sample_roles(value: Any) -> tuple[list[dict[str, Any]], set[str]]:
+def _sample_roles(
+    value: Any,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
     items = array_field(value, "trial_plan.sample_roles", allow_empty=False)
     normalized: list[dict[str, Any]] = []
     sample_refs: set[str] = set()
     sample_hashes: set[str] = set()
-    planned_hashes: set[str] = set()
+    planned_samples: dict[str, str] = {}
     for index, raw in enumerate(items):
         path = f"trial_plan.sample_roles[{index}]"
         item = object_field(
@@ -172,20 +176,25 @@ def _sample_roles(value: Any) -> tuple[list[dict[str, Any]], set[str]]:
             item.get("run_spec_hashes"),
             f"{path}.run_spec_hashes",
         )
-        planned_hashes.update(hashes)
+        for run_hash in hashes:
+            if run_hash in planned_samples:
+                raise ValueError(
+                    "one RunSpec cannot cross TrialPlan sample roles"
+                )
+            planned_samples[run_hash] = role
         normalized.append({
             "sample_ref": sample_ref,
             "sample_hash": sample_hash,
             "role": role,
             "run_spec_hashes": hashes,
         })
-    return normalized, planned_hashes
+    return normalized, planned_samples
 
 
 def _comparisons(
     value: Any,
     *,
-    planned_hashes: set[str],
+    planned_samples: dict[str, str],
 ) -> list[dict[str, Any]]:
     items = array_field(value, "trial_plan.comparisons", allow_empty=False)
     normalized: list[dict[str, Any]] = []
@@ -207,7 +216,7 @@ def _comparisons(
         members = _comparison_members(
             item.get("members"),
             path=f"{path}.members",
-            planned_hashes=planned_hashes,
+            planned_samples=planned_samples,
         )
         normalized.append({
             "comparison_id": comparison_id,
@@ -220,7 +229,7 @@ def _comparison_members(
     value: Any,
     *,
     path: str,
-    planned_hashes: set[str],
+    planned_samples: dict[str, str],
 ) -> list[dict[str, str]]:
     items = array_field(value, path, allow_empty=False)
     normalized: list[dict[str, str]] = []
@@ -236,7 +245,7 @@ def _comparison_members(
             item.get("run_spec_hash"),
             f"{item_path}.run_spec_hash",
         )
-        if run_hash not in planned_hashes:
+        if run_hash not in planned_samples:
             raise ValueError(
                 f"{item_path}.run_spec_hash has no declared sample role"
             )
@@ -244,6 +253,10 @@ def _comparison_members(
             item.get("trial_role"),
             f"{item_path}.trial_role",
         )
+        if trial_role != planned_samples[run_hash]:
+            raise ValueError(
+                f"{item_path}.trial_role does not match declared sample role"
+            )
         identity = (run_hash, trial_role)
         if identity in identities:
             raise ValueError("comparison members must be unique")

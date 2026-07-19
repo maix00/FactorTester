@@ -18,6 +18,9 @@ from server.services.research_graph.trial_plan.binding import (
     normalize_run_binding,
     validate_branch_binding,
 )
+from server.services.research_graph.trial_plan.sample_identity import (
+    derive_sample_identity,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -63,6 +66,16 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
                     trial_plan_version INTEGER NOT NULL DEFAULT 0,
                     trial_role TEXT NOT NULL DEFAULT '',
                     comparison_id TEXT NOT NULL DEFAULT '',
+                    graph_instance_id TEXT NOT NULL DEFAULT '',
+                    graph_branch_id TEXT NOT NULL DEFAULT '',
+                    sample_ref TEXT NOT NULL DEFAULT '',
+                    sample_hash TEXT NOT NULL DEFAULT '',
+                    sample_identity_hash TEXT NOT NULL DEFAULT '',
+                    sample_start TEXT NOT NULL DEFAULT '',
+                    sample_end TEXT NOT NULL DEFAULT '',
+                    sample_universe_hash TEXT NOT NULL DEFAULT '',
+                    sample_design_context_hash TEXT NOT NULL DEFAULT '',
+                    sample_identity_assurance TEXT NOT NULL DEFAULT '',
                     created_at REAL NOT NULL
                 );
                 INSERT INTO research_runs (
@@ -94,6 +107,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             trial_plan_version INTEGER NOT NULL DEFAULT 0,
             trial_role TEXT NOT NULL DEFAULT '',
             comparison_id TEXT NOT NULL DEFAULT '',
+            graph_instance_id TEXT NOT NULL DEFAULT '',
+            graph_branch_id TEXT NOT NULL DEFAULT '',
+            sample_ref TEXT NOT NULL DEFAULT '',
+            sample_hash TEXT NOT NULL DEFAULT '',
             created_at REAL NOT NULL
         )
         """
@@ -108,6 +125,16 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         ("trial_plan_version", "INTEGER NOT NULL DEFAULT 0"),
         ("trial_role", "TEXT NOT NULL DEFAULT ''"),
         ("comparison_id", "TEXT NOT NULL DEFAULT ''"),
+        ("graph_instance_id", "TEXT NOT NULL DEFAULT ''"),
+        ("graph_branch_id", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_ref", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_identity_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_start", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_end", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_universe_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_design_context_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_identity_assurance", "TEXT NOT NULL DEFAULT ''"),
     )
     for column, declaration in additions:
         if column not in columns:
@@ -117,6 +144,14 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_workspace "
         "ON research_runs(owner, workspace_id, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_graph_branch "
+        "ON research_runs(owner, graph_branch_id, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_sample_scope "
+        "ON research_runs(owner, sample_universe_hash, sample_start, sample_end)"
     )
 
 
@@ -148,11 +183,17 @@ def create_run(
     run_id = uuid.uuid4().hex
     raw = orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
     run_spec_hash = hash_run_spec(run_spec)
+    sample_identity = _derive_sample_identity_or_none(run_spec)
     binding = _normalize_trial_binding(
         trial_binding,
         run_spec_hash=run_spec_hash,
+        sample_identity=sample_identity,
     )
     persisted_binding = dict(binding or {})
+    persisted_sample = _persisted_sample_identity(
+        binding=binding,
+        sample_identity=sample_identity,
+    )
     created_at = time.time()
     with _connect() as conn:
         if binding is not None:
@@ -163,6 +204,17 @@ def create_run(
                 instance_id=str(binding["instance_id"]),
                 branch_id=str(binding["branch_id"]),
                 trial_plan_hash=binding["trial_plan_hash"],
+                trial_plan_version=int(binding["trial_plan_version"]),
+                trial_role=str(binding["trial_role"]),
+                sample_identity_hash=str(
+                    binding["sample_identity_hash"]
+                ),
+                sample_start=str(binding["sample_start"]),
+                sample_end=str(binding["sample_end"]),
+                sample_universe_hash=str(
+                    binding["sample_universe_hash"]
+                ),
+                run_spec_hash=run_spec_hash,
             )
         conn.execute(
             """
@@ -170,9 +222,15 @@ def create_run(
                 run_id, owner, workspace_id, configuration_id,
                 configuration_revision, kind, run_spec_version,
                 run_spec_hash, run_spec_json, trial_plan_id, trial_plan_hash,
-                trial_plan_version, trial_role, comparison_id, created_at
+                trial_plan_version, trial_role, comparison_id,
+                graph_instance_id, graph_branch_id, sample_ref, sample_hash,
+                sample_identity_hash, sample_start, sample_end,
+                sample_universe_hash, sample_design_context_hash,
+                sample_identity_assurance,
+                created_at
             ) VALUES (
-                ?, ?, ?, ?, ?, 'factor_research', ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, 'factor_research', ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             (
@@ -184,6 +242,16 @@ def create_run(
                 int((binding or {}).get("trial_plan_version") or 0),
                 str((binding or {}).get("trial_role") or ""),
                 str((binding or {}).get("comparison_id") or ""),
+                str((binding or {}).get("instance_id") or ""),
+                str((binding or {}).get("branch_id") or ""),
+                str((binding or {}).get("sample_ref") or ""),
+                str((binding or {}).get("sample_hash") or ""),
+                persisted_sample["sample_identity_hash"],
+                persisted_sample["sample_start"],
+                persisted_sample["sample_end"],
+                persisted_sample["sample_universe_hash"],
+                persisted_sample["sample_design_context_hash"],
+                persisted_sample["sample_identity_assurance"],
                 created_at,
             ),
         )
@@ -210,6 +278,15 @@ def create_run(
         "comparison_id": str(
             persisted_binding.get("comparison_id") or ""
         ),
+        "graph_instance_id": str(
+            persisted_binding.get("instance_id") or ""
+        ),
+        "graph_branch_id": str(
+            persisted_binding.get("branch_id") or ""
+        ),
+        "sample_ref": str(persisted_binding.get("sample_ref") or ""),
+        "sample_hash": str(persisted_binding.get("sample_hash") or ""),
+        **persisted_sample,
         "created_at": created_at,
     }
 
@@ -243,6 +320,20 @@ def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:
         "trial_plan_version": int(row["trial_plan_version"]),
         "trial_role": str(row["trial_role"]),
         "comparison_id": str(row["comparison_id"]),
+        "graph_instance_id": str(row["graph_instance_id"]),
+        "graph_branch_id": str(row["graph_branch_id"]),
+        "sample_ref": str(row["sample_ref"]),
+        "sample_hash": str(row["sample_hash"]),
+        "sample_identity_hash": str(row["sample_identity_hash"]),
+        "sample_start": str(row["sample_start"]),
+        "sample_end": str(row["sample_end"]),
+        "sample_universe_hash": str(row["sample_universe_hash"]),
+        "sample_design_context_hash": str(
+            row["sample_design_context_hash"]
+        ),
+        "sample_identity_assurance": str(
+            row["sample_identity_assurance"]
+        ),
         "created_at": float(row["created_at"]),
     }
 
@@ -259,7 +350,9 @@ def load_job_trial_binding(
                 """
                 SELECT runs.trial_plan_id, runs.trial_plan_hash,
                        runs.trial_plan_version, runs.trial_role,
-                       runs.comparison_id
+                       runs.comparison_id, runs.sample_ref, runs.sample_hash
+                       , runs.sample_identity_hash,
+                       runs.sample_identity_assurance
                 FROM research_jobs AS jobs
                 JOIN research_runs AS runs ON runs.run_id=jobs.run_id
                 WHERE jobs.job_id=? AND jobs.owner=? AND runs.owner=?
@@ -280,6 +373,12 @@ def load_job_trial_binding(
         "trial_plan_version": int(row["trial_plan_version"]),
         "trial_role": str(row["trial_role"]),
         "comparison_id": str(row["comparison_id"]),
+        "sample_ref": str(row["sample_ref"]),
+        "sample_hash": str(row["sample_hash"]),
+        "sample_identity_hash": str(row["sample_identity_hash"]),
+        "sample_identity_assurance": str(
+            row["sample_identity_assurance"]
+        ),
     }
 
 
@@ -287,6 +386,7 @@ def _normalize_trial_binding(
     value: dict[str, Any] | None,
     *,
     run_spec_hash: str,
+    sample_identity: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -322,9 +422,45 @@ def _normalize_trial_binding(
         run_spec_hash=run_spec_hash,
         trial_role=str(value["trial_role"]),
         comparison_id=str(value["comparison_id"]),
+        sample_identity=sample_identity,
     )
     return {
         "instance_id": instance_id,
         "branch_id": branch_id,
         **binding,
+    }
+
+
+def _derive_sample_identity_or_none(
+    run_spec: dict[str, Any],
+) -> dict[str, Any] | None:
+    try:
+        return derive_sample_identity(run_spec)
+    except ValueError:
+        return None
+
+
+def _persisted_sample_identity(
+    *,
+    binding: dict[str, Any] | None,
+    sample_identity: dict[str, Any] | None,
+) -> dict[str, str]:
+    identity = sample_identity or {}
+    assurance = str(
+        (binding or {}).get("sample_identity_assurance")
+        or (
+            "server_derived_unbound"
+            if sample_identity is not None
+            else "unavailable"
+        )
+    )
+    return {
+        "sample_identity_hash": str(identity.get("sample_hash") or ""),
+        "sample_start": str(identity.get("sample_start") or ""),
+        "sample_end": str(identity.get("sample_end") or ""),
+        "sample_universe_hash": str(identity.get("universe_hash") or ""),
+        "sample_design_context_hash": str(
+            identity.get("design_context_hash") or ""
+        ),
+        "sample_identity_assurance": assurance,
     }

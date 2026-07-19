@@ -18,6 +18,9 @@ from server.services.research_graph.trial_plan import (
     trial_plan_hash,
     validate_trial_plan_transition,
 )
+from server.services.research_graph.trial_plan.sample_identity import (
+    derive_sample_identity,
+)
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
@@ -61,6 +64,35 @@ def test_trial_plan_hash_is_canonical_and_source_free() -> None:
         canonical_trial_plan(hidden_source)
 
 
+def test_sample_identity_is_scope_based_and_role_neutral() -> None:
+    base = {
+        "start_date": "2025-01-01",
+        "end_date": "2025-03-31",
+        "selected_paths": ["CNFutures/黑色", "CNFutures/能源"],
+        "factor_revision": 1,
+    }
+    same_scope = {
+        **base,
+        "selected_paths": list(reversed(base["selected_paths"])),
+        "factor_revision": 2,
+        "sample_role": "confirmation",
+    }
+    later = {**base, "end_date": "2025-04-30"}
+    other_market = {**base, "selected_paths": ["JPFutures/OSE/Nikkei225"]}
+
+    identity = derive_sample_identity(base)
+    assert identity["sample_hash"] == derive_sample_identity(
+        same_scope
+    )["sample_hash"]
+    assert identity["sample_hash"] != derive_sample_identity(
+        later
+    )["sample_hash"]
+    assert identity["universe_hash"] != derive_sample_identity(
+        other_market
+    )["universe_hash"]
+    assert identity["authority"] == "server_derived_scope_v1"
+
+
 def test_trial_plan_rejects_sample_stopping_and_runspec_mismatches() -> None:
     plan = trial_plan("a" * 64)
     cross_role = {
@@ -80,11 +112,41 @@ def test_trial_plan_rejects_sample_stopping_and_runspec_mismatches() -> None:
     distinct_slice = {
         **cross_role["sample_roles"][1],
         "sample_hash": "e" * 64,
+        "run_spec_hashes": ["b" * 64],
     }
     canonical_trial_plan({
         **plan,
         "sample_roles": [*plan["sample_roles"], distinct_slice],
     })
+    validation_plan = {
+        **plan,
+        "sample_roles": [{
+            **plan["sample_roles"][0],
+            "role": "validation",
+        }],
+        "comparisons": [{
+            "comparison_id": "main-comparison",
+            "members": [{
+                "run_spec_hash": "a" * 64,
+                "trial_role": "validation",
+            }],
+        }],
+    }
+    assert canonical_trial_plan(validation_plan)["sample_roles"][0][
+        "role"
+    ] == "validation"
+    mismatched_role = {
+        **plan,
+        "comparisons": [{
+            "comparison_id": "main-comparison",
+            "members": [{
+                "run_spec_hash": "a" * 64,
+                "trial_role": "confirmation",
+            }],
+        }],
+    }
+    with pytest.raises(ValueError, match="does not match declared"):
+        canonical_trial_plan(mismatched_role)
     unknown_outcome = {
         **plan,
         "stopping": {

@@ -17,6 +17,9 @@ from server.services.research_graph.trial_plan import (
     trial_plan_hash,
     trial_plan_trace_retention,
 )
+from server.services.research_graph.trial_plan.sample_identity import (
+    derive_sample_identity,
+)
 from tests.server.trial_plan_fixtures import (
     initialize_branch,
     job_record,
@@ -26,6 +29,62 @@ from tests.server.trial_plan_fixtures import (
     trial_plan,
 )
 from tools.data.sqlite.db import connect_sqlite
+
+
+def _staged_plan(
+    run_spec_value: dict,
+    *,
+    version: int,
+    role: str,
+    sample_hash: str | None = None,
+) -> dict:
+    run_hash = semantic_hash(run_spec_value)
+    plan = trial_plan(run_hash)
+    identity = derive_sample_identity(run_spec_value)
+    return {
+        **plan,
+        "schema_version": 2,
+        "trial_plan_id": f"plan-{version}",
+        "version": version,
+        "sample_roles": [{
+            "sample_ref": f"{role}-{version}",
+            "sample_hash": sample_hash or identity["sample_hash"],
+            "role": role,
+            "run_spec_hashes": [run_hash],
+        }],
+        "comparisons": [{
+            "comparison_id": f"comparison-{version}",
+            "members": [{
+                "run_spec_hash": run_hash,
+                "trial_role": role,
+            }],
+        }],
+    }
+
+
+def _bind(plan: dict) -> dict:
+    role = plan["sample_roles"][0]["role"]
+    return {
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+        "trial_plan": plan,
+        "trial_plan_hash": trial_plan_hash(plan),
+        "trial_plan_version": plan["version"],
+        "trial_role": role,
+        "comparison_id": plan["comparisons"][0]["comparison_id"],
+    }
+
+
+def _activate_plan(path, plan: dict) -> None:
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            UPDATE research_graph_branches
+            SET current_trial_plan_hash=?
+            WHERE branch_id='branch-1'
+            """,
+            (trial_plan_hash(plan),),
+        )
 
 
 def test_research_run_binds_plan_and_jobs_inherit_through_run(
@@ -59,8 +118,14 @@ def test_research_run_binds_plan_and_jobs_inherit_through_run(
         "trial_plan_id": "plan-1",
         "trial_plan_hash": plan_hash,
         "trial_plan_version": 1,
-        "trial_role": "main-only",
+        "trial_role": "selection",
         "comparison_id": "main-comparison",
+        "sample_ref": "selection-2020-2023",
+        "sample_hash": "d" * 64,
+        "sample_identity_hash": derive_sample_identity(
+            run_spec_value
+        )["sample_hash"],
+        "sample_identity_assurance": "declared_legacy",
     }
     assert {key: run[key] for key in expected} == expected
     assert research_runs.load_job_trial_binding(
@@ -157,6 +222,188 @@ def test_run_binding_rejects_stale_branch_and_unplanned_member(
             run_spec=run_spec_value,
             trial_binding=invalid,
         )
+
+
+def test_sample_use_is_auditable_without_hardcoded_stage_order(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "sample-stage.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    selection_spec = {
+        **run_spec(),
+        "sample": "selection",
+        "start_date": "2020-01-01",
+        "end_date": "2021-12-31",
+    }
+    selection = _staged_plan(
+        selection_spec,
+        version=1,
+        role="selection",
+    )
+    initialize_branch(path, trial_plan_hash(selection))
+
+    first = research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-1",
+        configuration_id="configuration-1",
+        configuration_revision=1,
+        run_spec=selection_spec,
+        trial_binding=_bind(selection),
+    )
+    assert first["graph_branch_id"] == "branch-1"
+    assert first["sample_ref"] == "selection-1"
+    assert first["sample_hash"] == derive_sample_identity(
+        selection_spec
+    )["sample_hash"]
+
+    confirmation_spec = {
+        **run_spec(),
+        "sample": "confirmation",
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+    }
+    confirmation = _staged_plan(
+        confirmation_spec,
+        version=2,
+        role="confirmation",
+    )
+    _activate_plan(path, confirmation)
+    second = research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-1",
+        configuration_id="configuration-2",
+        configuration_revision=1,
+        run_spec=confirmation_spec,
+        trial_binding=_bind(confirmation),
+    )
+    assert second["trial_role"] == "confirmation"
+
+    validation_spec = {
+        **run_spec(),
+        "sample": "validation",
+        "start_date": "2022-01-01",
+        "end_date": "2023-12-31",
+    }
+    validation = _staged_plan(
+        validation_spec,
+        version=3,
+        role="validation",
+    )
+    _activate_plan(path, validation)
+    third = research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-1",
+        configuration_id="configuration-3",
+        configuration_revision=1,
+        run_spec=validation_spec,
+        trial_binding=_bind(validation),
+    )
+    assert third["trial_role"] == "validation"
+
+
+def test_protected_sample_use_rejects_prior_exposure_and_role_relabeling(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "sample-stage-invalid.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    selection_spec = {
+        **run_spec(),
+        "sample": "selection",
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+    }
+    selection = _staged_plan(
+        selection_spec,
+        version=1,
+        role="selection",
+    )
+    initialize_branch(path, trial_plan_hash(selection))
+    research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-1",
+        configuration_id="configuration-1",
+        configuration_revision=1,
+        run_spec=selection_spec,
+        trial_binding=_bind(selection),
+    )
+
+    confirmation_spec = {
+        **run_spec(),
+        "sample": "confirmation",
+        "factor_revision": 2,
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+    }
+    skipped = _staged_plan(
+        confirmation_spec,
+        version=2,
+        role="confirmation",
+    )
+    _activate_plan(path, skipped)
+    with pytest.raises(ValueError, match="already exposed"):
+        research_runs.create_run(
+            owner="alice",
+            workspace_id="workspace-1",
+            configuration_id="configuration-2",
+            configuration_revision=1,
+            run_spec=confirmation_spec,
+            trial_binding=_bind(skipped),
+        )
+
+    validation_spec = {
+        **run_spec(),
+        "sample": "validation",
+        "factor_revision": 3,
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+    }
+    reused = _staged_plan(
+        validation_spec,
+        version=2,
+        role="validation",
+    )
+    _activate_plan(path, reused)
+    with pytest.raises(ValueError, match="already exposed"):
+        research_runs.create_run(
+            owner="alice",
+            workspace_id="workspace-1",
+            configuration_id="configuration-2",
+            configuration_revision=1,
+            run_spec=validation_spec,
+            trial_binding=_bind(reused),
+        )
+
+
+def test_first_bound_run_may_be_untouched_confirmation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "first-confirmation.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    run_spec_value = {
+        **run_spec(),
+        "sample": "confirmation",
+        "start_date": "2025-01-01",
+        "end_date": "2025-12-31",
+    }
+    plan = _staged_plan(
+        run_spec_value,
+        version=1,
+        role="confirmation",
+    )
+    initialize_branch(path, trial_plan_hash(plan))
+
+    created = research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-1",
+        configuration_id="configuration-1",
+        configuration_revision=1,
+        run_spec=run_spec_value,
+        trial_binding=_bind(plan),
+    )
+    assert created["trial_role"] == "confirmation"
 
 
 def test_bound_run_creation_has_one_read_one_write_and_no_trace_scan(

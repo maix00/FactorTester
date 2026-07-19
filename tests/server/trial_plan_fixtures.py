@@ -20,6 +20,9 @@ def run_spec() -> dict:
         "run_spec_version": 1,
         "workspace_id": "workspace-1",
         "analyses": ["ic"],
+        "start_date": "2020-01-01",
+        "end_date": "2023-12-31",
+        "selected_paths": ["CNFutures/黑色"],
     }
 
 
@@ -51,7 +54,7 @@ def trial_plan(run_spec_hash: str) -> dict:
             "comparison_id": "main-comparison",
             "members": [{
                 "run_spec_hash": run_spec_hash,
-                "trial_role": "main-only",
+                "trial_role": "selection",
             }],
         }],
         "stopping": {
@@ -176,7 +179,7 @@ def trial_binding(plan: dict) -> dict:
         "trial_plan": plan,
         "trial_plan_hash": trial_plan_hash(plan),
         "trial_plan_version": 1,
-        "trial_role": "main-only",
+        "trial_role": "selection",
         "comparison_id": "main-comparison",
     }
 
