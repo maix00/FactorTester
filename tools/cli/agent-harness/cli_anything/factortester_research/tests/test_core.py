@@ -144,6 +144,14 @@ def test_graph_validation_rejects_a_dangling_edge() -> None:
         validate_graph(graph)
 
 
+def test_graph_validation_rejects_an_unknown_server_action() -> None:
+    graph = build_draft_graph()
+    graph["edges"][0]["server_action"] = "client_defined_mutation"
+
+    with pytest.raises(ValueError, match="invalid server_action"):
+        validate_graph(graph)
+
+
 def test_capability_resolution_reports_available_bindings_and_gaps() -> None:
     graph = build_observed_graph(build_factor_research_plan(
         factor_families=["SgCCS"],
@@ -327,7 +335,7 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "adjudication_route_bound": True,
         "factor_revision_authorized": True,
         "next_trial_stage_required": False,
-        "current_trial_stage_allows_revision": True,
+        "new_hypothesis_lineage_allowed": True,
         "new_falsifiable_hypothesis_proposed": True,
         "protected_sample_reuse_forbidden": True,
         "remaining_revision_budget_positive": True,
@@ -364,6 +372,9 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "holdout_status_recorded": True,
         "factor_change_retained": True,
     }
+    assert edges["factor_improvement__hypothesis"]["server_action"] == (
+        "start_new_hypothesis_lineage"
+    )
     assert edges["hypothesis__capability_resolution"]["guard"][
         "obligation_discovery_checkpoint_fresh"
     ] is True
@@ -793,7 +804,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "6dd1deac654a90027872e5308937d0fcafbae8945f8479f288a307590cd57755"
+        "c3e876d261c1eca9b49385ab817bcb940a9ec2d4a4ae70ea72554770564750cf"
     )
 
 

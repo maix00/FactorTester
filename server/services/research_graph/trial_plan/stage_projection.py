@@ -131,7 +131,8 @@ def trial_stage_guard_facts(
             raise ValueError("stage advancement requires a v4 TrialPlan")
         return {
             "current_trial_stage_executable": False,
-            "current_trial_stage_allows_revision": False,
+            "current_trial_stage_allows_in_lineage_revision": False,
+            "new_hypothesis_lineage_allowed": False,
             "next_trial_stage_required": False,
             "trial_stage_advance_authorized": False,
         }
@@ -144,9 +145,10 @@ def trial_stage_guard_facts(
         raise ValueError("TrialPlan has no next TrialPlan stage")
     return {
         "current_trial_stage_executable": True,
-        "current_trial_stage_allows_revision": (
+        "current_trial_stage_allows_in_lineage_revision": (
             current_stage not in TERMINAL_STAGES
         ),
+        "new_hypothesis_lineage_allowed": True,
         "next_trial_stage_required": advancing,
         "trial_stage_advance_authorized": advancing and has_next,
     }

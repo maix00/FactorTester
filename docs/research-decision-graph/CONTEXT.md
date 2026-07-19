@@ -240,6 +240,9 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   sample stage, one comparison-arm trial role, and one comparison identity,
   which its JobAttempts inherit. Submission outside the plan-bound execution
   node fails closed.
+- A factor revision crosses the server-owned new-hypothesis edge before the
+  old current-plan binding is released. The old TrialPlan and exposure remain
+  immutable; a replacement plan begins a new identity at version 1.
 - Existing persistence objects are implementation candidates, not frozen
   semantics. Implementation may refactor them when an ownership and query-path
   audit proves fewer duplicate facts, reads, or writes.

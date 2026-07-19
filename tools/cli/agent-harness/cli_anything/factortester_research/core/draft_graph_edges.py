@@ -15,10 +15,11 @@ def edge(
     required_research_evidence: list[str] | None = None,
     required_transition_facts: list[str] | None = None,
     counterexamples: list[str] | None = None,
+    server_action: str | None = None,
 ) -> dict[str, Any]:
     research_evidence = required_research_evidence or []
     transition_facts = required_transition_facts or []
-    return {
+    value = {
         "edge_id": edge_id,
         "from_node": from_node,
         "to_node": to_node,
@@ -30,6 +31,9 @@ def edge(
         "counterexamples": counterexamples or [],
         "risk_level": risk_level,
     }
+    if server_action is not None:
+        value["server_action"] = server_action
+    return value
 
 def build_draft_edges() -> list[dict[str, Any]]:
     """Return the audited transition topology."""
@@ -154,7 +158,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
                 "adjudication_route_bound": True,
                 "factor_revision_authorized": True,
                 "next_trial_stage_required": False,
-                "current_trial_stage_allows_revision": True,
+                "new_hypothesis_lineage_allowed": True,
                 "new_falsifiable_hypothesis_proposed": True,
                 "protected_sample_reuse_forbidden": True,
                 "remaining_revision_budget_positive": True,
@@ -222,6 +226,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
             required_transition_facts=[
                 "new hypothesis version, trial-ledger delta, and holdout status",
             ],
+            server_action="start_new_hypothesis_lineage",
         ),
         edge(
             "capability_gap__capability_resolution",

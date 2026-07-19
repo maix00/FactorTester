@@ -137,6 +137,9 @@ ResearchRun boundary tests verify that stage comes from the planned sample,
 not the comparison arm; only the current stage at the plan-bound execution
 node can run; protected-sample reuse cannot be hidden behind a shared
 `candidate` role; and the hot path remains one branch read plus one run write.
+Factor-revision lineage tests preserve the old plan and exposure, release only
+on the server-owned new-hypothesis edge, and bind the replacement as version 1
+of a new plan identity.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.

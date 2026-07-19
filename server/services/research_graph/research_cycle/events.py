@@ -28,6 +28,7 @@ _EVENT_TYPES = {
     "closure_decided",
     "closure_proposed",
     "trial_plan_bound",
+    "trial_plan_released",
 }
 
 
@@ -45,6 +46,8 @@ def apply_research_cycle_event(
     value = deepcopy(checkpoint)
     if event_type == "trial_plan_bound":
         return _bind_trial_plan(value, event)
+    if event_type == "trial_plan_released":
+        return _release_trial_plan(value, event)
     if event_type == "adjudication_proposed":
         return _propose_adjudication(value, event)
     if event_type == "adjudication_decided":
@@ -67,6 +70,24 @@ def _bind_trial_plan(
         event.get("to_hash"),
         field="trial_plan_bound.to_hash",
     )
+    return checkpoint
+
+
+def _release_trial_plan(
+    checkpoint: dict[str, Any],
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    if event.get("reason") != "new_hypothesis_lineage":
+        raise ValueError("TrialPlan release reason is invalid")
+    if event.get("from_hash") != checkpoint["trial_plan_hash"]:
+        raise ValueError("TrialPlan release does not match checkpoint")
+    if not checkpoint["trial_plan_hash"]:
+        raise ValueError("TrialPlan release requires a current plan")
+    if checkpoint["pending_adjudications"]:
+        raise ValueError(
+            "cannot release TrialPlan with pending adjudication"
+        )
+    checkpoint["trial_plan_hash"] = ""
     return checkpoint
 
 

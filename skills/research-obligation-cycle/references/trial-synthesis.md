@@ -44,7 +44,10 @@ freezes all stage sample identities, RunSpecs, comparisons, outcomes, criteria,
 and stopping/multiplicity rules. A child version may update bounded obligation
 references, but may not replace that frozen trial design after outcome
 inspection. A new factor or design starts a new hypothesis and TrialPlan
-lineage; it does not reuse a protected sample.
+lineage; it does not reuse a protected sample. Keep the old plan and exposure
+history immutable. Release its current binding only on the server-owned
+new-hypothesis transition, then freeze the replacement as version 1 of a new
+plan identity.
 
 Use only the stages justified by the obligations. Direct confirmation is
 allowed only with an explicit entry-basis reference. Stage advancement is an

@@ -87,6 +87,32 @@ def prepare_research_cycle_trace(
     return trace_event, current
 
 
+def release_trial_plan_for_new_hypothesis(
+    *,
+    trace_event: dict[str, Any] | None,
+    checkpoint: dict[str, Any] | None,
+    current_trial_plan_hash: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Append one server-owned release event without scanning old traces."""
+    if trace_event is None or checkpoint is None:
+        raise ValueError(
+            "new hypothesis lineage requires a Research Cycle checkpoint"
+        )
+    event = {
+        "event_type": "trial_plan_released",
+        "from_hash": current_trial_plan_hash,
+        "reason": "new_hypothesis_lineage",
+    }
+    current = replay_research_cycle_events(
+        checkpoint,
+        events=[event],
+        expected_base_hash=checkpoint["projection_hash"],
+    )
+    value = deepcopy(trace_event)
+    value["events"] = [*(value.get("events") or []), event]
+    return value, current
+
+
 def agent_cycle_summary(
     checkpoint: dict[str, Any] | None,
 ) -> dict[str, Any]:

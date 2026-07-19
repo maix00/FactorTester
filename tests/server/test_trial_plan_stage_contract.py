@@ -110,7 +110,8 @@ def test_stage_projection_enforces_lineage_and_frozen_trial_design() -> None:
         )
 
 
-def test_direct_confirmation_is_terminal_and_not_revision_eligible() -> None:
+def test_direct_confirmation_blocks_in_lineage_revision_not_new_hypothesis(
+) -> None:
     plan = trial_plan_v4()
     plan["sample_roles"] = [plan["sample_roles"][2]]
     plan["comparisons"][0]["members"] = [
@@ -135,7 +136,8 @@ def test_direct_confirmation_is_terminal_and_not_revision_eligible() -> None:
         adjudication_action="research_decision",
     ) == {
         "current_trial_stage_executable": True,
-        "current_trial_stage_allows_revision": False,
+        "current_trial_stage_allows_in_lineage_revision": False,
+        "new_hypothesis_lineage_allowed": True,
         "next_trial_stage_required": False,
         "trial_stage_advance_authorized": False,
     }

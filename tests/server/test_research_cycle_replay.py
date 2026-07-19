@@ -190,6 +190,35 @@ def test_adjudication_v2_binds_an_authoritative_next_action() -> None:
         })
 
 
+def test_new_hypothesis_releases_only_the_current_trial_plan_binding() -> None:
+    before = _checkpoint()
+    after = replay_research_cycle_events(
+        before,
+        events=[{
+            "event_type": "trial_plan_released",
+            "from_hash": before["trial_plan_hash"],
+            "reason": "new_hypothesis_lineage",
+        }],
+        expected_base_hash=before["projection_hash"],
+    )
+
+    assert after["trial_plan_hash"] == ""
+    assert after["claims"] == before["claims"]
+    assert after["obligations"] == before["obligations"]
+    assert after["projection_hash"] != before["projection_hash"]
+
+    with pytest.raises(ValueError, match="does not match checkpoint"):
+        replay_research_cycle_events(
+            before,
+            events=[{
+                "event_type": "trial_plan_released",
+                "from_hash": "f" * 64,
+                "reason": "new_hypothesis_lineage",
+            }],
+            expected_base_hash=before["projection_hash"],
+        )
+
+
 def test_pending_or_rejected_adjudication_changes_no_accepted_state() -> None:
     before = _checkpoint()
     proposal = _proposal()

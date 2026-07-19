@@ -186,6 +186,16 @@ def initialize_graph_version(path) -> None:
                 "kind": "research",
                 "required_capabilities": [],
             },
+            {
+                "node_id": "factor_improvement",
+                "kind": "research",
+                "required_capabilities": [],
+            },
+            {
+                "node_id": "hypothesis",
+                "kind": "research",
+                "required_capabilities": [],
+            },
         ],
         "edges": [
             {
@@ -223,6 +233,26 @@ def initialize_graph_version(path) -> None:
                 "from_node": "result",
                 "to_node": "result",
                 "guard": {"research_cycle_delta_applied": True},
+                "required_evidence": [],
+            },
+            {
+                "edge_id": "start-new-hypothesis",
+                "from_node": "factor_improvement",
+                "to_node": "hypothesis",
+                "guard": {
+                    "new_hypothesis_version_recorded": True,
+                    "trial_ledger_incremented": True,
+                    "holdout_status_recorded": True,
+                    "factor_change_retained": True,
+                },
+                "required_evidence": [],
+                "server_action": "start_new_hypothesis_lineage",
+            },
+            {
+                "edge_id": "hypothesis-to-validation",
+                "from_node": "hypothesis",
+                "to_node": "validation_design",
+                "guard": {},
                 "required_evidence": [],
             },
         ],

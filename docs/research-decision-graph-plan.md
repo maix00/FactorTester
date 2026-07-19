@@ -225,7 +225,10 @@ outcomes have been inspected, a child version may not replace frozen sample
 partitions, RunSpecs, comparisons, outcomes, criteria, or
 stopping/multiplicity rules. A factor or trial-design change creates a new
 hypothesis and TrialPlan lineage with the trial-ledger consequences required
-by decisions 114–115.
+by decisions 114–115. The server releases the old current-plan binding only
+when the branch crosses the declared new-hypothesis edge. It does not rewrite
+the old plan, ResearchRuns, sample exposure, or evidence; the replacement plan
+starts at version 1 under a new plan identity.
 
 The server persists the compact immutable TrialPlan as the authoritative
 run/result binding. It contains the executable statistical contract and opaque

@@ -23,6 +23,7 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
     prepare_research_cycle_trace,
+    release_trial_plan_for_new_hypothesis,
 )
 from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
@@ -238,11 +239,32 @@ def advance_graph_branch(
                 node_id=target_id,
             )
         )
+        starts_new_hypothesis = (
+            edge.get("server_action")
+            == "start_new_hypothesis_lineage"
+        )
+        if starts_new_hypothesis:
+            if has_trial_plan_body or proposed_trial_plan_hash:
+                raise ValueError(
+                    "new hypothesis must release the old TrialPlan before "
+                    "freezing another plan"
+                )
         projected_trial_plan_hash = validate_trial_plan_transition(
             current_hash=str(branch_row["current_trial_plan_hash"]),
             proposed_hash=proposed_trial_plan_hash,
             has_body=has_trial_plan_body,
         )
+        if starts_new_hypothesis:
+            cycle_event, cycle_checkpoint = (
+                release_trial_plan_for_new_hypothesis(
+                    trace_event=cycle_event,
+                    checkpoint=cycle_checkpoint,
+                    current_trial_plan_hash=str(
+                        branch_row["current_trial_plan_hash"]
+                    ),
+                )
+            )
+            projected_trial_plan_hash = ""
         if (
             cycle_checkpoint is not None
             and cycle_checkpoint["trial_plan_hash"]
@@ -260,7 +282,9 @@ def advance_graph_branch(
             raise ValueError(
                 "advance the stage before freezing its child TrialPlan"
             )
-        projected_stage = current_stage_projection
+        projected_stage = (
+            {} if starts_new_hypothesis else current_stage_projection
+        )
         if has_trial_plan_body:
             projected_stage = project_trial_plan_stage(
                 trial_plan=prepared_evidence["trial_plan"],

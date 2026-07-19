@@ -11,6 +11,7 @@ _LIFECYCLES = {"observed", "draft", "active", "retired"}
 _ENFORCEMENTS = {"advisory", "deterministic", "audited"}
 _EDGE_TYPES = {"recommended", "conditional", "failure", "recovery"}
 _RISK_LEVELS = {"L1", "L2", "L3", "L4"}
+_SERVER_ACTIONS = {"start_new_hypothesis_lineage"}
 
 
 def graph_content_hash(graph: dict[str, Any]) -> str:
@@ -92,6 +93,12 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"invalid edge_type: {edge_id}")
         if str(edge.get("risk_level") or "") not in _RISK_LEVELS:
             raise ValueError(f"invalid risk_level: {edge_id}")
+        server_action = edge.get("server_action")
+        if (
+            server_action is not None
+            and str(server_action) not in _SERVER_ACTIONS
+        ):
+            raise ValueError(f"invalid server_action: {edge_id}")
         for field in (
             "required_evidence",
             "required_research_evidence",
