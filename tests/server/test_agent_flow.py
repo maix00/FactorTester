@@ -89,6 +89,86 @@ def test_uncapped_agent_invocation_settles_without_provider_attestation(
     }
 
 
+def test_same_agent_continues_after_runtime_and_model_switch(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "agent-flow.sqlite"
+    first_store = AgentFlowStore(database_path)
+    first_store.configure_token_limit(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+        token_limit=200,
+    )
+    first = first_store.reserve_invocation(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+        actor_role="research",
+        authority_scope="local_research",
+        purpose="first runtime",
+        runtime_id="runtime-a",
+        model_id="model-a",
+        max_input_tokens=40,
+        max_output_tokens=10,
+        agent_principal_hash="a" * 64,
+        lineage_hash="b" * 64,
+    )
+    first_store.settle_invocation(
+        owner_user_id="alice",
+        invocation_id=first["invocation_id"],
+        input_tokens=20,
+        output_tokens=5,
+    )
+
+    restarted_store = AgentFlowStore(database_path)
+    second = restarted_store.reserve_invocation(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+        actor_role="research",
+        authority_scope="local_research",
+        purpose="continue after runtime switch",
+        runtime_id="runtime-b",
+        model_id="model-b",
+        max_input_tokens=30,
+        max_output_tokens=10,
+        agent_principal_hash="a" * 64,
+        lineage_hash="b" * 64,
+    )
+    restarted_store.settle_invocation(
+        owner_user_id="alice",
+        invocation_id=second["invocation_id"],
+        input_tokens=12,
+        output_tokens=3,
+    )
+
+    period = restarted_store.load_current_budget_period(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+    )
+    invocations = restarted_store.load_invocations(
+        owner_user_id="alice",
+        invocation_ids=[
+            first["invocation_id"],
+            second["invocation_id"],
+        ],
+    )
+
+    assert first["period_id"] == second["period_id"] == period["period_id"]
+    assert period["used_tokens"] == 40
+    assert period["reserved_tokens"] == 0
+    assert period["available_tokens"] == 160
+    assert {
+        (
+            invocation["runtime_id"],
+            invocation["model_id"],
+            invocation["status"],
+        )
+        for invocation in invocations.values()
+    } == {
+        ("runtime-a", "model-a", "settled"),
+        ("runtime-b", "model-b", "settled"),
+    }
+
+
 def test_role_resume_packets_are_bounded_stable_and_isolated(
     tmp_path,
     monkeypatch,
