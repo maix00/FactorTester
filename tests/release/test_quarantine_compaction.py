@@ -56,6 +56,16 @@ def _compaction_fixture(
     (independent / "independent.txt").write_text("unique history\n")
     _git(independent, "add", "independent.txt")
     _git(independent, "commit", "-m", "independent")
+    _git(independent, "branch", "archived-ref")
+    _git(independent, "tag", "evidence-v1")
+    _git(independent, "pack-refs", "--all")
+    (independent / ".git/info/exclude").write_text(
+        ".factor_workspace/\n"
+    )
+    (independent / ".factor_workspace").mkdir()
+    (independent / ".factor_workspace/manifest.json").write_text(
+        '{"ignored_but_required":true}\n'
+    )
 
     (reachable_dirty / "Factor.py").write_text("staged\n")
     _git(reachable_dirty, "add", "Factor.py")
@@ -115,6 +125,13 @@ def test_plan_classifies_four_quarantine_cases_and_rejects_unsafe_link(
         if item["mode"] == "independent_bundle"
     )
     assert independent["unique_commit_count"] > 0
+    assert len(independent["refs"]) == 3
+    assert independent["untracked"] == [{
+        "path": ".factor_workspace/manifest.json",
+        "kind": "file",
+        "mode": 0o644,
+        "sha256": independent["untracked"][0]["sha256"],
+    }]
     assert plan["safe_to_compact"] is True
 
     non_git = next(

@@ -46,6 +46,7 @@ def plan_quarantine_compaction(
             branch = _git(path, "branch", "--show-current").strip()
             head = _git(path, "rev-parse", "HEAD").strip()
             ref_rows = _git_refs(path)
+            status_context = _status_context(path)
             repo_commits = set(
                 _git(path, "rev-list", "--all").splitlines()
             )
@@ -68,13 +69,14 @@ def plan_quarantine_compaction(
             unique = None
             untracked = _content_manifest(path)
             refs_hash = ""
+            status_context = {}
         item = {
             "path": str(path),
             "original_path": mapping["source"],
             "canonical_path": str(canonical),
             "profile_id": mapping["profile_id"],
             "migration_content_sha256": mapping["content_sha256"],
-            "content_sha256": _content_hash(path),
+            "worktree_content_sha256": _worktree_content_hash(path),
             "before_bytes": _tree_bytes(path),
             "git": git,
             "mode": mode,
@@ -86,6 +88,7 @@ def plan_quarantine_compaction(
             "unique_commit_count": unique,
             "canonical_reachable": reachable,
             "untracked": untracked,
+            "status_context": status_context,
             "unsafe_symlinks": unsafe,
             "active_profile_refs": refs,
         }
@@ -127,6 +130,7 @@ def apply_quarantine_compaction(
         return {**existing, "receipt_ref": receipt_path.resolve().as_uri()}
     canonical = Path(plan["canonical_path"])
     published: list[dict[str, Any]] = []
+    temporary_paths: list[Path] = []
     try:
         mappings = []
         for index, item in enumerate(plan["entries"]):
@@ -140,6 +144,7 @@ def apply_quarantine_compaction(
             if staging.exists() or rebuild.exists():
                 raise ValueError("quarantine compaction staging collision")
             staging.mkdir()
+            temporary_paths.extend((staging, rebuild))
             _write_compact_evidence(source, staging, item)
             _rebuild_from_evidence(staging, rebuild, canonical)
             _assert_rebuild(item, rebuild)
@@ -168,7 +173,9 @@ def apply_quarantine_compaction(
                 "branch": item["branch"],
                 "head": item["head"],
                 "status_sha256": item["status_sha256"],
-                "content_sha256": item["content_sha256"],
+                "worktree_content_sha256": item[
+                    "worktree_content_sha256"
+                ],
                 "refs_sha256": item["refs_sha256"],
                 "before_bytes": before,
                 "after_bytes": after,
@@ -211,6 +218,9 @@ def apply_quarantine_compaction(
             _assert_rebuild(entry["item"], restore)
             shutil.rmtree(compact)
             os.replace(restore, compact)
+        for path in temporary_paths:
+            if path.exists():
+                shutil.rmtree(path)
         raise
 
 
@@ -237,7 +247,9 @@ def verify_quarantine_compaction(
                 "path": str(compact),
                 "compact_present": compact.is_dir(),
                 "rebuild_verified": True,
-                "content_sha256": item["content_sha256"],
+                "worktree_content_sha256": item[
+                    "worktree_content_sha256"
+                ],
             })
         finally:
             if rebuild.exists():
@@ -267,11 +279,15 @@ def rollback_quarantine_compaction(
     plan = _load_plan_from_compact_paths(receipt)
     canonical = Path(plan["canonical_path"])
     restored = []
+    temporary_paths: list[Path] = []
     try:
         mappings = []
         for item in plan["entries"]:
             compact = Path(item["path"])
             rebuild = compact.parent / f".{compact.name}.rollback-rebuild"
+            if rebuild.exists():
+                raise ValueError("quarantine rollback staging collision")
+            temporary_paths.append(rebuild)
             _rebuild_from_evidence(compact, rebuild, canonical)
             _assert_rebuild(item, rebuild)
             backup = compact.parent / f".{compact.name}.compact-backup"
@@ -285,7 +301,9 @@ def rollback_quarantine_compaction(
             shutil.rmtree(backup)
             mappings.append({
                 "path": str(compact),
-                "content_sha256": item["content_sha256"],
+                "worktree_content_sha256": item[
+                    "worktree_content_sha256"
+                ],
                 "branch": item["branch"],
                 "head": item["head"],
                 "status_sha256": item["status_sha256"],
@@ -310,6 +328,9 @@ def rollback_quarantine_compaction(
             _write_compact_evidence(compact, staging, item)
             shutil.rmtree(compact)
             os.replace(staging, compact)
+        for path in temporary_paths:
+            if path.exists():
+                shutil.rmtree(path)
         raise
 
 
@@ -381,11 +402,13 @@ def _rebuild_from_evidence(
         _git(destination, "apply", "--index", str(index_patch))
     if worktree_patch.stat().st_size:
         _git(destination, "apply", str(worktree_patch))
+    _restore_status_context(destination, manifest["status_context"])
     _extract_tar(compact / "untracked.tar.gz", destination)
+    _restore_refs(destination, manifest["refs"])
 
 
 def _assert_rebuild(item: dict[str, Any], rebuilt: Path) -> None:
-    if _content_hash(rebuilt) != item["content_sha256"]:
+    if _worktree_content_hash(rebuilt) != item["worktree_content_sha256"]:
         raise ValueError("compact evidence content reconstruction failed")
     if not item["git"]:
         return
@@ -396,6 +419,8 @@ def _assert_rebuild(item: dict[str, Any], rebuilt: Path) -> None:
     status = _git_bytes(rebuilt, "status", "--porcelain=v1", "-z")
     if sha256(status).hexdigest() != item["status_sha256"]:
         raise ValueError("compact evidence status reconstruction failed")
+    if _refs_hash(_git_refs(rebuilt)) != item["refs_sha256"]:
+        raise ValueError("compact evidence refs reconstruction failed")
 
 
 def _load_plan_from_compact_paths(
@@ -409,7 +434,7 @@ def _load_plan_from_compact_paths(
             raise ValueError("compact evidence manifest is missing")
         for key in (
             "path", "original_path", "mode", "branch", "head",
-            "status_sha256", "content_sha256", "refs_sha256",
+            "status_sha256", "worktree_content_sha256", "refs_sha256",
         ):
             if item.get(key) != mapping.get(key):
                 raise ValueError("compact evidence manifest conflicts with receipt")
@@ -454,11 +479,19 @@ def _git_refs(repo: Path) -> list[dict[str, str]]:
 
 
 def _untracked_manifest(repo: Path) -> list[dict[str, Any]]:
-    raw = _git_bytes(
-        repo, "ls-files", "--others", "--exclude-standard", "-z"
-    )
+    tracked = {
+        value.decode()
+        for value in _git_bytes(repo, "ls-files", "-z").split(b"\0")
+        if value
+    }
     paths = [
-        value.decode() for value in raw.split(b"\0") if value
+        str(path.relative_to(repo))
+        for path in sorted(repo.rglob("*"))
+        if (
+            (path.is_file() or path.is_symlink())
+            and path.relative_to(repo).parts[:1] != (".git",)
+            and str(path.relative_to(repo)) not in tracked
+        )
     ]
     return _paths_manifest(repo, paths)
 
@@ -531,11 +564,19 @@ def _extract_tar(archive: Path, destination: Path) -> None:
         stream.extractall(destination, filter="data")
 
 
-def _content_hash(root: Path) -> str:
+def _worktree_content_hash(root: Path) -> str:
     digest = sha256()
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
-        if relative.parts[:1] == (".git",):
+        if (
+            relative.parts[:1] == (".git",)
+            or any(
+                "compact-staging" in part
+                or "verify-rebuild" in part
+                or "rollback-rebuild" in part
+                for part in relative.parts
+            )
+        ):
             continue
         if path.is_symlink():
             digest.update(str(relative).encode())
@@ -546,6 +587,75 @@ def _content_hash(root: Path) -> str:
             digest.update(b"file:")
             digest.update(path.read_bytes())
     return digest.hexdigest()
+
+
+def _restore_refs(repo: Path, expected: list[dict[str, str]]) -> None:
+    expected_by_ref = {
+        str(item["ref"]): str(item["commit"]) for item in expected
+    }
+    for item in _git_refs(repo):
+        if item["ref"] not in expected_by_ref:
+            _git(repo, "update-ref", "-d", item["ref"])
+    for ref, commit in expected_by_ref.items():
+        _git(repo, "update-ref", ref, commit)
+
+
+def _status_context(repo: Path) -> dict[str, str]:
+    exclude_path = Path(
+        _git(repo, "rev-parse", "--git-path", "info/exclude").strip()
+    )
+    if not exclude_path.is_absolute():
+        exclude_path = repo / exclude_path
+    configured = subprocess.run(
+        ["git", "-C", str(repo), "config", "--path", "--get", "core.excludesFile"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    configured_path = Path(configured).expanduser() if configured else None
+    return {
+        "info_exclude": (
+            exclude_path.read_text(encoding="utf-8")
+            if exclude_path.is_file() else ""
+        ),
+        "configured_excludes": (
+            configured_path.read_text(encoding="utf-8")
+            if configured_path is not None and configured_path.is_file()
+            else ""
+        ),
+    }
+
+
+def _restore_status_context(
+    repo: Path,
+    context: dict[str, str],
+) -> None:
+    exclude_path = Path(
+        _git(repo, "rev-parse", "--git-path", "info/exclude").strip()
+    )
+    if not exclude_path.is_absolute():
+        exclude_path = repo / exclude_path
+    exclude_path.parent.mkdir(parents=True, exist_ok=True)
+    exclude_path.write_text(context.get("info_exclude", ""), encoding="utf-8")
+    configured = context.get("configured_excludes", "")
+    if configured:
+        configured_path = exclude_path.parent / "compact-global-excludes"
+        configured_path.write_text(configured, encoding="utf-8")
+        _git(repo, "config", "core.excludesFile", str(configured_path))
+    else:
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "--unset-all", "core.excludesFile"],
+            capture_output=True,
+            check=False,
+        )
+
+
+def _refs_hash(rows: list[dict[str, str]]) -> str:
+    return sha256(
+        json.dumps(
+            rows, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
 
 
 def _unsafe_symlinks(root: Path) -> list[str]:
