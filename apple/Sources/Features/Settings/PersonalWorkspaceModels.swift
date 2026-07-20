@@ -22,10 +22,10 @@ struct PersonalCanonicalWorkspace {
     let repositoryRef: String
 
     init(json: [String: Any], principal: String = "") {
-        if !json.string("target").isEmpty {
-            path = json.string("target")
-        } else if !json.string("source").isEmpty {
+        if !json.string("source").isEmpty {
             path = json.string("source")
+        } else if !json.string("target").isEmpty {
+            path = json.string("target")
         } else {
             path = json.string("path")
         }
@@ -71,7 +71,8 @@ struct PersonalWorkspaceMigrationPlan {
             json["legacy_quarantine"] as? [[String: Any]] ?? []
         ).compactMap { $0["target"] as? String }
         ready = json.bool("ready") ?? false
-        let isMigration = json.string("operation") == "user_layout_migration"
+        let isMigration =
+            json.string("operation") == "principal_user_layout_migration"
         preservesBranches = isMigration
         preservesCommits = isMigration
         preservesUncommitted = isMigration

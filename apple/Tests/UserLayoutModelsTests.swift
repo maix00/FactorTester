@@ -4,7 +4,7 @@ import XCTest
 final class UserLayoutModelsTests: XCTestCase {
     func testMigrationPlanDecodesUnifiedUserTree() {
         let plan = PersonalWorkspaceMigrationPlan(json: [
-            "operation": "user_layout_migration",
+            "operation": "principal_user_layout_migration",
             "target_layout": [
                 "user_root": "/users/maxa",
                 "personal_workspace": "/users/maxa/personal-workspace",
