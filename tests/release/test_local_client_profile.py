@@ -61,6 +61,17 @@ def test_client_cli_exposes_generic_profile_and_adapter_commands(
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["profile_id"] == "research-a"
+    workspace = tmp_path / "workspace"
+    assert workspace.is_dir()
+    assert workspace.stat().st_mode & 0o777 == 0o700
+    repeated = runner.invoke(cli, [
+        "client", "profile", "init",
+        "--profile-id", "research-a",
+        "--display-name", "Research A",
+        "--server-url", "http://127.0.0.1:8123",
+        "--workspace-root", str(workspace),
+    ])
+    assert repeated.exit_code == 0, repeated.output
     assert runner.invoke(cli, ["client", "profile", "list"]).exit_code == 0
     adapters = runner.invoke(cli, ["client", "adapter", "list"])
     assert adapters.exit_code == 0
@@ -140,6 +151,7 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
             "--server-url", "http://127.0.0.1:8000",
             "--agent-id", agent_id,
             "--principal-ref", "18717974771",
+            "--workspace-root", str(tmp_path / "profiles" / profile_id),
         ])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
@@ -147,6 +159,15 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
         assert not payload["local_source_registered"]
         assert payload["server_visibility_verified"]
         assert payload["ready"] is False
+        assert payload["can_start_inspection_and_planning"] is True
+        assert payload["claim_command"] == (
+            f"factortester client profile claim {profile_id} {agent_id}"
+        )
+        assert "Codex" not in payload["agent_prompt"]
+        receipt = payload["claim_receipt"]
+        assert receipt["can_start_inspection_and_planning"] is True
+        assert receipt["research_execution_scope_bound"] is False
+        assert Path(receipt["workspace_root"]).stat().st_mode & 0o777 == 0o700
         profile = payload["profile"]
         assert profile["profile_id"] == profile_id
         assert profile["agents"][0]["agent_id"] == agent_id
@@ -169,10 +190,30 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
             "session-binding://18717974771/"
         )
         assert not {"password", "token"}.intersection(source)
+        claimed = runner.invoke(cli, [
+            "client", "profile", "claim", profile_id, agent_id,
+        ])
+        assert claimed.exit_code == 0, claimed.output
+        updated_receipt = json.loads(claimed.output)
+        assert updated_receipt["receipt_hash"] != receipt["receipt_hash"]
+        receipt_path = Path(
+            updated_receipt["receipt_ref"].removeprefix("file://")
+        )
+        before_mtime = receipt_path.stat().st_mtime_ns
+        repeated_claim = runner.invoke(cli, [
+            "client", "profile", "claim", profile_id, agent_id,
+        ])
+        assert repeated_claim.exit_code == 0, repeated_claim.output
+        assert json.loads(repeated_claim.output)["receipt_hash"] == (
+            updated_receipt["receipt_hash"]
+        )
+        assert receipt_path.stat().st_mtime_ns == before_mtime
 
     maxa = LocalProfileStore(root).load("maxa")
     maxb = LocalProfileStore(root).load("maxb")
     assert maxa["workspace_root"] != maxb["workspace_root"]
+    assert Path(maxa["workspace_root"]).is_dir()
+    assert Path(maxb["workspace_root"]).is_dir()
     assert maxa["agents"] != maxb["agents"]
     assert maxa["initialization_sources"][0]["session_ref"] != (
         maxb["initialization_sources"][0]["session_ref"]

@@ -31,6 +31,12 @@ def _workspace(root: Path, owner: str, factor: str) -> Path:
     )
     (root / ".vscode").mkdir()
     (root / "pyrightconfig.json").write_text("{}")
+    (root / "tools").mkdir()
+    (root / "tools_index.json").write_text(json.dumps({
+        "files": [],
+        "workspace_root": "/private/legacy/workspace",
+        "tools_dir": "/private/legacy/tools",
+    }))
     (root / "custom_factors").mkdir()
     (root / "custom_factors" / factor).write_text("class Factor: ...\n")
     return root
@@ -91,6 +97,16 @@ def test_workspace_migration_preserves_distinct_owners_and_rolls_back(
     assert migrated_manifest["workspace_root"] == str(
         target / "workspaces/maxa-factor-library"
     )
+    migrated_index = json.loads((
+        target / "workspaces/maxa-factor-library/tools_index.json"
+    ).read_text())
+    assert migrated_index["workspace_root"] == str(
+        target / "workspaces/maxa-factor-library"
+    )
+    assert migrated_index["tools_dir"] == str(
+        target / "workspaces/maxa-factor-library/tools"
+    )
+    assert "/private/legacy" not in json.dumps(migrated_index)
     assert receipt["workspaces"][0]["removed_hooks"] == ["post-commit"]
 
     rolled_back = rollback_workspace_migration(
@@ -243,6 +259,7 @@ def test_existing_unsafe_workspace_repair_is_previewed_atomic_and_reversible(
     assert plan["repairable"] is True
     assert set(plan["issues"]) == {
         "manifest_paths_outside_workspace",
+        "machine_metadata_paths_outside_workspace",
         "active_private_hooks",
     }
     assert plan["research_refs"]["run_id"] == ["run-1"]
@@ -257,6 +274,10 @@ def test_existing_unsafe_workspace_repair_is_previewed_atomic_and_reversible(
         / "receipts/legacy.json"
     ).is_file()
     assert not (target / ".git/hooks/post-commit").exists()
+    repaired_index = json.loads((target / "tools_index.json").read_text())
+    assert repaired_index["workspace_root"] == str(target)
+    assert repaired_index["tools_dir"] == str(target / "tools")
+    assert "/private/legacy" not in json.dumps(repaired_index)
     assert verify_workspace_repair(
         client_root, "maxa", repair_id
     )["valid"] is True

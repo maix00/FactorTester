@@ -162,6 +162,9 @@ def verify_workspace_migration(
             "manifest_paths_relocated": _manifest_paths_within(
                 manifest, path
             ),
+            "machine_metadata_relocated": (
+                _machine_metadata_paths_within(path)
+            ),
             "legacy_hooks_removed": not hooks,
             "unsafe_symlinks": inventory["unsafe_symlinks"],
         })
@@ -171,6 +174,7 @@ def verify_workspace_migration(
         and item["vscode_preserved"]
         and item["pylance_ready"]
         and item["manifest_paths_relocated"]
+        and item["machine_metadata_relocated"]
         and item["legacy_hooks_removed"]
         and not item["unsafe_symlinks"]
         for item in results
@@ -236,6 +240,8 @@ def plan_workspace_repair(
     issues = []
     if not _manifest_paths_within(manifest, root):
         issues.append("manifest_paths_outside_workspace")
+    if not _machine_metadata_paths_within(root):
+        issues.append("machine_metadata_paths_outside_workspace")
     if active_hooks:
         issues.append("active_private_hooks")
     if inventory["unsafe_symlinks"]:
@@ -322,7 +328,7 @@ def apply_workspace_repair(
     try:
         shutil.copytree(root, staging, symlinks=True)
         _remove_active_hooks(staging)
-        _relocate_manifest(staging, root)
+        _relocate_machine_metadata(staging, root)
         (metadata_backup / "receipts").mkdir(parents=True)
         legacy_receipts = (
             store.root / "receipts" / str(plan["profile_id"])
@@ -400,6 +406,7 @@ def verify_workspace_repair(
         "manifest_relocated": _manifest_paths_within(
             _manifest(root), root
         ),
+        "machine_metadata_relocated": _machine_metadata_paths_within(root),
         "private_hooks_removed": not _active_hooks(root),
         "research_refs_preserved": refs == before["research_refs"],
         "pylance_ready": inventory["has_pyright_config"],
@@ -460,7 +467,7 @@ def _stage(plan: dict[str, Any], staging: Path) -> list[dict[str, Any]]:
         )
         removed_hooks = _remove_active_hooks(target)
         logical_target = Path(item["target"])
-        _relocate_manifest(target, logical_target)
+        _relocate_machine_metadata(target, logical_target)
         (target / "research").mkdir(exist_ok=True)
         after = inventory_workspace(target)
         staged.append({
@@ -474,6 +481,9 @@ def _stage(plan: dict[str, Any], staging: Path) -> list[dict[str, Any]]:
             "removed_hooks": removed_hooks,
             "manifest_relocated": _manifest_paths_within(
                 _manifest(target), logical_target
+            ),
+            "machine_metadata_relocated": (
+                _machine_metadata_paths_within_for(target, logical_target)
             ),
             "pylance_ready": after["has_pyright_config"],
         })
@@ -528,6 +538,51 @@ def _relocate_manifest(root: Path, logical_root: Path | None = None) -> None:
         + "\n",
         encoding="utf-8",
     )
+
+
+def _relocate_machine_metadata(
+    root: Path,
+    logical_root: Path | None = None,
+) -> None:
+    destination = logical_root or root
+    _relocate_manifest(root, destination)
+    path = root / "tools_index.json"
+    if not path.is_file():
+        return
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("tools_index.json must be an object")
+    value["workspace_root"] = str(destination)
+    value["tools_dir"] = str(destination / "tools")
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _machine_metadata_paths_within(root: Path) -> bool:
+    return _machine_metadata_paths_within_for(root, root)
+
+
+def _machine_metadata_paths_within_for(
+    root: Path,
+    logical_root: Path,
+) -> bool:
+    if not _manifest_paths_within(_manifest(root), logical_root):
+        return False
+    path = root / "tools_index.json"
+    if not path.is_file():
+        return True
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        for key in ("workspace_root", "tools_dir"):
+            Path(str(value[key])).resolve().relative_to(
+                logical_root.resolve()
+            )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return True
 
 
 def _manifest_paths_within(manifest: dict[str, Any], root: Path) -> bool:

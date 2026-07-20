@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from hashlib import sha256
+import json
 from typing import Any
 
 from .locations import validate_client_root
@@ -150,6 +152,68 @@ class LocalProfileStore:
         raise ValueError(
             f"local Agent not found: {profile_id}/{agent_id}"
         )
+
+    def ensure_workspace_root(self, profile_id: str) -> Path:
+        profile = self.load(profile_id)
+        root = Path(profile["workspace_root"]).expanduser()
+        if root.exists() and not root.is_dir():
+            raise ValueError(f"profile workspace root is not a directory: {root}")
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root.chmod(0o700)
+        return root.resolve()
+
+    def claim_agent(
+        self,
+        profile_id: str,
+        agent_id: str,
+    ) -> dict[str, Any]:
+        profile, agent = self.load_agent(profile_id, agent_id)
+        workspace_root = self.ensure_workspace_root(profile_id)
+        scope = dict(agent["scope"])
+        scope_bound = all(
+            value not in {"", "all", "unbound"}
+            for value in scope.values()
+        )
+        receipt = {
+            "schema_version": 1,
+            "profile_id": profile_id,
+            "agent_id": agent_id,
+            "role": agent["role"],
+            "agent_status": agent["status"],
+            "next_action": agent["next_action"],
+            "workspace_root": str(workspace_root),
+            "session_binding_ref": str(
+                (profile.get("session_binding") or {}).get(
+                    "session_ref", ""
+                )
+            ),
+            "initialization_source_refs": sorted(
+                str(item["source_ref"])
+                for item in profile["initialization_sources"]
+            ),
+            "registered_workspace_refs": sorted(
+                str(item["server_workspace_ref"])
+                for item in profile["workspaces"]
+                if item["server_workspace_ref"]
+            ),
+            "can_start_inspection_and_planning": True,
+            "research_execution_scope_bound": scope_bound,
+        }
+        encoded = json.dumps(
+            receipt, sort_keys=True, separators=(",", ":")
+        ).encode()
+        receipt["receipt_hash"] = sha256(encoded).hexdigest()
+        path = (
+            self.root
+            / "claim-receipts"
+            / profile_id
+            / f"{agent_id}.json"
+        )
+        existing = read_json(path)
+        if existing != receipt:
+            write_json(path, receipt)
+            path.chmod(0o600)
+        return {**receipt, "receipt_ref": path.resolve().as_uri()}
 
     def _path(self, profile_id: str) -> Path:
         validate_local_identifier(profile_id, "profile_id")

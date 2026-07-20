@@ -99,13 +99,26 @@ def initialize_profile(
     release_profile: Path | None,
 ) -> None:
     store = LocalProfileStore(load_profile_root(release_profile))
-    click.echo(_json(store.save(new_local_profile(
+    candidate = new_local_profile(
         profile_id=profile_id,
         display_name=display_name,
         server_url=server_url,
         workspace_root=workspace_root
         or default_profile_workspace_root(profile_id),
-    ))))
+    )
+    try:
+        profile = store.load(profile_id)
+    except ValueError:
+        profile = store.save(candidate)
+    else:
+        stable = ("display_name", "server", "workspace_root")
+        if any(profile[key] != candidate[key] for key in stable):
+            raise ValueError(
+                "existing profile configuration differs; use an explicit "
+                "profile update"
+            )
+    store.ensure_workspace_root(profile_id)
+    click.echo(_json(profile))
 
 
 @client_profile.command("list")
@@ -154,11 +167,25 @@ def bootstrap_profile(
     authenticated_ref = str(authenticated.get("username") or "")
     if authenticated_ref != principal_ref:
         raise ValueError("authenticated principal does not match principal_ref")
+    candidate = new_local_profile(
+        profile_id=profile_id,
+        display_name=display_name,
+        server_url=server_url,
+        workspace_root=workspace_root
+        or default_profile_workspace_root(profile_id),
+        principal_ref=principal_ref,
+    )
     try:
         existing = store.load(profile_id)
     except ValueError:
         existing = None
     if existing is not None:
+        stable = ("display_name", "server", "workspace_root")
+        if any(existing[key] != candidate[key] for key in stable):
+            raise ValueError(
+                "existing profile configuration differs; use an explicit "
+                "profile update"
+            )
         binding = existing.get("session_binding") or {}
         if (
             binding
@@ -170,14 +197,7 @@ def bootstrap_profile(
     discovered = True
     if existing is None:
         discovered = False
-        store.save(new_local_profile(
-            profile_id=profile_id,
-            display_name=display_name,
-            server_url=server_url,
-            workspace_root=workspace_root
-            or default_profile_workspace_root(profile_id),
-            principal_ref=principal_ref,
-        ))
+        store.save(candidate)
     store.bind_session(profile_id, principal_ref=principal_ref)
     scope = (
         {"workspace_id": "all"}
@@ -191,6 +211,10 @@ def bootstrap_profile(
         "status": "needs_scope",
         "next_action": "Bind a real workspace or research instance and branch.",
     })
+    claim = store.claim_agent(profile_id, agent_id)
+    claim_command = (
+        f"factortester client profile claim {profile_id} {agent_id}"
+    )
     click.echo(_json({
         "schema_version": 1,
         "discovered_existing_profile": discovered,
@@ -198,13 +222,33 @@ def bootstrap_profile(
         "local_source_registered": False,
         "server_visibility_verified": True,
         "ready": False,
+        "can_start_inspection_and_planning": True,
+        "claim_command": claim_command,
+        "claim_receipt": claim,
         "profile": profile,
         "agent_prompt": (
-            f"Use FactorTester profile '{profile_id}' as Agent "
-            f"'{agent_id}', inspect its initialization provenance, "
-            "bind a real research scope, then resume work."
+            f"Use profile={profile_id} agent={agent_id}; run "
+            f"`{claim_command}` to deterministically resume inspection "
+            "and planning. Bind an approved research scope before execution."
         ),
     }))
+
+
+@client_profile.command("claim")
+@click.argument("profile_id")
+@click.argument("agent_id")
+@_root_option
+@friendly_errors
+def claim_profile_agent(
+    profile_id: str,
+    agent_id: str,
+    release_profile: Path | None,
+) -> None:
+    """Resume one pre-registered Agent identity from a compact prompt."""
+    receipt = LocalProfileStore(
+        load_profile_root(release_profile)
+    ).claim_agent(profile_id, agent_id)
+    click.echo(_json(receipt))
 
 
 @client_profile.group("initialization")
