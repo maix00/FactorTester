@@ -21,6 +21,10 @@ def _workspace(root: Path, owner: str, factor: str) -> Path:
         json.dumps({"username": owner, "workspace_root": str(root)})
     )
     (root / ".git").mkdir()
+    (root / ".git/hooks").mkdir()
+    (root / ".git/hooks/post-commit").write_text(
+        "#!/bin/sh\n/private/server/sync\n"
+    )
     (root / ".vscode").mkdir()
     (root / "pyrightconfig.json").write_text("{}")
     (root / "custom_factors").mkdir()
@@ -71,8 +75,19 @@ def test_workspace_migration_preserves_distinct_owners_and_rolls_back(
     } == {"default$MaxA@1", "18717974771"}
     assert maxa.is_dir() and shared.is_dir()
     assert (target / "workspaces/maxa-factor-library/.git").is_dir()
+    assert not (
+        target / "workspaces/maxa-factor-library/.git/hooks/post-commit"
+    ).exists()
     assert (target / "workspaces/shared-187-factor-library/.vscode").is_dir()
     assert verify_workspace_migration(client_root, "maxa")["valid"] is True
+    migrated_manifest = json.loads((
+        target
+        / "workspaces/maxa-factor-library/.factor_workspace/manifest.json"
+    ).read_text())
+    assert migrated_manifest["workspace_root"] == str(
+        target / "workspaces/maxa-factor-library"
+    )
+    assert receipt["workspaces"][0]["removed_hooks"] == ["post-commit"]
 
     rolled_back = rollback_workspace_migration(
         client_root, "maxa", receipt["migration_id"]
@@ -106,3 +121,75 @@ def test_workspace_plan_cli_is_dry_run_and_hash_bound(
     assert plan["workspaces"][0]["inventory"]["owner_ref"] == "default$MaxA@1"
     assert output.is_file()
     assert not target.exists()
+
+
+def test_workspace_apply_fails_if_source_changes_after_plan(
+    tmp_path: Path,
+) -> None:
+    client_root = tmp_path / "support"
+    _profile(client_root, tmp_path / "old")
+    source = _workspace(tmp_path / "source", "default$MaxA@1", "A.py")
+    target = tmp_path / "target"
+    plan = plan_workspace_migration("maxa", target, [{
+        "workspace_id": "maxa-factor-library",
+        "source": str(source),
+        "access_mode": "owner",
+        "server_workspace_ref": "default$MaxA@1",
+    }])
+    (source / "custom_factors/A.py").write_text("changed\n")
+
+    try:
+        apply_workspace_migration(client_root, plan)
+    except ValueError as error:
+        assert "changed after plan" in str(error)
+    else:
+        raise AssertionError("migration should fail closed")
+
+    assert not target.exists()
+    assert LocalProfileStore(client_root).load("maxa")["workspaces"] == []
+
+
+def test_workspace_plan_rejects_symlink_outside_source(
+    tmp_path: Path,
+) -> None:
+    source = _workspace(tmp_path / "source", "default$MaxA@1", "A.py")
+    (source / "outside").symlink_to(tmp_path)
+
+    try:
+        plan_workspace_migration("maxa", tmp_path / "target", [{
+            "workspace_id": "maxa-factor-library",
+            "source": str(source),
+            "access_mode": "owner",
+            "server_workspace_ref": "default$MaxA@1",
+        }])
+    except ValueError as error:
+        assert "symlinks outside" in str(error)
+    else:
+        raise AssertionError("unsafe symlink should be rejected")
+
+
+def test_workspace_rollback_refuses_to_overwrite_newer_profile_pointer(
+    tmp_path: Path,
+) -> None:
+    client_root = tmp_path / "support"
+    store = _profile(client_root, tmp_path / "old")
+    source = _workspace(tmp_path / "source", "default$MaxA@1", "A.py")
+    plan = plan_workspace_migration("maxa", tmp_path / "target", [{
+        "workspace_id": "maxa-factor-library",
+        "source": str(source),
+        "access_mode": "owner",
+        "server_workspace_ref": "default$MaxA@1",
+    }])
+    receipt = apply_workspace_migration(client_root, plan)
+    profile = store.load("maxa")
+    profile["workspace_root"] = str(tmp_path / "newer")
+    store.save(profile)
+
+    try:
+        rollback_workspace_migration(
+            client_root, "maxa", receipt["migration_id"]
+        )
+    except ValueError as error:
+        assert "no longer points" in str(error)
+    else:
+        raise AssertionError("stale rollback should be refused")

@@ -46,6 +46,11 @@ def plan_workspace_migration(
             raise ValueError(f"duplicate workspace_id: {workspace_id}")
         seen.add(workspace_id)
         inventory = inventory_workspace(Path(spec["source"]))
+        if inventory["unsafe_symlinks"]:
+            raise ValueError(
+                "workspace contains symlinks outside its root: "
+                + ", ".join(inventory["unsafe_symlinks"])
+            )
         required += int(inventory["bytes"])
         workspaces.append({
             "workspace_id": workspace_id,
@@ -98,11 +103,13 @@ def apply_workspace_migration(
         "workspace_ids": [
             item["workspace_id"] for item in plan["workspaces"]
         ],
+        "workspaces": [],
     }
     write_json(receipt_path, receipt)
     receipt_path.chmod(0o600)
     try:
-        _stage(plan, staging)
+        _assert_sources_unchanged(plan)
+        staged = _stage(plan, staging)
         target_root.parent.mkdir(parents=True, exist_ok=True)
         os.replace(staging, target_root)
         for item in plan["workspaces"]:
@@ -119,6 +126,7 @@ def apply_workspace_migration(
                 workspace_root=target_root,
             )
         receipt["status"] = "applied"
+        receipt["workspaces"] = staged
         write_json(receipt_path, receipt)
         receipt_path.chmod(0o600)
         return receipt
@@ -140,6 +148,8 @@ def verify_workspace_migration(
     for workspace in profile["workspaces"]:
         path = Path(workspace["path"])
         inventory = inventory_workspace(path)
+        manifest = _manifest(path)
+        hooks = _active_hooks(path)
         results.append({
             "workspace_id": workspace["workspace_id"],
             "path": str(path),
@@ -149,12 +159,20 @@ def verify_workspace_migration(
             "git_preserved": inventory["has_git"],
             "vscode_preserved": inventory["has_vscode"],
             "pylance_ready": inventory["has_pyright_config"],
+            "manifest_paths_relocated": _manifest_paths_within(
+                manifest, path
+            ),
+            "legacy_hooks_removed": not hooks,
+            "unsafe_symlinks": inventory["unsafe_symlinks"],
         })
     valid = bool(results) and all(
         item["owner_matches"]
         and item["git_preserved"]
         and item["vscode_preserved"]
         and item["pylance_ready"]
+        and item["manifest_paths_relocated"]
+        and item["legacy_hooks_removed"]
+        and not item["unsafe_symlinks"]
         for item in results
     )
     return {
@@ -176,6 +194,10 @@ def rollback_workspace_migration(
     if not receipt or receipt.get("status") != "applied":
         raise ValueError("applied workspace migration receipt not found")
     profile = store.load(profile_id)
+    if profile["workspace_root"] != receipt["new_workspace_root"]:
+        raise ValueError(
+            "profile no longer points at this migration; rollback refused"
+        )
     profile["workspace_root"] = receipt["old_workspace_root"]
     reverted = set(receipt["workspace_ids"])
     profile["workspaces"] = [
@@ -190,10 +212,11 @@ def rollback_workspace_migration(
     return receipt
 
 
-def _stage(plan: dict[str, Any], staging: Path) -> None:
+def _stage(plan: dict[str, Any], staging: Path) -> list[dict[str, Any]]:
     (staging / "workspaces").mkdir(parents=True)
     (staging / "local-data").mkdir()
     (staging / "adapters").mkdir()
+    staged = []
     for item in plan["workspaces"]:
         target = staging / "workspaces" / item["workspace_id"]
         shutil.copytree(
@@ -201,7 +224,111 @@ def _stage(plan: dict[str, Any], staging: Path) -> None:
             target,
             symlinks=True,
         )
+        removed_hooks = _remove_active_hooks(target)
+        logical_target = Path(item["target"])
+        _relocate_manifest(target, logical_target)
         (target / "research").mkdir(exist_ok=True)
+        after = inventory_workspace(target)
+        staged.append({
+            "workspace_id": item["workspace_id"],
+            "owner_ref": after["owner_ref"],
+            "source_tree_sha256": item["inventory"]["tree_sha256"],
+            "target_tree_sha256": after["tree_sha256"],
+            "git_head": after["git_head"],
+            "git_branch": after["git_branch"],
+            "git_refs_sha256": after["git_refs_sha256"],
+            "removed_hooks": removed_hooks,
+            "manifest_relocated": _manifest_paths_within(
+                _manifest(target), logical_target
+            ),
+            "pylance_ready": after["has_pyright_config"],
+        })
+    return staged
+
+
+def _assert_sources_unchanged(plan: dict[str, Any]) -> None:
+    bound = (
+        "owner_ref", "manifest_sha256", "git_head", "git_branch",
+        "git_refs_sha256", "tree_sha256", "file_count", "bytes",
+    )
+    for item in plan["workspaces"]:
+        expected = item["inventory"]
+        observed = inventory_workspace(Path(expected["source"]))
+        if any(observed.get(key) != expected.get(key) for key in bound):
+            raise ValueError(
+                f"workspace changed after plan: {item['workspace_id']}"
+            )
+        if observed["unsafe_symlinks"]:
+            raise ValueError(
+                f"workspace symlink escaped after plan: {item['workspace_id']}"
+            )
+
+
+def _manifest(root: Path) -> dict[str, Any]:
+    return json.loads(
+        (root / ".factor_workspace" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
+def _relocate_manifest(root: Path, logical_root: Path | None = None) -> None:
+    path = root / ".factor_workspace" / "manifest.json"
+    manifest = _manifest(root)
+    destination = logical_root or root
+    replacements = {
+        "workspace_root": destination,
+        "custom_factor_dir": destination / "custom_factors",
+        "public_factor_dir": destination / "public_factors",
+    }
+    for key, value in replacements.items():
+        if key in manifest:
+            manifest[key] = str(value)
+    git = manifest.get("git")
+    if isinstance(git, dict):
+        for key in ("workspace_root", "git_repo_root"):
+            if key in git:
+                git[key] = str(destination)
+    path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _manifest_paths_within(manifest: dict[str, Any], root: Path) -> bool:
+    values = [
+        manifest.get("workspace_root"),
+        manifest.get("custom_factor_dir"),
+        manifest.get("public_factor_dir"),
+    ]
+    git = manifest.get("git")
+    if isinstance(git, dict):
+        values.extend([git.get("workspace_root"), git.get("git_repo_root")])
+    for value in (item for item in values if item):
+        try:
+            Path(str(value)).resolve().relative_to(root.resolve())
+        except ValueError:
+            return False
+    return True
+
+
+def _active_hooks(root: Path) -> list[Path]:
+    hooks = root / ".git" / "hooks"
+    if not hooks.is_dir():
+        return []
+    return sorted(
+        path for path in hooks.iterdir()
+        if path.is_file() and not path.name.endswith(".sample")
+    )
+
+
+def _remove_active_hooks(root: Path) -> list[str]:
+    removed = []
+    for path in _active_hooks(root):
+        removed.append(path.name)
+        path.unlink()
+    return removed
 
 
 def _validate_plan(plan: dict[str, Any]) -> None:
