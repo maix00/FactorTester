@@ -73,10 +73,34 @@ Tests must establish that:
 5. the draft graph exposes only the two-stage topology, with no legacy direct
    edge.
 
-## Deliberately unresolved follow-up
+## Grill 145: bounded gap closure and recovery
 
-This decision does not define whether a branch paused for a missing downstream
-capability can reach a bounded non-success closure, or exactly how it returns
-to `job_evidence_ready` when that capability later becomes available. Those
-closure and recovery semantics require the next grill decision and must not be
-inferred from this topology change.
+The follow-up was accepted with a smaller persistence design:
+
+- a paused downstream gap may record the existing Research Cycle `blocked`
+  closure after its required independent challenge;
+- that closure keeps Claims and open obligations unchanged and is neither
+  validation success nor factor rejection;
+- recovery returns to `job_evidence_ready` and re-resolves the downstream
+  capability without rerunning the accepted Job;
+- the server derives the permitted recovery origin from the existing latest
+  trace edge, so no `resume_node_ref`, column, table, or history scan is added;
+  and
+- only stale immutable RunSpec, TrialPlan, backend, artifact, or evidence
+  identity requires a new JobAttempt.
+
+A blocked run may truthfully complete an acceptance receipt but cannot claim
+that the graph is release-ready.
+
+### Capability diagnosis is not code modification
+
+`capability_gap` classifies what is missing and why research cannot currently
+advance. It does not own implementation. Resolution can come from an already
+approved binding, a separately approved local Skill, data access, or a
+source-authorized backend change.
+
+Backend modification remains a Maintenance/code-improvement concern with code
+access, tests, revision, deployment, and audit authority. Ordinary users and
+client Agents cannot perform it. The research branch remains paused while that
+work occurs and consumes only the resulting approved-binding fact. This keeps
+research semantics independent from software-delivery mechanics.

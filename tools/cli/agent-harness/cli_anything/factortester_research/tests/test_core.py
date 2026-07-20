@@ -327,6 +327,14 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     assert edges["job_evidence_ready__capability_gap"]["guard"] == {
         "mandatory_binding_missing": True,
     }
+    assert edges["capability_gap__job_evidence_ready"]["guard"] == {
+        "approved_binding_now_available": True,
+        "gap_origin_edge_id": "job_evidence_ready__capability_gap",
+    }
+    assert edges["capability_gap__blocked_closure"]["guard"] == {
+        "bounded_closure_disposition": "blocked",
+        "research_cycle_delta_applied": True,
+    }
     assert "backtest__statistical_robustness" not in edges
     assert edges["statistical_robustness__result_audit"]["guard"] == {
         "uncertainty_evidence_complete": True,

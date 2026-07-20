@@ -21,6 +21,9 @@ from server.services.research_graph.branch.repository import (
     load_current_branch_resolution,
     load_instance_branch_with_latest_trace,
 )
+from server.services.research_graph.branch.guards import (
+    system_transition_guard_facts,
+)
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
     prepare_research_cycle_trace,
@@ -194,6 +197,10 @@ def advance_graph_branch(
                 adjudication_action=route_action,
             ),
             "research_cycle_delta_applied": bool(cycle_events),
+            **system_transition_guard_facts(
+                branch_row=branch_row,
+                cycle_checkpoint=cycle_checkpoint,
+            ),
             **server_actions.guard_facts(prepared_server_actions),
         }
         failed_guards = [

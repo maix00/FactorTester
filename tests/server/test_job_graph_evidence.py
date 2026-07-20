@@ -11,6 +11,9 @@ import settings as Settings
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
+from server.services.research_graph.branch.guards import (
+    system_transition_guard_facts,
+)
 from server.services.research_graph.branch.transition import advance_graph_branch
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
@@ -50,6 +53,11 @@ def _graph() -> dict:
                 "kind": "research",
                 "required_capabilities": ["performance.bootstrap-sharpe"],
             },
+            {
+                "node_id": "capability_gap",
+                "kind": "capability_gap",
+                "required_capabilities": [],
+            },
         ],
         "edges": [
             {
@@ -69,6 +77,26 @@ def _graph() -> dict:
                 "from_node": "job_evidence_ready",
                 "to_node": "statistical_robustness",
                 "guard": {"mandatory_bindings_resolved": True},
+                "required_evidence": [],
+            },
+            {
+                "edge_id": "job_evidence_ready__capability_gap",
+                "from_node": "job_evidence_ready",
+                "to_node": "capability_gap",
+                "guard": {"mandatory_binding_missing": True},
+                "required_evidence": [],
+            },
+            {
+                "edge_id": "capability_gap__job_evidence_ready",
+                "from_node": "capability_gap",
+                "to_node": "job_evidence_ready",
+                "edge_type": "recovery",
+                "guard": {
+                    "approved_binding_now_available": True,
+                    "gap_origin_edge_id": (
+                        "job_evidence_ready__capability_gap"
+                    ),
+                },
                 "required_evidence": [],
             },
         ],
@@ -299,3 +327,95 @@ def test_downstream_capability_gap_does_not_rollback_bound_job_evidence(
         trace["server_evidence"]["job_attempt"]["facts"]["job_id"]
         == "job-1"
     )
+
+
+def test_capability_recovery_returns_to_job_checkpoint_without_rerun(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="backtest__job_evidence_ready",
+        evidence=_request(),
+    )
+    paused = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="job_evidence_ready__capability_gap",
+        evidence={"mandatory_binding_missing": True},
+    )
+
+    recovered = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="capability_gap__job_evidence_ready",
+        evidence={"approved_binding_now_available": True},
+    )
+
+    assert paused["status"] == "paused"
+    assert recovered["current_node"] == "job_evidence_ready"
+    assert recovered["status"] == "running"
+    with connect_sqlite(path) as conn:
+        traces = conn.execute(
+            """
+            SELECT edge_id, evidence_json FROM research_graph_trace
+            WHERE branch_id='branch-1' ORDER BY created_at
+            """
+        ).fetchall()
+        jobs = conn.execute(
+            "SELECT COUNT(*) AS count FROM research_jobs"
+        ).fetchone()["count"]
+    bound = next(
+        orjson.loads(row["evidence_json"])
+        for row in traces
+        if row["edge_id"] == "backtest__job_evidence_ready"
+    )
+    assert bound["server_evidence"]["job_attempt"]["facts"]["job_id"] == "job-1"
+    assert jobs == 1
+
+
+def test_job_checkpoint_recovery_rejects_a_different_gap_origin(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            UPDATE research_graph_branches
+            SET current_node='capability_gap', status='paused'
+            WHERE branch_id='branch-1'
+            """
+        )
+
+    with pytest.raises(ValueError, match="gap_origin_edge_id"):
+        advance_graph_branch(
+            instance_id="instance-1",
+            branch_id="branch-1",
+            owner="alice",
+            edge_id="capability_gap__job_evidence_ready",
+            evidence={"approved_binding_now_available": True},
+        )
+
+
+def test_blocked_closure_guard_fact_is_server_derived() -> None:
+    facts = system_transition_guard_facts(
+        branch_row={
+            "latest_trace_edge_id": "job_evidence_ready__capability_gap",
+        },
+        cycle_checkpoint={"closure": {"disposition": "blocked"}},
+    )
+
+    assert facts == {
+        "gap_origin_edge_id": "job_evidence_ready__capability_gap",
+        "bounded_closure_disposition": "blocked",
+    }

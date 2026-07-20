@@ -260,6 +260,33 @@ def build_draft_edges() -> list[dict[str, Any]]:
             risk_level="L2",
         ),
         edge(
+            "capability_gap__job_evidence_ready",
+            "capability_gap",
+            "job_evidence_ready",
+            edge_type="recovery",
+            guard={
+                "approved_binding_now_available": True,
+                "gap_origin_edge_id": (
+                    "job_evidence_ready__capability_gap"
+                ),
+            },
+            risk_level="L2",
+        ),
+        edge(
+            "capability_gap__blocked_closure",
+            "capability_gap",
+            "capability_gap",
+            edge_type="recovery",
+            guard={
+                "bounded_closure_disposition": "blocked",
+                "research_cycle_delta_applied": True,
+            },
+            risk_level="L2",
+            required_transition_facts=[
+                "accepted independent blocked-closure decision",
+            ],
+        ),
+        edge(
             "capability_gap__skill_review",
             "capability_gap",
             "skill_candidate_review",

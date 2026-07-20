@@ -13,7 +13,8 @@ from server.services.research_graph.protocol import loads
 
 
 CURRENT_BRANCH_CONTEXT_SQL = """
-    SELECT i.*, b.*, t.evidence_json AS latest_trace_evidence_json
+    SELECT i.*, b.*, t.edge_id AS latest_trace_edge_id,
+           t.evidence_json AS latest_trace_evidence_json
     FROM research_graph_instances i
     JOIN research_graph_branches b
       ON b.instance_id=i.instance_id
