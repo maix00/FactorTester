@@ -1,64 +1,102 @@
 {
   "schema_version": 1,
-  "receipt_id": "batch6-token-context-v1",
+  "receipt_id": "batch6-token-context-v2",
   "measured_at": "2026-07-20",
   "owner_ref": "profile:default$MaxA@1",
-  "graph_ref": "factor-research@5",
-  "invocations": [
+  "graph_ref": "factor-research@6:aee02eed6ec617cebf3e208390fa826460c28fc88fb3919c3637162e31537d41",
+  "activation": {
+    "proposal_id": "d71626421b1745cd9b99d38386180127",
+    "validation_id": "adef9cb2b23d3b82e3e9633229f2cbc25cd4b42d61d039bf79a6c544c3e50647",
+    "independent_review_id": "b1bd8e6762c9f64e5f57a5945127c3f54d7627d72f4af85d5ffc1ace5b643fbb",
+    "grill_ref": "grill-with-docs:144-146:accepted",
+    "shadow_equivalent": true,
+    "shadow_isolated": true,
+    "routine_context_bytes": 2703,
+    "shadow_graph_total_tokens": 800,
+    "shadow_baseline_total_tokens": 1000,
+    "measurement_quality": "reserved_fallback",
+    "token_failures": []
+  },
+  "source_branches": [
     {
-      "invocation_id": "6364fa02f2b64784b89594b041e3caf7",
-      "agent_id": "issue140-v5-planning-agent",
-      "reserved_tokens": 2000,
-      "charged_tokens": 2000,
-      "measurement_quality": "reserved_fallback",
-      "provider_actual_available": false,
-      "context_cost_breakdown_available": false,
-      "reviewer_invocations": 0
-    },
-    {
-      "invocation_id": "1d3fffca029c4957910d9287b26934b6",
-      "agent_id": "issue140-v5-research-agent",
-      "reserved_tokens": 4000,
-      "charged_tokens": 4000,
-      "measurement_quality": "reserved_fallback",
-      "provider_actual_available": false,
-      "context_cost_breakdown_available": false,
-      "reviewer_invocations": 0
-    }
-  ],
-  "branches": [
-    {
+      "factor_scope": "SgCCS",
       "instance_id": "723d7bcb5ffe414795adade39f849a08",
       "branch_id": "3e7fae879aad4453b3fdc17987d69295",
-      "context_bytes": 4102,
-      "next_bytes": 3401,
-      "trace_count": 7,
-      "accepted_evidence_deltas": 0,
+      "graph_version": 5,
+      "latest_trace_id": "93c5bf8844014151b4fad1d41c4419d3",
+      "status": "paused",
+      "node": "capability_gap",
+      "mutated_by_continuation": false
+    },
+    {
+      "factor_scope": "Trend",
+      "instance_id": "13822bc5a8454fcb850aa4f7bc60bfba",
+      "branch_id": "43efeeed072a4c3eba4191ab24d34e95",
+      "graph_version": 5,
+      "latest_trace_id": "2a50bcc0771a402bb56a93a2379cab05",
+      "status": "paused",
+      "node": "capability_gap",
+      "mutated_by_continuation": false
+    }
+  ],
+  "continuation_branches": [
+    {
+      "factor_scope": "SgCCS",
+      "instance_id": "b9ee5dad27204df8b7f82d794a485bbb",
+      "branch_id": "95c856884a2f4d588886d3c7e999051f",
+      "source_job_id": "afe87b94622246d9a19cfcdf5a664719",
+      "context_bytes": 3611,
+      "trace_count": 3,
+      "accepted_job_evidence_deltas": 1,
+      "replay_passed": true,
+      "claim_states": ["unknown"],
+      "obligation_states": ["open", "open"],
+      "closure_disposition": "blocked",
+      "closure_proposal_hash": "c3f9499ca1907005ba59d4df64e6ecbfc677249a54fa68f96fa10838b4b13d20",
       "status": "paused",
       "node": "capability_gap"
     },
     {
-      "instance_id": "13822bc5a8454fcb850aa4f7bc60bfba",
-      "branch_id": "43efeeed072a4c3eba4191ab24d34e95",
-      "context_bytes": 4221,
-      "next_bytes": 3526,
-      "trace_count": 7,
-      "accepted_evidence_deltas": 0,
+      "factor_scope": "Trend",
+      "instance_id": "5d11484b2ed9426d84e0cba8b2874c6b",
+      "branch_id": "fa8cfdd6e3b947e687043e617fb078e4",
+      "source_job_id": "dc7d5929559641e49bce3c0908de6837",
+      "context_bytes": 3566,
+      "trace_count": 3,
+      "accepted_job_evidence_deltas": 1,
+      "replay_passed": true,
+      "claim_states": ["unknown"],
+      "obligation_states": ["open", "open"],
+      "closure_disposition": "blocked",
+      "closure_proposal_hash": "af02192eee34fc02908ad0693aa7c84075868523ec7aa1e094d6094b082dfccb",
       "status": "paused",
       "node": "capability_gap"
     }
   ],
-  "jobs": {
-    "succeeded_trusted": 5
+  "real_data_copy_e2e": {
+    "database": "temporary_consistent_sqlite_backup",
+    "source_branch_identity_preserved": true,
+    "job_count_before": 37,
+    "job_count_after": 37,
+    "sgccs_immediate_and_gap_replay_passed": true,
+    "trend_immediate_and_gap_replay_passed": true,
+    "production_copy_writes": 0
+  },
+  "database_bounds": {
+    "new_tables": 0,
+    "continuation_insert_rows": 3,
+    "continuation_replay_lineage_queries": 1,
+    "routine_context_loads_full_graph": false
   },
   "assessment": {
-    "status": "partial",
+    "status": "blocked",
     "hard_reservation_enforced": true,
     "routine_context_within_6000_bytes": true,
-    "actual_token_telemetry_proven": false,
-    "accepted_evidence_proven": false,
+    "actual_provider_token_telemetry_proven": false,
+    "accepted_job_evidence_proven": true,
+    "source_jobs_rerun": false,
     "release_ready": false,
-    "reason": "provider usage and context-cost categories were not supplied; trusted JobAttempts were not bound before the statistical capability gap"
+    "reason": "trusted Job evidence is retained and replayable, but performance.bootstrap-sharpe remains an explicitly deferred capability; Claims remain unknown and decision-blocking obligations remain open"
   },
-  "receipt_hash": "60937b7e25b79ab5853506d241021df63197f5adc64706a4142f57a6d26a6bbc"
+  "receipt_hash": "91c7b17c4d8048929dbd9c78b69332f083ab565e61f702289cf370efc2088798"
 }
