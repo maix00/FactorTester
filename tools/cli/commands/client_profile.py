@@ -22,6 +22,10 @@ from tools.cli.release.personal_workspace_migration import (
     rollback_personal_workspace_migration,
     verify_personal_workspace_migration,
 )
+from tools.cli.release.legacy_workspace_cleanup import (
+    plan_legacy_workspace_cleanup,
+    purge_legacy_workspaces,
+)
 from tools.cli.release.storage import read_json, write_json
 from tools.cli.release.workspace_migration import (
     apply_workspace_migration,
@@ -508,6 +512,57 @@ def show_personal_workspace(
 @profile_personal_workspace.group("migration")
 def personal_workspace_migration() -> None:
     """Relocate a canonical personal factor Git workspace safely."""
+
+
+@profile_personal_workspace.group("cleanup")
+def personal_workspace_cleanup() -> None:
+    """Audit legacy workspaces before any gated cleanup."""
+
+
+@personal_workspace_cleanup.command("plan")
+@click.option(
+    "--workspace",
+    "workspaces",
+    multiple=True,
+    required=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+)
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def plan_legacy_personal_workspace_cleanup(
+    workspaces: tuple[Path, ...],
+    output: Path,
+    release_profile: Path | None,
+) -> None:
+    plan = plan_legacy_workspace_cleanup(
+        load_profile_root(release_profile), list(workspaces)
+    )
+    write_json(output, plan)
+    click.echo(_json(plan))
+
+
+@personal_workspace_cleanup.command("purge")
+@click.argument(
+    "plan_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def purge_legacy_personal_workspaces(
+    plan_path: Path,
+    release_profile: Path | None,
+) -> None:
+    plan = read_json(plan_path)
+    if not isinstance(plan, dict):
+        raise ValueError("legacy workspace cleanup plan is invalid")
+    click.echo(_json(purge_legacy_workspaces(
+        load_profile_root(release_profile), plan
+    )))
 
 
 @personal_workspace_migration.command("plan")
