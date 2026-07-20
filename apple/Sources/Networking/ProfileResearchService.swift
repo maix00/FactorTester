@@ -107,11 +107,27 @@ struct ProfileResearchService {
         return try await value(path: path, as: ProfileResearchListResponse.self)
     }
 
-    func detail(
+    func workPackageDetail(
+        href: String,
+        etag: String? = nil
+    ) async throws -> ConditionalProjection<ProfileResearchWorkPackageDetail> {
+        try await conditional(path: href, etag: etag)
+    }
+
+    func branchDetail(
         href: String,
         etag: String? = nil
     ) async throws -> ConditionalProjection<ProfileResearchDetail> {
         try await conditional(path: href, etag: etag)
+    }
+
+    // Temporary source compatibility for callers that already hold a branch
+    // detail href. New navigation first opens a Work Package.
+    func detail(
+        href: String,
+        etag: String? = nil
+    ) async throws -> ConditionalProjection<ProfileResearchDetail> {
+        try await branchDetail(href: href, etag: etag)
     }
 
     func timeline(

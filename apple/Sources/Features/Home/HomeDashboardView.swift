@@ -19,7 +19,6 @@ struct HomeDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 welcome
-                ClientAdapterPanel(onOpen: openAdapter)
                 LazyVGrid(columns: columns, spacing: Theme.gridSpacing) {
                     DashboardShortcutCard(
                         title: "研究进度",
@@ -52,6 +51,7 @@ struct HomeDashboardView: View {
                     .font(.footnote)
                     .foregroundStyle(.red)
                 }
+                ClientAdapterPanel(onOpen: openAdapter)
             }
             .padding(20)
         }

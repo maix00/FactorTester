@@ -8,6 +8,8 @@ from server.modules.single_factor_test import sft_bp
 from server.services.research_graph.profile_research_projection import (
     ProfileResearchProjection,
     projection_etag,
+    research_ref_for,
+    parse_work_package_ref,
 )
 from server.services.session_runtime import require_user
 
@@ -73,6 +75,51 @@ def list_profile_research_timeline(research_ref: str):
         payload = _projection.list_timeline(
             owner=require_user(),
             research_ref=research_ref,
+            limit=_limit(50),
+            after=str(request.args.get("after") or ""),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return _error(exc)
+    return _response(payload)
+
+
+@sft_bp.get(
+    "/api/profile-research/<work_package_ref>/branches/<branch_id>"
+)
+def get_profile_research_branch(
+    work_package_ref: str,
+    branch_id: str,
+):
+    try:
+        branch_ref = research_ref_for(
+            parse_work_package_ref(work_package_ref),
+            branch_id,
+        )
+        payload = _projection.get_branch(
+            owner=require_user(),
+            branch_ref=branch_ref,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return _error(exc)
+    return _response(payload)
+
+
+@sft_bp.get(
+    "/api/profile-research/<work_package_ref>/branches/"
+    "<branch_id>/timeline"
+)
+def list_profile_research_branch_timeline(
+    work_package_ref: str,
+    branch_id: str,
+):
+    try:
+        branch_ref = research_ref_for(
+            parse_work_package_ref(work_package_ref),
+            branch_id,
+        )
+        payload = _projection.list_timeline(
+            owner=require_user(),
+            research_ref=branch_ref,
             limit=_limit(50),
             after=str(request.args.get("after") or ""),
         )

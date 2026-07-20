@@ -8,6 +8,29 @@ struct ProfileLiveResearchDetail: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let workPackage = controller.workPackage {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(workPackage.productGroup)
+                            .font(.headline)
+                        Text("Work Package · \(workPackage.branchCount) 个分支")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Picker(
+                        "假设分支",
+                        selection: $controller.selectedBranchID
+                    ) {
+                        ForEach(workPackage.branches) { branch in
+                            Text(branch.label).tag(branch.branchID)
+                        }
+                    }
+                    .frame(maxWidth: 260)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+            }
             Picker("", selection: $section) {
                 ForEach(LiveDetailSection.allCases) {
                     Text($0.title).tag($0)

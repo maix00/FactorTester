@@ -32,7 +32,6 @@ struct ClientSidebar: View {
                 bottomLauncher(.settings)
             }
             .padding(.vertical, 6)
-            .background(.regularMaterial)
         }
         .frame(minWidth: 210)
     }

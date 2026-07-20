@@ -4,7 +4,9 @@ import Foundation
 final class ProfileLiveProcessController: ObservableObject {
     @Published var selectedWorkspaceID = ""
     @Published var selectedResearchRef = ""
+    @Published var selectedBranchID = ""
     @Published private(set) var research: [ProfileResearchSummary] = []
+    @Published private(set) var workPackage: ProfileResearchWorkPackageDetail?
     @Published private(set) var detail: ProfileResearchDetail?
     @Published private(set) var timeline: [ResearchTransitionStep] = []
     @Published private(set) var nextTimelineCursor: String?
@@ -14,6 +16,7 @@ final class ProfileLiveProcessController: ObservableObject {
     let workspaces: [LocalWorkspaceModel]
     private let service: ProfileResearchService
     private let clock: ResearchRefreshClock
+    private var workPackageETag: String?
     private var detailETag: String?
     private var timelineETag: String?
 
@@ -53,6 +56,8 @@ final class ProfileLiveProcessController: ObservableObject {
                 $0.researchRef == selectedResearchRef
             }) {
                 selectedResearchRef = research.first?.researchRef ?? ""
+                selectedBranchID = ""
+                workPackage = nil
             }
         } catch is CancellationError {
             return
@@ -65,26 +70,46 @@ final class ProfileLiveProcessController: ObservableObject {
 
     func observeSelectedResearch() async {
         guard let summary = selectedSummary else {
+            workPackage = nil
             detail = nil
             timeline = []
             return
         }
-        detail = nil
-        timeline = []
-        detailETag = nil
-        timelineETag = nil
         do {
-            try await refresh(summary: summary, conditional: false)
+            if workPackage?.workPackageRef != summary.workPackageRef {
+                let result = try await service.workPackageDetail(
+                    href: summary.detailHref,
+                    etag: nil
+                )
+                guard case .value(let value, let etag) = result else { return }
+                workPackage = value
+                workPackageETag = etag
+                if !value.branches.contains(where: {
+                    $0.branchID == selectedBranchID
+                }) {
+                    selectedBranchID = value.branches.first?.branchID ?? ""
+                }
+            }
+            guard let branch = selectedBranch else {
+                detail = nil
+                timeline = []
+                return
+            }
+            detail = nil
+            timeline = []
+            detailETag = nil
+            timelineETag = nil
+            try await refresh(branch: branch, conditional: false)
             while !Task.isCancelled, let directive = detail?.refresh {
                 if directive.terminal || directive.mode == "stopped" { return }
                 if directive.mode == "job_sse", let href = directive.href {
                     for try await _ in service.events(href: href) {
                         try Task.checkCancellation()
-                        try await refresh(summary: summary, conditional: true)
+                        try await refresh(branch: branch, conditional: true)
                         if detail?.refresh.terminal == true { return }
                     }
                     try Task.checkCancellation()
-                    try await refresh(summary: summary, conditional: true)
+                    try await refresh(branch: branch, conditional: true)
                     if detail?.refresh.mode == "job_sse",
                        detail?.refresh.terminal == false {
                         try await clock.sleep(seconds: 5)
@@ -96,7 +121,7 @@ final class ProfileLiveProcessController: ObservableObject {
                     )
                     try await clock.sleep(seconds: seconds)
                     try Task.checkCancellation()
-                    try await refresh(summary: summary, conditional: true)
+                    try await refresh(branch: branch, conditional: true)
                 }
             }
         } catch is CancellationError {
@@ -131,12 +156,20 @@ final class ProfileLiveProcessController: ObservableObject {
         research.first { $0.researchRef == selectedResearchRef }
     }
 
+    var selectedBranch: ProfileResearchBranchSummary? {
+        workPackage?.branches.first { $0.branchID == selectedBranchID }
+    }
+
+    var observationKey: String {
+        "\(selectedResearchRef)|\(selectedBranchID)"
+    }
+
     private func refresh(
-        summary: ProfileResearchSummary,
+        branch: ProfileResearchBranchSummary,
         conditional: Bool
     ) async throws {
-        let detailResult = try await service.detail(
-            href: summary.detailHref,
+        let detailResult = try await service.branchDetail(
+            href: branch.detailHref,
             etag: conditional ? detailETag : nil
         )
         if case .value(let value, let etag) = detailResult {

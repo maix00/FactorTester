@@ -179,6 +179,88 @@ def _service(path, monkeypatch) -> projection.ProfileResearchProjection:
     return projection.ProfileResearchProjection()
 
 
+def test_research_projects_one_work_package_with_hypothesis_branches(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "work-package-research.sqlite"
+    _seed(path, branch_count=3)
+    service = _service(path, monkeypatch)
+
+    listing = service.list_research(
+        owner="alice",
+        workspace_ref="workspace:workspace-a",
+    )
+
+    assert [item["research_ref"] for item in listing["items"]] == [
+        "work-package:instance-a",
+    ]
+    assert listing["items"][0]["branch_count"] == 3
+    detail = service.get_research(
+        owner="alice",
+        research_ref="work-package:instance-a",
+    )
+    assert detail["work_package_ref"] == "work-package:instance-a"
+    assert [item["branch_ref"] for item in detail["branches"]] == [
+        "graph-branch:instance-a:branch-0002",
+        "graph-branch:instance-a:branch-0001",
+        "graph-branch:instance-a:branch-0000",
+    ]
+
+
+def test_work_package_list_keyset_pages_instances_not_branches(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "work-package-pagination.sqlite"
+    _seed(path, branch_count=3)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, owner, graph_id, graph_version, product_group,
+                workspace_id, mode, shadow_run_id, created_at
+            ) VALUES (
+                'instance-new', 'alice', 'factor-research', 6,
+                'CNFutures', 'workspace-a', 'live', '', 2000
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_branches (
+                branch_id, instance_id, label, current_node, status,
+                current_capability_resolution_json,
+                current_capability_resolution_hash,
+                current_trial_plan_hash, trial_stage_projection_json,
+                evidence_refs_json, omitted_evidence_count,
+                latest_trace_id, created_at, updated_at
+            ) VALUES (
+                'branch-new', 'instance-new', 'new research', 'hypothesis',
+                'running', '{}', '', '', '{}', '[]', 0, '', 2000, 2000
+            )
+            """
+        )
+    service = _service(path, monkeypatch)
+
+    first = service.list_research(
+        owner="alice", workspace_ref="workspace:workspace-a", limit=1
+    )
+    second = service.list_research(
+        owner="alice",
+        workspace_ref="workspace:workspace-a",
+        limit=1,
+        after=first["next_cursor"],
+    )
+
+    assert [item["research_ref"] for item in first["items"]] == [
+        "work-package:instance-new"
+    ]
+    assert [item["research_ref"] for item in second["items"]] == [
+        "work-package:instance-a"
+    ]
+
+
 def test_list_detail_and_timeline_are_bounded_source_free_and_keyset_paged(
     tmp_path,
     monkeypatch,
@@ -193,33 +275,28 @@ def test_list_detail_and_timeline_are_bounded_source_free_and_keyset_paged(
         limit=2,
     )
     assert [item["research_ref"] for item in first["items"]] == [
-        "graph-branch:instance-a:branch-0002",
-        "graph-branch:instance-a:branch-0001",
+        "work-package:instance-a",
     ]
-    assert first["next_cursor"]
-    second = service.list_research(
-        owner="alice",
-        workspace_ref="workspace:workspace-a",
-        limit=2,
-        after=first["next_cursor"],
-    )
-    assert [item["research_ref"] for item in second["items"]] == [
-        "graph-branch:instance-a:branch-0000",
-    ]
-    assert second["next_cursor"] is None
+    assert first["items"][0]["branch_count"] == 3
+    assert first["next_cursor"] is None
 
     detail = service.get_research(
         owner="alice",
-        research_ref="graph-branch:instance-a:branch-0000",
+        research_ref="work-package:instance-a",
     )
-    assert detail["research_cycle"]["obligations"] == [{
+    assert len(detail["branches"]) == 3
+    branch = service.get_branch(
+        owner="alice",
+        branch_ref="graph-branch:instance-a:branch-0000",
+    )
+    assert branch["research_cycle"]["obligations"] == [{
         "obligation_ref": "obligation:obligation-1",
         "status": "open",
         "materiality": "decision_blocking",
         "question_summary": "Does the factor survive costs?",
     }]
-    assert detail["timeline_href"].endswith("/timeline")
-    serialized_detail = orjson.dumps(detail)
+    assert branch["timeline_href"].endswith("/timeline")
+    serialized_detail = orjson.dumps(branch)
     for forbidden in (
         b"source_code",
         b"private factor source",
@@ -270,7 +347,7 @@ def test_projection_uses_one_read_and_owner_scope_returns_not_found(
     service = _service(path, monkeypatch)
     service.get_research(
         owner="alice",
-        research_ref="graph-branch:instance-a:branch-0000",
+        research_ref="work-package:instance-a",
     )
     normalized = [
         " ".join(statement.upper().split())
@@ -287,7 +364,7 @@ def test_projection_uses_one_read_and_owner_scope_returns_not_found(
     with pytest.raises(KeyError, match="not found"):
         service.get_research(
             owner="bob",
-            research_ref="graph-branch:instance-a:branch-0000",
+            research_ref="work-package:instance-a",
         )
 
 
@@ -312,7 +389,8 @@ def test_large_scope_query_plans_use_indexes_and_ignore_global_history(
     )
     elapsed = time.perf_counter() - started
 
-    assert len(listed["items"]) == 20
+    assert len(listed["items"]) == 1
+    assert listed["items"][0]["branch_count"] == 1_000
     assert len(timeline["items"]) == 50
     assert elapsed < 2.0
     with connect_sqlite(path) as conn:
@@ -368,6 +446,7 @@ def test_authenticated_routes_emit_etag_and_honor_conditional_reads(
     payload = listing.get_json()
     assert payload["success"] is True
     research_ref = payload["items"][-1]["research_ref"]
+    assert research_ref == "work-package:instance-a"
 
     unchanged = app_client.get(
         "/api/profile-research",
@@ -383,10 +462,17 @@ def test_authenticated_routes_emit_etag_and_honor_conditional_reads(
     detail = app_client.get(f"/api/profile-research/{research_ref}")
     timeline = app_client.get(
         "/api/profile-research/"
-        "graph-branch:instance-a:branch-0000/timeline",
+        "work-package:instance-a/branches/branch-0000/timeline",
         query_string={"limit": 3},
     )
+    branch = app_client.get(
+        "/api/profile-research/"
+        "work-package:instance-a/branches/branch-0000"
+    )
     assert detail.status_code == 200
+    assert len(detail.get_json()["branches"]) == 3
+    assert branch.status_code == 200
+    assert branch.get_json()["branch_ref"].endswith(":branch-0000")
     assert timeline.status_code == 200
     assert len(timeline.get_json()["items"]) == 3
 

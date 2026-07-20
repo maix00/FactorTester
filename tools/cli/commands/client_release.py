@@ -18,6 +18,7 @@ from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.locations import default_client_root, validate_client_root
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_profile import client_profile
+from tools.cli.commands.client_research import client_research
 
 
 def _echo(value: dict, as_json: bool) -> None:
@@ -38,6 +39,7 @@ def client_release() -> None:
 
 client_release.add_command(client_adapter)
 client_release.add_command(client_profile)
+client_release.add_command(client_research)
 
 
 @client_release.command("activate-bundle", hidden=True)

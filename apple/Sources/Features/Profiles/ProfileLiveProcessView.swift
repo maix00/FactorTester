@@ -28,7 +28,7 @@ struct ProfileLiveProcessView: View {
         .task(id: controller.selectedWorkspaceID) {
             await controller.loadSelectedWorkspace()
         }
-        .task(id: controller.selectedResearchRef) {
+        .task(id: controller.observationKey) {
             await controller.observeSelectedResearch()
         }
     }
@@ -68,11 +68,15 @@ struct ProfileLiveProcessView: View {
             selection: $controller.selectedResearchRef
         ) { item in
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.label).lineLimit(1)
+                Text(item.productGroup).lineLimit(1)
                 HStack(spacing: 6) {
-                    Text(item.currentNode).lineLimit(1)
+                    Text("\(item.branchCount) 个假设分支").lineLimit(1)
                     Spacer()
-                    Text(item.status)
+                    Text(
+                        item.runningBranchCount > 0
+                            ? "\(item.runningBranchCount) 进行中"
+                            : item.status
+                    )
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

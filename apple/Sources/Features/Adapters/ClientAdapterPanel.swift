@@ -8,7 +8,7 @@ struct ClientAdapterPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             if !controller.adapters.isEmpty {
                 HStack {
-                    Label("本地研究", systemImage: "desktopcomputer")
+                    Label("外部服务", systemImage: "externaldrive.connected.to.line.below")
                         .font(.headline)
                     Spacer()
                     if controller.isWorking {
@@ -38,9 +38,13 @@ struct ClientAdapterPanel: View {
                 }
             }
             if let error = controller.error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
+                Label(
+                    "无法加载外部服务，请在设置中检查 FactorTester CLI。",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
                     .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.secondary)
+                    .help(error)
             }
         }
         .task { await controller.refresh() }

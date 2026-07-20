@@ -16,12 +16,12 @@ struct ProfileResearchListResponse: Decodable {
 
 struct ProfileResearchSummary: Decodable, Identifiable {
     let researchRef: String
+    let workPackageRef: String
     let workspaceRef: String
-    let label: String
-    let currentNode: String
+    let productGroup: String
     let status: String
-    let trialPlanRef: String?
-    let latestTraceRef: String?
+    let branchCount: Int
+    let runningBranchCount: Int
     let updatedAt: Double
     let detailHref: String
     let reportLookupRef: String?
@@ -29,12 +29,63 @@ struct ProfileResearchSummary: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case researchRef = "research_ref"
+        case workPackageRef = "work_package_ref"
         case workspaceRef = "workspace_ref"
+        case productGroup = "product_group"
+        case status
+        case branchCount = "branch_count"
+        case runningBranchCount = "running_branch_count"
+        case updatedAt = "updated_at"
+        case detailHref = "detail_href"
+        case reportLookupRef = "report_lookup_ref"
+    }
+}
+
+struct ProfileResearchWorkPackageDetail: Decodable {
+    let researchRef: String
+    let workPackageRef: String
+    let productGroup: String
+    let mode: String
+    let branchCount: Int
+    let omittedBranchCount: Int
+    let branches: [ProfileResearchBranchSummary]
+    let reportLookupRef: String?
+    let etag: String
+
+    enum CodingKeys: String, CodingKey {
+        case researchRef = "research_ref"
+        case workPackageRef = "work_package_ref"
+        case productGroup = "product_group"
+        case mode
+        case branchCount = "branch_count"
+        case omittedBranchCount = "omitted_branch_count"
+        case branches
+        case reportLookupRef = "report_lookup_ref"
+        case etag
+    }
+}
+
+struct ProfileResearchBranchSummary: Decodable, Identifiable {
+    let branchRef: String
+    let label: String
+    let currentNode: String
+    let status: String
+    let trialPlanRef: String?
+    let updatedAt: Double
+    let detailHref: String
+    let reportLookupRef: String?
+    var id: String { branchRef }
+
+    var branchID: String {
+        branchRef.split(separator: ":").last.map(String.init) ?? branchRef
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case branchRef = "branch_ref"
         case label
         case currentNode = "current_node"
         case status
         case trialPlanRef = "trial_plan_ref"
-        case latestTraceRef = "latest_trace_ref"
         case updatedAt = "updated_at"
         case detailHref = "detail_href"
         case reportLookupRef = "report_lookup_ref"
@@ -43,6 +94,8 @@ struct ProfileResearchSummary: Decodable, Identifiable {
 
 struct ProfileResearchDetail: Decodable {
     let researchRef: String
+    let workPackageRef: String
+    let branchRef: String
     let label: String
     let currentNode: String
     let status: String
@@ -59,6 +112,8 @@ struct ProfileResearchDetail: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case researchRef = "research_ref"
+        case workPackageRef = "work_package_ref"
+        case branchRef = "branch_ref"
         case label
         case currentNode = "current_node"
         case status

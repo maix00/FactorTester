@@ -116,6 +116,8 @@
 "个人中心" = "Account Center";
 "设置" = "Settings";
 "功能入口" = "Features";
+"外部服务" = "External Services";
+"无法加载外部服务，请在设置中检查 FactorTester CLI。" = "External services could not be loaded. Check the FactorTester CLI in Settings.";
 "已打开" = "Open Workspaces";
 "工作身份" = "Work Identities";
 "研究进度" = "Research Progress";

@@ -34,6 +34,34 @@ class ResearchGraphClientMixin(ClientMixinBase):
             f"/api/profile-research/{research_ref}"
         ))
 
+    def get_profile_research_branch(
+        self,
+        work_package_ref: str,
+        branch_id: str,
+    ) -> dict[str, Any]:
+        """Load one Hypothesis Branch under a Work Package."""
+        return self._expect_success(self.session.get(
+            f"/api/profile-research/{work_package_ref}/branches/{branch_id}"
+        ))
+
+    def list_profile_research_branch_timeline(
+        self,
+        work_package_ref: str,
+        branch_id: str,
+        *,
+        limit: int = 50,
+        after: str = "",
+    ) -> dict[str, Any]:
+        """Page one Hypothesis Branch timeline."""
+        return self._expect_success(self.session.get(
+            f"/api/profile-research/{work_package_ref}/branches/"
+            f"{branch_id}/timeline",
+            query={
+                "limit": limit,
+                "after": after or None,
+            },
+        ))
+
     def list_profile_research_timeline(
         self,
         research_ref: str,

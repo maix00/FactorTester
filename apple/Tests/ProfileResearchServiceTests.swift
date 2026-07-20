@@ -250,7 +250,7 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         await controller.loadSelectedWorkspace()
         await controller.observeSelectedResearch()
         XCTAssertEqual(clock.seconds, [5])
-        XCTAssertEqual(transport.requests.count, 3)
+        XCTAssertEqual(transport.requests.count, 4)
     }
 
     func testLeavingVisibleTaskCancelsRefreshWithoutMoreRequests() async {
@@ -275,7 +275,7 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         await fulfillment(of: [started], timeout: 1)
         task.cancel()
         await task.value
-        XCTAssertEqual(transport.requests.count, 3)
+        XCTAssertEqual(transport.requests.count, 4)
     }
 
     private func makeController(
@@ -311,6 +311,7 @@ private func fixtureResponses(
 ) -> [ResearchHTTPResponse] {
     [
         response(listJSON(), etag: "\"list-v1\""),
+        response(workPackageJSON(), etag: "\"work-package-v1\""),
         response(detailJSON(refresh: detailRefresh), etag: "\"detail-v1\""),
         response(timelineJSON(), etag: "\"timeline-v1\""),
     ]
@@ -330,12 +331,30 @@ private func response(
 private func listJSON() -> String {
     """
     {"success":true,"workspace_ref":"workspace:w","items":[{
-      "research_ref":"graph-branch:i:b","workspace_ref":"workspace:w",
-      "label":"R","current_node":"audit","status":"running",
-      "trial_plan_ref":"trial-plan:t","latest_trace_ref":"trace:s",
-      "updated_at":1,"detail_href":"/api/profile-research/graph-branch:i:b",
-      "report_lookup_ref":"graph-branch:i:b"}],
+      "research_ref":"work-package:i","work_package_ref":"work-package:i",
+      "workspace_ref":"workspace:w","product_group":"CNFutures",
+      "status":"running","branch_count":1,"running_branch_count":1,
+      "updated_at":1,"detail_href":"/api/profile-research/work-package:i",
+      "report_lookup_ref":"work-package:i"}],
      "next_cursor":null,"etag":"sha256:list"}
+    """
+}
+
+private func workPackageJSON() -> String {
+    """
+    {"success":true,"research_ref":"work-package:i",
+     "work_package_ref":"work-package:i","product_group":"CNFutures",
+     "mode":"live","branch_count":1,"omitted_branch_count":0,
+     "branches":[{"research_ref":"work-package:i",
+       "work_package_ref":"work-package:i","branch_ref":"graph-branch:i:b",
+       "workspace_ref":"workspace:w","graph_ref":"factor-research@v6",
+       "product_group":"CNFutures","mode":"live","label":"Primary",
+       "current_node":"audit","status":"running",
+       "trial_plan_ref":"trial-plan:t","latest_trace_ref":"trace:s",
+       "created_at":1,"updated_at":1,
+       "detail_href":"/api/profile-research/work-package:i/branches/b",
+       "report_lookup_ref":"graph-branch:i:b"}],
+     "report_lookup_ref":"work-package:i","etag":"sha256:work-package"}
     """
 }
 
@@ -344,7 +363,9 @@ private func detailJSON(
     node: String = "audit"
 ) -> String {
     """
-    {"success":true,"research_ref":"graph-branch:i:b","label":"R",
+    {"success":true,"research_ref":"work-package:i",
+     "work_package_ref":"work-package:i","branch_ref":"graph-branch:i:b",
+     "label":"R",
      "current_node":"\(node)","status":"running",
      "trial_plan_ref":"trial-plan:t",
      "report_lookup_ref":"graph-branch:i:b",
@@ -353,7 +374,7 @@ private func detailJSON(
        "obligation_ref":"obligation:o","status":"open",
        "materiality":"blocking","question_summary":"costs?"}],"closure":null},
      "job_refs":["job:j"],"run_refs":["run:r"],
-     "timeline_href":"/api/profile-research/graph-branch:i:b/timeline",
+     "timeline_href":"/api/profile-research/work-package:i/branches/b/timeline",
      "refresh":\(refresh),"etag":"sha256:detail"}
     """
 }

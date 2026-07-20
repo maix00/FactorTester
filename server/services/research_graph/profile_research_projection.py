@@ -30,36 +30,55 @@ MAX_REF_BYTES = 256
 LIST_FIRST_SQL = """
     SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
            i.workspace_id, i.mode, i.created_at AS instance_created_at,
-           b.branch_id, b.label, b.current_node, b.status,
-           b.current_trial_plan_hash, b.latest_trace_id,
-           b.created_at, b.updated_at
+           COUNT(b.branch_id) AS branch_count,
+           SUM(CASE WHEN b.status='running' THEN 1 ELSE 0 END)
+               AS running_branch_count,
+           MAX(b.updated_at) AS updated_at
     FROM research_graph_instances AS i
     JOIN research_graph_branches AS b
       ON b.instance_id=i.instance_id
     WHERE i.owner=? AND i.workspace_id=?
-    ORDER BY b.updated_at DESC, b.branch_id DESC
+    GROUP BY i.instance_id
+    ORDER BY updated_at DESC, i.instance_id DESC
     LIMIT ?
 """
 
 LIST_AFTER_SQL = """
     SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
            i.workspace_id, i.mode, i.created_at AS instance_created_at,
-           b.branch_id, b.label, b.current_node, b.status,
-           b.current_trial_plan_hash, b.latest_trace_id,
-           b.created_at, b.updated_at
+           COUNT(b.branch_id) AS branch_count,
+           SUM(CASE WHEN b.status='running' THEN 1 ELSE 0 END)
+               AS running_branch_count,
+           MAX(b.updated_at) AS updated_at
     FROM research_graph_instances AS i
     JOIN research_graph_branches AS b
       ON b.instance_id=i.instance_id
     WHERE i.owner=? AND i.workspace_id=?
-      AND (
-        b.updated_at<?
-        OR (b.updated_at=? AND b.branch_id<?)
-      )
+    GROUP BY i.instance_id
+    HAVING (
+        MAX(b.updated_at)<?
+        OR (MAX(b.updated_at)=? AND i.instance_id<?)
+    )
+    ORDER BY updated_at DESC, i.instance_id DESC
+    LIMIT ?
+"""
+
+WORK_PACKAGE_DETAIL_SQL = """
+    SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
+           i.workspace_id, i.mode, i.created_at AS instance_created_at,
+           b.branch_id, b.label, b.current_node, b.status,
+           b.current_trial_plan_hash, b.latest_trace_id,
+           b.created_at, b.updated_at,
+           COUNT(*) OVER () AS total_branch_count
+    FROM research_graph_instances AS i
+    JOIN research_graph_branches AS b
+      ON b.instance_id=i.instance_id
+    WHERE i.owner=? AND i.instance_id=?
     ORDER BY b.updated_at DESC, b.branch_id DESC
     LIMIT ?
 """
 
-DETAIL_SQL = """
+BRANCH_DETAIL_SQL = """
     SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
            i.workspace_id, i.mode, i.created_at AS instance_created_at,
            b.branch_id, b.label, b.current_node, b.status,
@@ -158,18 +177,18 @@ class ProfileResearchProjection:
                 ).fetchall()
         has_more = len(rows) > page_limit
         visible = rows[:page_limit]
-        items = [_research_summary(row) for row in visible]
+        items = [_work_package_summary(row) for row in visible]
         next_cursor = (
             encode_cursor(
                 kind="research",
                 at=float(visible[-1]["updated_at"]),
-                identifier=str(visible[-1]["branch_id"]),
+                identifier=str(visible[-1]["instance_id"]),
             )
             if has_more and visible
             else None
         )
         return bounded_projection({
-            "schema_version": 1,
+            "schema_version": 2,
             "workspace_ref": workspace_ref_for(workspace_id),
             "items": items,
             "next_cursor": next_cursor,
@@ -181,14 +200,56 @@ class ProfileResearchProjection:
         owner: str,
         research_ref: str,
     ) -> dict[str, Any]:
-        instance_id, branch_id = parse_research_ref(research_ref)
+        if str(research_ref).startswith("graph-branch:"):
+            return self.get_branch(
+                owner=owner,
+                branch_ref=research_ref,
+            )
+        instance_id = parse_work_package_ref(research_ref)
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            rows = conn.execute(
+                WORK_PACKAGE_DETAIL_SQL,
+                (owner, instance_id, MAX_LIST_LIMIT + 1),
+            ).fetchall()
+        if not rows:
+            raise KeyError("profile research not found")
+        visible = rows[:MAX_LIST_LIMIT]
+        first = visible[0]
+        work_package_ref = work_package_ref_for(instance_id)
+        return bounded_projection({
+            "schema_version": 2,
+            "research_ref": work_package_ref,
+            "work_package_ref": work_package_ref,
+            "workspace_ref": workspace_ref_for(str(first["workspace_id"])),
+            "graph_ref": (
+                f"{str(first['graph_id'])}@v{int(first['graph_version'])}"
+            ),
+            "product_group": str(first["product_group"]),
+            "mode": str(first["mode"]),
+            "created_at": float(first["instance_created_at"]),
+            "updated_at": max(float(row["updated_at"]) for row in rows),
+            "branch_count": int(first["total_branch_count"]),
+            "omitted_branch_count": max(
+                int(first["total_branch_count"]) - len(visible), 0
+            ),
+            "branches": [_branch_summary(row) for row in visible],
+            "report_lookup_ref": work_package_ref,
+        })
+
+    def get_branch(
+        self,
+        *,
+        owner: str,
+        branch_ref: str,
+    ) -> dict[str, Any]:
+        instance_id, branch_id = parse_research_ref(branch_ref)
         with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
             row = conn.execute(
-                DETAIL_SQL,
+                BRANCH_DETAIL_SQL,
                 (owner, instance_id, branch_id),
             ).fetchone()
         if row is None:
-            raise KeyError("profile research not found")
+            raise KeyError("profile research branch not found")
         evidence = _json_object(row["latest_trace_evidence_json"])
         cycle = _cycle_projection(evidence.get("research_cycle_checkpoint"))
         job_refs = _named_refs(evidence, "job_id", prefix="job:")
@@ -211,8 +272,8 @@ class ProfileResearchProjection:
                 "terminal": False,
             }
         value = {
-            "schema_version": 1,
-            **_research_summary(row),
+            "schema_version": 2,
+            **_branch_summary(row),
             "capability_resolution_ref": (
                 "branch-resolution:"
                 f"{instance_id}:{branch_id}:"
@@ -231,7 +292,9 @@ class ProfileResearchProjection:
             "job_refs": job_refs,
             "run_refs": run_refs,
             "timeline_href": (
-                f"/api/profile-research/{research_ref}/timeline"
+                f"/api/profile-research/"
+                f"{work_package_ref_for(instance_id)}/branches/"
+                f"{branch_id}/timeline"
             ),
             "refresh": refresh,
         }
@@ -345,6 +408,19 @@ def parse_workspace_ref(value: str) -> str:
     )
 
 
+def work_package_ref_for(instance_id: str) -> str:
+    return f"work-package:{_identifier(instance_id, field='instance_id')}"
+
+
+def parse_work_package_ref(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("research_ref must be a string")
+    parts = value.split(":")
+    if len(parts) != 2 or parts[0] != "work-package":
+        raise ValueError("research_ref must use work-package:<instance>")
+    return _identifier(parts[1], field="instance_id")
+
+
 def research_ref_for(instance_id: str, branch_id: str) -> str:
     return (
         "graph-branch:"
@@ -415,13 +491,40 @@ def bounded_projection(value: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
-def _research_summary(row: sqlite3.Row) -> dict[str, Any]:
+def _work_package_summary(row: sqlite3.Row) -> dict[str, Any]:
+    instance_id = str(row["instance_id"])
+    work_package_ref = work_package_ref_for(instance_id)
+    branch_count = int(row["branch_count"])
+    running_count = int(row["running_branch_count"])
+    return {
+        "research_ref": work_package_ref,
+        "work_package_ref": work_package_ref,
+        "workspace_ref": workspace_ref_for(str(row["workspace_id"])),
+        "graph_ref": (
+            f"{str(row['graph_id'])}@v{int(row['graph_version'])}"
+        ),
+        "product_group": str(row["product_group"]),
+        "mode": str(row["mode"]),
+        "branch_count": branch_count,
+        "running_branch_count": running_count,
+        "status": "running" if running_count else "stopped",
+        "created_at": float(row["instance_created_at"]),
+        "updated_at": float(row["updated_at"]),
+        "detail_href": f"/api/profile-research/{work_package_ref}",
+        "report_lookup_ref": work_package_ref,
+    }
+
+
+def _branch_summary(row: sqlite3.Row) -> dict[str, Any]:
     instance_id = str(row["instance_id"])
     branch_id = str(row["branch_id"])
-    research_ref = research_ref_for(instance_id, branch_id)
+    branch_ref = research_ref_for(instance_id, branch_id)
+    work_package_ref = work_package_ref_for(instance_id)
     trial_plan_hash = str(row["current_trial_plan_hash"] or "")
     return {
-        "research_ref": research_ref,
+        "research_ref": work_package_ref,
+        "work_package_ref": work_package_ref,
+        "branch_ref": branch_ref,
         "workspace_ref": workspace_ref_for(str(row["workspace_id"])),
         "graph_ref": (
             f"{str(row['graph_id'])}@v{int(row['graph_version'])}"
@@ -443,8 +546,10 @@ def _research_summary(row: sqlite3.Row) -> dict[str, Any]:
         ),
         "created_at": float(row["created_at"]),
         "updated_at": float(row["updated_at"]),
-        "detail_href": f"/api/profile-research/{research_ref}",
-        "report_lookup_ref": research_ref,
+        "detail_href": (
+            f"/api/profile-research/{work_package_ref}/branches/{branch_id}"
+        ),
+        "report_lookup_ref": branch_ref,
     }
 
 
