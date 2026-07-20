@@ -2,11 +2,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct LocalProfileForm: View {
+    @EnvironmentObject private var session: SessionStore
     @ObservedObject var controller: LocalProfileController
     @State private var id = ""
     @State private var name = ""
     @State private var serverURL = ""
     @State private var workspaceRoot = ""
+    @State private var agentID = ""
     @State private var choosingWorkspace = false
 
     var body: some View {
@@ -15,6 +17,18 @@ struct LocalProfileForm: View {
                 row("ID", "例如 maxa", $id)
                 row("名称", "显示名称", $name)
                 row("服务器", "https://server.example", $serverURL)
+                row("Agent ID", "例如 research-maxa", $agentID)
+                GridRow {
+                    Text("初始化").frame(width: 64, alignment: .leading)
+                    Text(session.user?.username ?? "请先在个人中心登录")
+                        .foregroundStyle(session.isLoggedIn ? .primary : .secondary)
+                }
+                GridRow {
+                    Spacer()
+                    Text("自动使用当前登录用户的个人因子库；Profile 不保存密码，也不能选择或冒充其他用户。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 GridRow {
                     Text("工作区").frame(width: 64, alignment: .leading)
                     HStack {
@@ -30,15 +44,19 @@ struct LocalProfileForm: View {
                     Spacer()
                     Button("保存 Profile") {
                         Task {
-                            await controller.saveProfile(
+                            await controller.bootstrapProfile(
                                 id: id, name: name,
                                 serverURL: serverURL,
-                                workspaceRoot: workspaceRoot
+                                workspaceRoot: workspaceRoot,
+                                agentID: agentID,
+                                principalRef: session.user?.username ?? ""
                             )
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled([id, name, serverURL, workspaceRoot].contains(""))
+                    .disabled(!session.isLoggedIn || [
+                        id, name, serverURL, workspaceRoot, agentID
+                    ].contains(""))
                 }
             }
             .padding(8)

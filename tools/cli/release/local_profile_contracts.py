@@ -82,7 +82,8 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
 def _initialization_source(value: Any) -> dict[str, Any]:
     fields = {
         "source_id", "kind", "owner_ref", "mode", "source_ref",
-        "snapshot_ref",
+        "snapshot_ref", "principal_ref", "session_ref",
+        "projection_hash", "source_materialized",
     }
     if not isinstance(value, dict) or set(value) != fields:
         raise ValueError("initialization source fields are invalid")
@@ -109,6 +110,18 @@ def _initialization_source(value: Any) -> dict[str, Any]:
     )
     if mode == "snapshot" and not snapshot_ref:
         raise ValueError("snapshot initialization requires snapshot_ref")
+    session_ref = _text(
+        value.get("session_ref"),
+        "initialization_source.session_ref",
+    )
+    _reference(
+        session_ref,
+        field="initialization_source.session_ref",
+        schemes={"session-binding"},
+    )
+    materialized = value.get("source_materialized")
+    if materialized is not False:
+        raise ValueError("source_materialized must remain false")
     return {
         "source_id": validate_local_identifier(
             value.get("source_id"),
@@ -122,6 +135,16 @@ def _initialization_source(value: Any) -> dict[str, Any]:
         "mode": mode,
         "source_ref": source_ref,
         "snapshot_ref": snapshot_ref,
+        "principal_ref": _text(
+            value.get("principal_ref"),
+            "initialization_source.principal_ref",
+        ),
+        "session_ref": session_ref,
+        "projection_hash": _text(
+            value.get("projection_hash"),
+            "initialization_source.projection_hash",
+        ),
+        "source_materialized": False,
     }
 
 
@@ -156,9 +179,9 @@ def validate_local_identifier(value: Any, field: str) -> str:
 
 
 def _agent(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) != {
-        "agent_id", "role", "scope",
-    }:
+    legacy = {"agent_id", "role", "scope"}
+    current = legacy | {"status", "next_action"}
+    if not isinstance(value, dict) or set(value) not in {frozenset(legacy), frozenset(current)}:
         raise ValueError("local agent descriptor fields are invalid")
     role = _text(value.get("role"), "agent.role")
     if role not in _AGENT_ROLES:
@@ -180,6 +203,11 @@ def _agent(value: Any) -> dict[str, Any]:
             str(key): _text(item, f"agent.scope.{key}")
             for key, item in sorted(scope.items())
         },
+        "status": str(value.get("status") or "needs_scope"),
+        "next_action": str(
+            value.get("next_action")
+            or "Bind an authorized research scope before execution."
+        ),
     }
 
 

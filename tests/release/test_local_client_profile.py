@@ -94,6 +94,24 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
 ) -> None:
     root = tmp_path / "client-support"
     monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    monkeypatch.setattr(
+        FactorTesterClient,
+        "current_principal",
+        lambda self: {"username": "18717974771"},
+    )
+    monkeypatch.setattr(
+        FactorTesterClient,
+        "factor_library_source_projection",
+        lambda self, owner_ref: {
+            "projection": {
+                "schema_version": 1,
+                "principal": "18717974771",
+                "owner_ref": owner_ref,
+                "factors": [{"factor_alias": "SgCCS"}],
+            },
+            "projection_hash": "a" * 64,
+        },
+    )
     runner = CliRunner()
 
     for profile_id, agent_id in (
@@ -106,11 +124,14 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
             "--display-name", profile_id.upper(),
             "--server-url", "http://127.0.0.1:8000",
             "--agent-id", agent_id,
-            "--source-owner-ref", "18717974771",
+            "--principal-ref", "18717974771",
         ])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
-        assert payload["claimed"] and payload["registered"]
+        assert payload["local_profile_claimed"]
+        assert payload["local_source_registered"]
+        assert payload["server_visibility_verified"]
+        assert payload["ready"] is False
         profile = payload["profile"]
         assert profile["profile_id"] == profile_id
         assert profile["agents"][0]["agent_id"] == agent_id
@@ -118,12 +139,91 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
         assert source["owner_ref"] == "18717974771"
         assert source["mode"] == "reference"
         assert source["source_ref"].endswith("/18717974771")
+        assert source["principal_ref"] == "18717974771"
+        assert source["projection_hash"] == "a" * 64
+        assert source["source_materialized"] is False
+        assert source["session_ref"].startswith(
+            "session-binding://18717974771/"
+        )
         assert not {"password", "token"}.intersection(source)
 
     maxa = LocalProfileStore(root).load("maxa")
     maxb = LocalProfileStore(root).load("maxb")
     assert maxa["workspace_root"] != maxb["workspace_root"]
     assert maxa["agents"] != maxb["agents"]
+    assert maxa["initialization_sources"][0]["session_ref"] != (
+        maxb["initialization_sources"][0]["session_ref"]
+    )
+
+
+def test_bootstrap_fails_closed_before_local_write_on_principal_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "client-support"
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    monkeypatch.setattr(
+        FactorTesterClient,
+        "current_principal",
+        lambda self: {"username": "someone-else"},
+    )
+
+    result = CliRunner().invoke(cli, [
+        "client", "profile", "bootstrap",
+        "--profile-id", "maxa",
+        "--display-name", "MaxA",
+        "--server-url", "http://127.0.0.1:8000",
+        "--agent-id", "research-maxa",
+        "--principal-ref", "18717974771",
+    ])
+
+    assert result.exit_code != 0
+    assert "does not match" in result.output
+    assert not (root / "profiles").exists()
+
+
+def test_bootstrap_does_not_rebind_existing_profile_to_new_principal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "client-support"
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    active = {"username": "18717974771"}
+    monkeypatch.setattr(
+        FactorTesterClient,
+        "current_principal",
+        lambda self: {"username": active["username"]},
+    )
+    monkeypatch.setattr(
+        FactorTesterClient,
+        "factor_library_source_projection",
+        lambda self, owner_ref: {
+            "projection": {
+                "principal": owner_ref,
+                "owner_ref": owner_ref,
+                "factors": [],
+            },
+            "projection_hash": owner_ref.zfill(64)[-64:],
+        },
+    )
+    runner = CliRunner()
+    base = [
+        "client", "profile", "bootstrap",
+        "--profile-id", "maxa",
+        "--display-name", "MaxA",
+        "--server-url", "http://127.0.0.1:8000",
+        "--agent-id", "research-maxa",
+    ]
+    first = runner.invoke(cli, [*base, "--principal-ref", active["username"]])
+    assert first.exit_code == 0, first.output
+    before = (root / "profiles" / "maxa.json").read_bytes()
+
+    active["username"] = "other-user"
+    second = runner.invoke(cli, [*base, "--principal-ref", active["username"]])
+
+    assert second.exit_code != 0
+    assert "bound to another principal" in second.output
+    assert (root / "profiles" / "maxa.json").read_bytes() == before
 
 
 def test_local_agent_identity_resumes_without_provider_or_model_fields(

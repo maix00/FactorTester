@@ -236,6 +236,15 @@ class FactorLibraryClientMixin(ClientMixinBase):
             query=query or None,
         ))
 
+    def factor_library_source_projection(
+        self,
+        owner_ref: str,
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            f"/custom-factors/api/client/factor-library-sources/"
+            f"{owner_ref}/projection",
+        ))
+
     def factor_library_configs(
         self,
         factor_family: str,

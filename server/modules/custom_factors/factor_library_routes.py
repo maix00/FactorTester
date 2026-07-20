@@ -1,5 +1,7 @@
 """Routes for factor-library parameter configurations."""
 from __future__ import annotations
+from hashlib import sha256
+import json
 from typing import cast
 
 from flask import jsonify, request
@@ -58,6 +60,50 @@ def api_factor_library_overview():
     factor_family_alias = request.args.get('factor_family_alias') or None
     payload = build_factor_library_overview(username, include_subordinates, product_group=product_group, factor_family_alias=factor_family_alias)
     return jsonify({'success': True, **payload})
+
+
+@cf_bp.route(
+    '/api/client/factor-library-sources/<owner_username>/projection',
+    methods=['GET'],
+)
+@login_required
+def api_client_factor_library_projection(owner_username):
+    """Return a bounded, source-free initialization projection."""
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    if not can_view_user_scope(username, owner_username):
+        return jsonify({'success': False, 'error': '无权查看该用户因子库'}), 403
+    payload = build_factor_library_overview(
+        username,
+        True,
+        product_group=request.args.get('product_group') or None,
+    )
+    allowed = {
+        'factor_alias', 'factor_family_alias', 'factor_family_name',
+        'category', 'params', 'owner_username', 'owner_alias',
+        'scope_key', 'product_group', 'updated_at',
+    }
+    factors = [
+        {key: item.get(key) for key in sorted(allowed) if key in item}
+        for item in payload.get('factors', [])
+        if item.get('owner_username') == owner_username
+    ]
+    projection = {
+        'schema_version': 1,
+        'principal': username,
+        'owner_ref': owner_username,
+        'factors': factors,
+    }
+    encoded = json.dumps(
+        projection, ensure_ascii=False, sort_keys=True,
+        separators=(',', ':'),
+    ).encode()
+    return jsonify({
+        'success': True,
+        'projection': projection,
+        'projection_hash': sha256(encoded).hexdigest(),
+    })
 
 
 @cf_bp.route('/api/factor-library-configs/<ff_alias>', methods=['GET'])

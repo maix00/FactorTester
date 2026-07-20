@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-
 import click
 
 from tools.cli.core.errors import friendly_errors
@@ -21,6 +20,8 @@ from tools.cli.release.workspace_migration import (
     rollback_workspace_migration,
     verify_workspace_migration,
 )
+from tools.cli.client import FactorTesterClient
+from tools.cli.http import HttpSession
 
 
 def _json(value) -> str:
@@ -85,7 +86,7 @@ def list_profiles(release_profile: Path | None) -> None:
     type=click.Choice(["planning", "research"]),
     default="research",
 )
-@click.option("--source-owner-ref", default="")
+@click.option("--principal-ref", default="")
 @click.option(
     "--source-mode",
     type=click.Choice(["reference", "snapshot"]),
@@ -104,7 +105,7 @@ def bootstrap_profile(
     server_url: str,
     agent_id: str,
     role: str,
-    source_owner_ref: str,
+    principal_ref: str,
     source_mode: str,
     snapshot_ref: str,
     workspace_root: Path | None,
@@ -113,10 +114,40 @@ def bootstrap_profile(
     """Idempotently discover, claim, and register one local Agent profile."""
     root = load_profile_root(release_profile)
     store = LocalProfileStore(root)
-    discovered = True
+    if not principal_ref:
+        raise ValueError("principal_ref is required")
+    client = FactorTesterClient(HttpSession(server_url))
+    authenticated = client.current_principal()
+    authenticated_ref = str(authenticated.get("username") or "")
+    if authenticated_ref != principal_ref:
+        raise ValueError("authenticated principal does not match principal_ref")
+    projection = client.factor_library_source_projection(principal_ref)
+    body = projection.get("projection") or {}
+    if body.get("principal") != principal_ref:
+        raise ValueError("factor-library projection principal mismatch")
+    if body.get("owner_ref") != principal_ref:
+        raise ValueError("factor-library projection owner mismatch")
+    serialized = json.dumps(body, ensure_ascii=False).lower()
+    if any(item in serialized for item in ("source_code", "math_expr", ".py")):
+        raise ValueError("factor-library projection contains source material")
+    projection_hash = str(projection.get("projection_hash") or "")
+    if not projection_hash:
+        raise ValueError("factor-library projection hash is missing")
     try:
-        store.load(profile_id)
+        existing = store.load(profile_id)
     except ValueError:
+        existing = None
+    if existing is not None:
+        bound_principals = {
+            str(item.get("principal_ref") or "")
+            for item in existing.get("initialization_sources", [])
+        }
+        if bound_principals and bound_principals != {principal_ref}:
+            raise ValueError(
+                "profile is bound to another principal; rebind or create a new profile"
+            )
+    discovered = True
+    if existing is None:
         discovered = False
         store.save(new_local_profile(
             profile_id=profile_id,
@@ -125,18 +156,20 @@ def bootstrap_profile(
             workspace_root=workspace_root
             or default_profile_workspace_root(profile_id),
         ))
-    if source_owner_ref:
-        store.upsert_initialization_source(profile_id, {
-            "source_id": "factor-library-initial",
-            "kind": "server_factor_library",
-            "owner_ref": source_owner_ref,
-            "mode": source_mode,
-            "source_ref": (
-                "factortester://factor-library/"
-                f"{source_owner_ref}"
-            ),
-            "snapshot_ref": snapshot_ref,
-        })
+    store.upsert_initialization_source(profile_id, {
+        "source_id": "principal-factor-library",
+        "kind": "server_factor_library",
+        "owner_ref": principal_ref,
+        "mode": source_mode,
+        "source_ref": f"factortester://factor-library/{principal_ref}",
+        "snapshot_ref": snapshot_ref,
+        "principal_ref": principal_ref,
+        "session_ref": (
+            f"session-binding://{principal_ref}/{profile_id}/{projection_hash}"
+        ),
+        "projection_hash": projection_hash,
+        "source_materialized": False,
+    })
     scope = (
         {"workspace_id": "all"}
         if role == "planning"
@@ -146,17 +179,21 @@ def bootstrap_profile(
         "agent_id": agent_id,
         "role": role,
         "scope": scope,
+        "status": "needs_scope",
+        "next_action": "Bind a real workspace or research instance and branch.",
     })
     click.echo(_json({
         "schema_version": 1,
         "discovered_existing_profile": discovered,
-        "claimed": True,
-        "registered": True,
+        "local_profile_claimed": True,
+        "local_source_registered": True,
+        "server_visibility_verified": True,
+        "ready": False,
         "profile": profile,
         "agent_prompt": (
             f"Use FactorTester profile '{profile_id}' as Agent "
             f"'{agent_id}', inspect its initialization provenance, "
-            "then resume the authorized research scope."
+            "bind a real research scope, then resume work."
         ),
     }))
 

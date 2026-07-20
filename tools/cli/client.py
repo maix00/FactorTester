@@ -30,6 +30,9 @@ class FactorTesterClient(
             {"username": username, "password": password},
         ))
 
+    def current_principal(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get("/api/me"))
+
     def set_keep_login(self, enabled: bool) -> dict[str, Any]:
         return self._expect_success(
             self.session.post("/api/keep_login", {

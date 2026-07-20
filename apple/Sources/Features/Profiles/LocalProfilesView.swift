@@ -67,6 +67,22 @@ struct LocalProfilesView: View {
                 Text(profile.workspaceRoot)
                     .font(.caption).foregroundStyle(.secondary)
                 Divider()
+                Text("初始化来源")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if profile.initializationSources.isEmpty {
+                    Text("尚未登记当前登录用户的个人因子库")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(profile.initializationSources) { source in
+                    HStack {
+                        Label("当前 principal：\(source.ownerRef)", systemImage: "books.vertical")
+                        Text(source.mode).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(source.sourceRef).font(.caption)
+                    }
+                }
+                Divider()
                 Text("可见工作区")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
