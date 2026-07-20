@@ -86,6 +86,9 @@
 "Timeline / steps" = "Timeline / steps";
 "Select a step" = "Select a step";
 "Open" = "Open";
+"Select a step to load its bounded report detail." = "Select a step to load its bounded report detail.";
+"View original report" = "View original report";
+"Legacy report section summary is unavailable." = "Legacy report section summary is unavailable.";
 "迁移工作区" = "Migrate Workspace";
 "迁移预览" = "Migration Preview";
 "验证迁移" = "Verify Migration";

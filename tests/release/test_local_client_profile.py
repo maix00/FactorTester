@@ -33,7 +33,7 @@ def test_local_profile_is_strict_private_and_version_independent(
     assert path.stat().st_mode & 0o777 == 0o600
     assert not (root / "current.json").exists()
     assert not {"password", "token", "email"}.intersection(stored)
-    assert stored["schema_version"] == 5
+    assert stored["schema_version"] == 6
     assert stored["workspaces"] == []
     assert stored["initialization_sources"] == []
     assert stored["session_binding"] == {}
@@ -85,7 +85,7 @@ def test_version_one_profile_is_upgraded_without_losing_identity(
 
     upgraded = LocalProfileStore(root).load("legacy")
 
-    assert upgraded["schema_version"] == 5
+    assert upgraded["schema_version"] == 6
     assert upgraded["profile_id"] == "legacy"
     assert upgraded["workspaces"] == []
     assert upgraded["initialization_sources"] == []
@@ -402,6 +402,7 @@ def test_profile_history_stores_only_compact_refs_and_deep_links(
             "status": "ready",
             "content_hash": "sha256:abc",
             "local_ref": (tmp_path / "report.md").as_uri(),
+            "index_ref": (tmp_path / "REPORT.index.json").as_uri(),
             "section_refs": [{
                 "link_id": "section-method",
                 "kind": "evidence",

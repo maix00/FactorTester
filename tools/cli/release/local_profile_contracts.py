@@ -26,7 +26,7 @@ def new_local_profile(
     principal_ref: str = "",
 ) -> dict[str, Any]:
     return validate_local_profile({
-        "schema_version": 5,
+        "schema_version": 6,
         "profile_id": profile_id,
         "display_name": display_name,
         "server": {"base_url": server_url},
@@ -65,7 +65,7 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
     }
     if not (allowed - legacy_optional).issubset(observed) or observed - allowed:
         raise ValueError("local profile fields are invalid")
-    if value.get("schema_version") not in {1, 2, 3, 4, 5}:
+    if value.get("schema_version") not in {1, 2, 3, 4, 5, 6}:
         raise ValueError("local profile schema_version is unsupported")
     server = value.get("server")
     if not isinstance(server, dict) or set(server) != {"base_url"}:
@@ -85,7 +85,7 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         value.get("research_records", []), "research_records"
     )
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
@@ -158,11 +158,15 @@ def _research_record(value: Any) -> dict[str, Any]:
 
 
 def _research_artifact(value: Any) -> dict[str, Any]:
-    fields = {
+    legacy_fields = {
         "artifact_ref", "format", "status", "content_hash", "local_ref",
         "section_refs",
     }
-    if not isinstance(value, dict) or set(value) != fields:
+    fields = legacy_fields | {"index_ref"}
+    if (
+        not isinstance(value, dict)
+        or set(value) not in {frozenset(legacy_fields), frozenset(fields)}
+    ):
         raise ValueError("research artifact fields are invalid")
     format_name = _text(value.get("format"), "artifact.format")
     if format_name not in _ARTIFACT_FORMATS:
@@ -171,10 +175,16 @@ def _research_artifact(value: Any) -> dict[str, Any]:
     if status not in _RESEARCH_STATUS:
         raise ValueError("research artifact status is unsupported")
     local_ref = str(value.get("local_ref") or "")
+    index_ref = str(value.get("index_ref") or "")
     section_refs = _array(value.get("section_refs"), "section_refs")
     _reference(
         local_ref,
         field="artifact.local_ref",
+        schemes={"file", "artifact"},
+    )
+    _reference(
+        index_ref,
+        field="artifact.index_ref",
         schemes={"file", "artifact"},
     )
     return {
@@ -185,6 +195,7 @@ def _research_artifact(value: Any) -> dict[str, Any]:
         "status": status,
         "content_hash": str(value.get("content_hash") or ""),
         "local_ref": local_ref,
+        "index_ref": index_ref,
         "section_refs": [_deep_link(item) for item in section_refs],
     }
 
