@@ -7,6 +7,7 @@ import pytest
 from click.testing import CliRunner
 
 from tools.cli.app import cli
+from tools.cli.client import FactorTesterClient
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.local_profile import validate_local_profile
 
@@ -57,3 +58,88 @@ def test_client_cli_exposes_generic_profile_and_adapter_commands(
     adapters = runner.invoke(cli, ["client", "adapter", "list"])
     assert adapters.exit_code == 0
     assert json.loads(adapters.output) == []
+
+
+def test_local_agent_identity_resumes_without_provider_or_model_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "client-support"
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    store = LocalProfileStore(root)
+    store.save(new_local_profile(
+        profile_id="agent-profile",
+        display_name="Research Agent",
+        server_url="http://127.0.0.1:8123",
+        workspace_root=tmp_path / "workspace",
+    ))
+    runner = CliRunner()
+    configured = runner.invoke(cli, [
+        "client", "profile", "agent", "set", "agent-profile",
+        "--agent-id", "planner-a",
+        "--role", "planning",
+        "--workspace-id", "workspace-1",
+    ])
+    assert configured.exit_code == 0, configured.output
+    seen: list[tuple[str, dict]] = []
+
+    def fake_resume(self, agent_id: str, **kwargs):
+        seen.append((agent_id, kwargs))
+        return {
+            "schema_version": 1,
+            "agent": {"agent_id": agent_id, "role": kwargs["role"]},
+            "resume_ref": "sha256:stable",
+            "packet_bytes": 180,
+        }
+
+    monkeypatch.setattr(FactorTesterClient, "resume_agent", fake_resume)
+    first = runner.invoke(cli, [
+        "agent-flow", "resume-local", "agent-profile", "planner-a",
+    ])
+    second = runner.invoke(cli, [
+        "agent-flow", "resume-local", "agent-profile", "planner-a",
+    ])
+
+    assert first.exit_code == second.exit_code == 0
+    assert json.loads(first.output) == json.loads(second.output)
+    assert seen == [
+        ("planner-a", {
+            "role": "planning",
+            "workspace_id": "workspace-1",
+            "instance_id": "",
+            "branch_id": "",
+        }),
+    ] * 2
+    profile = store.load("agent-profile")
+    serialized = json.dumps(profile).lower()
+    assert "runtime_id" not in serialized
+    assert "model_id" not in serialized
+    assert "codex" not in serialized
+
+
+def test_adapter_credentials_are_opaque_keychain_references(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = LocalProfileStore(root)
+    store.save(new_local_profile(
+        profile_id="human",
+        display_name="Human",
+        server_url="http://127.0.0.1:8123",
+        workspace_root=tmp_path / "workspace",
+    ))
+
+    stored = store.upsert_adapter("human", {
+        "adapter_id": "ai-trader",
+        "enabled": True,
+        "credential_ref": "keychain://ai4trade/token",
+        "configuration_ref": "profile://ai-trader",
+    })
+    assert stored["adapters"][0]["credential_ref"].startswith("keychain://")
+    with pytest.raises(ValueError, match="opaque"):
+        store.upsert_adapter("human", {
+            "adapter_id": "ai-trader",
+            "enabled": True,
+            "credential_ref": "secret-token",
+            "configuration_ref": "",
+        })

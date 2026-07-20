@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from tools.cli.commands.agent_resume import resume_local_agent
 from tools.cli.core.context import client_from_config
 
 
@@ -24,6 +25,9 @@ def _read_json_object(path: Path, *, label: str) -> dict:
 @click.group("agent-flow")
 def agent_flow() -> None:
     """管理 Agent Budget Period 与 Agent Invocation 生命周期。"""
+
+
+agent_flow.add_command(resume_local_agent)
 
 
 @agent_flow.command("resume")
