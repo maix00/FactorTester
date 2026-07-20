@@ -91,6 +91,8 @@ def test_macos_embeds_signed_local_adapter_web_ui() -> None:
 
     assert '["client"] + tail' in controller
     assert '["adapter", "start", adapter.id]' in controller
+    assert "!adapter.running && !adapter.healthy" in controller
+    assert "外部服务可用" in panel
     assert "127.0.0.1" in model and "localhost" in model
     assert "openTarget" in panel
     assert "LocalAdapterWebView" in panel

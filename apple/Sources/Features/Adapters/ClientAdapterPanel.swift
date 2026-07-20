@@ -71,7 +71,10 @@ struct ClientAdapterPanel: View {
                 Button(adapter.running ? "停止" : "启动") {
                     Task { await controller.toggle(adapter) }
                 }
-                .disabled(controller.isWorking)
+                .disabled(
+                    controller.isWorking
+                        || (adapter.healthy && !adapter.running)
+                )
                 Spacer()
                 Button("在 App 中打开") {
                     Task { await controller.open(adapter) }
@@ -92,10 +95,10 @@ struct ClientAdapterPanel: View {
     private func statusBadge(_ adapter: ClientAdapterModel) -> some View {
         let label = adapter.running
             ? (adapter.healthy ? "运行中" : "启动中")
-            : "已停止"
-        let color: Color = adapter.running
-            ? (adapter.healthy ? .green : .orange)
-            : .secondary
+            : (adapter.healthy ? "外部服务可用" : "已停止")
+        let color: Color = adapter.healthy
+            ? .green
+            : (adapter.running ? .orange : .secondary)
         return Text(label)
             .font(.caption.weight(.medium))
             .foregroundStyle(color)

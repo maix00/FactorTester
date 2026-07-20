@@ -49,7 +49,7 @@ final class ClientAdapterController: ObservableObject {
             return
         }
         await perform {
-            if !adapter.running {
+            if !adapter.running && !adapter.healthy {
                 _ = try await ReleaseCommand.runObject(
                     self.arguments(["adapter", "start", adapter.id]),
                     executable: self.cliPath
