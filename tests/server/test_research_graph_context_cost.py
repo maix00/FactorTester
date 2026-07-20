@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import time
+
+import orjson
 
 import settings as Settings
 from server.services import research_graphs
@@ -134,3 +137,27 @@ def test_context_query_plan_uses_primary_key_lookups(
     assert any("RESEARCH_GRAPH_INSTANCES" in detail for detail in details)
     assert any("RESEARCH_GRAPH_BRANCHES" in detail for detail in details)
     assert any("RESEARCH_GRAPH_TRACE" in detail for detail in details)
+
+
+def test_context_cost_receipt_is_content_addressed() -> None:
+    receipt_path = (
+        Path(__file__).parents[2]
+        / "docs"
+        / "research-decision-graph"
+        / "acceptance"
+        / "context-cost-receipt.json"
+    )
+    receipt = orjson.loads(receipt_path.read_bytes())
+    declared_hash = receipt.pop("receipt_hash")
+    actual_hash = hashlib.sha256(
+        orjson.dumps(receipt, option=orjson.OPT_SORT_KEYS)
+    ).hexdigest()
+
+    assert actual_hash == declared_hash
+    assert receipt["comparisons"] == {
+        "sql_equal": True,
+        "context_equal": True,
+    }
+    assert {
+        item["history_rows"] for item in receipt["measurements"]
+    } == {0, 1000}
