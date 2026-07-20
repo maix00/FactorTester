@@ -33,11 +33,12 @@ def test_local_profile_is_strict_private_and_version_independent(
     assert path.stat().st_mode & 0o777 == 0o600
     assert not (root / "current.json").exists()
     assert not {"password", "token", "email"}.intersection(stored)
-    assert stored["schema_version"] == 6
+    assert stored["schema_version"] == 7
     assert stored["workspaces"] == []
     assert stored["initialization_sources"] == []
     assert stored["session_binding"] == {}
     assert stored["research_records"] == []
+    assert stored["factor_workspace_binding"] == {}
 
     with pytest.raises(ValueError, match="fields"):
         validate_local_profile({**stored, "token": "must-not-be-stored"})
@@ -96,7 +97,7 @@ def test_version_one_profile_is_upgraded_without_losing_identity(
 
     upgraded = LocalProfileStore(root).load("legacy")
 
-    assert upgraded["schema_version"] == 6
+    assert upgraded["schema_version"] == 7
     assert upgraded["profile_id"] == "legacy"
     assert upgraded["workspaces"] == []
     assert upgraded["initialization_sources"] == []

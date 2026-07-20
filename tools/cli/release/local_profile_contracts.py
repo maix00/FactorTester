@@ -26,7 +26,7 @@ def new_local_profile(
     principal_ref: str = "",
 ) -> dict[str, Any]:
     return validate_local_profile({
-        "schema_version": 6,
+        "schema_version": 7,
         "profile_id": profile_id,
         "display_name": display_name,
         "server": {"base_url": server_url},
@@ -44,6 +44,7 @@ def new_local_profile(
         ),
         "agents": [],
         "research_records": [],
+        "factor_workspace_binding": {},
         "adapters": [],
     })
 
@@ -57,15 +58,17 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "initialization_sources",
         "session_binding",
         "research_records",
+        "factor_workspace_binding",
     }
     observed = set(value)
     legacy_optional = {
         "workspaces", "initialization_sources", "session_binding",
         "research_records",
+        "factor_workspace_binding",
     }
     if not (allowed - legacy_optional).issubset(observed) or observed - allowed:
         raise ValueError("local profile fields are invalid")
-    if value.get("schema_version") not in {1, 2, 3, 4, 5, 6}:
+    if value.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7}:
         raise ValueError("local profile schema_version is unsupported")
     server = value.get("server")
     if not isinstance(server, dict) or set(server) != {"base_url"}:
@@ -84,8 +87,11 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
     research_records = _array(
         value.get("research_records", []), "research_records"
     )
+    factor_workspace_binding = _factor_workspace_binding(
+        value.get("factor_workspace_binding", {})
+    )
     return {
-        "schema_version": 6,
+        "schema_version": 7,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
@@ -102,8 +108,77 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "research_records": [
             _research_record(item) for item in research_records
         ],
+        "factor_workspace_binding": factor_workspace_binding,
         "agents": [_agent(item) for item in agents],
         "adapters": [_adapter(item) for item in adapters],
+    }
+
+
+def _factor_workspace_binding(value: Any) -> dict[str, Any]:
+    if value == {}:
+        return {}
+    fields = {
+        "binding_id", "canonical_repo_ref", "base_commit", "branch",
+        "worktree_path", "research_root", "git_common_dir", "owner_ref",
+        "sync_policy", "receipt_hash", "receipt_ref",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("factor workspace binding fields are invalid")
+    sync = value.get("sync_policy")
+    if not isinstance(sync, dict) or set(sync) != {
+        "source_sync_enabled", "auto_push", "auto_merge",
+    }:
+        raise ValueError("factor workspace sync policy fields are invalid")
+    if sync["auto_push"] is not False or sync["auto_merge"] is not False:
+        raise ValueError("factor workspace cannot auto push or merge")
+    commit = _text(value.get("base_commit"), "factor_workspace.base_commit")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("factor workspace base_commit is invalid")
+    canonical_ref = _text(
+        value.get("canonical_repo_ref"),
+        "factor_workspace.canonical_repo_ref",
+    )
+    _reference(
+        canonical_ref,
+        field="factor_workspace.canonical_repo_ref",
+        schemes={"local-factor-git"},
+    )
+    receipt_ref = _text(
+        value.get("receipt_ref"), "factor_workspace.receipt_ref"
+    )
+    _reference(
+        receipt_ref,
+        field="factor_workspace.receipt_ref",
+        schemes={"file"},
+    )
+    return {
+        "binding_id": validate_local_identifier(
+            value.get("binding_id"), "factor_workspace.binding_id"
+        ),
+        "canonical_repo_ref": canonical_ref,
+        "base_commit": commit,
+        "branch": _text(value.get("branch"), "factor_workspace.branch"),
+        "worktree_path": _text(
+            value.get("worktree_path"), "factor_workspace.worktree_path"
+        ),
+        "research_root": _text(
+            value.get("research_root"), "factor_workspace.research_root"
+        ),
+        "git_common_dir": _text(
+            value.get("git_common_dir"), "factor_workspace.git_common_dir"
+        ),
+        "owner_ref": _text(
+            value.get("owner_ref"), "factor_workspace.owner_ref"
+        ),
+        "sync_policy": {
+            "source_sync_enabled": bool(sync["source_sync_enabled"]),
+            "auto_push": False,
+            "auto_merge": False,
+        },
+        "receipt_hash": _text(
+            value.get("receipt_hash"), "factor_workspace.receipt_hash"
+        ),
+        "receipt_ref": receipt_ref,
     }
 
 
