@@ -14,6 +14,9 @@ from server.modules.custom_factors.factor_library_service import (
     list_factor_library_config_users,
     save_current_user_library_config,
 )
+from server.modules.custom_factors.client_library import (
+    build_client_library_projection,
+)
 from server.modules.custom_factors.factor_library_store import (
     DEFAULT_SCOPE_KEY,
     delete_factor_param_config,
@@ -60,6 +63,37 @@ def api_factor_library_overview():
     factor_family_alias = request.args.get('factor_family_alias') or None
     payload = build_factor_library_overview(username, include_subordinates, product_group=product_group, factor_family_alias=factor_family_alias)
     return jsonify({'success': True, **payload})
+
+
+@cf_bp.route('/api/client/factor-library', methods=['GET'])
+@login_required
+def api_client_factor_library():
+    """Return only registered, source-free metadata for embedded clients."""
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    include_subordinates = (
+        request.args.get('include_subordinates') == '1'
+    )
+    payload = build_factor_library_overview(
+        username,
+        include_subordinates,
+        product_group=(
+            request.args.get('product_group')
+            or request.args.get('scope_key')
+            or None
+        ),
+        factor_family_alias=(
+            request.args.get('factor_family_alias') or None
+        ),
+    )
+    return jsonify({
+        'success': True,
+        **build_client_library_projection(
+            payload,
+            principal=username,
+        ),
+    })
 
 
 @cf_bp.route(
