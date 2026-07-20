@@ -382,6 +382,9 @@ def verify_factor_worktree_binding(
 def repair_factor_worktree_binding(
     client_root: Path,
     profile_id: str,
+    *,
+    run_pyright: bool = True,
+    refresh_manifest: bool = True,
 ) -> dict[str, Any]:
     root = validate_client_root(client_root)
     profile = LocalProfileStore(root).load(profile_id)
@@ -402,8 +405,11 @@ def repair_factor_worktree_binding(
     research_root = Path(str(binding["research_root"]))
     research_root.mkdir(parents=True, exist_ok=True)
     _configure_safe_hooks(repo, target, research_root)
-    _write_binding_manifest(target, binding)
-    return verify_factor_worktree_binding(root, profile_id, run_pyright=True)
+    if refresh_manifest:
+        _write_binding_manifest(target, binding)
+    return verify_factor_worktree_binding(
+        root, profile_id, run_pyright=run_pyright
+    )
 
 
 def rollback_factor_worktree_binding(

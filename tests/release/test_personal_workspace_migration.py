@@ -48,6 +48,12 @@ def _fixture(
         "workspace_root": str(source),
     }))
     (source / "Factor.py").write_text("value = 1\n")
+    (source / "tools").mkdir()
+    (source / "tools/__init__.pyi").write_text("value: int\n")
+    (source / "pyrightconfig.json").write_text(json.dumps({
+        "include": ["Factor.py", "tools"],
+        "reportMissingModuleSource": "none",
+    }))
     _git(source, "add", ".")
     _git(source, "commit", "-m", "base")
     linked_root = tmp_path / "profiles"

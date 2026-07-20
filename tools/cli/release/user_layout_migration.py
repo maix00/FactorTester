@@ -11,7 +11,11 @@ import subprocess
 from typing import Any
 from uuid import uuid4
 
-from .factor_worktree import CanonicalFactorRepoStore
+from .factor_worktree import (
+    CanonicalFactorRepoStore,
+    repair_factor_worktree_binding,
+    verify_factor_worktree_binding,
+)
 from .local_profile import LocalProfileStore
 from .local_profile_contracts import validate_local_identifier
 from .locations import validate_client_root
@@ -364,6 +368,15 @@ def verify_user_layout_migration(
             _profile_mapping_matches(store, item)
             for item in receipt["profile_mapping"]
         ),
+        "factor_worktree_bindings_valid": all(
+            (
+                not item["target_worktree"]
+                or verify_factor_worktree_binding(
+                    root, item["profile_id"]
+                )["valid"]
+            )
+            for item in receipt["profile_mapping"]
+        ),
         "research_and_local_data_preserved": all(
             (
                 not item["research_present"]
@@ -588,6 +601,18 @@ def _update_profiles(
             binding["git_common_dir"] = new_common
             profile["factor_workspace_binding"] = binding
         saved = store.save(profile)
+        if binding:
+            repair = repair_factor_worktree_binding(
+                store.root.parent,
+                saved["profile_id"],
+                run_pyright=False,
+                refresh_manifest=False,
+            )
+            if not repair["valid"]:
+                raise ValueError(
+                    "relocated factor worktree repair failed: "
+                    + json.dumps(repair["checks"], sort_keys=True)
+                )
         mapping = {**item, "removed_workspace_paths": sorted(removed)}
         mapping["profile_sha256"] = json_hash(saved)
         mappings.append(mapping)

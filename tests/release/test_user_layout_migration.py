@@ -139,6 +139,20 @@ def test_unified_layout_preserves_and_repairs_everything_then_rolls_back(
     assert profile["factor_workspace_binding"]["research_root"] == str(
         maxa_root / "research"
     )
+    assert _git(
+        maxa_worktree,
+        "config",
+        "--worktree",
+        "--get",
+        "core.hooksPath",
+    ) == str(maxa_worktree / ".factortester/hooks-disabled")
+    assert _git(
+        maxa_worktree,
+        "config",
+        "--worktree",
+        "--get",
+        "core.excludesFile",
+    ) == str(maxa_root / "research/factor-worktree.gitignore")
     claim = store.claim_agent("maxa", "research-maxa")
     assert claim["recommended_cwd"] == str(maxa_worktree)
     assert sha256(historical.read_bytes()).hexdigest() == historical_hash
