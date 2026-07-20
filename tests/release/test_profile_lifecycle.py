@@ -14,11 +14,27 @@ from tools.cli.release.factor_worktree import (
     apply_factor_worktree_binding,
     plan_factor_worktree_binding,
 )
+from tools.cli.release import factor_worktree
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile_lifecycle import ProfileLifecycle
 
 
 OWNER = "factor-owner"
+
+
+@pytest.fixture(autouse=True)
+def _bundled_pyright(monkeypatch):
+    monkeypatch.setattr(
+        factor_worktree,
+        "run_bundled_pyright",
+        lambda _root: {
+            "version": "1.1.410",
+            "returncode": 0,
+            "files_analyzed": 2,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
 
 
 def _git(root: Path, *arguments: str) -> str:

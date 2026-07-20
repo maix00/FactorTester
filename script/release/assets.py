@@ -22,6 +22,7 @@ DEPENDENCIES = (
     "rich==15.0.0",
 )
 PYINSTALLER_VERSION = "6.21.0"
+PYRIGHT_VERSION = "1.1.410"
 
 
 def build_python_assets(repo: Path, output: Path) -> list[Path]:
@@ -139,11 +140,13 @@ def embed_client_runtime(
                 "install",
                 "--disable-pip-version-check",
                 f"pyinstaller=={PYINSTALLER_VERSION}",
+                f"pyright[nodejs]=={PYRIGHT_VERSION}",
                 str(repo / "tools" / "cli"),
                 str(repo / "tools" / "cli" / "agent-harness"),
             ],
             check=True,
         )
+        node_binary = _nodejs_wheel_binary(environment)
         bootstrap = root / "factortester_runtime.py"
         bootstrap.write_text(
             "from pathlib import Path\n"
@@ -166,6 +169,12 @@ def embed_client_runtime(
                 "factortester",
                 "--collect-all",
                 "cli_anything.factortester_research",
+                "--collect-all",
+                "pyright",
+                "--hidden-import",
+                "nodejs_wheel",
+                "--add-binary",
+                f"{node_binary}:nodejs_wheel/bin",
                 "--distpath",
                 str(root / "dist"),
                 "--workpath",
@@ -212,6 +221,15 @@ def embed_client_runtime(
         encoding="utf-8",
     )
     return receipt_path
+
+
+def _nodejs_wheel_binary(environment: Path) -> Path:
+    matches = list(environment.glob(
+        "lib/python*/site-packages/nodejs_wheel/bin/node"
+    ))
+    if len(matches) != 1 or not matches[0].is_file():
+        raise ValueError("pinned nodejs-wheel runtime is missing")
+    return matches[0]
 
 
 def _build_wheel(

@@ -62,6 +62,13 @@ def test_local_build_script_uses_installed_app_identity() -> None:
     ).read_text(encoding="utf-8")
     assert 'APP_NAME="FTClient"' in source
     assert 'APP_NAME="FactorTester-Client"' not in source
+    for contract in (
+        "CFBundleIdentifier", "CFBundleShortVersionString",
+        "CFBundleVersion", "bundle_hash", "bundle-receipt.json",
+        'receipt["files"]["bin/factortester"]',
+    ):
+        assert contract in source
+    assert "--install|install" in source
 
 
 def test_manifest_accepts_current_and_legacy_app_archive_names() -> None:
@@ -145,6 +152,11 @@ def test_embedded_runtime_writes_internal_hash_receipt(
 
     monkeypatch.setattr(release_assets.venv, "EnvBuilder", FakeEnvironment)
     monkeypatch.setattr(release_assets.subprocess, "run", fake_run)
+    node = tmp_path / "node"
+    node.write_bytes(b"node")
+    monkeypatch.setattr(
+        release_assets, "_nodejs_wheel_binary", lambda _environment: node
+    )
 
     receipt = embed_client_runtime(
         repo,

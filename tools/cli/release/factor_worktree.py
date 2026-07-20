@@ -12,6 +12,12 @@ import subprocess
 from typing import Any
 import uuid
 
+from .authoring_runtime import (
+    AUTHORING_CONTRACT_ID,
+    authoring_status_paths,
+    refresh_authoring_metadata,
+    run_bundled_pyright,
+)
 from .local_profile import LocalProfileStore
 from .local_profile_contracts import validate_local_identifier
 from .locations import validate_client_root
@@ -23,6 +29,9 @@ _HOOK_ENV = {
     "FACTOR_WORKSPACE_SKIP_AUTOSYNC": "1",
     "GIT_TERMINAL_PROMPT": "0",
 }
+_GENERATED_BASELINE_SUBJECT = (
+    f"chore: refresh {AUTHORING_CONTRACT_ID}"
+)
 
 
 class CanonicalFactorRepoStore:
@@ -237,6 +246,7 @@ def apply_factor_worktree_binding(
             return existing
         raise ValueError("factor worktree receipt exists but binding is invalid")
     recovered = _matches_planned_worktree(repo, target, plan)
+    generated_baseline: dict[str, Any]
     if not recovered:
         branch_exists = _ref_exists(
             repo, f"refs/heads/{plan['branch']}"
@@ -263,6 +273,7 @@ def apply_factor_worktree_binding(
             raise ValueError("factor worktree target collision")
         staging = target.parent / f".{target.name}.staging-{uuid.uuid4().hex}"
         target.parent.mkdir(parents=True, exist_ok=True)
+        branch_started_at_base = not branch_exists or recover_branch
         try:
             if recover_branch:
                 _git_checked(
@@ -275,20 +286,34 @@ def apply_factor_worktree_binding(
                     str(staging), str(plan["base_commit"]),
                 )
             _write_worktree_manifest(staging, plan)
-            _assert_authoring_ready(staging)
+            generated_baseline = _prepare_generated_baseline(staging, plan)
             _checkpoint(checkpoint, "before_publish")
             _git_checked(repo, "worktree", "move", str(staging), str(target))
         except Exception:
             if _is_worktree(repo, staging):
-                _git_result(repo, "worktree", "remove", str(staging))
+                _git_result(
+                    repo, "worktree", "remove", "--force", str(staging)
+                )
+            if (
+                branch_started_at_base
+                and _ref_exists(repo, f"refs/heads/{plan['branch']}")
+                and _generated_commit_is_safe_to_discard(repo, plan)
+            ):
+                _git_checked(
+                    repo, "branch", "-f", str(plan["branch"]),
+                    str(plan["base_commit"]),
+                )
             raise
+    else:
+        generated_baseline = _prepare_generated_baseline(target, plan)
     research_root = Path(str(plan["research_root"]))
     research_root.mkdir(parents=True, exist_ok=True)
     _configure_safe_hooks(repo, target, research_root)
     _write_worktree_manifest(target, plan)
-    _assert_authoring_ready(target)
+    if _head(target) != generated_baseline["baseline_commit"]:
+        raise ValueError("generated authoring baseline changed during publication")
     _checkpoint(checkpoint, "before_receipt")
-    receipt = _build_receipt(plan)
+    receipt = _build_receipt(plan, generated_baseline)
     write_json(receipt_path, receipt)
     receipt_path.chmod(0o600)
     _checkpoint(checkpoint, "before_profile")
@@ -517,32 +542,161 @@ def _write_binding_manifest(worktree: Path, binding: dict[str, Any]) -> None:
     )
 
 
-def _assert_authoring_ready(worktree: Path) -> None:
+def _prepare_generated_baseline(
+    worktree: Path,
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    refresh = refresh_authoring_metadata(worktree)
+    changed = list(refresh["changed_paths"])
+    created = False
+    if changed:
+        _git_checked(worktree, "add", "--", *changed)
+        date = _git_value(
+            worktree,
+            "show",
+            "-s",
+            "--format=%aI",
+            str(plan["base_commit"]),
+        )
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(worktree),
+                "-c",
+                "user.name=FactorTester Client",
+                "-c",
+                "user.email=factortester-client@invalid",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "commit",
+                "-m",
+                _GENERATED_BASELINE_SUBJECT,
+            ],
+            env={
+                **os.environ,
+                **_HOOK_ENV,
+                "GIT_AUTHOR_DATE": date,
+                "GIT_COMMITTER_DATE": date,
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            raise ValueError(
+                "cannot commit generated authoring baseline: "
+                + result.stderr.strip()
+            )
+        created = True
+    elif _head(worktree) != plan["base_commit"]:
+        if not _generated_baseline_matches(worktree, plan):
+            raise ValueError("factor worktree has an unrecognized baseline commit")
+        changed = _git(
+            worktree,
+            "diff",
+            "--name-only",
+            f"{plan['base_commit']}..HEAD",
+        ).splitlines()
+    if authoring_status_paths(worktree):
+        raise ValueError("generated authoring baseline did not leave a clean worktree")
+    pyright = _assert_authoring_ready(worktree)
+    return {
+        **refresh,
+        "changed_paths": changed,
+        "base_commit": plan["base_commit"],
+        "baseline_commit": _head(worktree),
+        "commit_created": created,
+        "commit_subject": (
+            _GENERATED_BASELINE_SUBJECT if changed else None
+        ),
+        "pyright": pyright,
+    }
+
+
+def _generated_baseline_matches(
+    worktree: Path,
+    plan: dict[str, Any],
+) -> bool:
+    head = _head(worktree)
+    if head == plan["base_commit"]:
+        return True
+    parents = _git_value(worktree, "show", "-s", "--format=%P", head).split()
+    subject = _git_value(worktree, "show", "-s", "--format=%s", head)
+    changed = set(
+        _git(
+            worktree,
+            "diff",
+            "--name-only",
+            f"{plan['base_commit']}..{head}",
+        ).splitlines()
+    )
+    return (
+        parents == [plan["base_commit"]]
+        and subject == _GENERATED_BASELINE_SUBJECT
+        and bool(changed)
+        and changed <= {
+            "pyrightconfig.json",
+            "tools/factors/Parameters.pyi",
+        }
+        and not authoring_status_paths(worktree)
+    )
+
+
+def _generated_commit_is_safe_to_discard(
+    repo: Path,
+    plan: dict[str, Any],
+) -> bool:
+    branch_head = _git_value(
+        repo, "rev-parse", f"refs/heads/{plan['branch']}"
+    )
+    if branch_head == plan["base_commit"]:
+        return True
+    parents = _git_value(
+        repo, "show", "-s", "--format=%P", branch_head
+    ).split()
+    subject = _git_value(
+        repo, "show", "-s", "--format=%s", branch_head
+    )
+    changed = set(
+        _git(
+            repo,
+            "diff",
+            "--name-only",
+            f"{plan['base_commit']}..{branch_head}",
+        ).splitlines()
+    )
+    return (
+        parents == [plan["base_commit"]]
+        and subject == _GENERATED_BASELINE_SUBJECT
+        and bool(changed)
+        and changed <= {
+            "pyrightconfig.json",
+            "tools/factors/Parameters.pyi",
+        }
+    )
+
+
+def _assert_authoring_ready(worktree: Path) -> dict[str, Any]:
     if not (worktree / "pyrightconfig.json").is_file():
         raise ValueError("factor worktree has no pyrightconfig.json")
     if not any(worktree.rglob("*.pyi")):
         raise ValueError("factor worktree has no authoring stubs")
-    if not _pyright_ok(worktree):
+    result = run_bundled_pyright(worktree)
+    if result["returncode"] or result["error_count"]:
         raise ValueError("factor worktree Pyright validation failed")
+    return result
 
 
 def _pyright_ok(worktree: Path) -> bool:
-    executable = shutil.which("pyright")
-    if executable is None:
-        raise ValueError("pyright is required to validate factor worktree")
-    result = subprocess.run(
-        [executable, "--project", str(worktree / "pyrightconfig.json")],
-        cwd=worktree,
-        env={**os.environ, **_HOOK_ENV},
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    return result.returncode == 0
+    result = run_bundled_pyright(worktree)
+    return result["returncode"] == 0 and result["error_count"] == 0
 
 
-def _build_receipt(plan: dict[str, Any]) -> dict[str, Any]:
+def _build_receipt(
+    plan: dict[str, Any],
+    generated_baseline: dict[str, Any],
+) -> dict[str, Any]:
     body = {
         "schema_version": 1,
         "binding_id": plan["binding_id"],
@@ -555,6 +709,7 @@ def _build_receipt(plan: dict[str, Any]) -> dict[str, Any]:
         "git_common_dir": plan["git_common_dir"],
         "owner_ref": plan["owner_ref"],
         "sync_policy": plan["sync_policy"],
+        "generated_baseline": generated_baseline,
         "plan_hash": plan["plan_hash"],
         "status": "applied",
         "created_at": utc_now(),
@@ -586,7 +741,10 @@ def _matches_planned_worktree(
         target.is_dir()
         and _is_worktree(repo, target)
         and _git_value(target, "branch", "--show-current") == plan["branch"]
-        and _head(target) == plan["base_commit"]
+        and (
+            _head(target) == plan["base_commit"]
+            or _generated_baseline_matches(target, plan)
+        )
         and _absolute_common_dir(target) == plan["git_common_dir"]
     )
 

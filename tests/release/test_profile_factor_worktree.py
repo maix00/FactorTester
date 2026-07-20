@@ -16,10 +16,26 @@ from tools.cli.release.factor_worktree import (
     rollback_factor_worktree_binding,
     verify_factor_worktree_binding,
 )
+from tools.cli.release import factor_worktree
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
 
 OWNER = "factor-owner"
+
+
+@pytest.fixture(autouse=True)
+def _bundled_pyright(monkeypatch):
+    monkeypatch.setattr(
+        factor_worktree,
+        "run_bundled_pyright",
+        lambda _root: {
+            "version": "1.1.410",
+            "returncode": 0,
+            "files_analyzed": 2,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -114,8 +130,19 @@ def test_two_profiles_use_isolated_branches_over_shared_object_store(
     )
     assert _git(path_a, "branch", "--show-current") == "agent/maxa"
     assert _git(path_b, "branch", "--show-current") == "agent/maxb"
-    assert _git(path_a, "rev-parse", "HEAD") == base
-    assert _git(path_b, "rev-parse", "HEAD") == base
+    baseline_a = receipt_a["generated_baseline"]["baseline_commit"]
+    baseline_b = receipt_b["generated_baseline"]["baseline_commit"]
+    assert baseline_a == baseline_b
+    assert baseline_a != base
+    assert _git(path_a, "rev-parse", "HEAD") == baseline_a
+    assert _git(path_b, "rev-parse", "HEAD") == baseline_b
+    assert receipt_a["generated_baseline"]["changed_paths"] == [
+        "pyrightconfig.json"
+    ]
+    assert receipt_a["generated_baseline"]["pyright"]["error_count"] == 0
+    assert json.loads((path_a / "pyrightconfig.json").read_text())[
+        "pythonVersion"
+    ] == "3.10"
     assert (path_a / "custom_factors/Trend.py").read_text() == "value: int = 1\n"
     assert not (path_a / "local-note.txt").exists()
     assert not (path_a / ".git/objects").exists()
@@ -135,7 +162,7 @@ def test_two_profiles_use_isolated_branches_over_shared_object_store(
     _git(path_a, "add", "custom_factors/OnlyMaxA.py")
     _git(path_a, "commit", "-m", "maxa only")
     maxa_commit = _git(path_a, "rev-parse", "HEAD")
-    assert _git(path_b, "rev-parse", "HEAD") == base
+    assert _git(path_b, "rev-parse", "HEAD") == baseline_b
 
     rolled_back = rollback_factor_worktree_binding(
         client_root, "maxa", receipt_a["binding_id"]
