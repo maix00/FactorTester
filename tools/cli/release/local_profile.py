@@ -59,6 +59,25 @@ class LocalProfileStore:
         profile["agents"] = [*agents, descriptor]
         return self.save(profile)
 
+    def upsert_workspace(
+        self,
+        profile_id: str,
+        descriptor: dict[str, Any],
+        *,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any]:
+        profile = self.load(profile_id)
+        workspaces = [
+            item for item in profile["workspaces"]
+            if item["workspace_id"] != descriptor.get("workspace_id")
+        ]
+        profile["workspaces"] = [*workspaces, descriptor]
+        if workspace_root is not None:
+            profile["workspace_root"] = str(
+                workspace_root.expanduser().resolve()
+            )
+        return self.save(profile)
+
     def upsert_adapter(
         self,
         profile_id: str,

@@ -1,5 +1,21 @@
 import Foundation
 
+struct LocalWorkspaceModel: Identifiable {
+    let id: String
+    let path: String
+    let accessMode: String
+    let ownerRef: String
+    let serverWorkspaceRef: String
+
+    init(json: [String: Any]) {
+        id = json["workspace_id"] as? String ?? ""
+        path = json["path"] as? String ?? ""
+        accessMode = json["access_mode"] as? String ?? ""
+        ownerRef = json["owner_ref"] as? String ?? ""
+        serverWorkspaceRef = json["server_workspace_ref"] as? String ?? ""
+    }
+}
+
 struct LocalAgentModel: Identifiable {
     let id: String
     let role: String
@@ -21,6 +37,7 @@ struct LocalProfileModel: Identifiable {
     let displayName: String
     let serverURL: String
     let workspaceRoot: String
+    let workspaces: [LocalWorkspaceModel]
     let agents: [LocalAgentModel]
 
     init(json: [String: Any]) {
@@ -29,6 +46,8 @@ struct LocalProfileModel: Identifiable {
         serverURL = (json["server"] as? [String: Any])?["base_url"]
             as? String ?? ""
         workspaceRoot = json["workspace_root"] as? String ?? ""
+        workspaces = (json["workspaces"] as? [[String: Any]] ?? [])
+            .map(LocalWorkspaceModel.init)
         agents = (json["agents"] as? [[String: Any]] ?? [])
             .map(LocalAgentModel.init)
     }

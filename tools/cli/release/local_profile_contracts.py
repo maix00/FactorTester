@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _AGENT_ROLES = {"planning", "research"}
+_WORKSPACE_ACCESS = {"owner", "granted", "read_only"}
 
 
 def new_local_profile(
@@ -20,11 +21,12 @@ def new_local_profile(
     workspace_root: Path,
 ) -> dict[str, Any]:
     return validate_local_profile({
-        "schema_version": 1,
+        "schema_version": 2,
         "profile_id": profile_id,
         "display_name": display_name,
         "server": {"base_url": server_url},
         "workspace_root": str(workspace_root.expanduser().resolve()),
+        "workspaces": [],
         "agents": [],
         "adapters": [],
     })
@@ -33,12 +35,14 @@ def new_local_profile(
 def validate_local_profile(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("local profile must be an object")
-    if set(value) != {
+    allowed = {
         "schema_version", "profile_id", "display_name", "server",
-        "workspace_root", "agents", "adapters",
-    }:
+        "workspace_root", "workspaces", "agents", "adapters",
+    }
+    observed = set(value)
+    if observed != allowed and observed != allowed - {"workspaces"}:
         raise ValueError("local profile fields are invalid")
-    if value.get("schema_version") != 1:
+    if value.get("schema_version") not in {1, 2}:
         raise ValueError("local profile schema_version is unsupported")
     server = value.get("server")
     if not isinstance(server, dict) or set(server) != {"base_url"}:
@@ -48,8 +52,9 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         raise ValueError("server.base_url must use http or https")
     agents = _array(value.get("agents"), "agents")
     adapters = _array(value.get("adapters"), "adapters")
+    workspaces = _array(value.get("workspaces", []), "workspaces")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
@@ -58,8 +63,32 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "workspace_root": _text(
             value.get("workspace_root"), "workspace_root"
         ),
+        "workspaces": [_workspace(item) for item in workspaces],
         "agents": [_agent(item) for item in agents],
         "adapters": [_adapter(item) for item in adapters],
+    }
+
+
+def _workspace(value: Any) -> dict[str, Any]:
+    fields = {
+        "workspace_id", "path", "access_mode", "owner_ref",
+        "server_workspace_ref",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("local workspace descriptor fields are invalid")
+    access_mode = _text(value.get("access_mode"), "workspace.access_mode")
+    if access_mode not in _WORKSPACE_ACCESS:
+        raise ValueError("local workspace access_mode is unsupported")
+    owner_ref = _text(value.get("owner_ref"), "workspace.owner_ref")
+    server_ref = str(value.get("server_workspace_ref") or "").strip()
+    return {
+        "workspace_id": validate_local_identifier(
+            value.get("workspace_id"), "workspace.workspace_id"
+        ),
+        "path": _text(value.get("path"), "workspace.path"),
+        "access_mode": access_mode,
+        "owner_ref": owner_ref,
+        "server_workspace_ref": server_ref,
     }
 
 

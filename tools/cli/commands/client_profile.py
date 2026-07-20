@@ -13,6 +13,14 @@ from tools.cli.release.local_profile import (
     new_local_profile,
 )
 from tools.cli.release.profile import load_profile_root
+from tools.cli.release.storage import read_json, write_json
+from tools.cli.release.workspace_migration import (
+    apply_workspace_migration,
+    default_profile_workspace_root,
+    plan_workspace_migration,
+    rollback_workspace_migration,
+    verify_workspace_migration,
+)
 
 
 def _json(value) -> str:
@@ -37,7 +45,6 @@ def client_profile() -> None:
 @click.option("--server-url", required=True)
 @click.option(
     "--workspace-root",
-    required=True,
     type=click.Path(file_okay=False, path_type=Path),
 )
 @_root_option
@@ -46,7 +53,7 @@ def initialize_profile(
     profile_id: str,
     display_name: str,
     server_url: str,
-    workspace_root: Path,
+    workspace_root: Path | None,
     release_profile: Path | None,
 ) -> None:
     store = LocalProfileStore(load_profile_root(release_profile))
@@ -54,7 +61,8 @@ def initialize_profile(
         profile_id=profile_id,
         display_name=display_name,
         server_url=server_url,
-        workspace_root=workspace_root,
+        workspace_root=workspace_root
+        or default_profile_workspace_root(profile_id),
     ))))
 
 
@@ -65,6 +73,102 @@ def list_profiles(release_profile: Path | None) -> None:
     click.echo(_json(
         LocalProfileStore(load_profile_root(release_profile)).list()
     ))
+
+
+@client_profile.group("workspace")
+def profile_workspace() -> None:
+    """Plan and audit visible local factor workspaces."""
+
+
+@profile_workspace.command("plan")
+@click.argument("profile_id")
+@click.option(
+    "--workspace",
+    "workspace_specs",
+    type=(str, click.Path(exists=True, file_okay=False, path_type=Path),
+          click.Choice(["owner", "granted", "read_only"]), str),
+    multiple=True,
+    required=True,
+    metavar="ID SOURCE ACCESS_MODE SERVER_REF",
+)
+@click.option(
+    "--target-root",
+    type=click.Path(file_okay=False, path_type=Path),
+)
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@friendly_errors
+def plan_profile_workspace(
+    profile_id: str,
+    workspace_specs: tuple[tuple[str, Path, str, str], ...],
+    target_root: Path | None,
+    output: Path,
+) -> None:
+    plan = plan_workspace_migration(
+        profile_id,
+        target_root or default_profile_workspace_root(profile_id),
+        [
+            {
+                "workspace_id": workspace_id,
+                "source": str(source),
+                "access_mode": access_mode,
+                "server_workspace_ref": server_ref,
+            }
+            for workspace_id, source, access_mode, server_ref
+            in workspace_specs
+        ],
+    )
+    write_json(output, plan)
+    click.echo(_json(plan))
+
+
+@profile_workspace.command("apply")
+@click.argument(
+    "plan_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def apply_profile_workspace(
+    plan_path: Path,
+    release_profile: Path | None,
+) -> None:
+    plan = read_json(plan_path)
+    if not isinstance(plan, dict):
+        raise ValueError("workspace migration plan is invalid")
+    root = load_profile_root(release_profile)
+    click.echo(_json(apply_workspace_migration(root, plan)))
+
+
+@profile_workspace.command("verify")
+@click.argument("profile_id")
+@_root_option
+@friendly_errors
+def verify_profile_workspace(
+    profile_id: str,
+    release_profile: Path | None,
+) -> None:
+    root = load_profile_root(release_profile)
+    click.echo(_json(verify_workspace_migration(root, profile_id)))
+
+
+@profile_workspace.command("rollback")
+@click.argument("profile_id")
+@click.argument("migration_id")
+@_root_option
+@friendly_errors
+def rollback_profile_workspace(
+    profile_id: str,
+    migration_id: str,
+    release_profile: Path | None,
+) -> None:
+    root = load_profile_root(release_profile)
+    click.echo(_json(rollback_workspace_migration(
+        root, profile_id, migration_id
+    )))
 
 
 @client_profile.group("agent")

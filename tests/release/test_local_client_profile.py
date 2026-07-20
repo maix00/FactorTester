@@ -32,6 +32,8 @@ def test_local_profile_is_strict_private_and_version_independent(
     assert path.stat().st_mode & 0o777 == 0o600
     assert not (root / "current.json").exists()
     assert not {"password", "token", "email"}.intersection(stored)
+    assert stored["schema_version"] == 2
+    assert stored["workspaces"] == []
 
     with pytest.raises(ValueError, match="fields"):
         validate_local_profile({**stored, "token": "must-not-be-stored"})
@@ -59,6 +61,29 @@ def test_client_cli_exposes_generic_profile_and_adapter_commands(
     adapters = runner.invoke(cli, ["client", "adapter", "list"])
     assert adapters.exit_code == 0
     assert json.loads(adapters.output) == []
+
+
+def test_version_one_profile_is_upgraded_without_losing_identity(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    path = root / "profiles" / "legacy.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({
+        "schema_version": 1,
+        "profile_id": "legacy",
+        "display_name": "Legacy",
+        "server": {"base_url": "http://127.0.0.1:8123"},
+        "workspace_root": str(tmp_path / "legacy"),
+        "agents": [],
+        "adapters": [],
+    }))
+
+    upgraded = LocalProfileStore(root).load("legacy")
+
+    assert upgraded["schema_version"] == 2
+    assert upgraded["profile_id"] == "legacy"
+    assert upgraded["workspaces"] == []
 
 
 def test_local_agent_identity_resumes_without_provider_or_model_fields(

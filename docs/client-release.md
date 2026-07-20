@@ -73,6 +73,29 @@ stable provider-neutral ID and an explicit research scope. Approvals still
 happen in the relevant Agent conversation; the settings UI only displays
 completed approval facts.
 
+Profile configuration and migration receipts live under
+`~/Library/Application Support/FactorTester/profiles`. User-visible workspaces
+default to `~/Documents/FactorTester/profiles/<profile-id>/workspaces`.
+Each workspace retains its own `owner_ref` and access mode; an authorized
+workspace is never relabeled as the profile owner. Large local data is
+referenced from `local-data` rather than copied into the profile.
+
+Workspace migration starts with an inventory-only plan:
+
+```bash
+factortester client profile workspace plan maxa \
+  --workspace maxa-factor-library /path/to/maxa owner 'default$MaxA@1' \
+  --workspace shared-187-factor-library /path/to/shared granted '' \
+  --output workspace-plan.json
+factortester client profile workspace apply workspace-plan.json
+factortester client profile workspace verify maxa
+```
+
+The plan checks ownership, Git/VS Code/Pyright state, conflicts, and capacity.
+Apply copies into staging, atomically switches the profile root, and writes a
+rollback receipt. Rollback restores the old profile pointer while preserving
+the migrated files for inspection.
+
 ## Local adapters
 
 Signed adapters are installed under the selected release. Their processes,

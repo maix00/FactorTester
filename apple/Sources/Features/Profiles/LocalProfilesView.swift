@@ -67,6 +67,17 @@ struct LocalProfilesView: View {
                 Text(profile.workspaceRoot)
                     .font(.caption).foregroundStyle(.secondary)
                 Divider()
+                Text("可见工作区")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if profile.workspaces.isEmpty {
+                    Text("尚未登记工作区")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(profile.workspaces) { workspace in
+                    WorkspaceRegistryRow(workspace: workspace)
+                }
+                Divider()
                 if profile.agents.isEmpty {
                     Text("尚未登记 Agent").foregroundStyle(.secondary)
                 }
