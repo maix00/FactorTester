@@ -19,6 +19,11 @@ from server.services.research_graph.shadow_tokens import (
     derive_token_metrics,
     token_failures,
 )
+from server.services.research_graph.shadow_outcome import (
+    canonical_json_hash,
+    canonical_result_summary,
+    canonical_terminal_assurance,
+)
 from server.services.research_graph.versions import load_graph
 from tools.data.sqlite.db import connect_sqlite
 
@@ -206,9 +211,15 @@ def _run_snapshot(*, owner: str, run_id: str) -> dict[str, Any]:
             "source_revision": str(row["source_revision"]),
             "runner_path": str(row["runner_path"]),
             "execution_plan_hash": str(row["execution_plan_hash"]),
-            "result_hash": _text_hash(row["result_summary_json"]),
+            "result_hash": canonical_json_hash(canonical_result_summary(
+                row["result_summary_json"]
+            )),
             "error_hash": _text_hash(row["error_json"]),
-            "assurance_hash": _text_hash(row["terminal_assurance_json"]),
+            "assurance_hash": canonical_json_hash(
+                canonical_terminal_assurance(
+                    row["terminal_assurance_json"]
+                )
+            ),
         } for row in jobs],
         "artifacts": [{
             "name": str(row["name"]),
