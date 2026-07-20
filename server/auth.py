@@ -202,3 +202,38 @@ def api_keep_login():
     session['keep_login'] = bool(data.get('keep_login', False))
     touch_session_activity()
     return jsonify({'success': True, 'keep_login': session['keep_login']})
+
+
+@auth_bp.route('/api/account/password', methods=['POST'])
+def api_change_password():
+    """Allow the signed-in account to rotate its own password."""
+    username = current_user()
+    if not username:
+        return jsonify({'success': False, 'error': '请先登录'}), 401
+    data = request.get_json(silent=True) or {}
+    current_password = data.get('current_password') or ''
+    new_password = data.get('new_password') or ''
+    if not current_password or not new_password:
+        return jsonify({'success': False, 'error': '当前密码和新密码不能为空'}), 400
+    if len(new_password) < 6:
+        return jsonify({'success': False, 'error': '新密码至少6位'}), 400
+    if current_password == new_password:
+        return jsonify({'success': False, 'error': '新密码不能与当前密码相同'}), 400
+
+    with accounts_lock:
+        accounts = load_accounts()
+        account = next(
+            (item for item in accounts if item.get('username') == username),
+            None,
+        )
+        if account is None or not verify_password(
+            current_password,
+            account.get('salt') or '',
+            account.get('hash') or '',
+        ):
+            return jsonify({'success': False, 'error': '当前密码错误'}), 400
+        salt = secrets.token_hex(16)
+        account['salt'] = salt
+        account['hash'] = hash_password(new_password, salt)
+        save_accounts(accounts)
+    return jsonify({'success': True})

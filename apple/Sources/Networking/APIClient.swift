@@ -68,6 +68,18 @@ final class APIClient: NSObject {
         _ = try await request(path: "/api/keep_login", method: "POST", json: ["keep_login": keep])
     }
 
+    func changePassword(currentPassword: String, newPassword: String) async throws -> ActionResponse {
+        let data = try await request(
+            path: "/api/account/password",
+            method: "POST",
+            json: [
+                "current_password": currentPassword,
+                "new_password": newPassword,
+            ]
+        )
+        return try decoder.decode(ActionResponse.self, from: data)
+    }
+
     func organizations() async throws -> [Organization] {
         let data = try await request(path: "/api/organizations")
         let resp = try decoder.decode(OrganizationsResponse.self, from: data)

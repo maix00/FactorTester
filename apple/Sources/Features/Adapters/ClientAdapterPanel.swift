@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ClientAdapterPanel: View {
+    let onOpen: (ClientAdapterModel) -> Void
     @StateObject private var controller = ClientAdapterController()
 
     var body: some View {
@@ -43,12 +44,10 @@ struct ClientAdapterPanel: View {
             }
         }
         .task { await controller.refresh() }
-        .sheet(item: $controller.openTarget) { adapter in
-            if let url = adapter.uiURL {
-                LocalAdapterWebView(
-                    title: adapter.displayName,
-                    url: url
-                )
+        .onChange(of: controller.openTarget?.id) { _ in
+            if let adapter = controller.openTarget {
+                onOpen(adapter)
+                controller.openTarget = nil
             }
         }
     }

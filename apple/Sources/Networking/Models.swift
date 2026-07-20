@@ -65,6 +65,11 @@ struct AuthResponse: Codable {
     }
 }
 
+struct ActionResponse: Codable {
+    let success: Bool
+    let error: String?
+}
+
 enum APIError: LocalizedError {
     case notConfigured
     case server(String)

@@ -34,7 +34,7 @@ def test_macos_settings_use_the_same_deterministic_client_cli() -> None:
     for label in ("安装来源", "选择发布 Profile", "首次安装"):
         assert label in view
     assert "密码、token 与审批不会由此界面保存" in view
-    assert "客户端设置…" in home
+    assert "客户端与 Profiles…" in home
     assert "approval" not in view.lower()
 
 
@@ -82,6 +82,9 @@ def test_macos_embeds_signed_local_adapter_web_ui() -> None:
     panel = (adapter_root / "ClientAdapterPanel.swift").read_text(
         encoding="utf-8"
     )
+    tab = (SOURCES / "Navigation" / "ClientTabView.swift").read_text(
+        encoding="utf-8"
+    )
     local_web = (adapter_root / "LocalAdapterWebView.swift").read_text(
         encoding="utf-8"
     )
@@ -95,7 +98,7 @@ def test_macos_embeds_signed_local_adapter_web_ui() -> None:
     assert "外部服务可用" in panel
     assert "127.0.0.1" in model and "localhost" in model
     assert "openTarget" in panel
-    assert "LocalAdapterWebView" in panel
+    assert "LocalAdapterWebView" in tab
     assert "WebViewRepresentable" in local_web
     assert "syncServerCookies: false" in local_web
     assert "let url: URL" in web
@@ -166,3 +169,49 @@ def test_macos_adapter_secrets_go_to_keychain_not_cli_arguments() -> None:
     assert '"--profile-id"' in adapter_controller
     assert "client.profile.activeID" in adapter_controller
     assert "用于本地 Adapter" in profiles
+
+
+def test_macos_profiles_show_workspace_ownership_and_folder_picker() -> None:
+    profile_root = SOURCES / "Features" / "Profiles"
+    model = (profile_root / "LocalProfileModel.swift").read_text(
+        encoding="utf-8"
+    )
+    form = (profile_root / "LocalProfileForm.swift").read_text(
+        encoding="utf-8"
+    )
+    view = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            profile_root / "LocalProfilesView.swift",
+            profile_root / "WorkspaceRegistryRow.swift",
+        )
+    )
+    assert 'json["workspaces"]' in model
+    assert 'json["owner_ref"]' in model
+    assert "allowedContentTypes: [.folder]" in form
+    assert "可见工作区" in view
+    assert "Owner:" in view
+
+
+def test_macos_tabs_and_account_center_use_real_routes() -> None:
+    navigation = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((SOURCES / "Navigation").glob("ClientTab*.swift"))
+    )
+    account = (
+        SOURCES / "Features" / "Account" / "AccountCenterView.swift"
+    ).read_text(encoding="utf-8")
+    api = (SOURCES / "Networking" / "APIClient.swift").read_text(
+        encoding="utf-8"
+    )
+    config = (SOURCES / "Config" / "ServerConfig.swift").read_text(
+        encoding="utf-8"
+    )
+
+    assert "返回主页" in navigation
+    assert "case web(path: String)" in navigation
+    assert "/api/account/password" in api
+    assert "/products" in account
+    assert "/custom-factors/editor" in account
+    assert '"127.0.0.1"' in config
+    assert '"8000"' in config
