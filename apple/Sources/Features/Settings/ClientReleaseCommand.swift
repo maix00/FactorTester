@@ -95,8 +95,10 @@ enum ReleaseCommandError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .failed(let detail): return detail
-        case .invalidResponse: return "客户端命令没有返回有效 JSON。"
-        case .unsupportedPlatform: return "客户端版本管理仅支持 macOS。"
+        case .invalidResponse:
+            return L10n.text("客户端命令没有返回有效 JSON。")
+        case .unsupportedPlatform:
+            return L10n.text("客户端版本管理仅支持 macOS。")
         }
     }
 }

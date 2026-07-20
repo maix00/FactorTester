@@ -7,6 +7,7 @@ STORE = (
     ROOT
     / "apple/Sources/Features/Updates/AppUpdateStore.swift"
 )
+LOCALIZATION = ROOT / "apple/Sources/Localization/AppLanguage.swift"
 
 
 def test_verified_installer_receipt_retains_previous_for_rollback(
@@ -62,6 +63,7 @@ struct Acceptance {
     subprocess.run(
         [
             "swiftc",
+            str(LOCALIZATION),
             str(STORE),
             str(runner),
             "-o",

@@ -33,9 +33,12 @@ enum KeychainError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .writeFailed(let status):
-            return "Keychain 写入失败（\(status)）。"
+            return String(
+                format: L10n.text("Keychain 写入失败（%d）。"),
+                status
+            )
         case .unsupported:
-            return "此平台不支持本地 Keychain。"
+            return L10n.text("此平台不支持本地 Keychain。")
         }
     }
 }

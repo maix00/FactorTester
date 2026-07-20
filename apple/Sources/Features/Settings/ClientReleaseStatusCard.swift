@@ -56,10 +56,10 @@ struct ClientReleaseStatusCard: View {
     }
 
     private var statusLabel: String {
-        if controller.healthy == false { return "需要修复" }
-        if controller.compatible == false { return "协议不兼容" }
-        if controller.healthy == true { return "正常" }
-        return "尚未检查"
+        if controller.healthy == false { return L10n.text("需要修复") }
+        if controller.compatible == false { return L10n.text("协议不兼容") }
+        if controller.healthy == true { return L10n.text("正常") }
+        return L10n.text("尚未检查")
     }
 
     private var divider: some View {
@@ -90,6 +90,6 @@ struct ClientReleaseStatusCard: View {
     }
 
     private func fallback(_ value: String) -> String {
-        value.isEmpty ? "未安装" : value
+        value.isEmpty ? L10n.text("未安装") : value
     }
 }

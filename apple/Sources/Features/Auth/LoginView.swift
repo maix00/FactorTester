@@ -39,7 +39,10 @@ struct LoginView: View {
                             }
                         }
                     }
-                    SecureField(tab == .register ? "密码（至少6位）" : "密码", text: $password)
+                    SecureField(
+                        L10n.text(tab == .register ? "密码（至少6位）" : "密码"),
+                        text: $password
+                    )
                         #if os(iOS)
                         .textContentType(.password)
                         #endif
@@ -56,7 +59,10 @@ struct LoginView: View {
                         HStack {
                             Spacer()
                             if session.isWorking { ProgressView() }
-                            else { Text(tab == .login ? "登录" : "注册").bold() }
+                            else {
+                                Text(L10n.text(tab == .login ? "登录" : "注册"))
+                                    .bold()
+                            }
                             Spacer()
                         }
                     }

@@ -132,11 +132,11 @@ enum AppUpdateError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidRelease:
-            return "公开 Release 必须且只能包含一个 FactorTester-Client.dmg。"
+            return L10n.text("公开 Release 必须且只能包含一个 FactorTester-Client.dmg。")
         case .missingDigest:
-            return "GitHub Release 未提供 DMG 的 SHA-256 digest。"
+            return L10n.text("GitHub Release 未提供 DMG 的 SHA-256 digest。")
         case .checksumMismatch:
-            return "下载的 DMG 校验失败，未保存也未打开。"
+            return L10n.text("下载的 DMG 校验失败，未保存也未打开。")
         case .server(let detail):
             return detail
         }

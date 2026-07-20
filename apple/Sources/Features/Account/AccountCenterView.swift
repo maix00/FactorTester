@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AccountCenterView: View {
+    @AppStorage("client.language") private var language = AppLanguage.system.rawValue
     @EnvironmentObject private var session: SessionStore
     @Environment(\.dismiss) private var dismiss
 
@@ -17,6 +18,7 @@ struct AccountCenterView: View {
         NavigationStack {
             Form {
                 accountSection
+                languageSection
                 resourceSection
                 passwordSection
             }
@@ -29,6 +31,21 @@ struct AccountCenterView: View {
             }
         }
         .frame(minWidth: 620, minHeight: 560)
+    }
+
+    private var languageSection: some View {
+        Section("语言") {
+            Picker("界面语言", selection: $language) {
+                Text("跟随系统").tag(AppLanguage.system.rawValue)
+                Text("简体中文").tag(AppLanguage.simplifiedChinese.rawValue)
+                Text("English").tag(AppLanguage.english.rawValue)
+            }
+            .pickerStyle(.menu)
+            Text("语言设置仅影响界面文案；机器 JSON、状态值与 API 协议保持不变。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var accountSection: some View {
@@ -111,8 +128,8 @@ struct AccountCenterView: View {
                     .font(.title3)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                    Text(subtitle)
+                    Text(L10n.text(title))
+                    Text(L10n.text(subtitle))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -128,7 +145,7 @@ struct AccountCenterView: View {
     private func changePassword() async {
         passwordSucceeded = false
         guard newPassword == confirmPassword else {
-            passwordMessage = "两次输入的新密码不一致"
+            passwordMessage = L10n.text("两次输入的新密码不一致")
             return
         }
         isChangingPassword = true
@@ -140,12 +157,12 @@ struct AccountCenterView: View {
             )
             if response.success {
                 passwordSucceeded = true
-                passwordMessage = "密码已更新"
+                passwordMessage = L10n.text("密码已更新")
                 currentPassword = ""
                 newPassword = ""
                 confirmPassword = ""
             } else {
-                passwordMessage = response.error ?? "密码更新失败"
+                passwordMessage = response.error ?? L10n.text("密码更新失败")
             }
         } catch {
             passwordMessage =

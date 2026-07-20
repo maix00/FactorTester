@@ -27,7 +27,7 @@ final class SessionStore: ObservableObject {
                 await refresh()
                 return true
             } else {
-                lastError = resp.error ?? "登录失败"
+                lastError = resp.error ?? L10n.text("登录失败")
                 return false
             }
         } catch {
@@ -45,7 +45,7 @@ final class SessionStore: ObservableObject {
                 await refresh()
                 return true
             } else {
-                lastError = resp.error ?? "注册失败"
+                lastError = resp.error ?? L10n.text("注册失败")
                 return false
             }
         } catch {

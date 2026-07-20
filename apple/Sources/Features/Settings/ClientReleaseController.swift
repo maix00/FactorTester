@@ -14,7 +14,7 @@ final class ClientReleaseController: ObservableObject {
     @Published private(set) var latestVersion = ""
     @Published private(set) var compatible: Bool?
     @Published private(set) var healthy: Bool?
-    @Published private(set) var signatureText = "检查中…"
+    @Published private(set) var signatureText = L10n.text("检查中…")
     @Published private(set) var canRollback = false
     @Published private(set) var isWorking = false
     @Published var lastError: String?
@@ -25,8 +25,10 @@ final class ClientReleaseController: ObservableObject {
         await perform {
             let signature = await AppSignatureStatus.inspect()
             self.signatureText = signature.acceptedByGatekeeper
-                ? "Developer ID 已签名并通过 Gatekeeper"
-                : (signature.signed ? "已签名，但未通过 Gatekeeper" : "未签名开发版本")
+                ? L10n.text("Developer ID 已签名并通过 Gatekeeper")
+                : (signature.signed
+                    ? L10n.text("已签名，但未通过 Gatekeeper")
+                    : L10n.text("未签名开发版本"))
             self.healthy = signature.signed
             self.release = try await self.fetchLatestRelease()
             self.latestVersion = self.release?.version ?? ""
@@ -51,7 +53,7 @@ final class ClientReleaseController: ObservableObject {
             )
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else {
-                throw AppUpdateError.server("DMG 下载失败。")
+                throw AppUpdateError.server(L10n.text("DMG 下载失败。"))
             }
             let installer = try self.store.save(
                 temporaryURL: temporary,
@@ -60,7 +62,9 @@ final class ClientReleaseController: ObservableObject {
             )
             let url = self.store.root.appendingPathComponent(installer.filename)
             NSWorkspace.shared.open(url)
-            self.lastError = "DMG 已校验并打开。请拖入 Applications，然后重新启动客户端。"
+            self.lastError = L10n.text(
+                "DMG 已校验并打开。请拖入 Applications，然后重新启动客户端。"
+            )
             self.canRollback = self.store.previousInstaller(
                 excluding: [self.installedVersion, release.version]
             ) != nil
@@ -71,11 +75,11 @@ final class ClientReleaseController: ObservableObject {
         guard let installer = store.previousInstaller(
             excluding: [installedVersion, latestVersion]
         ) else {
-            lastError = "没有可用的上一版已验证 DMG。"
+            lastError = L10n.text("没有可用的上一版已验证 DMG。")
             return
         }
         NSWorkspace.shared.open(installer)
-        lastError = "上一版 DMG 已打开。请拖入 Applications 完成回滚。"
+        lastError = L10n.text("上一版 DMG 已打开。请拖入 Applications 完成回滚。")
     }
 
     private func fetchLatestRelease() async throws -> GitHubRelease {
@@ -91,7 +95,7 @@ final class ClientReleaseController: ObservableObject {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode) else {
-            throw AppUpdateError.server("无法读取公开 GitHub Release。")
+            throw AppUpdateError.server(L10n.text("无法读取公开 GitHub Release。"))
         }
         let value = try JSONDecoder().decode(GitHubRelease.self, from: data)
         guard !value.draft, !value.prerelease, value.installer != nil else {
