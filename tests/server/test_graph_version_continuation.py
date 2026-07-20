@@ -281,6 +281,76 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
     )["passed"] is True
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("source_graph_hash", "1" * 64),
+        ("source_trace_id", "trace-tampered"),
+        ("source_checkpoint_hash", "2" * 64),
+        ("target_graph_hash", "3" * 64),
+        ("job_evidence_hash", "4" * 64),
+        ("authorization_ref", "maintenance-case:missing"),
+    ],
+)
+def test_continuation_shadow_replay_rejects_tampered_lineage(
+    tmp_path,
+    monkeypatch,
+    field,
+    replacement,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    _pause_legacy_branch_without_bound_job(path)
+    target = _install_active_target(path)
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="job-1",
+    )
+    case_id = _approve(path, target_hash=preview["target_hash"])
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="job-1",
+        expected_target_hash=preview["target_hash"],
+        human_authorization_id=case_id,
+    )
+    branch = continued["branches"][0]
+    with connect_sqlite(path) as conn:
+        trace = conn.execute(
+            """
+            SELECT trace_id, evidence_json FROM research_graph_trace
+            WHERE instance_id=? AND branch_id=?
+            """,
+            (continued["instance_id"], branch["branch_id"]),
+        ).fetchone()
+        evidence = orjson.loads(trace["evidence_json"])
+        evidence["graph_continuation"][field] = replacement
+        conn.execute(
+            """
+            UPDATE research_graph_trace SET evidence_json=?
+            WHERE trace_id=?
+            """,
+            (orjson.dumps(evidence).decode(), trace["trace_id"]),
+        )
+        runtime = load_instance_branch_row(
+            conn,
+            instance_id=continued["instance_id"],
+            branch_id=branch["branch_id"],
+            owner="alice",
+        )
+    assert runtime is not None
+    assert replay_shadow_trace(
+        graph=target,
+        runtime=runtime,
+    )["passed"] is False
+
+
 def test_continuation_rejects_stale_trial_identity_without_consuming_gate(
     tmp_path,
     monkeypatch,
