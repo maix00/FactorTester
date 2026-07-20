@@ -77,6 +77,20 @@ def _run(script: str, path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _synthesis(*, assessment: str, output: dict) -> dict:
+    return {
+        "schema_version": 1,
+        "decision_contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "obligation_assessments": [{
+            "obligation_id": "obligation-1",
+            "disposition": assessment,
+            "reason_ref": "review:actionability-1",
+        }],
+        "output": output,
+    }
+
+
 def test_skill_routes_to_exactly_one_progressive_reference() -> None:
     text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     assert "TODO" not in text
@@ -155,3 +169,65 @@ def test_obligation_validator_requires_full_absent_to_open_body(
 
     assert result.returncode == 1
     assert "complete body" in json.loads(result.stdout)["error"]
+
+
+def test_trial_synthesis_emits_no_plan_for_non_actionable_obligation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "synthesis.json"
+    path.write_text(json.dumps(_synthesis(
+        assessment="semantic_resolution",
+        output={
+            "disposition": "no_actionable_trial",
+            "reason_ref": "review:no-empirical-trial",
+        },
+    )), encoding="utf-8")
+
+    result = _run("validate-trial-synthesis.py", path)
+
+    assert result.returncode == 0, result.stdout
+    assert json.loads(result.stdout)["disposition"] == (
+        "no_actionable_trial"
+    )
+
+
+def test_trial_synthesis_rejects_plan_for_non_actionable_obligation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "invalid-synthesis.json"
+    path.write_text(json.dumps(_synthesis(
+        assessment="backend_gap",
+        output={
+            "disposition": "trial_plan",
+            "trial_plan": {
+                "schema_version": 4,
+                "obligation_refs": ["obligation-1"],
+            },
+        },
+    )), encoding="utf-8")
+
+    result = _run("validate-trial-synthesis.py", path)
+
+    assert result.returncode == 1
+    assert "non-actionable obligation" in json.loads(result.stdout)["error"]
+
+
+def test_trial_synthesis_accepts_plan_for_actionable_obligation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "valid-synthesis.json"
+    path.write_text(json.dumps(_synthesis(
+        assessment="actionable_trial",
+        output={
+            "disposition": "trial_plan",
+            "trial_plan": {
+                "schema_version": 4,
+                "obligation_refs": ["obligation-1"],
+            },
+        },
+    )), encoding="utf-8")
+
+    result = _run("validate-trial-synthesis.py", path)
+
+    assert result.returncode == 0, result.stdout
+    assert json.loads(result.stdout)["disposition"] == "trial_plan"

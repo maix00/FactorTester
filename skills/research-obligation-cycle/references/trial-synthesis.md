@@ -3,6 +3,15 @@
 Use this mode only for an open obligation whose answer is actionable with the
 available authoritative backend.
 
+Before emitting a plan, classify each considered obligation as
+`actionable_trial`, `semantic_resolution`, `provenance_repair`, `backend_gap`,
+`infeasible`, or `bounded_unknown`, and attach a compact reason reference.
+Validate the bounded synthesis output with
+`scripts/validate-trial-synthesis.py`. A canonical TrialPlan may reference only
+`actionable_trial` obligations. This actionability assessment is semantic and
+reviewable; it is not inferred from `materiality`, so a `non_blocking`
+obligation is not automatically non-actionable.
+
 ## Select
 
 Prioritize decision-blocking obligations, then tests with high expected

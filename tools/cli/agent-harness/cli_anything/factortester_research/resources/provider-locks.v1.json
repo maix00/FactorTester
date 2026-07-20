@@ -154,10 +154,12 @@
         "skills/research-obligation-cycle/references/search-exhaustion.md",
         "skills/research-obligation-cycle/references/trial-synthesis.md",
         "skills/research-obligation-cycle/scripts/_proposal_validation.py",
+        "skills/research-obligation-cycle/scripts/_trial_synthesis_validation.py",
         "skills/research-obligation-cycle/scripts/validate-adjudication-proposal.py",
-        "skills/research-obligation-cycle/scripts/validate-obligation-proposal.py"
+        "skills/research-obligation-cycle/scripts/validate-obligation-proposal.py",
+        "skills/research-obligation-cycle/scripts/validate-trial-synthesis.py"
       ],
-      "sha256": "f42fec088c6ec6ce024ed0a24cff53797c72bb6408611d24174b1fc824d190fc"
+      "sha256": "939553ace0da1907e9a43d0d3680db22b581228c61cdedeec4d207d325b4bfec"
     }
   }
 }

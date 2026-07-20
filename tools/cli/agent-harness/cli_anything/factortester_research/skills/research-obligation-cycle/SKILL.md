@@ -63,6 +63,12 @@ For any paired evidence adjudication:
 python scripts/validate-adjudication-proposal.py --input proposal.json
 ```
 
+For selective TrialPlan synthesis:
+
+```bash
+python scripts/validate-trial-synthesis.py --input synthesis.json
+```
+
 Treat a nonzero exit as a proposal defect. The scripts validate bounded,
 provider-neutral shapes; the server remains authoritative for current hashes,
 state transitions, and approval.
