@@ -26,6 +26,14 @@ from tools.cli.release.legacy_workspace_cleanup import (
     plan_legacy_workspace_cleanup,
     purge_legacy_workspaces,
 )
+from tools.cli.release.user_layout_migration import (
+    apply_user_layout_migration,
+    default_user_profile_root,
+    plan_user_layout_migration,
+    rollback_user_layout_migration,
+    user_layout_status,
+    verify_user_layout_migration,
+)
 from tools.cli.release.storage import read_json, write_json
 from tools.cli.release.workspace_migration import (
     apply_workspace_migration,
@@ -147,7 +155,6 @@ def initialize_profile(
 @click.option("--server-url", required=True)
 @click.option(
     "--workspace-root",
-    required=True,
     type=click.Path(file_okay=False, path_type=Path),
 )
 @click.option("--agent-id", default="")
@@ -163,7 +170,7 @@ def create_profile(
     profile_id: str,
     display_name: str,
     server_url: str,
-    workspace_root: Path,
+    workspace_root: Path | None,
     agent_id: str,
     role: str,
     principal_ref: str,
@@ -234,6 +241,95 @@ def list_profiles(release_profile: Path | None) -> None:
     ))
 
 
+@client_profile.group("user-layout")
+def profile_user_layout() -> None:
+    """Manage one principal-scoped ownership tree."""
+
+
+@profile_user_layout.command("show")
+@click.option("--principal", "principal_ref", required=True)
+@_root_option
+@friendly_errors
+def show_user_layout(
+    principal_ref: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(user_layout_status(
+        load_profile_root(release_profile), principal_ref
+    )))
+
+
+@profile_user_layout.group("migration")
+def user_layout_migration() -> None:
+    """Move canonical and Profile roots as one recoverable transaction."""
+
+
+@user_layout_migration.command("plan")
+@click.option("--principal", "principal_ref", required=True)
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def plan_user_layout(
+    principal_ref: str,
+    output: Path,
+    release_profile: Path | None,
+) -> None:
+    plan = plan_user_layout_migration(
+        load_profile_root(release_profile), principal_ref
+    )
+    write_json(output, plan)
+    click.echo(_json(plan))
+
+
+@user_layout_migration.command("apply")
+@click.argument(
+    "plan_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def apply_user_layout(
+    plan_path: Path,
+    release_profile: Path | None,
+) -> None:
+    plan = read_json(plan_path)
+    if not isinstance(plan, dict):
+        raise ValueError("principal user layout migration plan is invalid")
+    click.echo(_json(apply_user_layout_migration(
+        load_profile_root(release_profile), plan
+    )))
+
+
+@user_layout_migration.command("verify")
+@click.argument("migration_id")
+@_root_option
+@friendly_errors
+def verify_user_layout(
+    migration_id: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(verify_user_layout_migration(
+        load_profile_root(release_profile), migration_id
+    )))
+
+
+@user_layout_migration.command("rollback")
+@click.argument("migration_id")
+@_root_option
+@friendly_errors
+def rollback_user_layout(
+    migration_id: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(rollback_user_layout_migration(
+        load_profile_root(release_profile), migration_id
+    )))
+
+
 @client_profile.command("bootstrap")
 @click.option("--profile-id", required=True)
 @click.option("--display-name", required=True)
@@ -276,7 +372,7 @@ def bootstrap_profile(
         display_name=display_name,
         server_url=server_url,
         workspace_root=workspace_root
-        or default_profile_workspace_root(profile_id),
+        or default_user_profile_root(principal_ref, profile_id),
         principal_ref=principal_ref,
     )
     try:
@@ -284,12 +380,6 @@ def bootstrap_profile(
     except ValueError:
         existing = None
     if existing is not None:
-        stable = ("display_name", "server", "workspace_root")
-        if any(existing[key] != candidate[key] for key in stable):
-            raise ValueError(
-                "existing profile configuration differs; use an explicit "
-                "profile update"
-            )
         binding = existing.get("session_binding") or {}
         if (
             binding
@@ -297,6 +387,12 @@ def bootstrap_profile(
         ):
             raise ValueError(
                 "profile is bound to another principal; rebind or create a new profile"
+            )
+        stable = ("display_name", "server", "workspace_root")
+        if any(existing[key] != candidate[key] for key in stable):
+            raise ValueError(
+                "existing profile configuration differs; use an explicit "
+                "profile update"
             )
     discovered = True
     if existing is None:

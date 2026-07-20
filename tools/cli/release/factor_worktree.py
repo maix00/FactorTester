@@ -94,7 +94,7 @@ def plan_factor_worktree_binding(
     target = (
         worktree_path.expanduser().resolve()
         if worktree_path is not None
-        else profile_root / "factor-worktrees" / profile_id
+        else profile_root / "factor-worktree"
     )
     _assert_target_path(target, profile_root, repo)
     base = _head(repo)

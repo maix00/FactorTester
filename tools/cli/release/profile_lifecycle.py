@@ -11,6 +11,7 @@ from .local_profile import LocalProfileStore, new_local_profile
 from .local_profile_contracts import validate_local_identifier
 from .locations import validate_client_root
 from .storage import json_hash, read_json, utc_now, write_json
+from .user_layout_migration import default_user_profile_root
 
 
 class ProfileLifecycle:
@@ -24,12 +25,20 @@ class ProfileLifecycle:
         profile_id: str,
         display_name: str,
         server_url: str,
-        workspace_root: Path,
+        workspace_root: Path | None,
         agent_id: str = "",
         role: str = "research",
         principal_ref: str = "",
     ) -> dict[str, Any]:
         validate_local_identifier(profile_id, "profile_id")
+        if workspace_root is None:
+            if not principal_ref:
+                raise ValueError(
+                    "principal_ref is required for the default profile layout"
+                )
+            workspace_root = default_user_profile_root(
+                principal_ref, profile_id
+            )
         tombstone = self._tombstone(profile_id)
         if tombstone.exists():
             raise ValueError("deleted profile must be purged before reuse")
@@ -71,9 +80,7 @@ class ProfileLifecycle:
         return self._receipt("create", "active", profile_id, profile=profile, extra={
             "recommended_factor_worktree": {
                 "branch": f"agent/{profile_id}",
-                "worktree_path": str(
-                    workspace / "factor-worktrees" / profile_id
-                ),
+                "worktree_path": str(workspace / "factor-worktree"),
             },
         })
 
