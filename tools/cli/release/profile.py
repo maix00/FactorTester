@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from importlib.resources import files
 from pathlib import Path
+import time
 from typing import Any
 from urllib.request import urlopen
 
@@ -39,11 +40,22 @@ def load_release_inputs(
         if configured_root
         else default_client_root()
     )
-    with urlopen(manifest_url, timeout=30) as response:
-        raw = response.read(MAX_MANIFEST_BYTES + 1)
+    raw = _read_manifest_with_retry(manifest_url)
     if len(raw) > MAX_MANIFEST_BYTES:
         raise ValueError("release manifest exceeds size limit")
     return _json_object(raw, "release manifest"), public_key, root
+
+
+def _read_manifest_with_retry(url: str) -> bytes:
+    for attempt in range(3):
+        try:
+            with urlopen(url, timeout=30) as response:
+                return response.read(MAX_MANIFEST_BYTES + 1)
+        except OSError:
+            if attempt == 2:
+                raise
+            time.sleep(0.25 * (attempt + 1))
+    raise AssertionError("unreachable")
 
 
 def load_profile_root(profile_path: Path | None) -> Path:

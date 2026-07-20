@@ -4,7 +4,7 @@ from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
-from tools.cli.release import artifacts
+from tools.cli.release import artifacts, profile
 from tools.cli.release.contracts import ReleaseAsset
 
 
@@ -53,3 +53,24 @@ def test_transient_asset_download_retries_from_zero(
     assert calls == 2
     assert receipt["sha256"] == asset.sha256
     assert (tmp_path / "artifacts" / "client.whl").read_bytes() == content
+
+
+def test_transient_manifest_download_retries(monkeypatch) -> None:
+    content = b'{"schema_version":1}'
+    calls = 0
+
+    def open_once_then_succeed(_url: str, timeout: int):
+        nonlocal calls
+        assert timeout == 30
+        calls += 1
+        if calls == 1:
+            raise OSError("transient TLS EOF")
+        return _Response(content)
+
+    monkeypatch.setattr(profile, "urlopen", open_once_then_succeed)
+    monkeypatch.setattr(profile.time, "sleep", lambda _seconds: None)
+
+    assert profile._read_manifest_with_retry(
+        "https://example.test/release-manifest.json"
+    ) == content
+    assert calls == 2
