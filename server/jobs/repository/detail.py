@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+import orjson
+
 
 class JobDetailQueryImplementation:
     """Join Job, pin, and immutable ResearchRun identity once."""
@@ -36,7 +38,11 @@ class JobDetailQueryImplementation:
             "job": record,
             "pinned": bool(row["detail_pinned"]),
             "trial_binding": trial_binding,
+            "graph_binding": _graph_binding(row, trial_binding),
             "identity_refs": _identity_refs(row, trial_binding),
+            "active_artifacts": orjson.loads(
+                row["detail_artifacts_json"] or "[]"
+            ),
         }
 
 
@@ -59,6 +65,19 @@ def _trial_binding(row: Any) -> dict[str, Any] | None:
             row["run_sample_identity_assurance"] or ""
         ),
     }
+
+
+def _graph_binding(
+    row: Any,
+    trial_binding: dict[str, Any] | None,
+) -> dict[str, str] | None:
+    if trial_binding is None:
+        return None
+    value = {
+        "instance_id": str(row["run_graph_instance_id"] or ""),
+        "branch_id": str(row["run_graph_branch_id"] or ""),
+    }
+    return value if all(value.values()) else None
 
 
 def _identity_refs(
@@ -90,7 +109,24 @@ _DETAIL_COLUMNS = """
     runs.sample_hash AS run_sample_hash,
     runs.sample_identity_hash AS run_sample_identity_hash,
     runs.sample_identity_assurance AS run_sample_identity_assurance,
-    runs.run_spec_hash AS run_run_spec_hash
+    runs.graph_instance_id AS run_graph_instance_id,
+    runs.graph_branch_id AS run_graph_branch_id,
+    runs.run_spec_hash AS run_run_spec_hash,
+    COALESCE((
+        SELECT json_group_array(json_object(
+            'name', evidence_artifacts.name,
+            'content_hash', evidence_artifacts.content_hash,
+            'content_type', evidence_artifacts.content_type,
+            'size_bytes', evidence_artifacts.size_bytes
+        ))
+        FROM (
+            SELECT name, content_hash, content_type, size_bytes
+            FROM research_job_artifacts
+            WHERE job_id=jobs.job_id AND state='active'
+              AND name IN ('net_returns', 'net_return_series')
+            ORDER BY name
+        ) AS evidence_artifacts
+    ), '[]') AS detail_artifacts_json
 """
 
 _DETAIL_QUERY = f"""
@@ -119,7 +155,10 @@ _LEGACY_DETAIL_QUERY = """
            NULL AS run_sample_hash,
            NULL AS run_sample_identity_hash,
            NULL AS run_sample_identity_assurance,
-           NULL AS run_run_spec_hash
+           NULL AS run_graph_instance_id,
+           NULL AS run_graph_branch_id,
+           NULL AS run_run_spec_hash,
+           '[]' AS detail_artifacts_json
     FROM research_jobs AS jobs
     LEFT JOIN user_job_pins AS pins
       ON pins.job_id=jobs.job_id AND pins.owner=jobs.owner

@@ -74,5 +74,6 @@ def job_evidence(detail: dict) -> dict:
             trial_stage=str(
                 (trial_binding or {}).get("trial_stage") or ""
             ),
+            active_artifacts=detail["active_artifacts"],
         ),
     }

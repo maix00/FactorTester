@@ -137,8 +137,10 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "statistical_robustness",
             guard={
                 "terminal_job_evidence_retained": True,
+                "terminal_job_trusted": True,
                 "net_return_series_available": True,
             },
+            server_action="bind_job_attempt",
         ),
         edge(
             "statistical_robustness__result_audit",

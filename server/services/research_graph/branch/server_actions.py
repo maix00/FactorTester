@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import data_contract, factor_semantics
+from . import data_contract, factor_semantics, job_attempt
 
 
-_HANDLERS = (data_contract, factor_semantics)
+_HANDLERS = (data_contract, factor_semantics, job_attempt)
 
 
 def prepare(

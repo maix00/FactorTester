@@ -178,6 +178,13 @@ Contract/Methodology EvidenceEnvelope, reject stale or unresolved selections,
 and derive identical manifest guards during offline replay. The envelope
 contains no source, formula, or expression tree and does not self-certify
 causal or economic semantics.
+JobAttempt edge tests require only an owner-scoped `job_id`, bind canonical
+Job/ResearchRun/Contract/Methodology/TrialPlan identity outside the branch
+write transaction, and derive identical trust and artifact guards during
+offline replay. Client booleans cannot override server facts; failed,
+maintenance-required, cross-branch, and stale-plan attempts cannot advance.
+Only a named `net_returns` or `net_return_series` artifact qualifies, while a
+generic result artifact deliberately exposes a backend capability gap.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.

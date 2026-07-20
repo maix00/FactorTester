@@ -549,15 +549,17 @@ def test_job_detail_uses_one_read_for_pin_and_run_identity(
                 run_spec_hash, run_spec_json, decision_contract_hash,
                 methodology_hash, trial_plan_id, trial_plan_hash,
                 trial_plan_version, trial_role, trial_stage,
-                comparison_id, sample_ref, sample_hash, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                comparison_id, graph_instance_id, graph_branch_id,
+                sample_ref, sample_hash, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "run-1", "alice", "workspace-1", "configuration-1",
                 1, "backtest", 2, _record("identity").run_spec_hash,
                 "{}", "1" * 64, "2" * 64, "trial-plan-1",
                 "3" * 64, 1, "selection", "selection",
-                "baseline", "sample-1", "4" * 64, time.time(),
+                "baseline", "instance-1", "branch-1",
+                "sample-1", "4" * 64, time.time(),
             ),
         )
     repository = JobRepository(path)
@@ -568,6 +570,14 @@ def test_job_detail_uses_one_read_for_pin_and_run_identity(
         plan={"products": []},
         notices=[],
         requires_confirmation=False,
+    )
+    repository.record_artifact(
+        job_id="detail-1",
+        name="net_returns",
+        relative_path="detail-1/net_returns.parquet",
+        content_type="application/x-parquet",
+        content_hash="5" * 64,
+        size_bytes=128,
     )
     repository.pin("detail-1", owner="alice")
     statements: list[str] = []
@@ -585,12 +595,22 @@ def test_job_detail_uses_one_read_for_pin_and_run_identity(
     assert detail["job"].job_id == "detail-1"
     assert detail["pinned"] is True
     assert detail["trial_binding"]["trial_plan_hash"] == "3" * 64
+    assert detail["graph_binding"] == {
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+    }
     assert detail["identity_refs"] == {
         "contract_hash": "1" * 64,
         "methodology_hash": "2" * 64,
         "trial_plan_hash": "3" * 64,
         "run_spec_hash": _record("identity").run_spec_hash,
     }
+    assert detail["active_artifacts"] == [{
+        "name": "net_returns",
+        "content_hash": "5" * 64,
+        "content_type": "application/x-parquet",
+        "size_bytes": 128,
+    }]
     reads = [
         statement
         for statement in statements

@@ -13,6 +13,8 @@ def derive_server_guard_facts(
 ) -> dict[str, Any]:
     """Recompute declared server-action facts without trusting booleans."""
     action = edge.get("server_action")
+    if action == "bind_job_attempt":
+        return _job_attempt_facts(evidence)
     if action == "bind_factor_semantics":
         return _factor_semantics_facts(evidence)
     if action != "bind_data_availability":
@@ -48,6 +50,41 @@ def derive_server_guard_facts(
         "requested_product_availability_present": all(
             isinstance(product, str) and product in available
             for product in products
+        ),
+    }
+
+
+def _job_attempt_facts(evidence: dict[str, Any]) -> dict[str, Any]:
+    server_evidence = evidence.get("server_evidence")
+    envelope = (
+        server_evidence.get("job_attempt")
+        if isinstance(server_evidence, dict) else None
+    )
+    empty = {
+        "terminal_job_evidence_retained": False,
+        "terminal_job_trusted": False,
+        "net_return_series_available": False,
+    }
+    if not isinstance(envelope, dict):
+        return empty
+    value = validate_evidence_envelope(envelope)
+    if value.get("evidence_kind") != "job_attempt":
+        raise ValueError("backtest edge requires JobAttempt evidence")
+    facts = value.get("facts")
+    assurance = facts.get("assurance") if isinstance(facts, dict) else None
+    if not isinstance(assurance, dict):
+        raise ValueError("JobAttempt evidence requires assurance facts")
+    return {
+        "terminal_job_evidence_retained": True,
+        "terminal_job_trusted": (
+            facts.get("status") == "succeeded"
+            and assurance.get("disposition") == "trusted"
+            and assurance.get("anomaly_codes") == []
+        ),
+        "net_return_series_available": (
+            facts.get("net_return_series_available") is True
+            and isinstance(facts.get("net_return_series_ref"), str)
+            and facts["net_return_series_ref"] in value["artifact_refs"]
         ),
     }
 

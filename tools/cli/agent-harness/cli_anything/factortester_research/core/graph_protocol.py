@@ -14,6 +14,7 @@ _RISK_LEVELS = {"L1", "L2", "L3", "L4"}
 _SERVER_ACTIONS = {
     "bind_data_availability",
     "bind_factor_semantics",
+    "bind_job_attempt",
     "start_new_hypothesis_lineage",
 }
 

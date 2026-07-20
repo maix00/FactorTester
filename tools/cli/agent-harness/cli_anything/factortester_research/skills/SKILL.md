@@ -133,6 +133,22 @@ local workspace inspection as server evidence. Frozen implementation identity
 is necessary but does not establish causal timing, economic meaning,
 auxiliary-factor validity, or discharge open Verification Obligations.
 
+When the current edge is `backtest__statistical_robustness`, submit only the
+terminal Job identity:
+
+```json
+{"job_attempt_request": {"job_id": "job-1"}}
+```
+
+The server reloads the authenticated Job, immutable ResearchRun binding,
+terminal assurance, and active artifact manifest outside the branch write
+transaction. It derives whether the attempt is trusted and whether a canonical
+`net_returns` or `net_return_series` artifact exists. Never submit terminal,
+trust, or net-return guard booleans as authority. A generic `result` artifact
+does not establish a net return series; remain on the backtest node and surface
+the backend capability gap instead of guessing from gross returns or summary
+metrics.
+
 Do not search for or call capability `attest`/receipt APIs; they do not exist.
 Submit the node-local resolution directly. Use `--all` only for explicit
 activation audit and `--include-contracts` only for human inspection.

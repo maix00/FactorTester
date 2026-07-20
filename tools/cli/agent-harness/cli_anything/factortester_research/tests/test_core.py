@@ -313,8 +313,13 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     }
     assert edges["backtest__statistical_robustness"]["guard"] == {
         "terminal_job_evidence_retained": True,
+        "terminal_job_trusted": True,
         "net_return_series_available": True,
     }
+    assert (
+        edges["backtest__statistical_robustness"]["server_action"]
+        == "bind_job_attempt"
+    )
     assert edges["statistical_robustness__result_audit"]["guard"] == {
         "uncertainty_evidence_complete": True,
     }
@@ -1112,6 +1117,56 @@ def test_replay_derives_factor_semantics_guards_from_server_evidence() -> None:
         "factor_revision_manifests_bound": True,
         "selected_factor_semantics_resolved": True,
     }
+
+
+def test_replay_derives_trusted_job_guards_from_server_evidence() -> None:
+    net_return_ref = "artifact:net_returns:sha256:" + "a" * 64
+    envelope = validate_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "job-attempt:job-1",
+        "evidence_kind": "job_attempt",
+        "source_refs": ["research-job:job-1", "research-run:run-1"],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+            "trial_plan_hash": "3" * 64,
+            "run_spec_hash": "4" * 64,
+        },
+        "facts": {
+            "status": "succeeded",
+            "net_return_series_available": True,
+            "net_return_series_ref": net_return_ref,
+            "assurance": {
+                "disposition": "trusted",
+                "anomaly_codes": [],
+            },
+        },
+        "metric_refs": [],
+        "artifact_refs": [net_return_ref],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    })
+
+    facts = derive_server_guard_facts(
+        {"server_action": "bind_job_attempt"},
+        {"server_evidence": {"job_attempt": envelope}},
+    )
+    assert facts == {
+        "terminal_job_evidence_retained": True,
+        "terminal_job_trusted": True,
+        "net_return_series_available": True,
+    }
+
+    envelope["facts"]["assurance"]["disposition"] = "maintenance_required"
+    envelope["facts"]["assurance"]["anomaly_codes"] = ["worker_crashed"]
+    envelope.pop("envelope_hash")
+    facts = derive_server_guard_facts(
+        {"server_action": "bind_job_attempt"},
+        {"server_evidence": {"job_attempt": envelope}},
+    )
+    assert facts["terminal_job_trusted"] is False
 
 
 def test_plan_uses_one_workspace_run_job_contract() -> None:

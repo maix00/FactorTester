@@ -147,6 +147,16 @@ implementations resolve; the client cannot self-certify those guards. This
 identity binding does not establish causal timing, economic meaning,
 auxiliary-factor validity, or clear an open Verification Obligation.
 
+For `backtest__statistical_robustness`, transition evidence supplies only
+`job_attempt_request.job_id`. The server reloads the owner-scoped Job,
+ResearchRun identity, terminal assurance, and active artifact manifest in one
+bounded detail read, then binds its own EvidenceEnvelope. Only a succeeded,
+anomaly-free, trusted Job can satisfy the trust guard. Only a named
+`net_returns` or `net_return_series` artifact can satisfy the net-return guard;
+a generic `result`, summary metrics, or gross-return field cannot. If the
+backend does not emit that canonical artifact, route to the capability gap
+instead of allowing the client to infer it.
+
 Graph activation validation accepts canonical references only:
 
 ```bash
