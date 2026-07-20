@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct LocalProfileForm: View {
     @EnvironmentObject private var session: SessionStore
@@ -8,10 +7,8 @@ struct LocalProfileForm: View {
     @State private var id = ""
     @State private var name = ""
     @State private var serverURL = ""
-    @State private var workspaceRoot = ""
     @State private var agentID = ""
     @State private var role = "research"
-    @State private var choosingWorkspace = false
 
     var body: some View {
         GroupBox("新建 Profile") {
@@ -42,14 +39,9 @@ struct LocalProfileForm: View {
                 }
                 GridRow {
                     Text("工作区").frame(width: 64, alignment: .leading)
-                    HStack {
-                        TextField(
-                            "~/Documents/FactorTester/profiles/<profile-id>",
-                            text: $workspaceRoot
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        Button("选择…") { choosingWorkspace = true }
-                    }
+                    Text(defaultWorkspaceDescription)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(.secondary)
                 }
                 GridRow {
                     Spacer()
@@ -58,7 +50,6 @@ struct LocalProfileForm: View {
                             await controller.createIsolatedProfile(
                                 id: id, name: name,
                                 serverURL: serverURL,
-                                workspaceRoot: effectiveWorkspaceRoot,
                                 agentID: agentID,
                                 role: role,
                                 principalRef: session.user?.username ?? ""
@@ -72,15 +63,6 @@ struct LocalProfileForm: View {
                 }
             }
             .padding(8)
-        }
-        .fileImporter(
-            isPresented: $choosingWorkspace,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                workspaceRoot = url.path
-            }
         }
         .onAppear {
             if serverURL.isEmpty {
@@ -104,11 +86,9 @@ struct LocalProfileForm: View {
         id.isEmpty ? "<profile-id>" : id
     }
 
-    private var effectiveWorkspaceRoot: String {
-        guard workspaceRoot.isEmpty else { return workspaceRoot }
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/FactorTester/profiles")
-            .appendingPathComponent(id)
-            .path
+    private var defaultWorkspaceDescription: String {
+        let principal = session.user?.username ?? "<principal>"
+        let profile = id.isEmpty ? "<profile-id>" : id
+        return "~/Documents/FactorTester/users/\(principal)/profiles/\(profile)"
     }
 }

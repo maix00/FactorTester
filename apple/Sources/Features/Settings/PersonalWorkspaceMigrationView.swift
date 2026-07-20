@@ -2,7 +2,6 @@ import SwiftUI
 
 struct PersonalWorkspaceMigrationView: View {
     @ObservedObject var controller: PersonalWorkspaceController
-    @Binding var targetPath: String
     let suggestedPath: String
     @Binding var confirmsMigration: Bool
 
@@ -10,9 +9,9 @@ struct PersonalWorkspaceMigrationView: View {
         GroupBox("迁移预览") {
             VStack(alignment: .leading, spacing: 10) {
                 LabeledContent("建议路径", value: suggestedPath)
-                TextField("迁移目标", text: $targetPath)
                 if let plan = controller.plan {
                     Divider()
+                    layout(plan.layout)
                     LabeledContent("源路径", value: plan.source)
                     LabeledContent("目标路径", value: plan.target)
                     LabeledContent("Dirty 文件", value: "\(plan.dirtyCount)")
@@ -28,9 +27,9 @@ struct PersonalWorkspaceMigrationView: View {
                 }
                 HStack {
                     Button("生成迁移预览") {
-                        Task { await controller.previewMigration(target: targetPath) }
+                        Task { await controller.previewMigration() }
                     }
-                    .disabled(controller.current == nil || targetPath.isEmpty)
+                    .disabled(controller.current == nil)
                     Button("执行预览中的迁移…") {
                         confirmsMigration = true
                     }
@@ -53,6 +52,15 @@ struct PersonalWorkspaceMigrationView: View {
             }
             .padding(8)
         }
+    }
+
+    private func layout(_ value: UserLayoutPaths) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            LabeledContent("用户根目录", value: value.userRoot)
+            LabeledContent("Personal workspace", value: value.personalWorkspace)
+            LabeledContent("Profiles root", value: value.profilesRoot)
+        }
+        .font(.caption)
     }
 
     private func preservation(

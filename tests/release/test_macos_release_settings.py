@@ -215,7 +215,7 @@ def test_macos_adapter_secrets_go_to_keychain_not_cli_arguments() -> None:
     assert "用于本地 Adapter" in profiles
 
 
-def test_macos_profiles_show_workspace_ownership_and_folder_picker() -> None:
+def test_macos_profiles_use_principal_scoped_default_workspace() -> None:
     profile_root = SOURCES / "Features" / "Profiles"
     model = (profile_root / "LocalProfileModel.swift").read_text(
         encoding="utf-8"
@@ -232,7 +232,8 @@ def test_macos_profiles_show_workspace_ownership_and_folder_picker() -> None:
     )
     assert 'json["workspaces"]' in model
     assert 'json["owner_ref"]' in model
-    assert "allowedContentTypes: [.folder]" in form
+    assert "Documents/FactorTester/users/" in form
+    assert "workspaceRoot" not in form
     assert "可见工作区" in view
     assert "Owner:" in view
 
@@ -255,19 +256,21 @@ def test_macos_settings_manage_personal_workspace_through_cli() -> None:
     assert "PersonalWorkspaceView()" in hub
     assert "LocalProfilesView()" not in hub
     assert "Profile、实时研究步骤、Trial Plan、义务与报告不属于设置" in hub
-    assert "Documents/FactorTester/personal-workspaces" in view
+    assert "Documents/FactorTester/users" in view
+    assert "personal-workspace/factor-library" in view
+    assert "Profile 只链接 canonical repo 的独立 worktree" in view
     assert "当前 canonical 因子库" in view
-    assert "cleanup preview" in view
-    assert "不会从 UI 直接删除目录" in view
+    assert "Legacy quarantine preview" in view
+    assert "不提供无门禁删除" in view
     for label in (
         "Dirty 文件", "关联 Profiles", "关联 Worktrees",
         "保留所有 branch", "保留所有 commit", "保留未提交内容",
     ):
         assert label in migration
-    assert '"personal-workspace", "show"' in controller
-    assert '"personal-workspace", "migration", "plan"' in controller
-    assert '"personal-workspace", "migration", "apply"' in controller
-    assert '"personal-workspace", "migration", "verify"' in controller
+    assert '"user-layout", "show"' in controller
+    assert '"user-layout", "migration", "plan"' in controller
+    assert '"user-layout", "migration", "apply"' in controller
+    assert '"user-layout", "migration", "verify"' in controller
     assert "Process()" not in controller
     assert '"git"' not in controller
     assert "receiptRef" in migration

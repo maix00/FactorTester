@@ -5,7 +5,6 @@ extension LocalProfileController {
         id: String,
         name: String,
         serverURL: String,
-        workspaceRoot: String,
         agentID: String,
         role: String,
         principalRef: String
@@ -14,7 +13,7 @@ extension LocalProfileController {
             let created = try await ReleaseCommand.runObject([
                 "client", "profile", "create",
                 "--profile-id", id, "--display-name", name,
-                "--server-url", serverURL, "--workspace-root", workspaceRoot,
+                "--server-url", serverURL,
                 "--agent-id", agentID, "--role", role,
                 "--principal-ref", principalRef,
             ], executable: self.cliPath)

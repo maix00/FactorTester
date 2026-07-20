@@ -21,10 +21,13 @@ final class PersonalWorkspaceController: ObservableObject {
         guard !principal.isEmpty else { return }
         await perform {
             let value = try await ReleaseCommand.runObject([
-                "client", "profile", "personal-workspace", "show",
+                "client", "profile", "user-layout", "show",
                 "--principal", principal,
             ], executable: self.cliPath)
-            self.current = PersonalCanonicalWorkspace(json: value)
+            let canonical = value["canonical"] as? [String: Any] ?? [:]
+            self.current = PersonalCanonicalWorkspace(
+                json: canonical, principal: principal
+            )
         }
     }
 
@@ -40,17 +43,16 @@ final class PersonalWorkspaceController: ObservableObject {
         }
     }
 
-    func previewMigration(target: String) async {
-        guard !principal.isEmpty, !target.isEmpty else { return }
+    func previewMigration() async {
+        guard !principal.isEmpty else { return }
         await perform {
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "factortester-personal-workspace-\(UUID().uuidString).json"
                 )
             let value = try await ReleaseCommand.runObject([
-                "client", "profile", "personal-workspace", "migration", "plan",
+                "client", "profile", "user-layout", "migration", "plan",
                 "--principal", self.principal,
-                "--target", target,
                 "--output", url.path,
             ], executable: self.cliPath)
             self.plan = PersonalWorkspaceMigrationPlan(json: value)
@@ -64,7 +66,7 @@ final class PersonalWorkspaceController: ObservableObject {
         guard let planURL else { return }
         await perform {
             let value = try await ReleaseCommand.runObject([
-                "client", "profile", "personal-workspace", "migration", "apply",
+                "client", "profile", "user-layout", "migration", "apply",
                 planURL.path,
             ], executable: self.cliPath)
             self.receipt = PersonalWorkspaceReceipt(json: value)
@@ -75,15 +77,19 @@ final class PersonalWorkspaceController: ObservableObject {
         guard let receipt, !receipt.id.isEmpty else { return }
         await perform {
             let value = try await ReleaseCommand.runObject([
-                "client", "profile", "personal-workspace", "migration", "verify",
+                "client", "profile", "user-layout", "migration", "verify",
                 receipt.id,
             ], executable: self.cliPath)
-            self.verificationStatus = value.string("status")
+            self.verificationStatus = value.bool("valid") == true
+                ? "verified" : "invalid"
             let current = try await ReleaseCommand.runObject([
-                "client", "profile", "personal-workspace", "show",
+                "client", "profile", "user-layout", "show",
                 "--principal", self.principal,
             ], executable: self.cliPath)
-            self.current = PersonalCanonicalWorkspace(json: current)
+            let canonical = current["canonical"] as? [String: Any] ?? [:]
+            self.current = PersonalCanonicalWorkspace(
+                json: canonical, principal: self.principal
+            )
         }
     }
 

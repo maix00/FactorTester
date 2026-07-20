@@ -5,7 +5,6 @@ struct PersonalWorkspaceView: View {
     @EnvironmentObject private var session: SessionStore
     @StateObject private var controller = PersonalWorkspaceController()
     @State private var selectedPath = ""
-    @State private var targetPath = ""
     @State private var choosingFolder = false
     @State private var confirmsMigration = false
 
@@ -13,6 +12,7 @@ struct PersonalWorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
+                layoutCard
                 canonicalCard
                 migrationCard
                 cleanupCard
@@ -25,7 +25,6 @@ struct PersonalWorkspaceView: View {
         }
         .overlay { if controller.isWorking { ProgressView() } }
         .task {
-            targetPath = suggestedPath
             await controller.refresh(principal: session.user?.username ?? "")
         }
         .fileImporter(
@@ -54,7 +53,7 @@ struct PersonalWorkspaceView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("个人工作区").font(.largeTitle.weight(.semibold))
-            Text("登记当前用户的 canonical 因子库，并安全迁移到统一目录。")
+            Text("一个用户目录、一份 canonical 因子库，以及按 Profile 隔离的研究现场。")
                 .foregroundStyle(.secondary)
         }
     }
@@ -62,9 +61,36 @@ struct PersonalWorkspaceView: View {
     private var suggestedPath: String {
         let principal = session.user?.username ?? "<principal>"
         return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/FactorTester/personal-workspaces")
+            .appendingPathComponent("Documents/FactorTester/users")
             .appendingPathComponent(principal)
-            .appendingPathComponent("factor-library").path
+            .appendingPathComponent("personal-workspace/factor-library").path
+    }
+
+    private var layoutCard: some View {
+        GroupBox("用户目录结构") {
+            VStack(alignment: .leading, spacing: 7) {
+                pathRow("用户根目录", userRoot)
+                pathRow("唯一 canonical 因子库", suggestedPath)
+                pathRow("Profile 根目录", "\(userRoot)/profiles")
+                Text("每个 Profile 只链接 canonical repo 的独立 worktree；不会复制第二份因子库。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(8)
+        }
+    }
+
+    private var userRoot: String {
+        let principal = session.user?.username ?? "<principal>"
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/FactorTester/users")
+            .appendingPathComponent(principal).path
+    }
+
+    private func pathRow(_ label: String, _ value: String) -> some View {
+        LabeledContent(label) {
+            Text(value).font(.caption.monospaced()).textSelection(.enabled)
+        }
     }
 
     private var canonicalCard: some View {
@@ -101,24 +127,23 @@ struct PersonalWorkspaceView: View {
     private var migrationCard: some View {
         PersonalWorkspaceMigrationView(
             controller: controller,
-            targetPath: $targetPath,
             suggestedPath: suggestedPath,
             confirmsMigration: $confirmsMigration
         )
     }
 
     private var cleanupCard: some View {
-        GroupBox("旧 Profile 工作区 cleanup preview") {
+        GroupBox("Legacy quarantine preview") {
             VStack(alignment: .leading, spacing: 8) {
-                Text("这里只显示确定性预览；不会从 UI 直接删除目录。")
+                Text("旧目录只进入 quarantine，不再作为活动 workspace；UI 不提供无门禁删除。")
                     .foregroundStyle(.secondary)
                 if let plan = controller.plan {
-                    LabeledContent("关联 Worktrees", value: "\(plan.linkedWorktrees.count)")
-                    ForEach(plan.linkedWorktrees, id: \.self) { path in
+                    LabeledContent("隔离项", value: "\(plan.legacyQuarantine.count)")
+                    ForEach(plan.legacyQuarantine, id: \.self) { path in
                         Text(path).font(.caption.monospaced())
                     }
                 } else {
-                    Text("生成迁移预览后显示受影响的旧 Profile worktrees。")
+                    Text("生成统一布局预览后显示 legacy quarantine 目标。")
                         .font(.caption)
                 }
             }
