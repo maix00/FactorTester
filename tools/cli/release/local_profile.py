@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from hashlib import sha256
 import json
+import subprocess
 from typing import Any
 
 from .locations import validate_client_root
@@ -174,8 +175,14 @@ class LocalProfileStore:
             value not in {"", "all", "unbound"}
             for value in scope.values()
         )
+        binding = profile.get("factor_workspace_binding") or {}
+        worktree_path = str(binding.get("worktree_path") or "")
+        worktree = Path(worktree_path) if worktree_path else None
+        worktree_available = bool(worktree and worktree.is_dir())
+        commit, commit_kind = _factor_worktree_commit(binding, worktree)
+        plan_path = workspace_root / "factor-worktree-plan.json"
         receipt = {
-            "schema_version": 1,
+            "schema_version": 2,
             "profile_id": profile_id,
             "agent_id": agent_id,
             "role": agent["role"],
@@ -198,6 +205,28 @@ class LocalProfileStore:
             ),
             "can_start_inspection_and_planning": True,
             "research_execution_scope_bound": scope_bound,
+            "factor_worktree_ref": str(binding.get("receipt_ref") or ""),
+            "factor_worktree_path": worktree_path,
+            "factor_worktree_branch": str(binding.get("branch") or ""),
+            "factor_worktree_commit": commit,
+            "factor_worktree_commit_kind": commit_kind,
+            "factor_worktree_available": worktree_available,
+            "canonical_repo_ref": str(
+                binding.get("canonical_repo_ref") or ""
+            ),
+            "sync_policy": dict(binding.get("sync_policy") or {}),
+            "recommended_cwd": (
+                worktree_path if worktree_available else str(workspace_root)
+            ),
+            "next_command": (
+                "factortester client profile factor-worktree verify "
+                f"{profile_id} --run-pyright"
+                if binding
+                else (
+                    "factortester client profile factor-worktree plan "
+                    f"{profile_id} --output {json.dumps(str(plan_path))}"
+                )
+            ),
         }
         encoded = json.dumps(
             receipt, sort_keys=True, separators=(",", ":")
@@ -218,3 +247,27 @@ class LocalProfileStore:
     def _path(self, profile_id: str) -> Path:
         validate_local_identifier(profile_id, "profile_id")
         return self.root / f"{profile_id}.json"
+
+
+def _factor_worktree_commit(
+    binding: dict[str, Any],
+    worktree: Path | None,
+) -> tuple[str, str]:
+    base = str(binding.get("base_commit") or "")
+    if worktree is None or not worktree.is_dir():
+        return (base, "base") if base else ("", "")
+    result = subprocess.run(
+        ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    head = result.stdout.strip()
+    if (
+        result.returncode == 0
+        and len(head) == 40
+        and all(character in "0123456789abcdef" for character in head)
+    ):
+        return head, "head"
+    return (base, "base") if base else ("", "")

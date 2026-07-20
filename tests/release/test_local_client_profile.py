@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 from click.testing import CliRunner
@@ -168,8 +169,22 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
         )
         assert "Codex" not in payload["agent_prompt"]
         receipt = payload["claim_receipt"]
+        assert receipt["schema_version"] == 2
         assert receipt["can_start_inspection_and_planning"] is True
         assert receipt["research_execution_scope_bound"] is False
+        assert receipt["factor_worktree_ref"] == ""
+        assert receipt["factor_worktree_path"] == ""
+        assert receipt["factor_worktree_branch"] == ""
+        assert receipt["factor_worktree_commit"] == ""
+        assert receipt["factor_worktree_commit_kind"] == ""
+        assert receipt["factor_worktree_available"] is False
+        assert receipt["canonical_repo_ref"] == ""
+        assert receipt["sync_policy"] == {}
+        assert receipt["recommended_cwd"] == receipt["workspace_root"]
+        assert "factor-worktree plan" in receipt["next_command"]
+        assert "profile" not in {
+            key.lower() for key in receipt if key != "profile_id"
+        }
         assert Path(receipt["workspace_root"]).stat().st_mode & 0o777 == 0o700
         profile = payload["profile"]
         assert profile["profile_id"] == profile_id
@@ -221,6 +236,108 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
     assert maxa["initialization_sources"][0]["session_ref"] != (
         maxb["initialization_sources"][0]["session_ref"]
     )
+
+
+def test_claim_receipt_exposes_compact_bound_factor_worktree(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    workspace = tmp_path / "profile"
+    worktree = workspace / "factor-worktrees" / "maxa"
+    worktree.mkdir(parents=True)
+    subprocess.run(
+        ["git", "-C", str(worktree), "init", "-b", "agent/maxa"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(worktree), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(worktree), "config", "user.name", "Tests"],
+        check=True,
+    )
+    (worktree / "Factor.py").write_text("value = 1\n")
+    subprocess.run(
+        ["git", "-C", str(worktree), "add", "Factor.py"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(worktree), "commit", "-m", "base"],
+        check=True,
+        capture_output=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    store = LocalProfileStore(root)
+    profile = new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8000",
+        workspace_root=workspace,
+    )
+    profile["agents"] = [{
+        "agent_id": "research-maxa",
+        "role": "research",
+        "scope": {"instance_id": "i-1", "branch_id": "b-1"},
+        "status": "ready",
+        "next_action": "Continue research.",
+    }]
+    profile["factor_workspace_binding"] = {
+        "binding_id": "factor-worktree-test",
+        "canonical_repo_ref": "local-factor-git://canonical/test",
+        "base_commit": head,
+        "branch": "agent/maxa",
+        "worktree_path": str(worktree),
+        "research_root": str(workspace / "research"),
+        "git_common_dir": str(worktree / ".git"),
+        "owner_ref": "maxa",
+        "sync_policy": {
+            "source_sync_enabled": False,
+            "auto_push": False,
+            "auto_merge": False,
+        },
+        "receipt_hash": "a" * 64,
+        "receipt_ref": (tmp_path / "binding.json").resolve().as_uri(),
+    }
+    store.save(profile)
+
+    first = store.claim_agent("maxa", "research-maxa")
+    receipt_path = Path(first["receipt_ref"].removeprefix("file://"))
+    before_mtime = receipt_path.stat().st_mtime_ns
+    second = store.claim_agent("maxa", "research-maxa")
+
+    assert second == first
+    assert receipt_path.stat().st_mtime_ns == before_mtime
+    assert first["factor_worktree_ref"].endswith("binding.json")
+    assert first["factor_worktree_path"] == str(worktree)
+    assert first["factor_worktree_branch"] == "agent/maxa"
+    assert first["factor_worktree_commit"] == head
+    assert first["factor_worktree_commit_kind"] == "head"
+    assert first["factor_worktree_available"] is True
+    assert first["canonical_repo_ref"] == "local-factor-git://canonical/test"
+    assert first["sync_policy"]["auto_push"] is False
+    assert first["recommended_cwd"] == str(worktree)
+    assert first["next_command"].endswith("maxa --run-pyright")
+    assert "profile" not in first
+    assert len(json.dumps(first)) < 2_500
+
+    (worktree / "Factor.py").write_text("value = 2\n")
+    subprocess.run(
+        ["git", "-C", str(worktree), "add", "Factor.py"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(worktree), "commit", "-m", "advance"],
+        check=True,
+        capture_output=True,
+    )
+    advanced = store.claim_agent("maxa", "research-maxa")
+    assert advanced["factor_worktree_commit"] != head
+    assert advanced["receipt_hash"] != first["receipt_hash"]
 
 
 def test_bootstrap_fails_closed_before_local_write_on_principal_mismatch(
