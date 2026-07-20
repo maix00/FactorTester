@@ -12,7 +12,10 @@ def derive_server_guard_facts(
     evidence: dict[str, Any],
 ) -> dict[str, Any]:
     """Recompute declared server-action facts without trusting booleans."""
-    if edge.get("server_action") != "bind_data_availability":
+    action = edge.get("server_action")
+    if action == "bind_factor_semantics":
+        return _factor_semantics_facts(evidence)
+    if action != "bind_data_availability":
         return {}
     server_evidence = evidence.get("server_evidence")
     envelope = (
@@ -45,5 +48,36 @@ def derive_server_guard_facts(
         "requested_product_availability_present": all(
             isinstance(product, str) and product in available
             for product in products
+        ),
+    }
+
+
+def _factor_semantics_facts(evidence: dict[str, Any]) -> dict[str, Any]:
+    server_evidence = evidence.get("server_evidence")
+    envelope = (
+        server_evidence.get("factor_semantics")
+        if isinstance(server_evidence, dict) else None
+    )
+    if not isinstance(envelope, dict):
+        return {
+            "factor_revision_manifests_bound": False,
+            "selected_factor_semantics_resolved": False,
+        }
+    value = validate_evidence_envelope(envelope)
+    if value.get("evidence_kind") != "factor_semantics":
+        raise ValueError("factor-semantics edge requires factor evidence")
+    facts = value.get("facts")
+    refs = (
+        facts.get("factor_revision_refs")
+        if isinstance(facts, dict) else None
+    )
+    if not isinstance(refs, list) or not refs:
+        raise ValueError("factor semantics requires revision references")
+    return {
+        "factor_revision_manifests_bound": True,
+        "selected_factor_semantics_resolved": all(
+            isinstance(item, dict)
+            and item.get("resolution_status") == "resolved"
+            for item in refs
         ),
     }

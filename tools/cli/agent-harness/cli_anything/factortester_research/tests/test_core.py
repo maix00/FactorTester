@@ -39,6 +39,9 @@ from cli_anything.factortester_research.core.session import (
     record_skill_usage,
     resolve_gap,
 )
+from cli_anything.factortester_research.core.server_guards import (
+    derive_server_guard_facts,
+)
 from cli_anything.factortester_research.core.slices import default_factor_validation_plan
 from cli_anything.factortester_research.core.capability_sources import (
     source_manifest_sha256,
@@ -396,6 +399,15 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     assert edges["factor_semantics__validation_design"]["guard"][
         "semantic_discovery_fresh_or_not_triggered"
     ] is True
+    assert edges["factor_semantics__validation_design"]["guard"][
+        "factor_revision_manifests_bound"
+    ] is True
+    assert edges["factor_semantics__validation_design"]["guard"][
+        "selected_factor_semantics_resolved"
+    ] is True
+    assert edges["factor_semantics__validation_design"]["server_action"] == (
+        "bind_factor_semantics"
+    )
     assert edges["validation_design__cheap_diagnostics"]["guard"][
         "actionable_obligations_planned_or_bounded"
     ] is True
@@ -1065,6 +1077,41 @@ def test_transition_validation_rejects_client_server_evidence() -> None:
                 "data_availability": {"forged": True},
             },
         })
+
+
+def test_replay_derives_factor_semantics_guards_from_server_evidence() -> None:
+    envelope = validate_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "factor-semantics-replay",
+        "evidence_kind": "factor_semantics",
+        "source_refs": ["factor-revision:" + "a" * 64],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+        },
+        "facts": {
+            "factor_revision_refs": [{
+                "manifest_hash": "a" * 64,
+                "resolution_status": "resolved",
+            }],
+        },
+        "metric_refs": [],
+        "artifact_refs": [],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    })
+
+    facts = derive_server_guard_facts(
+        {"server_action": "bind_factor_semantics"},
+        {"server_evidence": {"factor_semantics": envelope}},
+    )
+
+    assert facts == {
+        "factor_revision_manifests_bound": True,
+        "selected_factor_semantics_resolved": True,
+    }
 
 
 def test_plan_uses_one_workspace_run_job_contract() -> None:

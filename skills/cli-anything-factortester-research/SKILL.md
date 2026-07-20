@@ -103,6 +103,20 @@ Verification Obligation. If a required product is unavailable, remain at
 `data_contract` and ask only for an actual source/scope/fee/credential/licence
 choice; Tiger is one candidate source, not a Graph rule.
 
+When the current edge is `factor_semantics__validation_design`, submit only
+the branch configuration revision to be frozen:
+
+```json
+{"factor_semantics_request": {"configuration_revision": 3}}
+```
+
+The server reloads the branch-owned workspace outside the write transaction,
+freezes source-free factor revision manifests, and derives whether every
+selected factor resolves. Never submit factor-semantics guard booleans or use a
+local workspace inspection as server evidence. Frozen implementation identity
+is necessary but does not establish causal timing, economic meaning,
+auxiliary-factor validity, or discharge open Verification Obligations.
+
 Do not search for or call capability `attest`/receipt APIs; they do not exist.
 Submit the node-local resolution directly. Use `--all` only for explicit
 activation audit and `--include-contracts` only for human inspection.

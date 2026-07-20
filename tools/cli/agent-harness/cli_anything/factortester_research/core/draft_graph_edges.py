@@ -95,7 +95,10 @@ def build_draft_edges() -> list[dict[str, Any]]:
             guard={
                 "causal_semantics_valid": True,
                 "semantic_discovery_fresh_or_not_triggered": True,
+                "factor_revision_manifests_bound": True,
+                "selected_factor_semantics_resolved": True,
             },
+            server_action="bind_factor_semantics",
         ),
         edge(
             "validation_design__cheap_diagnostics",

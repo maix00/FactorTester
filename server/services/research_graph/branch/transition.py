@@ -10,7 +10,7 @@ from typing import Any
 import orjson
 
 import settings as Settings
-from server.services.research_graph.branch import data_contract
+from server.services.research_graph.branch import server_actions
 from server.services.research_graph.branch.projection import (
     normalize_capability_resolution,
     serialize_capability_resolution,
@@ -91,20 +91,20 @@ def advance_graph_branch(
         isinstance(item, str) and item for item in invocation_ids
     ):
         raise ValueError("agent_invocation_ids must be an array")
-    data_preflight = data_contract.prepare_transition(
+    prepared_server_actions = server_actions.prepare(
         instance_id=instance_id,
         branch_id=branch_id,
         owner=owner,
         edge_id=edge_id,
-        request=prepared_evidence.get(data_contract.REQUEST_FIELD),
+        evidence=prepared_evidence,
     )
-    prepared_evidence = data_contract.bind_server_evidence(
+    prepared_evidence = server_actions.bind(
         prepared_evidence,
-        data_preflight,
+        prepared_server_actions,
     )
-    persisted_evidence = data_contract.bind_server_evidence(
+    persisted_evidence = server_actions.bind(
         persisted_evidence,
-        data_preflight,
+        prepared_server_actions,
     )
     serialize_bounded_trace_evidence(persisted_evidence)
     proposed_trial_plan_hash = validate_trial_plan_hash(
@@ -155,10 +155,10 @@ def advance_graph_branch(
         )
         if edge is None:
             raise KeyError("graph edge not found")
-        data_contract.validate_preflight(
+        server_actions.validate(
             row=branch_row,
             edge=edge,
-            prepared=data_preflight,
+            prepared=prepared_server_actions,
         )
         edge_from = str(edge.get("from_node") or "")
         if edge_from not in {branch["current_node"], "*"}:
@@ -194,10 +194,7 @@ def advance_graph_branch(
                 adjudication_action=route_action,
             ),
             "research_cycle_delta_applied": bool(cycle_events),
-            **(
-                data_preflight["guard_facts"]
-                if data_preflight is not None else {}
-            ),
+            **server_actions.guard_facts(prepared_server_actions),
         }
         failed_guards = [
             key

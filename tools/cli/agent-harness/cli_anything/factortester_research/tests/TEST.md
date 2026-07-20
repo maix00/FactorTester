@@ -162,6 +162,12 @@ for source or resolved-expression changes, RunSpec-v2 preview/submit identity,
 legacy RunSpec-v1 readability, and execution-time failure when the current
 factor implementation no longer matches the frozen manifest. Random
 Parameter display UUIDs are excluded from semantic hashes.
+Factor-semantics edge tests require only the branch configuration revision,
+freeze manifests outside the branch write transaction, bind a server-owned
+Contract/Methodology EvidenceEnvelope, reject stale or unresolved selections,
+and derive identical manifest guards during offline replay. The envelope
+contains no source, formula, or expression tree and does not self-certify
+causal or economic semantics.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.

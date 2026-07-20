@@ -13,6 +13,7 @@ _EDGE_TYPES = {"recommended", "conditional", "failure", "recovery"}
 _RISK_LEVELS = {"L1", "L2", "L3", "L4"}
 _SERVER_ACTIONS = {
     "bind_data_availability",
+    "bind_factor_semantics",
     "start_new_hypothesis_lineage",
 }
 
