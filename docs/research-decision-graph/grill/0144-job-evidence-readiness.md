@@ -104,3 +104,29 @@ access, tests, revision, deployment, and audit authority. Ordinary users and
 client Agents cannot perform it. The research branch remains paused while that
 work occurs and consumes only the resulting approved-binding fact. This keeps
 research semantics independent from software-delivery mechanics.
+
+## Grill 146: immutable cross-version continuation
+
+The real v5 acceptance branches already own immutable ResearchRun and
+JobAttempt bindings. Updating their `graph_version` would reinterpret history;
+creating an ordinary v6 branch would correctly fail Job binding. The accepted
+solution preserves both invariants:
+
+1. The source instance, branch, trace, ResearchRun binding, and Job remain
+   unchanged.
+2. A read-only preview hashes the owner, source and target graph hashes,
+   source trace and checkpoint, workspace, Job evidence, target version, and
+   `job_evidence_ready` node.
+3. One exact-hash Maintenance Gate must bind that descriptor and the approved
+   `continue_graph_branch` action.
+4. The server rechecks Contract, Methodology, TrialPlan, RunSpec, workspace,
+   terminal assurance, artifacts, direct graph parentage, active target, and
+   capability-free target node.
+5. Gate consumption and insertion of one target instance, branch, and
+   `__graph_continuation__` bootstrap trace share a transaction.
+6. The Job envelope gains a bounded migration limitation and a new hash. The
+   Job itself is neither rebound nor rerun.
+
+The continuation uses the existing Graph and Maintenance tables. It adds no
+catalog, migration, lineage, receipt, or evidence table, and shadow replay
+understands the one bounded bootstrap trace without loading source history.

@@ -64,8 +64,18 @@ def replay_shadow_trace(
                 evidence_count=evidence_count,
                 status="invalid",
             )
-        if str(row["edge_id"]) == "__branch_fork__":
-            fork_node = _fork_node(evidence, graph)
+        bootstrap_edge = str(row["edge_id"])
+        if bootstrap_edge in {
+            "__branch_fork__",
+            "__graph_continuation__",
+        }:
+            fork_node = _bootstrap_node(
+                evidence,
+                graph,
+                continuation=(
+                    bootstrap_edge == "__graph_continuation__"
+                ),
+            )
             if (
                 path
                 or previous_trace_id
@@ -154,10 +164,20 @@ def replay_shadow_trace(
     )
 
 
-def _fork_node(evidence: dict[str, Any], graph: dict[str, Any]) -> str:
-    fork = evidence.get("branch_fork")
+def _bootstrap_node(
+    evidence: dict[str, Any],
+    graph: dict[str, Any],
+    *,
+    continuation: bool,
+) -> str:
+    fork = evidence.get(
+        "graph_continuation" if continuation else "branch_fork"
+    )
     fork_node = (
-        str(fork.get("checkpoint_node") or "")
+        str(
+            fork.get("target_node" if continuation else "checkpoint_node")
+            or ""
+        )
         if isinstance(fork, dict)
         else ""
     )

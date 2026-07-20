@@ -62,7 +62,23 @@ def prepare_transition(
             raise ValueError(
                 "JobAttempt evidence requires a Research Cycle checkpoint"
             )
-        expected = _branch_identity(row)
+        expected = branch_identity(row)
+    return prepare_bound_job_evidence(
+        job_id=job_id,
+        owner=owner,
+        checkpoint=checkpoint,
+        expected=expected,
+    )
+
+
+def prepare_bound_job_evidence(
+    *,
+    job_id: str,
+    owner: str,
+    checkpoint: dict[str, Any],
+    expected: dict[str, Any],
+) -> dict[str, Any]:
+    """Project one source-bound Job without changing its Graph identity."""
     detail = JobRepository(Settings.CACHE_DB_PATH).load_detail(
         job_id,
         owner=owner,
@@ -143,7 +159,7 @@ def validate_preflight(
     if prepared is None:
         return
     _validate_edge(row=row, edge=edge)
-    if _branch_identity(row) != prepared["expected"]:
+    if branch_identity(row) != prepared["expected"]:
         raise ValueError(
             "JobAttempt preflight is stale; inspect the current branch again"
         )
@@ -190,7 +206,7 @@ def _request_job_id(value: Any) -> str:
     return job_id.strip()
 
 
-def _branch_identity(row: Any) -> dict[str, Any]:
+def branch_identity(row: Any) -> dict[str, Any]:
     return {
         "instance_id": str(row["instance_id"]),
         "branch_id": str(row["branch_id"]),
