@@ -15,10 +15,14 @@ from tools.cli.release.profile import load_profile_root
 from tools.cli.release.storage import read_json, write_json
 from tools.cli.release.workspace_migration import (
     apply_workspace_migration,
+    apply_workspace_repair,
     default_profile_workspace_root,
     plan_workspace_migration,
+    plan_workspace_repair,
     rollback_workspace_migration,
+    rollback_workspace_repair,
     verify_workspace_migration,
+    verify_workspace_repair,
 )
 from tools.cli.client import FactorTesterClient
 from tools.cli.http import HttpSession
@@ -291,6 +295,80 @@ def rollback_profile_workspace(
     root = load_profile_root(release_profile)
     click.echo(_json(rollback_workspace_migration(
         root, profile_id, migration_id
+    )))
+
+
+@profile_workspace.command("repair-plan")
+@click.argument("profile_id")
+@click.argument("workspace_id")
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def plan_profile_workspace_repair(
+    profile_id: str,
+    workspace_id: str,
+    output: Path,
+    release_profile: Path | None,
+) -> None:
+    """Preview repair of an already materialized legacy workspace."""
+    plan = plan_workspace_repair(
+        load_profile_root(release_profile), profile_id, workspace_id
+    )
+    write_json(output, plan)
+    click.echo(_json(plan))
+
+
+@profile_workspace.command("repair-apply")
+@click.argument(
+    "plan_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def apply_profile_workspace_repair(
+    plan_path: Path,
+    release_profile: Path | None,
+) -> None:
+    """Atomically repair a previewed legacy workspace."""
+    plan = read_json(plan_path)
+    if not isinstance(plan, dict):
+        raise ValueError("workspace repair plan is invalid")
+    click.echo(_json(apply_workspace_repair(
+        load_profile_root(release_profile), plan
+    )))
+
+
+@profile_workspace.command("repair-verify")
+@click.argument("profile_id")
+@click.argument("repair_id")
+@_root_option
+@friendly_errors
+def verify_profile_workspace_repair(
+    profile_id: str,
+    repair_id: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(verify_workspace_repair(
+        load_profile_root(release_profile), profile_id, repair_id
+    )))
+
+
+@profile_workspace.command("repair-rollback")
+@click.argument("profile_id")
+@click.argument("repair_id")
+@_root_option
+@friendly_errors
+def rollback_profile_workspace_repair(
+    profile_id: str,
+    repair_id: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(rollback_workspace_repair(
+        load_profile_root(release_profile), profile_id, repair_id
     )))
 
 

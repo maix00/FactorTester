@@ -8,10 +8,14 @@ from click.testing import CliRunner
 from tools.cli.app import cli
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.workspace_migration import (
+    apply_workspace_repair,
     apply_workspace_migration,
     plan_workspace_migration,
+    plan_workspace_repair,
     rollback_workspace_migration,
+    rollback_workspace_repair,
     verify_workspace_migration,
+    verify_workspace_repair,
 )
 
 
@@ -193,3 +197,75 @@ def test_workspace_rollback_refuses_to_overwrite_newer_profile_pointer(
         assert "no longer points" in str(error)
     else:
         raise AssertionError("stale rollback should be refused")
+
+
+def test_existing_unsafe_workspace_repair_is_previewed_atomic_and_reversible(
+    tmp_path: Path,
+) -> None:
+    client_root = tmp_path / "support"
+    target = _workspace(
+        tmp_path / "Documents/FactorTester/profiles/maxa/workspaces/maxa",
+        "default$MaxA@1",
+        "TrDualMomentum.py",
+    )
+    manifest_path = target / ".factor_workspace/manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["workspace_root"] = "/private/legacy/server/workspace"
+    manifest_path.write_text(json.dumps(manifest))
+    (target / "research").mkdir()
+    (target / "research/state.json").write_text(json.dumps({
+        "workspace_id": "workspace-1",
+        "run_id": "run-1",
+        "branch_id": "branch-1",
+        "checkpoint_ref": "checkpoint:1",
+        "evidence_ref": "evidence:1",
+        "report_ref": "report:1",
+        "artifact_ref": "artifact:1",
+        "factor_family_version": "TrDualMomentum@4",
+    }))
+    store = _profile(client_root, target.parent.parent)
+    store.upsert_workspace("maxa", {
+        "workspace_id": "maxa-factor-library",
+        "path": str(target),
+        "access_mode": "owner",
+        "owner_ref": "default$MaxA@1",
+        "server_workspace_ref": "default$MaxA@1",
+    }, workspace_root=target.parent.parent)
+    old_receipt = (
+        store.root / "receipts/maxa/legacy.json"
+    )
+    old_receipt.parent.mkdir(parents=True)
+    old_receipt.write_text('{"status":"applied"}')
+    plan = plan_workspace_repair(
+        client_root, "maxa", "maxa-factor-library"
+    )
+
+    assert plan["repairable"] is True
+    assert set(plan["issues"]) == {
+        "manifest_paths_outside_workspace",
+        "active_private_hooks",
+    }
+    assert plan["research_refs"]["run_id"] == ["run-1"]
+    assert (target / ".git/hooks/post-commit").exists()
+
+    receipt = apply_workspace_repair(client_root, plan)
+    repair_id = receipt["repair_id"]
+    assert receipt["status"] == "applied"
+    assert Path(receipt["unsafe_backup_path"]).is_dir()
+    assert (
+        Path(receipt["metadata_backup_path"])
+        / "receipts/legacy.json"
+    ).is_file()
+    assert not (target / ".git/hooks/post-commit").exists()
+    assert verify_workspace_repair(
+        client_root, "maxa", repair_id
+    )["valid"] is True
+
+    rolled_back = rollback_workspace_repair(
+        client_root, "maxa", repair_id
+    )
+    assert rolled_back["status"] == "rolled_back"
+    assert (target / ".git/hooks/post-commit").exists()
+    assert json.loads((
+        target / ".factor_workspace/manifest.json"
+    ).read_text())["workspace_root"] != str(target)
