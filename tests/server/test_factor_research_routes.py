@@ -190,3 +190,40 @@ def test_client_factor_library_projection_rejects_invisible_owner(
     )
 
     assert response.status_code == 403
+
+
+def test_client_factor_library_sources_lists_only_authorized_registered_owners(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        routes,
+        "can_view_user_scope",
+        lambda current, owner: owner != "hidden",
+    )
+    monkeypatch.setattr(
+        routes,
+        "build_factor_library_overview",
+        lambda username, include_subordinates: {
+            "factors": [
+                {
+                    "owner_username": "18717974771",
+                    "owner_alias": "Research Library",
+                },
+                {"owner_username": "18717974771"},
+                {"owner_username": "hidden"},
+            ],
+        },
+    )
+    client = _app().test_client()
+    _login(client, "max-user")
+
+    payload = client.get(
+        "/custom-factors/api/client/factor-library-sources"
+    ).get_json()
+
+    assert payload["principal"] == "max-user"
+    assert payload["sources"] == [{
+        "owner_ref": "18717974771",
+        "owner_alias": "18717974771",
+        "factor_count": 2,
+    }]

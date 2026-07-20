@@ -32,9 +32,10 @@ def test_local_profile_is_strict_private_and_version_independent(
     assert path.stat().st_mode & 0o777 == 0o600
     assert not (root / "current.json").exists()
     assert not {"password", "token", "email"}.intersection(stored)
-    assert stored["schema_version"] == 3
+    assert stored["schema_version"] == 4
     assert stored["workspaces"] == []
     assert stored["initialization_sources"] == []
+    assert stored["session_binding"] == {}
 
     with pytest.raises(ValueError, match="fields"):
         validate_local_profile({**stored, "token": "must-not-be-stored"})
@@ -82,7 +83,7 @@ def test_version_one_profile_is_upgraded_without_losing_identity(
 
     upgraded = LocalProfileStore(root).load("legacy")
 
-    assert upgraded["schema_version"] == 3
+    assert upgraded["schema_version"] == 4
     assert upgraded["profile_id"] == "legacy"
     assert upgraded["workspaces"] == []
     assert upgraded["initialization_sources"] == []
@@ -98,6 +99,18 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
         FactorTesterClient,
         "current_principal",
         lambda self: {"username": "18717974771"},
+    )
+    monkeypatch.setattr(
+        FactorTesterClient,
+        "factor_library_sources",
+        lambda self: {
+            "principal": "18717974771",
+            "sources": [{
+                "owner_ref": "18717974771",
+                "owner_alias": "18717974771",
+                "factor_count": 1,
+            }],
+        },
     )
     monkeypatch.setattr(
         FactorTesterClient,
@@ -129,12 +142,20 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["local_profile_claimed"]
-        assert payload["local_source_registered"]
+        assert not payload["local_source_registered"]
         assert payload["server_visibility_verified"]
         assert payload["ready"] is False
         profile = payload["profile"]
         assert profile["profile_id"] == profile_id
         assert profile["agents"][0]["agent_id"] == agent_id
+        assert profile["session_binding"]["principal_ref"] == "18717974771"
+        assert profile["initialization_sources"] == []
+        bound = runner.invoke(cli, [
+            "client", "profile", "initialization", "bind", profile_id,
+            "--owner-ref", "18717974771",
+        ])
+        assert bound.exit_code == 0, bound.output
+        profile = json.loads(bound.output)
         source = profile["initialization_sources"][0]
         assert source["owner_ref"] == "18717974771"
         assert source["mode"] == "reference"

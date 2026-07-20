@@ -73,6 +73,14 @@
 "保存 Profile" = "保存 Profile";
 "请先在个人中心登录" = "请先在个人中心登录";
 "自动使用当前登录用户的个人因子库；Profile 不保存密码，也不能选择或冒充其他用户。" = "自动使用当前登录用户的个人因子库；Profile 不保存密码，也不能选择或冒充其他用户。";
+"Profile 只绑定当前登录身份；创建后再从服务器授权列表选择初始化因子库。" = "Profile 只绑定当前登录身份；创建后再从服务器授权列表选择初始化因子库。";
+"Initialization" = "初始化";
+"Authenticated principal" = "已认证用户";
+"Authorized factor library" = "已授权因子库";
+"Select a registered grant" = "选择已登记授权";
+"Refresh grants" = "刷新授权";
+"Bind source" = "绑定来源";
+"Only server-authorized registered libraries appear here. Source code is never materialized." = "这里只显示服务器已授权且已登记的因子库，不会在本地生成来源源码。";
 "迁移工作区" = "迁移工作区";
 "迁移预览" = "迁移预览";
 "验证迁移" = "验证迁移";

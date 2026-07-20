@@ -21,6 +21,7 @@ struct LocalProfilesView: View {
                     LocalProfileForm(controller: controller)
                     if let profile = selectedProfile {
                         profileDetails(profile)
+                        InitializationSourceView(profile: profile)
                         WorkspaceRepairView(profile: profile)
                         Button(
                             activeID == profile.id

@@ -104,6 +104,27 @@ class LocalProfileStore:
         profile["initialization_sources"] = [*sources, descriptor]
         return self.save(profile)
 
+    def bind_session(
+        self,
+        profile_id: str,
+        *,
+        principal_ref: str,
+    ) -> dict[str, Any]:
+        profile = self.load(profile_id)
+        current = profile.get("session_binding") or {}
+        if current and current.get("principal_ref") != principal_ref:
+            raise ValueError(
+                "profile is bound to another principal; "
+                "rebind or create a new profile"
+            )
+        profile["session_binding"] = {
+            "principal_ref": principal_ref,
+            "session_ref": (
+                f"session-binding://{principal_ref}/{profile_id}"
+            ),
+        }
+        return self.save(profile)
+
     def load_agent(
         self,
         profile_id: str,

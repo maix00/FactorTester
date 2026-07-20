@@ -73,6 +73,14 @@
 "保存 Profile" = "Save Profile";
 "请先在个人中心登录" = "Sign in through Account Center first";
 "自动使用当前登录用户的个人因子库；Profile 不保存密码，也不能选择或冒充其他用户。" = "Uses the signed-in user's personal factor library. Profiles never store passwords and cannot select or impersonate another user.";
+"Profile 只绑定当前登录身份；创建后再从服务器授权列表选择初始化因子库。" = "The profile binds only the signed-in identity. Choose an initialization library from server-authorized grants after creation.";
+"Initialization" = "Initialization";
+"Authenticated principal" = "Authenticated principal";
+"Authorized factor library" = "Authorized factor library";
+"Select a registered grant" = "Select a registered grant";
+"Refresh grants" = "Refresh grants";
+"Bind source" = "Bind source";
+"Only server-authorized registered libraries appear here. Source code is never materialized." = "Only server-authorized registered libraries appear here. Source code is never materialized.";
 "迁移工作区" = "Migrate Workspace";
 "迁移预览" = "Migration Preview";
 "验证迁移" = "Verify Migration";

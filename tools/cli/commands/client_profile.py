@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 import click
 
@@ -92,12 +93,6 @@ def list_profiles(release_profile: Path | None) -> None:
 )
 @click.option("--principal-ref", default="")
 @click.option(
-    "--source-mode",
-    type=click.Choice(["reference", "snapshot"]),
-    default="reference",
-)
-@click.option("--snapshot-ref", default="")
-@click.option(
     "--workspace-root",
     type=click.Path(file_okay=False, path_type=Path),
 )
@@ -110,8 +105,6 @@ def bootstrap_profile(
     agent_id: str,
     role: str,
     principal_ref: str,
-    source_mode: str,
-    snapshot_ref: str,
     workspace_root: Path | None,
     release_profile: Path | None,
 ) -> None:
@@ -125,28 +118,16 @@ def bootstrap_profile(
     authenticated_ref = str(authenticated.get("username") or "")
     if authenticated_ref != principal_ref:
         raise ValueError("authenticated principal does not match principal_ref")
-    projection = client.factor_library_source_projection(principal_ref)
-    body = projection.get("projection") or {}
-    if body.get("principal") != principal_ref:
-        raise ValueError("factor-library projection principal mismatch")
-    if body.get("owner_ref") != principal_ref:
-        raise ValueError("factor-library projection owner mismatch")
-    serialized = json.dumps(body, ensure_ascii=False).lower()
-    if any(item in serialized for item in ("source_code", "math_expr", ".py")):
-        raise ValueError("factor-library projection contains source material")
-    projection_hash = str(projection.get("projection_hash") or "")
-    if not projection_hash:
-        raise ValueError("factor-library projection hash is missing")
     try:
         existing = store.load(profile_id)
     except ValueError:
         existing = None
     if existing is not None:
-        bound_principals = {
-            str(item.get("principal_ref") or "")
-            for item in existing.get("initialization_sources", [])
-        }
-        if bound_principals and bound_principals != {principal_ref}:
+        binding = existing.get("session_binding") or {}
+        if (
+            binding
+            and binding.get("principal_ref") != principal_ref
+        ):
             raise ValueError(
                 "profile is bound to another principal; rebind or create a new profile"
             )
@@ -159,21 +140,9 @@ def bootstrap_profile(
             server_url=server_url,
             workspace_root=workspace_root
             or default_profile_workspace_root(profile_id),
+            principal_ref=principal_ref,
         ))
-    store.upsert_initialization_source(profile_id, {
-        "source_id": "principal-factor-library",
-        "kind": "server_factor_library",
-        "owner_ref": principal_ref,
-        "mode": source_mode,
-        "source_ref": f"factortester://factor-library/{principal_ref}",
-        "snapshot_ref": snapshot_ref,
-        "principal_ref": principal_ref,
-        "session_ref": (
-            f"session-binding://{principal_ref}/{profile_id}/{projection_hash}"
-        ),
-        "projection_hash": projection_hash,
-        "source_materialized": False,
-    })
+    store.bind_session(profile_id, principal_ref=principal_ref)
     scope = (
         {"workspace_id": "all"}
         if role == "planning"
@@ -190,7 +159,7 @@ def bootstrap_profile(
         "schema_version": 1,
         "discovered_existing_profile": discovered,
         "local_profile_claimed": True,
-        "local_source_registered": True,
+        "local_source_registered": False,
         "server_visibility_verified": True,
         "ready": False,
         "profile": profile,
@@ -200,6 +169,96 @@ def bootstrap_profile(
             "bind a real research scope, then resume work."
         ),
     }))
+
+
+@client_profile.group("initialization")
+def profile_initialization() -> None:
+    """Discover and bind authorized factor-library provenance."""
+
+
+@profile_initialization.command("list")
+@click.argument("profile_id")
+@_root_option
+@friendly_errors
+def list_profile_initialization_sources(
+    profile_id: str,
+    release_profile: Path | None,
+) -> None:
+    store = LocalProfileStore(load_profile_root(release_profile))
+    profile = store.load(profile_id)
+    binding = profile.get("session_binding") or {}
+    principal_ref = str(binding.get("principal_ref") or "")
+    client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    authenticated = client.current_principal()
+    if str(authenticated.get("username") or "") != principal_ref:
+        raise ValueError("authenticated principal does not match profile")
+    click.echo(_json(client.factor_library_sources()))
+
+
+@profile_initialization.command("bind")
+@click.argument("profile_id")
+@click.option("--owner-ref", required=True)
+@click.option(
+    "--mode",
+    type=click.Choice(["reference", "snapshot"]),
+    default="reference",
+)
+@click.option("--snapshot-ref", default="")
+@_root_option
+@friendly_errors
+def bind_profile_initialization_source(
+    profile_id: str,
+    owner_ref: str,
+    mode: str,
+    snapshot_ref: str,
+    release_profile: Path | None,
+) -> None:
+    root = load_profile_root(release_profile)
+    store = LocalProfileStore(root)
+    profile = store.load(profile_id)
+    binding = profile.get("session_binding") or {}
+    principal_ref = str(binding.get("principal_ref") or "")
+    client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    authenticated = client.current_principal()
+    if str(authenticated.get("username") or "") != principal_ref:
+        raise ValueError("authenticated principal does not match profile")
+    sources = client.factor_library_sources()
+    granted = {
+        str(item.get("owner_ref") or "")
+        for item in sources.get("sources", [])
+    }
+    if owner_ref not in granted:
+        raise ValueError("factor-library owner is not in authorized grants")
+    projection = client.factor_library_source_projection(owner_ref)
+    body = projection.get("projection") or {}
+    if body.get("principal") != principal_ref:
+        raise ValueError("factor-library projection principal mismatch")
+    if body.get("owner_ref") != owner_ref:
+        raise ValueError("factor-library projection owner mismatch")
+    serialized = json.dumps(body, ensure_ascii=False).lower()
+    if any(item in serialized for item in ("source_code", "math_expr", ".py")):
+        raise ValueError("factor-library projection contains source material")
+    projection_hash = str(projection.get("projection_hash") or "")
+    if not projection_hash:
+        raise ValueError("factor-library projection hash is missing")
+    click.echo(_json(store.upsert_initialization_source(profile_id, {
+        "source_id": (
+            "factor-library-"
+            + sha256(owner_ref.encode()).hexdigest()[:12]
+        ),
+        "kind": "server_factor_library",
+        "owner_ref": owner_ref,
+        "mode": mode,
+        "source_ref": f"factortester://factor-library/{owner_ref}",
+        "snapshot_ref": snapshot_ref,
+        "principal_ref": principal_ref,
+        "session_ref": (
+            f"session-binding://{principal_ref}/{profile_id}/"
+            f"{projection_hash}"
+        ),
+        "projection_hash": projection_hash,
+        "source_materialized": False,
+    })))
 
 
 @client_profile.group("workspace")

@@ -25,7 +25,7 @@ struct LocalProfileForm: View {
                 }
                 GridRow {
                     Spacer()
-                    Text("自动使用当前登录用户的个人因子库；Profile 不保存密码，也不能选择或冒充其他用户。")
+                    Text("Profile 只绑定当前登录身份；创建后再从服务器授权列表选择初始化因子库。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

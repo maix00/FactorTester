@@ -54,6 +54,7 @@ struct LocalProfileModel: Identifiable {
     let workspaces: [LocalWorkspaceModel]
     let initializationSources: [LocalInitializationSourceModel]
     let agents: [LocalAgentModel]
+    let principalRef: String
 
     init(json: [String: Any]) {
         id = json["profile_id"] as? String ?? ""
@@ -61,6 +62,9 @@ struct LocalProfileModel: Identifiable {
         serverURL = (json["server"] as? [String: Any])?["base_url"]
             as? String ?? ""
         workspaceRoot = json["workspace_root"] as? String ?? ""
+        principalRef = (
+            json["session_binding"] as? [String: Any]
+        )?["principal_ref"] as? String ?? ""
         workspaces = (json["workspaces"] as? [[String: Any]] ?? [])
             .map(LocalWorkspaceModel.init)
         initializationSources = (

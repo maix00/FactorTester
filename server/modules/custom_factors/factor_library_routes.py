@@ -106,6 +106,36 @@ def api_client_factor_library_projection(owner_username):
     })
 
 
+@cf_bp.route('/api/client/factor-library-sources', methods=['GET'])
+@login_required
+def api_client_factor_library_sources():
+    """List server-authorized source owners without returning source code."""
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    payload = build_factor_library_overview(username, True)
+    counts: dict[str, int] = {}
+    aliases: dict[str, str] = {}
+    for factor in payload.get('factors', []):
+        owner = str(factor.get('owner_username') or '').strip()
+        if not owner or not can_view_user_scope(username, owner):
+            continue
+        counts[owner] = counts.get(owner, 0) + 1
+        aliases[owner] = str(factor.get('owner_alias') or owner)
+    return jsonify({
+        'success': True,
+        'principal': username,
+        'sources': [
+            {
+                'owner_ref': owner,
+                'owner_alias': aliases[owner],
+                'factor_count': counts[owner],
+            }
+            for owner in sorted(counts)
+        ],
+    })
+
+
 @cf_bp.route('/api/factor-library-configs/<ff_alias>', methods=['GET'])
 @login_required
 def api_factor_library_configs(ff_alias):

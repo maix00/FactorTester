@@ -19,15 +19,25 @@ def new_local_profile(
     display_name: str,
     server_url: str,
     workspace_root: Path,
+    principal_ref: str = "",
 ) -> dict[str, Any]:
     return validate_local_profile({
-        "schema_version": 3,
+        "schema_version": 4,
         "profile_id": profile_id,
         "display_name": display_name,
         "server": {"base_url": server_url},
         "workspace_root": str(workspace_root.expanduser().resolve()),
         "workspaces": [],
         "initialization_sources": [],
+        "session_binding": (
+            {
+                "principal_ref": principal_ref,
+                "session_ref": (
+                    f"session-binding://{principal_ref}/{profile_id}"
+                ),
+            }
+            if principal_ref else {}
+        ),
         "agents": [],
         "adapters": [],
     })
@@ -40,12 +50,15 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "schema_version", "profile_id", "display_name", "server",
         "workspace_root", "workspaces", "agents", "adapters",
         "initialization_sources",
+        "session_binding",
     }
     observed = set(value)
-    legacy_optional = {"workspaces", "initialization_sources"}
+    legacy_optional = {
+        "workspaces", "initialization_sources", "session_binding",
+    }
     if not (allowed - legacy_optional).issubset(observed) or observed - allowed:
         raise ValueError("local profile fields are invalid")
-    if value.get("schema_version") not in {1, 2, 3}:
+    if value.get("schema_version") not in {1, 2, 3, 4}:
         raise ValueError("local profile schema_version is unsupported")
     server = value.get("server")
     if not isinstance(server, dict) or set(server) != {"base_url"}:
@@ -60,8 +73,9 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         value.get("initialization_sources", []),
         "initialization_sources",
     )
+    session_binding = _session_binding(value.get("session_binding", {}))
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
@@ -74,9 +88,23 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "initialization_sources": [
             _initialization_source(item) for item in sources
         ],
+        "session_binding": session_binding,
         "agents": [_agent(item) for item in agents],
         "adapters": [_adapter(item) for item in adapters],
     }
+
+
+def _session_binding(value: Any) -> dict[str, str]:
+    if value == {}:
+        return {}
+    if not isinstance(value, dict) or set(value) != {
+        "principal_ref", "session_ref",
+    }:
+        raise ValueError("session binding fields are invalid")
+    principal = _text(value.get("principal_ref"), "principal_ref")
+    reference = _text(value.get("session_ref"), "session_ref")
+    _reference(reference, field="session_ref", schemes={"session-binding"})
+    return {"principal_ref": principal, "session_ref": reference}
 
 
 def _initialization_source(value: Any) -> dict[str, Any]:
