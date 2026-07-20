@@ -18,7 +18,7 @@ password or token:
 {
   "schema_version": 1,
   "release": {
-    "manifest_url": "https://github.com/maix00/FactorTester-Client/releases/download/v0.1.0/release-manifest.json",
+    "manifest_url": "https://github.com/maix00/FactorTester-Client/releases/download/v0.1.2/release-manifest.json",
     "install_root": "~/Library/Application Support/FactorTester"
   }
 }
