@@ -6,7 +6,6 @@ from flask import jsonify
 
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
-from server.services import research_runs
 from server.services.research_graph.research_cycle.job_evidence import (
     project_job_attempt_evidence,
 )
@@ -43,14 +42,25 @@ def require_job(job_id: str):
         )
 
 
-def job_evidence(job: JobRecord) -> dict:
-    projection = research_runs.load_job_evidence_projection(
-        job_id=job.job_id,
-        owner=job.owner,
+def require_job_detail(job_id: str):
+    detail = repository().load_detail(
+        job_id,
+        owner=require_user(),
     )
-    trial_binding = (
-        projection["trial_binding"] if projection is not None else None
+    if detail is not None:
+        return detail, None
+    return None, (
+        jsonify({
+            "success": False,
+            "error": "research job not found",
+        }),
+        404,
     )
+
+
+def job_evidence(detail: dict) -> dict:
+    job: JobRecord = detail["job"]
+    trial_binding = detail["trial_binding"]
     return {
         "trial_binding": trial_binding,
         "terminal_assurance": (
@@ -60,11 +70,7 @@ def job_evidence(job: JobRecord) -> dict:
         ),
         "job_attempt": project_job_attempt_evidence(
             job,
-            identity_refs=(
-                projection["identity_refs"]
-                if projection is not None
-                else None
-            ),
+            identity_refs=detail["identity_refs"],
             trial_stage=str(
                 (trial_binding or {}).get("trial_stage") or ""
             ),

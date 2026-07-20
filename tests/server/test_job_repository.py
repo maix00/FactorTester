@@ -12,6 +12,9 @@ from server.jobs.assurance import BackendAssuranceValidator
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
+from server.services.research_run_schema import (
+    ensure_schema as ensure_research_run_schema,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -529,6 +532,71 @@ def test_job_list_metadata_uses_one_bounded_read(
     assert len(reads) == 1
     assert "USER_JOB_PINS" in reads[0].upper()
     assert "RESEARCH_JOB_ARTIFACTS" in reads[0].upper()
+
+
+def test_job_detail_uses_one_read_for_pin_and_run_identity(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "jobs.sqlite"
+    with connect_sqlite(path) as connection:
+        ensure_research_run_schema(connection)
+        connection.execute(
+            """
+            INSERT INTO research_runs (
+                run_id, owner, workspace_id, configuration_id,
+                configuration_revision, kind, run_spec_version,
+                run_spec_hash, run_spec_json, decision_contract_hash,
+                methodology_hash, trial_plan_id, trial_plan_hash,
+                trial_plan_version, trial_role, trial_stage,
+                comparison_id, sample_ref, sample_hash, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "run-1", "alice", "workspace-1", "configuration-1",
+                1, "backtest", 2, _record("identity").run_spec_hash,
+                "{}", "1" * 64, "2" * 64, "trial-plan-1",
+                "3" * 64, 1, "selection", "selection",
+                "baseline", "sample-1", "4" * 64, time.time(),
+            ),
+        )
+    repository = JobRepository(path)
+    repository.create(_record("detail-1"))
+    repository.transition("detail-1", JobStatus.PLANNING)
+    repository.set_execution_plan(
+        "detail-1",
+        plan={"products": []},
+        notices=[],
+        requires_confirmation=False,
+    )
+    repository.pin("detail-1", owner="alice")
+    statements: list[str] = []
+
+    def traced_connect():
+        connection = connect_sqlite(path, foreign_keys=True)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(repository, "_connect", traced_connect)
+
+    detail = repository.load_detail("detail-1", owner="alice")
+
+    assert detail is not None
+    assert detail["job"].job_id == "detail-1"
+    assert detail["pinned"] is True
+    assert detail["trial_binding"]["trial_plan_hash"] == "3" * 64
+    assert detail["identity_refs"] == {
+        "contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "trial_plan_hash": "3" * 64,
+        "run_spec_hash": _record("identity").run_spec_hash,
+    }
+    reads = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT")
+    ]
+    assert len(reads) == 1
 
 
 def test_repository_allows_one_step_job_and_one_replaceable_pin_per_user(tmp_path) -> None:

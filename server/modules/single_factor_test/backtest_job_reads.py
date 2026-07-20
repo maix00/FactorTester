@@ -17,6 +17,7 @@ from server.modules.single_factor_test.backtest_job_support import (
     job_urls,
     repository,
     require_job,
+    require_job_detail,
 )
 from server.modules.single_factor_test.research_jobs import _daemon_client
 from server.services.session_runtime import require_user
@@ -88,16 +89,17 @@ def list_test_jobs():
 
 @sft_bp.get("/api/jobs/<job_id>")
 def get_test_job(job_id: str):
-    job, error = require_job(job_id)
+    detail, error = require_job_detail(job_id)
     if error:
         return error
+    job = detail["job"]
     return jsonify({
         "success": True,
-        **job.summary(pinned=repository().is_pinned(job.job_id)),
+        **job.summary(pinned=detail["pinned"]),
         "execution_plan": job.execution_plan,
         "result_summary": job.result_summary,
         "error": job.error,
-        "evidence": job_evidence(job),
+        "evidence": job_evidence(detail),
         **job_urls(job.job_id),
     })
 
@@ -186,15 +188,16 @@ def stream_test_job(job_id: str):
 
 @sft_bp.get("/api/jobs/<job_id>/result")
 def get_test_job_result(job_id: str):
-    job, error = require_job(job_id)
+    detail, error = require_job_detail(job_id)
     if error:
         return error
+    job = detail["job"]
     base = {
         "job_id": job.job_id,
         "kind": job.kind,
         "run_id": job.run_id,
         "status": job.status.value,
-        "evidence": job_evidence(job),
+        "evidence": job_evidence(detail),
     }
     if job.status is JobStatus.SUCCEEDED:
         return jsonify({

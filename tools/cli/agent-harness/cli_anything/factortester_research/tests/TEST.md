@@ -55,6 +55,8 @@ artifact contracts produced by the workflow.
   the same envelope hash without duplicating the local audit record.
 - Keep the Job list projection to one bounded database read for Job records,
   pin state, and active-artifact counts rather than per-Job follow-up reads.
+- Project Job detail, pin state, TrialPlan binding, and EvidenceEnvelope
+  identity with one joined read; the envelope projector performs no reads.
 - Keep legacy EvidenceEnvelope v1 payloads in the persistence-only historical
   record while excluding their decisions, metrics, artifacts, paths, and
   nested copies from every Agent-facing session JSON view.

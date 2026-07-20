@@ -18,6 +18,7 @@ from ..assurance import BackendAssuranceValidator
 from ..models import JobRecord
 from ..states import JobStatus, NON_TERMINAL_STATUSES, TERMINAL_STATUSES, require_transition
 from .artifacts import JobArtifactImplementation
+from .detail import JobDetailQueryImplementation
 from .queries import JobQueryImplementation
 from .schema import ensure_job_schema
 from .terminal import evaluate_terminal_assurance
@@ -34,7 +35,11 @@ def _loads(value: str | None, default: Any = None) -> Any:
     return orjson.loads(value) if value else default
 
 
-class JobRepository(JobQueryImplementation, JobArtifactImplementation):
+class JobRepository(
+    JobQueryImplementation,
+    JobDetailQueryImplementation,
+    JobArtifactImplementation,
+):
     """Own the durable queue and terminal metadata, never live progress."""
 
     def __init__(
