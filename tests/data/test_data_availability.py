@@ -12,6 +12,7 @@ from server.modules.shared import data_availability as availability_routes
 from server.services.data_availability import availability_for_scope
 from sources.Tiger.connector import TigerConnectorConfig
 from tools.data.availability import build_availability_profile
+from tools.data.availability.model import profile_document
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
 from tools.products.Product import Product
 
@@ -121,6 +122,32 @@ def test_data_availability_endpoint_requires_and_preserves_explicit_scope(
     }
 
 
+def test_profile_identity_includes_source_and_probe_semantics() -> None:
+    as_of = datetime(2026, 7, 20, tzinfo=timezone.utc)
+    static = profile_document(
+        product_scope=["A.DCE"],
+        source_scope=["Local"],
+        probe=False,
+        expanded=False,
+        entries=[],
+        as_of=as_of,
+    )
+    probed = profile_document(
+        product_scope=["A.DCE"],
+        source_scope=["Local"],
+        probe=True,
+        expanded=False,
+        entries=[],
+        as_of=as_of,
+    )
+
+    assert static["schema_version"] == 2
+    assert static["source_scope"] == ["Local"]
+    assert static["probe"] is False
+    assert static["expanded"] is False
+    assert static["profile_hash"] != probed["profile_hash"]
+
+
 def test_tiger_scope_returns_only_tiger_cache_and_probe_entries(
     monkeypatch,
     tmp_path,
@@ -177,4 +204,7 @@ print(json.dumps({
     )
     assert profile["entries"][-1]["entitled_realtime"] is True
     assert profile["entries"][-1]["latency_class"] == "unverified"
+    assert profile["schema_version"] == 2
+    assert profile["source_scope"] == ["Tiger"]
+    assert profile["probe"] is True
     assert "never-return-this" not in json.dumps(profile)

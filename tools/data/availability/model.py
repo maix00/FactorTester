@@ -28,11 +28,21 @@ def profile_document(
     product_scope: list[str],
     entries: list[dict[str, Any]],
     as_of: datetime,
+    source_scope: list[str] | None = None,
+    probe: bool | None = None,
+    expanded: bool | None = None,
 ) -> dict[str, Any]:
+    request_bound = source_scope is not None
     body: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2 if request_bound else 1,
         "as_of": utc_iso(as_of),
         "product_scope": product_scope,
         "entries": entries,
     }
+    if request_bound:
+        body.update({
+            "source_scope": list(source_scope or []),
+            "probe": bool(probe),
+            "expanded": bool(expanded),
+        })
     return {**body, "profile_hash": canonical_hash(body)}

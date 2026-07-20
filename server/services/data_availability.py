@@ -44,6 +44,9 @@ def availability_for_scope(
         ))
     return profile_document(
         product_scope=list(product_names),
+        source_scope=list(source_names),
+        probe=probe,
+        expanded=expanded,
         entries=entries,
         as_of=as_of,
     )
