@@ -18,6 +18,10 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
+                ClientAdapterPanel()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+
                 LazyVGrid(columns: columns, spacing: Theme.gridSpacing) {
                     ForEach(registry.visibleModules(forRole: session.role)) { module in
                         ModuleCard(module: module) { tap(module) }

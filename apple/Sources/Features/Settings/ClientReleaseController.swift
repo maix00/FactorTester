@@ -35,23 +35,7 @@ final class ClientReleaseController: ObservableObject {
 
     func refresh() async {
         await perform {
-            let status = try await ReleaseCommand.run(
-                self.arguments(command: "status", needsProfile: false),
-                executable: self.cliPath
-            )
-            self.installedVersion = status.string("current_version")
-            self.healthy = status.bool("healthy")
-            guard !self.profilePath.isEmpty else {
-                self.latestVersion = ""
-                self.compatible = nil
-                return
-            }
-            let plan = try await ReleaseCommand.run(
-                self.arguments(command: "update", extra: ["--dry-run"]),
-                executable: self.cliPath
-            )
-            self.latestVersion = plan.string("target_version")
-            self.compatible = true
+            try await self.loadStatus()
         }
     }
 
@@ -73,12 +57,32 @@ final class ClientReleaseController: ObservableObject {
             return
         }
         await perform {
-            _ = try await ReleaseCommand.run(
+            _ = try await ReleaseCommand.runObject(
                 self.arguments(command: command),
                 executable: self.cliPath
             )
-            await self.refresh()
+            try await self.loadStatus()
         }
+    }
+
+    private func loadStatus() async throws {
+        let status = try await ReleaseCommand.runObject(
+            arguments(command: "status", needsProfile: false),
+            executable: cliPath
+        )
+        installedVersion = status.string("current_version")
+        healthy = status.bool("healthy")
+        guard !profilePath.isEmpty else {
+            latestVersion = ""
+            compatible = nil
+            return
+        }
+        let plan = try await ReleaseCommand.runObject(
+            arguments(command: "update", extra: ["--dry-run"]),
+            executable: cliPath
+        )
+        latestVersion = plan.string("target_version")
+        compatible = true
     }
 
     private func arguments(

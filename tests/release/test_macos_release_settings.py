@@ -67,3 +67,39 @@ def test_apple_project_generation_and_new_swift_syntax(tmp_path: Path) -> None:
             capture_output=True,
             text=True,
         )
+
+
+def test_macos_embeds_signed_local_adapter_web_ui() -> None:
+    adapter_root = SOURCES / "Features" / "Adapters"
+    controller = (adapter_root / "ClientAdapterController.swift").read_text(
+        encoding="utf-8"
+    )
+    model = (adapter_root / "ClientAdapterModel.swift").read_text(
+        encoding="utf-8"
+    )
+    panel = (adapter_root / "ClientAdapterPanel.swift").read_text(
+        encoding="utf-8"
+    )
+    local_web = (adapter_root / "LocalAdapterWebView.swift").read_text(
+        encoding="utf-8"
+    )
+    web = (SOURCES / "Features" / "Web" / "WebPageView.swift").read_text(
+        encoding="utf-8"
+    )
+
+    assert '["client"] + tail' in controller
+    assert '["adapter", "start", adapter.id]' in controller
+    assert "127.0.0.1" in model and "localhost" in model
+    assert "openTarget" in panel
+    assert "LocalAdapterWebView" in panel
+    assert "WebViewRepresentable" in local_web
+    assert "syncServerCookies: false" in local_web
+    assert "let url: URL" in web
+    assert "7899" not in controller + panel + local_web
+    for path in sorted(adapter_root.glob("*.swift")):
+        subprocess.run(
+            ["swiftc", "-frontend", "-parse", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )

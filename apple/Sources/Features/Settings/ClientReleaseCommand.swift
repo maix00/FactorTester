@@ -1,10 +1,36 @@
 import Foundation
 
 enum ReleaseCommand {
-    static func run(
+    static func runObject(
         _ arguments: [String],
         executable: String
     ) async throws -> [String: Any] {
+        guard let value = try await runJSON(
+            arguments,
+            executable: executable
+        ) as? [String: Any] else {
+            throw ReleaseCommandError.invalidResponse
+        }
+        return value
+    }
+
+    static func runArray(
+        _ arguments: [String],
+        executable: String
+    ) async throws -> [[String: Any]] {
+        guard let value = try await runJSON(
+            arguments,
+            executable: executable
+        ) as? [[String: Any]] else {
+            throw ReleaseCommandError.invalidResponse
+        }
+        return value
+    }
+
+    private static func runJSON(
+        _ arguments: [String],
+        executable: String
+    ) async throws -> Any {
         #if os(macOS)
         return try await Task.detached {
             let process = Process()
@@ -28,12 +54,7 @@ enum ReleaseCommand {
                     String(data: detail, encoding: .utf8) ?? "unknown error"
                 )
             }
-            guard let value = try JSONSerialization.jsonObject(
-                with: data
-            ) as? [String: Any] else {
-                throw ReleaseCommandError.invalidResponse
-            }
-            return value
+            return try JSONSerialization.jsonObject(with: data)
         }.value
         #else
         throw ReleaseCommandError.unsupportedPlatform
@@ -41,7 +62,7 @@ enum ReleaseCommand {
     }
 }
 
-private enum ReleaseCommandError: LocalizedError {
+enum ReleaseCommandError: LocalizedError {
     case failed(String)
     case invalidResponse
     case unsupportedPlatform
