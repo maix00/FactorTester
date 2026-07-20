@@ -22,14 +22,21 @@ def test_batch6_token_context_receipt_is_truthful_and_addressed() -> None:
     assert hashlib.sha256(
         orjson.dumps(receipt, option=orjson.OPT_SORT_KEYS)
     ).hexdigest() == declared_hash
-    assert receipt["assessment"]["status"] == "partial"
+    assert receipt["assessment"]["status"] == "blocked"
     assert receipt["assessment"]["release_ready"] is False
-    assert receipt["assessment"]["actual_token_telemetry_proven"] is False
-    assert receipt["assessment"]["accepted_evidence_proven"] is False
-    assert all(
-        item["measurement_quality"] == "reserved_fallback"
-        for item in receipt["invocations"]
+    assert (
+        receipt["assessment"]["actual_provider_token_telemetry_proven"]
+        is False
     )
+    assert receipt["assessment"]["accepted_job_evidence_proven"] is True
+    assert receipt["assessment"]["source_jobs_rerun"] is False
+    assert all(
+        branch["context_bytes"] <= MAX_AGENT_PACKET_BYTES
+        and branch["replay_passed"] is True
+        and branch["closure_disposition"] == "blocked"
+        for branch in receipt["continuation_branches"]
+    )
+    assert receipt["database_bounds"]["routine_context_loads_full_graph"] is False
 
 
 def test_batch6_trial_plan_binding_fits_trace_budget(monkeypatch) -> None:
