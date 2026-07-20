@@ -6,6 +6,10 @@ from flask import jsonify, request
 
 from server.modules.single_factor_test import sft_bp
 from server.services import agent_flow
+from server.services.agent_flow.authorization import (
+    require_invocation_authority,
+    require_resume_role,
+)
 from server.services.agent_flow.resume import build_agent_resume_packet
 from server.services.session_runtime import require_user
 
@@ -34,6 +38,10 @@ def resume_agent(agent_id: str):
             ),
         }), 400
     owner = require_user()
+    try:
+        require_resume_role(username=owner, role=role)
+    except PermissionError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 403
     store = agent_flow.get_store()
     try:
         packet = build_agent_resume_packet(
@@ -95,9 +103,15 @@ def reset_agent_budget(agent_id: str):
 @sft_bp.post("/api/agent-flow/invocations")
 def reserve_agent_invocation():
     data = request.get_json(silent=True) or {}
+    owner = require_user()
     try:
+        require_invocation_authority(
+            username=owner,
+            actor_role=str(data.get("actor_role") or ""),
+            authority_scope=str(data.get("authority_scope") or ""),
+        )
         invocation = agent_flow.get_store().reserve_invocation(
-            owner_user_id=require_user(),
+            owner_user_id=owner,
             agent_id=str(data.get("agent_id") or ""),
             sponsor_agent_id=str(data.get("sponsor_agent_id") or ""),
             actor_role=str(data.get("actor_role") or ""),
@@ -116,6 +130,8 @@ def reserve_agent_invocation():
             context_cost=data.get("context_cost"),
             idempotency_key=str(data.get("idempotency_key") or ""),
         )
+    except PermissionError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 403
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
     return jsonify({"success": True, "invocation": invocation}), 201

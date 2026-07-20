@@ -33,7 +33,6 @@ def agent_flow() -> None:
     type=click.Choice([
         "planning",
         "research",
-        "server_maintenance",
     ]),
     required=True,
 )
@@ -54,12 +53,6 @@ def resume_agent(
         )
     if role == "planning" and not workspace_id:
         raise click.ClickException("planning 需要 --workspace-id")
-    if role == "server_maintenance" and any(
-        (instance_id, branch_id, workspace_id)
-    ):
-        raise click.ClickException(
-            "server_maintenance 不接受 workspace/instance/branch"
-        )
     click.echo(_json(client_from_config().resume_agent(
         agent_id,
         role=role,
@@ -129,8 +122,6 @@ def agent_invocation() -> None:
         "reviewer",
         "audit_presenter",
         "skill",
-        "implementation_agent",
-        "backend_verifier",
     ]),
     required=True,
 )
@@ -139,7 +130,6 @@ def agent_invocation() -> None:
     type=click.Choice([
         "local_research",
         "server_research",
-        "server_backend_code",
     ]),
     required=True,
 )

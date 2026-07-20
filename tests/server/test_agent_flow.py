@@ -11,6 +11,7 @@ from server.services.agent_flow import (
     AgentFlowStore,
     migrate_legacy_graph_accounting,
 )
+from server.services.agent_flow import authorization
 from server.services.agent_flow import invocations as invocation_module
 from server.services.maintenance_cases import MaintenanceCaseStore
 from tests.server.data_contract_fixtures import initialize
@@ -255,6 +256,11 @@ def test_role_resume_packets_are_bounded_stable_and_isolated(
             "workspace_id": "workspace-1",
         },
     ).get_json()["resume"]
+    monkeypatch.setattr(
+        authorization,
+        "get_account",
+        lambda _username: {"username": "alice", "role": "developer"},
+    )
     maintenance = client.post(
         "/api/agent-flow/agents/server-agent-1/resume",
         json={"role": "server_maintenance"},
@@ -794,6 +800,36 @@ def test_http_invocation_path_is_provider_neutral(client) -> None:
     assert settled_payload["charged_tokens"] == 32
     assert "legacy_reservation_id" not in settled_payload
     assert "legacy_provider_receipt_id" not in settled_payload
+
+
+def test_http_rejects_client_claimed_backend_authority(
+    client,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        authorization,
+        "get_account",
+        lambda _username: {"username": "alice", "role": "user"},
+    )
+
+    response = client.post(
+        "/api/agent-flow/invocations",
+        json={
+            "agent_id": "forged-backend-agent",
+            "actor_role": "backend_verifier",
+            "authority_scope": "server_backend_code",
+            "purpose": "claim backend authority",
+            "runtime_id": "runtime-a",
+            "model_id": "model-a",
+            "max_input_tokens": 100,
+            "max_output_tokens": 40,
+            "agent_principal_hash": "a" * 64,
+            "lineage_hash": "b" * 64,
+        },
+    )
+
+    assert response.status_code == 403
+    assert "developer account" in response.get_json()["error"]
 
 
 def test_invocation_reserve_and_settle_are_request_idempotent(
