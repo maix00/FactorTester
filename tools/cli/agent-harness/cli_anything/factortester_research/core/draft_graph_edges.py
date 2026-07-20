@@ -83,9 +83,10 @@ def build_draft_edges() -> list[dict[str, Any]]:
             guard={
                 "point_in_time_contract_valid": True,
                 "data_availability_profile_bound": True,
-                "data_availability_constraints_satisfied": True,
+                "requested_product_availability_present": True,
                 "material_data_obligations_adjudicated_or_not_triggered": True,
             },
+            server_action="bind_data_availability",
         ),
         edge(
             "factor_semantics__validation_design",

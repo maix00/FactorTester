@@ -69,6 +69,30 @@ cli-anything-factortester-research cycle next \
   <instance_id> <branch_id> --json
 ```
 
+When the current edge is `data_contract__factor_semantics`, put the exact
+request in transition evidence instead of copying the preview response:
+
+```json
+{
+  "data_availability_request": {
+    "products": ["A.DCE"],
+    "sources": ["Local"],
+    "probe": false,
+    "expanded": false
+  }
+}
+```
+
+The server repeats the inspection outside the branch write transaction,
+binds the resulting EvidenceEnvelope to the current Contract and Methodology,
+and derives basic requested-product availability. Never submit
+`server_evidence`, `data_availability_profile_bound`, or
+`requested_product_availability_present` as authority. Availability does not
+prove point-in-time integrity, replayability, latency fitness, or discharge a
+Verification Obligation. If a required product is unavailable, remain at
+`data_contract` and ask only for an actual source/scope/fee/credential/licence
+choice; Tiger is one candidate source, not a Graph rule.
+
 Do not search for or call capability `attest`/receipt APIs; they do not exist.
 Submit the node-local resolution directly. Use `--all` only for explicit
 activation audit and `--include-contracts` only for human inspection.

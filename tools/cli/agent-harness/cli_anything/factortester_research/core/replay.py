@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from .graph import validate_graph
+from .server_guards import derive_server_guard_facts
 
 
 def replay_graph_trace(
@@ -84,9 +85,17 @@ def replay_graph_trace(
         if not isinstance(evidence, dict):
             errors.append(f"event {index}: evidence must be an object")
             break
+        try:
+            guard_evidence = {
+                **evidence,
+                **derive_server_guard_facts(edge, evidence),
+            }
+        except ValueError as exc:
+            errors.append(f"event {index}: invalid server evidence: {exc}")
+            break
         failed_guards = [
             key for key, expected in (edge.get("guard") or {}).items()
-            if evidence.get(key) != expected
+            if guard_evidence.get(key) != expected
         ]
         if failed_guards:
             errors.append(

@@ -10,6 +10,7 @@ from typing import Any
 import orjson
 
 import settings as Settings
+from server.services.research_graph.branch import data_contract
 from server.services.research_graph.branch.projection import (
     normalize_capability_resolution,
     serialize_capability_resolution,
@@ -69,6 +70,8 @@ def advance_graph_branch(
 ) -> dict[str, Any]:
     if not isinstance(evidence, dict):
         raise ValueError("transition evidence must be an object")
+    if "server_evidence" in evidence:
+        raise ValueError("server_evidence is server-owned")
     evidence = validate_agent_evidence_payload(evidence)
     prepared_evidence, proposed_trial_plan_hash, has_trial_plan_body = (
         prepare_trial_plan_evidence(evidence)
@@ -88,6 +91,22 @@ def advance_graph_branch(
         isinstance(item, str) and item for item in invocation_ids
     ):
         raise ValueError("agent_invocation_ids must be an array")
+    data_preflight = data_contract.prepare_transition(
+        instance_id=instance_id,
+        branch_id=branch_id,
+        owner=owner,
+        edge_id=edge_id,
+        request=prepared_evidence.get(data_contract.REQUEST_FIELD),
+    )
+    prepared_evidence = data_contract.bind_server_evidence(
+        prepared_evidence,
+        data_preflight,
+    )
+    persisted_evidence = data_contract.bind_server_evidence(
+        persisted_evidence,
+        data_preflight,
+    )
+    serialize_bounded_trace_evidence(persisted_evidence)
     proposed_trial_plan_hash = validate_trial_plan_hash(
         proposed_trial_plan_hash
     )
@@ -136,6 +155,11 @@ def advance_graph_branch(
         )
         if edge is None:
             raise KeyError("graph edge not found")
+        data_contract.validate_preflight(
+            row=branch_row,
+            edge=edge,
+            prepared=data_preflight,
+        )
         edge_from = str(edge.get("from_node") or "")
         if edge_from not in {branch["current_node"], "*"}:
             raise ValueError(
@@ -170,6 +194,10 @@ def advance_graph_branch(
                 adjudication_action=route_action,
             ),
             "research_cycle_delta_applied": bool(cycle_events),
+            **(
+                data_preflight["guard_facts"]
+                if data_preflight is not None else {}
+            ),
         }
         failed_guards = [
             key

@@ -385,8 +385,11 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "data_availability_profile_bound"
     ] is True
     assert edges["data_contract__factor_semantics"]["guard"][
-        "data_availability_constraints_satisfied"
+        "requested_product_availability_present"
     ] is True
+    assert edges["data_contract__factor_semantics"]["server_action"] == (
+        "bind_data_availability"
+    )
     assert edges["data_contract__factor_semantics"]["guard"][
         "material_data_obligations_adjudicated_or_not_triggered"
     ] is True
@@ -1001,6 +1004,67 @@ def test_replay_rejects_an_unsatisfied_guard_without_running_work() -> None:
     assert report["status"] == "failed"
     assert report["external_mutations"] == 0
     assert "hypothesis_frozen" in report["errors"][0]
+
+
+def test_replay_derives_data_guards_from_server_evidence() -> None:
+    graph = build_draft_graph()
+    graph["entry_node"] = "data_contract"
+    graph["content_hash"] = graph_content_hash(graph)
+    envelope = validate_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "availability-replay",
+        "evidence_kind": "data_availability",
+        "source_refs": ["data-availability-profile:" + "a" * 64],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+        },
+        "facts": {
+            "profile": {
+                "schema_version": 2,
+                "product_scope": ["A.DCE"],
+                "source_scope": ["Local"],
+                "probe": False,
+                "expanded": False,
+                "entries": [{
+                    "product": "A.DCE",
+                    "status": "available",
+                }],
+            },
+        },
+        "metric_refs": [],
+        "artifact_refs": [],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    })
+    evidence = {
+        "point_in_time_contract_valid": True,
+        "material_data_obligations_adjudicated_or_not_triggered": True,
+        "server_evidence": {"data_availability": envelope},
+    }
+
+    report = replay_graph_trace(graph, {
+        "schema_version": 1,
+        "events": [{
+            "type": "transition",
+            "edge_id": "data_contract__factor_semantics",
+            "evidence": evidence,
+        }],
+    })
+
+    assert report["status"] == "complete"
+    assert report["branches"]["primary"]["current_node"] == "factor_semantics"
+
+
+def test_transition_validation_rejects_client_server_evidence() -> None:
+    with pytest.raises(ValueError, match="server_evidence is server-owned"):
+        validate_transition_evidence({
+            "server_evidence": {
+                "data_availability": {"forged": True},
+            },
+        })
 
 
 def test_plan_uses_one_workspace_run_job_contract() -> None:

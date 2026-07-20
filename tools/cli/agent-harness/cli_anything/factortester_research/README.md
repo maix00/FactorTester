@@ -105,6 +105,17 @@ changed backend returns more than 6000 bytes or leaks a heavy/legacy field.
 `cycle advance` validates local Research Cycle proposals before invoking the
 real client and retains only a factual local command envelope for audit.
 
+For `data_contract__factor_semantics`, transition evidence supplies only an
+explicit `data_availability_request` (`products`, `sources`, `probe`, and
+`expanded: false`). The server repeats the inspection outside the branch write
+transaction and persists its own Contract/Methodology-bound EvidenceEnvelope.
+Client `server_evidence` and availability guard booleans are rejected or
+ignored as authority. A profile proves only observed availability facts; it
+does not establish PIT integrity, replayability, latency fitness, or clear a
+research obligation. Missing required products keep the branch at
+`data_contract`; the Agent may propose another source such as Tiger, public
+data, a narrower scope, or a bounded infeasibility decision.
+
 Graph activation validation accepts canonical references only:
 
 ```bash

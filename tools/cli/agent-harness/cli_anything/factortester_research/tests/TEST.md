@@ -151,6 +151,12 @@ non-blocking deltas preserve closure.
 Compact-cycle tests expose bounded question/criterion/detail refs in the
 routine packet and load exactly one referenced Claim or obligation body with
 one database read and no trace-history scan.
+Data-contract tests require an explicit request on the existing edge, execute
+availability outside the branch write lock, bind a server-owned
+Contract/Methodology EvidenceEnvelope, override client guard booleans, reject
+stale/oversized requests without transition writes, and derive identical
+guard facts during offline replay. Availability never discharges an
+obligation or claims PIT, replayability, or latency fitness.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.
@@ -195,10 +201,10 @@ CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
 
 [_resolve_cli] Using installed command:
   /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
-collected 59 items
+collected 61 items
 
 test_core.py
-  41 passed
+  43 passed
 test_full_e2e.py::TestCLISubprocess
   17 passed
 test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
@@ -208,7 +214,7 @@ test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
 
-59 passed, 123 warnings in 19.81s
+61 passed, 123 warnings in 16.86s
 ```
 
 All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in

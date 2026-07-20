@@ -11,7 +11,10 @@ _LIFECYCLES = {"observed", "draft", "active", "retired"}
 _ENFORCEMENTS = {"advisory", "deterministic", "audited"}
 _EDGE_TYPES = {"recommended", "conditional", "failure", "recovery"}
 _RISK_LEVELS = {"L1", "L2", "L3", "L4"}
-_SERVER_ACTIONS = {"start_new_hypothesis_lineage"}
+_SERVER_ACTIONS = {
+    "bind_data_availability",
+    "start_new_hypothesis_lineage",
+}
 
 
 def graph_content_hash(graph: dict[str, Any]) -> str:
