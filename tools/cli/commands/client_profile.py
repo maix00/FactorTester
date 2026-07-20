@@ -15,6 +15,13 @@ from tools.cli.release.local_profile import (
 )
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.profile_lifecycle import ProfileLifecycle
+from tools.cli.release.personal_workspace_migration import (
+    apply_personal_workspace_migration,
+    personal_workspace_status,
+    plan_personal_workspace_migration,
+    rollback_personal_workspace_migration,
+    verify_personal_workspace_migration,
+)
 from tools.cli.release.storage import read_json, write_json
 from tools.cli.release.workspace_migration import (
     apply_workspace_migration,
@@ -478,6 +485,102 @@ def upsert_profile_history(
 @client_profile.group("workspace")
 def profile_workspace() -> None:
     """Plan and audit visible local factor workspaces."""
+
+
+@client_profile.group("personal-workspace")
+def profile_personal_workspace() -> None:
+    """Manage the canonical personal factor workspace."""
+
+
+@profile_personal_workspace.command("show")
+@click.option("--principal", "principal_ref", required=True)
+@_root_option
+@friendly_errors
+def show_personal_workspace(
+    principal_ref: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(personal_workspace_status(
+        load_profile_root(release_profile), principal_ref
+    )))
+
+
+@profile_personal_workspace.group("migration")
+def personal_workspace_migration() -> None:
+    """Relocate a canonical personal factor Git workspace safely."""
+
+
+@personal_workspace_migration.command("plan")
+@click.option("--principal", "principal_ref", required=True)
+@click.option(
+    "--target",
+    type=click.Path(file_okay=False, path_type=Path),
+)
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def plan_personal_workspace(
+    principal_ref: str,
+    target: Path | None,
+    output: Path,
+    release_profile: Path | None,
+) -> None:
+    plan = plan_personal_workspace_migration(
+        load_profile_root(release_profile),
+        principal_ref,
+        target=target,
+    )
+    write_json(output, plan)
+    click.echo(_json(plan))
+
+
+@personal_workspace_migration.command("apply")
+@click.argument(
+    "plan_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def apply_personal_workspace(
+    plan_path: Path,
+    release_profile: Path | None,
+) -> None:
+    plan = read_json(plan_path)
+    if not isinstance(plan, dict):
+        raise ValueError("personal workspace migration plan is invalid")
+    click.echo(_json(apply_personal_workspace_migration(
+        load_profile_root(release_profile), plan
+    )))
+
+
+@personal_workspace_migration.command("verify")
+@click.argument("migration_id")
+@_root_option
+@friendly_errors
+def verify_personal_workspace(
+    migration_id: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(verify_personal_workspace_migration(
+        load_profile_root(release_profile), migration_id
+    )))
+
+
+@personal_workspace_migration.command("rollback")
+@click.argument("migration_id")
+@_root_option
+@friendly_errors
+def rollback_personal_workspace(
+    migration_id: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(rollback_personal_workspace_migration(
+        load_profile_root(release_profile), migration_id
+    )))
 
 
 @client_profile.group("factor-worktree")
