@@ -10,6 +10,10 @@ from typing import Any
 from urllib.request import urlopen
 
 from .locations import default_client_root, validate_client_root
+from .update_channel import (
+    ValidatedUpdateManifest,
+    resolve_update_manifest,
+)
 
 
 MAX_MANIFEST_BYTES = 256 * 1024
@@ -44,6 +48,36 @@ def load_release_inputs(
     if len(raw) > MAX_MANIFEST_BYTES:
         raise ValueError("release manifest exceeds size limit")
     return _json_object(raw, "release manifest"), public_key, root
+
+
+def load_update_inputs(
+    profile_path: Path,
+) -> tuple[dict[str, Any], ValidatedUpdateManifest, str]:
+    """Resolve server-first update metadata with signed GitHub fallback."""
+    profile = _json_object(profile_path.read_bytes(), "client profile")
+    if profile.get("schema_version") != 1:
+        raise ValueError("client profile schema_version is unsupported")
+    release = profile.get("release")
+    if not isinstance(release, dict):
+        raise ValueError("client profile release object is required")
+    if "public_key" in release:
+        raise ValueError("release public key is fixed by the client package")
+    github_url = str(release.get("github_manifest_url") or "").strip()
+    if not github_url:
+        raise ValueError("signed GitHub update manifest URL is required")
+    server_url = str(release.get("server_manifest_url") or "").strip() or None
+    channel = str(release.get("channel") or "stable")
+    public_key = Path(str(
+        files("tools.cli.release").joinpath("trusted-release-public.pem")
+    ))
+    if not public_key.is_file():
+        raise ValueError(f"release public key not found: {public_key}")
+    return resolve_update_manifest(
+        server_manifest_url=server_url,
+        github_manifest_url=github_url,
+        channel=channel,
+        public_key=public_key,
+    )
 
 
 def _read_manifest_with_retry(url: str) -> bytes:

@@ -19,6 +19,29 @@ this DMG. The CLI, research Harness, their Python runtime dependencies, and
 approved adapters live inside the signed app Resources and are covered by an
 internal hash receipt; users do not download those components separately.
 
+Update discovery uses a compact signed `stable.json` or `beta.json` manifest.
+The server serves this file from `FACTORTESTER_RELEASE_MANIFEST_ROOT` at
+`/api/client/releases/<channel>.json` with ETag and public cache headers; it
+does not store the DMG or query a database. A client profile may select a
+server manifest and a public GitHub fallback:
+
+```json
+{
+  "schema_version": 1,
+  "release": {
+    "channel": "stable",
+    "server_manifest_url": "https://factor.example/api/client/releases/stable.json",
+    "github_manifest_url": "https://github.example/releases/latest/download/stable.json"
+  }
+}
+```
+
+Both sources must pass the same packaged ECDSA trust anchor. Failure of the
+server source may select GitHub, but never unsigned GitHub API metadata.
+`factortester client check-update --profile client-profile.json --json`
+returns the verified version, build, channel, DMG URL/SHA256, minimum client,
+mandatory flag, publication time, source, and manifest hash.
+
 ## Login and local profiles
 
 The password is read interactively and is not accepted on the command line:
