@@ -10,6 +10,7 @@ struct HomeView: View {
     @State private var path: [Module] = []
     @State private var showLogin = false
     @State private var showSettings = false
+    @State private var showClientSettings = false
     @State private var pendingModule: Module?
 
     private let columns = [GridItem(.adaptive(minimum: Theme.cardMinWidth), spacing: Theme.gridSpacing)]
@@ -48,6 +49,9 @@ struct HomeView: View {
                 ServerSettingsView()
                     .environmentObject(config)
             }
+            .sheet(isPresented: $showClientSettings) {
+                ClientReleaseSettingsView()
+            }
         }
         .task {
             await session.refresh()
@@ -67,6 +71,7 @@ struct HomeView: View {
                 }
                 Divider()
                 Button("服务器设置…") { showSettings = true }
+                Button("客户端设置…") { showClientSettings = true }
             } label: {
                 Label(session.user?.username ?? "未登录", systemImage: "person.crop.circle")
             }
