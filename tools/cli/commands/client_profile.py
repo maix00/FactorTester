@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
+import sys
 from pathlib import Path
 import click
 
@@ -43,6 +44,41 @@ def _root_option(function):
 @click.group("profile")
 def client_profile() -> None:
     """Manage version-independent local profiles."""
+
+
+@client_profile.command("import-ui-session")
+@click.option("--server-url", required=True)
+@click.option("--principal-ref", required=True)
+@friendly_errors
+def import_ui_session(server_url: str, principal_ref: str) -> None:
+    """Import the native UI cookie bridge from JSON on stdin."""
+    value = json.load(sys.stdin)
+    if not isinstance(value, dict) or set(value) != {"cookies"}:
+        raise ValueError("UI session bridge payload is invalid")
+    cookies = value["cookies"]
+    if not isinstance(cookies, list):
+        raise ValueError("UI session cookies must be an array")
+    session = HttpSession(server_url)
+    session.import_cookies(cookies)
+    principal = FactorTesterClient(session).current_principal()
+    observed = str(principal.get("username") or "")
+    if observed != principal_ref:
+        session.clear_cookies()
+        raise ValueError("imported UI principal does not match")
+    click.echo(_json({
+        "schema_version": 1,
+        "principal_ref": observed,
+        "verified": True,
+    }))
+
+
+@client_profile.command("clear-ui-session")
+@click.option("--server-url", required=True)
+@friendly_errors
+def clear_ui_session(server_url: str) -> None:
+    session = HttpSession(server_url)
+    session.clear_cookies()
+    click.echo(_json({"schema_version": 1, "cleared": True}))
 
 
 @client_profile.command("init")

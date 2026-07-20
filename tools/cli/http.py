@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from http.cookiejar import LWPCookieJar, LoadError
+from http.cookiejar import Cookie
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
@@ -237,6 +238,38 @@ class HttpSession:
     def clear_cookies(self) -> None:
         """Remove the persisted authenticated session from this client."""
         self.cookie_jar.clear()
+        self._save_cookies()
+
+    def import_cookies(self, values: list[dict[str, Any]]) -> None:
+        self.cookie_jar.clear()
+        for value in values:
+            domain = str(value.get("domain") or "").strip()
+            name = str(value.get("name") or "").strip()
+            if not domain or not name:
+                raise ValueError("cookie domain and name are required")
+            path = str(value.get("path") or "/")
+            self.cookie_jar.set_cookie(Cookie(
+                version=0,
+                name=name,
+                value=str(value.get("value") or ""),
+                port=None,
+                port_specified=False,
+                domain=domain,
+                domain_specified=True,
+                domain_initial_dot=domain.startswith("."),
+                path=path,
+                path_specified=True,
+                secure=bool(value.get("secure")),
+                expires=(
+                    int(value["expires"])
+                    if value.get("expires") is not None else None
+                ),
+                discard=value.get("expires") is None,
+                comment=None,
+                comment_url=None,
+                rest={},
+                rfc2109=False,
+            ))
         self._save_cookies()
 
     def _stream_timeout(self) -> float:

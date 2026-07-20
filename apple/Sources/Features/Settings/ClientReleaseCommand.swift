@@ -3,11 +3,13 @@ import Foundation
 enum ReleaseCommand {
     static func runObject(
         _ arguments: [String],
-        executable: String
+        executable: String,
+        stdinJSON: [String: Any]? = nil
     ) async throws -> [String: Any] {
         guard let value = try await runJSON(
             arguments,
-            executable: executable
+            executable: executable,
+            stdinJSON: stdinJSON
         ) as? [String: Any] else {
             throw ReleaseCommandError.invalidResponse
         }
@@ -29,7 +31,8 @@ enum ReleaseCommand {
 
     private static func runJSON(
         _ arguments: [String],
-        executable: String
+        executable: String,
+        stdinJSON: [String: Any]? = nil
     ) async throws -> Any {
         #if os(macOS)
         return try await Task.detached {
@@ -41,7 +44,18 @@ enum ReleaseCommand {
             process.arguments = launch.arguments
             process.standardOutput = output
             process.standardError = errors
-            try process.run()
+            if let stdinJSON {
+                let input = Pipe()
+                process.standardInput = input
+                try process.run()
+                let data = try JSONSerialization.data(
+                    withJSONObject: stdinJSON
+                )
+                input.fileHandleForWriting.write(data)
+                try input.fileHandleForWriting.close()
+            } else {
+                try process.run()
+            }
             process.waitUntilExit()
             let data = output.fileHandleForReading.readDataToEndOfFile()
             if process.terminationStatus != 0 {

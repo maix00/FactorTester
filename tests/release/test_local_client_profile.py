@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from tools.cli.app import cli
 from tools.cli.client import FactorTesterClient
+from tools.cli.http import HttpSession
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.local_profile import validate_local_profile
 from tools.cli.release.adapters.profile_binding import adapter_binding
@@ -420,3 +421,38 @@ def test_profile_history_stores_only_compact_refs_and_deep_links(
     serialized = json.dumps(saved)
     assert "report body" not in serialized
     assert "source_code" not in serialized
+
+
+def test_ui_session_bridge_uses_stdin_and_verifies_principal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "cli-home"))
+    monkeypatch.setattr(
+        FactorTesterClient,
+        "current_principal",
+        lambda self: {"username": "18717974771"},
+    )
+    result = CliRunner().invoke(
+        cli,
+        [
+            "client", "profile", "import-ui-session",
+            "--server-url", "http://127.0.0.1:8000",
+            "--principal-ref", "18717974771",
+        ],
+        input=json.dumps({"cookies": [{
+            "name": "session",
+            "value": "opaque-secret",
+            "domain": "127.0.0.1",
+            "path": "/",
+            "secure": False,
+        }]}),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "opaque-secret" not in result.output
+    assert json.loads(result.output)["verified"] is True
+    restored = HttpSession("http://127.0.0.1:8000")
+    assert [(cookie.name, cookie.value) for cookie in restored.cookie_jar] == [
+        ("session", "opaque-secret")
+    ]

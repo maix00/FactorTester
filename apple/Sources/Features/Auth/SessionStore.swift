@@ -25,6 +25,13 @@ final class SessionStore: ObservableObject {
             let resp = try await APIClient.shared.login(username: username, password: password)
             if resp.success {
                 await refresh()
+                guard await bridgeClientSession(
+                    principalRef: resp.username ?? username
+                ) else {
+                    try? await APIClient.shared.logout()
+                    user = nil
+                    return false
+                }
                 return true
             } else {
                 lastError = resp.error ?? L10n.text("登录失败")
@@ -32,6 +39,39 @@ final class SessionStore: ObservableObject {
             }
         } catch {
             lastError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            return false
+        }
+    }
+
+    private func bridgeClientSession(principalRef: String) async -> Bool {
+        guard let serverURL = ServerConfig.shared.baseURL?.absoluteString else {
+            lastError = L10n.text("尚未配置服务器地址，请先在设置中填写。")
+            return false
+        }
+        let cookies = (HTTPCookieStorage.shared.cookies ?? []).map { cookie in
+            var value: [String: Any] = [
+                "name": cookie.name,
+                "value": cookie.value,
+                "domain": cookie.domain,
+                "path": cookie.path,
+                "secure": cookie.isSecure,
+            ]
+            if let expires = cookie.expiresDate?.timeIntervalSince1970 {
+                value["expires"] = expires
+            }
+            return value
+        }
+        do {
+            _ = try await ReleaseCommand.runObject([
+                "client", "profile", "import-ui-session",
+                "--server-url", serverURL,
+                "--principal-ref", principalRef,
+            ], executable: UserDefaults.standard.string(
+                forKey: "client.release.cliPath"
+            ) ?? "factortester", stdinJSON: ["cookies": cookies])
+            return true
+        } catch {
+            lastError = error.localizedDescription
             return false
         }
     }
@@ -56,6 +96,14 @@ final class SessionStore: ObservableObject {
 
     func logout() async {
         try? await APIClient.shared.logout()
+        if let serverURL = ServerConfig.shared.baseURL?.absoluteString {
+            _ = try? await ReleaseCommand.runObject([
+                "client", "profile", "clear-ui-session",
+                "--server-url", serverURL,
+            ], executable: UserDefaults.standard.string(
+                forKey: "client.release.cliPath"
+            ) ?? "factortester")
+        }
         user = nil
     }
 
