@@ -24,7 +24,9 @@ def test_macos_settings_use_the_same_deterministic_client_cli() -> None:
     ).read_text(encoding="utf-8")
 
     assert 'static let cliPath = "client.release.cliPath"' in controller
-    assert 'process.arguments = [executable] + arguments' in command
+    assert "Application Support/FactorTester/bin" in command
+    assert "isExecutableFile" in command
+    assert "[executable] + arguments" in command
     for command in ("bootstrap", "update", "status", "rollback"):
         assert f'"{command}"' in controller
     for label in ("当前版本", "可用版本", "运行状态"):

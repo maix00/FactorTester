@@ -36,13 +36,9 @@ enum ReleaseCommand {
             let process = Process()
             let output = Pipe()
             let errors = Pipe()
-            if executable.contains("/") {
-                process.executableURL = URL(fileURLWithPath: executable)
-                process.arguments = arguments
-            } else {
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                process.arguments = [executable] + arguments
-            }
+            let launch = resolve(executable: executable, arguments: arguments)
+            process.executableURL = launch.url
+            process.arguments = launch.arguments
             process.standardOutput = output
             process.standardError = errors
             try process.run()
@@ -60,6 +56,29 @@ enum ReleaseCommand {
         throw ReleaseCommandError.unsupportedPlatform
         #endif
     }
+
+    #if os(macOS)
+    private static func resolve(
+        executable: String,
+        arguments: [String]
+    ) -> (url: URL, arguments: [String]) {
+        if executable.contains("/") {
+            return (URL(fileURLWithPath: executable), arguments)
+        }
+        let installed = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Application Support/FactorTester/bin"
+            )
+            .appendingPathComponent(executable)
+        if FileManager.default.isExecutableFile(atPath: installed.path) {
+            return (installed, arguments)
+        }
+        return (
+            URL(fileURLWithPath: "/usr/bin/env"),
+            [executable] + arguments
+        )
+    }
+    #endif
 }
 
 enum ReleaseCommandError: LocalizedError {
