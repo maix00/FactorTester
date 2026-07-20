@@ -10,19 +10,29 @@ struct ClientReleaseSettingsView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            ScrollView {
-                VStack(spacing: 18) {
-                    ClientReleaseStatusCard(controller: controller)
-                    configuration
-                    actions
-                    if let error = controller.lastError {
-                        errorCallout(error)
+            TabView {
+                ScrollView {
+                    VStack(spacing: 18) {
+                        ClientReleaseStatusCard(controller: controller)
+                        configuration
+                        actions
+                        if let error = controller.lastError {
+                            errorCallout(error)
+                        }
                     }
+                    .padding(24)
                 }
-                .padding(24)
+                .tabItem {
+                    Label("组件", systemImage: "shippingbox")
+                }
+
+                LocalProfilesView()
+                    .tabItem {
+                        Label("Profiles", systemImage: "person.2")
+                    }
             }
         }
-        .frame(width: 620, height: 530)
+        .frame(width: 720, height: 620)
         .background(.regularMaterial)
         .fileImporter(
             isPresented: $choosingProfile,

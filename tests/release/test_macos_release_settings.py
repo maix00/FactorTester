@@ -103,3 +103,32 @@ def test_macos_embeds_signed_local_adapter_web_ui() -> None:
             capture_output=True,
             text=True,
         )
+
+
+def test_macos_manages_provider_neutral_local_profiles() -> None:
+    profile_root = SOURCES / "Features" / "Profiles"
+    controller = (profile_root / "LocalProfileController.swift").read_text(
+        encoding="utf-8"
+    )
+    settings = (
+        SOURCES / "Features" / "Settings" / "ClientReleaseSettingsView.swift"
+    ).read_text(encoding="utf-8")
+    combined = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(profile_root.glob("*.swift"))
+    )
+
+    assert '["client", "profile", "list"]' in controller
+    assert '"profile", "agent", "set"' in controller
+    assert "LocalProfilesView()" in settings
+    assert "审批" not in combined
+    for forbidden in ("Codex", "model_id", "runtime_id", "password", "token"):
+        assert forbidden not in combined
+    for path in sorted(profile_root.glob("*.swift")):
+        assert len(path.read_text(encoding="utf-8").splitlines()) <= 130
+        subprocess.run(
+            ["swiftc", "-frontend", "-parse", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
