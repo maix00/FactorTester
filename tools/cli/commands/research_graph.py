@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 
 from tools.cli.core.context import client_from_config
+from tools.cli.capability_projection import server_capability_resolution
 
 
 def _json(value) -> str:
@@ -315,6 +316,7 @@ def start_graph_instance(
         raise click.ClickException(
             "capability resolution must be a JSON object"
         )
+    resolution = server_capability_resolution(resolution)
     click.echo(_json(client_from_config().create_research_graph_instance(
         graph_id=graph_id,
         product_group=product_group,
@@ -436,7 +438,9 @@ def advance_graph_branch(
             raise click.ClickException(
                 "target capability resolution must be a JSON object"
             )
-        evidence["target_capability_resolution"] = resolution
+        evidence["target_capability_resolution"] = (
+            server_capability_resolution(resolution)
+        )
     click.echo(_json(client_from_config().advance_research_graph_branch(
         instance_id,
         branch_id,

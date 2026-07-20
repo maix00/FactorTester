@@ -18,6 +18,7 @@ class FakeClient:
         self.review = None
         self.authorization = None
         self.rollback = None
+        self.advance = None
         self.agent_budget_call = None
         self.agent_invocation_call = None
 
@@ -96,6 +97,21 @@ class FakeClient:
             "instance_id": "instance-1",
             **kwargs,
             "branches": [{"branch_id": "branch-1", "status": "running"}],
+        }
+
+    def advance_research_graph_branch(
+        self,
+        instance_id,
+        branch_id,
+        *,
+        edge_id,
+        evidence,
+    ):
+        self.advance = (instance_id, branch_id, edge_id, evidence)
+        return {
+            "instance_id": instance_id,
+            "branch_id": branch_id,
+            "current_node": "validation",
         }
 
     def load_agent_budget_period(self, agent_id):
@@ -255,8 +271,21 @@ def test_research_graph_start_consumes_node_local_capability_resolution(
     resolution_file.write_text(json.dumps({
         "resolution": {
             "node_id": "hypothesis",
-            "bindings": [],
+            "catalog_hash": "a" * 64,
+            "provider_conformance_hash": "b" * 64,
+            "bindings": [{
+                "capability_id": "research-obligation.discover",
+                "capability_description": "Discover bounded obligations.",
+                "descriptor_hash": "c" * 64,
+                "implementation_id": "local.private-skill",
+                "provider": "local-runtime",
+                "source_fingerprint": "d" * 64,
+                "execution_approval_granted": True,
+            }],
             "gaps": [],
+            "triggered_conditional_bindings": [],
+            "triggered_conditional_gaps": [],
+            "undetermined_conditions": [],
         },
     }))
 
@@ -277,6 +306,14 @@ def test_research_graph_start_consumes_node_local_capability_resolution(
     assert payload["graph_id"] == "factor-research"
     assert payload["product_group"] == "china_futures"
     assert payload["capability_resolution"]["node_id"] == "hypothesis"
+    assert payload["capability_resolution"]["bindings"] == [{
+        "capability_id": "research-obligation.discover",
+        "capability_description": "Discover bounded obligations.",
+        "descriptor_hash": "c" * 64,
+    }]
+    assert "implementation_id" not in json.dumps(
+        payload["capability_resolution"]
+    )
 
 
 def test_research_graph_next_and_bounded_review_commands(
@@ -320,6 +357,49 @@ def test_research_graph_next_and_bounded_review_commands(
         == "auth-conversation:test-cli"
     )
     assert fake.review[1]["scope_drift"] is False
+
+
+def test_research_graph_advance_projects_target_capability_descriptions(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    evidence_file = tmp_path / "evidence.json"
+    evidence_file.write_text(json.dumps({"ready": True}))
+    resolution_file = tmp_path / "resolution.json"
+    resolution_file.write_text(json.dumps({"resolution": {
+        "node_id": "validation",
+        "bindings": [{
+            "capability_id": "validation.run",
+            "capability_description": "Run validation.",
+            "descriptor_hash": "a" * 64,
+            "implementation_id": "local.validation",
+            "provider": "private-runtime",
+        }],
+        "gaps": [],
+    }}))
+
+    result = CliRunner().invoke(cli, [
+        "research-graph",
+        "advance",
+        "instance-1",
+        "branch-1",
+        "--edge-id",
+        "hypothesis__validation",
+        "--evidence-file",
+        str(evidence_file),
+        "--target-capability-resolution-file",
+        str(resolution_file),
+    ])
+
+    assert result.exit_code == 0
+    projected = fake.advance[3]["target_capability_resolution"]
+    assert projected["bindings"] == [{
+        "capability_id": "validation.run",
+        "capability_description": "Run validation.",
+        "descriptor_hash": "a" * 64,
+    }]
 
 
 def test_research_graph_rollback_requires_exact_authorization(
