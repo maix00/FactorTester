@@ -12,6 +12,10 @@ from server.services.research_graph.active_pointer import (
 from server.services.research_graph.branch.context import (
     build_graph_branch_context,
 )
+from server.services.research_graph.branch.continuation import (
+    continue_graph_branch,
+    preview_graph_continuation,
+)
 from server.services.research_graph.branch.cycle_objects import (
     load_research_cycle_object,
 )
@@ -57,6 +61,7 @@ __all__ = [
     "authorize_graph_activation",
     "build_graph_branch_context",
     "build_graph_branch_next",
+    "continue_graph_branch",
     "create_graph_instance",
     "ensure_schema",
     "fork_graph_branch",
@@ -65,6 +70,7 @@ __all__ = [
     "load_graph",
     "load_graph_branch",
     "load_research_cycle_object",
+    "preview_graph_continuation",
     "record_audit",
     "record_proposal",
     "record_proposal_review",

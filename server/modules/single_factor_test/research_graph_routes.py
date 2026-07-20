@@ -12,9 +12,15 @@ from server.services.session_runtime import require_user
 @sft_bp.post("/api/research-graphs/versions")
 def create_research_graph_version():
     data = request.get_json(silent=True) or {}
+    graph = data.get("graph")
+    if not isinstance(graph, dict):
+        return jsonify({
+            "success": False,
+            "error": "graph must be a JSON object",
+        }), 400
     try:
         graph = research_graphs.register_graph(
-            data.get("graph"),
+            graph,
             actor=require_user(),
         )
     except (TypeError, ValueError) as exc:
@@ -247,6 +253,58 @@ def fork_research_graph_branch(instance_id: str, branch_id: str):
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
     return jsonify({"success": True, "branch": branch}), 201
+
+
+@sft_bp.post(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/continuation-preview"
+)
+def preview_research_graph_continuation(instance_id: str, branch_id: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        preview = research_graphs.preview_graph_continuation(
+            source_instance_id=instance_id,
+            source_branch_id=branch_id,
+            owner=require_user(),
+            target_graph_version=int(
+                data.get("target_graph_version") or 0
+            ),
+            job_id=str(data.get("job_id") or ""),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "preview": preview})
+
+
+@sft_bp.post(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/continuations"
+)
+def continue_research_graph_branch(instance_id: str, branch_id: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        instance = research_graphs.continue_graph_branch(
+            source_instance_id=instance_id,
+            source_branch_id=branch_id,
+            owner=require_user(),
+            target_graph_version=int(
+                data.get("target_graph_version") or 0
+            ),
+            job_id=str(data.get("job_id") or ""),
+            expected_target_hash=str(
+                data.get("expected_target_hash") or ""
+            ),
+            human_authorization_id=str(
+                data.get("human_authorization_id") or ""
+            ),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "instance": instance}), 201
 
 
 @sft_bp.get(

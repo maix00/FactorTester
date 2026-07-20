@@ -190,6 +190,33 @@ cli-anything-factortester-research cycle advance \
 stdout/stderr, full graph/catalog content, artifacts, trace history, or legacy
 evidence. `cycle advance` validates before backend mutation and records only a
 local factual command envelope plus compact event metadata.
+
+When an approved Active Graph direct-child version must continue a paused
+legacy branch without rerunning a trusted Job, preview the exact effect first:
+
+```bash
+cli-anything-factortester-research cycle continuation-preview \
+  <source_instance_id> <source_branch_id> \
+  --target-version <version> --job-id <job_id> --json
+```
+
+The preview is read-only and creates no local session write. Submit its
+`target_hash` to the conversation approval/Grill flow. Only after the server
+returns the exact Gate ID, consume it with:
+
+```bash
+cli-anything-factortester-research cycle continue \
+  <source_instance_id> <source_branch_id> \
+  --target-version <version> --job-id <job_id> \
+  --expected-target-hash <sha256> \
+  --human-authorization-id <gate_id> --json
+```
+
+Never edit `graph_version`, rebind a ResearchRun, or copy an artifact manually.
+The server preserves the source branch and validates the Job, TrialPlan,
+Contract, graph parent, assurance, and target node. The mutating command writes
+one bounded local command receipt; it does not load source history into Agent
+context.
 Candidate edges expose `required_research_evidence` separately from
 `required_transition_facts`; never use a permission, budget, Job status, or
 approval fact to adjudicate a research obligation.

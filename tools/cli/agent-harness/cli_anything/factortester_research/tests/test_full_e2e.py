@@ -473,6 +473,58 @@ class TestCLISubprocess:
         assert persisted["events"][-1]["event"] == "research_cycle_advanced"
         assert persisted["evidence_envelopes"][-1]["schema_version"] == 2
 
+    def test_cycle_continuation_preview_is_read_only_and_continue_is_audited(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "factortester"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "if 'continuation-preview' in sys.argv:\n"
+            " print(json.dumps({'target_hash': 'c' * 64}))\n"
+            "else:\n"
+            " print(json.dumps({'instance_id': 'instance-v6',"
+            " 'graph_version': 6, 'branches': [{'branch_id': 'branch-v6'}]}))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+        session = tmp_path / "session.json"
+        env = {
+            "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")
+        }
+
+        preview = self._run([
+            "--session", str(session),
+            "cycle", "continuation-preview",
+            "instance-v5", "branch-v5",
+            "--target-version", "6",
+            "--job-id", "job-1",
+            "--json",
+        ], env=env)
+        assert json.loads(preview.stdout)["target_hash"] == "c" * 64
+        assert not session.exists()
+
+        continued = self._run([
+            "--session", str(session),
+            "cycle", "continue",
+            "instance-v5", "branch-v5",
+            "--target-version", "6",
+            "--job-id", "job-1",
+            "--expected-target-hash", "c" * 64,
+            "--human-authorization-id", "gate-146",
+            "--json",
+        ], env=env)
+        payload = json.loads(continued.stdout)
+        persisted = json.loads(session.read_text(encoding="utf-8"))
+        assert payload["backend"]["instance_id"] == "instance-v6"
+        assert persisted["events"][-1]["event"] == (
+            "graph_continuation_created"
+        )
+        assert len(persisted["evidence_envelopes"]) == 1
+
     def test_run_step_records_platform_gap_with_fake_factortester(self, tmp_path: Path) -> None:
         bindir = tmp_path / "bin"
         bindir.mkdir()

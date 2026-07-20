@@ -401,6 +401,56 @@ def fork_graph_branch(
     )))
 
 
+@research_graph.command("continuation-preview")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--target-version", required=True, type=click.IntRange(min=1))
+@click.option("--job-id", required=True)
+def preview_graph_continuation(
+    instance_id: str,
+    branch_id: str,
+    target_version: int,
+    job_id: str,
+) -> None:
+    """计算跨版本 continuation 的精确授权哈希；不修改服务器状态。"""
+    click.echo(_json(
+        client_from_config().preview_research_graph_continuation(
+            instance_id,
+            branch_id,
+            target_graph_version=target_version,
+            job_id=job_id,
+        )
+    ))
+
+
+@research_graph.command("continue")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--target-version", required=True, type=click.IntRange(min=1))
+@click.option("--job-id", required=True)
+@click.option("--expected-target-hash", required=True)
+@click.option("--human-authorization-id", required=True)
+def continue_graph_branch(
+    instance_id: str,
+    branch_id: str,
+    target_version: int,
+    job_id: str,
+    expected_target_hash: str,
+    human_authorization_id: str,
+) -> None:
+    """消费精确审批并创建不可变的新版本 continuation。"""
+    click.echo(_json(
+        client_from_config().continue_research_graph_branch(
+            instance_id,
+            branch_id,
+            target_graph_version=target_version,
+            job_id=job_id,
+            expected_target_hash=expected_target_hash,
+            human_authorization_id=human_authorization_id,
+        )
+    ))
+
+
 @research_graph.command("advance")
 @click.argument("instance_id")
 @click.argument("branch_id")

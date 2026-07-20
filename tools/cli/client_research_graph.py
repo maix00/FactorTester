@@ -217,6 +217,46 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("branch") or {})
 
+    def preview_research_graph_continuation(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        target_graph_version: int,
+        job_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/continuation-preview",
+            {
+                "target_graph_version": target_graph_version,
+                "job_id": job_id,
+            },
+        ))
+        return dict(data.get("preview") or {})
+
+    def continue_research_graph_branch(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        target_graph_version: int,
+        job_id: str,
+        expected_target_hash: str,
+        human_authorization_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/continuations",
+            {
+                "target_graph_version": target_graph_version,
+                "job_id": job_id,
+                "expected_target_hash": expected_target_hash,
+                "human_authorization_id": human_authorization_id,
+            },
+        ))
+        return dict(data.get("instance") or {})
+
     def get_research_graph_branch(
         self,
         instance_id: str,

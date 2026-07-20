@@ -127,6 +127,10 @@ The Harness `cycle next` wrapper is read-only and fails closed if an older or
 changed backend returns more than 6000 bytes or leaks a heavy/legacy field.
 `cycle advance` validates local Research Cycle proposals before invoking the
 real client and retains only a factual local command envelope for audit.
+`cycle continuation-preview` performs no write and returns the exact
+cross-version effect hash. After conversation approval,
+`cycle continue` consumes that exact Gate, preserves the old branch and Job
+binding, and records one bounded local command receipt.
 
 For `data_contract__factor_semantics`, transition evidence supplies only an
 explicit `data_availability_request` (`products`, `sources`, `probe`, and

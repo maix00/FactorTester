@@ -623,6 +623,72 @@ def client(tmp_path, monkeypatch):
     return client
 
 
+def test_graph_continuation_routes_preserve_exact_target(
+    client,
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    def preview(**kwargs):
+        calls.append(("preview", kwargs))
+        return {"target_hash": "c" * 64}
+
+    def continue_branch(**kwargs):
+        calls.append(("continue", kwargs))
+        return {
+            "instance_id": "instance-v6",
+            "graph_version": 6,
+            "branches": [{"branch_id": "branch-v6"}],
+        }
+
+    monkeypatch.setattr(
+        research_graphs,
+        "preview_graph_continuation",
+        preview,
+    )
+    monkeypatch.setattr(
+        research_graphs,
+        "continue_graph_branch",
+        continue_branch,
+    )
+    preview_response = client.post(
+        "/api/research-graph-instances/instance-v5"
+        "/branches/branch-v5/continuation-preview",
+        json={"target_graph_version": 6, "job_id": "job-1"},
+    )
+    continue_response = client.post(
+        "/api/research-graph-instances/instance-v5"
+        "/branches/branch-v5/continuations",
+        json={
+            "target_graph_version": 6,
+            "job_id": "job-1",
+            "expected_target_hash": "c" * 64,
+            "human_authorization_id": "gate-146",
+        },
+    )
+
+    assert preview_response.status_code == 200
+    assert continue_response.status_code == 201
+    assert calls == [
+        ("preview", {
+            "source_instance_id": "instance-v5",
+            "source_branch_id": "branch-v5",
+            "owner": "alice",
+            "target_graph_version": 6,
+            "job_id": "job-1",
+        }),
+        ("continue", {
+            "source_instance_id": "instance-v5",
+            "source_branch_id": "branch-v5",
+            "owner": "alice",
+            "target_graph_version": 6,
+            "job_id": "job-1",
+            "expected_target_hash": "c" * 64,
+            "human_authorization_id": "gate-146",
+        }),
+    ]
+
+
 def test_graph_versions_are_immutable_and_activation_moves_only_pointer(
     tmp_path,
     monkeypatch,

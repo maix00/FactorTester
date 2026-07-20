@@ -19,6 +19,8 @@ class FakeClient:
         self.authorization = None
         self.rollback = None
         self.advance = None
+        self.continuation_preview = None
+        self.continuation = None
         self.agent_budget_call = None
         self.agent_invocation_call = None
 
@@ -112,6 +114,50 @@ class FakeClient:
             "instance_id": instance_id,
             "branch_id": branch_id,
             "current_node": "validation",
+        }
+
+    def preview_research_graph_continuation(
+        self,
+        instance_id,
+        branch_id,
+        *,
+        target_graph_version,
+        job_id,
+    ):
+        self.continuation_preview = (
+            instance_id,
+            branch_id,
+            target_graph_version,
+            job_id,
+        )
+        return {
+            "action": "continue_graph_branch",
+            "target_hash": "c" * 64,
+            "descriptor": {"target_graph_version": target_graph_version},
+        }
+
+    def continue_research_graph_branch(
+        self,
+        instance_id,
+        branch_id,
+        *,
+        target_graph_version,
+        job_id,
+        expected_target_hash,
+        human_authorization_id,
+    ):
+        self.continuation = (
+            instance_id,
+            branch_id,
+            target_graph_version,
+            job_id,
+            expected_target_hash,
+            human_authorization_id,
+        )
+        return {
+            "instance_id": "instance-v6",
+            "graph_version": target_graph_version,
+            "branches": [{"branch_id": "branch-v6"}],
         }
 
     def load_agent_budget_period(self, agent_id):
@@ -400,6 +446,38 @@ def test_research_graph_advance_projects_target_capability_descriptions(
         "capability_description": "Run validation.",
         "descriptor_hash": "a" * 64,
     }]
+
+
+def test_research_graph_continuation_is_previewed_then_exactly_authorized(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    runner = CliRunner()
+
+    preview = runner.invoke(cli, [
+        "research-graph", "continuation-preview",
+        "instance-v5", "branch-v5",
+        "--target-version", "6",
+        "--job-id", "job-1",
+    ])
+    continued = runner.invoke(cli, [
+        "research-graph", "continue",
+        "instance-v5", "branch-v5",
+        "--target-version", "6",
+        "--job-id", "job-1",
+        "--expected-target-hash", "c" * 64,
+        "--human-authorization-id", "gate-146",
+    ])
+
+    assert preview.exit_code == 0
+    assert continued.exit_code == 0
+    assert fake.continuation_preview == (
+        "instance-v5", "branch-v5", 6, "job-1",
+    )
+    assert fake.continuation == (
+        "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "gate-146",
+    )
 
 
 def test_research_graph_rollback_requires_exact_authorization(

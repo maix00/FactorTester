@@ -87,6 +87,118 @@ def cycle_inspect(
     click.echo(f"{object_type}: {object_id}")
 
 
+@cycle.command("continuation-preview")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--target-version", required=True, type=click.IntRange(min=1))
+@click.option("--job-id", required=True)
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+def cycle_continuation_preview(
+    instance_id: str,
+    branch_id: str,
+    target_version: int,
+    job_id: str,
+    as_json: bool,
+) -> None:
+    """Read the exact continuation hash without changing any state."""
+    result = run_factortester([
+        "research-graph",
+        "continuation-preview",
+        instance_id,
+        branch_id,
+        "--target-version",
+        str(target_version),
+        "--job-id",
+        job_id,
+    ], timeout=60)
+    payload = _backend_json(
+        result.returncode,
+        result.stdout,
+        result.stderr,
+    )
+    if as_json:
+        echo_json(payload)
+        return
+    click.echo(f"target_hash: {payload.get('target_hash', '')}")
+
+
+@cycle.command("continue")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--target-version", required=True, type=click.IntRange(min=1))
+@click.option("--job-id", required=True)
+@click.option("--expected-target-hash", required=True)
+@click.option("--human-authorization-id", required=True)
+@click.option("--timeout", default=120, show_default=True, type=int)
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+@click.pass_context
+def cycle_continue(
+    ctx: click.Context,
+    instance_id: str,
+    branch_id: str,
+    target_version: int,
+    job_id: str,
+    expected_target_hash: str,
+    human_authorization_id: str,
+    timeout: int,
+    as_json: bool,
+) -> None:
+    """Consume one exact Gate and retain a bounded local command receipt."""
+    result = run_factortester([
+        "research-graph",
+        "continue",
+        instance_id,
+        branch_id,
+        "--target-version",
+        str(target_version),
+        "--job-id",
+        job_id,
+        "--expected-target-hash",
+        expected_target_hash,
+        "--human-authorization-id",
+        human_authorization_id,
+    ], timeout=timeout)
+    backend = _backend_json(
+        result.returncode,
+        result.stdout,
+        result.stderr,
+    )
+    session_path = str(ctx.obj["session_path"])
+    session = load_session(session_path)
+    envelope = persist_command_evidence(
+        session_path=session_path,
+        envelope_id=(
+            f"continuation-{len(session.evidence_envelopes) + 1}"
+        ),
+        argv=result.argv,
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        hypotheses_tested=session.hypotheses_tested,
+        stop_condition=None,
+    )
+    session.evidence_envelopes.append(envelope)
+    record_event(
+        session,
+        "graph_continuation_created",
+        source_instance_id=instance_id,
+        source_branch_id=branch_id,
+        target_graph_version=target_version,
+        target_hash=expected_target_hash,
+        evidence_envelope_hash=envelope["envelope_hash"],
+    )
+    save_session(session, session_path)
+    payload = {
+        "backend": backend,
+        "evidence_envelope_hash": envelope["envelope_hash"],
+    }
+    if as_json:
+        echo_json(payload)
+        return
+    click.echo(f"graph_version: {target_version}")
+    click.echo(f"evidence: {envelope['envelope_hash']}")
+
+
 @cycle.command("validate")
 @click.option(
     "--evidence-file",
