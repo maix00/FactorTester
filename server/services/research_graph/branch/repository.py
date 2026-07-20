@@ -12,6 +12,17 @@ from server.services.research_graph.branch.projection import (
 from server.services.research_graph.protocol import loads
 
 
+CURRENT_BRANCH_CONTEXT_SQL = """
+    SELECT i.*, b.*, t.evidence_json AS latest_trace_evidence_json
+    FROM research_graph_instances i
+    JOIN research_graph_branches b
+      ON b.instance_id=i.instance_id
+    LEFT JOIN research_graph_trace t
+      ON t.trace_id=b.latest_trace_id
+    WHERE i.instance_id=? AND b.branch_id=? AND i.owner=?
+"""
+
+
 def branch_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -94,14 +105,6 @@ def load_instance_branch_with_latest_trace(
 ) -> sqlite3.Row | None:
     """Load current branch and its checkpoint carrier by primary-key join."""
     return conn.execute(
-        """
-        SELECT i.*, b.*, t.evidence_json AS latest_trace_evidence_json
-        FROM research_graph_instances i
-        JOIN research_graph_branches b
-          ON b.instance_id=i.instance_id
-        LEFT JOIN research_graph_trace t
-          ON t.trace_id=b.latest_trace_id
-        WHERE i.instance_id=? AND b.branch_id=? AND i.owner=?
-        """,
+        CURRENT_BRANCH_CONTEXT_SQL,
         (instance_id, branch_id, owner),
     ).fetchone()
