@@ -147,7 +147,9 @@ transaction. It derives whether the attempt is trusted and whether a canonical
 trust, or net-return guard booleans as authority. A generic `result` artifact
 does not establish a net return series; remain on the backtest node and surface
 the backend capability gap instead of guessing from gross returns or summary
-metrics.
+metrics. When the TrialPlan needs statistical robustness over returns, freeze
+the RunSpec with `retention_mode=full`; summary retention deliberately cannot
+claim that the canonical series was retained.
 
 Do not search for or call capability `attest`/receipt APIs; they do not exist.
 Submit the node-local resolution directly. Use `--all` only for explicit

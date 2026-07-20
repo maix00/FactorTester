@@ -155,7 +155,9 @@ anomaly-free, trusted Job can satisfy the trust guard. Only a named
 `net_returns` or `net_return_series` artifact can satisfy the net-return guard;
 a generic `result`, summary metrics, or gross-return field cannot. If the
 backend does not emit that canonical artifact, route to the capability gap
-instead of allowing the client to infer it.
+instead of allowing the client to infer it. A TrialPlan that needs return-level
+robustness must freeze `retention_mode=full`; summary retention intentionally
+does not retain a canonical series.
 
 Graph activation validation accepts canonical references only:
 

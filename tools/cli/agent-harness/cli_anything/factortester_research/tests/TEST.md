@@ -185,6 +185,9 @@ offline replay. Client booleans cannot override server facts; failed,
 maintenance-required, cross-branch, and stale-plan attempts cannot advance.
 Only a named `net_returns` or `net_return_series` artifact qualifies, while a
 generic result artifact deliberately exposes a backend capability gap.
+Native backtest artifact tests derive the named series from fee-adjusted ledger
+equity and fail closed on missing, zero, duplicate, non-finite, or unsupported
+engine curves. Summary retention produces no such research artifact.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.

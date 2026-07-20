@@ -60,6 +60,7 @@ def test_live_template_import_runs_as_a_durable_process_job() -> None:
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": configuration["revision"],
         "analyses": ["backtest"],
+        "retention_mode": "full",
     })
     assert submitted.status_code == 202, submitted.get_data(as_text=True)
     job_id = submitted.get_json()["jobs"][0]["job_id"]
@@ -77,5 +78,10 @@ def test_live_template_import_runs_as_a_durable_process_job() -> None:
     assert status["status"] == "succeeded", client.get(f"/api/jobs/{job_id}/result").get_json()
     result = client.get(f"/api/jobs/{job_id}/result").get_json()["result"]
     artifact = client.get(f"/api/jobs/{job_id}/artifacts/group_execution").get_json()["artifact"]
+    net_returns = client.get(
+        f"/api/jobs/{job_id}/artifacts/net_returns"
+    ).get_json()["artifact"]
     assert result["success"] is True
     assert artifact.get("groups") or artifact.get("group_results")
+    assert net_returns["artifact_kind"] == "net_return_series"
+    assert net_returns["series"]

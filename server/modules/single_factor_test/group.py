@@ -3375,6 +3375,14 @@ def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any
         evaluation_split=evaluation_split,
         registry=run_registry,
     )
+    from .backtest_research_artifacts import project_net_returns
+
+    net_returns = project_net_returns(
+        engine_result=execution["engine_result"],
+        group_owner=execution["group_owner"],
+    )
+    if net_returns is not None:
+        sink.emit_artifact("net_returns", net_returns)
     event_execution = {
         "run_id": execution["payload"]["run_id"],
         "engine_result": execution["engine_result"],
