@@ -33,7 +33,8 @@ def test_local_profile_is_strict_private_and_version_independent(
     assert path.stat().st_mode & 0o777 == 0o600
     assert not (root / "current.json").exists()
     assert not {"password", "token", "email"}.intersection(stored)
-    assert stored["schema_version"] == 7
+    assert stored["schema_version"] == 8
+    assert stored["status"] == "active"
     assert stored["workspaces"] == []
     assert stored["initialization_sources"] == []
     assert stored["session_binding"] == {}
@@ -97,7 +98,8 @@ def test_version_one_profile_is_upgraded_without_losing_identity(
 
     upgraded = LocalProfileStore(root).load("legacy")
 
-    assert upgraded["schema_version"] == 7
+    assert upgraded["schema_version"] == 8
+    assert upgraded["status"] == "active"
     assert upgraded["profile_id"] == "legacy"
     assert upgraded["workspaces"] == []
     assert upgraded["initialization_sources"] == []

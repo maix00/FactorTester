@@ -26,8 +26,9 @@ def new_local_profile(
     principal_ref: str = "",
 ) -> dict[str, Any]:
     return validate_local_profile({
-        "schema_version": 7,
+        "schema_version": 8,
         "profile_id": profile_id,
+        "status": "active",
         "display_name": display_name,
         "server": {"base_url": server_url},
         "workspace_root": str(workspace_root.expanduser().resolve()),
@@ -53,7 +54,7 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("local profile must be an object")
     allowed = {
-        "schema_version", "profile_id", "display_name", "server",
+        "schema_version", "profile_id", "status", "display_name", "server",
         "workspace_root", "workspaces", "agents", "adapters",
         "initialization_sources",
         "session_binding",
@@ -64,12 +65,15 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
     legacy_optional = {
         "workspaces", "initialization_sources", "session_binding",
         "research_records",
-        "factor_workspace_binding",
+        "factor_workspace_binding", "status",
     }
     if not (allowed - legacy_optional).issubset(observed) or observed - allowed:
         raise ValueError("local profile fields are invalid")
-    if value.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7}:
+    if value.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7, 8}:
         raise ValueError("local profile schema_version is unsupported")
+    status = value.get("status", "active")
+    if status not in {"active", "inactive"}:
+        raise ValueError("local profile status is invalid")
     server = value.get("server")
     if not isinstance(server, dict) or set(server) != {"base_url"}:
         raise ValueError("local profile server fields are invalid")
@@ -91,10 +95,11 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         value.get("factor_workspace_binding", {})
     )
     return {
-        "schema_version": 7,
+        "schema_version": 8,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
+        "status": status,
         "display_name": _text(value.get("display_name"), "display_name"),
         "server": {"base_url": base_url},
         "workspace_root": _text(

@@ -92,6 +92,17 @@ def plan_factor_worktree_binding(
     status = _git(repo, "status", "--porcelain=v1", "-z")
     status_entries = [item for item in status.split("\0") if item]
     branch_exists = _ref_exists(repo, f"refs/heads/{branch_name}")
+    branch_head = (
+        _git_value(repo, "rev-parse", f"refs/heads/{branch_name}")
+        if branch_exists else ""
+    )
+    branch_checked_out = any(
+        row.get("branch") == f"refs/heads/{branch_name}"
+        for row in _worktree_rows(repo)
+    )
+    recoverable_branch = (
+        branch_exists and branch_head == base and not branch_checked_out
+    )
     target_exists = target.exists()
     existing_binding = profile.get("factor_workspace_binding") or {}
     idempotent = bool(
@@ -103,7 +114,7 @@ def plan_factor_worktree_binding(
             == target
     )
     collisions = []
-    if branch_exists and not idempotent:
+    if branch_exists and not idempotent and not recoverable_branch:
         collisions.append("branch_exists")
     if target_exists and not idempotent:
         collisions.append("target_exists")
@@ -145,7 +156,18 @@ def plan_factor_worktree_binding(
             "base_commit_valid": bool(_COMMIT.fullmatch(base)),
             "target_within_profile_root": True,
             "canonical_checkout_untouched": True,
-            "branch_available": not branch_exists or idempotent,
+            "branch_available": (
+                not branch_exists or idempotent or recoverable_branch
+            ),
+            "branch_recovery": (
+                "recoverable_same_base"
+                if recoverable_branch
+                else (
+                    "manual_repair_required_unique_commits"
+                    if branch_exists and not idempotent
+                    else "not_needed"
+                )
+            ),
             "target_available": not target_exists or idempotent,
             "collisions": sorted(set(collisions)),
             "pyright_config_at_base": _tracked_at(repo, base, "pyrightconfig.json"),
@@ -216,17 +238,42 @@ def apply_factor_worktree_binding(
         raise ValueError("factor worktree receipt exists but binding is invalid")
     recovered = _matches_planned_worktree(repo, target, plan)
     if not recovered:
-        if _ref_exists(repo, f"refs/heads/{plan['branch']}"):
-            raise ValueError("factor worktree branch collision")
+        branch_exists = _ref_exists(
+            repo, f"refs/heads/{plan['branch']}"
+        )
+        branch_head = (
+            _git_value(repo, "rev-parse", f"refs/heads/{plan['branch']}")
+            if branch_exists else ""
+        )
+        checked_out = any(
+            row.get("branch") == f"refs/heads/{plan['branch']}"
+            for row in _worktree_rows(repo)
+        )
+        recover_branch = (
+            branch_exists
+            and branch_head == plan["base_commit"]
+            and not checked_out
+        )
+        if branch_exists and not recover_branch:
+            raise ValueError(
+                "factor worktree branch has unique commits or is checked out; "
+                "manual repair is required"
+            )
         if target.exists():
             raise ValueError("factor worktree target collision")
         staging = target.parent / f".{target.name}.staging-{uuid.uuid4().hex}"
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
-            _git_checked(
-                repo, "worktree", "add", "-b", str(plan["branch"]),
-                str(staging), str(plan["base_commit"]),
-            )
+            if recover_branch:
+                _git_checked(
+                    repo, "worktree", "add",
+                    str(staging), str(plan["branch"]),
+                )
+            else:
+                _git_checked(
+                    repo, "worktree", "add", "-b", str(plan["branch"]),
+                    str(staging), str(plan["base_commit"]),
+                )
             _write_worktree_manifest(staging, plan)
             _assert_authoring_ready(staging)
             _checkpoint(checkpoint, "before_publish")
@@ -343,6 +390,14 @@ def rollback_factor_worktree_binding(
     store = LocalProfileStore(root)
     profile = store.load(profile_id)
     binding = profile.get("factor_workspace_binding") or {}
+    receipt_path = _receipt_path(store.root, profile_id, binding_id)
+    if not binding:
+        previous = read_json(receipt_path)
+        if isinstance(previous, dict) and previous.get("status") == "rolled_back":
+            return {
+                **previous,
+                "receipt_ref": receipt_path.resolve().as_uri(),
+            }
     if binding.get("binding_id") != binding_id:
         raise ValueError("factor worktree binding no longer matches rollback")
     settings = CanonicalFactorRepoStore(root).load()
@@ -353,14 +408,19 @@ def rollback_factor_worktree_binding(
     _git_checked(repo, "worktree", "remove", str(target))
     profile["factor_workspace_binding"] = {}
     store.save(profile)
-    receipt_path = _receipt_path(store.root, profile_id, binding_id)
     receipt = read_json(receipt_path) or {}
-    receipt["status"] = "rolled_back"
-    receipt["branch_retained"] = True
-    receipt["commits_retained"] = True
+    receipt.update({
+        "action": "unbind",
+        "status": "rolled_back",
+        "profile_id": profile_id,
+        "branch_retained": True,
+        "commits_retained": True,
+    })
+    receipt.pop("receipt_hash", None)
+    receipt["receipt_hash"] = json_hash(receipt)
     write_json(receipt_path, receipt)
     receipt_path.chmod(0o600)
-    return receipt
+    return {**receipt, "receipt_ref": receipt_path.resolve().as_uri()}
 
 
 def _assert_authorized(profile: dict[str, Any], owner: str) -> None:

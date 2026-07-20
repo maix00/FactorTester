@@ -157,11 +157,26 @@ def test_collisions_and_post_plan_changes_fail_closed(tmp_path: Path) -> None:
     CanonicalFactorRepoStore(client_root).register(repo, owner_ref=OWNER)
 
     _git(repo, "branch", "agent/taken")
-    branch_collision = plan_factor_worktree_binding(
+    recovered_branch = plan_factor_worktree_binding(
         client_root, "maxa", branch="agent/taken"
+    )
+    assert recovered_branch["ready"] is True
+    assert recovered_branch["checks"]["branch_recovery"] == (
+        "recoverable_same_base"
+    )
+    recovered = apply_factor_worktree_binding(client_root, recovered_branch)
+    assert Path(recovered["worktree_path"]).is_dir()
+
+    _git(repo, "switch", "-c", "agent/checked-out")
+    branch_collision = plan_factor_worktree_binding(
+        client_root, "maxb", branch="agent/checked-out"
     )
     assert branch_collision["ready"] is False
     assert branch_collision["checks"]["collisions"] == ["branch_exists"]
+    assert branch_collision["checks"]["branch_recovery"] == (
+        "manual_repair_required_unique_commits"
+    )
+    _git(repo, "switch", "download")
 
     occupied = tmp_path / "profiles" / "maxa" / "factor-worktrees" / "occupied"
     occupied.mkdir(parents=True)

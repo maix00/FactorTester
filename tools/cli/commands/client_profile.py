@@ -14,6 +14,7 @@ from tools.cli.release.local_profile import (
     new_local_profile,
 )
 from tools.cli.release.profile import load_profile_root
+from tools.cli.release.profile_lifecycle import ProfileLifecycle
 from tools.cli.release.storage import read_json, write_json
 from tools.cli.release.workspace_migration import (
     apply_workspace_migration,
@@ -127,6 +128,90 @@ def initialize_profile(
             )
     store.ensure_workspace_root(profile_id)
     click.echo(_json(profile))
+
+
+@client_profile.command("create")
+@click.option("--profile-id", required=True)
+@click.option("--display-name", required=True)
+@click.option("--server-url", required=True)
+@click.option(
+    "--workspace-root",
+    required=True,
+    type=click.Path(file_okay=False, path_type=Path),
+)
+@click.option("--agent-id", default="")
+@click.option(
+    "--role",
+    type=click.Choice(["planning", "research"]),
+    default="research",
+)
+@click.option("--principal-ref", default="")
+@_root_option
+@friendly_errors
+def create_profile(
+    profile_id: str,
+    display_name: str,
+    server_url: str,
+    workspace_root: Path,
+    agent_id: str,
+    role: str,
+    principal_ref: str,
+    release_profile: Path | None,
+) -> None:
+    """Create one provider-neutral local Profile and optional Agent."""
+    receipt = ProfileLifecycle(
+        load_profile_root(release_profile)
+    ).create(
+        profile_id=profile_id,
+        display_name=display_name,
+        server_url=server_url,
+        workspace_root=workspace_root,
+        agent_id=agent_id,
+        role=role,
+        principal_ref=principal_ref,
+    )
+    click.echo(_json(receipt))
+
+
+@client_profile.command("deactivate")
+@click.argument("profile_id")
+@_root_option
+@friendly_errors
+def deactivate_profile(
+    profile_id: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(ProfileLifecycle(
+        load_profile_root(release_profile)
+    ).deactivate(profile_id)))
+
+
+@client_profile.command("delete")
+@click.argument("profile_id")
+@_root_option
+@friendly_errors
+def delete_profile(
+    profile_id: str,
+    release_profile: Path | None,
+) -> None:
+    """Unbind a clean worktree and delete local Profile metadata."""
+    click.echo(_json(ProfileLifecycle(
+        load_profile_root(release_profile)
+    ).delete(profile_id)))
+
+
+@client_profile.command("purge")
+@click.argument("profile_id")
+@_root_option
+@friendly_errors
+def purge_profile(
+    profile_id: str,
+    release_profile: Path | None,
+) -> None:
+    """Remove an empty deleted Profile workspace and tombstone."""
+    click.echo(_json(ProfileLifecycle(
+        load_profile_root(release_profile)
+    ).purge(profile_id)))
 
 
 @client_profile.command("list")
