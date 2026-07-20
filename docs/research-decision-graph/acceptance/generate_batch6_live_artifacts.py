@@ -25,9 +25,9 @@ from server.services.research_graph.trial_plan import (
 )
 
 
-GRAPH_HASH = "ac92145b55412f23034d721c8a852606f08ec3129a98edd77d7114077d81724d"
+GRAPH_HASH = "16545c8bfead87c407806f0f94d448353b12aecd6fb5767ba85070bb2ca0e22d"
 METHODOLOGY_HASH = (
-    "d863791ad1c5b89dd1edb4728506328d6e1244e93ded7394d68bb006d9b416a2"
+    "b705ae825afa8033e235b9e5f7a43e51b25cb807f13366467bb4f088dc2dec34"
 )
 
 
@@ -121,16 +121,22 @@ def _obligations(case_name: str, case: dict, contract_hash: str) -> list[dict]:
         })
         for obligation_id, obligation_kind, question, criterion
         in case["obligations"]
+        if obligation_id in set(case["initial_obligation_ids"])
     ]
 
 
-def _trial_plan(case_name: str, case: dict) -> dict:
+def _trial_plan(
+    case_name: str,
+    case: dict,
+    *,
+    contract_hash: str,
+) -> dict:
     compact = (
         {
             "plan_id": "i140-s-v1",
             "claim_ref": "i140-s-claim",
             "family_ref": "i140-s-f1",
-            "sample_ref": "s-confirm",
+            "sample_ref": "s-replay",
             "comparison_id": "s-primary",
             "primary": "net_ordering",
             "secondary": ["grid_robustness", "turnover", "assurance"],
@@ -152,9 +158,9 @@ def _trial_plan(case_name: str, case: dict) -> dict:
         "primary": [compact["primary"]],
         "secondary": compact["secondary"],
     }
-    run_hash = case["run_spec_hash"]
+    run_hashes = list(case["run_spec_hashes"].values())
     return canonical_trial_plan({
-        "schema_version": 1,
+        "schema_version": 4,
         "trial_plan_id": compact["plan_id"],
         "version": 1,
         "hypothesis_ref": compact["claim_ref"],
@@ -163,16 +169,16 @@ def _trial_plan(case_name: str, case: dict) -> dict:
         "outcomes": outcomes,
         "sample_roles": [{
             "sample_ref": compact["sample_ref"],
-            "sample_hash": case["configuration_fingerprint"],
+            "sample_hash": case["sample_hash"],
             "role": case["sample_role"],
-            "run_spec_hashes": [run_hash],
+            "run_spec_hashes": run_hashes,
         }],
         "comparisons": [{
             "comparison_id": compact["comparison_id"],
             "members": [{
                 "run_spec_hash": run_hash,
                 "trial_role": case["sample_role"],
-            }],
+            } for run_hash in run_hashes],
         }],
         "stopping": {
             "rule_ref": "terminal-or-id",
@@ -191,6 +197,15 @@ def _trial_plan(case_name: str, case: dict) -> dict:
             "rejection_ref": "id-or-null",
             "revision_ref": "conflict",
             "continuation_ref": "new-plan",
+        },
+        "decision_contract_hash": contract_hash,
+        "methodology_hash": METHODOLOGY_HASH,
+        "obligation_refs": case["initial_obligation_ids"],
+        "parent_trial_plan_hash": None,
+        "stage_policy": {
+            "ordered_stages": [case["sample_role"]],
+            "entry_stage": case["sample_role"],
+            "entry_basis_ref": f"decision-contract:{case_name}-current-stage",
         },
     })
 
@@ -258,7 +273,11 @@ def build_case(
         "pending_closure": None,
         "closure": None,
     })
-    plan = _trial_plan(case_name, case)
+    plan = _trial_plan(
+        case_name,
+        case,
+        contract_hash=contract["contract_hash"],
+    )
     plan_hash = trial_plan_hash(plan)
     freeze_evidence, freeze_trace_bytes = _trial_freeze_evidence(
         checkpoint=checkpoint,
@@ -270,7 +289,10 @@ def build_case(
         "obligation_discovery_checkpoint_fresh": True,
         "evidence_refs": [
             f"decision-contract:{contract['contract_hash']}",
-            f"runspec-preview:{case['run_spec_hash']}",
+            *[
+                f"runspec-preview:{run_hash}"
+                for run_hash in case["run_spec_hashes"].values()
+            ],
         ],
         "agent_invocation_ids": [planning_invocation_id],
         "research_cycle": {
@@ -289,10 +311,21 @@ def build_case(
         "initial_checkpoint": checkpoint,
         "trial_plan": plan,
         "trial_plan_hash": plan_hash,
+        "trial_binding": {
+            "instance_id": case["instance_id"],
+            "branch_id": case["branch_id"],
+            "trial_plan": plan,
+            "trial_plan_hash": plan_hash,
+            "trial_plan_version": plan["version"],
+            "trial_role": case["sample_role"],
+            "comparison_id": (
+                "s-primary" if case_name == "sgccs" else "t-primary"
+            ),
+        },
         "trial_freeze_evidence": freeze_evidence,
         "trial_freeze_trace_bytes": freeze_trace_bytes,
         "run_spec_preview": {
-            "run_spec_hash": case["run_spec_hash"],
+            "run_spec_hashes": case["run_spec_hashes"],
             "configuration_fingerprint": case["configuration_fingerprint"],
             "configuration_revision": case["configuration_revision"],
             "analyses": case["analyses"],
@@ -322,7 +355,7 @@ def main() -> None:
             "historical_result_metrics_loaded": False,
         },
         "graph": {
-            "graph_ref": "factor-research@4",
+            "graph_ref": "factor-research@5",
             "graph_hash": GRAPH_HASH,
             "methodology_hash": METHODOLOGY_HASH,
         },
@@ -346,6 +379,7 @@ def main() -> None:
             "bootstrap_evidence",
             "capability_resolution",
             "trial_freeze_evidence",
+            "trial_binding",
         ):
             path = args.output_dir / f"{name}-{key.replace('_', '-')}.json"
             path.write_text(
@@ -366,7 +400,9 @@ def main() -> None:
                     value["initial_checkpoint"]["projection_hash"]
                 ),
                 "trial_plan_hash": value["trial_plan_hash"],
-                "run_spec_hash": value["run_spec_preview"]["run_spec_hash"],
+                "run_spec_hashes": (
+                    value["run_spec_preview"]["run_spec_hashes"]
+                ),
             }
             for name, value in package["cases"].items()
         },

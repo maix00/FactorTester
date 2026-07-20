@@ -17,12 +17,12 @@ def test_batch6_trial_plan_binding_fits_trace_budget(monkeypatch) -> None:
 
     expected_hashes = {
         "sgccs": (
-            "cadc5f6ea5d308393284a45fdcdfc441"
-            "f91acb9406412940c171c7e9e8edfc51"
+            "4dbf884db5aa2de27ef888838baea7a"
+            "7cec9a79e1434bc5c2c0dceb422f0d4ef"
         ),
         "trend": (
-            "fbf4ca1db3c16257d1dca41ac4a6ee"
-            "77d6b322fbcc561a0694542cbdd2f78c5c"
+            "8da9218b8024f3331f55993e4bfd88ff"
+            "f895673cd4a4179183c45180076a3603"
         ),
     }
     for case_name, case in module["CASES"].items():
@@ -40,3 +40,8 @@ def test_batch6_trial_plan_binding_fits_trace_budget(monkeypatch) -> None:
             "revision_ref": "conflict",
             "continuation_ref": "new-plan",
         }
+        assert {
+            member["run_spec_hash"]
+            for comparison in result["trial_plan"]["comparisons"]
+            for member in comparison["members"]
+        } == set(case["run_spec_hashes"].values())

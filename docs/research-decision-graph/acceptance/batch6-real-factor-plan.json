@@ -1,9 +1,9 @@
 {
   "acceptance_id": "issue-140-batch6-real-factor-v1",
   "created_at": "2026-07-19T12:10:00+08:00",
-  "revised_at": "2026-07-19T14:31:30+08:00",
-  "plan_revision": 3,
-  "revision_reason": "Correct frozen configuration and Skill-bundle identities, distinguish planning from execution backend revisions, and enforce the 6000-byte trace budget without consuming result evidence.",
+  "revised_at": "2026-07-20T12:05:00+08:00",
+  "plan_revision": 5,
+  "revision_reason": "Record the real v5 execution identities, correct SgCCS from confirmation to historical selection after the server detected prior sample exposure, bind each Trend analysis to its actual CLI RunSpec, and pause honestly at the unimplemented bootstrap-Sharpe capability.",
   "role": "planning_agent",
   "role_transition": {
     "next_role": "research_agent",
@@ -26,20 +26,21 @@
   },
   "backend": {
     "branch": "fix/issue-140-active-graph-agentflow",
-    "planning_revision": "7cb727df617d0ea30e2ee30dbe5ee47b28adcac0",
-    "acceptance_execution_revision": "03fe7ad2d3f5322cb0195ca65f868f2c529b2966",
+    "planning_revision": "d594a73a37349f16d6bcd3a339ee470bdcb47974",
+    "acceptance_execution_revision": "47ad0a8717d51c93a930dc0f12e42ddd124e66fb",
     "port": 8140,
     "database_path": "/Users/maxdeux/Documents/GTHT/data/sqlite/unifieddata.sqlite",
     "database_snapshot": {
       "size_bytes": 269926400,
-      "observed_mtime_epoch": 1784433074
+      "observed_mtime_epoch": 1784443362
     },
     "graph": {
       "graph_id": "factor-research",
-      "version": 4,
-      "content_hash": "ac92145b55412f23034d721c8a852606f08ec3129a98edd77d7114077d81724d"
+      "version": 5,
+      "content_hash": "16545c8bfead87c407806f0f94d448353b12aecd6fb5767ba85070bb2ca0e22d"
     },
-    "research_obligation_skill_bundle_hash": "3199189a952664aacb8947a4804a65644354f77ec913bce5105ca5d0d0adb2da",
+    "research_cycle_methodology_hash": "b705ae825afa8033e235b9e5f7a43e51b25cb807f13366467bb4f088dc2dec34",
+    "research_obligation_skill_bundle_hash": "4d534870a4c8577b4407dd1eeaa6f9fd3fc219e59b77640d36d9450c26a78917",
     "maximum_persisted_trace_bytes": 6000
   },
   "execution_identity": {
@@ -49,7 +50,7 @@
   },
   "workspace": {
     "root": "/Users/maxdeux/Documents/GTHT/data/factor_workspaces/default$MaxA@1",
-    "generator_baseline_commit": "f5309af98bbd7b6678413fc8632e390e9e240f6f",
+    "generator_baseline_commit": "c12d3cd1b583d7f13a89edc99676593e6c42964f",
     "pyright_config_sha256": "9bf739921ea4d0b331a078982fb4ded43765ee2979f90e0e37d8b21480bd33ba",
     "vscode_settings_sha256": "84a23a69442022cc623216836a9b2869e465d4f180a6221746137cbbc42fa7ea",
     "real_pyright_error_count": 0,
@@ -89,7 +90,7 @@
         "end_date": "2026-01-31",
         "timezone": "Asia/Shanghai"
       },
-      "claim": "Reversed short-window centered close location has a reproducible cross-sectional ordering effect after the frozen template's execution and liquidity semantics.",
+      "claim": "Historical replay can assess whether reversed short-window centered close location remains compatible with the prior bounded result; this already-exposed sample cannot provide untouched confirmation.",
       "initial_obligations": [
         "verify source/tree/timing identity and no-lookahead semantics",
         "verify the immutable RunSpec preserves the frozen template and product scope",
@@ -111,7 +112,8 @@
           "fees",
           "product concentration"
         ],
-        "decision_rule": "A successful job is not a successful factor. Strengthen the claim only if ordering and costed evidence are directionally coherent without a material concentration or timing anomaly."
+        "sample_role": "selection",
+        "decision_rule": "A successful job is not a successful factor. This prior-exposed sample can support only historical replay compatibility and new hypothesis generation, never an untouched confirmation claim."
       }
     },
     {
@@ -123,7 +125,7 @@
         "source_file": "/Users/maxdeux/Documents/GTHT/data/factor_workspaces/default$MaxA@1/custom_factors/TrDualMomentum.py",
         "source_sha256": "c051e55b7026f048e412c5bfd20953d14b051abae620ae06d9adef0e315dfb6c",
         "factor_family_version": {
-          "workspace_git_commit": "f5309af98bbd7b6678413fc8632e390e9e240f6f",
+          "workspace_git_commit": "c12d3cd1b583d7f13a89edc99676593e6c42964f",
           "database_owner": "default$MaxA@1"
         },
         "alias": "TrDualMomentum|S:5d|L:20d|$F:1d",
@@ -184,7 +186,7 @@
             "$F": "1d"
           }
         ],
-        "primary_evidence": "validation-slice rank IC with immutable next-open timing",
+        "primary_evidence": "selection-slice rank IC with immutable next-open timing",
         "secondary_evidence": [
           "factor distribution",
           "group monotonicity",
@@ -196,6 +198,39 @@
       }
     }
   ],
+  "execution": {
+    "status": "paused_capability_gap",
+    "gap": {
+      "capability_id": "performance.bootstrap-sharpe",
+      "reason": "approved_product_implementation_missing",
+      "policy": "Do not authorize the quarantined Vibe guidance as an authoritative FactorTester implementation."
+    },
+    "sgccs": {
+      "instance_id": "723d7bcb5ffe414795adade39f849a08",
+      "branch_id": "3e7fae879aad4453b3fdc17987d69295",
+      "trial_plan_hash": "4dbf884db5aa2de27ef888838baea7a7cec9a79e1434bc5c2c0dceb422f0d4ef",
+      "job_id": "afe87b94622246d9a19cfcdf5a664719",
+      "job_status": "succeeded",
+      "terminal_assurance": "trusted",
+      "graph_status": "paused",
+      "graph_node": "capability_gap"
+    },
+    "trend": {
+      "instance_id": "13822bc5a8454fcb850aa4f7bc60bfba",
+      "branch_id": "43efeeed072a4c3eba4191ab24d34e95",
+      "trial_plan_hash": "8da9218b8024f3331f55993e4bfd88fff895673cd4a4179183c45180076a3603",
+      "jobs": {
+        "ic": "dc418039c68746e3b1df16252d2bcd33",
+        "factor_evaluation": "3fd55b88de3647cda65df6fb032bef38",
+        "factor_type_analysis": "d5e2850025044d6eb5353c34fb01d990",
+        "backtest": "dc7d5929559641e49bce3c0908de6837"
+      },
+      "job_status": "all_succeeded",
+      "terminal_assurance": "trusted",
+      "graph_status": "paused",
+      "graph_node": "capability_gap"
+    }
+  },
   "closure": {
     "required": [
       "all preregistered jobs terminal or explicitly bounded",
