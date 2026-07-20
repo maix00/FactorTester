@@ -31,7 +31,7 @@ struct ClientReleaseSettingsView: View {
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 3) {
-                Text("FactorTester-Client")
+                Text("FTClient")
                     .font(.title2.weight(.semibold))
                 Text("更新客户端，并管理所有人类与 Agent Profiles")
                     .font(.callout)

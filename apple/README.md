@@ -64,8 +64,10 @@ xcodegen generate
    xcodebuild -project FactorTester-Client.xcodeproj -scheme FactorTester-Client-macOS \
      -configuration Release -derivedDataPath build build
    ```
-   产物 `.app` 在 `build/Build/Products/Release/FactorTester-Client.app`。
-   正式 Release 同时提供 `FactorTester-Client.dmg`，拖入 Applications 即可安装。
+   产物 `.app` 在 `build/Build/Products/Release/FTClient.app`。
+   正式 Release 继续提供兼容既有更新链的 `FactorTester-Client.dmg`，镜像内为
+   `FTClient.app`，拖入 Applications 即可安装。首次运行会在 bundle identity
+   一致时安全清理旧的 `FactorTester-Client.app`。
    （自签名/无签名时对方首次打开需右键「打开」绕过 Gatekeeper）。
 
 ### iOS

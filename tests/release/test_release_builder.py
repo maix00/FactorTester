@@ -12,7 +12,7 @@ from script.release.assets import (
 )
 from script.release import build as release_build
 from script.release.build import build_release
-from script.release.manifest import create_manifest
+from script.release.manifest import _kind, create_manifest
 from tools.cli.release.app_archive import install_macos_app
 from tools.cli.release.contracts import validate_release_manifest
 
@@ -55,6 +55,11 @@ def test_release_builder_requires_public_source_revision() -> None:
     assert "source_revision" in build_release.__annotations__
 
 
+def test_manifest_accepts_current_and_legacy_app_archive_names() -> None:
+    assert _kind("FTClient.zip") == "macos-app"
+    assert _kind("FactorTester-Client.zip") == "macos-app"
+
+
 def test_release_builder_exposes_only_one_dmg(
     tmp_path: Path,
     monkeypatch,
@@ -62,7 +67,7 @@ def test_release_builder_exposes_only_one_dmg(
     repo = tmp_path / "repo"
     app = (
         repo
-        / "apple/build/Build/Products/Release/FactorTester-Client.app"
+        / "apple/build/Build/Products/Release/FTClient.app"
     )
     (app / "Contents").mkdir(parents=True)
     (app / "Contents/Info.plist").write_text("<plist/>")
@@ -106,7 +111,7 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     adapter_builder = repo / "client-adapters/vibe-trading/build_archive.py"
     adapter_builder.parent.mkdir(parents=True)
     adapter_builder.write_text("")
-    app = tmp_path / "FactorTester-Client.app"
+    app = tmp_path / "FTClient.app"
     (app / "Contents/Resources").mkdir(parents=True)
 
     class FakeEnvironment:
@@ -149,8 +154,8 @@ def test_embedded_runtime_writes_internal_hash_receipt(
 def test_app_archive_is_deterministic_and_preserves_executable(
     tmp_path: Path,
 ) -> None:
-    app = tmp_path / "FactorTester-Client.app"
-    binary = app / "Contents" / "MacOS" / "FactorTester-Client"
+    app = tmp_path / "FTClient.app"
+    binary = app / "Contents" / "MacOS" / "FTClient"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"binary")
     binary.chmod(0o755)
@@ -161,20 +166,20 @@ def test_app_archive_is_deterministic_and_preserves_executable(
     assert first.read_bytes() == second.read_bytes()
     with zipfile.ZipFile(first) as archive:
         mode = archive.getinfo(
-            "FactorTester-Client.app/Contents/MacOS/FactorTester-Client"
+            "FTClient.app/Contents/MacOS/FTClient"
         ).external_attr >> 16
     assert mode & 0o111
     installed = install_macos_app(first, tmp_path / "installed")
     installed_binary = tmp_path / "installed" / installed["name"]
     assert (
-        installed_binary / "Contents/MacOS/FactorTester-Client"
+        installed_binary / "Contents/MacOS/FTClient"
     ).stat().st_mode & 0o111
 
 
 def test_installer_dmg_contains_app_and_applications_link(
     tmp_path: Path,
 ) -> None:
-    app = tmp_path / "FactorTester-Client.app"
+    app = tmp_path / "FTClient.app"
     (app / "Contents").mkdir(parents=True)
     (app / "Contents/Info.plist").write_text("<plist/>")
     image = build_installer_dmg(
@@ -182,10 +187,29 @@ def test_installer_dmg_contains_app_and_applications_link(
         tmp_path / "FactorTester-Client.dmg",
     )
     assert image.is_file()
-    listing = subprocess.run(
-        ["hdiutil", "imageinfo", str(image)],
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    subprocess.run(
+        [
+            "hdiutil",
+            "attach",
+            "-nobrowse",
+            "-readonly",
+            "-mountpoint",
+            str(mount),
+            str(image),
+        ],
         check=True,
         capture_output=True,
         text=True,
     )
-    assert "FactorTester-Client" in listing.stdout
+    try:
+        assert (mount / "FTClient.app").is_dir()
+        assert (mount / "Applications").is_symlink()
+    finally:
+        subprocess.run(
+            ["hdiutil", "detach", str(mount)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )

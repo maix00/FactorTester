@@ -89,6 +89,7 @@
 "Select a step to load its bounded report detail." = "请选择一个步骤以加载其有界报告详情。";
 "View original report" = "查看原始报告";
 "Legacy report section summary is unavailable." = "旧报告没有可用的结构化章节摘要。";
+"旧客户端身份校验失败，未删除任何应用。" = "旧客户端身份校验失败，未删除任何应用。";
 "迁移工作区" = "迁移工作区";
 "迁移预览" = "迁移预览";
 "验证迁移" = "验证迁移";

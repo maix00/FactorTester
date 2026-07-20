@@ -26,11 +26,11 @@ def build_release(
     output.mkdir(parents=True)
     source_app = (
         REPO
-        / "apple/build/Build/Products/Release/FactorTester-Client.app"
+        / "apple/build/Build/Products/Release/FTClient.app"
     )
     if not (source_app / "Contents" / "Info.plist").is_file():
         raise ValueError(f"macOS application is incomplete: {source_app}")
-    app = output / ".staging" / "FactorTester-Client.app"
+    app = output / ".staging" / "FTClient.app"
     shutil.copytree(source_app, app)
     embed_client_runtime(
         REPO,

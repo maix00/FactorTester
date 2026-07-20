@@ -73,7 +73,7 @@ def _kind(name: str) -> str:
             if name.startswith("cli_anything_factortester_research-")
             else "python-wheel"
         )
-    if name == "FactorTester-Client.zip":
+    if name in {"FTClient.zip", "FactorTester-Client.zip"}:
         return "macos-app"
     if name == "vibe-trading-adapter.zip":
         return "adapter-archive"

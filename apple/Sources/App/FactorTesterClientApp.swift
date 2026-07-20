@@ -17,6 +17,9 @@ struct FactorTesterClientApp: App {
                     \.locale,
                     AppLanguage(rawValue: language)?.locale ?? .autoupdatingCurrent
                 )
+                #if os(macOS)
+                .task { try? LegacyAppNameMigration.run() }
+                #endif
         }
         #if os(macOS)
         .defaultSize(width: 1000, height: 720)

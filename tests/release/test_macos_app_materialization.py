@@ -11,10 +11,10 @@ from tools.cli.release.app_archive import install_macos_app
 def _app_archive(path: Path, *, unsafe: str = "") -> Path:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(
-            "FactorTester-Client.app/Contents/Info.plist", "<plist/>"
+            "FTClient.app/Contents/Info.plist", "<plist/>"
         )
         executable = zipfile.ZipInfo(
-            "FactorTester-Client.app/Contents/MacOS/FactorTester-Client"
+            "FTClient.app/Contents/MacOS/FTClient"
         )
         executable.external_attr = 0o100755 << 16
         archive.writestr(executable, "#!/bin/sh\nexit 0\n")
@@ -31,15 +31,15 @@ def test_signed_macos_app_is_materialized_inside_version_root(
         tmp_path / "applications",
     )
     assert result == {
-        "path": "applications/FactorTester-Client.app",
-        "name": "FactorTester-Client.app",
+        "path": "applications/FTClient.app",
+        "name": "FTClient.app",
     }
     assert (
         tmp_path
         / result["path"]
         / "Contents"
         / "MacOS"
-        / "FactorTester-Client"
+        / "FTClient"
     ).stat().st_mode & 0o111
 
 

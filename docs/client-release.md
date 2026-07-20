@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- macOS 13 or newer for `FactorTester-Client.app`;
+- macOS 13 or newer for `FTClient.app`;
 - HTTPS access to the public FactorTester client release;
 - a FactorTester server account for remote research.
 
@@ -12,7 +12,9 @@ No server source checkout, database driver, or local backtest engine is needed.
 
 For the normal macOS installation experience, download
 `FactorTester-Client.dmg` from the public GitHub Release, open it, and drag
-`FactorTester-Client.app` to Applications. The GitHub Release exposes only
+`FTClient.app` to Applications. On first launch, the signed client safely
+retires a matching legacy `/Applications/FactorTester-Client.app`, so Finder
+and Launchpad do not retain two visible clients. The GitHub Release exposes only
 this DMG. The CLI, research Harness, their Python runtime dependencies, and
 approved adapters live inside the signed app Resources and are covered by an
 internal hash receipt; users do not download those components separately.

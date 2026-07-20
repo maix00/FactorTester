@@ -94,7 +94,7 @@ def build_installer_dmg(app: Path, output: Path) -> Path:
                 "hdiutil",
                 "create",
                 "-volname",
-                "FactorTester-Client",
+                "FTClient",
                 "-srcfolder",
                 str(root),
                 "-format",
