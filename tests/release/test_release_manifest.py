@@ -54,6 +54,8 @@ def signed_manifest(
     version: str = "1.2.3",
     sha256: str = "a" * 64,
     size: int = 12,
+    kind: str = "python-wheel",
+    filename: str = "factortester.whl",
 ) -> tuple[dict, Path]:
     private_key, public_key = _keys(root)
     manifest = {
@@ -65,9 +67,9 @@ def signed_manifest(
         "client_protocol": {"minimum": 1, "maximum": 1},
         "assets": [{
             "id": "factortester-cli",
-            "kind": "python-wheel",
-            "filename": "factortester.whl",
-            "url": "https://example.invalid/factortester.whl",
+            "kind": kind,
+            "filename": filename,
+            "url": f"https://example.invalid/{filename}",
             "sha256": sha256,
             "size": size,
         }],

@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+from .adapters.archive import install_adapter_archive
 from .contracts import ReleaseAsset
 
 
@@ -41,10 +42,18 @@ def install_asset(
     observed = digest.hexdigest()
     if observed != asset.sha256:
         raise ValueError(f"release asset checksum mismatch: {asset.asset_id}")
-    return {
+    receipt = {
         "id": asset.asset_id,
         "kind": asset.kind,
         "filename": asset.filename,
         "sha256": observed,
         "size": size,
     }
+    if asset.kind == "adapter-archive":
+        contract = install_adapter_archive(target, staging / "adapters")
+        receipt["adapter"] = {
+            "adapter_id": contract.adapter_id,
+            "version": contract.version,
+            "path": f"adapters/{contract.adapter_id}",
+        }
+    return receipt

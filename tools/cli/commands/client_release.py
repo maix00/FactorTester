@@ -10,6 +10,7 @@ import click
 from tools.cli.core.errors import friendly_errors
 from tools.cli.release.profile import load_profile_root, load_release_inputs
 from tools.cli.release.transaction import ClientReleaseStore
+from tools.cli.commands.client_adapter import client_adapter, client_profile
 
 
 def _echo(value: dict, as_json: bool) -> None:
@@ -26,6 +27,10 @@ def _echo(value: dict, as_json: bool) -> None:
 @click.group("client")
 def client_release() -> None:
     """Manage the versioned local FactorTester client distribution."""
+
+
+client_release.add_command(client_adapter)
+client_release.add_command(client_profile)
 
 
 def _release_options(function):

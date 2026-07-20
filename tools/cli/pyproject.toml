@@ -22,6 +22,7 @@ packages = [
   "tools.cli.modules.custom_factors",
   "tools.cli.modules.products",
   "tools.cli.release",
+  "tools.cli.release.adapters",
 ]
 
 [tool.setuptools.package-dir]
@@ -32,6 +33,7 @@ packages = [
 "tools.cli.modules.custom_factors" = "modules/custom_factors"
 "tools.cli.modules.products" = "modules/products"
 "tools.cli.release" = "release"
+"tools.cli.release.adapters" = "release/adapters"
 
 [tool.setuptools.package-data]
 "tools.cli.release" = ["trusted-release-public.pem"]
