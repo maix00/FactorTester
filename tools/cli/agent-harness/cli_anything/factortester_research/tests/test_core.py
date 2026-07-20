@@ -1514,10 +1514,10 @@ def test_explicit_legacy_validation_plan_separates_selection_from_holdout() -> N
 
 
 def test_packaging_and_docs_record_durable_remote_contract() -> None:
-    setup_text = (HARNESS_ROOT / "setup.py").read_text(encoding="utf-8")
+    packaging = (HARNESS_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     readme = (HARNESS_ROOT / "cli_anything/factortester_research/README.md").read_text(encoding="utf-8")
     skill = (HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md").read_text(encoding="utf-8")
-    assert 'python_requires=">=3.10"' in setup_text
+    assert 'requires-python = ">=3.10"' in packaging
     for text in (readme, skill):
         assert "workspace" in text
         assert "RunSpec" in text

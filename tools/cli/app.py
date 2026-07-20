@@ -8,6 +8,7 @@ from tools.cli.commands.agent import doctor, factor_plan
 from tools.cli.commands.agent_flow import agent_flow
 from tools.cli.commands.auth import configure, login, logout
 from tools.cli.commands.navigation import list_modules
+from tools.cli.commands.protocol import protocol
 from tools.cli.commands.settings import describe, edit
 from tools.cli.commands.research import external_factor, job, run, workspace
 from tools.cli.commands.research_graph import research_graph
@@ -41,6 +42,7 @@ cli.add_command(logout)
 cli.add_command(doctor)
 cli.add_command(factor_plan)
 cli.add_command(list_modules)
+cli.add_command(protocol)
 cli.add_command(describe)
 cli.add_command(edit)
 cli.add_command(workspace)

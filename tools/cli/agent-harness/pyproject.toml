@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cli-anything-factortester-research"
+version = "0.1.0"
+description = "CLI-Anything harness for FactorTester factor research workflows"
+requires-python = ">=3.10"
+dependencies = ["click>=8.0"]
+
+[project.scripts]
+cli-anything-factortester-research = "cli_anything.factortester_research.factortester_research_cli:cli"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cli_anything.factortester_research*"]
+exclude = ["cli_anything.factortester_research.tests*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"cli_anything.factortester_research" = [
+  "README.md",
+  "resources/*.json",
+  "skills/*.md",
+  "skills/research-obligation-cycle/*.md",
+  "skills/research-obligation-cycle/agents/*.yaml",
+  "skills/research-obligation-cycle/references/*.md",
+  "skills/research-obligation-cycle/scripts/*.py",
+]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["tests/*", "**/__pycache__/*", "*.pyc"]

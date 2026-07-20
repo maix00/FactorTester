@@ -4,7 +4,7 @@
   "providers": {
     "vibe-trading": {
       "root_env": "VIBE_TRADING_ROOT",
-      "root_hint": "/Users/maxdeux/Documents/Vibe-Trading-Integration/repos/Vibe-Trading",
+      "root_hint": "~/Documents/Vibe-Trading-Integration/repos/Vibe-Trading",
       "reviewed_revision": "e494ed06d75a290818be3d4e7a5133484b4d8d7e"
     },
     "factortester-research-package": {
@@ -24,7 +24,7 @@
         "quantitative-research/references/validations.md"
       ],
       "root_env": "AGENTS_SKILLS_ROOT",
-      "root_hint": "/Users/maxdeux/.agents/skills",
+      "root_hint": "~/.agents/skills",
       "sha256": "fb3b71ba85f30476a41d3215f1a54a7594971304aedd1e76eaa53bda2977cab3"
     },
     "vibe.factor-research": {
@@ -93,7 +93,7 @@
         "diagnose/scripts/hitl-loop.template.sh"
       ],
       "root_env": "AGENTS_SKILLS_ROOT",
-      "root_hint": "/Users/maxdeux/.agents/skills",
+      "root_hint": "~/.agents/skills",
       "sha256": "515f2b6afade25c8283bb4413e949ff980fe5ef1e8e2c40c6f9b2a22a9776afb"
     },
     "codex.skill-installer.list-search": {
@@ -105,7 +105,7 @@
         "skills/.system/skill-installer/scripts/list-skills.py"
       ],
       "root_env": "CODEX_HOME",
-      "root_hint": "/Users/maxdeux/.codex",
+      "root_hint": "~/.codex",
       "sha256": "c2eae6c8dd90b59b44ed42c21553154d70de1cb5de3305ef434ea00f7e5d6b1b"
     },
     "vibe.skills-loader.metadata": {
@@ -126,7 +126,7 @@
         "skills/.system/skill-creator/scripts/quick_validate.py"
       ],
       "root_env": "CODEX_HOME",
-      "root_hint": "/Users/maxdeux/.codex",
+      "root_hint": "~/.codex",
       "sha256": "80e419afc5e33a21143a1addd50bd95a6bfe39f7cd0cedb63665c7b4a4bf3e2c"
     },
     "vibe.skill-writer": {
@@ -136,7 +136,7 @@
     "local.grill-me": {
       "source_path": "grill-me/SKILL.md",
       "root_env": "AGENTS_SKILLS_ROOT",
-      "root_hint": "/Users/maxdeux/.agents/skills",
+      "root_hint": "~/.agents/skills",
       "sha256": "74147eb6010a65957efef2b9e0f0b3ff935c1def7fc117697151b1d0f3610556"
     },
     "vibe.research-discipline": {

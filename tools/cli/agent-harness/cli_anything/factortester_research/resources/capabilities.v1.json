@@ -190,7 +190,7 @@
           "execution_mode": "guidance_only",
           "requires_execution_approval": true,
           "product_scopes": ["all"],
-          "source_path": "/Users/maxdeux/.agents/skills/quantitative-research/SKILL.md"
+          "source_path": "quantitative-research/SKILL.md"
         }
       ]
     },
@@ -360,7 +360,7 @@
           "execution_mode": "guidance_only",
           "requires_execution_approval": true,
           "product_scopes": ["all"],
-          "source_path": "/Users/maxdeux/.agents/skills/quantitative-research/SKILL.md",
+          "source_path": "quantitative-research/SKILL.md",
           "limitation": "Bonferroni and Benjamini-Hochberg guidance requires the complete trial ledger and explicit dependence caveats; it does not manufacture p-values for backtest-only outcomes"
         }
       ]
@@ -684,7 +684,7 @@
           "execution_mode": "guidance_only",
           "requires_execution_approval": true,
           "product_scopes": ["all"],
-          "source_path": "/Users/maxdeux/.agents/skills/diagnose/SKILL.md"
+          "source_path": "diagnose/SKILL.md"
         },
         {
           "implementation_id": "factortester-harness.gap",
@@ -711,7 +711,7 @@
           "execution_mode": "external_service",
           "requires_execution_approval": true,
           "product_scopes": ["all"],
-          "source_path": "/Users/maxdeux/.codex/skills/.system/skill-installer/SKILL.md"
+          "source_path": "skills/.system/skill-installer/SKILL.md"
         },
         {
           "implementation_id": "vibe.skills-loader.metadata",
@@ -749,7 +749,7 @@
           "execution_mode": "guidance_only",
           "requires_execution_approval": true,
           "product_scopes": ["all"],
-          "source_path": "/Users/maxdeux/.codex/skills/.system/skill-creator/SKILL.md"
+          "source_path": "skills/.system/skill-creator/SKILL.md"
         },
         {
           "implementation_id": "vibe.skill-writer",
@@ -778,7 +778,7 @@
           "execution_mode": "guidance_only",
           "requires_execution_approval": true,
           "product_scopes": ["all"],
-          "source_path": "/Users/maxdeux/.agents/skills/grill-me/SKILL.md"
+          "source_path": "grill-me/SKILL.md"
         }
       ]
     },

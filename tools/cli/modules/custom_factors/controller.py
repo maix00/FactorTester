@@ -13,7 +13,7 @@ from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
 from tools.cli.table import render_table
-from tools.data.factor_research_registry import (
+from tools.cli.research_metrics import (
     RESEARCH_METRIC_REGISTRY,
     default_display_metric,
     parse_metric_thresholds,

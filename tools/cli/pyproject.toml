@@ -13,8 +13,20 @@ dependencies = ["click>=8", "plotext>=5.2", "rich>=14"]
 factortester = "tools.cli.app:cli"
 
 [tool.setuptools]
-package-dir = {"" = "../.."}
+include-package-data = false
+packages = [
+  "tools.cli",
+  "tools.cli.commands",
+  "tools.cli.core",
+  "tools.cli.modules",
+  "tools.cli.modules.custom_factors",
+  "tools.cli.modules.products",
+]
 
-[tool.setuptools.packages.find]
-where = ["../.."]
-include = ["tools*"]
+[tool.setuptools.package-dir]
+"tools.cli" = "."
+"tools.cli.commands" = "commands"
+"tools.cli.core" = "core"
+"tools.cli.modules" = "modules"
+"tools.cli.modules.custom_factors" = "modules/custom_factors"
+"tools.cli.modules.products" = "modules/products"
