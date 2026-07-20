@@ -82,6 +82,69 @@ class JobQueryImplementation:
             if (record := self._record(row)) is not None
         ]
 
+    def list_with_metadata(
+        self,
+        *,
+        owner: str,
+        workspace_id: str = "",
+        run_id: str = "",
+        kind: str = "",
+        statuses: Iterable[JobStatus | str] | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return UI list rows with pin and active-artifact metadata."""
+        clauses = ["jobs.owner=?"]
+        args: list[Any] = [str(owner)]
+        for column, value in (
+            ("workspace_id", workspace_id),
+            ("run_id", run_id),
+            ("kind", kind),
+        ):
+            if value:
+                clauses.append(f"jobs.{column}=?")
+                args.append(str(value))
+        if statuses is not None:
+            values = [JobStatus(value).value for value in statuses]
+            if not values:
+                return []
+            clauses.append(
+                f"jobs.status IN ({','.join('?' for _ in values)})"
+            )
+            args.extend(values)
+        args.append(min(200, max(1, int(limit))))
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT jobs.*,
+                       CASE WHEN pins.job_id IS NULL
+                            THEN 0 ELSE 1 END AS list_pinned,
+                       COALESCE(artifacts.artifact_count, 0)
+                           AS active_artifact_count
+                FROM research_jobs AS jobs
+                LEFT JOIN user_job_pins AS pins
+                  ON pins.job_id=jobs.job_id AND pins.owner=jobs.owner
+                LEFT JOIN (
+                    SELECT job_id, COUNT(*) AS artifact_count
+                    FROM research_job_artifacts
+                    WHERE state='active'
+                    GROUP BY job_id
+                ) AS artifacts ON artifacts.job_id=jobs.job_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY jobs.updated_at DESC, jobs.created_at DESC
+                LIMIT ?
+                """,
+                args,
+            ).fetchall()
+        return [
+            {
+                "job": record,
+                "pinned": bool(row["list_pinned"]),
+                "artifact_count": int(row["active_artifact_count"]),
+            }
+            for row in rows
+            if (record := self._record(row)) is not None
+        ]
+
     def list_for_deployment(
         self,
         *,

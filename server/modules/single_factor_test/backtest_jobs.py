@@ -109,7 +109,7 @@ def list_test_jobs():
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     repository = _repository()
-    jobs = repository.list(
+    rows = repository.list_with_metadata(
         owner=require_user(),
         kind=str(request.args.get("kind") or "").strip(),
         workspace_id=str(request.args.get("workspace_id") or "").strip(),
@@ -121,15 +121,11 @@ def list_test_jobs():
         "success": True,
         "jobs": [
             {
-                **job.summary(pinned=repository.is_pinned(job.job_id)),
-                "artifact_count": len([
-                    item for item in repository.list_artifacts(
-                        job_id=job.job_id, owner=job.owner
-                    ) if item["state"] == "active"
-                ]),
-                **_urls(job.job_id),
+                **item["job"].summary(pinned=item["pinned"]),
+                "artifact_count": item["artifact_count"],
+                **_urls(item["job"].job_id),
             }
-            for job in jobs
+            for item in rows
         ],
     })
 

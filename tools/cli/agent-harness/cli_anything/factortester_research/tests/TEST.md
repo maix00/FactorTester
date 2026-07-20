@@ -53,6 +53,8 @@ artifact contracts produced by the workflow.
 - Capture a terminal JobAttempt envelope projected by the authenticated server,
   verify its frozen research identity against terminal assurance, and reuse
   the same envelope hash without duplicating the local audit record.
+- Keep the Job list projection to one bounded database read for Job records,
+  pin state, and active-artifact counts rather than per-Job follow-up reads.
 - Keep legacy EvidenceEnvelope v1 payloads in the persistence-only historical
   record while excluding their decisions, metrics, artifacts, paths, and
   nested copies from every Agent-facing session JSON view.

@@ -477,6 +477,60 @@ def test_terminalization_has_two_canonical_reads_and_one_job_write(
     )
 
 
+def test_job_list_metadata_uses_one_bounded_read(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    for job_id in ("list-1", "list-2"):
+        repository.create(_record(job_id))
+        repository.transition(job_id, JobStatus.PLANNING)
+        repository.set_execution_plan(
+            job_id,
+            plan={"products": []},
+            notices=[],
+            requires_confirmation=False,
+        )
+    repository.pin("list-1", owner="alice")
+    repository.record_artifact(
+        job_id="list-1",
+        name="summary",
+        relative_path="list-1/summary.json",
+        content_type="application/json",
+        content_hash="a" * 64,
+        size_bytes=12,
+    )
+    statements: list[str] = []
+
+    def traced_connect():
+        connection = connect_sqlite(
+            repository.db_path,
+            foreign_keys=True,
+        )
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(repository, "_connect", traced_connect)
+
+    rows = repository.list_with_metadata(owner="alice", limit=20)
+
+    assert [
+        (item["job"].job_id, item["pinned"], item["artifact_count"])
+        for item in rows
+    ] == [
+        ("list-2", False, 0),
+        ("list-1", True, 1),
+    ]
+    reads = [
+        " ".join(statement.split())
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT")
+    ]
+    assert len(reads) == 1
+    assert "USER_JOB_PINS" in reads[0].upper()
+    assert "RESEARCH_JOB_ARTIFACTS" in reads[0].upper()
+
+
 def test_repository_allows_one_step_job_and_one_replaceable_pin_per_user(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     repository.create(_record("step-1", step_mode=True))
