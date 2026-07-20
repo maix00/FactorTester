@@ -10,9 +10,11 @@ from tools.cli.release.app_archive import install_macos_app
 
 def _app_archive(path: Path, *, unsafe: str = "") -> Path:
     with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr("GTHTClient.app/Contents/Info.plist", "<plist/>")
+        archive.writestr(
+            "FactorTester-Client.app/Contents/Info.plist", "<plist/>"
+        )
         executable = zipfile.ZipInfo(
-            "GTHTClient.app/Contents/MacOS/GTHTClient"
+            "FactorTester-Client.app/Contents/MacOS/FactorTester-Client"
         )
         executable.external_attr = 0o100755 << 16
         archive.writestr(executable, "#!/bin/sh\nexit 0\n")
@@ -29,11 +31,15 @@ def test_signed_macos_app_is_materialized_inside_version_root(
         tmp_path / "applications",
     )
     assert result == {
-        "path": "applications/GTHTClient.app",
-        "name": "GTHTClient.app",
+        "path": "applications/FactorTester-Client.app",
+        "name": "FactorTester-Client.app",
     }
     assert (
-        tmp_path / result["path"] / "Contents" / "MacOS" / "GTHTClient"
+        tmp_path
+        / result["path"]
+        / "Contents"
+        / "MacOS"
+        / "FactorTester-Client"
     ).stat().st_mode & 0o111
 
 

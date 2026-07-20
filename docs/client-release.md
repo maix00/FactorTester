@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- macOS 13 or newer for `GTHTClient.app`;
+- macOS 13 or newer for `FactorTester-Client.app`;
 - Python 3.11 or newer to run the bootstrap CLI;
 - HTTPS access to the public FactorTester client release;
 - a FactorTester server account for remote research.
@@ -28,6 +28,12 @@ The trusted release public key is fixed inside the client wheel. A profile
 cannot replace it.
 
 ## Install and update
+
+For the normal macOS installation experience, download
+`FactorTester-Client.dmg` from the public GitHub Release, open it, and drag
+`FactorTester-Client.app` to Applications. The DMG is the human-facing
+installer; the signed manifest and app ZIP remain the transactional updater
+payload.
 
 Always inspect the deterministic plan before mutation:
 

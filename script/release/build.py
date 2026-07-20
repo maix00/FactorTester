@@ -8,7 +8,11 @@ import shutil
 import subprocess
 import sys
 
-from script.release.assets import build_app_archive, build_python_assets
+from script.release.assets import (
+    build_app_archive,
+    build_installer_dmg,
+    build_python_assets,
+)
 from script.release.manifest import create_manifest, write_manifest
 from tools.cli.release.contracts import validate_release_manifest
 
@@ -28,8 +32,14 @@ def build_release(
         raise ValueError(f"release output already exists: {output}")
     output.mkdir(parents=True)
     assets = build_python_assets(REPO, output)
-    app = REPO / "apple/build/Build/Products/Release/GTHTClient.app"
-    assets.append(build_app_archive(app, output / "GTHTClient.zip"))
+    app = (
+        REPO
+        / "apple/build/Build/Products/Release/FactorTester-Client.app"
+    )
+    assets.append(
+        build_app_archive(app, output / "FactorTester-Client.zip")
+    )
+    build_installer_dmg(app, output / "FactorTester-Client.dmg")
     adapter = output / "vibe-trading-adapter.zip"
     subprocess.run(
         [

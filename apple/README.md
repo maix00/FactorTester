@@ -50,26 +50,27 @@ apple/
 ```
 cd apple
 xcodegen generate
-open GTHTClient.xcodeproj
+   open FactorTester-Client.xcodeproj
 ```
 
-> `GTHTClient.xcodeproj` 是生成物（已 gitignore）。改了 `project.yml` 后重新 `xcodegen generate`。
+> `FactorTester-Client.xcodeproj` 是生成物（已 gitignore）。改了 `project.yml` 后重新 `xcodegen generate`。
 
 ## 构建可安装版本
 
 ### macOS
 
-1. Xcode 选 scheme `GTHTClient-macOS` → My Mac → Run，或：
+1. Xcode 选 scheme `FactorTester-Client-macOS` → My Mac → Run，或：
    ```
-   xcodebuild -project GTHTClient.xcodeproj -scheme GTHTClient-macOS \
+   xcodebuild -project FactorTester-Client.xcodeproj -scheme FactorTester-Client-macOS \
      -configuration Release -derivedDataPath build build
    ```
-   产物 `.app` 在 `build/Build/Products/Release/GTHTClient.app`，可直接拷给他人运行
+   产物 `.app` 在 `build/Build/Products/Release/FactorTester-Client.app`。
+   正式 Release 同时提供 `FactorTester-Client.dmg`，拖入 Applications 即可安装。
    （自签名/无签名时对方首次打开需右键「打开」绕过 Gatekeeper）。
 
 ### iOS
 
-- **模拟器**：scheme 选 `GTHTClient-iOS` + 任一模拟器，Run。
+- **模拟器**：scheme 选 `FactorTester-Client-iOS` + 任一模拟器，Run。
 - **真机安装**：在 target 的 Signing & Capabilities 里选你的开发者账号（免费 Apple ID 即可做
   7 天自签名调试安装），连上 iPhone 选为目标设备 Run；或 Product → Archive → 导出 ad-hoc / development `.ipa`。
   - `project.yml` 里的 `DEVELOPMENT_TEAM` 留空，请在 Xcode 里选 Team 自动签名，或填入 Team ID 后重新 `xcodegen generate`。

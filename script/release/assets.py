@@ -68,6 +68,42 @@ def build_app_archive(app: Path, output: Path) -> Path:
     return output
 
 
+def build_installer_dmg(app: Path, output: Path) -> Path:
+    """Build the familiar drag-to-Applications macOS installer image.
+
+    The DMG is a human-facing release asset. It intentionally stays outside
+    the signed component manifest: the app archive in that manifest remains
+    the transactional update payload.
+    """
+    if sys.platform != "darwin":
+        raise ValueError("macOS installer images can only be built on macOS")
+    if not (app / "Contents" / "Info.plist").is_file():
+        raise ValueError(f"macOS application is incomplete: {app}")
+    with tempfile.TemporaryDirectory(
+        prefix="factortester-installer-"
+    ) as raw:
+        root = Path(raw)
+        shutil.copytree(app, root / app.name)
+        (root / "Applications").symlink_to("/Applications")
+        subprocess.run(
+            [
+                "hdiutil",
+                "create",
+                "-volname",
+                "FactorTester-Client",
+                "-srcfolder",
+                str(root),
+                "-format",
+                "UDZO",
+                "-ov",
+                str(output),
+            ],
+            check=True,
+            capture_output=True,
+        )
+    return output
+
+
 def _build_wheel(
     source: Path,
     distribution: str,

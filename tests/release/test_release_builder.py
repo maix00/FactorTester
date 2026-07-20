@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 import zipfile
 
-from script.release.assets import build_app_archive
+from script.release.assets import build_app_archive, build_installer_dmg
 from script.release.build import build_release
 from script.release.manifest import create_manifest
 from tools.cli.release.app_archive import install_macos_app
@@ -52,8 +52,8 @@ def test_release_builder_requires_public_source_revision() -> None:
 def test_app_archive_is_deterministic_and_preserves_executable(
     tmp_path: Path,
 ) -> None:
-    app = tmp_path / "GTHTClient.app"
-    binary = app / "Contents" / "MacOS" / "GTHTClient"
+    app = tmp_path / "FactorTester-Client.app"
+    binary = app / "Contents" / "MacOS" / "FactorTester-Client"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"binary")
     binary.chmod(0o755)
@@ -64,9 +64,31 @@ def test_app_archive_is_deterministic_and_preserves_executable(
     assert first.read_bytes() == second.read_bytes()
     with zipfile.ZipFile(first) as archive:
         mode = archive.getinfo(
-            "GTHTClient.app/Contents/MacOS/GTHTClient"
+            "FactorTester-Client.app/Contents/MacOS/FactorTester-Client"
         ).external_attr >> 16
     assert mode & 0o111
     installed = install_macos_app(first, tmp_path / "installed")
     installed_binary = tmp_path / "installed" / installed["name"]
-    assert (installed_binary / "Contents/MacOS/GTHTClient").stat().st_mode & 0o111
+    assert (
+        installed_binary / "Contents/MacOS/FactorTester-Client"
+    ).stat().st_mode & 0o111
+
+
+def test_installer_dmg_contains_app_and_applications_link(
+    tmp_path: Path,
+) -> None:
+    app = tmp_path / "FactorTester-Client.app"
+    (app / "Contents").mkdir(parents=True)
+    (app / "Contents/Info.plist").write_text("<plist/>")
+    image = build_installer_dmg(
+        app,
+        tmp_path / "FactorTester-Client.dmg",
+    )
+    assert image.is_file()
+    listing = subprocess.run(
+        ["hdiutil", "imageinfo", str(image)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "FactorTester-Client" in listing.stdout

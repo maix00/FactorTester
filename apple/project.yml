@@ -1,4 +1,4 @@
-name: GTHTClient
+name: FactorTester-Client
 options:
   bundleIdPrefix: com.gtht
   deploymentTarget:
@@ -22,7 +22,7 @@ settings:
 
 targets:
   # ── iOS / iPadOS ──────────────────────────────────────────────
-  GTHTClient-iOS:
+  FactorTester-Client-iOS:
     type: application
     platform: iOS
     sources:
@@ -36,7 +36,7 @@ targets:
     info:
       path: Resources/iOS/Info.plist
       properties:
-        CFBundleDisplayName: GTHT
+        CFBundleDisplayName: FactorTester-Client
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -45,7 +45,7 @@ targets:
         <<: *ats
 
   # ── macOS ─────────────────────────────────────────────────────
-  GTHTClient-macOS:
+  FactorTester-Client-macOS:
     type: application
     platform: macOS
     sources:
@@ -54,13 +54,13 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client
-        PRODUCT_NAME: GTHTClient
-        CODE_SIGN_ENTITLEMENTS: Resources/macOS/GTHTClient.entitlements
+        PRODUCT_NAME: FactorTester-Client
+        CODE_SIGN_ENTITLEMENTS: Resources/macOS/FactorTester-Client.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Resources/macOS/Info.plist
       properties:
-        CFBundleDisplayName: GTHT
+        CFBundleDisplayName: FactorTester-Client
         LSMinimumSystemVersion: "13.0"
         <<: *ats

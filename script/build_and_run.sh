@@ -2,12 +2,12 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="GTHTClient"
+APP_NAME="FactorTester-Client"
 BUNDLE_ID="com.gtht.client"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPLE_DIR="$ROOT_DIR/apple"
-PROJECT="$APPLE_DIR/GTHTClient.xcodeproj"
+PROJECT="$APPLE_DIR/FactorTester-Client.xcodeproj"
 DERIVED_DATA="$APPLE_DIR/build"
 APP_BUNDLE="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
@@ -19,7 +19,7 @@ pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 xcodegen generate --spec "$APPLE_DIR/project.yml" --project "$APPLE_DIR"
 xcodebuild \
   -project "$PROJECT" \
-  -scheme GTHTClient-macOS \
+  -scheme FactorTester-Client-macOS \
   -configuration Release \
   -derivedDataPath "$DERIVED_DATA" \
   CODE_SIGNING_ALLOWED=NO \

@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct GTHTApp: App {
+struct FactorTesterClientApp: App {
     @StateObject private var config = ServerConfig.shared
     @StateObject private var session = SessionStore()
     @StateObject private var registry = ModuleRegistry()
