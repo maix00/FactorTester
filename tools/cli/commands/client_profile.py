@@ -34,6 +34,12 @@ from tools.cli.release.user_layout_migration import (
     user_layout_status,
     verify_user_layout_migration,
 )
+from tools.cli.release.quarantine_compaction import (
+    apply_quarantine_compaction,
+    plan_quarantine_compaction,
+    rollback_quarantine_compaction,
+    verify_quarantine_compaction,
+)
 from tools.cli.release.storage import read_json, write_json
 from tools.cli.release.workspace_migration import (
     apply_workspace_migration,
@@ -262,6 +268,77 @@ def show_user_layout(
 @profile_user_layout.group("migration")
 def user_layout_migration() -> None:
     """Move canonical and Profile roots as one recoverable transaction."""
+
+
+@profile_user_layout.group("compact")
+def user_layout_compaction() -> None:
+    """Compact verified legacy quarantine into rebuildable evidence."""
+
+
+@user_layout_compaction.command("plan")
+@click.argument("migration_id")
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def plan_user_layout_compaction(
+    migration_id: str,
+    output: Path,
+    release_profile: Path | None,
+) -> None:
+    plan = plan_quarantine_compaction(
+        load_profile_root(release_profile), migration_id
+    )
+    write_json(output, plan)
+    click.echo(_json(plan))
+
+
+@user_layout_compaction.command("apply")
+@click.argument(
+    "plan_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def apply_user_layout_compaction(
+    plan_path: Path,
+    release_profile: Path | None,
+) -> None:
+    plan = read_json(plan_path)
+    if not isinstance(plan, dict):
+        raise ValueError("legacy quarantine compaction plan is invalid")
+    click.echo(_json(apply_quarantine_compaction(
+        load_profile_root(release_profile), plan
+    )))
+
+
+@user_layout_compaction.command("verify")
+@click.argument("plan_hash")
+@_root_option
+@friendly_errors
+def verify_user_layout_compaction(
+    plan_hash: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(verify_quarantine_compaction(
+        load_profile_root(release_profile), plan_hash
+    )))
+
+
+@user_layout_compaction.command("rollback")
+@click.argument("plan_hash")
+@_root_option
+@friendly_errors
+def rollback_user_layout_compaction(
+    plan_hash: str,
+    release_profile: Path | None,
+) -> None:
+    click.echo(_json(rollback_quarantine_compaction(
+        load_profile_root(release_profile), plan_hash
+    )))
 
 
 @user_layout_migration.command("plan")
