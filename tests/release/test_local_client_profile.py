@@ -32,10 +32,11 @@ def test_local_profile_is_strict_private_and_version_independent(
     assert path.stat().st_mode & 0o777 == 0o600
     assert not (root / "current.json").exists()
     assert not {"password", "token", "email"}.intersection(stored)
-    assert stored["schema_version"] == 4
+    assert stored["schema_version"] == 5
     assert stored["workspaces"] == []
     assert stored["initialization_sources"] == []
     assert stored["session_binding"] == {}
+    assert stored["research_records"] == []
 
     with pytest.raises(ValueError, match="fields"):
         validate_local_profile({**stored, "token": "must-not-be-stored"})
@@ -83,7 +84,7 @@ def test_version_one_profile_is_upgraded_without_losing_identity(
 
     upgraded = LocalProfileStore(root).load("legacy")
 
-    assert upgraded["schema_version"] == 4
+    assert upgraded["schema_version"] == 5
     assert upgraded["profile_id"] == "legacy"
     assert upgraded["workspaces"] == []
     assert upgraded["initialization_sources"] == []
@@ -360,3 +361,62 @@ def test_adapter_profile_binding_exposes_only_opaque_references(
         "keychain://"
     )
     assert "password" not in json.dumps(binding).lower()
+
+
+def test_profile_history_stores_only_compact_refs_and_deep_links(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = LocalProfileStore(root)
+    store.save(new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8000",
+        workspace_root=tmp_path / "workspace",
+    ))
+    record = {
+        "record_id": "research-1",
+        "title": "SgCCS review",
+        "status": "ready",
+        "scope": {"factor_families": ["SgCCS"]},
+        "factor_family_versions": ["SgCCS@7"],
+        "agent_id": "research-maxa",
+        "created_at": 1.0,
+        "updated_at": 2.0,
+        "workspace_ref": "workspace:dd2322",
+        "run_ref": "run:1",
+        "graph_instance_ref": "instance:1",
+        "graph_branch_ref": "branch:1",
+        "checkpoint_ref": "checkpoint:1",
+        "evidence_refs": ["evidence:1"],
+        "timeline_refs": [{
+            "link_id": "step-1",
+            "kind": "trial_plan",
+            "target_ref": "trial-plan:1",
+            "section_ref": "section:method",
+        }],
+        "artifacts": [{
+            "artifact_ref": "report:1",
+            "format": "markdown",
+            "status": "ready",
+            "content_hash": "sha256:abc",
+            "local_ref": (tmp_path / "report.md").as_uri(),
+            "section_refs": [{
+                "link_id": "section-method",
+                "kind": "evidence",
+                "target_ref": "evidence:1",
+                "section_ref": "section:method",
+            }],
+        }],
+        "provenance": {
+            "kind": "owned_legacy_research",
+            "owner_ref": "default$MaxA@1",
+        },
+    }
+
+    saved = store.upsert_research_record("maxa", record)
+
+    assert saved["research_records"] == [record]
+    serialized = json.dumps(saved)
+    assert "report body" not in serialized
+    assert "source_code" not in serialized

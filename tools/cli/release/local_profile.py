@@ -125,6 +125,19 @@ class LocalProfileStore:
         }
         return self.save(profile)
 
+    def upsert_research_record(
+        self,
+        profile_id: str,
+        descriptor: dict[str, Any],
+    ) -> dict[str, Any]:
+        profile = self.load(profile_id)
+        records = [
+            item for item in profile["research_records"]
+            if item["record_id"] != descriptor.get("record_id")
+        ]
+        profile["research_records"] = [*records, descriptor]
+        return self.save(profile)
+
     def load_agent(
         self,
         profile_id: str,

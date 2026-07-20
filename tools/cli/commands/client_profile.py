@@ -261,6 +261,47 @@ def bind_profile_initialization_source(
     })))
 
 
+@client_profile.group("history")
+def profile_history() -> None:
+    """Manage compact local research/report references."""
+
+
+@profile_history.command("list")
+@click.argument("profile_id")
+@_root_option
+@friendly_errors
+def list_profile_history(
+    profile_id: str,
+    release_profile: Path | None,
+) -> None:
+    profile = LocalProfileStore(
+        load_profile_root(release_profile)
+    ).load(profile_id)
+    click.echo(_json(profile["research_records"]))
+
+
+@profile_history.command("upsert")
+@click.argument("profile_id")
+@click.option(
+    "--record",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def upsert_profile_history(
+    profile_id: str,
+    record: Path,
+    release_profile: Path | None,
+) -> None:
+    value = read_json(record)
+    if not isinstance(value, dict):
+        raise ValueError("research record must be an object")
+    click.echo(_json(LocalProfileStore(
+        load_profile_root(release_profile)
+    ).upsert_research_record(profile_id, value)))
+
+
 @client_profile.group("workspace")
 def profile_workspace() -> None:
     """Plan and audit visible local factor workspaces."""

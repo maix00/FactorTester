@@ -81,6 +81,11 @@
 "Refresh grants" = "Refresh grants";
 "Bind source" = "Bind source";
 "Only server-authorized registered libraries appear here. Source code is never materialized." = "Only server-authorized registered libraries appear here. Source code is never materialized.";
+"Research History / Reports" = "Research History / Reports";
+"No indexed research records" = "No indexed research records";
+"Timeline / steps" = "Timeline / steps";
+"Select a step" = "Select a step";
+"Open" = "Open";
 "迁移工作区" = "Migrate Workspace";
 "迁移预览" = "Migration Preview";
 "验证迁移" = "Verify Migration";

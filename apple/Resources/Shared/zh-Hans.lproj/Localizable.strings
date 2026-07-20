@@ -81,6 +81,11 @@
 "Refresh grants" = "刷新授权";
 "Bind source" = "绑定来源";
 "Only server-authorized registered libraries appear here. Source code is never materialized." = "这里只显示服务器已授权且已登记的因子库，不会在本地生成来源源码。";
+"Research History / Reports" = "研究历史与报告";
+"No indexed research records" = "暂无已索引的研究记录";
+"Timeline / steps" = "时间线／步骤";
+"Select a step" = "选择步骤";
+"Open" = "打开";
 "迁移工作区" = "迁移工作区";
 "迁移预览" = "迁移预览";
 "验证迁移" = "验证迁移";

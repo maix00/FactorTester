@@ -11,6 +11,10 @@ from urllib.parse import urlparse
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _AGENT_ROLES = {"planning", "research"}
 _WORKSPACE_ACCESS = {"owner", "granted", "read_only"}
+_RESEARCH_STATUS = {
+    "pending", "generating", "failed", "stale", "ready",
+}
+_ARTIFACT_FORMATS = {"markdown", "pdf"}
 
 
 def new_local_profile(
@@ -22,7 +26,7 @@ def new_local_profile(
     principal_ref: str = "",
 ) -> dict[str, Any]:
     return validate_local_profile({
-        "schema_version": 4,
+        "schema_version": 5,
         "profile_id": profile_id,
         "display_name": display_name,
         "server": {"base_url": server_url},
@@ -39,6 +43,7 @@ def new_local_profile(
             if principal_ref else {}
         ),
         "agents": [],
+        "research_records": [],
         "adapters": [],
     })
 
@@ -51,14 +56,16 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "workspace_root", "workspaces", "agents", "adapters",
         "initialization_sources",
         "session_binding",
+        "research_records",
     }
     observed = set(value)
     legacy_optional = {
         "workspaces", "initialization_sources", "session_binding",
+        "research_records",
     }
     if not (allowed - legacy_optional).issubset(observed) or observed - allowed:
         raise ValueError("local profile fields are invalid")
-    if value.get("schema_version") not in {1, 2, 3, 4}:
+    if value.get("schema_version") not in {1, 2, 3, 4, 5}:
         raise ValueError("local profile schema_version is unsupported")
     server = value.get("server")
     if not isinstance(server, dict) or set(server) != {"base_url"}:
@@ -74,8 +81,11 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "initialization_sources",
     )
     session_binding = _session_binding(value.get("session_binding", {}))
+    research_records = _array(
+        value.get("research_records", []), "research_records"
+    )
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
@@ -89,8 +99,106 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
             _initialization_source(item) for item in sources
         ],
         "session_binding": session_binding,
+        "research_records": [
+            _research_record(item) for item in research_records
+        ],
         "agents": [_agent(item) for item in agents],
         "adapters": [_adapter(item) for item in adapters],
+    }
+
+
+def _research_record(value: Any) -> dict[str, Any]:
+    fields = {
+        "record_id", "title", "status", "scope", "factor_family_versions",
+        "agent_id", "created_at", "updated_at", "workspace_ref", "run_ref",
+        "graph_instance_ref", "graph_branch_ref", "checkpoint_ref",
+        "evidence_refs", "artifacts", "provenance",
+        "timeline_refs",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("research record fields are invalid")
+    status = _text(value.get("status"), "research_record.status")
+    if status not in _RESEARCH_STATUS:
+        raise ValueError("research record status is unsupported")
+    scope = value.get("scope")
+    provenance = value.get("provenance")
+    if not isinstance(scope, dict) or not isinstance(provenance, dict):
+        raise ValueError("research record scope/provenance must be objects")
+    versions = _array(
+        value.get("factor_family_versions"), "factor_family_versions"
+    )
+    evidence = _array(value.get("evidence_refs"), "evidence_refs")
+    artifacts = _array(value.get("artifacts"), "artifacts")
+    timeline = _array(value.get("timeline_refs"), "timeline_refs")
+    return {
+        "record_id": validate_local_identifier(
+            value.get("record_id"), "research_record.record_id"
+        ),
+        "title": _text(value.get("title"), "research_record.title"),
+        "status": status,
+        "scope": scope,
+        "factor_family_versions": [
+            _text(item, "factor_family_version") for item in versions
+        ],
+        "agent_id": _text(value.get("agent_id"), "research_record.agent_id"),
+        "created_at": float(value.get("created_at") or 0),
+        "updated_at": float(value.get("updated_at") or 0),
+        "workspace_ref": str(value.get("workspace_ref") or ""),
+        "run_ref": str(value.get("run_ref") or ""),
+        "graph_instance_ref": str(value.get("graph_instance_ref") or ""),
+        "graph_branch_ref": str(value.get("graph_branch_ref") or ""),
+        "checkpoint_ref": str(value.get("checkpoint_ref") or ""),
+        "evidence_refs": [
+            _text(item, "evidence_ref") for item in evidence
+        ],
+        "timeline_refs": [_deep_link(item) for item in timeline],
+        "artifacts": [_research_artifact(item) for item in artifacts],
+        "provenance": provenance,
+    }
+
+
+def _research_artifact(value: Any) -> dict[str, Any]:
+    fields = {
+        "artifact_ref", "format", "status", "content_hash", "local_ref",
+        "section_refs",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("research artifact fields are invalid")
+    format_name = _text(value.get("format"), "artifact.format")
+    if format_name not in _ARTIFACT_FORMATS:
+        raise ValueError("research artifact format is unsupported")
+    status = _text(value.get("status"), "artifact.status")
+    if status not in _RESEARCH_STATUS:
+        raise ValueError("research artifact status is unsupported")
+    local_ref = str(value.get("local_ref") or "")
+    section_refs = _array(value.get("section_refs"), "section_refs")
+    _reference(
+        local_ref,
+        field="artifact.local_ref",
+        schemes={"file", "artifact"},
+    )
+    return {
+        "artifact_ref": _text(
+            value.get("artifact_ref"), "artifact.artifact_ref"
+        ),
+        "format": format_name,
+        "status": status,
+        "content_hash": str(value.get("content_hash") or ""),
+        "local_ref": local_ref,
+        "section_refs": [_deep_link(item) for item in section_refs],
+    }
+
+
+def _deep_link(value: Any) -> dict[str, str]:
+    fields = {"link_id", "kind", "target_ref", "section_ref"}
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("research deep link fields are invalid")
+    kind = _text(value.get("kind"), "deep_link.kind")
+    if kind not in {"trial_plan", "obligation", "evidence", "report_section"}:
+        raise ValueError("research deep link kind is unsupported")
+    return {
+        key: _text(value.get(key), f"deep_link.{key}")
+        for key in sorted(fields)
     }
 
 

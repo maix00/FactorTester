@@ -23,6 +23,7 @@ struct LocalProfilesView: View {
                         profileDetails(profile)
                         InitializationSourceView(profile: profile)
                         WorkspaceRepairView(profile: profile)
+                        ResearchHistoryView(profile: profile)
                         Button(
                             activeID == profile.id
                                 ? "当前 Adapter Profile"

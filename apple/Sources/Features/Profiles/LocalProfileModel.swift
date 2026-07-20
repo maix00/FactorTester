@@ -55,6 +55,7 @@ struct LocalProfileModel: Identifiable {
     let initializationSources: [LocalInitializationSourceModel]
     let agents: [LocalAgentModel]
     let principalRef: String
+    let researchRecords: [ResearchRecordModel]
 
     init(json: [String: Any]) {
         id = json["profile_id"] as? String ?? ""
@@ -72,5 +73,8 @@ struct LocalProfileModel: Identifiable {
         ).map(LocalInitializationSourceModel.init)
         agents = (json["agents"] as? [[String: Any]] ?? [])
             .map(LocalAgentModel.init)
+        researchRecords = (
+            json["research_records"] as? [[String: Any]] ?? []
+        ).map(ResearchRecordModel.init)
     }
 }
