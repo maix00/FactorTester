@@ -13,8 +13,10 @@ struct WebPageView: View {
     let path: String
 
     var body: some View {
-        WebViewRepresentable(path: path)
-            .ignoresSafeArea(edges: .bottom)
+        if let url = ServerConfig.shared.url(forPath: path) {
+            WebViewRepresentable(url: url, syncServerCookies: true)
+                .ignoresSafeArea(edges: .bottom)
+        }
     }
 }
 
@@ -27,14 +29,15 @@ typealias PlatformViewRepresentable = NSViewRepresentable
 #endif
 
 struct WebViewRepresentable: PlatformViewRepresentable {
-    let path: String
+    let url: URL
+    let syncServerCookies: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     private func makeWebView(context: Context) -> WKWebView {
         let webView = WKWebView(frame: .zero)
         webView.navigationDelegate = context.coordinator
-        Task { await syncCookiesThenLoad(into: webView) }
+        Task { await prepareAndLoad(webView) }
         return webView
     }
 
@@ -48,13 +51,13 @@ struct WebViewRepresentable: PlatformViewRepresentable {
 
     /// 先把共享 HTTPCookieStorage 里的 cookie 灌进 WebView，再加载目标页。
     @MainActor
-    private func syncCookiesThenLoad(into webView: WKWebView) async {
-        guard let url = ServerConfig.shared.url(forPath: path),
-              let host = ServerConfig.shared.baseURL?.host else { return }
-
-        let store = webView.configuration.websiteDataStore.httpCookieStore
-        let cookies = (HTTPCookieStorage.shared.cookies ?? []).filter { $0.domain.contains(host) }
-        for cookie in cookies { await store.setCookie(cookie) }
+    private func prepareAndLoad(_ webView: WKWebView) async {
+        if syncServerCookies, let host = ServerConfig.shared.baseURL?.host {
+            let store = webView.configuration.websiteDataStore.httpCookieStore
+            let cookies = (HTTPCookieStorage.shared.cookies ?? [])
+                .filter { $0.domain.contains(host) }
+            for cookie in cookies { await store.setCookie(cookie) }
+        }
 
         webView.load(URLRequest(url: url))
     }

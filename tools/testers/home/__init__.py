@@ -31,8 +31,14 @@ def _single_factor_family_test_module_registry():
     return SingleFactorFamilyTestModuleRegistry()
 
 
+def _backtest_module_registry():
+    from tools.testers.backtest.modules.registry import BacktestModuleRegistry
+    return BacktestModuleRegistry()
+
+
 _SUB_REGISTRY_FACTORIES = {
     "single_factor_family_test_module_registry": _single_factor_family_test_module_registry,
+    "backtest_module_registry": _backtest_module_registry,
 }
 
 

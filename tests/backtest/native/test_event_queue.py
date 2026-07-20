@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+import tools.testers.backtest.engines.native.scheduler as scheduler_module
 from tools.testers.backtest.engines.native.scheduler import EventQueue
 from tools.testers.backtest.engines.native.strategy import Strategy
 
@@ -14,10 +15,14 @@ def test_pop_order_by_timestamp_then_kind():
 
     queue.set_dispatcher(EventKind.BAR, lambda batch: seen.append((batch[0].timestamp, EventKind.BAR)))
     queue.set_dispatcher(EventKind.SIGNAL, lambda batch: seen.append((batch[0].timestamp, EventKind.SIGNAL)))
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: seen.append((batch[0].timestamp, EventKind.TRADE_INTENT)))
     queue.set_dispatcher(EventKind.ORDER, lambda batch: seen.append((batch[0].timestamp, EventKind.ORDER)))
+    queue.set_dispatcher(EventKind.LEDGER, lambda batch: seen.append((batch[0].timestamp, EventKind.LEDGER)))
 
     t1, t2 = pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")
+    queue.push_event(EventDraft(EventKind.LEDGER, t1, s))
     queue.push_event(EventDraft(EventKind.ORDER, t1, s))  # pushed first but ORDER value > SIGNAL
+    queue.push_event(EventDraft(EventKind.TRADE_INTENT, t1, s))
     queue.push_event(EventDraft(EventKind.SIGNAL, t1, s))
     queue.push_event(EventDraft(EventKind.BAR, t1, s))
     queue.push_event(EventDraft(EventKind.SIGNAL, t2, s))
@@ -26,7 +31,9 @@ def test_pop_order_by_timestamp_then_kind():
     assert seen == [
         (t1, EventKind.BAR),
         (t1, EventKind.SIGNAL),
+        (t1, EventKind.TRADE_INTENT),
         (t1, EventKind.ORDER),
+        (t1, EventKind.LEDGER),
         (t2, EventKind.SIGNAL),
     ]
 
@@ -92,7 +99,7 @@ def test_batches_same_timestamp_and_kind_across_strategies():
 def test_push_events_bulk_preserves_timestamp_kind_ordering():
     queue = EventQueue()
     s1, s2 = Strategy(alias="S1"), Strategy(alias="S2")
-    seen: list[tuple[pd.Timestamp, EventKind, set[Strategy]]] = []
+    seen: list[tuple[pd.Timestamp, EventKind, set[Strategy | None]]] = []
 
     queue.set_dispatcher(
         EventKind.SIGNAL,
@@ -116,6 +123,44 @@ def test_push_events_bulk_preserves_timestamp_kind_ordering():
         (t1, EventKind.SIGNAL, {s1, s2}),
         (t1, EventKind.ORDER, {s1}),
         (t2, EventKind.SIGNAL, {s1}),
+    ]
+
+
+def test_push_events_small_dynamic_batch_uses_incremental_heap_push(monkeypatch):
+    queue = EventQueue()
+    strategy = Strategy(alias="S")
+    seen: list[tuple[pd.Timestamp, EventKind]] = []
+    queue.push_events([
+        EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-02"), strategy),
+        EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-03"), strategy),
+        EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-04"), strategy),
+    ])
+
+    def fail_heapify(_heap):
+        raise AssertionError("small dynamic push_events batches should not heapify the whole queue")
+
+    monkeypatch.setattr(scheduler_module.heapq, "heapify", fail_heapify)
+    queue.push_events([
+        EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01 09:01"), strategy),
+        EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01 09:02"), strategy),
+    ])
+    queue.set_dispatcher(
+        EventKind.SIGNAL,
+        lambda batch: seen.append((batch[0].timestamp, EventKind.SIGNAL)),
+    )
+    queue.set_dispatcher(
+        EventKind.ORDER,
+        lambda batch: seen.append((batch[0].timestamp, EventKind.ORDER)),
+    )
+
+    queue.run_until_drained()
+
+    assert seen == [
+        (pd.Timestamp("2024-01-01 09:01"), EventKind.ORDER),
+        (pd.Timestamp("2024-01-01 09:02"), EventKind.ORDER),
+        (pd.Timestamp("2024-01-02"), EventKind.SIGNAL),
+        (pd.Timestamp("2024-01-03"), EventKind.SIGNAL),
+        (pd.Timestamp("2024-01-04"), EventKind.SIGNAL),
     ]
 
 

@@ -61,7 +61,10 @@ class ShiftOp(OperandExpr):
             periods_val = periods_expr.value
         common, common_periods, product_periods = _resolve_windows(
             window=periods_val, freq=ctx.freq,
-            products=[p for p in ctx.products if p in operand_val.columns])
+            products=[p for p in ctx.products if p in operand_val.columns],
+            allow_zero=True,
+            allow_negative=True,
+        )
 
         # 同交易位置的面板沿用 master 的固定行数语义。
         timeline = ctx.panel_timeline

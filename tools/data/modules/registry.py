@@ -85,6 +85,9 @@ class ModuleRegistry:
                 "phases": phases,
                 "output_fields": list(getattr(cls, "output_fields", ())),
             })
+            result_metric_manifest = getattr(cls, "result_metric_manifest", None)
+            if callable(result_metric_manifest):
+                entries[-1]["result_metrics"] = list(result_metric_manifest())
         return entries
 
     # ── output collection ───────────────────────────────────────

@@ -29,7 +29,7 @@
          data-initial-factor="{{ initial_factor }}"
          data-initial-factor-type="{{ initial_factor_type }}"
          data-initial-owner-username="{{ initial_owner_username }}"
-         data-page-uuid="{{ page_uuid }}">
+         data-view-uuid="">
         <div class="sidebar">
             <div class="sidebar-header">
                 <h2>单因子(家族)测试</h2>
@@ -60,6 +60,14 @@
                 <button id="sidebar-expand-btn" class="sidebar-expand-btn" title="展开侧栏">☰</button>
                 <div class="editor-title" id="editor-title">选择一个因子家族开始测试</div>
             </div>
+            <section id="research-job-monitor" class="research-job-monitor" hidden aria-live="polite">
+                <div class="research-job-monitor-title">
+                    研究任务 <span id="research-job-storage"></span>
+                    <button id="research-job-clear-workspace-results" type="button" title="清除当前工作区保留的完整曲线和明细">清除完整结果</button>
+                    <button id="research-job-clear-workspace-history" type="button" title="删除当前工作区已结束的任务记录">清除已完成记录</button>
+                </div>
+                <div id="research-job-monitor-list" class="research-job-monitor-list"></div>
+            </section>
             <div class="editor-body single-factor-body" id="editor-body">
                 <div class="editor-placeholder">← 从左侧选择因子家族开始测试</div>
             </div>
@@ -69,16 +77,14 @@
     <div id="toast-container"></div>
     {% if show_runtime_ids %}
     <div style="position:fixed;left:12px;bottom:10px;z-index:900;font-size:11px;color:#98a2b3;opacity:0.75;pointer-events:none;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.45;">
-        <div>page_uuid: <span id="page-uuid-label">{{ page_uuid }}</span></div>
+        <div>view_uuid: <span id="page-uuid-label"></span></div>
         <div>session_id: <span id="session-id-label">{{ session_id }}</span></div>
     </div>
     {% endif %}
 
     <script>
-        window._pageUuid = {{ page_uuid|tojson }};
-        try {
-            sessionStorage.setItem('single_factor_test_page_uuid', window._pageUuid);
-        } catch (e) {}
+        window._viewUuid = '';
+        window._pageUuid = '';
     </script>
     <script src="{{ url_for('static', filename='js/base.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/shared/collapsible_factor_list.js') }}"></script>

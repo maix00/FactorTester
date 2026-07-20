@@ -1,0 +1,173 @@
+"""SQLite schema for canonical JobAttempt facts and retained artifacts."""
+
+from __future__ import annotations
+
+import sqlite3
+
+import orjson
+
+from ..assurance import canonical_hash
+from server.services.maintenance_cases.schema import (
+    create_schema as create_maintenance_schema,
+)
+
+
+def ensure_job_schema(conn: sqlite3.Connection) -> None:
+    legacy_assurance = conn.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='research_backend_assurance_receipts'
+        """
+    ).fetchone()
+    if legacy_assurance is not None:
+        raise RuntimeError(
+            "legacy backend assurance requires the explicit "
+            "migrate_backend_assurance cutover"
+        )
+    conn.executescript(
+        """
+        DROP TABLE IF EXISTS test_job_events;
+        DROP TABLE IF EXISTS test_job_process_slots;
+        DROP TABLE IF EXISTS test_job_artifacts;
+        DROP TABLE IF EXISTS test_jobs;
+        DROP TABLE IF EXISTS research_view_leases;
+
+        CREATE TABLE IF NOT EXISTS research_jobs (
+            job_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            retry_of TEXT NOT NULL DEFAULT '',
+            attempt INTEGER NOT NULL DEFAULT 1,
+            step_mode INTEGER NOT NULL DEFAULT 0,
+            retention_mode TEXT NOT NULL DEFAULT 'summary',
+            deployment_id TEXT NOT NULL DEFAULT '',
+            source_revision TEXT NOT NULL DEFAULT '',
+            runner_path TEXT NOT NULL DEFAULT '',
+            job_spec_json TEXT NOT NULL,
+            job_spec_hash TEXT NOT NULL,
+            run_spec_hash TEXT NOT NULL DEFAULT '',
+            worker_pid INTEGER,
+            worker_exitcode INTEGER,
+            cancel_requested_at REAL,
+            cancel_reason TEXT NOT NULL DEFAULT '',
+            entitlement_json TEXT NOT NULL,
+            execution_plan_json TEXT,
+            execution_plan_hash TEXT NOT NULL DEFAULT '',
+            plan_notices_json TEXT NOT NULL DEFAULT '[]',
+            result_summary_json TEXT,
+            error_json TEXT,
+            terminal_assurance_json TEXT,
+            created_at REAL NOT NULL,
+            planned_at REAL,
+            approved_at REAL,
+            queued_at REAL,
+            started_at REAL,
+            finished_at REAL,
+            updated_at REAL NOT NULL,
+            CHECK (status IN (
+                'submitted', 'planning', 'awaiting_confirmation', 'queued',
+                'running', 'paused', 'succeeded', 'failed', 'cancelled'
+            )),
+            CHECK (retention_mode IN ('summary', 'full'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_research_jobs_owner_updated
+            ON research_jobs(owner, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_research_jobs_workspace_updated
+            ON research_jobs(owner, workspace_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_research_jobs_queue
+            ON research_jobs(deployment_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_research_jobs_run
+            ON research_jobs(owner, run_id, created_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_research_jobs_one_active_step
+            ON research_jobs(owner)
+            WHERE step_mode=1 AND status IN (
+                'submitted', 'planning', 'awaiting_confirmation',
+                'queued', 'running', 'paused'
+            );
+
+        CREATE TABLE IF NOT EXISTS user_job_pins (
+            owner TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL UNIQUE,
+            pinned_at REAL NOT NULL,
+            FOREIGN KEY (job_id) REFERENCES research_jobs(job_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS user_storage_policies (
+            owner TEXT PRIMARY KEY,
+            quota_bytes INTEGER NOT NULL,
+            updated_at REAL NOT NULL,
+            CHECK (quota_bytes >= 0)
+        );
+
+        CREATE TABLE IF NOT EXISTS research_job_artifacts (
+            job_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            retention_mode TEXT NOT NULL,
+            state TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            deleted_at REAL,
+            PRIMARY KEY (job_id, name),
+            FOREIGN KEY (job_id) REFERENCES research_jobs(job_id) ON DELETE CASCADE,
+            CHECK (retention_mode IN ('temporary', 'retained')),
+            CHECK (state IN ('staging', 'active', 'deleting', 'deleted', 'failed')),
+            CHECK (size_bytes >= 0)
+        );
+        """
+    )
+    create_maintenance_schema(conn)
+    columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(research_jobs)").fetchall()
+    }
+    if "run_spec_hash" not in columns:
+        conn.execute(
+            "ALTER TABLE research_jobs "
+            "ADD COLUMN run_spec_hash TEXT NOT NULL DEFAULT ''"
+        )
+    if "terminal_assurance_json" not in columns:
+        conn.execute(
+            "ALTER TABLE research_jobs ADD COLUMN terminal_assurance_json TEXT"
+        )
+    active_without_run_hash = conn.execute(
+        """
+        SELECT job_id, job_spec_json
+        FROM research_jobs
+        WHERE run_spec_hash=''
+          AND status IN (
+              'submitted', 'planning', 'awaiting_confirmation',
+              'queued', 'running', 'paused'
+          )
+        """
+    ).fetchall()
+    for row in active_without_run_hash:
+        job_spec = orjson.loads(row["job_spec_json"])
+        run_spec = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
+        if isinstance(run_spec, dict):
+            conn.execute(
+                """
+                UPDATE research_jobs SET run_spec_hash=?
+                WHERE job_id=? AND run_spec_hash=''
+                """,
+                (canonical_hash(run_spec), str(row["job_id"])),
+            )
+    unassured_terminal = conn.execute(
+        """
+        SELECT job_id FROM research_jobs
+        WHERE status IN ('succeeded', 'failed', 'cancelled')
+          AND terminal_assurance_json IS NULL
+        LIMIT 1
+        """
+    ).fetchone()
+    if unassured_terminal is not None:
+        raise RuntimeError(
+            "historical terminal Jobs require the explicit "
+            "migrate_backend_assurance cutover"
+        )

@@ -20,7 +20,6 @@ from tools.data.account_manage import (
     load_levels,
     load_organizations,
     load_product_groups,
-    load_user_templates,
     save_accounts,
     save_levels,
     save_organizations,
@@ -30,7 +29,6 @@ from tools.data.sqlite.account_manager import (
     ensure_scope_exists,
     load_factor_param_config,
     save_factor_param_config_payload,
-    save_user_template_payload,
 )
 from tools.data.account_manage import save_product_groups
 
@@ -94,57 +92,6 @@ def _normalize_level_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def _load_template_items(path: str) -> list[dict[str, Any]]:
-    data = _load_json(path)
-    if isinstance(data, dict) and isinstance(data.get("templates"), list):
-        return [item for item in data["templates"] if isinstance(item, dict)]
-    if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
-    return []
-
-
-def _import_templates(username: str, user_dir: str) -> tuple[int, int]:
-    collections = 0
-    templates = 0
-    for name in sorted(os.listdir(user_dir)):
-        path = os.path.join(user_dir, name)
-        if os.path.isfile(path) and name.endswith("_templates.json"):
-            kind = name[: -len("_templates.json")]
-            payload = _load_json(path)
-            save_user_template_payload(username, kind, payload)
-            collections += 1
-            templates += len(_load_template_items(path))
-            continue
-        if not os.path.isdir(path) or not name.endswith("_templates"):
-            continue
-        kind = name[: -len("_templates")]
-        for child in sorted(os.listdir(path)):
-            child_path = os.path.join(path, child)
-            if os.path.isfile(child_path) and child.endswith(".json"):
-                payload = _load_json(child_path)
-                key = child[:-5]
-                if kind == "params":
-                    save_user_template_payload(username, kind, payload, ff_alias=key)
-                else:
-                    save_user_template_payload(username, kind, payload, scope_key=key)
-                collections += 1
-                templates += len(_load_template_items(child_path))
-                continue
-            if not os.path.isdir(child_path):
-                continue
-            scope_key = child
-            for filename in sorted(os.listdir(child_path)):
-                file_path = os.path.join(child_path, filename)
-                if not os.path.isfile(file_path) or not filename.endswith(".json"):
-                    continue
-                payload = _load_json(file_path)
-                ff_alias = filename[:-5]
-                save_user_template_payload(username, kind, payload, ff_alias=ff_alias, scope_key=scope_key)
-                collections += 1
-                templates += len(_load_template_items(file_path))
-    return collections, templates
-
-
 def _import_product_groups(username: str, user_dir: str) -> int:
     path = os.path.join(user_dir, "product_groups.json")
     if not os.path.isfile(path):
@@ -199,8 +146,6 @@ def import_user_account_data_once(source_root: str | None = None) -> dict[str, A
         "organizations": 0,
         "levels": 0,
         "users": 0,
-        "template_collections": 0,
-        "templates": 0,
         "product_groups": 0,
         "param_scopes": 0,
         "param_configs": 0,
@@ -237,9 +182,6 @@ def import_user_account_data_once(source_root: str | None = None) -> dict[str, A
             continue
         result["users"] += 1
         try:
-            collections, templates = _import_templates(username, user_dir)
-            result["template_collections"] += collections
-            result["templates"] += templates
             result["product_groups"] += _import_product_groups(username, user_dir)
             scope_count, config_count = _import_factor_param_configs(username, user_dir)
             result["param_scopes"] += scope_count
@@ -279,39 +221,6 @@ def verify_user_account_data_import(source_root: str | None = None) -> dict[str,
             source_groups = [item for item in _load_json(os.path.join(user_dir, "product_groups.json")) if isinstance(item, dict)]
             if load_product_groups(username) != source_groups:
                 mismatches.append(f"{username}:product_groups")
-        for name in sorted(os.listdir(user_dir)):
-            path = os.path.join(user_dir, name)
-            if os.path.isfile(path) and name.endswith("_templates.json"):
-                kind = name[: -len("_templates.json")]
-                if load_user_templates(username, kind) != _load_template_items(path):
-                    mismatches.append(f"{username}:template:{kind}")
-                continue
-            if not os.path.isdir(path) or not name.endswith("_templates"):
-                continue
-            kind = name[: -len("_templates")]
-            for child in sorted(os.listdir(path)):
-                child_path = os.path.join(path, child)
-                if os.path.isfile(child_path) and child.endswith(".json"):
-                    key = child[:-5]
-                    expected = _load_template_items(child_path)
-                    actual = (
-                        load_user_templates(username, kind, ff_alias=key)
-                        if kind == "params"
-                        else load_user_templates(username, kind, scope_key=key)
-                    )
-                    if actual != expected:
-                        mismatches.append(f"{username}:template:{kind}:{key}")
-                    continue
-                if not os.path.isdir(child_path):
-                    continue
-                for filename in sorted(os.listdir(child_path)):
-                    if not filename.endswith(".json"):
-                        continue
-                    ff_alias = filename[:-5]
-                    expected = _load_template_items(os.path.join(child_path, filename))
-                    actual = load_user_templates(username, kind, ff_alias=ff_alias, scope_key=child)
-                    if actual != expected:
-                        mismatches.append(f"{username}:template:{kind}:{child}:{ff_alias}")
         source_configs = _iter_factor_param_configs(user_dir)
         seen_scopes = {scope_key for scope_key, _, _ in source_configs}
         for scope_key, ff_alias, payload in source_configs:

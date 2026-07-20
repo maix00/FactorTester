@@ -8,3 +8,8 @@ modules:
     order: 10
     build_app: single_factor_page
     sub_registry: single_factor_family_test_module_registry
+  - key: backtest
+    label: 回测
+    order: 20
+    build_app: group_test
+    sub_registry: backtest_module_registry

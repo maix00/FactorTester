@@ -22,7 +22,12 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
-from tools.testers.backtest.modules.market_data import MarketDataModule, current_prices_table_for
+from tools.testers.backtest.modules.market_data import (
+    MarketDataModule,
+    current_prices_table_for,
+    resolved_bar_frequency_for_strategy,
+)
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import (
     RunWindowModule,
     _expr_operands as _run_window_expr_operands,
@@ -48,19 +53,44 @@ from tools.testers.backtest.modules.time_index_lookup import (
 @dataclass
 class FactorSignalStore:
     precomputed_tables: dict[Any, Any] = field(default_factory=dict)
+    precomputed_provenance: dict[Any, dict[str, Any]] = field(default_factory=dict)
+    precomputed_results: dict[Any, Any] = field(default_factory=dict)
     precomputed_table_keys: dict[Any, Any] = field(default_factory=dict)
+    precomputed_signal_value_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
     live_price_tables: dict[Any, Any] = field(default_factory=dict)
     live_executors: dict[Any, Any] = field(default_factory=dict)
 
-    def put_precomputed_table(self, key: Any, table: Any) -> None:
+    def put_precomputed_table(
+        self, key: Any, table: Any, *, provenance: Any = None,
+        run_result: Any = None,
+    ) -> None:
         self.precomputed_tables[key] = table
+        self.precomputed_signal_value_cache.clear()
+        if provenance:
+            self.precomputed_provenance[key] = dict(provenance)
+        if run_result is not None:
+            self.precomputed_results[key] = run_result
 
     def bind_precomputed_table(self, strategy: Any, key: Any) -> None:
         self.precomputed_table_keys[strategy] = key
 
-    def precomputed_table_for(self, strategy: Any, fallback_key: Any = None) -> Any:
-        key = self.precomputed_table_keys.get(strategy, fallback_key)
+    def precomputed_table_for(self, strategy: Any) -> Any:
+        key = self.precomputed_table_keys.get(strategy)
+        if key is None:
+            raise KeyError(f"precomputed signal table is not bound for strategy {strategy!r}")
         return self.precomputed_tables.get(key)
+
+    def precomputed_provenance_for(
+        self, strategy: Any, fallback_key: Any = None,
+    ) -> dict[str, Any]:
+        key = self.precomputed_table_keys.get(strategy, fallback_key)
+        return dict(self.precomputed_provenance.get(key, {}))
+
+    def precomputed_result_for(
+        self, strategy: Any, fallback_key: Any = None,
+    ) -> Any:
+        key = self.precomputed_table_keys.get(strategy, fallback_key)
+        return self.precomputed_results.get(key)
 
 
 class FactorSignalModule(ExecutableModule):
@@ -74,6 +104,7 @@ class FactorSignalModule(ExecutableModule):
     end_session_gap: ClassVar[FieldRef[Any]] = FieldRef("end_session_gap")
     calendar_frequency: ClassVar[FieldRef[Any]] = FieldRef("calendar_frequency")
     signal_value: ClassVar[FieldRef[Any]] = FieldRef("signal_value")  # dict[Product, float]
+    live_factor_state: ClassVar[FieldRef[Any]] = FieldRef("live_factor_state")
     factor_mode: ClassVar[FieldRef[str]] = FieldRef("factor_mode")
     warmup_mode: ClassVar[FieldRef[str]] = FieldRef("warmup_mode")
     warmup_window: ClassVar[FieldRef[Any]] = FieldRef("warmup_window")
@@ -132,10 +163,31 @@ class FactorSignalModule(ExecutableModule):
             options=(("auto", "按因子频率自动判断"), ("1min", "1 分钟"), ("5min", "5 分钟"), ("1day", "1 天")),
             chip_template="时钟: {value}", tab_label="回测时钟", tab_order=190,
         ),
+        "live_factor_state": FieldDefinition(public=False),
     }
 
     signal_live: ClassVar[Flow] = Flow(
-        "signal_live", inputs=(), outputs=(),
+        "signal_live",
+        inputs=(
+            FactorModule.factor,
+            calendar_frequency,
+            signal_freq,
+            basepoint,
+            daily_basepoint,
+            end_session_skip,
+            end_session_gap,
+            RunWindowModule.start_date,
+            RunWindowModule.end_date,
+            RunWindowModule.start_time,
+            RunWindowModule.end_time,
+            RunWindowModule.timezone,
+            RunWindowModule.time_precision,
+            warmup_mode,
+            warmup_window,
+            MarketDataModule.required_frequency,
+            MarketDataModule.causal_valuation_table,
+        ),
+        outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
         description="登记实时因子信号",
         compute=lambda state, ctx: _schedule_signal_live_timestamps(state, ctx),
@@ -143,8 +195,32 @@ class FactorSignalModule(ExecutableModule):
     )
     signal_precomputed: ClassVar[Flow] = Flow(
         "signal_precomputed",
-        inputs=(FactorModule.factor, MarketDataModule.required_data_source, MarketDataModule.required_frequency),
-        outputs=(),
+        inputs=(
+            FactorModule.factor,
+            ProductSelectionModule.products,
+            ProductSelectionModule.product_path_selection,
+            calendar_frequency,
+            signal_freq,
+            basepoint,
+            daily_basepoint,
+            end_session_skip,
+            end_session_gap,
+            RunWindowModule.start_date,
+            RunWindowModule.end_date,
+            RunWindowModule.start_time,
+            RunWindowModule.end_time,
+            RunWindowModule.timezone,
+            RunWindowModule.time_precision,
+            warmup_mode,
+            warmup_window,
+            MarketDataModule.data_source_mode,
+            MarketDataModule.data_source,
+            MarketDataModule.freq_mode,
+            MarketDataModule.freq_fixed,
+            MarketDataModule.required_data_source,
+            MarketDataModule.required_frequency,
+        ),
+        outputs=(signal_value,),
         phase=Phase.PRE_REPLAY, order=50,
         description="登记预计算信号",
         compute=lambda state, ctx: _schedule_signal_precomputed_timestamps(state, ctx),
@@ -152,19 +228,24 @@ class FactorSignalModule(ExecutableModule):
     )
 
     signal_live_on_event: ClassVar[Flow] = Flow(
-        "signal_live", inputs=(FactorModule.factor,), outputs=(signal_value,),
+        "signal_live", inputs=(FactorModule.factor, live_factor_state), outputs=(signal_value,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取实时因子信号",
         compute=lambda state, ctx: _evaluate_signal_live(state, ctx),
     )
     signal_live_on_bar: ClassVar[Flow] = Flow(
-        "signal_live", inputs=(FactorModule.factor,), outputs=(),
+        "signal_live", inputs=(
+            FactorModule.factor,
+            MarketDataModule.required_frequency,
+            MarketDataModule.required_factor_columns,
+            MarketDataModule.current_market_snapshot,
+        ), outputs=(live_factor_state,),
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=5,
         description="更新实时因子状态",
         compute=lambda state, ctx: _observe_signal_live_bar(state, ctx),
     )
     signal_precomputed_on_event: ClassVar[Flow] = Flow(
-        "signal_precomputed", inputs=(), outputs=(signal_value,),
+        "signal_precomputed", inputs=(signal_value,), outputs=(signal_value,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取预计算信号",
         compute=lambda state, ctx: _evaluate_signal_precomputed(state, ctx),
@@ -247,7 +328,9 @@ def _schedule_signal_live_timestamps(state, ctx) -> None:
             end_session_skip=end_session_skip,
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(end_session_gap)),
         )
-        scheduled = _clip_signal_table_to_strategy_window(aligned, state.config_for(strategies[0]))
+        config = state.config_for(strategies[0])
+        aligned = _table_with_exact_event_index(aligned, config, state)
+        scheduled = _clip_scheduled_table_to_strategy_window(aligned, config)
         _append_signal_drafts(drafts, signal_event_times(scheduled), strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)  # pushes every draft via FlowContext._push_if_event
 
@@ -284,7 +367,19 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
         ).items():
             first_config = state.config_for(scheduled_strategies[0])
             if schedule_key not in tables:
-                store.put_precomputed_table(schedule_key, _schedule_table_for_strategy(table, first_config))
+                scheduled_table = _schedule_table_for_strategy(
+                    table, first_config, factor=factor, state=state,
+                )
+                result_factory = getattr(factor, "to_run_result", None)
+                store.put_precomputed_table(
+                    schedule_key,
+                    scheduled_table,
+                    provenance=getattr(factor, "provenance", None),
+                    run_result=(
+                        result_factory(table=scheduled_table)
+                        if callable(result_factory) else None
+                    ),
+                )
             for strategy in scheduled_strategies:
                 store.bind_precomputed_table(strategy, schedule_key)
             _append_signal_drafts(drafts, signal_event_times(tables[schedule_key]), scheduled_strategies)
@@ -321,10 +416,19 @@ def _factor_calculation_key(factor_key: Any, config) -> tuple:
     return (
         factor_key,
         "calculation",
+        _strategy_product_selection_key(config),
         _strategy_run_window_key(config),
         _strategy_warmup_key(config),
         _strategy_market_data_key(config),
     )
+
+
+def _strategy_product_selection_key(config) -> tuple:
+    selection = config.get(ProductSelectionModule.product_path_selection)
+    products = tuple(
+        sorted(str(getattr(product, "name", product)) for product in getattr(selection, "products", ()))
+    )
+    return ("products", str(getattr(selection, "selection_id", "")), products)
 
 
 def _strategy_market_data_key(config) -> tuple:
@@ -334,7 +438,6 @@ def _strategy_market_data_key(config) -> tuple:
         _market_data_source_key(config.get(MarketDataModule.data_source)),
         str(config.get(MarketDataModule.freq_mode, "auto") or "auto"),
         str(config.get(MarketDataModule.freq_fixed, "") or ""),
-        str(config.get(MarketDataModule.frequency, "") or ""),
     )
 
 
@@ -379,9 +482,8 @@ def _evaluate_factor_for_strategies(factor: Any, strategies: list, state, ctx) -
     warmup_window = _warmup_window_for_strategies(factor, strategies, state)
     frequency = _market_data_frequency_for_strategies(strategies, ctx)
     _market_data_source_for_strategies(strategies, ctx)
+    products = _products_for_strategies(strategies, ctx)
     evaluate = getattr(factor, "evaluate")
-    if start_dt is None or end_dt is None:
-        return evaluate()
     try:
         signature = inspect.signature(evaluate)
     except (TypeError, ValueError):
@@ -393,11 +495,35 @@ def _evaluate_factor_for_strategies(factor: Any, strategies: list, state, ctx) -
         kwargs["warmup_window"] = warmup_window
     if frequency is not None and (accepts_kwargs or "freq" in params):
         kwargs["freq"] = frequency
-    if accepts_kwargs or "start_dt" in params or "end_dt" in params:
-        return evaluate(start_dt=start_dt, end_dt=end_dt, **kwargs)
-    if "run_window" in params:
-        return evaluate(run_window=(start_dt, end_dt), **kwargs)
-    return evaluate()
+    if start_dt is not None and end_dt is not None:
+        if accepts_kwargs or "start_dt" in params or "end_dt" in params:
+            kwargs.update(start_dt=start_dt, end_dt=end_dt)
+        elif "run_window" in params:
+            kwargs["run_window"] = (start_dt, end_dt)
+    if accepts_kwargs or "products" in params:
+        return evaluate(products=products, **kwargs)
+    positional_parameters = [
+        parameter
+        for parameter in params.values()
+        if parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    ]
+    if positional_parameters:
+        return evaluate(products, **kwargs)
+    return evaluate(**kwargs)
+
+
+def _products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
+    products_by_strategy = {
+        strategy: tuple(sorted(ctx.get_for(ProductSelectionModule.products, strategy) or (), key=str))
+        for strategy in strategies
+    }
+    distinct = {products for products in products_by_strategy.values()}
+    if len(distinct) != 1:
+        raise ValueError("共享因子计算要求策略使用相同的产品路径")
+    return next(iter(distinct), ())
 
 
 def _market_data_frequency_for_strategies(strategies: list, ctx) -> Any | None:
@@ -462,8 +588,32 @@ def _run_window_envelope_for_strategies(strategies: list, state) -> tuple[DataTi
     return run_window_envelope_for_strategies(strategies, state)
 
 
-def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
+def _schedule_table_for_strategy(
+    table: pd.DataFrame, config, state: Any = None, *, factor: Any = None,
+) -> pd.DataFrame:
+    external_align = getattr(factor, "align_to_market_schedule", None)
+    if callable(external_align):
+        if state is None:
+            raise ValueError("external precomputed factor alignment requires backtest state")
+        market_table = current_prices_table_for(state)
+        if market_table is None or market_table.empty:
+            raise ValueError("external precomputed factor alignment requires market data")
+        scheduled_market = signal_align(
+            market_table,
+            config.get(FactorSignalModule.signal_freq, "1d"),
+            basepoint=config.get(FactorSignalModule.basepoint, "last"),
+            daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
+            end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
+            end_session_gap=cast(
+                pd.Timedelta,
+                pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h")),
+            ),
+        )
+        return _clip_signal_table_to_strategy_window(
+            external_align(scheduled_market), config,
+        )
     calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
+    table = _table_with_exact_event_index(table, config, state)
     run_table = _clip_signal_table_to_strategy_window(table, config)
     if not calendar_frequency or str(calendar_frequency) == "auto":
         scheduled = run_table
@@ -476,19 +626,164 @@ def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
             end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h"))),
         )
-    return _clip_signal_table_to_strategy_window(scheduled, config)
+    clipped = _clip_scheduled_table_to_strategy_window(scheduled, config)
+    return _table_with_strategy_event_timezone(clipped, config, state)
+
+
+def _table_with_exact_event_index(table: pd.DataFrame, config, state=None) -> pd.DataFrame:
+    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    if table.empty or start_dt is None or end_dt is None:
+        return table
+    if start_dt.precision == "trading_day" or end_dt.precision == "trading_day":
+        return table
+    data_index = DataIndex(table.index)
+    explicit_day_level = bool(
+        data_index.signal_name
+        and "_SIGNAL@" in str(data_index.signal_name)
+        and DataFreq(str(data_index.signal_name).split("@", 1)[-1]).is_day_multiple()
+    )
+    inferred_day_level = (
+        not data_index.signal_name
+        and data_index.freq is not None
+        and DataFreq(data_index.freq).is_day_multiple()
+        and bool((data_index.signal_index == data_index.signal_index.normalize()).all())
+    )
+    if not explicit_day_level and not inferred_day_level:
+        return table
+    lookup = _last_market_event_lookup_by_trading_day(state)
+    if lookup is None:
+        raise ValueError("日级信号在 exact 回测中需要已加载的日内 market-data 事件时间")
+    trading_days = DataIndex.trading_day_index_from_index(table.index)
+    start_day = _naive_trading_day(start_dt.ts)
+    end_day = _naive_trading_day(end_dt.ts)
+    day_mask = (trading_days >= start_day) & (trading_days <= end_day)
+    table = table.loc[day_mask]
+    trading_days = pd.DatetimeIndex(trading_days[day_mask])
+    mapped = [lookup.get(pd.Timestamp(day).normalize()) for day in trading_days]
+    if any(value is None for value in mapped):
+        missing = next(pd.Timestamp(day).date() for day, value in zip(trading_days, mapped) if value is None)
+        expected_close = getattr(state.market_data_store, "daily_signal_close_time", None)
+        close_text = f" {expected_close} close bar" if expected_close else " market-data 事件时间"
+        raise ValueError(f"日级信号缺少 trading_day={missing} 的{close_text}")
+    result = table.copy(deep=False)
+    result.index = pd.DatetimeIndex(cast(list[pd.Timestamp], mapped))
+    return result
+
+
+def _naive_trading_day(value: Any) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_localize(None)
+    return ts.normalize()
+
+
+def _last_market_event_lookup_by_trading_day(state) -> dict[pd.Timestamp, pd.Timestamp] | None:
+    if state is None:
+        return None
+    table = current_prices_table_for(state)
+    if table is None or getattr(table, "empty", True):
+        return None
+    days = DataIndex.trading_day_index_from_index(table.index)
+    timestamps = DataIndex.event_timestamps_from_index(table.index)
+    expected_close = getattr(state.market_data_store, "daily_signal_close_time", None)
+    lookup: dict[pd.Timestamp, pd.Timestamp] = {}
+    timestamps_by_day: dict[pd.Timestamp, set[pd.Timestamp]] = defaultdict(set)
+    for day, timestamp in zip(days, timestamps):
+        if pd.isna(day) or pd.isna(timestamp):
+            continue
+        key = pd.Timestamp(day).normalize()
+        ts = pd.Timestamp(timestamp)
+        timestamps_by_day[key].add(ts)
+        previous = lookup.get(key)
+        if previous is None or ts > previous:
+            lookup[key] = ts
+    if expected_close:
+        resolved: dict[pd.Timestamp, pd.Timestamp] = {}
+        for day, observed in timestamps_by_day.items():
+            target = pd.Timestamp(f"{day.date()} {expected_close}")
+            sample = next(iter(observed))
+            if sample.tzinfo is not None:
+                target = target.tz_localize(sample.tzinfo)
+            if target in observed:
+                resolved[day] = target
+        return resolved
+    return lookup
+
+
+def _table_with_strategy_event_timezone(table: pd.DataFrame, config, state=None) -> pd.DataFrame:
+    strategy_timezone = str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai")
+    if table.empty:
+        return table
+    market_table = current_prices_table_for(state) if state is not None else None
+    market_timezone = None
+    preserve_naive_market_time = False
+    if isinstance(market_table, pd.DataFrame) and not market_table.empty:
+        market_index = DataIndex.event_timestamps_from_index(market_table.index)
+        market_timezone = market_index.tz
+        preserve_naive_market_time = market_timezone is None
+
+    def align(values: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        aligned = _timestamps_in_timezone(values, strategy_timezone)
+        if preserve_naive_market_time:
+            return pd.DatetimeIndex(aligned.tz_localize(None))
+        if market_timezone is not None:
+            return pd.DatetimeIndex(aligned.tz_convert(market_timezone))
+        return aligned
+
+    index = table.index
+    if isinstance(index, pd.MultiIndex):
+        event_values = align(pd.DatetimeIndex(index.get_level_values(-1)))
+        arrays = [
+            event_values if pos == index.nlevels - 1 else index.get_level_values(pos)
+            for pos in range(index.nlevels)
+        ]
+        result = table.copy(deep=False)
+        result.index = pd.MultiIndex.from_arrays(arrays, names=index.names)
+        return result
+    result = table.copy(deep=False)
+    result.index = align(pd.DatetimeIndex(index))
+    return result
+
+
+def _timestamps_in_timezone(index: pd.DatetimeIndex, timezone: str) -> pd.DatetimeIndex:
+    if index.tz is None:
+        return pd.DatetimeIndex(index.tz_localize(timezone))
+    return pd.DatetimeIndex(index.tz_convert(timezone))
 
 
 def _clip_signal_table_to_strategy_window(table: pd.DataFrame, config) -> pd.DataFrame:
-    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    start_dt, end_dt = _strategy_signal_window_datetimes(config)
     if start_dt is None or end_dt is None:
         return table
-    mask = DataIndex(table.index).slice_by_datatime(start_dt, end_dt)
+    if start_dt.precision == "trading_day" or end_dt.precision == "trading_day":
+        mask = DataIndex(table.index).slice_by_datatime(start_dt, end_dt)
+    else:
+        event_index = DataIndex(table.index).finest_index
+        mask = DataIndex(event_index).slice_by_datatime(start_dt, end_dt)
+    return table.loc[mask]
+
+
+def _clip_scheduled_table_to_strategy_window(table: pd.DataFrame, config) -> pd.DataFrame:
+    """Clip a scheduled table by the timestamp that will enter EventQueue.
+
+    ``signal_align(..., "1d")`` deliberately keeps both a semantic
+    ``_SIGNAL@DAY1`` level and the selected intraday bar timestamp.  Exact run
+    windows must therefore compare the finest/event-time level, while
+    trading-day windows retain DataIndex's trading-day-aware slicing.
+    """
+    start_dt, end_dt = _strategy_signal_window_datetimes(config)
+    if start_dt is None or end_dt is None:
+        return table
+    if start_dt.precision == "trading_day" or end_dt.precision == "trading_day":
+        mask = DataIndex(table.index).slice_by_datatime(start_dt, end_dt)
+    else:
+        event_index = DataIndex(table.index).finest_index
+        mask = DataIndex(event_index).slice_by_datatime(start_dt, end_dt)
     return table.loc[mask]
 
 
 def _clip_table_to_strategy_warmup_window(table: pd.DataFrame, config) -> pd.DataFrame:
-    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    start_dt, end_dt = _strategy_signal_window_datetimes(config)
     if table.empty:
         return table
     if start_dt is None or end_dt is None:
@@ -528,6 +823,20 @@ def _warmup_window_to_bars_for_table(warmup_window: pd.Timedelta, table: pd.Data
 
 def _strategy_run_window_datetimes(config) -> tuple[DataTime | None, DataTime | None]:
     return strategy_run_window_datetimes(config)
+
+
+def _strategy_signal_window_datetimes(config) -> tuple[DataTime | None, DataTime | None]:
+    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    try:
+        is_daily = DataFreq(_effective_signal_frequency(config)).is_day_multiple()
+    except (TypeError, ValueError):
+        is_daily = False
+    if not is_daily or start_dt is None or end_dt is None:
+        return start_dt, end_dt
+    return (
+        DataTime.parse(start_dt.date_str, precision="trading_day"),
+        DataTime.parse(end_dt.date_str, precision="trading_day"),
+    )
 
 
 def _strategy_run_window_key(config) -> tuple:
@@ -571,28 +880,46 @@ def _evaluate_signal_precomputed(state, ctx) -> None:
     re-evaluation here."""
     store = state.factor_signal_store
     for strategy in ctx.active_strategies:
-        config = state.config_for(strategy)
-        factor = config.get(FactorModule.factor)
-        calculation_key = _factor_calculation_key(factor_runtime_key(factor), config)
-        fallback_key = _precomputed_schedule_key(calculation_key, config)
-        table = store.precomputed_table_for(strategy, fallback_key)
+        table = store.precomputed_table_for(strategy)
         if table is None:
-            ctx.set_for(FactorSignalModule.signal_value, strategy, {})
-            continue
-        try:
-            draft = ctx.draft_for(strategy)
-            row = row_at_index_key(table, draft.index_key) if draft.index_key is not None else row_at(table, ctx.timestamp)
-        except KeyError:
-            ctx.set_for(FactorSignalModule.signal_value, strategy, {})
-            continue
-        ctx.set_for(FactorSignalModule.signal_value, strategy,
-                     {product: float(cast(Any, row[product])) for product in table.columns})
+            raise KeyError(f"precomputed signal table is missing for strategy {strategy!r}")
+        ctx.set_for(FactorSignalModule.signal_value, strategy, _precomputed_signal_values_for_event(store, table, ctx, strategy))
+
+
+def _precomputed_signal_values_for_event(store: FactorSignalStore, table: pd.DataFrame, ctx, strategy) -> dict[Any, float]:
+    try:
+        draft = ctx.draft_for(strategy)
+        index_key = draft.index_key
+    except Exception:
+        index_key = None
+    cache_key = (id(table), _precomputed_signal_cache_key(index_key if index_key is not None else ctx.timestamp))
+    cached = store.precomputed_signal_value_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        row = row_at_index_key(table, index_key) if index_key is not None else row_at(table, ctx.timestamp)
+    except KeyError:
+        values: dict[Any, float] = {}
+    else:
+        values = {product: float(cast(Any, row[product])) for product in table.columns}
+    store.precomputed_signal_value_cache[cache_key] = values
+    return values
+
+
+def _precomputed_signal_cache_key(index_key: Any) -> Any:
+    try:
+        hash(index_key)
+    except TypeError:
+        return repr(index_key)
+    return index_key
 
 
 def _observe_signal_live_bar(state, ctx) -> None:
     """Feed one bar of current market data into each active live factor."""
-    prices = ctx.get(FieldRef("current_prices", owner="MarketDataModule"), {})
-    if not prices:
+    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
+    fields_by_product = _factor_fields_by_product(snapshot)
+    term_curves_by_product = _factor_term_curves_by_product(snapshot)
+    if not fields_by_product and not term_curves_by_product:
         return
     store = state.factor_signal_store
     tables = store.live_price_tables
@@ -607,7 +934,8 @@ def _observe_signal_live_bar(state, ctx) -> None:
         by_factor[state_key].append(strategy)
         factor_by_key[state_key] = factor
 
-    row = pd.DataFrame([prices], index=[pd.Timestamp(ctx.timestamp)])
+    close_prices = snapshot.get("close", {})
+    row = pd.DataFrame([close_prices], index=[pd.Timestamp(ctx.timestamp)])
     for factor_key in by_factor:
         factor = factor_by_key[factor_key]
         table = tables.get(factor_key)
@@ -618,20 +946,82 @@ def _observe_signal_live_bar(state, ctx) -> None:
             tables[factor_key] = updated.iloc[~updated.index.duplicated(keep="last")]
         executor = executors.get(factor_key)
         if executor is None:
+            products = _live_products_for_strategies(by_factor[factor_key], ctx)
             executor = _compile_live_factor_executor(
                 factor,
                 by_factor[factor_key][0],
-                prices.keys(),
-                getattr(state, "source_freq", None),
+                products if products else (set(fields_by_product) | set(term_curves_by_product)),
+                resolved_bar_frequency_for_strategy(state, by_factor[factor_key][0]),
             )
             if executor is not None:
                 executors[factor_key] = executor
         if executor is not None:
-            executor.on_bar(pd.Timestamp(ctx.timestamp), prices)
+            _call_live_executor_on_bar(
+                executor,
+                pd.Timestamp(ctx.timestamp),
+                fields_by_product,
+                term_curves_by_product,
+            )
+            current_value = getattr(executor, "on_signal", None)
+            if callable(current_value):
+                values = _row_to_signal_values(current_value(ctx.timestamp))
+                for strategy in by_factor[factor_key]:
+                    ctx.set_for(FactorSignalModule.live_factor_state, strategy, values)
             continue
         on_bar = getattr(factor, "on_bar", None)
         if callable(on_bar):
-            on_bar(pd.Timestamp(ctx.timestamp), dict(prices))
+            # Preserve the public live-adapter contract: custom factors receive
+            # the scalar close-price map. Compiled FactorExpr executors consume
+            # the richer canonical DataColumn mapping above.
+            on_bar(pd.Timestamp(ctx.timestamp), dict(close_prices))
+
+
+def _live_products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
+    products_by_strategy = {
+        strategy: tuple(sorted(ctx.get_for(ProductSelectionModule.products, strategy) or (), key=str))
+        for strategy in strategies
+    }
+    distinct = {products for products in products_by_strategy.values() if products}
+    if not distinct:
+        return ()
+    if len(distinct) != 1:
+        raise ValueError("共享 live FactorExpr executor 要求策略使用相同的产品集合")
+    return next(iter(distinct))
+
+
+def _factor_fields_by_product(snapshot: dict[str, dict[Any, float]]) -> dict[Any, dict[str, float]]:
+    fields: dict[Any, dict[str, float]] = defaultdict(dict)
+    for column_name, values in snapshot.items():
+        if column_name == "TERM_STRUCTURE":
+            continue
+        if not str(column_name).isupper() or not isinstance(values, dict):
+            continue
+        for product, value in values.items():
+            fields[product][str(column_name)] = float(value)
+    return dict(fields)
+
+
+def _factor_term_curves_by_product(snapshot: dict[str, dict[Any, Any]]) -> dict[Any, Any]:
+    values = snapshot.get("TERM_STRUCTURE", {})
+    return dict(values) if isinstance(values, dict) else {}
+
+
+def _call_live_executor_on_bar(
+    executor: Any,
+    timestamp: pd.Timestamp,
+    fields_by_product: dict[Any, dict[str, float]],
+    term_curves_by_product: dict[Any, Any],
+) -> None:
+    on_bar = executor.on_bar
+    signature = inspect.signature(on_bar)
+    accepts_varargs = any(
+        parameter.kind is inspect.Parameter.VAR_POSITIONAL
+        for parameter in signature.parameters.values()
+    )
+    if accepts_varargs or len(signature.parameters) >= 3:
+        on_bar(timestamp, fields_by_product, term_curves_by_product)
+    else:
+        on_bar(timestamp, fields_by_product)
 
 
 def _live_signal_values(factor: Any, timestamp: pd.Timestamp, price_table: pd.DataFrame | None) -> dict:

@@ -12,15 +12,14 @@ from qlib.backtest.position import Position
 from .common import (
     market_rule_diagnostics,
     capacity_limited_deltas,
-    execute_target_weights,
     execution_delay_bars,
     execution_price,
     execution_trace_entry,
     execution_timing,
     parse_group_strategy_input,
     parse_target_weight_input,
-    portfolio_value,
     position_value_snapshot,
+    require_worker_execution_policies,
     setting_fallback_diagnostics,
     target_quantities,
     target_rows,
@@ -99,27 +98,97 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {"engine": "qlib", "portfolios": portfolios}
 
 
-def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+def run_strategy_intents(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    """Event-driven strategy-intent replay through Qlib's Position/Order lifecycle.
+
+    Per bar: mark held stocks to market on the Qlib Position, execute due
+    targets as Qlib Orders applied via ``position.update_order`` (see
+    ``_rebalance``), then compute this bar's target via the group calculator
+    and schedule it for the next bar — ADR-029's target-on-SIGNAL /
+    fill-on-next-ORDER semantics. Broker policy selectors (ADR-028) are
+    validated up front; cash rescale + lot floor run in
+    ``_qlib_executable_deltas`` inside ``_rebalance``.
+    """
     request, memberships, updates, calculators = parse_group_strategy_input(payload)
     portfolios = {}
     total_replay_steps = len(request.timestamps) * len(request.strategies)
     for strategy_position, (strategy, calculator) in enumerate(
         zip(request.strategies, calculators, strict=True)
     ):
+        require_worker_execution_policies(
+            strategy,
+            engine="qlib",
+            supported={"fill_cap_policy": frozenset({"no_cap", "volume_participation"})},
+        )
         strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
         position = _SignedPosition(cash=strategy_cash)
-        cash = strategy_cash
-        positions = {instrument: 0.0 for instrument in request.instruments}
-        pending_targets = []
+        pending_deltas: list[tuple[int, dict[str, float]]] = []
         equity_curve = {}
         position_curve = {}
         notional_curve = {}
         margin_curve = {}
         execution_trace = {}
-        execution_trace_count = 0
         collect_trace = bool(strategy.get("collect_execution_trace"))
         timing = execution_timing(strategy)
         delay_bars = execution_delay_bars(strategy)
+
+        def _positions() -> dict[str, float]:
+            return {
+                instrument: float(position.get_stock_amount(instrument) or 0.0)
+                for instrument in request.instruments
+            }
+
+        def _deltas_for_target(row: int, target) -> dict[str, float]:
+            value = float(position.calculate_value())
+            quantities = target_quantities(request, row, target, value, strategy)
+            current = _positions()
+            return _qlib_executable_deltas(
+                request,
+                row,
+                strategy,
+                quantities,
+                current,
+                float(position.position.get("cash", 0.0)),
+            )
+
+        def _execute(row: int, timestamp, deltas, current_prices) -> None:
+            current = _positions()
+            cash_before = float(position.position.get("cash", 0.0))
+            desired = {
+                instrument: float(current.get(instrument, 0.0)) + float(deltas.get(instrument, 0.0))
+                for instrument in request.instruments
+            }
+            executable = _qlib_executable_deltas(
+                request,
+                row,
+                strategy,
+                desired,
+                current,
+                cash_before,
+            )
+            if (
+                collect_trace
+                and any(abs(float(delta)) > 1e-12 for delta in executable.values())
+            ):
+                execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                    request,
+                    row,
+                    strategy,
+                    current,
+                    executable,
+                    cash_before,
+                )
+            quantities = {
+                instrument: float(current.get(instrument, 0.0)) + float(executable.get(instrument, 0.0))
+                for instrument in request.instruments
+            }
+            _rebalance(
+                position, quantities, current_prices, timestamp,
+                fee_rate=float(strategy.get("fee_rate") or 0.0),
+                strategy=strategy, request=None, row=row,
+                execution_trace=execution_trace if collect_trace else None,
+            )
+
         for row, timestamp in enumerate(request.timestamps):
             current_prices = {
                 instrument: valuation_price(request, row, instrument)
@@ -127,22 +196,12 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             }
             for instrument in position.get_stock_list():
                 position.update_stock_price(instrument, current_prices[instrument])
-            due_targets = [target for due_row, target in pending_targets if due_row <= row]
-            pending_targets = [
-                (due_row, target) for due_row, target in pending_targets if due_row > row
+            due_deltas = [deltas for due_row, deltas in pending_deltas if due_row <= row]
+            pending_deltas = [
+                (due_row, deltas) for due_row, deltas in pending_deltas if due_row > row
             ]
-            for pending in due_targets:
-                before = dict(positions)
-                cash_before = cash
-                cash, positions, deltas = execute_target_weights(
-                    request, row, strategy, pending, positions, cash
-                )
-                if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace_count += 1
-                    if collect_trace:
-                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                            request, row, strategy, before, deltas, cash_before
-                        )
+            for pending in due_deltas:
+                _execute(row, timestamp, pending, current_prices)
             target = calculator.update(
                 timestamp,
                 np.asarray([request.prices[name][row] for name in request.instruments]),
@@ -150,27 +209,17 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                 updates[row],
                 np.asarray(request.margin_ratios[row]),
             )
-            if timing == "same_bar" and target is not None:
-                before = dict(positions)
-                cash_before = cash
-                cash, positions, deltas = execute_target_weights(
-                    request, row, strategy, target, positions, cash
-                )
-                if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace_count += 1
-                    if collect_trace:
-                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                            request, row, strategy, before, deltas, cash_before
-                        )
-            elif timing == "next_bar":
-                if target is not None:
-                    pending_targets.append((row + delay_bars, target))
-            equity_curve[timestamp.isoformat()] = float(
-                portfolio_value(request, row, positions, cash)
-            )
-            position_curve[timestamp.isoformat()] = dict(positions)
+            if target is not None:
+                deltas = _deltas_for_target(row, target)
+                if timing == "same_bar":
+                    _execute(row, timestamp, deltas, current_prices)
+                else:
+                    pending_deltas.append((row + delay_bars, deltas))
+            equity_curve[timestamp.isoformat()] = float(position.calculate_value())
+            positions_row = _positions()
+            position_curve[timestamp.isoformat()] = positions_row
             notional_values, margin_values = position_value_snapshot(
-                request, row, strategy, positions
+                request, row, strategy, positions_row
             )
             notional_curve[timestamp.isoformat()] = notional_values
             if margin_values is not None:
@@ -189,14 +238,14 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                 )
         portfolios[calculator.strategy_id] = {
             "initial_value": strategy_cash,
-            "final_value": float(portfolio_value(request, len(request.timestamps) - 1, positions, cash)),
-            "positions": positions,
+            "final_value": float(position.calculate_value()),
+            "positions": _positions(),
             "equity_curve": equity_curve,
             "position_curve": position_curve,
             "notional_curve": notional_curve,
             "margin_curve": margin_curve,
             "execution_trace": execution_trace,
-            "execution_trace_count": execution_trace_count,
+            "execution_trace_count": len(execution_trace),
         }
     return {
         "engine": "qlib",
@@ -219,6 +268,10 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
     }
 
 
+def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    return run_strategy_intents(payload, progress=progress)
+
+
 def _rebalance(
     position: Position,
     quantities: Mapping[str, float],
@@ -236,14 +289,17 @@ def _rebalance(
         for instrument in prices
     }
     current = {instrument: position.get_stock_amount(instrument) for instrument in prices}
-    deltas = raw_deltas if request is None else _qlib_executable_deltas(
-        request,
-        int(row),
-        strategy,
-        quantities,
-        current,
-        float(position.position.get("cash", 0.0)),
-    )
+    if request is None or row is None:
+        deltas = raw_deltas
+    else:
+        deltas = _qlib_executable_deltas(
+            request,
+            int(row),
+            strategy,
+            quantities,
+            current,
+            float(position.position.get("cash", 0.0)),
+        )
     if (
         request is not None
         and row is not None

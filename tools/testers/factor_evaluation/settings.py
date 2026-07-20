@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from tools.testers.settings.applications import (
+from tools.testers._shared import (
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SELECTION_KEYS,
     MARKET_DATA_SELECTION_KEYS,
@@ -15,11 +13,10 @@ from tools.testers.settings.applications import (
     register_factor_selection_base,
     register_market_data_base,
     register_product_path_candidate_list_base,
+    register_product_path_selection_base,
     register_run_window_base,
 )
 from tools.testers.settings.contracts import (
-    ScopePolicy,
-    SettingDefinition,
     SettingModule,
     SettingTab,
     TabMountPoint,
@@ -48,7 +45,7 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
         app.register_module(module)
     for tab in (
         SettingTab(
-            "product",
+            "product_path_selection",
             "产品",
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
@@ -78,18 +75,8 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
     ):
         app.register_tab(tab)
     register_run_window_base(app)
-    app.register_setting(SettingDefinition(
-        "product",
-        "产品路径",
-        "product",
-        "select",
-        None,
-        ScopePolicy.LOCAL_ONLY,
-        module="product_selection",
-        chip_template="产品路径: {value}",
-        help_text="从后端注册的产品树选择一个产品或产品路径。",
-    ))
-    register_product_path_candidate_list_base(app, tab="product")
+    register_product_path_candidate_list_base(app, tab="product_path_selection")
+    register_product_path_selection_base(app, tab="product_path_selection")
     register_market_data_base(app, include_price_type=True)
     register_factor_candidate_list_base(app)
     register_factor_selection_base(app)

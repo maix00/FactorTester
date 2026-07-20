@@ -1,0 +1,412 @@
+# ADR-030：外部回测框架的执行桥（非 native 引擎不进 native event queue）
+
+- **日期**：2026-07-02
+- **状态**：已接受，实施中
+- **决策者**：FactorTester 团队
+
+---
+
+## 背景
+
+`run_backtest_task`（`engines/native/backtester.py`）是 `FactorTester.dispatch("backtest")`
+的唯一入口。当前它对非 native 引擎直接抛 `NotImplementedError`，错误信息里已经写明
+方向："must run through its own ExecutableModule/worker bridge instead of falling
+back to native"。
+
+同时仓库里已经存在但**只有测试在用**的一整套 worker 基础设施：
+
+- `engines/workers/contracts.py`：版本化 JSON 协议（`WorkerRequest`/`WorkerResponse`）；
+- `engines/workers/dispatcher.py`：每个框架一个隔离 conda 环境的子进程
+  （GTHT-backtrader / GTHT-qlib / GTHT-zipline / GTHT-rqalpha），支持超时、取消、
+  以及 stderr 上的 `GTHT_PROGRESS` 行式进度流；
+- `engines/workers/entrypoint.py`：worker 侧单请求入口，stdout 保留给协议 JSON；
+- `engines/workers/runners/{backtrader,qlib,zipline}.py`：目标权重回放与分组策略
+  回放两种 operation，返回 portfolios/equity_curve/position_curve/execution_trace
+  等与 native 相同形状的结果（rqalpha runner 尚未实现）；
+- `engines/adapters/frameworks.py`：能力声明模型（`FrameworkCapabilities` /
+  `CapabilityReport`），`FactorFrameworkAdapter.prepare` 会对无法表达的能力显式
+  抛 `UnsupportedFrameworkPlan`；
+- `engines/adapters/{backtrader,qlib,zipline}/factor.py` + `factor_step.py`：
+  FactorExpr 在框架回调粒度上的执行适配（`PrecomputedFactorSource` /
+  `IncrementalFactorSource`）。
+
+缺的是把两边接起来的桥：production 链路（前端字段值 → `BacktestRunState`）到
+worker 链路（JSON payload）之间没有翻译层，worker 的进度流也没有接到前端
+SSE 流程图/进度条（`ProgressSink` 协议）。测试里的 payload 全是手写的。
+
+## 决策
+
+### 1. 路由：`run_backtest_task` 是唯一分叉点
+
+```text
+tester.dispatch("backtest")
+  └── run_backtest_task(run_state, ...)
+        ├── engine == "native"  → 现有路径：FlowRegistry + EventQueue + run()
+        └── engine != "native"  → run_framework_backtest_task(...)（新桥）
+              不构造 EventQueue，不注册任何 native Flow —— 框架自己跑自己的循环
+```
+
+外部框架引擎**不注册 native event queue**。native 的 Flow/EventQueue 体系只为
+native 引擎服务；桥是一段顺序执行的函数（翻译 → dispatch → 收集），不是伪装成
+Flow 的编排。
+
+### 2. ExecutableModule 的角色：定义层，不是执行层
+
+`EngineModule.engine` 字段（native/backtrader/qlib/zipline/rqalpha）仍是唯一的
+引擎选择入口；所有 ExecutableModule 的 `fields`（费用、滑点、流动性、换月、
+资金……）仍是**字段定义与前端 manifest 的唯一来源**。桥消费的是
+`StrategyConfig.field_values`（`strategy_config_builder` 已经把前端扁平字典
+桥接成 FieldRef 键的值），不再发明第二套字段体系。
+
+### 3. 字段值翻译：声明式映射表 + 能力拒绝
+
+新增 `engines/workers/translator.py`：
+
+- `translate_strategy_config(config: StrategyConfig, framework: Framework) ->
+  dict`：把 FieldRef 值翻成 runner 方言（`fee_rate`、`slippage_mode`、
+  `slippage_bps`、`liquidity_mode`、`participation_rate`、`initial_capital`、
+  `execution_timing`、`execution_delay_bars`、`margin_*`……——即
+  `runners/common.py` 的 `parse_*_input` 已消费的键）。
+- 映射表是数据不是代码分支：`(FieldRef, worker_key, value_mapper)` 三元组列表。
+- **不静默忽略**（ADR-024 的约束）：框架无法表达的字段值，翻译器要么显式映射到
+  框架托管的等价默认并记录 `setting_fallback_diagnostics`，要么抛
+  `UnsupportedFrameworkPlan`。判断依据是 `frameworks.py` 的能力声明。
+
+### 4. 因子翻译：复用 FactorSource 双形态
+
+- `factor_mode = precomputed`（或 auto 判定为可向量化）：FactorExpr 在 native 侧
+  批量求值 → 分组 membership 张量 + signal_updates 掩码进 payload（
+  `parse_group_strategy_input` 已消费）。这满足 ADR-024 的"membership 必须由同一
+  FactorExpr 结果生成"。
+- `factor_mode = incremental`：`compile_streaming_factor` 产出可移植的
+  `StreamingFactorPlan`，包进 `IncrementalFactorSource`，由框架内的
+  `{Backtrader,Qlib,Zipline}FactorAdapter` 在框架自己的 bar 回调里逐步执行。
+  注意 `factor_step.py` 里 `MarketSlice`/`ProductPrice` 因 issue-114 重写被删成
+  stub —— 增量因子进框架前必须先修复该 stub（本 ADR 实施的第二阶段，先做
+  precomputed 路径）。
+- 能力检查走现有 `FactorFrameworkAdapter.prepare`，不重复造。
+
+### 5. 市场数据：native 侧装载一次，序列化进 payload
+
+桥直接调用 `MarketDataModule` 的装载函数（消费 `run_state.market_data_request`），
+不经过 queue。产出 payload 的 `timestamps`/`instruments`/`prices`/`volumes`/
+`market_rules`（lot_sizes/multipliers/margin_ratios 的时变矩阵，
+`runners/common.py::_parse_rule_matrix` 已消费）。
+
+### 6. 进度：GTHT_PROGRESS → ProgressSink → 前端流程图
+
+- 桥在开始时向 `activity_sink.emit_activity_manifest` 发一份**框架版三阶段
+  manifest**（沿用 native 的 `pre_replay`/`event_replay`/`post_replay` 阶段键与
+  中文标签：翻译准备/框架回放/结果收集），前端流程图组件零改动即可显示。
+- dispatcher 的 `progress` 回调（解析 worker stderr 的 `GTHT_PROGRESS` JSON 行）
+  转发为 `activity_sink.emit_signal_progress(completed=, total=,
+  phase="event_replay")` —— 进度条实时前进。
+- 取消复用 dispatcher 已有的 `cancel_event` → `BacktestCancelled` 链。
+
+### 7. 结果收集：runner 返回形状已经与 native 对齐
+
+runners 已返回 `{"engine", "portfolios": {id: {equity_curve, position_curve,
+notional_curve, margin_curve, execution_trace, ...}}, "target_trace",
+"strategy_diagnostics", "event_count"}`。桥只需把它包进与 native
+`run_backtest_task` 相同的 `execution` dict（`engine_result`/`group_owner`/
+`settings_by_strategy`/`payload`），`_serialize_event_execution` 及其后的
+snapshot/detail 链路零改动。事后结果字段即 `WorkerResponse.result`；实时结果字段
+即 `GTHT_PROGRESS` 行（可按需扩展行内 payload，协议允许任意 JSON 键）。
+
+### 8. 一致性测试
+
+控制变量测试从"手写 payload 调 dispatcher"（现 `test_framework_workers.py` 的
+模式）升级为"同一份 `resolved_settings_by_alias` + 同一份市场数据，分别经
+`run_backtest_task`（native）与桥（各框架）"，断言：
+
+- 目标权重序列一致（`target_trace`）；
+- 等价能力下 equity curve 逐点一致；框架能力有差异的维度（如 backtrader 的
+  partial fill 语义）按 `CapabilityReport` 声明豁免，豁免必须显式列出而不是
+  比较时悄悄放宽容差。
+
+## 后果
+
+### 正面
+
+- 前端一套字段、五个引擎；引擎差异集中在翻译器与能力声明，不散落在路由层；
+- worker 基础设施从"只有测试在用"变成 production 路径，测试模式与生产模式一致；
+- 前端流程图/进度条对外部框架开箱即用（同一 ProgressSink 协议）；
+- CLI（ADR-024 的方向）可以直接复用桥：同一翻译器、同一结果形状。
+
+### 权衡
+
+- 第一阶段只做 precomputed 因子路径；增量因子进框架被 `factor_step.py` 的
+  issue-114 stub 阻塞，作为第二阶段（修 stub → 接 IncrementalFactorSource）。
+- rqalpha runner 尚不存在，桥对 rqalpha 会在能力检查处显式失败，而不是假装支持。
+- 每框架一个 conda 子进程的启动开销（秒级）保留——隔离优先于速度，与
+  dispatcher 现有设计一致。
+
+## 实施记录（2026-07-02）
+
+### 每个 runner 都是真事件驱动回放，不是循环里调批量函数
+
+`run_group_strategy` 对三个已实现框架都是真正的逐 bar 回放，用框架自己的
+组件，不是"算好整段轨迹再包一层"：
+
+- **backtrader**：真 `bt.Cerebro` + `_GroupMembershipStrategy(bt.Strategy)`，
+  target 在 `next()` 回调里逐 bar 计算，撤单走 `self.cancel(previous)`，
+  成交走 Backtrader 自己的 broker/order 生命周期。
+- **qlib**：真 `qlib.backtest.position.Position`（`_SignedPosition` 扩展支持
+  做空）+ `Order`，逐 bar mark-to-market、`position.update_order` 成交。
+- **zipline**：真 `zipline.finance.ledger.Ledger` + `Transaction`，逐 bar
+  `position_tracker.update_position` 估值、`ledger.process_transaction`/
+  `process_commission` 成交入账。
+
+三者都不再共享原先"backtrader/zipline 函数体字节级相同"的手写纯 Python 循环；
+那份逻辑抽成 `runners/reference.py`（框架无关的参考实现），只用于
+`test_framework_consistency.py` 的 in-process 一致性基线（不需要 conda 环境
+即可验证 worker 回放语义本身），不再是任何生产 runner 的实现。
+
+### 事件顺序对齐 ADR-029：SIGNAL 定量、ORDER 成交
+
+`reference.py` 和三个真实 runner 都遵守 ADR-029 的顺序：target 在 SIGNAL bar
+用该 bar 的价格/权益定量（含现金缩放、手数取整），成交发生在到期的 ORDER bar
+（`execution_timing=next_bar` 时延后 `execution_delay_bars` 个 bar；
+`same_bar` 时当bar成交）。`reference.py` 修正前的版本在成交 bar 才定量，是
+native 已经修过的同一类顺序漂移，被一致性测试量出来后一并修掉。
+
+### Broker policy 走 ADR-028，不是另起一套字段
+
+`runners/common.py` 新增 `BROKER_POLICY_DEFAULTS`（与 ADR-028 的 NativeBroker
+默认字段表完全一致）+ `require_broker_policies()`。每个 runner 在回放开始前
+调用它校验，无法表达的 selector 显式抛错，不静默降级：
+
+- `cancel_policy=replace_pending_same_product`、
+  `order_validity=next_signal`：backtrader 用 broker 撤单，qlib/zipline/
+  reference 用"到期 pending 队列替换"实现，语义相同。
+- `matching_policy=next_bar_open_full_fill`：backtrader `coc=False`；
+  qlib/zipline/reference 固定用到期 bar 的开盘价。
+- `min_lot_policy=floor_to_lot`：三个 runner 都通过
+  `target_quantities`/`_backtrader_executable_target_sizes`/
+  `_zipline_executable_deltas`/`_qlib_executable_deltas` 向下取整到
+  `lot_sizes` 矩阵。`nearest_lot` 目前 worker 侧不可表达，翻译层
+  （`translator.py`）直接抛 `UnsupportedFrameworkPlan`，不是悄悄退化成
+  floor。
+- `cash_policy=rescale_buy_orders`：`executable_deltas`/各框架专属版本按比例
+  缩买单，从不拒单。
+- `fill_cap_policy`：`no_cap`（默认）或 `volume_participation`（backtrader
+  `FixedBarPerc` filler；qlib/zipline/reference 用
+  `capacity_limited_deltas`），是 ADR-028 首版遗漏、审计后补上的维度，
+  `translator.py` 从 `LiquidityModule.liquidity_mode` 读取。
+
+### 意外发现并修复：native 的手数取整从未真正生效
+
+写一致性测试时发现 `PositionSizingModule._round_to_lot_sizes` 读的是
+`ctx.get(MarketDataModule.lot_sizes, {})`——但 `lot_sizes` 只在 PRE_REPLAY 的
+`_publish_raw_market_data` 里 `ctx.set()` 过一次，PER_EVENT/SIGNAL 用的是全新
+的 `FlowContext`（自己的空 `_values`），所以这个读取从来都拿到默认空字典，
+`quantity_rounding_policy` 不管配成什么，取整从未真正执行过。改成从
+`market_data_store_for(state).raw_input`（持久化在 `state` 上，不是 ctx-scoped）
+读取，修好了这个此前一直存在、和本 ADR 无关但被一致性测试量出来的 bug。
+
+### 意外发现并修复：`MinorUnitModule.use_minor_units` 是个没接线的摆设字段
+
+对着真实行情数据（而不是凑巧是整数的合成价格）继续跑一致性测试时，手数计算
+在个别 bar 上出现"native 240 手、worker 239 手"这类整数手边界的分歧。一开始
+用 `+1e-12` epsilon 保护了 `_round_one` 的 floor（worker 侧 `runners/common.py`
+早就有这个保护），但 `_initialize_ledgers` 里 `DataMoney.from_major(...,
+use_minor_units=False)` 是硬编码的——`MinorUnitModule.use_minor_units` 字段
+在前端 manifest 上显示默认 `True`，实际代码从来没读过这个字段，现金/权益
+全程都是 major-unit 浮点数，`use_minor_units` 是个纯摆设。
+
+现在按你的纠正，`use_minor_units` 的 `default_when` 只在 `engine_mode="basic"`
+时锁定 `False`（对齐 `fee_mode`/`margin_mode`/`_resolve_use_int_position` 已有
+的"`basic` 用最简单模型，其余模式用完整语义"这条既有约定），其余
+（auto/custom/exact）默认 `True`，`_initialize_ledgers` 读取这个已解析好的
+字段值，不再硬编码。`initialize_ledgers` Flow 的 `inputs` 也补上了这个字段
+的声明。
+
+Worker 侧没有整数最小货币单位的账本可对接，`translator.py` 新增
+`_note_minor_unit_precision`：`use_minor_units=True` 时记一条
+`_setting_fallbacks`（`reason=engine_disabled_value`，与已有的 fee/margin
+fallback 走同一套记录方式），不是静默忽略，也不是当成"框架不支持就报错"
+（这不是算法差异，只是精度粗细的差异，跟已经容忍的整手边界噪声是同一类
+东西）。`epsilon` 保护本身仍然保留，作为 lot 计算这一步单独的浮点边界防御，
+不因为账本本身更精确了就失去意义。
+
+### 修复：桥接框架从不换月，永远交易抽象连续合约
+
+native 侧修好 `expand_term_structure` 的排序 bug 后（见上面本 ADR 的
+`market_data.py`/`term_structure.py` 提交），追问桥接是否也有同样的问题——
+答案是有，而且更根本：`build_membership_payload` 里 membership 张量的列
+直接取自 `current_prices_table.columns`，signal 又是在抽象连续产品上算的，
+所以 `resolve_tradable_target_weights`（native 在 PER_EVENT/SIGNAL 阶段调用
+的换月/强平合约切换函数）在桥接路径上根本没被调用过——`_run_pre_replay_flows`
+只跑 PRE_REPLAY 阶段，`register_rollover_notices`/`register_force_close_notices`
+产生的 `ORDER_NOTICE` 事件从未被消费（bridge.py 的注释原本就写了"never
+drained"，但没意识到这连带丢了目标合约的切换逻辑）。结果是桥接框架永远在
+交易抽象连续产品本身，never rolls，跟 native 的"到期前换到下一张具体合约"
+行为在有期限结构的产品上完全不一致。
+
+修法是直接复用 `TermStructureExpandModule._tradable_contract_row`——不是
+重新实现一遍换月/强平判断逻辑，而是 import 那个函数本身，保证桥接和 native
+用的是同一段判断代码（ADR-024 的等价性要求）。`build_membership_payload`
+新增 `_term_structure_resolver_for(run_state, strategy)`：如果这个策略在
+`run_state.term_structure_store.contract_metadata` 里有内容（`_run_pre_replay_flows`
+执行 `expand_term_structure` 时已经填好了），就用该策略自己的
+`rollover_policy`/`rollover_before_expiry`/`force_close_before_expiry` 构造
+一个按 `(product, timestamp)` 解析出目标合约的 resolver；没有期限结构
+元数据的策略（绝大多数产品，没有 rollover）resolver 返回 `None`，membership
+写入位置和改动前完全一样，不影响现有行为。有 resolver 时，每一行/每一个
+被选中的抽象产品都先过一遍 `_tradable_contract_row`，再把 membership 写到
+它解析出的具体合约（或者仍然是抽象产品本身，取决于 native 会怎么解析）
+对应的列上——而不是抽象产品自己的列。
+
+`signal_updates`（触发 worker 侧下单的信号）现在基于"解析后的具体合约集合"
+是否变化来判断，不是抽象产品集合是否变化——这样换月导致的目标合约切换本身
+就会被记成一次信号更新，驱动 worker 平掉旧合约、开出新合约，跟 native
+`_handle_rollover_notice` 里手工构造的 close_order + open_order 是等价的
+经济结果（虽然桥接这边是通过"目标权重从旧合约的非零变成零、从新合约的零
+变成非零"这套已有的 target-weight executable-deltas 机制自然产生的，不是
+显式生成一对订单）。
+
+新增测试 `test_membership_resolves_rolled_to_contract_for_term_structure_products`
+（`tests/backtest/test_framework_bridge.py`）：一个抽象产品 + 两张具体合约，
+换月提前量设为 `0d`，断言不同 bar 上 membership 落在不同的具体合约列上，
+从不落在抽象产品自己的列上。
+
+### 修复：换月/强平从未真正解析过目标合约（ctx 跨阶段失效，比排序 bug 更根本）
+
+追问桥接一致性的过程中，用户指出把 `expand_term_structure` 挪到 PRE_REPLAY
+前面之后，还要确认后续（分组、目标解析）用的是"这个时刻对应的具体合约"，
+不能因为挪了顺序就引入新 bug。查证过程中发现一个比排序更根本、跟这次挪动
+无关的既有 bug：`resolve_tradable_target_weights`（PER_EVENT/SIGNAL，真正
+把抽象产品目标权重解析到当前可交易具体合约的函数）读 `contract_metadata`
+用的是 `ctx.get_for(...)`——但 `scheduler.py` 的 `make_dispatcher` 对每个
+事件批次都会新建一个 `FlowContext`（`handler()` 闭包里 `ctx = FlowContext(...)`
+是每次调用都重新构造，不是跨批次复用的），PRE_REPLAY 阶段 `expand_term_structure`
+写入的 `ctx.set_for(contract_metadata, ...)` 属于另一个、早已丢弃的 `FlowContext`
+实例，PER_EVENT 阶段的新 ctx 完全看不到它。也就是说：无论 `expand_term_structure`
+排在 PRE_REPLAY 的第几位，`resolve_tradable_target_weights` 读到的 `metadata`
+在真实回放中永远是空的（`ctx.get_for` 的默认值），换月/强平的目标合约重新
+映射在生产环境里从未真正执行过——现金/持仓/订单全程只认得抽象产品这一个
+对象。同文件里 `_handle_rollover_notice`/`_handle_delivery_force_close_notice`
+（同样是 PER_EVENT，但读的是 `state.term_structure_store.contract_metadata`，
+持久化在 `state` 上、不是 ctx-scoped）已经是正确写法，`resolve_tradable_target_weights`
+只是没跟上这个约定。测试之所以一直是绿的，是因为所有单测都用同一个手工构造的
+`ctx` 先调 `_expand_term_structure` 再调 `_resolve_tradable_target_weights`，
+掩盖了生产环境两次调用之间 ctx 会被整个替换掉这件事。
+
+修法是把 `metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata,
+strategy, ()))` 改成 `state.term_structure_store.contract_metadata.get(strategy, ())`，
+跟 `_next_contract_object_for_notice` 保持一致。新增回归测试
+`test_signal_target_weights_resolve_across_separate_pre_replay_and_per_event_contexts`
+（`tests/backtest/native/test_term_structure_lifecycle.py`）——特意用两个独立
+的 `FlowContext` 实例（不是像其它测试那样共用一个），修复前这个测试确认会
+失败（目标权重停留在抽象产品上，不会换月），修复后通过。
+
+### 修复：行情覆盖检查不能用"数据文件是否有交集"的启发式判断期限结构合约
+
+用户进一步指出：`expand_term_structure` 提前之后，`check_market_data_coverage`
+判断一个具体合约"是否被覆盖"的逻辑本身也不对。原来的 `_product_outside_run_window`
+是给连续产品设计的启发式——从产品自己的数据文件（或 `_local_cnfutures_lifecycle_coverage`
+目录快照）反推它的上市/退市区间，跟回测窗口比较，判断"没有交集就可以静默排除"
+（服务于半途上市/退市的连续产品场景，这部分行为不变）。但对
+`TermStructureExpandModule.expand_term_structure` 展开出来的具体合约而言，
+"这个时间区间是否应该有这张合约的数据"这件事期限结构表本身就是权威来源——
+`get_contract_list(start_date, end_date)` 已经把展开结果过滤成跟回测窗口
+有交集的合约了。如果这时候还是用连续产品那套（可能来自另一个、更粗糙的
+目录数据源的）启发式去判断"是否越界"，两个信息源可能互相矛盾：期限结构表
+明确说这张合约在这个窗口内应该有数据，但启发式因为查的是另一份目录快照，
+判断"越界"就把它静默排除——真实的数据缺口（合约存在、但本地行情库没有对应
+文件）被吞掉了，永远不会报错，用户不会知道自己其实是在缺数据的情况下跑的
+回测。
+
+修法：新增 `_term_structure_concrete_contracts(state, ctx)`，收集所有策略
+`contract_metadata` 里非 `is_identity` 行的 `contract_object` 集合。
+`_check_market_data_coverage`/`_load_raw_market_data` 里所有原本直接调
+`_product_outside_run_window(product, start_dt, end_dt)` 的地方，都换成一个
+本地 `outside_window(product)`：只要 `product` 属于这个集合，直接返回
+`False`（永远不允许静默排除，缺数据必须报错）；否则退回原来的启发式
+（非期限结构产品的行为完全不变）。`check_market_data_coverage`/
+`load_raw_market_data` 两个 Flow 的 `inputs` 都补上了
+`TermStructureExpandModule.contract_metadata` 的声明。
+
+新增测试 `test_missing_data_for_a_term_structure_contract_is_a_hard_error_not_a_silent_exclusion`
+（`tests/backtest/native/test_market_data_product_selection.py`）：把
+`_product_outside_run_window` monkeypatch 成永远返回 `True`（模拟启发式
+误判"越界"），断言期限结构展开出来的具体合约仍然报错，而普通非期限结构
+产品在同样的 monkeypatch 下还是走原来的静默排除路径——证明修复只收窄了
+期限结构合约这一类对象的行为，没有改变其它产品的既有语义。
+
+### 修复：`_last_valid_timestamp` 不认 MultiIndex，撞上了刚刚才真正跑到的推断分支
+
+上面这次让"数据缺口必须报错"的修复落地之后，用户反馈跑真实回测时在
+"登记交割强平通知"（`register_force_close_notices`）这一步炸了：
+
+```
+Cannot convert input [(Timestamp('2026-01-30 00:00:00'),
+Timestamp('2026-01-30 15:00:00+0800', tz='Asia/Shanghai'))] of type
+<class 'tuple'> to Timestamp
+```
+
+顺着 `_lifecycle_base_timestamp` 往下查：一个具体合约如果自己的
+`get_contract_list` 行里没有 `last_trade_date`/`auto_close_date` 这类字段
+（`AdjustableProductMixin.get_contract_list` 的默认实现只给 `start`/`end`/
+`start_ts`/`end_ts`，从不给这些），又没能在 OpenCTP 快照或 AKShare 生命周期表
+里查到（两边都单独验证过，字段是干净的标量字符串，没有重复列），就会走到
+最后一道兜底：`_local_cnfutures_inferred_lifecycle` → `infer_contract_end_from_coverage`
+→ `_last_valid_timestamp(contract_series)`。这个函数原来直接写
+`valid.index[-1]`——但 `raw_prices`（真实加载出来的行情表）的索引在这个仓库里
+可以是 `_SIGNAL@` 前缀的 MultiIndex（`DataIndex` 专门支持这种结构），对
+MultiIndex 取 `[-1]` 返回的是这一行各层级值组成的元组，不是标量，喂给
+`pd.Timestamp(...)` 直接炸——错误信息里两个时间戳（同一天的裸日期 + 带时区
+的精确时刻）正是 MultiIndex 两层的值。
+
+这是 `sources/LocalCNFutures/lifecycle.py` 里的既有 bug，跟这次改动本身无关，
+但只有在这次把"期限结构合约缺数据必须报错"改对之后，具体合约的真实每档行情
+才会被稳定加载进来、真正走到这条此前很可能从未被现实数据触发过的兜底推断分支——
+所以是被上一个修复带出来的，而不是新引入的。
+
+修法：`_last_valid_timestamp` 改用 `DataIndex(valid.index).event_timestamps()`
+取信号时间层的最后一个值，跟 `term_structure.py` 里 `_shift_on_event_axis`
+已经在用的手法保持一致，同时兼容普通 `DatetimeIndex` 和 MultiIndex。
+
+新增测试 `tests/data/test_local_cnfutures_lifecycle.py`：`_last_valid_timestamp`
+分别用普通 `DatetimeIndex`（含末尾 NaN 的情形）和 `_SIGNAL@` 前缀 MultiIndex
+两种索引验证；`infer_contract_end_from_coverage` 用 MultiIndex 行情表端到端
+验证。修复前，MultiIndex 用例复现了用户报的一模一样的 `TypeError`。
+
+### 修复：`resolve_tradable_target_weights` 真正跑起来之后，每个 SIGNAL 事件都重新扫一遍行情表
+
+上面 ctx 跨阶段失效的 bug 修好、`resolve_tradable_target_weights` 第一次
+真正在生产环境执行之后，用户反馈回测明显变慢。原因很直接：这个函数现在
+对每个 SIGNAL 事件、每个有目标权重的产品，都会调用一次
+`TermStructureExpandModule._tradable_contract_row`，而它内部
+`_event_timestamp_from_row`（解析换月/强平这两个时间点）在合约自身元数据
+和 OpenCTP/AKShare 目录都没有权威日期时，会兜底调用
+`_local_cnfutures_inferred_lifecycle` → `infer_contract_end_from_coverage`——
+这个函数会扫一遍整张行情表（每个候选合约的价格列都要 `dropna()`）。
+
+问题在于：`_event_timestamp_from_row` 的结果只取决于"这一行元数据 + 这个
+offset（换月提前量/强平提前量）"，跟当前是第几个 SIGNAL 事件、事件时间戳
+是多少完全无关——换月/强平的绝对时间点在回测开始时就已经确定了。之前这个
+函数从未真正跑过（ctx bug 导致 metadata 永远是空的，直接 `continue`），
+所以这个"每次都重新扫全表"的设计缺陷从未被现实数据触发过、代价从未被
+真正付过；bug 一修好，这笔账单也一起送到了。
+
+修法：`TermStructureStore` 新增 `event_timestamp_cache`，`_event_timestamp_from_row`
+按 `(id(row), offset)` 记忆化——同一份元数据行对象在整个回测过程中是
+`_expand_term_structure`（PRE_REPLAY，只跑一次）产出并持久化在
+`state.term_structure_store.contract_metadata` 上的稳定对象，不会跨事件
+重建，所以 `id(row)` 是安全的缓存键；`offset` 区分换月和强平这两个不同的
+提前量。
+
+新增测试 `test_resolve_tradable_target_weights_caches_lifecycle_inference_across_signal_events`
+（`tests/backtest/native/test_term_structure_lifecycle.py`）：monkeypatch
+`infer_contract_end_from_coverage` 计数，模拟 20 个各自独立 `FlowContext`
+的 SIGNAL 事件（贴近生产环境每批事件都是新 ctx 这一事实），断言昂贵的
+兜底推断调用次数有一个跟事件数无关的小常数上限。修复前，20 个事件触发了
+37 次全表扫描；修复后封顶在 4 次以内（2 张合约 × 最多 2 个 offset）。
+
+## 参考
+
+- ADR-018（事件运行时）、ADR-022（因子执行后端）、ADR-024（模块所有权与
+  RQAlpha 适配边界）、ADR-028（Broker policy 边界）、ADR-029（Flow 顺序与
+  RunState 命名）
+- `tools/testers/backtest/engines/workers/`、`engines/adapters/`

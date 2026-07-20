@@ -207,7 +207,7 @@
 
         <h3>3.4 设计模式</h3>
         <p><strong>抽屉式设置 (Drawer)：</strong>每个设置模块以可折叠的 <code>.settings-drawer-panel</code> 形式呈现，点击摘要行展开，不刷新页面。</p>
-        <p><strong>模板系统：</strong>参数、时间范围、单因子设置快照有独立的 JSON 模板存储（<code>/api/*_templates</code>），支持命名、保存、加载、删除。</p>
+        <p><strong>模板系统：</strong>研究工作区与命名模板共享开放的 ResearchConfiguration 结构；字段由设置 registry 声明，模板支持命名、保存、加载、覆盖、删除。</p>
         <p><strong>前端费率计算：</strong>分组回测中的费率敏感性分析在前端用 JS 实时重算累积净值和 Sharpe/MDD，无需重复请求后端。</p>
     </div>
 
@@ -230,15 +230,15 @@
             <tr><td><code>/add_factor_by_params</code></td><td>POST</td><td>新增一组因子参数（写入 page_factors）</td></tr>
         </table>
 
-        <h3>4.3 模板系统 (CRUD 统一模式)</h3>
-        <p>三套模板 API 遵循相同的 REST 模式：</p>
+        <h3>4.3 研究配置与模板</h3>
         <table>
-            <tr><th>资源</th><th>路由前缀</th><th>存储内容</th></tr>
-            <tr><td>时间范围模板</td><td><code>/api/time_templates</code></td><td>起止时间、交易日/盘面设置</td></tr>
-            <tr><td>参数模板</td><td><code>/api/params_templates/&lt;alias&gt;</code></td><td>因子参数组列表</td></tr>
-            <tr><td>单因子设置快照</td><td><code>/api/single_factor_setting_templates</code></td><td>当前因子家族的完整快照（参数+时间+品种+费率+回测设置）</td></tr>
+            <tr><th>资源</th><th>路由</th><th>说明</th></tr>
+            <tr><td>活动配置</td><td><code>/api/workspaces/&lt;id&gt;/configuration</code></td><td>读取或更新工作区当前完整配置</td></tr>
+            <tr><td>模板列表</td><td><code>/api/configuration-templates</code></td><td>列出用户命名的完整研究配置</td></tr>
+            <tr><td>保存模板</td><td><code>/api/workspaces/&lt;id&gt;/configuration/templates</code></td><td>从当前活动配置保存模板</td></tr>
+            <tr><td>加载模板</td><td><code>/api/workspaces/&lt;id&gt;/configuration/load-template</code></td><td>将模板加载为活动配置</td></tr>
         </table>
-        <p>每个资源均支持：<code>GET /</code>（列表）、<code>POST /</code>（创建）、<code>GET /&lt;id&gt;</code>（获取）、<code>PUT /&lt;id&gt;</code>（更新）、<code>DELETE /&lt;id&gt;</code>（删除）。模板按用户隔离存储，JSON 格式。</p>
+        <p>配置按用户隔离；shared、各测试 local settings、分组和 LS 内的 registry 字段均原样保存，不使用固定字段白名单。</p>
 
         <h3>4.4 时间 & 品种</h3>
         <table>

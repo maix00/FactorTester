@@ -37,6 +37,29 @@ def test_order_reversed_raises():
         sort_and_validate(_resolve(fa, fb))
 
 
+def test_input_can_read_earlier_value_when_field_has_a_later_producer():
+    first = Flow("first", inputs=(), outputs=(A,), phase=Phase.PRE_REPLAY, order=1, compute=lambda a, c: None)
+    reader = Flow("reader", inputs=(A,), outputs=(B,), phase=Phase.PRE_REPLAY, order=2, compute=lambda a, c: None)
+    overwrite = Flow("overwrite", inputs=(), outputs=(A,), phase=Phase.PRE_REPLAY, order=3, compute=lambda a, c: None)
+
+    groups = sort_and_validate(_resolve(first, reader, overwrite))
+
+    assert [flow.name for flow in groups[(Phase.PRE_REPLAY, None)]] == [
+        "first",
+        "reader",
+        "overwrite",
+    ]
+
+
+def test_input_rejects_field_when_all_producers_are_later():
+    reader = Flow("reader", inputs=(A,), outputs=(B,), phase=Phase.PRE_REPLAY, order=1, compute=lambda a, c: None)
+    first = Flow("first", inputs=(), outputs=(A,), phase=Phase.PRE_REPLAY, order=2, compute=lambda a, c: None)
+    overwrite = Flow("overwrite", inputs=(), outputs=(A,), phase=Phase.PRE_REPLAY, order=3, compute=lambda a, c: None)
+
+    with pytest.raises(SchedulerError, match="all producer flows"):
+        sort_and_validate(_resolve(reader, first, overwrite))
+
+
 def test_after_violation_raises():
     fa = Flow("fa", inputs=(), outputs=(), phase=Phase.PRE_REPLAY, order=2, compute=lambda a, c: None)
     fb = Flow("fb", inputs=(), outputs=(), phase=Phase.PRE_REPLAY, order=1, after=(fa,), compute=lambda a, c: None)

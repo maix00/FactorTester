@@ -10,7 +10,17 @@ import numpy as np
 import pandas as pd
 
 from ...strategies.targets import GroupTargetCalculator
-from tools.testers.settings.strategy_fields import validate_resolved_strategy_settings
+from tools.testers.settings.strategy_fields import (
+    OBSOLETE_REBALANCE_MODE,
+    POSITION_POLICY,
+    REBALANCE_TRIGGER,
+    required_strategy_value,
+)
+
+WORKER_STRATEGY_INTENT_POLICIES: dict[str, str] = {
+    "group": "membership_target_weights",
+    "long_short": "membership_target_weights",
+}
 
 
 def should_report_progress(completed: int, total: int, max_updates: int = 100) -> bool:
@@ -19,6 +29,51 @@ def should_report_progress(completed: int, total: int, max_updates: int = 100) -
         return True
     stride = max(1, int(np.ceil(total / max(max_updates, 1))))
     return completed % stride == 0
+
+
+# ── worker execution policy selectors ───────────────────────────────
+# These two selectors are the only ones ever sourced from a real per-strategy
+# field (translator.py's _worker_execution_policy_selectors reads
+# OrderConstructModule.quantity_rounding_policy / VolumeCapacityMode.
+# liquidity_mode) or checked against a real per-engine `supported` set (see
+# zipline.py/backtrader.py/qlib.py's require_worker_execution_policies calls)
+# -- this is deliberately narrow, not a general broker/account policy
+# object (that's StrategyBook for ledger routing, CounterParty for fee/
+# margin/accounting terms, see ADR-032). A runner must validate the
+# requested selectors against what its framework can actually express and
+# reject the rest — never silently substitute (ADR-024).
+
+WORKER_EXECUTION_POLICY_DEFAULTS: dict[str, str] = {
+    "min_lot_policy": "floor_to_lot",
+    "fill_cap_policy": "no_cap",
+}
+
+
+def worker_execution_policies(strategy: Mapping[str, Any]) -> dict[str, str]:
+    """Requested worker execution policy selectors, defaulted above."""
+    return {
+        key: str(strategy.get(key) or default)
+        for key, default in WORKER_EXECUTION_POLICY_DEFAULTS.items()
+    }
+
+
+def require_worker_execution_policies(
+    strategy: Mapping[str, Any],
+    *,
+    engine: str,
+    supported: Mapping[str, frozenset[str]] | None = None,
+) -> dict[str, str]:
+    """Validate selectors; a value outside the engine's supported set raises."""
+    supported = supported or {}
+    policies = worker_execution_policies(strategy)
+    for key, value in policies.items():
+        allowed = supported.get(key, frozenset({WORKER_EXECUTION_POLICY_DEFAULTS[key]}))
+        if value not in allowed:
+            raise ValueError(
+                f"{engine} cannot express worker execution policy {key}={value!r}; "
+                f"supported: {sorted(allowed)}"
+            )
+    return policies
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +118,7 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
     if any(not value for value in strategy_ids) or len(set(strategy_ids)) != len(strategy_ids):
         raise ValueError("strategy ids must be non-empty and unique")
     for strategy in strategies:
-        validate_resolved_strategy_settings(strategy)
+        _validate_worker_strategy_settings(strategy)
     rules = payload.get("market_rules", {})
     multipliers = _parse_rule_matrix(
         rules.get("multipliers"), len(timestamps), len(instruments), "multipliers"
@@ -102,6 +157,23 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
         margin_ratios,
         volumes,
     )
+
+
+def _validate_worker_strategy_settings(strategy: Mapping[str, Any]) -> None:
+    """Validate shared split semantics without importing native-only timing policy."""
+
+    kind = str(strategy.get("strategy_kind") or "group")
+    if kind not in WORKER_STRATEGY_INTENT_POLICIES:
+        raise ValueError(
+            f"strategy_kind={kind!r} is not registered for framework worker strategy-intent replay"
+        )
+    if OBSOLETE_REBALANCE_MODE in strategy:
+        raise ValueError(
+            f"{OBSOLETE_REBALANCE_MODE} is obsolete; use "
+            f"{REBALANCE_TRIGGER} and {POSITION_POLICY}"
+        )
+    required_strategy_value(strategy, REBALANCE_TRIGGER)
+    required_strategy_value(strategy, POSITION_POLICY)
 
 
 def target_rows(

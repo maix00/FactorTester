@@ -9,6 +9,7 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": false,
+            "subProcess": true,
             "args": ["--repo", "${workspaceFolder}", "--port", "7998"]
         },
         {
@@ -19,6 +20,7 @@
             "cwd": "${workspaceFolder}/../Codes-master-server",
             "console": "integratedTerminal",
             "justMyCode": false,
+            "subProcess": true,
             "env": {
                 "FLASK_DEBUG": "1"
             },
@@ -32,6 +34,7 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": false,
+            "subProcess": true,
             "env": {
                 "FLASK_DEBUG": "1"
             },
@@ -45,10 +48,32 @@
             "cwd": "${input:debugWorktreePath}",
             "console": "integratedTerminal",
             "justMyCode": false,
+            "subProcess": true,
             "env": {
-                "FLASK_DEBUG": "1"
+                "FLASK_DEBUG": "1",
+                "FACTORTESTER_WERKZEUG_RELOADER": "0",
+                "GTHT_DEPLOYMENT_ID": "${input:debugWorktreeDeployment}",
+                "GTHT_JOB_DAEMON_SOCKET": "${input:debugWorktreePath}/.workspace/runtime/${input:debugWorktreeDeployment}.sock"
             },
             "args": ["--port", "${input:debugWorktreePort}"]
+        },
+        {
+            "name": "Research Daemon Debug: selected worktree",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${input:debugWorktreePath}/scripts/research_job_daemon.py",
+            "cwd": "${input:debugWorktreePath}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "subProcess": true,
+            "env": {
+                "GTHT_DEPLOYMENT_ID": "${input:debugWorktreeDeployment}",
+                "GTHT_JOB_DAEMON_SOCKET": "${input:debugWorktreePath}/.workspace/runtime/${input:debugWorktreeDeployment}.sock"
+            },
+            "args": [
+                "--deployment-id", "${input:debugWorktreeDeployment}",
+                "--socket", "${input:debugWorktreePath}/.workspace/runtime/${input:debugWorktreeDeployment}.sock"
+            ]
         },
         {
             "name": "Python Debugger: Current File",
@@ -68,6 +93,16 @@
             "justMyCode": false
         }
     ],
+    "compounds": [
+        {
+            "name": "FactorTester Debug: selected bundle",
+            "configurations": [
+                "Research Daemon Debug: selected worktree",
+                "Flask Debug: selected worktree"
+            ],
+            "stopAll": true
+        }
+    ],
     "inputs": [
         {
             "id": "debugWorktreePath",
@@ -80,6 +115,12 @@
             "type": "promptString",
             "description": "Flask port for this worktree",
             "default": "8100"
+        },
+        {
+            "id": "debugWorktreeDeployment",
+            "type": "promptString",
+            "description": "Deployment id shared by API and research daemon",
+            "default": "issue-135-debug"
         }
     ]
 }

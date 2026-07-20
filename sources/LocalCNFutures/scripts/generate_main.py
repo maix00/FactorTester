@@ -22,7 +22,11 @@ if __package__ in (None, ""):
         sys.path.insert(0, str(_root))
 
 from sources.LocalCNFutures import ROLLER_INFO_PATH, SOURCE_DATA_DIR
-from sources.LocalCNFutures.contract_files import portable_contract_filename, resolve_contract_parquet_path
+from sources.LocalCNFutures.contract_files import (
+    contract_uid_from_exchange_contract,
+    portable_contract_filename,
+    resolve_contract_parquet_path,
+)
 
 CONTRACT_MAPPING_PATH = os.path.join(SOURCE_DATA_DIR, 'wind_mapping.parquet')
 CONTRACT_MAPPING_PATH_TRUNCATED = os.path.join(SOURCE_DATA_DIR, 'wind_mapping_truncated.parquet')
@@ -35,11 +39,92 @@ MAIN_DAYK_FOLDER = os.path.join(SOURCE_DATA_DIR, 'main_dayk') + '/'
 
 _MINUTE_PREPROCESS_MANIFEST = '_minute_preprocess_manifest.json'
 BACKWARD_BASE_DATE_COL = 'BACKWARD_BASE_DATE'
+SETTLEMENT_FILL_COLUMNS = ('settlement_price', 'pre_settlement_price')
 
 _IS_WINDOWS = platform.system() == 'Windows'
 
 
-def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_rebuild: bool = True):
+def _build_dayk_settlement_lookup(dayk_df: pd.DataFrame) -> pd.DataFrame:
+    """Build a compact ``(contract_uid, trading_day)`` lookup for settlement fields."""
+    if dayk_df.empty or 'trading_day' not in dayk_df.columns:
+        return pd.DataFrame(columns=['contract_uid', 'trading_day', *SETTLEMENT_FILL_COLUMNS])
+    if 'contract_uid' not in dayk_df.columns:
+        if 'unique_instrument_id' not in dayk_df.columns:
+            return pd.DataFrame(columns=['contract_uid', 'trading_day', *SETTLEMENT_FILL_COLUMNS])
+        dayk_df = dayk_df.rename(columns={'unique_instrument_id': 'contract_uid'})
+    columns = ['contract_uid', 'trading_day', *[col for col in SETTLEMENT_FILL_COLUMNS if col in dayk_df.columns]]
+    lookup = dayk_df[columns].copy()
+    lookup['trading_day'] = pd.to_datetime(lookup['trading_day']).dt.normalize()
+    lookup = lookup.drop_duplicates(['contract_uid', 'trading_day'], keep='last')
+    return lookup
+
+
+def fill_minute_settlement_from_dayk(minute_df: pd.DataFrame, dayk_lookup: pd.DataFrame) -> pd.DataFrame:
+    """Fill missing/zero minute settlement fields from ``data_dayk``.
+
+    Local minute files currently contain settlement-related columns, but many
+    historical slices use ``0`` as a placeholder. Daily bars are the canonical
+    settlement source. Current-day settlement is only visible on the last bar
+    of each trading day; previous settlement may remain visible intraday.
+    """
+    if minute_df.empty or dayk_lookup.empty:
+        return minute_df
+    filled = minute_df.copy()
+    if 'contract_uid' not in filled.columns:
+        if 'unique_instrument_id' not in filled.columns:
+            return minute_df
+        filled['contract_uid'] = filled['unique_instrument_id']
+    if not {'contract_uid', 'trading_day'} <= set(filled.columns):
+        return minute_df
+
+    filled['trading_day'] = pd.to_datetime(filled['trading_day']).dt.normalize()
+    lookup_cols = ['contract_uid', 'trading_day'] + [
+        col for col in SETTLEMENT_FILL_COLUMNS if col in dayk_lookup.columns
+    ]
+    if len(lookup_cols) <= 2:
+        return filled
+    lookup = dayk_lookup[lookup_cols].rename(
+        columns={col: f'__dayk_{col}' for col in SETTLEMENT_FILL_COLUMNS if col in dayk_lookup.columns}
+    )
+    filled = filled.merge(lookup, on=['contract_uid', 'trading_day'], how='left')
+    last_bar_mask = _trading_day_last_bar_mask(filled)
+    for col in SETTLEMENT_FILL_COLUMNS:
+        day_col = f'__dayk_{col}'
+        if day_col not in filled.columns:
+            continue
+        if col not in filled.columns:
+            filled[col] = np.nan
+        target = pd.to_numeric(filled[col], errors='coerce')
+        source = pd.to_numeric(filled[day_col], errors='coerce')
+        if col == 'settlement_price':
+            filled.loc[~last_bar_mask, col] = np.nan
+            target = pd.to_numeric(filled[col], errors='coerce')
+            mask = last_bar_mask & (target.isna() | (target == 0)) & source.notna() & (source != 0)
+        else:
+            mask = (target.isna() | (target == 0)) & source.notna() & (source != 0)
+        filled.loc[mask, col] = source[mask]
+        filled.drop(columns=[day_col], inplace=True)
+    return filled
+
+
+def _trading_day_last_bar_mask(frame: pd.DataFrame) -> pd.Series:
+    if 'trade_time' in frame.columns:
+        event_time = pd.to_datetime(frame['trade_time'], errors='coerce')
+    elif 'trade_timestamp' in frame.columns:
+        event_time = pd.to_datetime(frame['trade_timestamp'], unit='ms', errors='coerce')
+    else:
+        event_time = pd.Series(frame.index, index=frame.index)
+    grouped_max = event_time.groupby([frame['contract_uid'], frame['trading_day']]).transform('max')
+    return event_time.eq(grouped_max).fillna(False)
+
+
+def preprocess_minute_data(
+    minute_raw_dir: str,
+    minute_product_dir: str,
+    force_rebuild: bool = True,
+    dayk_settlement_lookup: pd.DataFrame | None = None,
+    dayk_signature: dict | None = None,
+):
     """预处理分钟数据，生成每个 uid 的独立 parquet 文件。
 
     force_rebuild=True 时清空并全量重建；False 时按原始 parquet 的
@@ -63,14 +148,17 @@ def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_r
     # 增量模式：加载已有 manifest，对比文件签名
     manifest_path = os.path.join(minute_product_dir, _MINUTE_PREPROCESS_MANIFEST)
     manifest = {} if force_rebuild else (json.load(open(manifest_path, encoding='utf-8')) if os.path.exists(manifest_path) else {})
-    files_to_process = []
-    for path in raw_files:
-        stat = os.stat(path)
-        sig = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
-        key = os.path.basename(path)
-        if not force_rebuild and manifest.get(key) == sig:
-            continue
-        files_to_process.append((path, key, sig))
+    if not force_rebuild and dayk_signature is not None and manifest.get("__dayk_settlement_source__") != dayk_signature:
+        files_to_process = [(path, os.path.basename(path), {'size': os.stat(path).st_size, 'mtime_ns': os.stat(path).st_mtime_ns}) for path in raw_files]
+    else:
+        files_to_process = []
+        for path in raw_files:
+            stat = os.stat(path)
+            sig = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
+            key = os.path.basename(path)
+            if not force_rebuild and manifest.get(key) == sig:
+                continue
+            files_to_process.append((path, key, sig))
 
     if not files_to_process:
         print("Minute product data is up to date. Skipping preprocessing.")
@@ -80,6 +168,8 @@ def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_r
 
     def _write_uid_group(uid: str, group: pd.DataFrame) -> None:
         out_path = os.path.join(minute_product_dir, portable_contract_filename(uid))
+        if dayk_settlement_lookup is not None:
+            group = fill_minute_settlement_from_dayk(group, dayk_settlement_lookup)
         group = group.drop_duplicates(subset='trade_timestamp').sort_values('trade_timestamp')
         if os.path.exists(out_path):
             existing = pd.read_parquet(out_path)
@@ -108,6 +198,8 @@ def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_r
 
         manifest[key] = sig
         with open(manifest_path, 'w', encoding='utf-8') as f:
+            if dayk_signature is not None:
+                manifest["__dayk_settlement_source__"] = dayk_signature
             json.dump(manifest, f, ensure_ascii=False, indent=2, sort_keys=True)
         del df
 
@@ -118,7 +210,9 @@ def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_r
 
 def preprocess_minute_data_stream(minute_raw_dir: str, minute_product_dir: str,
                                    force_rebuild: bool = True,
-                                   flush_threshold: int = 200_000):
+                                   flush_threshold: int = 200_000,
+                                   dayk_settlement_lookup: pd.DataFrame | None = None,
+                                   dayk_signature: dict | None = None):
     """流式预处理分钟数据 — 专为 Windows 优化。
 
     单遍顺序扫描原始文件，每个 uid 用内存缓冲区累积，
@@ -147,14 +241,17 @@ def preprocess_minute_data_stream(minute_raw_dir: str, minute_product_dir: str,
     manifest = {} if force_rebuild else (
         json.load(open(manifest_path, encoding='utf-8')) if os.path.exists(manifest_path) else {}
     )
-    files_to_process = []
-    for path in raw_files:
-        stat = os.stat(path)
-        sig = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
-        key = os.path.basename(path)
-        if not force_rebuild and manifest.get(key) == sig:
-            continue
-        files_to_process.append((path, key, sig))
+    if not force_rebuild and dayk_signature is not None and manifest.get("__dayk_settlement_source__") != dayk_signature:
+        files_to_process = [(path, os.path.basename(path), {'size': os.stat(path).st_size, 'mtime_ns': os.stat(path).st_mtime_ns}) for path in raw_files]
+    else:
+        files_to_process = []
+        for path in raw_files:
+            stat = os.stat(path)
+            sig = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
+            key = os.path.basename(path)
+            if not force_rebuild and manifest.get(key) == sig:
+                continue
+            files_to_process.append((path, key, sig))
 
     if not files_to_process:
         print("Minute product data is up to date. Skipping preprocessing.")
@@ -170,6 +267,8 @@ def preprocess_minute_data_stream(minute_raw_dir: str, minute_product_dir: str,
         """将缓冲区数据写入磁盘，同一 uid 只写 1 次（无需读回）。"""
         out_path = os.path.join(minute_product_dir, portable_contract_filename(uid))
         combined = pd.concat(buffer[uid], ignore_index=True)
+        if dayk_settlement_lookup is not None:
+            combined = fill_minute_settlement_from_dayk(combined, dayk_settlement_lookup)
         combined = combined.drop_duplicates(subset='trade_timestamp') \
                            .sort_values('trade_timestamp')
 
@@ -222,6 +321,8 @@ def preprocess_minute_data_stream(minute_raw_dir: str, minute_product_dir: str,
 
                     manifest[key] = sig
                     with open(manifest_path, 'w', encoding='utf-8') as f:
+                        if dayk_signature is not None:
+                            manifest["__dayk_settlement_source__"] = dayk_signature
                         json.dump(manifest, f, ensure_ascii=False, indent=2)
                     pbar.update(1)
     finally:
@@ -249,18 +350,31 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
     增量更新主力合约序列（仅追加尾部新合约，不修改历史）
     使用分钟数据索引，按需加载分钟数据。
     """
+    dayk_df = (df := pd.read_parquet(dayk_path)).assign(trading_day=pd.to_datetime(df['trading_day']))
+    if 'contract_uid' not in dayk_df.columns and 'unique_instrument_id' in dayk_df.columns:
+        dayk_df = dayk_df.rename(columns={'unique_instrument_id': 'contract_uid'})
+    dayk_settlement_lookup = _build_dayk_settlement_lookup(dayk_df)
+    dayk_stat = os.stat(dayk_path) if isinstance(dayk_path, str) and os.path.exists(dayk_path) else None
+    dayk_signature = (
+        {'path': os.path.abspath(dayk_path), 'size': dayk_stat.st_size, 'mtime_ns': dayk_stat.st_mtime_ns}
+        if dayk_stat is not None else None
+    )
     # ========== 1. 处理分钟索引 ==========
     if _IS_WINDOWS:
         preprocess_minute_data_stream(
             minute_data_dir,
             minute_data_preprocessed_dir,
             force_rebuild=bool(rebuild_minute_product),
+            dayk_settlement_lookup=dayk_settlement_lookup,
+            dayk_signature=dayk_signature,
         )
     else:
         preprocess_minute_data(
             minute_data_dir,
             minute_data_preprocessed_dir,
             force_rebuild=bool(rebuild_minute_product),
+            dayk_settlement_lookup=dayk_settlement_lookup,
+            dayk_signature=dayk_signature,
         )
 
     # ========== 2. 加载已有 roller_info ==========
@@ -300,22 +414,15 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
             return row['CONTRACT'].replace(contract_digits, decade_str + contract_digits) if decade_str is not None else None
         else: return None  # 无法处理的格式
         
-    exchange_map = {'DCE': 'DCE', 'CZCE': 'CZC', 'INE': 'INE', 'SHFE': 'SHF', 'CFFEX': 'CFE', 'GFEX': 'GFE'}
-    reverse_map = {v: k for k, v in exchange_map.items()}
-
     def patched_to_uid(patched):
         if patched is None:
             return None
-        pm, exchange = patched.split('.')
-        first_digit_idx = next((i for i, c in enumerate(pm) if c.isdigit()), len(pm))
-        return f"{reverse_map.get(exchange, exchange)}|F|{pm[:first_digit_idx]}|{pm[first_digit_idx:]}"
+        return contract_uid_from_exchange_contract(patched)
 
     added_df['CONTRACT_PATCHED'] = added_df.apply(czc_patch_decade, axis=1)
     added_df['CONTRACT_UID'] = added_df['CONTRACT_PATCHED'].apply(patched_to_uid)
 
     # ========== 5. 截断已有合约数据，准备生成主力序列 ==========
-    dayk_df = ((df := pd.read_parquet(dayk_path)).assign(trading_day=pd.to_datetime(df['trading_day']))
-               .rename(columns={'unique_instrument_id': 'contract_uid'}))
     dayk_groups = {uid: group for uid, group in dayk_df.groupby('contract_uid')}
     
     def truncate_contract_data(row):
@@ -327,8 +434,11 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
             if not os.path.exists(file_path):
                 return pd.DataFrame(columns=['trading_day', 'close_price', 'trade_time'])
             lookback_start = start_date - pd.Timedelta(days=60)
-            return ((df := pd.read_parquet(file_path, filters=[('trading_day', '>=', lookback_start), ('trading_day', '<=', end_date)]))
-                .assign(trading_day=pd.to_datetime(df['trading_day']))).rename(columns={'unique_instrument_id': 'contract_uid'})
+            loaded = (df := pd.read_parquet(file_path, filters=[('trading_day', '>=', lookback_start), ('trading_day', '<=', end_date)])) \
+                .assign(trading_day=pd.to_datetime(df['trading_day']))
+            if 'contract_uid' not in loaded.columns and 'unique_instrument_id' in loaded.columns:
+                loaded = loaded.rename(columns={'unique_instrument_id': 'contract_uid'})
+            return fill_minute_settlement_from_dayk(loaded, dayk_settlement_lookup)
         
         df_mink_with_prev = load_contract_data_mink(row['CONTRACT_UID'], row['STARTDATE'], row['ENDDATE'])
         df_mink_with_prev = df_mink_with_prev.sort_values('trade_time') if 'trade_time' in df_mink_with_prev.columns else df_mink_with_prev
@@ -444,6 +554,8 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
                 .assign(unique_instrument_id=product)
                 .sort_values('trade_time')
             )
+            if name == 'MinK':
+                product_df = fill_minute_settlement_from_dayk(product_df, dayk_settlement_lookup)
             product_df.to_parquet(save_path, index=False)
     
     return info_df

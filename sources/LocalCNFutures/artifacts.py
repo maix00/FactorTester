@@ -112,7 +112,7 @@ def register_local_cn_futures_artifacts() -> tuple[DerivedArtifactSpec, DerivedA
         dependencies=(continuous.key,),
         build=_build_term_structure,
         coverage=_term_structure_coverage,
-        schema_version="2-listed-contracts",
+        schema_version="4-listed-contracts-settlement-vwap",
         accept_unmanaged_existing=False,
         on_published=_invalidate_term_structure,
     ))

@@ -14,7 +14,7 @@ from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
-from tools.testers.backtest.modules.target import TargetStrategyModule
+from tools.testers.backtest.modules.target import TargetStrategyModule, target_weight_intent
 
 
 _TARGET_WEIGHTS_REF: FieldRef[Any] = TargetStrategyModule.target_weights
@@ -39,8 +39,8 @@ class LongShortCompositionModule(TargetStrategyModule):
 
     compose_long_short_target: ClassVar[Flow] = Flow(
         "compose_long_short_target",
-        inputs=(long_leg_strategy_ids, short_leg_strategy_ids),
-        outputs=(_TARGET_WEIGHTS_REF, long_short_diagnostics),
+        inputs=(strategy_kind, long_leg_strategy_ids, short_leg_strategy_ids, _TARGET_WEIGHTS_REF),
+        outputs=(_TARGET_WEIGHTS_REF, TargetStrategyModule.trade_intent, long_short_diagnostics),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
         order=15,
@@ -74,6 +74,8 @@ def _compose_long_short_target(state, ctx) -> None:
         short_weights = _combined_leg_weights(ctx, short_legs, diagnostics, "short")
         if not long_weights or not short_weights:
             ctx.set_for(_TARGET_WEIGHTS_REF, strategy, {})
+            ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+                {}, reason="long_short_empty_leg"))
             ctx.set_for(LongShortCompositionModule.long_short_diagnostics, strategy, diagnostics)
             continue
 
@@ -86,6 +88,8 @@ def _compose_long_short_target(state, ctx) -> None:
                 short_weights.pop(product, None)
         if not long_weights or not short_weights:
             ctx.set_for(_TARGET_WEIGHTS_REF, strategy, {})
+            ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+                {}, reason="long_short_no_tradable_leg"))
             ctx.set_for(LongShortCompositionModule.long_short_diagnostics, strategy, diagnostics)
             continue
 
@@ -96,6 +100,8 @@ def _compose_long_short_target(state, ctx) -> None:
             target[product] = target.get(product, 0.0) - weight
         target = {product: weight for product, weight in target.items() if abs(weight) > 1e-12}
         ctx.set_for(_TARGET_WEIGHTS_REF, strategy, target)
+        ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+            target, reason="long_short_composition"))
         ctx.set_for(LongShortCompositionModule.long_short_diagnostics, strategy, diagnostics)
         _record_target_trace(state, strategy, ctx.timestamp, target)
 

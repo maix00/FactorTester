@@ -7,9 +7,19 @@ Futures 通过 roller_info 表维护「历史交易日 → 对应主办合约」
 roller_info 的闲置释放由 DataHub → IdleResourceManager 统一管理。
 """
 import pandas as pd
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, cast
+from importlib import import_module
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, cast
 from datetime import datetime
-from tqdm import tqdm
+
+_T = TypeVar("_T")
+
+
+def tqdm(iterable: Iterable[_T], *args: Any, **kwargs: Any) -> Iterable[_T]:
+    try:
+        progress = getattr(import_module("tqdm"), "tqdm")
+    except ModuleNotFoundError:  # pragma: no cover - exercised in slim worker envs
+        return iterable
+    return cast(Iterable[_T], progress(iterable, *args, **kwargs))
 
 from tools.products.Product import Product
 from tools.data.hub import DataHub
@@ -127,7 +137,7 @@ class Futures(AdjustableProductMixin, Product):
         req_start: Optional[pd.Timestamp] = getattr(pd.Timestamp(start_date), 'normalize')() if start_date else None
         req_end: Optional[pd.Timestamp] = getattr(pd.Timestamp(end_date), 'normalize')() if end_date else None
 
-        contracts = []
+        contracts: List[Dict[str, Any]] = []
         if self.roller_info is None:
             return contracts
         rows = cast(pd.DataFrame, self.roller_info)[['CONTRACT_UID', 'CONTRACT', 'STARTDATE', 'ENDDATE']].copy()
@@ -140,21 +150,21 @@ class Futures(AdjustableProductMixin, Product):
         if req_end is not None:
             rows = rows[rows['STARTDATE_NORM'] <= req_end]
 
-        contracts = [
-            {
+        for row in tqdm(
+            rows.itertuples(index=False),
+            total=len(rows),
+            desc=f"Roller contracts {self.name}",
+        ):
+            start = pd.Timestamp(cast(Any, row.STARTDATE)) if pd.notna(row.STARTDATE) else None
+            end = pd.Timestamp(cast(Any, row.ENDDATE)) if pd.notna(row.ENDDATE) else None
+            contracts.append({
                 'contract': str(row.CONTRACT),
                 'uid': str(row.CONTRACT_UID),
-                'start': row.STARTDATE.strftime('%Y-%m-%d') if pd.notna(row.STARTDATE) else None,
-                'end': row.ENDDATE.strftime('%Y-%m-%d') if pd.notna(row.ENDDATE) else None,
-                'start_ts': int(row.STARTDATE.timestamp() * 1000) if pd.notna(row.STARTDATE) else None,
-                'end_ts': int(row.ENDDATE.timestamp() * 1000) if pd.notna(row.ENDDATE) else None,
-            }
-            for row in tqdm(
-                rows.itertuples(index=False),
-                total=len(rows),
-                desc=f"Roller contracts {self.name}",
-            )
-        ]
+                'start': start.strftime('%Y-%m-%d') if start is not None else None,
+                'end': end.strftime('%Y-%m-%d') if end is not None else None,
+                'start_ts': int(start.timestamp() * 1000) if start is not None else None,
+                'end_ts': int(end.timestamp() * 1000) if end is not None else None,
+            })
         return contracts
 
     def get_contract_row_from_trading_day(self, trading_day: datetime | str) -> Optional[pd.Series]:
@@ -209,7 +219,7 @@ class Futures(AdjustableProductMixin, Product):
             return None
         return self.contract_class(contract_id)
 
-    def iter_roller_contract_rows(self) -> Iterable[pd.Series]:
+    def iter_roller_contract_rows(self) -> Iterable[Any]:
         """按 STARTDATE 顺序遍历当前 Futures 的主力切换行。"""
         self._ensure_roller_info()
         if self.roller_info is None or self.roller_info.empty:
@@ -295,9 +305,9 @@ def map_contracts_to_futures(
         key = contract_key(contract)
         if key is None:
             continue
-        future = futures_by_key.get(tuple(key))
-        if future is not None:
-            mapping[contract] = future
+        matched_future = futures_by_key.get(tuple(key))
+        if matched_future is not None:
+            mapping[contract] = matched_future
     return mapping
 
 

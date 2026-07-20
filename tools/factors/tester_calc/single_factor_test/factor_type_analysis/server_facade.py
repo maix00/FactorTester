@@ -23,10 +23,11 @@ from server.modules.factors.helpers import (
     match_product_column as _match_product_column,
 )
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_run
+from server.modules.shared.factor_tester_runtime import create_isolated_factor_tester_for_run
 from server.modules.shared.factor_tester_runtime import selection_from_request
 from tools.products.product_path_selection import ProductPathSelection
-from server.services.factor_registry import get_factor_family_instance, get_page_factor, page_factors
-from server.services.session_runtime import current_user_obj
+from server.services.factor_registry import factor_from_alias, get_factor_family_instance, get_page_factor, page_factors
+from server.services.session_runtime import current_user_obj, user_obj_for_name
 from tools.data.types import DataTime, finest_index
 from tools.factors.FactorTester import _active_tester
 from tools.factors.tester_calc.single_factor_test.factor_type_analysis import (
@@ -41,7 +42,7 @@ from tools.factors.tester_calc.single_factor_test.factor_type_analysis.correlati
 
 def _product_series_from_tester(
     tester,
-    factor_alias: str,
+    factor_or_alias: Any,
 ) -> dict[str, pd.Series]:
     """
     从 FactorTester 中提取某因子在所有产品上的序列。
@@ -50,22 +51,25 @@ def _product_series_from_tester(
         {product_name: pd.Series}
     """
     factors = getattr(tester, "_factors", [])
-    factor = next((f for f in factors if f.alias == factor_alias), None)
+    result = tester.results.get(factor_or_alias)
+    factor = factor_or_alias if result is not None else None
+    factor_alias = str(getattr(factor_or_alias, "alias", factor_or_alias))
     if factor is None:
-        # 尝试通过已计算的结果查找
+        factor = next((f for f in factors if getattr(f, "alias", None) == factor_alias), None)
+    if factor is None:
+        factor = next((f for f in factors if str(getattr(f, "alias", "")) == factor_alias), None)
+    if factor is None:
+        # Last resort for older FactorTester result stores keyed by factor objects
+        # that are not present in _factors.
         for f in getattr(tester, "_factors", []):
             result = tester.results.get(f)
             if result is not None:
-                table = (
-                    result.func_table if not result.func_table.empty
-                    else result.table if not result.table.empty
-                    else None
-                )
-                if table is not None:
-                    break
+                factor = f
+                break
+    if factor is None:
         return {}
 
-    result = tester.results.get(factor)
+    result = result or tester.results.get(factor)
     if result is None:
         return {}
 
@@ -97,15 +101,30 @@ def _load_and_calc_factor(
     factor_family_alias: str,
     factor_alias: str,
     page_uuid: str,
+    *,
+    allow_default_factor: bool = False,
+    owner: str = "",
+    isolated: bool = False,
+    external_factor_artifacts: list[dict[str, Any]] | None = None,
 ) -> Any:
     """
     加载因子族 → 获取因子定义 → 在 tester 上计算因子。
     返回计算后的 factor 对象。
     """
-    factor_family = get_factor_family_instance(
-        factor_family_alias,
-        page_uuid=page_uuid,
-    )
+    if isolated:
+        from server.services.external_factor_artifacts import factor_by_alias
+
+        factor = factor_by_alias(
+            external_factor_artifacts, factor_alias,
+        ) or factor_from_alias(factor_alias, username=owner)
+        token = _active_tester.set(tester)
+        try:
+            tester.calc_factor(factor, parallel=False)
+        finally:
+            _active_tester.reset(token)
+        return factor
+
+    factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
     # Populate factor_family.factors from page_factors (single source of truth)
     from server.services.factor_registry import page_factors
     page_dict = page_factors.get(str(page_uuid), {})
@@ -116,6 +135,20 @@ def _load_and_calc_factor(
     ]
     factor_family.factors = factors
     factor = _find_factor(factors, factor_alias, factor_alias)
+    if factor is None and allow_default_factor:
+        try:
+            generated = factor_family.get_factors(page_uuid=page_uuid)
+            factors = list(getattr(factor_family, "factors", []) or [])
+            factor = _find_factor(factors, factor_alias, factor_alias)
+            if factor is None and factor_alias == str(getattr(factor_family, "alias", factor_family_alias)):
+                if isinstance(generated, list) and generated:
+                    factor = generated[0]
+                elif generated is not None and not isinstance(generated, list):
+                    factor = generated
+                elif factors:
+                    factor = factors[0]
+        except Exception:
+            factor = None
     if factor is None:
         raise LookupError(f"因子 {factor_alias} 未找到，请先在配置中提交")
 
@@ -187,6 +220,10 @@ class FactorTypeAnalysisRun:
     settings: dict[str, Any] | None = None
     method: str = "pearson"
     min_periods: int = 30
+    owner: str = ""
+    run_id: str = ""
+    isolated: bool = False
+    external_factor_artifacts: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_request(cls, data: dict[str, Any], *, page_uuid: str) -> "FactorTypeAnalysisRun":
@@ -194,10 +231,11 @@ class FactorTypeAnalysisRun:
         factor_alias = str(data.get("factor_alias") or data.get("factor_name") or "").strip()
         if not factor_family_alias or not factor_alias:
             raise ValueError("请先选择因子")
-        method = str(data.get("method") or "pearson").strip()
+        raw_settings = data.get("settings")
+        settings: dict[str, Any] = raw_settings if isinstance(raw_settings, dict) else {}
+        method = str(data.get("method") or settings.get("correlation_method") or "pearson").strip()
         if method not in ("pearson", "spearman"):
             method = "pearson"
-        settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
         raw_min_periods = data.get("min_periods")
         if raw_min_periods is None:
             raw_min_periods = settings.get("min_periods")
@@ -219,17 +257,42 @@ class FactorTypeAnalysisRun:
             min_periods=min_periods,
         )
 
+    @classmethod
+    def from_run_spec(cls, data: dict[str, Any]) -> "FactorTypeAnalysisRun":
+        owner = str(data.get("_owner") or data.get("owner_username") or "").strip()
+        run_id = str(data.get("run_id") or data.get("run_token") or "").strip()
+        if not owner or not run_id:
+            raise ValueError("factor type analysis RunSpec requires owner and run_id")
+        base = cls.from_request(data, page_uuid="")
+        base.owner = owner
+        base.run_id = run_id
+        base.isolated = True
+        base.external_factor_artifacts = list(
+            data.get("external_factor_artifacts") or []
+        )
+        return base
+
     def run(self) -> dict[str, Any]:
         started_at = time.time()
         start_dt, end_dt = _run_window_datetimes(self.settings)
 
         # 1) 创建 FactorTester
-        tester = create_factor_tester_for_run(
-            self.selection,
-            page_uuid=self.page_uuid,
-            start_dt=start_dt,
-            end_dt=end_dt,
-            user=current_user_obj(),
+        tester = (
+            create_isolated_factor_tester_for_run(
+                self.selection,
+                run_id=self.run_id,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                user=user_obj_for_name(self.owner),
+            )
+            if self.isolated
+            else create_factor_tester_for_run(
+                self.selection,
+                page_uuid=self.page_uuid,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                user=current_user_obj(),
+            )
         )
 
         # 2) 计算目标因子
@@ -238,10 +301,13 @@ class FactorTypeAnalysisRun:
             self.factor_family_alias,
             self.factor_alias,
             self.page_uuid,
+            owner=self.owner,
+            isolated=self.isolated,
+            external_factor_artifacts=self.external_factor_artifacts,
         )
 
         # 3) 提取目标因子在各产品上的序列
-        target_series = _product_series_from_tester(tester, self.factor_alias)
+        target_series = _product_series_from_tester(tester, target_factor)
         if not target_series:
             raise LookupError("目标因子没有可用的序列数据")
 
@@ -267,10 +333,11 @@ class FactorTypeAnalysisRun:
                     ref_def.factor_family_alias or self.factor_family_alias,
                     ref_def.factor_alias,
                     self.page_uuid,
+                    allow_default_factor=getattr(ref_def, "reference_source", "") == "public_factor",
+                    owner=self.owner,
+                    isolated=self.isolated,
                 )
-                ref_series = _product_series_from_tester(
-                    tester, ref_def.factor_alias
-                )
+                ref_series = _product_series_from_tester(tester, ref_factor)
                 if ref_series:
                     # 取与目标因子代表性产品相同的产品
                     rep_product = max(
@@ -336,6 +403,8 @@ class FactorTypeAnalysisRun:
                 "std": round(float(series.std()), 6) if len(series) else None,
             })
 
+        from server.services.external_factor_artifacts import result_metadata
+
         return {
             "success": True,
             "target_factor": {
@@ -359,4 +428,7 @@ class FactorTypeAnalysisRun:
                 "skipped_reference_count": len(skipped_refs),
                 "asset_classes": list(asset_classes),
             },
+            "external_factor_artifacts": result_metadata(
+                self.external_factor_artifacts
+            ),
         }

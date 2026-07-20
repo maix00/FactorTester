@@ -32,9 +32,5 @@
         getGroupSnapshot: function(payload) { return postJson('/get_group_snapshot', payload); },
 
         // Settings snapshot persistence (Issue #85 P6)
-        saveGroupSettings: function(payload) { return postJson('/save_group_settings', payload); },
-        loadGroupSettings: function(payload) { return postJson('/load_group_settings', payload); },
-        listGroupSettings: function(payload) { return postJson('/list_group_settings', payload); },
-        deleteGroupSettings: function(payload) { return postJson('/delete_group_settings', payload); },
     };
 })();

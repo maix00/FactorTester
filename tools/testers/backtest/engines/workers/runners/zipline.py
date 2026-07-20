@@ -15,15 +15,14 @@ from zipline.finance.transaction import Transaction
 from .common import (
     market_rule_diagnostics,
     capacity_limited_deltas,
-    execute_target_weights,
     execution_delay_bars,
     execution_trace_entry,
     execution_price,
     execution_timing,
     parse_group_strategy_input,
     parse_target_weight_input,
-    portfolio_value,
     position_value_snapshot,
+    require_worker_execution_policies,
     setting_fallback_diagnostics,
     target_quantities,
     target_rows,
@@ -132,17 +131,47 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {"engine": "zipline", "portfolios": portfolios}
 
 
-def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+def run_strategy_intents(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    """Event-driven strategy-intent replay through Zipline's Ledger transaction lifecycle.
+
+    Per bar: mark positions to market on Zipline's PositionTracker, execute
+    due targets as Zipline Transactions processed by its Ledger (fees via
+    process_commission), then compute this bar's target via the group
+    calculator and schedule it for the next bar — target on SIGNAL, fill on
+    the following ORDER, matching ADR-029's event order. Broker policy
+    selectors (ADR-028) are validated up front; cash rescale + lot floor
+    (cash_policy=rescale_buy_orders, min_lot_policy=floor_to_lot) run in
+    _zipline_executable_deltas before transactions are created.
+    """
     request, memberships, updates, calculators = parse_group_strategy_input(payload)
+    exchange = ExchangeInfo("GTHT", "GTHT", "CN")
+    assets = {
+        instrument: Equity(
+            index + 1,
+            exchange,
+            symbol=instrument,
+            asset_name=instrument,
+            start_date=request.timestamps[0],
+            end_date=request.timestamps[-1],
+        )
+        for index, instrument in enumerate(request.instruments)
+    }
     portfolios = {}
     total_replay_steps = len(request.timestamps) * len(request.strategies)
     for strategy_position, (strategy, calculator) in enumerate(
         zip(request.strategies, calculators, strict=True)
     ):
+        require_worker_execution_policies(
+            strategy,
+            engine="zipline",
+            supported={"fill_cap_policy": frozenset({"no_cap", "volume_participation"})},
+        )
         strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
-        cash = strategy_cash
-        positions = {instrument: 0.0 for instrument in request.instruments}
-        pending_targets = []
+        ledger = Ledger(request.timestamps, strategy_cash, "daily")
+        timing = execution_timing(strategy)
+        delay_bars = execution_delay_bars(strategy)
+        pending_deltas: list[tuple[int, dict[str, float]]] = []
+        transaction_number = 0
         equity_curve = {}
         position_curve = {}
         notional_curve = {}
@@ -150,25 +179,80 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         execution_trace = {}
         execution_trace_count = 0
         collect_trace = bool(strategy.get("collect_execution_trace"))
-        timing = execution_timing(strategy)
-        delay_bars = execution_delay_bars(strategy)
-        for row, timestamp in enumerate(request.timestamps):
-            due_targets = [target for due_row, target in pending_targets if due_row <= row]
-            pending_targets = [
-                (due_row, target) for due_row, target in pending_targets if due_row > row
-            ]
-            for pending in due_targets:
-                before = dict(positions)
-                cash_before = cash
-                cash, positions, deltas = execute_target_weights(
-                    request, row, strategy, pending, positions, cash
+
+        def _positions() -> dict[str, float]:
+            return {
+                instrument: float(
+                    ledger.position_tracker.positions[asset].amount
+                    if asset in ledger.position_tracker.positions else 0.0
                 )
-                if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace_count += 1
-                    if collect_trace:
-                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                            request, row, strategy, before, deltas, cash_before
-                        )
+                for instrument, asset in assets.items()
+            }
+
+        def _deltas_for_target(row: int, target) -> dict[str, float]:
+            ledger._dirty_portfolio = True
+            value = float(ledger.portfolio.portfolio_value)
+            desired = target_quantities(request, row, target, value, strategy)
+            current = _positions()
+            return _zipline_executable_deltas(
+                request, row, strategy, desired, current, float(ledger.portfolio.cash),
+            )
+
+        def _execute(row: int, timestamp, deltas: Mapping[str, float]) -> None:
+            nonlocal transaction_number, execution_trace_count
+            ledger._dirty_portfolio = True
+            current = _positions()
+            executable = _zipline_executable_deltas(
+                request,
+                row,
+                strategy,
+                {
+                    instrument: float(current.get(instrument, 0.0)) + float(deltas.get(instrument, 0.0))
+                    for instrument in request.instruments
+                },
+                current,
+                float(ledger.portfolio.cash),
+            )
+            if any(abs(delta) > 1e-12 for delta in executable.values()):
+                execution_trace_count += 1
+                if collect_trace:
+                    execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                        request, row, strategy, current, executable,
+                        float(ledger.portfolio.cash),
+                    )
+            for sell_first in (True, False):
+                for instrument, delta in executable.items():
+                    if abs(delta) <= 1e-12 or (delta < 0) != sell_first:
+                        continue
+                    transaction_number += 1
+                    fill_price = execution_price(
+                        valuation_price(request, row, instrument), delta, strategy
+                    )
+                    ledger.process_transaction(Transaction(
+                        assets[instrument], delta, timestamp, fill_price,
+                        f"order-{transaction_number}",
+                    ))
+                    fee = abs(delta) * fill_price * float(strategy.get("fee_rate") or 0.0)
+                    if fee:
+                        ledger.process_commission({"asset": assets[instrument], "cost": fee})
+
+        for row, timestamp in enumerate(request.timestamps):
+            current_prices = {
+                instrument: valuation_price(request, row, instrument)
+                for instrument in request.instruments
+            }
+            for instrument, asset in assets.items():
+                ledger.position_tracker.update_position(
+                    asset,
+                    last_sale_price=current_prices[instrument],
+                    last_sale_date=timestamp,
+                )
+            due_deltas = [deltas for due_row, deltas in pending_deltas if due_row <= row]
+            pending_deltas = [
+                (due_row, deltas) for due_row, deltas in pending_deltas if due_row > row
+            ]
+            for pending in due_deltas:
+                _execute(row, timestamp, pending)
             target = calculator.update(
                 timestamp,
                 np.asarray([request.prices[name][row] for name in request.instruments]),
@@ -176,47 +260,35 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                 updates[row],
                 np.asarray(request.margin_ratios[row]),
             )
-            if timing == "same_bar" and target is not None:
-                before = dict(positions)
-                cash_before = cash
-                cash, positions, deltas = execute_target_weights(
-                    request, row, strategy, target, positions, cash
-                )
-                if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace_count += 1
-                    if collect_trace:
-                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                            request, row, strategy, before, deltas, cash_before
-                        )
-            elif timing == "next_bar":
-                if target is not None:
-                    pending_targets.append((row + delay_bars, target))
-            equity_curve[timestamp.isoformat()] = float(
-                portfolio_value(request, row, positions, cash)
-            )
-            position_curve[timestamp.isoformat()] = dict(positions)
+            if target is not None:
+                deltas = _deltas_for_target(row, target)
+                if timing == "same_bar":
+                    _execute(row, timestamp, deltas)
+                else:
+                    pending_deltas.append((row + delay_bars, deltas))
+            ledger._dirty_portfolio = True
+            equity_curve[timestamp.isoformat()] = float(ledger.portfolio.portfolio_value)
+            positions_row = _positions()
+            position_curve[timestamp.isoformat()] = positions_row
             notional_values, margin_values = position_value_snapshot(
-                request, row, strategy, positions
+                request, row, strategy, positions_row
             )
             notional_curve[timestamp.isoformat()] = notional_values
             if margin_values is not None:
                 margin_curve[timestamp.isoformat()] = margin_values
-            if (
-                progress is not None
-                and should_report_progress(
-                    strategy_position * len(request.timestamps) + row + 1,
-                    total_replay_steps,
-                )
+            if progress is not None and should_report_progress(
+                strategy_position * len(request.timestamps) + row + 1, total_replay_steps,
             ):
                 progress(
                     strategy_position * len(request.timestamps) + row + 1,
                     total_replay_steps,
                     timestamp,
                 )
+        ledger._dirty_portfolio = True
         portfolios[calculator.strategy_id] = {
             "initial_value": strategy_cash,
-            "final_value": float(portfolio_value(request, len(request.timestamps) - 1, positions, cash)),
-            "positions": positions,
+            "final_value": float(ledger.portfolio.portfolio_value),
+            "positions": _positions(),
             "equity_curve": equity_curve,
             "position_curve": position_curve,
             "notional_curve": notional_curve,
@@ -243,6 +315,10 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         "event_count": len(request.timestamps),
         "signal_kind": payload.get("signal_kind"),
     }
+
+
+def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    return run_strategy_intents(payload, progress=progress)
 
 
 def _zipline_executable_deltas(

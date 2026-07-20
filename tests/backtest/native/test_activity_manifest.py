@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.scheduler import (
     FlowRegistry,
     activity_manifest_from_groups,
@@ -15,8 +15,6 @@ def _registry() -> FlowRegistry:
     for cls in _ALL_MODULE_CLASSES:
         for flow in getattr(cls, "flows", ()):
             registry.register_flow(flow)
-        for override in getattr(cls, "overrides", ()):
-            registry.register_override(override)
     return registry
 
 
@@ -108,3 +106,20 @@ def test_activity_manifest_dedupes_logical_live_signal_flow():
 
     labels = _event_labels(manifest)
     assert labels.count("读取实时因子信号") == 1
+
+
+def test_activity_manifest_hides_input_materialization_flows():
+    account = BacktestRunState()
+    apply_strategy_configs(account, {
+        "A1": {
+            "factor_mode": "precomputed",
+            "split_count": 5,
+            "group_index": 0,
+        },
+    })
+
+    manifest = activity_manifest_from_groups(sort_and_validate(_registry().resolve()), account)
+
+    labels = _event_labels(manifest)
+    assert "读取信号时点市场快照" not in labels
+    assert "读取信号交易规则字段" not in labels

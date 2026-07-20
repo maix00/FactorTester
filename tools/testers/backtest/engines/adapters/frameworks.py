@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Mapping
 
 import pandas as pd
 
@@ -68,6 +69,7 @@ class FrameworkCapabilities:
 @dataclass(frozen=True, slots=True)
 class PrecomputedFactorSource:
     signals: pd.DataFrame
+    provenance: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.signals.empty:
@@ -78,6 +80,16 @@ class PrecomputedFactorSource:
             raise ValueError("signal timestamps must be unique and monotonic")
         if not self.signals.columns.is_unique:
             raise ValueError("signal instruments must be unique")
+        if not isinstance(self.provenance, Mapping):
+            raise TypeError("precomputed factor provenance must be a mapping")
+
+    @classmethod
+    def from_artifact(cls, artifact: Any) -> "PrecomputedFactorSource":
+        signals = getattr(artifact, "signals", None)
+        provenance = getattr(artifact, "provenance", None)
+        if not isinstance(signals, pd.DataFrame) or not isinstance(provenance, Mapping):
+            raise TypeError("artifact must expose signals DataFrame and provenance mapping")
+        return cls(signals=signals, provenance=dict(provenance))
 
 
 @dataclass(frozen=True, slots=True)

@@ -20,6 +20,7 @@ from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
     TERM_TRADING_DAY_COL,
 )
+from tools.data.types import DataColumn
 
 
 dayk_path = os.path.join(SOURCE_DATA_DIR, "data_dayk.parquet")
@@ -138,6 +139,9 @@ def generate_cn_futures_term_structure(
         "HIGH": dayk.get("highest_price"),
         "LOW": dayk.get("lowest_price"),
         "CLOSE": dayk.get("close_price"),
+        "VWAP": dayk.get("vwap"),
+        DataColumn.SETTLEMENT_PRICE.name: dayk.get("settlement_price"),
+        DataColumn.PRE_SETTLEMENT_PRICE.name: dayk.get("pre_settlement_price"),
         "VOLUME": dayk.get("volume"),
         "OPEN_INTEREST": dayk.get("open_interest"),
     }).drop_duplicates(

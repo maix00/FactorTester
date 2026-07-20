@@ -1,5 +1,9 @@
 # ADR-028 实施计划：Native Broker Policy 迁移
 
+> **状态：已被 [ADR-032](032-strategy-book-and-counterparty-boundary.md) 取代。** 只有"阶段 1：
+> BrokerModule 骨架"（改名为 StrategyBookModule/StrategyBookSimple）落地了；阶段 2 起把各模块
+> 改成调用 broker policy 的方向已放弃，不再执行。
+
 - **对应决策**：[028-native-broker-policy-boundary.md](028-native-broker-policy-boundary.md)
 - **日期**：2026-07-01
 - **状态**：草案，未开始执行
@@ -57,7 +61,7 @@ liquidity_mode=volume_participation` 干净地实现了，没必要在 `matching
 
 | selector | 默认值 | 映射自 |
 |---|---|---|
-| `broker_model` | `native_default` | 新概念 |
+| `broker_model` | `native_broker` | 新概念 |
 | `cancel_policy` | `replace_pending_same_product` | `GroupMembershipModule._schedule_order_execution` 现有行为 |
 | `order_validity` | `next_signal` | 同上 |
 | `matching_policy` | `next_bar_open_full_fill` | `OrderExecutionModule.matching_model` |

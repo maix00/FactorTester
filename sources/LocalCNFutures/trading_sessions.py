@@ -5,8 +5,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 import pandas as pd
+
+
+_SESSION_INTERVAL_RE = re.compile(
+    r"(?P<start>\d{1,2}:\d{2})\s*-\s*(?P<end>\d{1,2}:\d{2})"
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +28,25 @@ class ObservedTradingSessions:
 def _minute_label(value: int) -> str:
     value %= 24 * 60
     return f"{value // 60:02d}:{value % 60:02d}"
+
+
+def infer_trading_day_close_time(
+    day_sessions: str | None,
+    night_session: str | None = None,
+) -> str | None:
+    """Return the final scheduled close of a futures trading day.
+
+    The night session belongs to the following trading day, but it is not the
+    final session of that trading day.  DAY1 signals therefore use the final
+    endpoint from the stored day-session schedule only.
+    """
+    del night_session
+    endpoints: list[int] = []
+    for match in _SESSION_INTERVAL_RE.finditer(str(day_sessions or "")):
+        hour, minute = (int(part) for part in match.group("end").split(":"))
+        if 4 <= hour < 20 and 0 <= minute < 60:
+            endpoints.append(hour * 60 + minute)
+    return _minute_label(max(endpoints)) if endpoints else None
 
 
 def _contiguous_runs(minutes: list[int]) -> list[tuple[int, int]]:

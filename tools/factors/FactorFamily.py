@@ -14,6 +14,7 @@
 # =============================================================================
 from __future__ import annotations
 
+import json
 import os
 import threading
 import uuid
@@ -336,6 +337,89 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                     parts.append(f"{key}:{val_alias}")
         params_str = '|'.join(parts)
         return f"{self.alias}|{params_str}" if params_str else self.alias
+
+    def parse_alias(self, alias: str) -> dict[str, Any]:
+        """Parse this family's canonical alias into normalized parameters.
+
+        An alias is a transport description, not persistent page/session state.
+        Nested ``FactorParam`` aliases may contain ``|`` inside ``[...]`` and
+        therefore cannot be parsed with a plain string split.
+        """
+        text = str(alias or "").strip()
+        if text == self.alias:
+            return {}
+        prefix = f"{self.alias}|"
+        if not text.startswith(prefix):
+            raise ValueError(f"Factor alias {text!r} does not belong to family {self.alias!r}")
+
+        parsed: dict[str, Any] = {}
+        for part in self._split_alias_parts(text[len(prefix):]):
+            if ":" in part:
+                key, raw_value = part.split(":", 1)
+            else:
+                key, raw_value = part, "1"
+            if key not in self.params_dict:
+                raise ValueError(
+                    f"Unknown parameter {key!r} in factor alias {text!r}; "
+                    f"available: {list(self.params_dict)}"
+                )
+            if key in parsed:
+                raise ValueError(f"Duplicate parameter {key!r} in factor alias {text!r}")
+            param = self.params_dict[key]
+            if isinstance(param, FactorParam) and raw_value.startswith("[") and raw_value.endswith("]"):
+                raw_value = raw_value[1:-1]
+            parsed[key] = self._value_from_alias(param, raw_value)
+
+        canonical = self.get_alias(**parsed)
+        if canonical != text:
+            raise ValueError(f"Non-canonical factor alias {text!r}; expected {canonical!r}")
+        return parsed
+
+    def factor_from_alias(self, alias: str) -> Factor:
+        """Create a one-off Factor from an alias without page/session storage."""
+        return self.get_factor(**self.parse_alias(alias))
+
+    @staticmethod
+    def _split_alias_parts(text: str) -> list[str]:
+        parts: list[str] = []
+        start = 0
+        depth = 0
+        for index, char in enumerate(text):
+            if char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+                if depth < 0:
+                    raise ValueError(f"Unbalanced brackets in factor alias parameters: {text!r}")
+            elif char == "|" and depth == 0:
+                if index > start:
+                    parts.append(text[start:index])
+                start = index + 1
+        if depth:
+            raise ValueError(f"Unbalanced brackets in factor alias parameters: {text!r}")
+        if start < len(text):
+            parts.append(text[start:])
+        return parts
+
+    @staticmethod
+    def _value_from_alias(param: Parameter, raw_value: str) -> Any:
+        candidates: list[Any] = [raw_value]
+        try:
+            decoded = json.loads(raw_value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            decoded = raw_value
+        if decoded != raw_value:
+            candidates.append(decoded)
+        candidates.extend(getattr(param, "_fin_values", ()))
+
+        for candidate in candidates:
+            try:
+                value = param._value_space.rectify(candidate)
+                if value in param and param._value_space.alias(value) == raw_value:
+                    return value
+            except (TypeError, ValueError):
+                continue
+        raise ValueError(f"Cannot parse value alias {raw_value!r} for parameter {param.alias!r}")
 
     @factor_workspace
     def get_factor(self, **kwargs) -> Factor:

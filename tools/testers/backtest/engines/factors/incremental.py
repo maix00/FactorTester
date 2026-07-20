@@ -18,6 +18,12 @@ from tools.factors.expr import (
     FactorExpr,
     RollingOp,
     ShiftOp,
+    TermStructureOp,
+    WhereOp,
+)
+from tools.factors.expr.term_structure_math import evaluate_term_curve, normalize_term_curve
+from tools.products.AdjustableTermStructure import (
+    TERM_RANK_COL,
 )
 
 if TYPE_CHECKING:
@@ -146,6 +152,27 @@ class RollingWindowNode:
         raise UnsupportedStreamingFactor(f"unsupported rolling op: {self.op}")
 
 
+class ExpandingEwmNode:
+    def __init__(self, child: StreamingNode, span: int, width: int) -> None:
+        self.child = child
+        self.span = span
+        self._history: list[np.ndarray] = []
+        self._width = width
+
+    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        self._history.append(self.child.update(market, cache).copy())
+        frame = pd.DataFrame(np.asarray(self._history, dtype=float))
+        min_periods = max(1, self.span // 2)
+        result = frame.ewm(span=self.span, min_periods=min_periods).mean().iloc[-1]
+        cache[key] = result.to_numpy(dtype=float)
+        if len(cache[key]) != self._width:
+            raise ValueError("streaming ewm output width changed unexpectedly")
+        return cache[key]
+
+
 class ShiftNode:
     def __init__(self, child: StreamingNode, periods: int, width: int) -> None:
         self.child = child
@@ -164,10 +191,14 @@ class ShiftNode:
 @dataclass(slots=True)
 class CrossSectionalNode:
     op: str
-    child: StreamingNode
+    children: tuple[StreamingNode, ...]
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
-        values = self.child.update(market, cache)
+        if len(self.children) != 1:
+            raise UnsupportedStreamingFactor(
+                f"{self.op} produces an IC time series, not product-level live signal values"
+            )
+        values = self.children[0].update(market, cache)
         series = pd.Series(values, dtype=float)
         if self.op == "cs_rank":
             return (series.rank(pct=True) - 0.5).to_numpy()
@@ -177,6 +208,54 @@ class CrossSectionalNode:
                 return np.where(series.isna(), np.nan, 0.0)
             return ((series - series.mean()) / std).to_numpy()
         raise UnsupportedStreamingFactor(f"unsupported cross-sectional op: {self.op}")
+
+
+@dataclass(slots=True)
+class TermStructureNode:
+    op: str
+    products: tuple[Any, ...]
+    near_rank: int
+    far_rank: int
+    depth: int
+    column_name: str
+
+    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        return np.asarray([
+            self._value_for_curve(product, market.term_curves.get(product))
+            for product in self.products
+        ], dtype=float)
+
+    def _value_for_curve(self, product: Any, curve: pd.DataFrame | None) -> float:
+        if curve is None:
+            raise KeyError(f"TERM_STRUCTURE snapshot is missing curve for product {product!r}")
+        if self.column_name not in curve.columns:
+            raise KeyError(f"TERM_STRUCTURE curve for product {product!r} is missing column {self.column_name!r}")
+        if TERM_RANK_COL not in curve.columns:
+            raise KeyError(f"TERM_STRUCTURE curve for product {product!r} is missing column {TERM_RANK_COL!r}")
+        try:
+            return evaluate_term_curve(
+                self.op,
+                curve,
+                near_rank=self.near_rank,
+                far_rank=self.far_rank,
+                depth=self.depth,
+                column=self.column_name,
+            )
+        except KeyError as exc:
+            raise KeyError(f"TERM_STRUCTURE curve for product {product!r} is missing required field: {exc}") from exc
+
+
+@dataclass(slots=True)
+class WhereNode:
+    cond: StreamingNode
+    true_value: StreamingNode
+    false_value: StreamingNode
+
+    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        cond = self.cond.update(market, cache).astype(bool)
+        true_value = self.true_value.update(market, cache)
+        false_value = self.false_value.update(market, cache)
+        return np.where(cond, true_value, false_value)
 
 
 class StreamingFactorPlan:
@@ -205,6 +284,7 @@ class _StreamingBarPrice:
 @dataclass(frozen=True, slots=True)
 class _StreamingMarketSlice:
     prices: Mapping[Any, _StreamingBarPrice]
+    term_curves: Mapping[Any, pd.DataFrame]
 
 
 class IncrementalFactorExecutor:
@@ -217,11 +297,28 @@ class IncrementalFactorExecutor:
         self._plan = plan
         self._latest: dict[Any, float] = {}
 
-    def on_bar(self, timestamp: pd.Timestamp, fields_by_product: Mapping[Any, Any]) -> None:
-        market = _StreamingMarketSlice({
-            product: _StreamingBarPrice(_normalize_bar_fields(fields))
-            for product, fields in fields_by_product.items()
-        })
+    def on_bar(
+        self,
+        timestamp: pd.Timestamp,
+        fields_by_product: Mapping[Any, Any],
+        term_curves_by_product: Mapping[Any, Any] | None = None,
+    ) -> None:
+        term_curves_by_product = term_curves_by_product or {}
+        observed_products = set(fields_by_product) | set(term_curves_by_product)
+        missing = [product for product in self._plan.products if product not in observed_products]
+        if missing:
+            raise ValueError(f"market slice is missing streaming products: {missing!r}")
+        market = _StreamingMarketSlice(
+            {
+                product: _StreamingBarPrice(_normalize_bar_fields(fields_by_product.get(product, {})))
+                for product in self._plan.products
+            },
+            {
+                product: _normalize_term_curve(curve)
+                for product, curve in term_curves_by_product.items()
+                if product in self._plan.products
+            },
+        )
         self._latest = {
             product: float(value)
             for product, value in self._plan.update(pd.Timestamp(timestamp), market).items()
@@ -261,20 +358,21 @@ def compile_streaming_factor(
             if not isinstance(expr.window, ConstExpr):
                 raise UnsupportedStreamingFactor("streaming windows must resolve to fixed bars")
             window = _resolve_window_bars(expr.window.value, source_freq)
-            if expr.op == "rolling_ema":
-                raise UnsupportedStreamingFactor(
-                    "rolling_ema requires a dedicated constant-memory incremental kernel"
-                )
             children = tuple(
                 compile_node(item)
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
             )
-            node = RollingWindowNode(
-                expr.op,
-                children,
-                window,
-                len(products),
-            )
+            if expr.op == "rolling_ema":
+                if len(children) != 1:
+                    raise UnsupportedStreamingFactor("rolling_ema expects one streaming operand")
+                node = ExpandingEwmNode(children[0], window, len(products))
+            else:
+                node = RollingWindowNode(
+                    expr.op,
+                    children,
+                    window,
+                    len(products),
+                )
         elif isinstance(expr, ShiftOp):
             if not isinstance(expr.periods, ConstExpr) or not isinstance(expr.periods.value, int):
                 raise UnsupportedStreamingFactor("streaming shifts must resolve to fixed bars")
@@ -286,11 +384,33 @@ def compile_streaming_factor(
                 len(products),
             )
         elif isinstance(expr, CrossSectionalOp):
+            if expr.op in {"cs_corr", "cs_spearman"}:
+                raise UnsupportedStreamingFactor(
+                    f"{expr.op} produces an IC time series, not product-level live signal values"
+                )
             if expr.op not in {"cs_rank", "cs_zscore"}:
                 raise UnsupportedStreamingFactor(
                     f"unsupported cross-sectional op: {expr.op}"
                 )
-            node = CrossSectionalNode(expr.op, compile_node(expr.operand))
+            node = CrossSectionalNode(expr.op, (compile_node(expr.operand),))
+        elif isinstance(expr, TermStructureOp):
+            near_rank, far_rank, depth, column_name = _term_structure_params(expr)
+            node = TermStructureNode(
+                expr.op,
+                products,
+                near_rank,
+                far_rank,
+                depth,
+                column_name,
+            )
+        elif isinstance(expr, WhereOp):
+            if len(expr.operands) != 3:
+                raise UnsupportedStreamingFactor("where expects condition, true, and false operands")
+            node = WhereNode(
+                compile_node(expr.operands[0]),
+                compile_node(expr.operands[1]),
+                compile_node(expr.operands[2]),
+            )
         else:
             raise UnsupportedStreamingFactor(
                 f"unsupported FactorExpr node: {type(expr).__name__}"
@@ -324,6 +444,48 @@ def _normalize_bar_fields(fields: Any) -> dict[str, float]:
         "LOW": value,
         "CLOSE": value,
     }
+
+
+def _normalize_term_curve(curve: Any) -> pd.DataFrame:
+    return normalize_term_curve(curve)
+
+
+def _term_structure_params(expr: TermStructureOp) -> tuple[int, int, int, str]:
+    if expr.op in TermStructureOp._PAIR_OPS:
+        if len(expr.operands) != 3:
+            raise UnsupportedStreamingFactor(f"{expr.op} expects near_rank, far_rank, and column operands")
+        near_rank = _term_structure_int_operand(expr.operands[0], "near_rank")
+        far_rank = _term_structure_int_operand(expr.operands[1], "far_rank")
+        column = _term_structure_column_operand(expr.operands[2])
+        return near_rank, far_rank, 0, column
+    if expr.op in TermStructureOp._DEPTH_OPS:
+        if len(expr.operands) != 2:
+            raise UnsupportedStreamingFactor(f"{expr.op} expects depth and column operands")
+        depth = _term_structure_int_operand(expr.operands[0], "depth")
+        column = _term_structure_column_operand(expr.operands[1])
+        return 0, 1, depth, column
+    if expr.op in TermStructureOp._RANK_OPS:
+        if len(expr.operands) != 2:
+            raise UnsupportedStreamingFactor(f"{expr.op} expects rank and column operands")
+        rank = _term_structure_int_operand(expr.operands[0], "rank")
+        column = _term_structure_column_operand(expr.operands[1])
+        return rank, 0, 0, column
+    raise UnsupportedStreamingFactor(f"unsupported term structure op: {expr.op}")
+
+
+def _term_structure_int_operand(expr: FactorExpr, name: str) -> int:
+    if not isinstance(expr, ConstExpr) or not np.isscalar(expr.value):
+        raise UnsupportedStreamingFactor(f"term structure {name} must be a scalar constant")
+    value = int(expr.value)
+    if value < 0:
+        raise UnsupportedStreamingFactor(f"term structure {name} must be non-negative")
+    return value
+
+
+def _term_structure_column_operand(expr: FactorExpr) -> str:
+    if isinstance(expr, (ColumnRef, ConstExpr)):
+        return TermStructureOp._column_name(expr)
+    raise UnsupportedStreamingFactor("term structure column operand must be a ColumnRef or DataColumn constant")
 
 
 def _resolve_window_bars(

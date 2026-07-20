@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "factortester"
+version = "0.1.0"
+description = "HTTP command-line client for FactorTester"
+requires-python = ">=3.11"
+dependencies = ["click>=8", "plotext>=5.2", "rich>=14"]
+
+[project.scripts]
+factortester = "tools.cli.app:cli"
+
+[tool.setuptools]
+include-package-data = false
+packages = [
+  "tools.cli",
+  "tools.cli.commands",
+  "tools.cli.core",
+  "tools.cli.modules",
+  "tools.cli.modules.custom_factors",
+  "tools.cli.modules.products",
+  "tools.cli.release",
+  "tools.cli.release.adapters",
+]
+
+[tool.setuptools.package-dir]
+"tools.cli" = "."
+"tools.cli.commands" = "commands"
+"tools.cli.core" = "core"
+"tools.cli.modules" = "modules"
+"tools.cli.modules.custom_factors" = "modules/custom_factors"
+"tools.cli.modules.products" = "modules/products"
+"tools.cli.release" = "release"
+"tools.cli.release.adapters" = "release/adapters"
+
+[tool.setuptools.package-data]
+"tools.cli.release" = ["trusted-release-public.pem"]

@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Start the official Vibe-Trading Web server without a shell."""
+
+import os
+from pathlib import Path
+import shutil
+import sys
+import json
+
+
+def executable() -> str:
+    bundled = (
+        Path(os.environ["FACTORTESTER_ADAPTER_ROOT"])
+        / "runtime" / "bin" / "vibe-trading"
+    )
+    if bundled.is_file() and os.access(bundled, os.X_OK):
+        return str(bundled)
+    configuration = os.environ.get(
+        "FACTORTESTER_ADAPTER_CONFIGURATION_REF", ""
+    )
+    if configuration and not configuration.startswith("profile://"):
+        value = json.loads(Path(configuration).read_text(encoding="utf-8"))
+        configured = Path(str(value.get("executable") or "")).expanduser()
+        if configured.is_file() and os.access(configured, os.X_OK):
+            return str(configured.resolve())
+    discovered = shutil.which("vibe-trading")
+    if discovered:
+        return discovered
+    raise SystemExit(
+        "Vibe-Trading runtime is not installed; update the client components."
+    )
+
+
+program = executable()
+os.execv(
+    program,
+    [
+        program, "serve", "--host", "127.0.0.1",
+        "--port", os.environ.get("FACTORTESTER_VIBE_PORT", "7899"),
+    ],
+)

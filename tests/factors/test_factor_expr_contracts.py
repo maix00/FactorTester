@@ -111,6 +111,13 @@ def test_timedelta_window_can_drive_dynamic_truncation_offsets():
     assert not result.empty
 
 
+def test_window_param_numeric_string_is_bar_count_integer():
+    window = WindowParam("NumericStringWindow", default_value="10")
+
+    assert window.default_value == 10
+    assert window.rectify_value("3") == 3
+
+
 def test_window_bars_preserves_timedelta_dependency_for_frequency_inference():
     window = WindowParam("FrequencyWindow", default_value="9m")
     volume = _FrameExpr(pd.DataFrame({"P": [1.0]}))
@@ -174,3 +181,45 @@ def test_undefined_constant_cross_section_ic_propagates_as_nan():
     ).evaluate(ctx=EvaluateContext(products=["A", "B"], freq=DataFreq.MIN1, cache={}))
 
     assert result["IC"].isna().all()
+
+
+def test_cross_section_ic_empty_overlap_preserves_multiindex_shape():
+    index = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime(["2024-01-02", "2024-01-03"]),
+            pd.to_datetime(["2024-01-02 09:00", "2024-01-03 09:00"]),
+        ],
+        names=["交易日", "数据源时间"],
+    )
+    left = pd.DataFrame({"A": [1.0, 2.0]}, index=index)
+    right = pd.DataFrame({"B": [3.0, 4.0]}, index=index)
+
+    result = CrossSectionalOp(
+        "cs_spearman", _FrameExpr(left), _FrameExpr(right),
+    ).evaluate(ctx=EvaluateContext(products=["A", "B"], freq=DataFreq.MIN1, cache={}))
+
+    assert result.empty
+    assert isinstance(result.index, pd.MultiIndex)
+    assert result.index.names == index.names
+
+
+def test_cross_section_ic_restores_tuple_intersection_to_multiindex():
+    index = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime(["2024-01-02", "2024-01-03"]),
+            pd.to_datetime(["2024-01-02 09:00", "2024-01-03 09:00"]),
+        ],
+        names=["交易日", "数据源时间"],
+    )
+    left = pd.DataFrame({"A": [1.0, 2.0], "B": [2.0, 1.0]}, index=index)
+    right = pd.DataFrame(
+        {"A": [2.0, 1.0], "B": [1.0, 2.0]},
+        index=pd.Index(list(index)),
+    )
+
+    result = CrossSectionalOp(
+        "cs_spearman", _FrameExpr(left), _FrameExpr(right),
+    ).evaluate(ctx=EvaluateContext(products=["A", "B"], freq=DataFreq.MIN1, cache={}))
+
+    assert isinstance(result.index, pd.MultiIndex)
+    assert result.index.names == index.names

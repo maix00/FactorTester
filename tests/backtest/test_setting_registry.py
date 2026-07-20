@@ -19,7 +19,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
-        "position_policy", "group_strategy", "cost", "order", "liquidity", "margin",
+        "position_policy", "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
@@ -30,7 +30,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation",
         "rebalance_trigger", "position_policy",
-        "group_strategy", "cost", "order", "liquidity", "margin",
+        "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
@@ -75,9 +75,18 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["fee_mode"]["default_when"] == {
         "engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"},
+        "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
     }
     assert {option["value"] for option in index["defaults"]["fee_mode"]["options"]} == {
         "auto", "exact", "custom", "close_yesterday", "close_today", "fixed", "zero",
+    }
+    assert index["defaults"]["transaction_fee_source"]["label"] == "交易费来源"
+    assert index["defaults"]["transaction_fee_source"]["chip_template"] == "交易费来源: {value}"
+    assert index["defaults"]["transaction_fee_source"]["default_when"] == {
+        "counterparty_profile": {"exchange_base": "exchange", "openctp_broker": "openctp"},
+    }
+    assert {option["value"] for option in index["defaults"]["transaction_fee_source"]["options"]} == {
+        "exchange", "openctp",
     }
     assert index["defaults"]["fixed_fee_rate"]["visible_when"] == {
         "fee_mode": ["fixed"],
@@ -92,11 +101,14 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "margin_mode": ["fixed", "auto", "exact", "custom"],
     }
     assert index["defaults"]["margin_mode"]["value"] == "auto"
+    assert index["defaults"]["margin_mode"]["label"] == "保证金模式"
+    assert index["defaults"]["margin_mode"]["chip_template"] == "保证金模式: {value}"
     assert index["defaults"]["margin_mode"]["editable_when"] == {
-        "engine_mode": ["custom"],
+        "engine_mode": ["auto", "custom"],
     }
     assert index["defaults"]["margin_mode"]["default_when"] == {
         "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
+        "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
     }
     assert index["defaults"]["accounting_mode"]["editable_when"] == {
         "engine_mode": ["custom"],
@@ -109,7 +121,10 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["custom_product_fields"]["serialization"]["kind"] == "custom_product_overrides"
     custom_fields = index["defaults"]["custom_product_fields"]["serialization"]["fields"]
     assert {field["value"] for field in custom_fields} >= {
-        "MarginRatio",
+        "LongMarginRatioByMoney",
+        "ShortMarginRatioByMoney",
+        "LongMarginRatioByVolume",
+        "ShortMarginRatioByVolume",
         "OpenRatioByMoney",
         "CostBasisMethod",
     }
@@ -136,6 +151,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "margin_mode": ["custom"],
     }
     assert index["defaults"]["margin_custom_product_fields"]["serialization"]["module_filter"] == "margin"
+    margin_fields = index["defaults"]["margin_custom_product_fields"]["serialization"]["fields"]
+    assert {field["value"] for field in margin_fields} == {
+        "LongMarginRatioByMoney",
+        "ShortMarginRatioByMoney",
+        "LongMarginRatioByVolume",
+        "ShortMarginRatioByVolume",
+    }
     assert index["defaults"]["trading_rule_custom_product_fields"]["tab_key"] == "accounting"
     assert index["defaults"]["trading_rule_custom_product_fields"]["chip_template"] is None
     assert index["defaults"]["trading_rule_custom_product_fields"]["visible_when"] == {
@@ -162,7 +184,9 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "product_mask",
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
-        "engine", "engine_mode", "historical_field_policy", "equity_compute_live", "custom_product_fields",
+        "engine", "engine_mode", "counterparty_profile", "bar_open_visibility_delay",
+        "bar_end_visibility_delay", "historical_field_policy", "equity_compute_live",
+        "custom_product_fields",
     ]
     executable_public_fields = {
         key
@@ -326,6 +350,26 @@ def test_factor_type_analysis_reuses_product_path_selection_setting() -> None:
     ]
 
 
+def test_factor_evaluation_reuses_product_path_selection_setting() -> None:
+    application = backtest_setting_registry.get("factor_evaluation")
+
+    index = application.manifest()
+    product_tab = application.tab_manifest("product_path_selection")
+
+    assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
+        "product_path_selection", "time", "data_source", "frequency", "price_type", "factor",
+    ]
+    assert [setting["key"] for setting in product_tab["settings"]] == [
+        "product_path_candidates", "product_path_selection",
+    ]
+    assert index["defaults"]["product_path_selection"]["serialization"]["kind"] == "product_path_selection"
+    assert list(index["defaults"]["product_path_selection"]["serialization"]["manual_fields"]) == [
+        "product_path_selection_id",
+        "paths",
+    ]
+    assert "product" not in index["defaults"]
+
+
 def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules() -> None:
     application = backtest_setting_registry.get("single_factor_page")
     index = application.manifest()
@@ -366,7 +410,9 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     assert "settings" not in index.get_json()
     assert tab.status_code == 200
     assert [setting["key"] for setting in tab.get_json()["settings"]] == [
-        "engine", "engine_mode", "historical_field_policy", "equity_compute_live", "custom_product_fields",
+        "engine", "engine_mode", "counterparty_profile", "bar_open_visibility_delay",
+        "bar_end_visibility_delay", "historical_field_policy", "equity_compute_live",
+        "custom_product_fields",
     ]
     assert missing.status_code == 404
 
@@ -422,7 +468,7 @@ def test_local_settings_supplies_run_defaults_without_flat_frontend_values() -> 
     assert settings["start_time"] == "09:00"
     assert settings["end_time"] == "15:00"
     assert settings["initial_capital_major"] == 100_000_000.0
-    assert settings["allocation_policy"] == "inverse_volatility"
+    assert settings["allocation_policy"] == "equal_notional"
 
 
 def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> None:
@@ -443,8 +489,8 @@ def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> No
     defaults = _silent_default_settings_for_run(payload, groups, [], resolved)
 
     by_key = {item["setting_key"]: item for item in defaults}
-    assert by_key["allocation_policy"]["value"] == "inverse_volatility"
-    assert by_key["allocation_policy"]["value_label"] == "等风险（波动率倒数）"
+    assert by_key["allocation_policy"]["value"] == "equal_notional"
+    assert by_key["allocation_policy"]["value_label"] == "等市值"
     assert "execution_timing" not in by_key
     assert "execution_price_basis" not in by_key
 
@@ -778,7 +824,7 @@ def test_invalid_numeric_setting_falls_back_with_diagnostics() -> None:
     assert resolved["group-1"]["initial_capital_major"] == 100_000_000.0
     assert resolved["group-1"]["_setting_fallbacks"] == [{
         "setting_key": "initial_capital_major",
-        "module": "portfolio_capital",
+        "module": "cash_pool",
         "engine": "native",
         "requested_value": "",
         "applied_value": 100_000_000.0,

@@ -21,7 +21,20 @@ from server.modules.custom_factors.factor_library_store import (
     normalize_product_group,
     rename_scope,
 )
-from tools.data.account_manage import can_view_user_scope
+from tools.data.account_manage import (
+    can_view_user_scope,
+    delete_factor_research_run,
+    list_factor_research_runs,
+    save_factor_research_run,
+    visible_usernames_for,
+)
+from tools.data.factor_research_registry import (
+    RESEARCH_METRIC_REGISTRY,
+    metric_float,
+    parse_metric_thresholds,
+    research_stability_rows,
+    resolve_research_rank_preset,
+)
 from server.services.factor_registry import get_factor_family_instance
 from server.services.http_auth import login_required
 from server.services.session_runtime import current_user, get_user_file_lock
@@ -86,10 +99,20 @@ def api_save_factor_library_config(ff_alias):
     data = request.get_json() or {}
     params_list = data.get('params_list', [])
     product_group = data.get('product_group') or data.get('scope_key') or DEFAULT_SCOPE_KEY
+    metadata = data.get('metadata') if isinstance(data.get('metadata'), dict) else {}
+    for key in ('note', 'research_report', 'product_group_paths'):
+        if key in data and key not in metadata:
+            metadata[key] = data.get(key)
     if not isinstance(params_list, list):
         return jsonify({'success': False, 'error': '参数列表格式无效'})
     with get_user_file_lock(username):
-        config, factors = save_current_user_library_config(username, ff_alias, params_list, product_group=product_group)
+        config, factors = save_current_user_library_config(
+            username,
+            ff_alias,
+            params_list,
+            product_group=product_group,
+            metadata=metadata,
+        )
     return api_ok({'config': config, 'factors': factors})
 
 
@@ -214,4 +237,183 @@ def api_delete_scope(scope_key):
         ok = delete_scope(username, scope_key)
     if not ok:
         return jsonify({'success': False, 'error': '无法删除默认或不存在'}), 400
+    return jsonify({'success': True})
+
+
+def _metric_thresholds(prefix: str) -> dict[str, float]:
+    result: dict[str, float] = {}
+    for raw in request.args.getlist(prefix):
+        if ':' in raw:
+            key, value = raw.split(':', 1)
+        elif '=' in raw:
+            key, value = raw.split('=', 1)
+        else:
+            continue
+        key = key.strip()
+        if not key:
+            continue
+        try:
+            result[key] = float(value)
+        except ValueError:
+            continue
+    return result
+
+
+def _research_query_limit() -> int | None:
+    limit_arg = request.args.get('limit')
+    try:
+        return int(limit_arg) if limit_arg not in (None, '') else None
+    except ValueError:
+        return None
+
+
+def _list_visible_research_runs(
+    username: str,
+    *,
+    limit: int | None = None,
+    resolved_test_type: str | None = None,
+    apply_metric_filters: bool = True,
+) -> list[dict]:
+    include_subordinates = request.args.get('include_subordinates') == '1'
+    usernames = visible_usernames_for(username) if include_subordinates else [username]
+    runs: list[dict] = []
+    for visible_username in usernames:
+        runs.extend(
+            list_factor_research_runs(
+                visible_username,
+                ff_alias=request.args.get('factor_family') or request.args.get('ff_alias') or None,
+                factor_alias=request.args.get('factor_alias') or None,
+                product_group=request.args.get('product_group') or None,
+                test_type=resolved_test_type if resolved_test_type is not None else (request.args.get('test_type') or None),
+                sample_role=request.args.get('sample_role') or None,
+                regime_label=request.args.get('regime_label') or None,
+                slice_name=request.args.get('slice_name') or None,
+                start_date=request.args.get('start_date') or None,
+                end_date=request.args.get('end_date') or None,
+                overlap=request.args.get('overlap', '1') != '0',
+                min_metrics=(_metric_thresholds('min_metric') or None) if apply_metric_filters else None,
+                max_metrics=(_metric_thresholds('max_metric') or None) if apply_metric_filters else None,
+                order_by_metric=None,
+                descending=True,
+                limit=None,
+            )
+        )
+    order_by_metric = request.args.get('order_by_metric') or request.args.get('metric') or None
+    descending = request.args.get('ascending') != '1'
+    if order_by_metric:
+        missing_rank = float('-inf') if descending else float('inf')
+        runs.sort(
+            key=lambda run: metric_float((run.get('metrics') or {}).get(order_by_metric)) if metric_float((run.get('metrics') or {}).get(order_by_metric)) is not None else missing_rank,
+            reverse=descending,
+        )
+    else:
+        runs.sort(key=lambda run: float(run.get('updated_at') or 0), reverse=True)
+    if limit is not None and limit >= 0:
+        runs = runs[:limit]
+    return runs
+
+
+@cf_bp.route('/api/factor-library-research-runs', methods=['GET'])
+@login_required
+def api_list_factor_research_runs():
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    runs = _list_visible_research_runs(username, limit=_research_query_limit())
+    return jsonify({'success': True, 'runs': runs})
+
+
+@cf_bp.route('/api/factor-library-research-runs', methods=['POST'])
+@login_required
+@route_guard
+def api_save_factor_research_run():
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    data = request.get_json() or {}
+    metrics = data.get('metrics') if isinstance(data.get('metrics'), dict) else {}
+    try:
+        run = save_factor_research_run(
+            username,
+            ff_alias=str(data.get('ff_alias') or data.get('factor_family') or ''),
+            factor_alias=str(data.get('factor_alias') or ''),
+            factor_source=str(data.get('factor_source') or ''),
+            product_group=str(data.get('product_group') or ''),
+            start_date=str(data.get('start_date') or ''),
+            end_date=str(data.get('end_date') or ''),
+            test_type=str(data.get('test_type') or ''),
+            config=data.get('config') if isinstance(data.get('config'), dict) else {},
+            config_hash_value=str(data.get('config_hash') or ''),
+            metrics=metrics,
+            report_path=str(data.get('report_path') or ''),
+            artifact_path=str(data.get('artifact_path') or ''),
+            note=str(data.get('note') or ''),
+            sample_role=str(data.get('sample_role') or ''),
+            regime_label=str(data.get('regime_label') or ''),
+            slice_name=str(data.get('slice_name') or ''),
+            run_id=str(data.get('run_id') or '') or None,
+        )
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, 'run': run})
+
+
+@cf_bp.route('/api/factor-library-research-metrics', methods=['GET'])
+@login_required
+def api_factor_research_metrics():
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    test_type = request.args.get('test_type') or ''
+    metrics = {
+        key: value
+        for key, value in RESEARCH_METRIC_REGISTRY.items()
+        if not test_type or value.get('default_test_type') == test_type
+    }
+    return jsonify({'success': True, 'metrics': metrics})
+
+
+@cf_bp.route('/api/factor-library-research-stability', methods=['GET'])
+@login_required
+def api_factor_research_stability():
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    resolved = resolve_research_rank_preset(
+        preset=request.args.get('preset') or '',
+        test_type=request.args.get('test_type') or '',
+        metric=request.args.get('metric') or '',
+        min_metrics=request.args.getlist('min_metric'),
+        max_metrics=request.args.getlist('max_metric'),
+    )
+    try:
+        min_metrics = parse_metric_thresholds(resolved['min_metrics'])
+        max_metrics = parse_metric_thresholds(resolved['max_metrics'])
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    runs = _list_visible_research_runs(
+        username,
+        limit=_research_query_limit(),
+        resolved_test_type=resolved['test_type'] or None,
+        apply_metric_filters=False,
+    )
+    rows = research_stability_rows(
+        runs,
+        metric=resolved['metric'],
+        min_metrics=min_metrics,
+        max_metrics=max_metrics,
+        bucket=request.args.get('by') or request.args.get('bucket') or 'quarter',
+    )
+    return jsonify({'success': True, 'rows': rows, 'preset': resolved})
+
+
+@cf_bp.route('/api/factor-library-research-runs/<run_id>', methods=['DELETE'])
+@login_required
+def api_delete_factor_research_run(run_id):
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    deleted = delete_factor_research_run(username, run_id)
+    if not deleted:
+        return jsonify({'success': False, 'error': '研究结果不存在'}), 404
     return jsonify({'success': True})

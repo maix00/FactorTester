@@ -78,6 +78,23 @@ class CrossSectionalOp(OperandExpr):
         raise ValueError(f"Unknown cross-sectional op: {self.op}")
 
     @staticmethod
+    def _empty_ic_frame_like(index: pd.Index) -> pd.DataFrame:
+        empty_index = index[:0]
+        return pd.DataFrame({'IC': pd.Series(dtype=float)}, index=empty_index)
+
+    @staticmethod
+    def _restore_index_names(result: pd.DataFrame, source_index: pd.Index) -> pd.DataFrame:
+        if isinstance(source_index, pd.MultiIndex):
+            if isinstance(result.index, pd.MultiIndex) and result.index.nlevels == source_index.nlevels:
+                result.index.names = source_index.names
+            elif len(result.index) > 0 and all(isinstance(v, tuple) and len(v) == source_index.nlevels for v in result.index):
+                result.index = pd.MultiIndex.from_tuples(result.index, names=source_index.names)
+            return result
+        if not isinstance(result.index, pd.MultiIndex):
+            result.index.name = source_index.name
+        return result
+
+    @staticmethod
     def _apply_spearman(left_df: pd.DataFrame, right_df: pd.DataFrame) -> pd.DataFrame:
         # 快速路径：两个 DataFrame 的 MultiIndex 和 columns 完全相同时，
         # 跳过昂贵的 .loc[common_idx, common_cols]（节省 ~2s 的 index intersection + reindex）
@@ -90,10 +107,7 @@ class CrossSectionalOp(OperandExpr):
             common_idx = pd.Index(left_df.index).intersection(pd.Index(right_df.index))
             common_cols = left_df.columns.intersection(right_df.columns)
             if len(common_idx) == 0 or len(common_cols) == 0:
-                empty_idx = pd.Index([], name=left_df.index.names[-1] if left_df.index.names else None)
-                result = pd.DataFrame({'IC': []}, index=empty_idx)
-                result.index.names = left_df.index.names
-                return result
+                return CrossSectionalOp._empty_ic_frame_like(left_df.index)
             idx = common_idx
             cols = common_cols
             l_df = left_df.loc[idx, cols]
@@ -127,7 +141,7 @@ class CrossSectionalOp(OperandExpr):
         ic[(n <= 1) | (den <= 0)] = np.nan
 
         result = pd.DataFrame({'IC': ic}, index=idx)
-        result.index.names = left_df.index.names
+        CrossSectionalOp._restore_index_names(result, left_df.index)
         return result
 
     @staticmethod
@@ -140,10 +154,7 @@ class CrossSectionalOp(OperandExpr):
             common_idx = pd.Index(left_df.index).intersection(pd.Index(right_df.index))
             common_cols = left_df.columns.intersection(right_df.columns)
             if len(common_idx) == 0 or len(common_cols) == 0:
-                empty_idx = pd.Index([], name=left_df.index.names[-1] if left_df.index.names else None)
-                result = pd.DataFrame({'IC': []}, index=empty_idx)
-                result.index.names = left_df.index.names
-                return result
+                return CrossSectionalOp._empty_ic_frame_like(left_df.index)
             idx = common_idx
             l_df = left_df.loc[idx, common_cols]
             r_df = right_df.loc[idx, common_cols]
@@ -169,7 +180,7 @@ class CrossSectionalOp(OperandExpr):
         ic[(n <= 1) | (den <= 0)] = np.nan
 
         result = pd.DataFrame({'IC': ic}, index=idx)
-        result.index.names = left_df.index.names
+        CrossSectionalOp._restore_index_names(result, left_df.index)
         return result
 
     def _to_latex(self, subst: dict | None = None) -> str:

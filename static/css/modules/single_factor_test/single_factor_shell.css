@@ -125,3 +125,57 @@
         padding: 8px 6px 20px;
     }
 }
+.research-job-monitor {
+    border-bottom: 1px solid #d8dee8;
+    background: #f8fafc;
+    padding: 8px 14px;
+}
+
+.research-job-monitor-title {
+    color: #475467;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.research-job-monitor-list {
+    display: grid;
+    gap: 5px;
+}
+
+.research-job-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.8fr) minmax(180px, 2fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 28px;
+    color: #344054;
+    font-size: 12px;
+}
+
+.research-job-progress-track {
+    height: 5px;
+    overflow: hidden;
+    background: #e4e7ec;
+}
+
+.research-job-progress-fill {
+    width: 0;
+    height: 100%;
+    background: #1677ff;
+    transition: width 180ms ease;
+}
+
+.research-job-row button {
+    border: 1px solid #98a2b3;
+    background: #fff;
+    color: #344054;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 3px 8px;
+}
+
+@media (max-width: 720px) {
+    .research-job-row { grid-template-columns: 1fr auto; }
+    .research-job-progress { grid-column: 1 / -1; grid-row: 2; }
+}

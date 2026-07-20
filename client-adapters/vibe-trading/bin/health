@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Verify the loopback service is the expected Vibe-Trading API."""
+
+import json
+import os
+from urllib.request import urlopen
+
+
+port = os.environ.get("FACTORTESTER_VIBE_PORT", "7899")
+try:
+    with urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as response:
+        payload = json.load(response)
+    healthy = (
+        payload.get("status") == "healthy"
+        and payload.get("service") == "Vibe-Trading API"
+    )
+except Exception:
+    healthy = False
+raise SystemExit(0 if healthy else 1)

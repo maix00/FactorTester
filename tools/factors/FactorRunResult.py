@@ -54,6 +54,7 @@ class FactorRunResult:
         # Fast-path: whether data_present_mask is all True (dense panel, no inserted rows).
         "data_present_all",
         "panel_timeline",
+        "provenance",
         "_returns",
         "_return_freq",
         "ic_series",
@@ -68,6 +69,7 @@ class FactorRunResult:
         self.data_present_mask: pd.DataFrame = pd.DataFrame()
         self.data_present_all: Optional[bool] = None
         self.panel_timeline: Optional[PanelTimeline] = None
+        self.provenance: dict = {}
         self._returns: pd.DataFrame = pd.DataFrame()
         self._return_freq: Optional[DataFreq] = None
         self.ic_series: pd.Series = pd.Series(dtype=float)
@@ -163,6 +165,7 @@ class FactorRunResult:
         self.data_present_mask = pd.DataFrame()
         self.data_present_all = None
         self.panel_timeline = None
+        self.provenance = {}
         self.returns = pd.DataFrame()
         self._return_freq = None
         self.ic_series = pd.Series(dtype=float)

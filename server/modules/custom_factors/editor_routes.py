@@ -20,6 +20,7 @@ from server.services.factor_workspace import (
     build_factor_workspace,
     get_factor_workspace_git_state,
     push_factor_workspace,
+    run_factor_workspace_git_action,
     sync_factor_workspace,
 )
 from tools.data.factor_workspace.storage import factor_source_root, load_factor_source
@@ -66,6 +67,12 @@ def api_validate_expr():
     if not source_code and factor_id:
         if not can_view_user_scope(username, owner_username):
             return jsonify({'success': True, 'valid': False, 'error': '无权查看该用户因子'})
+        if owner_username != username:
+            return jsonify({
+                'success': True,
+                'valid': False,
+                'error': '跨账号登记因子只授权执行，不授权读取源码或数学表达式',
+            })
         loaded_source = load_factor_source(owner_username, factor_id) or ''
         source_code = strip_factor_meta(loaded_source) if loaded_source else ''
 
@@ -235,6 +242,28 @@ def api_workspace_git_settings():
         git_repo_root=git_repo_root,
     )
     return jsonify({'success': True, **get_factor_workspace_git_state(username)})
+
+
+@cf_bp.route('/api/workspace/git', methods=['POST'])
+@login_required
+def api_workspace_git_action():
+    username = current_user()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    data = request.get_json(silent=True) or {}
+    try:
+        result = run_factor_workspace_git_action(
+            username,
+            str(data.get('action') or ''),
+            message=str(data.get('message') or ''),
+            branch=str(data.get('branch') or ''),
+            create=bool(data.get('create')),
+            cached=bool(data.get('cached')),
+            stat=bool(data.get('stat')),
+        )
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, **result})
 
 
 

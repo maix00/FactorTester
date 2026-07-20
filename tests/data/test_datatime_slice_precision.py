@@ -33,6 +33,20 @@ def test_exact_slice_rejects_midnight_only_daily_index():
         )
 
 
+def test_trading_day_slice_does_not_include_next_day_midnight():
+    index = pd.DatetimeIndex([
+        "2025-01-02 15:00",
+        "2025-01-03 00:00",
+    ])
+
+    mask = DataIndex(index).slice_by_datatime(
+        DataTime.parse("2025-01-02", precision="trading_day"),
+        DataTime.parse("2025-01-02", precision="trading_day"),
+    )
+
+    assert mask.tolist() == [True, False]
+
+
 def test_datatime_sort_key_normalizes_timezone_for_ordering():
     shanghai = DataTime.parse("2025-01-02 09:00", precision="exact", tz="Asia/Shanghai")
     utc = DataTime.parse("2025-01-02 01:00", precision="exact", tz="UTC")

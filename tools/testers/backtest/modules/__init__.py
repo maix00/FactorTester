@@ -16,9 +16,10 @@ from tools.data.modules.registry import ModuleRegistry
 from .base import ExecutableModule
 from .fee import FeeModule
 from .slippage import SlippageModule
-from .liquidity import LiquidityModule
+from .volume_capacity import VolumeCapacityMode
 from .margin import MarginModule
-from .position_sizing import PositionSizingModule
+from .order_construct import OrderConstructModule
+from .threshold_signal import ThresholdSignalModule
 from .cash_rescale import LedgerCashConstraintModule
 from .registry import (
     BacktestModuleRegistry,
@@ -30,9 +31,10 @@ __all__ = [
     "ExecutableModule",
     "FeeModule",
     "SlippageModule",
-    "LiquidityModule",
+    "VolumeCapacityMode",
     "MarginModule",
-    "PositionSizingModule",
+    "OrderConstructModule",
+    "ThresholdSignalModule",
     "LedgerCashConstraintModule",
     "ModuleRegistry",
     "BacktestModuleRegistry",

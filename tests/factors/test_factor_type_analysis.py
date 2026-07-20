@@ -41,6 +41,7 @@ from tools.factors.tester_calc.single_factor_test.factor_type_analysis.registry 
 from tools.factors.tester_calc.single_factor_test.factor_type_analysis.server_facade import (
     FactorTypeAnalysisRun,
     _infer_asset_classes,
+    _load_and_calc_factor,
     _reference_skip_reason,
     _run_window_datetimes,
 )
@@ -158,6 +159,7 @@ class TestReferenceFactorRegistry:
             assert "category" in entry
             assert "category_label" in entry
             assert "factor_alias" in entry
+            assert "reference_source" in entry
 
     def test_default_registry_has_core_and_extended_styles(self):
         assert default_registry.count() >= 10
@@ -173,6 +175,17 @@ class TestReferenceFactorRegistry:
         assert any(item.category == FactorCategory.QUALITY for item in disabled)
         for item in disabled:
             assert item.help_text
+
+    def test_default_reference_factors_point_to_public_factor_families(self):
+        """风格桶描述分析语义；可计算参照来自明确的公共因子家族。"""
+        enabled_public_refs = [
+            item for item in default_registry.list()
+            if item.enabled_by_default and item.reference_source == "public_factor"
+        ]
+        assert enabled_public_refs
+        for item in enabled_public_refs:
+            assert item.factor_family_alias
+            assert item.factor_family_alias == item.factor_alias
 
 
 # =========================================================
@@ -229,6 +242,25 @@ class TestTimeSeriesCorrelation:
         # 强相关应有小 p_value
         assert results["trend_a"]["p_value"] < 0.05
 
+    def test_aligns_multiindex_series_by_finest_event_time(self):
+        events = pd.date_range("2025-01-02 15:00", periods=5, freq="D")
+        target_index = pd.MultiIndex.from_arrays(
+            [events.normalize(), events], names=["trading_day", "_SIGNAL@DAY1"],
+        )
+        reference_index = pd.MultiIndex.from_arrays(
+            [events.normalize(), ["close"] * 5, events],
+            names=["trading_day", "session", "event_time"],
+        )
+        target = pd.Series([1, 2, 3, 4, 5], index=target_index)
+        reference = pd.Series([2, 4, 6, 8, 10], index=reference_index)
+
+        result = compute_time_series_correlation(
+            target, {"reference": reference}, min_periods=3,
+        )
+
+        assert result["reference"]["correlation"] == 1.0
+        assert result["reference"]["valid_periods"] == 5
+
 
 # =========================================================
 #  3) 品种相关性矩阵
@@ -268,6 +300,23 @@ class TestProductCorrelationMatrix:
             sample_product_series, method="spearman"
         )
         assert len(result["matrix"]) == 4
+
+    def test_aligns_products_with_different_multiindex_depths(self):
+        events = pd.date_range("2025-01-02 15:00", periods=5, freq="D")
+        two_levels = pd.MultiIndex.from_arrays(
+            [events.normalize(), events], names=["trading_day", "event_time"],
+        )
+        three_levels = pd.MultiIndex.from_arrays(
+            [events.normalize(), ["close"] * 5, events],
+            names=["trading_day", "session", "event_time"],
+        )
+
+        result = compute_product_correlation_matrix({
+            "A": pd.Series([1, 2, 3, 4, 5], index=two_levels),
+            "B": pd.Series([2, 4, 6, 8, 10], index=three_levels),
+        }, min_periods=3)
+
+        assert result["matrix"][0][1] == 1.0
 
 
 # =========================================================
@@ -562,6 +611,49 @@ class TestApiSimulation:
         assert run.method == "spearman"
         assert run.selection.selected_paths == ["Product/Futures/CNFutures/日夜盘/日盘"]
 
+    def test_reference_loader_constructs_public_default_factor_when_page_missing(self, monkeypatch):
+        class FakeFactor:
+            def __init__(self, alias: str):
+                self.alias = alias
+                self.name = alias
+
+        class FakeFamily:
+            alias = "MmTrend"
+
+            def __init__(self):
+                self.factors = []
+                self.constructed_with_page_uuid = None
+
+            def get_factors(self, *, page_uuid=None, **kwargs):
+                self.constructed_with_page_uuid = page_uuid
+                self.factors = [FakeFactor("MmTrend|N:20d|$F:1d")]
+                return self.factors
+
+        class FakeTester:
+            def __init__(self):
+                self.results = {}
+                self.calculated = []
+
+            def calc_factor(self, factor, parallel=False):
+                self.calculated.append((factor.alias, parallel))
+
+        family = FakeFamily()
+        monkeypatch.setattr(server_facade, "get_factor_family_instance", lambda *args, **kwargs: family)
+        monkeypatch.setattr(server_facade, "page_factors", {"page-1": {}})
+
+        tester = FakeTester()
+        factor = _load_and_calc_factor(
+            tester,
+            "MmTrend",
+            "MmTrend",
+            "page-1",
+            allow_default_factor=True,
+        )
+
+        assert factor.alias == "MmTrend|N:20d|$F:1d"
+        assert family.constructed_with_page_uuid == "page-1"
+        assert tester.calculated == [("MmTrend|N:20d|$F:1d", False)]
+
     def test_run_simulates_frontend_request(self, monkeypatch):
         """模拟前端提交到后端对象并完成一次完整类型分析。"""
 
@@ -597,7 +689,7 @@ class TestApiSimulation:
         def fake_current_user_obj():
             return None
 
-        def fake_load_and_calc_factor(tester, factor_family_alias, factor_alias, page_uuid):
+        def fake_load_and_calc_factor(tester, factor_family_alias, factor_alias, page_uuid, **kwargs):
             factor = FakeFactor(factor_alias)
             tester._factors.append(factor)
             if factor_alias == "TargetFactor":

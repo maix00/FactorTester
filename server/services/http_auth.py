@@ -13,7 +13,12 @@ def login_required(func):
     @wraps(func)
     def decorated(*args, **kwargs):
         if not current_user():
-            if request.is_json or request.method != 'GET':
+            wants_json = (
+                request.is_json
+                or request.method != 'GET'
+                or request.accept_mimetypes.best == "application/json"
+            )
+            if wants_json:
                 return jsonify({'success': False, 'error': '请先登录', 'login_required': True}), 401
             return redirect('/login')
         return func(*args, **kwargs)

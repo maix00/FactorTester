@@ -6,7 +6,9 @@ the frontend receives module phase declarations alongside setting schemas.
 
 from __future__ import annotations
 
-from flask import jsonify
+from typing import Any
+
+from flask import jsonify, request
 
 from tools.testers.settings import backtest_setting_registry
 from tools.testers.backtest.modules.registry import BacktestModuleRegistry
@@ -31,33 +33,128 @@ def _registry_for(application: str) -> BacktestModuleRegistry:
     return BacktestModuleRegistry()
 
 
-def _serialize_module(module: Module) -> dict:
-    """递归序列化一个 Module。BacktestModuleRegistry 子注册中心展开为其
-    module_manifest()（叶子是执行模块，不是嵌套 Module 树）；其它 ModuleRegistry
-    子注册中心递归展开为 Module 列表。"""
+def _serialize_module(module: Module) -> dict[str, Any]:
     sub = module.sub_registry
-    if isinstance(sub, BacktestModuleRegistry):
-        modules: list[dict] = sub.module_manifest()
-    elif isinstance(sub, ModuleRegistry):
-        modules = [_serialize_module(m) for m in sub.sorted_modules()]
-    else:
-        modules = []
+    has_children = isinstance(sub, ModuleRegistry)
+    if not has_children:
+        try:
+            has_children = bool(module.app.tabs)
+        except Exception:
+            has_children = False
     return {
         "key": module.key,
         "label": module.label,
         "order": module.order,
         "layout": module.layout,
-        "modules": modules,
+        "kind": "module",
+        "application": _module_application(module),
+        "has_children": has_children,
     }
 
 
 @sft_bp.get("/api/testers/modules")
 def get_testers_modules():
     home = HomeModuleRegistry()
+    parent = (request.args.get("parent") or "").strip()
+    try:
+        modules = _navigation_children(home, parent)
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
     return jsonify({
         "success": True,
-        "modules": [_serialize_module(m) for m in home.sorted_modules()],
+        "parent": parent or None,
+        "modules": modules,
     })
+
+
+def _navigation_children(home: HomeModuleRegistry, parent: str) -> list[dict[str, Any]]:
+    """Return exactly one frontend navigation layer.
+
+    Frontend navigation modules are user-editable setting surfaces:
+      ModuleRegistry Module -> application tabs -> tab public fields.
+
+    Backtest ExecutableModule classes are not exposed as navigation modules;
+    they stay in settings manifests as `executable_modules` for execution and
+    progress infrastructure.
+    """
+    if not parent:
+        return [_serialize_module(module) for module in home.sorted_modules()]
+    if "/" in parent:
+        application, tab_key, *rest = parent.split("/")
+        if rest:
+            return []
+        module = home.find(application)
+        if module is None:
+            raise KeyError(f"unknown module: {application}")
+        return _field_nodes(module, tab_key)
+    module = home.find(parent)
+    if module is None:
+        raise KeyError(f"unknown module: {parent}")
+    sub = module.sub_registry
+    if isinstance(sub, ModuleRegistry) and not isinstance(sub, BacktestModuleRegistry):
+        return [_serialize_module(child) for child in sub.sorted_modules()]
+    return _tab_nodes(module)
+
+
+def _tab_nodes(module: Module) -> list[dict[str, Any]]:
+    app = module.app
+    application = _module_application(module)
+    tabs = sorted(app.tabs.values(), key=lambda tab: tab.order)
+    return [
+        {
+            "key": f"{module.key}/{tab.key}",
+            "label": tab.label,
+            "order": tab.order,
+            "kind": "tab",
+            "application": application,
+            "tab_key": tab.key,
+            "layout": tab.layout_template,
+            "has_children": any(setting.tab == tab.key for setting in app.settings.values()),
+        }
+        for tab in tabs
+    ]
+
+
+def _field_nodes(module: Module, tab_key: str) -> list[dict[str, Any]]:
+    app = module.app
+    application = _module_application(module)
+    if tab_key not in app.tabs:
+        raise KeyError(f"unknown tab: {module.key}/{tab_key}")
+    fields = [
+        setting
+        for setting in app.settings.values()
+        if setting.tab == tab_key
+    ]
+    fields = sorted(
+        fields,
+        key=lambda setting: (
+            setting.serialization.get("display_order", 1000),
+            setting.label,
+            setting.key,
+        ),
+    )
+    return [
+        {
+            "key": f"{module.key}/{tab_key}/{setting.key}",
+            "label": setting.label,
+            "order": setting.serialization.get("display_order", index),
+            "kind": "field",
+            "application": application,
+            "tab_key": tab_key,
+            "field_key": setting.key,
+            "control_template": setting.control_template,
+            "has_children": False,
+        }
+        for index, setting in enumerate(fields, start=1)
+    ]
+
+
+def _module_application(module: Module) -> str:
+    try:
+        application = str(module.app.application)
+    except Exception:
+        application = ""
+    return application or module.key
 
 
 @sft_bp.get("/api/backtest/settings/<application>")

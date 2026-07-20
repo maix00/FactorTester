@@ -4,19 +4,16 @@ import hashlib
 import hmac
 import re
 import threading
-import time
 
 from .user import User
 from tools.data.sqlite.account_manager import (
     DEFAULT_SCOPE_KEY,
     delete_factor_param_config as _delete_factor_param_config,
     delete_scope as _delete_scope,
-    delete_user_template_collections,
-    delete_user_template_collection,
     ensure_account_manager_sqlite_store,
-    iter_user_template_collections,
-    list_user_template_metadata as _list_user_template_metadata,
-    load_user_template as _load_user_template,
+    factor_research_config_hash as _factor_research_config_hash,
+    delete_factor_research_run as _delete_factor_research_run,
+    list_factor_research_runs as _list_factor_research_runs,
     ensure_scope_exists as _ensure_scope_exists,
     list_all_factor_param_aliases_across_scopes as _list_all_aliases_across_scopes,
     list_factor_param_config_aliases as _list_factor_param_config_aliases,
@@ -26,21 +23,19 @@ from tools.data.sqlite.account_manager import (
     load_organizations as _load_organizations,
     load_factor_param_config as _load_factor_param_config,
     load_product_groups as _load_product_groups,
-    load_user_templates as _load_user_templates,
     normalize_product_group as _normalize_product_group,
     rename_scope as _rename_scope,
     save_accounts as _save_accounts,
+    save_factor_research_run as _save_factor_research_run,
     save_levels as _save_levels,
     save_organizations as _save_organizations,
     save_factor_param_config as _save_factor_param_config,
     save_product_groups as _save_product_groups,
-    save_user_templates as _save_user_templates,
 )
 
 accounts_lock = threading.Lock()
 organizations_lock = threading.Lock()
 levels_lock = threading.Lock()
-templates_lock = threading.Lock()
 
 DEFAULT_ORGANIZATION_ID = 'default'
 DEFAULT_ORGANIZATION_NAME = '默认机构'
@@ -50,7 +45,6 @@ ROLE_LEVEL_ADMIN = 'level_admin'
 ROLE_DEVELOPER = 'developer'
 ROLE_USER = 'user'
 ADMIN_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN}
-_last_template_ts = 0
 
 
 def account_display_name(account: dict | None) -> str:
@@ -404,53 +398,6 @@ def can_manage_level(current_username: str | None, level_id: str | None) -> bool
     return False
 
 
-def load_user_templates(
-    username: str,
-    kind: str,
-    ff_alias: str | None = None,
-    scope_key: str | None = None,
-) -> list:
-    ensure_account_manager_sqlite_store()
-    return _load_user_templates(username, kind, ff_alias=ff_alias, scope_key=scope_key)
-
-
-def list_user_template_metadata(
-    username: str,
-    kind: str,
-    ff_alias: str | None = None,
-    scope_key: str | None = None,
-) -> list:
-    ensure_account_manager_sqlite_store()
-    return _list_user_template_metadata(username, kind, ff_alias=ff_alias, scope_key=scope_key)
-
-
-def load_user_template(
-    username: str,
-    kind: str,
-    template_id: str,
-    ff_alias: str | None = None,
-    scope_key: str | None = None,
-) -> dict | None:
-    ensure_account_manager_sqlite_store()
-    return _load_user_template(
-        username,
-        kind,
-        template_id,
-        ff_alias=ff_alias,
-        scope_key=scope_key,
-    )
-
-
-def save_user_templates(
-    username: str,
-    kind: str,
-    templates: list,
-    ff_alias: str | None = None,
-    scope_key: str | None = None,
-) -> None:
-    _save_user_templates(username, kind, templates, ff_alias=ff_alias, scope_key=scope_key)
-
-
 def load_product_groups(username: str) -> list:
     ensure_account_manager_sqlite_store()
     return _load_product_groups(username)
@@ -470,9 +417,16 @@ def load_factor_param_config(username: str, ff_alias: str, scope_key: str = DEFA
     return _load_factor_param_config(username, ff_alias, scope_key)
 
 
-def save_factor_param_config(username: str, ff_alias: str, params_list: list, scope_key: str = DEFAULT_SCOPE_KEY) -> dict:
+def save_factor_param_config(
+    username: str,
+    ff_alias: str,
+    params_list: list,
+    scope_key: str = DEFAULT_SCOPE_KEY,
+    *,
+    metadata: dict | None = None,
+) -> dict:
     ensure_account_manager_sqlite_store()
-    return _save_factor_param_config(username, ff_alias, params_list, scope_key)
+    return _save_factor_param_config(username, ff_alias, params_list, scope_key, metadata=metadata)
 
 
 def delete_factor_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> bool:
@@ -510,62 +464,94 @@ def delete_scope(username: str, scope_key: str) -> bool:
     return _delete_scope(username, scope_key)
 
 
-def new_template_id() -> str:
-    """Return a unique, monotonically increasing millisecond-precision id."""
-    global _last_template_ts
-    ts = int(time.time() * 1000)
-    if ts <= _last_template_ts:
-        ts = _last_template_ts + 1
-    _last_template_ts = ts
-    return str(ts)
+def factor_research_config_hash(config: dict | None) -> str:
+    return _factor_research_config_hash(config)
 
 
-def migrate_templates_on_rename(old_name: str, new_name: str) -> int:
-    """Update template collection keys and embedded ff_alias fields after factor rename."""
-    touched = 0
-    old_name = str(old_name or "")
-    new_name = str(new_name or "")
-    if not old_name or not new_name or old_name == new_name:
-        return 0
-
-    with templates_lock:
-        for collection in iter_user_template_collections():
-            username = collection.get("username") or ""
-            kind = collection.get("kind") or ""
-            scope_key = collection.get("scope_key") or ""
-            ff_alias = collection.get("ff_alias") or ""
-            templates = [dict(item) for item in collection.get("templates", []) if isinstance(item, dict)]
-
-            changed = False
-            for template in templates:
-                if template.get("ff_alias") == old_name:
-                    template["ff_alias"] = new_name
-                    changed = True
-
-            next_scope_key = new_name if scope_key == old_name else scope_key
-            next_ff_alias = new_name if ff_alias == old_name else ff_alias
-            if next_scope_key != scope_key or next_ff_alias != ff_alias:
-                changed = True
-
-            if changed:
-                save_user_templates(
-                    username,
-                    kind,
-                    templates,
-                    ff_alias=next_ff_alias or None,
-                    scope_key=next_scope_key or None,
-                )
-                if next_scope_key != scope_key or next_ff_alias != ff_alias:
-                    delete_user_template_collection(
-                        username,
-                        kind,
-                        ff_alias=ff_alias or None,
-                        scope_key=scope_key or None,
-                    )
-                touched += 1
-    return touched
+def save_factor_research_run(
+    username: str,
+    *,
+    ff_alias: str,
+    factor_alias: str,
+    start_date: str,
+    end_date: str,
+    test_type: str,
+    metrics: dict,
+    product_group: str = "",
+    factor_source: str = "",
+    config: dict | None = None,
+    config_hash_value: str | None = None,
+    report_path: str = "",
+    artifact_path: str = "",
+    note: str = "",
+    sample_role: str = "",
+    regime_label: str = "",
+    slice_name: str = "",
+    run_id: str | None = None,
+) -> dict:
+    ensure_account_manager_sqlite_store()
+    return _save_factor_research_run(
+        username,
+        ff_alias=ff_alias,
+        factor_alias=factor_alias,
+        start_date=start_date,
+        end_date=end_date,
+        test_type=test_type,
+        metrics=metrics,
+        product_group=product_group,
+        factor_source=factor_source,
+        config=config,
+        config_hash_value=config_hash_value,
+        report_path=report_path,
+        artifact_path=artifact_path,
+        note=note,
+        sample_role=sample_role,
+        regime_label=regime_label,
+        slice_name=slice_name,
+        run_id=run_id,
+    )
 
 
-def delete_user_template_data(username: str) -> int:
-    with templates_lock:
-        return delete_user_template_collections(username)
+def list_factor_research_runs(
+    username: str,
+    *,
+    ff_alias: str | None = None,
+    factor_alias: str | None = None,
+    product_group: str | None = None,
+    test_type: str | None = None,
+    sample_role: str | None = None,
+    regime_label: str | None = None,
+    slice_name: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    overlap: bool = True,
+    min_metrics: dict[str, float] | None = None,
+    max_metrics: dict[str, float] | None = None,
+    order_by_metric: str | None = None,
+    descending: bool = True,
+    limit: int | None = None,
+) -> list[dict]:
+    ensure_account_manager_sqlite_store()
+    return _list_factor_research_runs(
+        username,
+        ff_alias=ff_alias,
+        factor_alias=factor_alias,
+        product_group=product_group,
+        test_type=test_type,
+        sample_role=sample_role,
+        regime_label=regime_label,
+        slice_name=slice_name,
+        start_date=start_date,
+        end_date=end_date,
+        overlap=overlap,
+        min_metrics=min_metrics,
+        max_metrics=max_metrics,
+        order_by_metric=order_by_metric,
+        descending=descending,
+        limit=limit,
+    )
+
+
+def delete_factor_research_run(username: str, run_id: str) -> bool:
+    ensure_account_manager_sqlite_store()
+    return _delete_factor_research_run(username, run_id)

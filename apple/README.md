@@ -12,6 +12,10 @@
 - **自签名证书**：对已配置的那台主机放行自签名 https（URLSession + WKWebView 双通道），
   其余主机仍走系统校验。
 - **苹果原生界面**：NavigationStack、Form、系统材质与系统色，自动明暗模式。
+- **本地研究界面**：在 App 内启动、停止并用 WKWebView 打开已签名的
+  Vibe-Trading 等本地 adapter；外部浏览器仅作为排错备用。
+- **版本与身份设置**：查看客户端安装健康状态，管理一个人类 profile 和多个
+  provider-neutral Agent profile。密码和 adapter secret 只进入 Keychain。
 
 ## 目录结构
 
@@ -27,7 +31,8 @@ apple/
     Features/
       Home/                   首页原生迁移
       Auth/                   登录 / 注册、SessionStore
-      Settings/               服务器设置
+      Settings/               服务器、版本、profile 与 Keychain 设置
+      Adapters/               本地 adapter 生命周期与内嵌 Web UI
       Web/                    WebPageView（转发到 web 的 WKWebView + cookie 桥接）
   Resources/                  Assets（图标 / 强调色）、entitlements
 ```
@@ -74,3 +79,10 @@ open GTHTClient.xcodeproj
 1. 启动 App → 「配置服务器」填写：协议（http/https）、主机或 IP、端口（如 `8000`）→ 保存。
 2. 首页出现模块网格（来自服务器注册表）。点需要登录的模块会弹出登录/注册。
 3. 右上角菜单可「服务器设置」改地址、或退出登录。
+4. 客户端设置中选择人类或 Agent profile，并配置本地 adapter 的 executable
+   路径；secret 由系统 Keychain 保存。
+5. 启动 Vibe-Trading 后，其 `127.0.0.1` Web UI 直接嵌入客户端。SwiftUI 不
+   硬编码端口，而是读取已验证 adapter contract 返回的 URL。
+
+审批不在设置页面完成。设置页只负责配置和展示已有审批事实；Skill 执行、图变更
+和后端更新仍在对应 Agent 对话中接受审计。

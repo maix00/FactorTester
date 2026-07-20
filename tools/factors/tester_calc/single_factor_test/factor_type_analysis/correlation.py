@@ -11,6 +11,18 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from tools.data.types import finest_index
+
+
+def _on_event_time(series: pd.Series) -> pd.Series:
+    if not isinstance(series.index, pd.MultiIndex):
+        return series
+    normalized = series.copy(deep=False)
+    normalized.index = finest_index(series.index).rename("event_time")
+    if not normalized.index.is_unique:
+        normalized = normalized.groupby(level=0, sort=False).last()
+    return normalized
+
 
 def compute_time_series_correlation(
     target_series: pd.Series,
@@ -32,9 +44,12 @@ def compute_time_series_correlation(
         {ref_name: {"correlation": float, "p_value": float, "valid_periods": int}}
     """
     results: dict[str, dict[str, Any]] = {}
+    target_series = _on_event_time(target_series)
     for ref_name, ref_series in reference_series.items():
         # 对齐时间轴
-        aligned = pd.concat([target_series, ref_series], axis=1, join="inner")
+        aligned = pd.concat(
+            [target_series, _on_event_time(ref_series)], axis=1, join="inner"
+        )
         aligned.columns = ["target", "reference"]
         aligned = aligned.dropna()
         valid = len(aligned)
@@ -107,7 +122,10 @@ def compute_product_correlation_matrix(
         }
 
     # 对齐所有产品到统一时间轴
-    aligned = pd.DataFrame(factor_series)
+    aligned = pd.DataFrame({
+        product: _on_event_time(series)
+        for product, series in factor_series.items()
+    })
     aligned = aligned.dropna(how="any", axis=0)
     valid_count = len(aligned)
 

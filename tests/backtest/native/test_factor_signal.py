@@ -3,11 +3,14 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from tools.data.types import DataColumn
-from tools.factors.expr import ColumnRef
+from tools.factors.expr import CLOSE, ColumnRef, term_ratio
+from tools.products.AdjustableTermStructure import TERM_DAYS_TO_MATURITY_COL, TERM_RANK_COL
 from tools.data.types.time_freq import DataFreq
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import FieldRef
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
@@ -16,9 +19,14 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import (
     FactorSignalModule, _evaluate_signal_live, _evaluate_signal_precomputed, _observe_signal_live_bar,
     _schedule_signal_live_timestamps, _schedule_signal_precomputed_timestamps,
-    _factor_calculation_key, normalize_signal_timestamp,
+    _evaluate_factor_for_strategies, _factor_calculation_key,
+    _clip_scheduled_table_to_strategy_window, _clip_signal_table_to_strategy_window,
+    _schedule_table_for_strategy, _factor_fields_by_product,
+    normalize_signal_timestamp,
 )
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import _factor_required_columns
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
@@ -57,6 +65,74 @@ def test_normalize_signal_timestamp_day_level_midnight_without_lookup_raises():
         normalize_signal_timestamp(pd.Timestamp("2024-01-01"), _FakeDayFreq())
 
 
+def test_external_precomputed_factor_uses_market_signal_schedule() -> None:
+    product = object()
+
+    class _ExternalFactor:
+        provenance = {"factor_sha256": "abc", "execution": "next_bar"}
+
+        def align_to_market_schedule(self, schedule):
+            result = pd.DataFrame({product: [3.0]}, index=schedule.index)
+            return result
+
+        def to_run_result(self, table):
+            return {"table": table, "provenance": self.provenance}
+
+    strategy = Strategy(alias="external")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            FactorSignalModule.signal_freq: "1d",
+            FactorSignalModule.basepoint: "last",
+        },
+    )
+    state = BacktestRunState(strategy_configs={strategy: config})
+    market_index = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime(["2026-01-02"]),
+            pd.to_datetime(["2026-01-02 15:00"]),
+        ],
+        names=["trading_day", "trade_time"],
+    )
+    state.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [100.0]}, index=market_index
+    )
+    schedule = pd.DataFrame({product: [100.0]}, index=market_index)
+
+    with patch(
+        "tools.testers.backtest.modules.factor_signal.signal_align",
+        return_value=schedule,
+    ) as align:
+        result = _schedule_table_for_strategy(
+            pd.DataFrame(), config, factor=_ExternalFactor(), state=state,
+        )
+
+    assert result.index.equals(market_index)
+    assert result.iloc[0, 0] == 3.0
+    align.assert_called_once()
+
+
+def test_factor_signal_store_keeps_external_provenance_per_bound_schedule() -> None:
+    from tools.testers.backtest.modules.factor_signal import FactorSignalStore
+
+    strategy = Strategy(alias="external")
+    store = FactorSignalStore()
+    key = ("external", "schedule")
+    run_result = object()
+    store.put_precomputed_table(
+        key,
+        pd.DataFrame({"A": [1.0]}, index=[pd.Timestamp("2026-01-01")]),
+        provenance={"factor_sha256": "abc", "execution": "next_bar"},
+        run_result=run_result,
+    )
+    store.bind_precomputed_table(strategy, key)
+
+    assert store.precomputed_provenance_for(strategy) == {
+        "factor_sha256": "abc", "execution": "next_bar",
+    }
+    assert store.precomputed_result_for(strategy) is run_result
+
+
 def test_factor_calculation_key_separates_market_data_source_and_frequency():
     factor_key = ("factor", "A")
     base = StrategyConfig(
@@ -91,6 +167,110 @@ def test_factor_calculation_key_separates_market_data_source_and_frequency():
     assert _factor_calculation_key(factor_key, base) != _factor_calculation_key(factor_key, different_frequency)
 
 
+def test_live_market_data_resolves_exact_factor_column_names():
+    factor = (ColumnRef(DataColumn.CLOSE_ADJUSTED) + ColumnRef(DataColumn.VOLUME)) / 2
+
+    assert set(_factor_required_columns(factor)) == {"CLOSE_ADJUSTED", "VOLUME"}
+
+
+def test_live_factor_compile_receives_strategy_resolved_bar_frequency():
+    strategy = Strategy(alias="live-frequency")
+
+    class _Executor:
+        def on_bar(self, timestamp, prices) -> None:
+            pass
+
+    class _Factor:
+        def __init__(self) -> None:
+            self.source_freq = None
+
+        def compile_incremental(self, *, factor_alias, products, source_freq):
+            self.source_freq = source_freq
+            return _Executor()
+
+    factor = _Factor()
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={FactorModule.factor: factor},
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    account.market_data_store.required_frequency_by_strategy[strategy] = DataFreq.MIN1
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-02 09:01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0},
+        "CLOSE_ADJUSTED": {"P1": 10.5},
+    })
+
+    _observe_signal_live_bar(account, ctx)
+
+    assert factor.source_freq == DataFreq.MIN1
+
+
+def test_live_factor_fields_keep_canonical_data_column_names_per_product():
+    assert _factor_fields_by_product({
+        "close": {"P1": 10.0},
+        "CLOSE": {"P1": 10.0, "P2": 20.0},
+        "CLOSE_ADJUSTED": {"P1": 11.0, "P2": 21.0},
+        "VOLUME": {"P1": 100.0, "P2": 200.0},
+        "TERM_STRUCTURE": {
+            "P1": pd.DataFrame({TERM_RANK_COL: [0], DataColumn.CLOSE.name: [10.0]}),
+        },
+    }) == {
+        "P1": {"CLOSE": 10.0, "CLOSE_ADJUSTED": 11.0, "VOLUME": 100.0},
+        "P2": {"CLOSE": 20.0, "CLOSE_ADJUSTED": 21.0, "VOLUME": 200.0},
+    }
+
+
+def test_precomputed_factor_uses_registered_products_and_runtime_window_without_wrapper():
+    strategy = Strategy(alias="A")
+
+    class _Selection:
+        selection_id = "selection-1"
+        products = ("P2", "P1")
+
+    class _Factor:
+        def __init__(self) -> None:
+            self.calls: list[tuple] = []
+
+        def evaluate(self, products, *, freq=None, start_dt=None, end_dt=None, warmup_window=None):
+            self.calls.append((tuple(products), freq, start_dt, end_dt, warmup_window))
+            return pd.DataFrame({"P1": [1.0]}, index=[pd.Timestamp("2024-01-02 09:00")])
+
+    factor = _Factor()
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            FactorModule.factor: factor,
+            ProductSelectionModule.product_path_selection: _Selection(),
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.timezone: "Asia/Shanghai",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2024-01-03",
+            RunWindowModule.end_time: "15:00",
+            FactorSignalModule.warmup_mode: "fixed",
+            FactorSignalModule.warmup_window: "2d",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({"P1", "P2"}))
+    ctx.set_for(MarketDataModule.required_frequency, strategy, DataFreq.DAY1)
+
+    _evaluate_factor_for_strategies(factor, [strategy], account, ctx)
+
+    products, freq, start_dt, end_dt, warmup_window = factor.calls[0]
+    assert products == ("P1", "P2")
+    assert freq == DataFreq.DAY1
+    assert start_dt.ts == pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai")
+    assert end_dt.ts == pd.Timestamp("2024-01-03 15:00", tz="Asia/Shanghai")
+    assert warmup_window == pd.Timedelta("2D")
+
+
 def test_signal_live_groups_by_shared_align_params_calls_once_per_group():
     s1, s2, s3 = Strategy(alias="A"), Strategy(alias="B"), Strategy(alias="C")
     configs = {
@@ -119,6 +299,173 @@ def test_signal_live_groups_by_shared_align_params_calls_once_per_group():
 
     assert calls.count("1d") == 1  # shared by s1, s2 -> called once
     assert calls.count("1h") == 1  # s3's own group
+
+
+def test_signal_live_maps_daily_schedule_to_trading_day_last_bar_close():
+    strategy = Strategy(alias="daily-live-exact")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_live"}),
+        field_values={
+            FactorSignalModule.signal_freq: "1d",
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.timezone: "Asia/Shanghai",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.start_time: "10:12",
+            RunWindowModule.end_date: "2024-01-02",
+            RunWindowModule.end_time: "10:13",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    account.market_data_store.daily_signal_close_time = "15:00"
+    market_times = pd.DatetimeIndex(
+        ["2024-01-01 21:01", "2024-01-02 09:00", "2024-01-02 15:00"],
+        tz="Asia/Shanghai",
+        name="MIN1",
+    )
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {"P1": [0.5, 1.0, 2.0]},
+        index=market_times,
+    )
+    daily_signal = pd.DataFrame(
+        {"P1": [2.0]},
+        index=pd.DatetimeIndex(["2024-01-02"], name="_SIGNAL@DAY1"),
+    )
+    queue = EventQueue()
+
+    with patch(
+        "tools.testers.backtest.modules.factor_signal.signal_align",
+        return_value=daily_signal,
+    ):
+        _schedule_signal_live_timestamps(account, FlowContext(timestamp=None, event_queue=queue))
+
+    scheduled = queue.snapshot_head()
+    assert [draft.timestamp for draft in scheduled] == [
+        pd.Timestamp("2024-01-02 15:00", tz="Asia/Shanghai")
+    ]
+    assert config.get(RunWindowModule.time_precision) == "exact"
+    assert config.get(RunWindowModule.end_time) == "10:13"
+
+
+def test_signal_live_rejects_missing_close_on_formal_signal_day():
+    strategy = Strategy(alias="daily-missing-close")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_live"}),
+        field_values={
+            FactorSignalModule.signal_freq: "1d",
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.end_date: "2024-01-02",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    account.market_data_store.daily_signal_close_time = "15:00"
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {"P1": [1.0]},
+        index=pd.DatetimeIndex(
+            ["2024-01-02 09:00"],
+            tz="Asia/Shanghai",
+            name="MIN1",
+        ),
+    )
+    daily_signal = pd.DataFrame(
+        {"P1": [1.0]},
+        index=pd.DatetimeIndex(["2024-01-02"], name="_SIGNAL@DAY1"),
+    )
+
+    with patch(
+        "tools.testers.backtest.modules.factor_signal.signal_align",
+        return_value=daily_signal,
+    ), pytest.raises(ValueError, match="2024-01-02.*15:00 close bar"):
+        _schedule_signal_live_timestamps(
+            account,
+            FlowContext(timestamp=None, event_queue=EventQueue()),
+        )
+
+
+def test_exact_window_clips_daily_signal_schedule_by_intraday_event_timestamp():
+    strategy = Strategy(alias="daily-exact")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.timezone: "Asia/Shanghai",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2024-01-02",
+            RunWindowModule.end_time: "15:00",
+        },
+    )
+    trading_days = pd.DatetimeIndex([
+        "2024-01-01", "2024-01-02", "2024-01-03",
+    ], name="_SIGNAL@DAY1")
+    event_times = pd.DatetimeIndex([
+        "2024-01-01 15:00", "2024-01-02 15:00", "2024-01-03 15:00",
+    ], tz="Asia/Shanghai", name="MIN1")
+    table = pd.DataFrame(
+        {"P1": [1.0, 2.0, 3.0]},
+        index=pd.MultiIndex.from_arrays([trading_days, event_times]),
+    )
+
+    clipped = _clip_scheduled_table_to_strategy_window(table, config)
+
+    assert list(clipped["P1"]) == [2.0]
+    assert list(clipped.index.get_level_values("MIN1")) == [event_times[1]]
+
+    raw_clipped = _clip_signal_table_to_strategy_window(table, config)
+
+    assert list(raw_clipped["P1"]) == [2.0]
+
+
+def test_schedule_table_maps_explicit_daily_signal_to_market_event_time():
+    strategy = Strategy(alias="daily-exact")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.timezone: "Asia/Shanghai",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2024-01-02",
+            RunWindowModule.end_time: "15:00",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    market_times = pd.DatetimeIndex([
+        "2024-01-02 09:00",
+        "2024-01-02 15:00",
+    ], tz="Asia/Shanghai")
+    account.market_data_store.current_prices_table = pd.DataFrame({"P1": [1.0, 2.0]}, index=market_times)
+    table = pd.DataFrame(
+        {"P1": [2.0]},
+        index=pd.DatetimeIndex(["2024-01-02"], name="_SIGNAL@DAY1"),
+    )
+
+    scheduled = _schedule_table_for_strategy(table, config, account)
+
+    assert list(scheduled.index) == [pd.Timestamp("2024-01-02 15:00", tz="Asia/Shanghai")]
+
+
+def test_schedule_table_preserves_naive_loaded_market_event_semantics():
+    strategy = Strategy(alias="daily-naive-market")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            RunWindowModule.timezone: "Asia/Shanghai",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    market_times = pd.DatetimeIndex(["2024-01-01", "2024-01-02"])
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {"P1": [1.0, 2.0]},
+        index=market_times,
+    )
+    table = pd.DataFrame({"P1": [1.0]}, index=market_times[:1])
+
+    scheduled = _schedule_table_for_strategy(table, config, account)
+
+    assert list(scheduled.index) == [pd.Timestamp("2024-01-01")]
 
 
 def test_signal_precomputed_groups_by_factor_identity():
@@ -253,9 +600,9 @@ def test_signal_precomputed_clips_events_to_strategy_run_window():
     assert factor.calls == 2
     assert len(account.factor_signal_store.precomputed_tables) == 2
     assert seen == [
-        (pd.Timestamp("2024-01-01 09:00"), s1),
-        (pd.Timestamp("2024-01-02 09:00"), s1),
-        (pd.Timestamp("2024-01-03 09:00"), s2),
+        (pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai"), s1),
+        (pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai"), s1),
+        (pd.Timestamp("2024-01-03 09:00", tz="Asia/Shanghai"), s2),
     ]
 
 
@@ -501,9 +848,41 @@ def test_signal_precomputed_same_window_batches_strategies_by_timestamp():
 
     assert len(account.factor_signal_store.precomputed_tables) == 1
     assert batches == [
-        (pd.Timestamp("2024-01-01 09:00"), {s1, s2}),
-        (pd.Timestamp("2024-01-02 09:00"), {s1, s2}),
+        (pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai"), {s1, s2}),
+        (pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai"), {s1, s2}),
     ]
+
+
+def test_signal_precomputed_localizes_naive_subset_timestamps_before_event_queue_push():
+    strategy = Strategy(alias="A")
+
+    class _FakeFactor:
+        def evaluate(self):
+            return pd.DataFrame(
+                {"PT.GFE": [1.0], "PD.GFE": [2.0], "SI.GFE": [3.0]},
+                index=pd.DatetimeIndex([pd.Timestamp("2026-01-05 09:00")]),
+            )
+
+    fields = {
+        FactorModule.factor: _FakeFactor(),
+        RunWindowModule.time_precision: "exact",
+        RunWindowModule.timezone: "Asia/Shanghai",
+        RunWindowModule.start_date: "2026-01-05",
+        RunWindowModule.end_date: "2026-01-05",
+        RunWindowModule.start_time: "08:00",
+        RunWindowModule.end_time: "15:00",
+    }
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, active_flow_names=frozenset({"signal_precomputed"}), field_values=fields),
+    })
+    queue = EventQueue()
+    queue.push_event(EventDraft(EventKind.BAR, pd.Timestamp("2026-01-05 09:01", tz="Asia/Shanghai"), strategy))
+    ctx = FlowContext(timestamp=None, event_queue=queue)
+
+    _schedule_signal_precomputed_timestamps(account, ctx)
+
+    head = queue.snapshot_head()
+    assert all(draft.timestamp.tz is not None for draft in head)
 
 
 def test_signal_precomputed_uses_strategy_index_key_inside_same_timestamp_batch():
@@ -546,6 +925,41 @@ def test_signal_precomputed_uses_strategy_index_key_inside_same_timestamp_batch(
 
     assert ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 10.0}
     assert ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 20.0}
+
+
+def test_signal_precomputed_reuses_row_lookup_for_shared_table_and_index_key(monkeypatch):
+    import tools.testers.backtest.modules.factor_signal as factor_signal_module
+
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    timestamp = pd.Timestamp("2026-03-09 21:00")
+    table = pd.DataFrame({"P1": [10.0]}, index=[timestamp])
+    key = ("shared",)
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"signal_precomputed"})),
+        s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"})),
+    })
+    account.factor_signal_store.precomputed_tables = {key: table}
+    account.factor_signal_store.precomputed_table_keys = {s1: key, s2: key}
+    calls = 0
+    real_row_at = factor_signal_module.row_at
+
+    def _counting_row_at(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_row_at(*args, **kwargs)
+
+    monkeypatch.setattr(factor_signal_module, "row_at", _counting_row_at)
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s1, s2}),
+    )
+
+    _evaluate_signal_precomputed(account, ctx)
+
+    assert calls == 1
+    assert ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 10.0}
+    assert ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 10.0}
 
 
 def test_signal_precomputed_groups_by_adapter_cache_key():
@@ -650,7 +1064,9 @@ def test_signal_precomputed_calendar_frequency_aligns_schedule():
     assert align.call_args.args[1] == "5min"
     key = account.factor_signal_store.precomputed_table_keys[strategy]
     assert key in account.factor_signal_store.precomputed_tables
-    assert list(account.factor_signal_store.precomputed_tables[key].index) == [pd.Timestamp("2024-01-01 09:01")]
+    assert list(account.factor_signal_store.precomputed_tables[key].index) == [
+        pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    ]
 
 
 def test_signal_live_observes_bars_then_signals_from_causal_price_table():
@@ -679,16 +1095,18 @@ def test_signal_live_observes_bars_then_signals_from_causal_price_table():
         s2: StrategyConfig(strategy=s2, field_values={FactorModule.factor: shared_factor}),
     }
     account = BacktestRunState(strategy_configs=configs)
-    prices_ref = FieldRef("current_prices", owner="MarketDataModule")
-
     bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                           active_strategies=frozenset({s1, s2}))
-    bar_ctx.set(prices_ref, {"P1": 41.0})
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 41.0}, "CLOSE": {"P1": 41.0},
+    })
     _observe_signal_live_bar(account, bar_ctx)
 
     bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02"), event_queue=EventQueue(),
                           active_strategies=frozenset({s1, s2}))
-    bar_ctx.set(prices_ref, {"P1": 42.0})
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 42.0}, "CLOSE": {"P1": 42.0},
+    })
     _observe_signal_live_bar(account, bar_ctx)
 
     signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02"), event_queue=EventQueue(),
@@ -740,11 +1158,90 @@ def test_signal_live_compiles_factor_expr_executor_from_bar_events():
         strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
     }
     account = BacktestRunState(strategy_configs=configs)
-    prices_ref = FieldRef("current_prices", owner="MarketDataModule")
-
     bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                           active_strategies=frozenset({strategy}))
-    bar_ctx.set(prices_ref, {"P1": {"CLOSE": 10.0}})
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0}, "CLOSE": {"P1": 10.0},
+    })
+    _observe_signal_live_bar(account, bar_ctx)
+
+    assert bar_ctx.get_for(FactorSignalModule.live_factor_state, strategy) == {"P1": 11.0}
+
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({strategy}))
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 11.0}
+
+
+def test_signal_live_factor_expr_requires_canonical_data_column_snapshot_fields():
+    strategy = Strategy(alias="A")
+    factor = ColumnRef(DataColumn.CLOSE) + 1.0
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0},
+    })
+
+    _observe_signal_live_bar(account, bar_ctx)
+
+    assert account.factor_signal_store.live_executors == {}
+    assert bar_ctx.get_for(FactorSignalModule.live_factor_state, strategy) is None
+
+
+def test_signal_live_shared_factor_expr_executor_updates_once_across_strategies():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    factor = ColumnRef(DataColumn.CLOSE).rolling_mean(2)
+    configs = {
+        s1: StrategyConfig(strategy=s1, field_values={FactorModule.factor: factor}),
+        s2: StrategyConfig(strategy=s2, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+
+    first_bar = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:00"), event_queue=EventQueue(),
+                            active_strategies=frozenset({s1, s2}))
+    first_bar.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0, "P2": 20.0},
+        "CLOSE": {"P1": 10.0, "P2": 20.0},
+    })
+    _observe_signal_live_bar(account, first_bar)
+
+    second_bar = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({s1, s2}))
+    second_bar.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 12.0, "P2": 18.0},
+        "CLOSE": {"P1": 12.0, "P2": 18.0},
+    })
+    _observe_signal_live_bar(account, second_bar)
+
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({s1, s2}))
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert len(account.factor_signal_store.live_executors) == 1
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 11.0, "P2": 19.0}
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 11.0, "P2": 19.0}
+
+
+def test_signal_live_factor_expr_uses_strategy_products_not_extra_snapshot_products():
+    strategy = Strategy(alias="A")
+    factor = ColumnRef(DataColumn.CLOSE) + 1.0
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({"P1"}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 10.0, "CONTRACT_EXTRA": 99.0},
+        "CLOSE": {"P1": 10.0, "CONTRACT_EXTRA": 99.0},
+    })
+
     _observe_signal_live_bar(account, bar_ctx)
 
     signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
@@ -752,3 +1249,61 @@ def test_signal_live_compiles_factor_expr_executor_from_bar_events():
     _evaluate_signal_live(account, signal_ctx)
 
     assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 11.0}
+
+
+def test_signal_live_term_structure_factor_expr_from_bar_events():
+    strategy = Strategy(alias="A")
+    p1, p2 = "TERM1", "TERM2"
+    factor = term_ratio(0, 1, CLOSE)
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02 09:00"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({p1, p2}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {p1: 1.0, p2: 1.0},
+        "CLOSE": {p1: 1.0, p2: 1.0},
+        "TERM_STRUCTURE": {
+            p1: pd.DataFrame({
+                TERM_RANK_COL: [0, 1],
+                TERM_DAYS_TO_MATURITY_COL: [10, 40],
+                DataColumn.CLOSE.name: [100.0, 95.0],
+            }),
+            p2: pd.DataFrame({
+                TERM_RANK_COL: [0, 1],
+                TERM_DAYS_TO_MATURITY_COL: [10, 40],
+                DataColumn.CLOSE.name: [120.0, 90.0],
+            }),
+        },
+    })
+
+    _observe_signal_live_bar(account, bar_ctx)
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02 09:00"), event_queue=EventQueue(),
+                             active_strategies=frozenset({strategy}))
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {
+        p1: 100.0 / 95.0 - 1.0,
+        p2: 120.0 / 90.0 - 1.0,
+    }
+
+
+def test_signal_live_term_structure_factor_requires_curve_snapshot():
+    strategy = Strategy(alias="A")
+    factor = term_ratio(0, 1, CLOSE)
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02 09:00"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({"TERM1"}))
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"TERM1": 1.0},
+        "CLOSE": {"TERM1": 1.0},
+    })
+
+    with pytest.raises(KeyError, match="TERM_STRUCTURE snapshot is missing curve"):
+        _observe_signal_live_bar(account, bar_ctx)

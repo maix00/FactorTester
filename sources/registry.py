@@ -6,8 +6,10 @@ from typing import Iterable
 
 
 _SOURCE_MODULES: list[str] = [
+    "sources.Local.data_source_bundle",
     "sources.LocalCNFutures.CNFutures",
     "sources.LocalCNFutures.artifacts",
+    "sources.Tiger.source",
 ]
 
 

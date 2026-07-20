@@ -4,7 +4,8 @@ import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -48,11 +49,32 @@ def test_pre_replay_flow_produces_event_processed_by_per_event_flow():
     registry.register_flow(f_emit)
     registry.register_flow(f_handle)
 
-    account = _account([s], active_flow_names=frozenset({"handle_signal"}))
+    account = _account([s], active_flow_names=frozenset({"emit_signal", "handle_signal"}))
     queue = EventQueue()
     run(account, queue, registry.resolve())
 
     assert seen == [pd.Timestamp("2024-01-01")]
+
+
+def test_flow_profile_records_slow_pre_replay_flow():
+    s = Strategy(alias="S")
+
+    def compute(account, ctx) -> None:
+        return None
+
+    flow = Flow("profiled_flow", inputs=(), outputs=(), phase=Phase.PRE_REPLAY, compute=compute)
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    account = _account([s], active_flow_names=frozenset({"profiled_flow"}))
+    account.backtest_profile_min_duration_ms = 0.0
+
+    run(account, EventQueue(), registry.resolve())
+
+    rows = [row for row in account.runtime_info_rows if row.get("code") == "backtest_flow_profile"]
+    assert len(rows) == 1
+    assert rows[0]["details"]["phase"] == "pre_replay"
+    assert rows[0]["details"]["flow"] == "profiled_flow"
+    assert rows[0]["details"]["count"] == 1
 
 
 def test_chained_event_production_is_consumed_not_dropped():
@@ -93,7 +115,7 @@ def test_chained_event_production_is_consumed_not_dropped():
     registry.register_flow(f_on_signal)
     registry.register_flow(f_on_order)
 
-    account = _account([s], active_flow_names=frozenset({"on_signal", "on_order"}))
+    account = _account([s], active_flow_names=frozenset({"emit_signal2", "on_signal", "on_order"}))
     queue = EventQueue()
     run(account, queue, registry.resolve())
 
@@ -157,7 +179,7 @@ def test_flow_not_applicable_to_any_strategy_is_skipped():
     assert called == []
 
 
-def test_strategy_scoped_pre_replay_flow_is_skipped_when_no_strategy_uses_it():
+def test_pre_replay_flow_is_skipped_when_no_strategy_uses_it():
     s = Strategy(alias="S")
     called: list[str] = []
 
@@ -178,7 +200,28 @@ def test_strategy_scoped_pre_replay_flow_is_skipped_when_no_strategy_uses_it():
 
     run(account, EventQueue(), registry.resolve())
 
-    assert called == ["global"]
+    assert called == []
+
+
+def test_global_pre_replay_flow_runs_once_for_all_applicable_strategies():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    active_seen: list[frozenset[Strategy]] = []
+
+    global_flow = Flow(
+        "global_pre", inputs=(), outputs=(), phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: active_seen.append(ctx.active_strategies),
+    )
+
+    registry = FlowRegistry()
+    registry.register_flow(global_flow)
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"global_pre"})),
+        s2: StrategyConfig(strategy=s2, active_flow_names=frozenset()),
+    })
+
+    run(account, EventQueue(), registry.resolve())
+
+    assert active_seen == [frozenset({s1})]
 
 
 def test_strategy_scoped_pre_replay_flow_runs_for_applicable_strategies():
@@ -234,6 +277,48 @@ def test_make_dispatcher_processes_all_drafts_for_one_strategy_in_one_batch():
     assert seen_payloads == [[payload1, payload2, payload3]]
 
 
+def test_make_dispatcher_ledger_events_activate_exact_registered_strategies():
+    """Ledger dispatch must match the old scan-all-strategies semantics.
+
+    A cached ledger->strategy map is only a performance optimization; it must
+    not change which strategies participate in ledger-scoped calculations.
+    """
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+
+    s1, s2, s3 = Strategy(alias="A"), Strategy(alias="B"), Strategy(alias="C")
+    shared = ledger_identity("shared-book")
+    other = ledger_identity("other-book")
+    seen: list[frozenset] = []
+    step_records: list[dict] = []
+
+    flow = Flow(
+        "ledger_flow", inputs=(), outputs=(), phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER,
+        compute=lambda account, ctx: seen.append(frozenset(ctx.active_strategies)),
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    account = _account([s1, s2, s3], active_flow_names=frozenset({"ledger_flow"}))
+    store = strategy_book_store_for(account)
+    store.register_strategy_ledgers(s1, (shared.name,), default_ledger_id=shared.name)
+    store.register_strategy_ledgers(s2, (shared.name,), default_ledger_id=shared.name)
+    store.register_strategy_ledgers(s3, (other.name,), default_ledger_id=other.name)
+    queue = EventQueue()
+
+    queue.push_event(EventDraft(EventKind.LEDGER, pd.Timestamp("2024-01-01"), ledger=shared))
+    run(account, queue, registry.resolve(), step_mode=True, step_callback=step_records.append)
+
+    assert seen == [frozenset({s1, s2})]
+    assert [item["strategy"] for item in step_records[0]["strategies"]] == ["A", "B"]
+    assert [item["ledger"] for item in step_records[0]["ledgers_before"]] == ["shared-book"]
+    assert step_records[0]["event_kind"] == "LEDGER"
+    assert step_records[0]["current_event"]["event_kind"] == "LEDGER"
+    assert step_records[0]["current_event"]["batch_count"] == 1
+    assert step_records[0]["current_event"]["subjects"][0]["ledger"] == "shared-book"
+    assert "C" not in {item["strategy"] for item in step_records[0]["strategies"]}
+    assert "other-book" not in {item["ledger"] for item in step_records[0]["ledgers_before"]}
+
+
 def test_progress_fires_across_all_three_phases_with_description():
     s = Strategy(alias="S")
     seen: list[tuple[int, int, str]] = []
@@ -256,7 +341,7 @@ def test_progress_fires_across_all_three_phases_with_description():
     registry.register_flow(post)
     registry.register_flow(on_signal)
 
-    account = _account([s], active_flow_names=frozenset({"on_signal"}))
+    account = _account([s], active_flow_names=frozenset({"pre_flow", "on_signal", "post_flow"}))
     queue = EventQueue()
     queue.push_event(EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-01"), s))
 
@@ -266,3 +351,127 @@ def test_progress_fires_across_all_three_phases_with_description():
     assert "预处理" in labels       # pre_flow's description
     assert "post_flow" in labels    # post's name (no description given)
     assert "on_signal" in labels
+
+
+def test_step_mode_emits_every_flow_invocation_and_keeps_phase_coverage():
+    """The client receives every real flow invocation without sampling.
+
+    Each record is emitted after compute, so the declared output contains the
+    value the flow just produced. Repeating the same event flow produces the
+    next step because Enter means exactly one flow invocation.
+    """
+    from tools.testers.backtest.modules.base import FieldRef
+
+    strategy = Strategy(alias="S")
+    output = FieldRef("audit_output", owner="Audit")
+    records: list[dict] = []
+
+    def compute(value: str):
+        def _compute(account, ctx) -> None:
+            ctx.set(output, value)
+        return _compute
+
+    pre = Flow(
+        "pre", inputs=(), outputs=(output,), phase=Phase.PRE_REPLAY,
+        description="准备审计输入", compute=compute("pre"),
+    )
+    event = Flow(
+        "event", inputs=(output,), outputs=(output,), phase=Phase.PER_EVENT,
+        event_kind=EventKind.SIGNAL, description="处理审计事件", compute=compute("event"),
+    )
+    post = Flow(
+        "post", inputs=(output,), outputs=(output,), phase=Phase.POST_REPLAY,
+        description="整理审计结果", compute=compute("post"),
+    )
+    registry = FlowRegistry()
+    for flow in (pre, event, post):
+        registry.register_flow(flow)
+
+    account = _account([strategy], active_flow_names=frozenset({"pre", "event", "post"}))
+    queue = EventQueue()
+    queue.push_event(EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-01"), strategy))
+    queue.push_event(EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-02"), strategy))
+
+    run(account, queue, registry.resolve(), step_mode=True, step_callback=records.append)
+
+    assert [(record["flow_phase"], record["flow_id"]) for record in records] == [
+        ("pre_replay", "pre"),
+        ("per_event", "event"),
+        ("per_event", "event"),
+        ("post_replay", "post"),
+    ]
+    assert all(record["phase"] == "step" for record in records)
+    assert records[0]["outputs"][0]["values"][0]["value"] == "pre"
+    assert records[1]["outputs"][0]["values"][0]["value"] == "event"
+    assert records[2]["outputs"][0]["values"][0]["value"] == "event"
+    assert records[3]["outputs"][0]["values"][0]["value"] == "post"
+
+
+def test_step_fast_forward_skips_audit_capture_but_not_flow_compute():
+    strategy = Strategy(alias="S-fast")
+    computed: list[str] = []
+    records: list[dict] = []
+
+    class Callback:
+        def should_capture(self, timestamp) -> bool:
+            return False
+
+        def __call__(self, record: dict) -> None:
+            records.append(record)
+
+    flow = Flow(
+        "fast", inputs=(), outputs=(), phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: computed.append("ran"),
+    )
+    account = _account([strategy], active_flow_names=frozenset({"fast"}))
+
+    run(account, EventQueue(), [flow], step_mode=True, step_callback=Callback())
+
+    assert computed == ["ran"]
+    assert records == []
+
+
+def test_step_mode_reports_mutable_event_payload_before_and_after_per_strategy():
+    strategy = Strategy(alias="S-payload")
+    records: list[dict] = []
+
+    def mutate_payload(account, ctx) -> None:
+        ctx.payloads_for(strategy)[0]["fee_cost"] = 12.5
+
+    flow = Flow(
+        "mutate_payload",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        description="修改订单载荷",
+        compute=mutate_payload,
+    )
+    account = _account([strategy], active_flow_names=frozenset({"mutate_payload"}))
+    queue = EventQueue()
+    queue.push_event(EventDraft(
+        EventKind.ORDER,
+        pd.Timestamp("2024-01-01"),
+        strategy,
+        {"quantity": 2.0},
+    ))
+
+    run(account, queue, [flow], step_mode=True, step_callback=records.append)
+
+    assert records[0]["event_payloads"] == [{
+        "scope": "strategy",
+        "strategy": "S-payload",
+        "payloads": [{"quantity": 2.0}],
+    }]
+    assert records[0]["event_payloads_after"][0]["payloads"] == [{
+        "fee_cost": 12.5,
+        "quantity": 2.0,
+    }]
+    assert records[0]["event_payload_changes"] == [{
+        "scope": "strategy",
+        "strategy": "S-payload",
+        "ledger": None,
+        "cash_pool": None,
+        "before": [{"quantity": 2.0}],
+        "after": [{"fee_cost": 12.5, "quantity": 2.0}],
+    }]

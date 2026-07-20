@@ -6,6 +6,7 @@ import pytest
 
 from tools.data.types import DataFreq
 from tools.factors.FactorExpr import ConstExpr, build_panel_timeline
+from tools.factors.expr.shift import ShiftOp
 from tools.factors.expr.rolling import RollingExpr
 
 
@@ -41,6 +42,48 @@ def test_same_observed_slots_rolling_matches_master_path():
     result = _mean(data, [left, right], 2)
 
     pd.testing.assert_frame_equal(result, data.rolling(2, min_periods=1).mean())
+
+
+def test_numeric_string_window_uses_current_frequency_bar_count():
+    product = _Product("p")
+    index = pd.to_datetime(["2026-05-25 09:00", "2026-05-25 09:01", "2026-05-25 09:02"])
+    data = pd.DataFrame({product: [1.0, 2.0, 3.0]}, index=index)
+
+    result = _mean(data, [product], "2")
+
+    pd.testing.assert_frame_equal(result, data.rolling(2, min_periods=1).mean())
+
+
+def test_numeric_window_requires_resolved_frequency():
+    product = _Product("p")
+    data = pd.DataFrame({product: [1.0, 2.0, 3.0]})
+
+    with pytest.raises(ValueError, match="裸数字滚动窗口需要先解析数据频率"):
+        RollingExpr(ConstExpr(data), ConstExpr("2")).mean().evaluate(
+            products=[product], freq=None,
+        )
+
+
+def test_shift_zero_is_current_bar_not_invalid_window():
+    product = _Product("p")
+    data = pd.DataFrame({product: [1.0, 2.0, 3.0]})
+
+    result = ShiftOp("shift", ConstExpr(0), ConstExpr(data)).evaluate(
+        products=[product], freq=DataFreq.MIN1,
+    )
+
+    pd.testing.assert_frame_equal(result, data)
+
+
+def test_shift_negative_bar_count_is_forward_shift():
+    product = _Product("p")
+    data = pd.DataFrame({product: [1.0, 2.0, 3.0]})
+
+    result = ShiftOp("shift", ConstExpr(-1), ConstExpr(data)).evaluate(
+        products=[product], freq=DataFreq.MIN1,
+    )
+
+    pd.testing.assert_frame_equal(result, data.shift(-1))
 
 
 def test_async_rolling_skips_rows_absent_from_initial_observed_mask():

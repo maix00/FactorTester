@@ -15,7 +15,7 @@ import pytest
 from tools.factors.factor_tester_state import FactorTesterState
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.backtester import run_backtest_task
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 
 
@@ -85,7 +85,7 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
     assert portfolio["position_curve"]
     assert portfolio["execution_trace"]
     steps = {row["step"] for row in portfolio["execution_trace"]}
-    assert {"construct_order", "ledger_update", "finalize_order"} <= steps
+    assert {"construct_order", "ledger_update", "order_terminal"} <= steps
     assert portfolio["initial_value"] == pytest.approx(1_000_000.0, rel=0.05)
     assert portfolio["market_rule_approximation_count"] == 0
 
@@ -96,7 +96,11 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
     assert state.account is account
 
 
-def test_run_backtest_task_rejects_non_native_engine_without_fallback():
+def test_run_backtest_task_routes_non_native_engine_to_the_framework_bridge(monkeypatch):
+    """ADR-030: non-native engines no longer raise -- they run through
+    engines/workers/bridge.py's own event-driven worker path, never the
+    native EventQueue. run_backtest_task itself must not build a registry or
+    EventQueue for this case."""
     p1 = _product()
     idx = pd.date_range("2024-01-01", periods=2, freq="D")
     selection = _FakeProductPathSelection("sel-1", [p1])
@@ -118,18 +122,33 @@ def test_run_backtest_task_rejects_non_native_engine_without_fallback():
     apply_strategy_configs(account, resolved_settings)
     account.raw_market_data = {"raw_prices": pd.DataFrame({p1: [10.0, 11.0]}, index=idx)}
 
-    with pytest.raises(NotImplementedError, match="falling back to native"):
-        run_backtest_task(
-            FactorTesterState(products=[]),
-            run_state=account,
-            group_owner=[{
-                "group_id": "A1",
-                "group_name": "A1",
-                "group_index": 0,
-                "product_path_selection_id": "sel-1",
-                "factor_alias": "f1",
-                "is_ls": False,
-            }],
-            settings_by_strategy=resolved_settings,
-            run_id="run-1",
-        )
+    captured: dict = {}
+
+    def _fake_bridge(state, **kwargs):
+        captured.update(kwargs)
+        return {"run_id": kwargs["run_id"], "engine_result": {"engine": kwargs["engine"]}}
+
+    monkeypatch.setattr(
+        "tools.testers.backtest.engines.workers.bridge.run_framework_backtest_task",
+        _fake_bridge,
+    )
+    group_owner = [{
+        "group_id": "A1",
+        "group_name": "A1",
+        "group_index": 0,
+        "product_path_selection_id": "sel-1",
+        "factor_alias": "f1",
+        "is_ls": False,
+    }]
+    result = run_backtest_task(
+        FactorTesterState(products=[]),
+        run_state=account,
+        group_owner=group_owner,
+        settings_by_strategy=resolved_settings,
+        run_id="run-1",
+    )
+
+    assert captured["engine"] == "backtrader"
+    assert captured["run_state"] is account
+    assert captured["group_owner"] == group_owner
+    assert result["engine_result"]["engine"] == "backtrader"

@@ -33,26 +33,20 @@ from .factor_param_config import (
     save_factor_param_config,
     save_factor_param_config_payload,
 )
-from .user_template import (
-    delete_user_template_collections,
-    delete_user_template_collection,
-    iter_user_template_collections,
-    list_user_template_metadata,
-    load_user_template,
-    load_user_templates,
-    save_user_template_payload,
-    save_user_templates,
-    ensure_user_template_schema,
+from .factor_research_result import (
+    config_hash as factor_research_config_hash,
+    delete_factor_research_run,
+    ensure_factor_research_result_schema,
+    list_factor_research_runs,
+    save_factor_research_run,
 )
-
-
 def ensure_account_manager_sqlite_store() -> str:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_user_schema(conn)
         ensure_user_level_schema(conn)
         ensure_product_group_schema(conn)
         ensure_factor_param_config_schema(conn)
-        ensure_user_template_schema(conn)
+        ensure_factor_research_result_schema(conn)
     return str(Settings.CACHE_DB_PATH)
 
 

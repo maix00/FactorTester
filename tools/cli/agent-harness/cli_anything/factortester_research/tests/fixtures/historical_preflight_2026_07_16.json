@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "source": {
+    "kind": "historical_preflight",
+    "captured_at": "2026-07-16",
+    "stale_historical_evidence": true,
+    "origin_branch": "codex/factortester-research-coordination",
+    "origin_commit": "081ca2b3",
+    "factor_family": "MmVolWgtRet",
+    "product_group_shorthand": "core8",
+    "expected_outcome": "expected_block",
+    "limitations": [
+      "product-group shorthand was not frozen to an exact group id",
+      "point-in-time data availability was not empirically verified",
+      "OOS availability was only annotated"
+    ]
+  },
+  "events": [
+    {
+      "type": "transition",
+      "branch_id": "primary",
+      "edge_id": "hypothesis__capability_resolution",
+      "evidence": {
+        "hypothesis_frozen": true,
+        "evidence_refs": [
+          "historical://preflight/2026-07-16/factor-source"
+        ]
+      }
+    },
+    {
+      "type": "transition",
+      "branch_id": "primary",
+      "edge_id": "capability_resolution__data_contract",
+      "evidence": {
+        "mandatory_bindings_resolved": true,
+        "evidence_refs": [
+          "historical://preflight/2026-07-16/operator-registry",
+          "historical://preflight/2026-07-16/slice-plan"
+        ]
+      }
+    },
+    {
+      "type": "transition",
+      "branch_id": "primary",
+      "edge_id": "any_node__capability_gap",
+      "evidence": {
+        "mandatory_binding_missing": true,
+        "evidence_refs": [
+          "historical://preflight/2026-07-16/unresolved-product-group",
+          "historical://preflight/2026-07-16/unverified-point-in-time-data"
+        ]
+      }
+    }
+  ]
+}

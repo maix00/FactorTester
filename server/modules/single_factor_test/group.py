@@ -8,11 +8,14 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
+from tools.data.field_history import load_market_rule_field_provider
+from tools.data.types import DataColumn
 from tools.data.types.currency import normalize_currency, require_product_currency_vector
 from tools.data.types.currency_units import minor_units_to_major
 from tools.data.types.time_index import DataIndex
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.testers.backtest.modules.market_data import historical_field_frames_for_market_data
 
 
 def infer_periods_per_year(index_like) -> float:
@@ -62,6 +65,7 @@ from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
 from server.modules.shared.price_data_helpers import to_epoch_ms
+
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 _log = logging.getLogger(__name__)
@@ -69,6 +73,126 @@ _log = logging.getLogger(__name__)
 
 _GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "shortAlias", "_expanded"}
 # Silent default keys now come from the registry — no hardcoded constant list
+
+
+def _load_raw_market_data_for(products: list[Any], start_dt: Any, end_dt: Any) -> dict[str, Any]:
+    """Compatibility facade for old group endpoint tests.
+
+    Production backtest loading is owned by MarketDataModule.  A few server
+    tests and old diagnostic scripts still call this group-level helper to
+    assert coverage behavior, so keep a narrow facade with the same observable
+    contract instead of reintroducing the old execution path.
+    """
+    series_by_product: dict[Any, pd.Series] = {}
+    missing_products: list[str] = []
+    excluded_out_of_range: list[Any] = []
+    for product in products:
+        try:
+            available_freqs = list(product.list_available_freqs())
+            if not available_freqs:
+                if _product_outside_run_window(product, start_dt, end_dt):
+                    excluded_out_of_range.append(product)
+                else:
+                    missing_products.append(str(getattr(product, "name", product)))
+                continue
+            current_freq = getattr(product, "current_freq", None)
+            freq = cast(Any, current_freq if current_freq in available_freqs else available_freqs[0])
+            data_view = getattr(product, freq.name)
+            df = data_view.get_and_adjust_cols([DataColumn.CLOSE.name], copy=False, start_dt=start_dt, end_dt=end_dt)
+        except (ValueError, KeyError, AttributeError):
+            if _product_outside_run_window(product, start_dt, end_dt):
+                excluded_out_of_range.append(product)
+            else:
+                missing_products.append(str(getattr(product, "name", product)))
+            continue
+        if df.empty or DataColumn.CLOSE.name not in df.columns:
+            if _product_outside_run_window(product, start_dt, end_dt):
+                excluded_out_of_range.append(product)
+            else:
+                missing_products.append(str(getattr(product, "name", product)))
+            continue
+        series_by_product[product] = df[DataColumn.CLOSE.name]
+    if missing_products:
+        sample = ", ".join(sorted(set(missing_products))[:20])
+        raise ValueError(
+            "回测产品池存在本地行情缺口，不能静默跳过或按 0 估值："
+            f"{sample}；窗口={getattr(start_dt, 'ts', start_dt)} 到 {getattr(end_dt, 'ts', end_dt)}。"
+            "请检查产品路径是否包含已退市/无分钟数据品种，或先补齐对应行情数据。"
+        )
+    raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
+    provider = load_market_rule_field_provider()
+    historical_frames = historical_field_frames_for_market_data(
+        list(raw_prices.columns),
+        raw_prices.index,
+        provider=provider,
+        trading_day_resolver=None,
+        field_names=(),
+        policy="latest_available",
+    )
+    return {
+        "raw_prices": raw_prices,
+        "historical_field_provider": provider,
+        "historical_field_frames": historical_frames,
+        "included_products": tuple(series_by_product.keys()),
+        "excluded_out_of_range_products": tuple(str(getattr(product, "name", product)) for product in _dedupe_products(excluded_out_of_range)),
+    }
+
+
+def _dedupe_products(products: list[Any]) -> list[Any]:
+    result: list[Any] = []
+    for product in products:
+        if product not in result:
+            result.append(product)
+    return result
+
+
+def _supports_local_cnfutures_coverage(_product: Any) -> bool:
+    return False
+
+
+def _product_outside_run_window(product: Any, start_dt: Any, end_dt: Any) -> bool:
+    if not _supports_local_cnfutures_coverage(product):
+        return False
+    coverage = _product_data_coverage(product)
+    if coverage is None:
+        return False
+    data_start, data_end = coverage
+    start_key = _datetime_sort_key(getattr(start_dt, "sort_key", lambda: None)())
+    end_key = _datetime_sort_key(getattr(end_dt, "sort_key", lambda: None)())
+    if start_key is not None and data_end is not None and data_end < start_key:
+        return True
+    if end_key is not None and data_start is not None and data_start > end_key:
+        return True
+    return False
+
+
+def _product_data_coverage(product: Any) -> tuple[pd.Timestamp | None, pd.Timestamp | None] | None:
+    try:
+        available_freqs = list(product.list_available_freqs())
+    except Exception:
+        available_freqs = []
+    for freq in available_freqs:
+        try:
+            view = getattr(product, freq.name)
+            data = view.get_data(copy=False)
+        except Exception:
+            continue
+        if data is None or data.empty:
+            continue
+        index = DataIndex(data.index).signal_index
+        if len(index) == 0:
+            continue
+        return _datetime_sort_key(index.min()), _datetime_sort_key(index.max())
+    return None
+
+
+def _datetime_sort_key(value: Any) -> pd.Timestamp | None:
+    if value is None:
+        return None
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_convert("UTC").tz_localize(None)
+    return timestamp
 
 
 def _group_product_path_selection_id(group: dict[str, Any]) -> str:
@@ -197,27 +321,6 @@ def _safe_bool(obj) -> bool:
     if isinstance(obj, np.ndarray):
         return bool(obj.size > 0)
     return bool(obj)
-
-
-def _parse_initial_capital(raw: Any, default: float = 100000000.0) -> float:
-    """Parse initial capital with a stable backend default."""
-    if raw in (None, ''):
-        return float(default)
-    value = _safe_float(raw)
-    if value is None or value <= 0:
-        raise ValueError(f'初始金额必须是正数，收到: {raw!r}')
-    return float(value)
-
-
-def _parse_currency_code(raw: Any, default: str = "CNY") -> str:
-    return normalize_currency(raw, default)
-
-
-def _parse_nonnegative_rate(raw: Any, default: float = 0.0) -> float:
-    value = _safe_float(default if raw in (None, '') else raw)
-    if value is None or value < 0:
-        raise ValueError(f'换汇佣金率必须是非负数，收到: {raw!r}')
-    return float(value)
 
 
 def _resolve_flat_backtest_settings(
@@ -1658,7 +1761,7 @@ def _serialize_event_execution(
                 f"available={sorted(portfolios)}"
             )
         portfolio = portfolios[strategy_id]
-        curve = portfolio.get("equity_curve") or {}
+        curve = portfolio.get("display_equity_curve") or portfolio.get("equity_curve") or {}
         index = pd.DatetimeIndex([pd.Timestamp(value) for value in curve])
         equity = np.asarray([float(value) for value in curve.values()], dtype=float)
         if len(index) != len(equity) or not len(index):
@@ -1810,70 +1913,33 @@ def _product_list_from_group_payload(group: dict) -> list[str] | None:
     return None
 
 
-class _FactorEvaluateAdapter:
-    """Wraps a real Factor + its resolved product universe so
-    FactorSignalModule can evaluate it through an explicit run window while
-    the real `Factor.evaluate(products, ...)` signature keeps product and time
-    inputs mandatory."""
+_AUTO_INFERRED_LEDGER_DEFAULTS = {
+    "cost_basis_method": "WeightAverage",
+    "daily_mark_to_market_enabled": False,
+}
 
-    def __init__(self, factor: Any, products) -> None:
-        self._factor = factor
-        self._products = products
 
-    @property
-    def underlying_factor(self) -> Any:
-        return self._factor
+def _strip_implicit_auto_ledger_defaults(
+    settings: dict[str, Any],
+    *,
+    local_settings: dict[str, Any],
+    group_payload: dict[str, Any],
+) -> None:
+    """Do not pass UI display defaults as explicit ledger config in auto/exact.
 
-    @property
-    def expression(self) -> Any:
-        return (
-            getattr(self._factor, "expression", None)
-            or getattr(self._factor, "_expr", None)
-            or getattr(self._factor, "_source_expr", None)
-        )
-
-    def supports_vectorized(self) -> bool:
-        flag = getattr(self._factor, "supports_vectorized", None)
-        if callable(flag):
-            return bool(flag())
-        if flag is not None:
-            return bool(flag)
-        expr = self.expression
-        expr_flag = getattr(expr, "supports_vectorized", None)
-        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
-
-    def supports_incremental(self) -> bool:
-        flag = getattr(self._factor, "supports_incremental", None)
-        if callable(flag):
-            return bool(flag())
-        if flag is not None:
-            return bool(flag)
-        expr = self.expression
-        expr_flag = getattr(expr, "supports_incremental", None)
-        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
-
-    def required_warmup_window(self) -> Any:
-        required = getattr(self._factor, "required_warmup_window", None) or getattr(self._factor, "required_lookback", None)
-        if callable(required):
-            return required()
-        if required is not None:
-            return required
-        return None
-
-    def backtest_factor_cache_key(self) -> tuple:
-        factor_key = (
-            getattr(self._factor, "alias", None)
-            or getattr(self._factor, "name", None)
-            or id(self._factor)
-        )
-        product_key = tuple(str(getattr(product, "name", product)) for product in self._products)
-        return ("factor_evaluate_adapter", factor_key, product_key)
-
-    def evaluate(self, *, start_dt=None, end_dt=None, run_window=None, warmup_window=None) -> pd.DataFrame:
-        if run_window is not None and (start_dt is None or end_dt is None):
-            start_dt, end_dt = run_window
-        self._factor.evaluate(self._products, start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window)
-        return self._factor.table
+    Native accounting infers these fields from historical trading-rule rows.
+    `resolve_group_settings` returns a complete value map, so without this
+    bridge cleanup an unedited UI default such as cost_basis_method=WeightAverage
+    would mask the intended FIFO/DMTM inference in step-mode audit output.
+    """
+    engine_mode = str(settings.get("engine_mode") or "auto").lower()
+    if engine_mode not in {"auto", "exact"}:
+        return
+    for key, default in _AUTO_INFERRED_LEDGER_DEFAULTS.items():
+        if key in local_settings or key in group_payload:
+            continue
+        if settings.get(key) == default:
+            settings.pop(key, None)
 
 
 def _resolve_group_strategy_settings(
@@ -1885,6 +1951,7 @@ def _resolve_group_strategy_settings(
     data: dict,
     page_factors_dict: dict,
     selection_cache: dict[str, Any],
+    username: str = "",
 ) -> dict[str, Any]:
     """Per-group bridge from the existing flat-settings resolution
     (resolve_group_settings, scalar values only) to the resolved_settings
@@ -1894,12 +1961,19 @@ def _resolve_group_strategy_settings(
 
     group_id = str(g.get('id') or '')
     group_settings = dict(resolved_backtest_settings.get(group_id) or fallback_group_settings)
+    local_settings = _payload_local_settings(data)
+    _strip_implicit_auto_ledger_defaults(
+        group_settings,
+        local_settings=local_settings,
+        group_payload=g,
+    )
 
     raw_split_count = g.get('splitCount')
     if raw_split_count is None:
         raise ValueError(f"缺少 splitCount: group={g.get('name') or group_id}")
     group_settings['split_count'] = int(raw_split_count)
     group_settings['group_index'] = int(g.get('groupIndex', 1)) - 1  # 前端 1-based -> 后端 0-based
+    group_settings['display_name'] = str(g.get('shortAlias') or g.get('name') or group_id)
 
     selection_id = _group_product_path_selection_id(g)
     if not selection_id:
@@ -1916,8 +1990,19 @@ def _resolve_group_strategy_settings(
     factor_alias = str(g.get('factorAlias', ''))
     factor = page_factors_dict.get(factor_alias)
     if factor is None:
-        raise ValueError(f"未找到因子 {factor_alias}。请确认当前因子参数已保存，或刷新页面后重试。")
-    group_settings['factor'] = _FactorEvaluateAdapter(factor, selection.products)
+        from server.services.external_factor_artifacts import factor_by_alias
+
+        factor = factor_by_alias(data.get("external_factor_artifacts"), factor_alias)
+    if factor is None:
+        from server.services.factor_registry import factor_from_alias
+        try:
+            factor = factor_from_alias(factor_alias, username=username, page_uuid=page_uuid)
+        except Exception as exc:
+            raise ValueError(
+                f"未找到因子 {factor_alias}。仅允许从当前用户可访问的公共因子家族"
+                "或当前用户自己的因子家族解析。"
+            ) from exc
+    group_settings['factor'] = factor
 
     return group_settings
 
@@ -1926,6 +2011,12 @@ def _resolve_long_short_leg_ids(config: dict[str, Any], key: str, legacy_key: st
     raw = config.get(key)
     if not raw and config.get(legacy_key):
         raw = [{"group_id": config.get(legacy_key), "weight": 1.0}]
+    snake_key = {
+        "longGroupId": "long_group_id",
+        "shortGroupId": "short_group_id",
+    }.get(legacy_key)
+    if not raw and snake_key and config.get(snake_key):
+        raw = [{"group_id": config.get(snake_key), "weight": 1.0}]
     if not isinstance(raw, list):
         return []
     result: list[dict[str, Any]] = []
@@ -1947,6 +2038,7 @@ def _resolve_long_short_strategy_settings(
     resolved_backtest_settings: dict[str, dict[str, Any]],
     source_settings_by_alias: dict[str, dict[str, Any]],
     fallback_group_settings: dict[str, Any],
+    local_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a peer long-short strategy from source strategy ids.
 
@@ -1977,12 +2069,28 @@ def _resolve_long_short_strategy_settings(
         key: value
         for key, value in config.items()
         if value not in (None, "")
-        and key not in {"id", "strategy_id", "name", "long", "short", "longGroupId", "shortGroupId"}
+        and key not in {
+            "id", "strategy_id", "name",
+            "long", "short",
+            "longGroupId", "shortGroupId",
+            "long_group_id", "short_group_id",
+        }
     })
+    # first_source is usually a normal group strategy and can carry
+    # strategy_intent_mode="group".  Long-short must override both aliases of
+    # the shared FieldRef; otherwise active-flow selection treats it as A1/A5
+    # group membership and the LS curve becomes a copy of the long leg.
+    settings["strategy_intent_mode"] = "long_short"
     settings["strategy_kind"] = "long_short"
     settings["strategy_id"] = strategy_id
+    settings["display_name"] = str(config.get("shortAlias") or config.get("name") or strategy_id)
     settings["long_leg_strategy_ids"] = long_legs
     settings["short_leg_strategy_ids"] = short_legs
+    _strip_implicit_auto_ledger_defaults(
+        settings,
+        local_settings=local_settings or {},
+        group_payload=config,
+    )
     return settings
 
 
@@ -2054,6 +2162,58 @@ def _get_or_create_group_test_tester(page_uuid: str) -> "FactorTester":
     return tester
 
 
+def _group_execution_for_request(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Resolve event execution from job artifacts.
+
+    ``page_uuid`` may carry a latest-view projection, but page runtime is not
+    the canonical owner of job results or lifecycle.
+    """
+    from server.jobs.artifacts import load_json_artifact
+    from server.jobs.repository import JobRepository
+    from server.jobs.states import JobStatus
+
+    job_id = str(data.get("job_id") or "").strip()
+    run_id = str(data.get("run_id") or data.get("run_token") or "").strip()
+    if job_id or run_id:
+        owner = str(current_user() or "")
+        repository = JobRepository()
+        if job_id:
+            job = repository.require(job_id, owner=owner)
+        else:
+            jobs = repository.list(
+                owner=owner,
+                run_id=run_id,
+                kind="backtest",
+                statuses=(JobStatus.SUCCEEDED,),
+                limit=20,
+            )
+            if not jobs:
+                raise LookupError("指定 run 尚无成功的分组测试 job")
+            job = jobs[0]
+        artifact = repository.load_artifact(
+            job_id=job.job_id,
+            name="group_execution",
+            owner=owner,
+        )
+        if not artifact or artifact["state"] != "active":
+            raise LookupError("指定 job 尚无可读取的分组测试详情")
+        execution = load_json_artifact(
+            str(artifact["relative_path"]),
+            str(artifact["content_hash"]),
+        )
+        if not isinstance(execution, dict):
+            raise TypeError("分组测试详情文件格式错误")
+        return execution
+    return None
+
+
+def _request_has_group_job_selector(data: dict[str, Any]) -> bool:
+    return bool(
+        str(data.get("job_id") or "").strip()
+        or str(data.get("run_id") or data.get("run_token") or "").strip()
+    )
+
+
 @sft_bp.route('/get_group_snapshot', methods=['POST'])
 def get_group_snapshot():
     """获取某个时刻各分组的产品列表及与上一时刻的进出变化。
@@ -2080,10 +2240,9 @@ def get_group_snapshot():
         return jsonify({'success': False, 'error': '缺少 product_path_selection_id 或 timestamp_ms'}), 400
 
     try:
-        if page_uuid and runtime_state.get_page_owner(page_uuid) != current_user():
+        if page_uuid and not _request_has_group_job_selector(data) and runtime_state.get_page_owner(page_uuid) != current_user():
             return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
-        page_state = runtime_state.get_page_state(page_uuid) if page_uuid else None
-        event_execution = getattr(page_state, 'latest_group_execution', None)
+        event_execution = _group_execution_for_request(data)
         if event_execution:
             return jsonify(_event_group_snapshot(
                 event_execution,
@@ -2229,10 +2388,9 @@ def get_group_order_flow():
     data = request.get_json() or {}
     page_uuid = str(data.get('page_uuid') or '')
     try:
-        if runtime_state.get_page_owner(page_uuid) != current_user():
+        if page_uuid and not _request_has_group_job_selector(data) and runtime_state.get_page_owner(page_uuid) != current_user():
             return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
-        page_state = runtime_state.get_page_state(page_uuid)
-        event_execution = getattr(page_state, 'latest_group_execution', None)
+        event_execution = _group_execution_for_request(data)
         if not event_execution:
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
         return jsonify(_event_order_flow_detail(
@@ -2850,7 +3008,8 @@ def _event_group_ranking_detail(execution: dict, product_path_selection_id: str)
     series = []
     for owner in owners:
         strategy_id = str(owner.get("group_id") or "")
-        curve = (portfolios.get(strategy_id) or {}).get("equity_curve") or {}
+        portfolio = portfolios.get(strategy_id) or {}
+        curve = portfolio.get("display_equity_curve") or portfolio.get("equity_curve") or {}
         if not curve:
             raise ValueError(f"分组 {strategy_id} 没有返回净值曲线")
         equity = pd.Series(
@@ -2873,10 +3032,9 @@ def get_group_detail():
         return jsonify({'success': False, 'error': '缺少 product_path_selection_id 或 group_index'}), 400
     try:
         group_index = int(group_index)
-        if runtime_state.get_page_owner(page_uuid) != current_user():
+        if page_uuid and not _request_has_group_job_selector(data) and runtime_state.get_page_owner(page_uuid) != current_user():
             return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
-        page_state = runtime_state.get_page_state(page_uuid)
-        event_execution = getattr(page_state, 'latest_group_execution', None)
+        event_execution = _group_execution_for_request(data)
         if not event_execution:
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
         return jsonify({
@@ -2902,10 +3060,9 @@ def get_group_ranking_detail():
     if product_path_selection_id is None:
         return jsonify({'success': False, 'error': '缺少 product_path_selection_id'}), 400
     try:
-        if runtime_state.get_page_owner(page_uuid) != current_user():
+        if page_uuid and not _request_has_group_job_selector(data) and runtime_state.get_page_owner(page_uuid) != current_user():
             return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
-        page_state = runtime_state.get_page_state(page_uuid)
-        event_execution = getattr(page_state, 'latest_group_execution', None)
+        event_execution = _group_execution_for_request(data)
         if not event_execution:
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
         return jsonify({
@@ -2985,239 +3142,285 @@ def get_product_path_selection_session_info():
     return jsonify({'success': True, 'product_path_selections': selections_info})
 
 
+def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
+    """Resolve immutable group settings and selections without loading bars."""
+    payload = deepcopy(data)
+    flat_groups_raw = payload.get("groups")
+    if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
+        raise ValueError("groups 必须是非空数组")
+    run_id = str(payload.get("run_id") or payload.get("run_token") or uuid.uuid4().hex)
+    owner = str(payload.get("_owner") or "")
+    payload["_group_owner_username"] = owner
+    flat_groups = _groups_with_parent_fallback(flat_groups_raw)
+    payload["groups"] = flat_groups
+    flat_ls_configs = payload.get("ls_configs") or []
+    if not isinstance(flat_ls_configs, list):
+        raise ValueError("ls_configs 必须是数组")
+
+    local_settings = _payload_local_settings(payload)
+    data_source = str(local_settings.get("data_source") or "").strip()
+    frequency = str(local_settings.get("frequency") or "").strip()
+    if data_source and data_source != "auto":
+        raise ValueError(f"当前分组测试不支持数据源 {data_source}，请使用自动")
+    if frequency and frequency != "auto":
+        raise ValueError(f"当前分组测试不支持数据频率 {frequency}，请使用自动")
+
+    resolved_backtest_settings = _resolve_flat_backtest_settings(
+        payload, flat_groups, flat_ls_configs,
+    )
+    run_registry = _get_group_test_registry()
+    local_settings_by_module = run_registry.collect_local_only_settings(resolved_backtest_settings)
+    market_rule_fallback = local_settings_by_module.get(
+        "market_rules", {},
+    ).get("market_rule_fallback", "latest_available")
+    evaluation_split = local_settings_by_module.get(
+        "evaluation_range", {},
+    ).get("evaluation_split") or None
+    first_group_id = str(flat_groups[0].get("id") or "group-0")
+    fallback_group_settings = resolved_backtest_settings.get(first_group_id, {})
+    factor_mode = fallback_group_settings.get("factor_mode", "auto")
+    start_dt, end_dt = _resolve_run_datetimes(local_settings, resolved_backtest_settings)
+
+    selection_cache: dict[str, Any] = {}
+    resolved_settings_by_alias: dict[str, dict[str, Any]] = {}
+    group_owner: list[dict[str, Any]] = []
+    for group in flat_groups:
+        if not isinstance(group, dict):
+            continue
+        group_id = str(group.get("id") or f"group-{len(resolved_settings_by_alias)}")
+        resolved_settings_by_alias[group_id] = _resolve_group_strategy_settings(
+            group,
+            resolved_backtest_settings=resolved_backtest_settings,
+            fallback_group_settings=fallback_group_settings,
+            page_uuid="",
+            username=owner,
+            data=payload,
+            page_factors_dict={},
+            selection_cache=selection_cache,
+        )
+    group_owner.extend(_build_group_owner_rows(flat_groups, is_ls=False))
+    group_owner_by_id = {str(row.get("group_id")): row for row in group_owner}
+
+    normalized_ls_configs: list[dict[str, Any]] = []
+    for index, config in enumerate(flat_ls_configs):
+        if not isinstance(config, dict):
+            continue
+        normalized = dict(config)
+        strategy_id = _long_short_strategy_id(normalized, index)
+        normalized["strategy_id"] = strategy_id
+        normalized.setdefault("id", strategy_id)
+        normalized_ls_configs.append(normalized)
+        resolved_settings_by_alias[strategy_id] = _resolve_long_short_strategy_settings(
+            normalized,
+            resolved_backtest_settings=resolved_backtest_settings,
+            source_settings_by_alias=resolved_settings_by_alias,
+            fallback_group_settings=fallback_group_settings,
+            local_settings=local_settings,
+        )
+    group_owner.extend(_build_long_short_owner_rows(
+        normalized_ls_configs,
+        source_owner_by_id=group_owner_by_id,
+    ))
+    if not resolved_settings_by_alias:
+        raise ValueError("没有有效的分组配置")
+
+    all_products: list[Any] = []
+    seen_products: set[Any] = set()
+    for selection in selection_cache.values():
+        for product in selection.products:
+            if product not in seen_products:
+                seen_products.add(product)
+                all_products.append(product)
+
+    return {
+        "payload": payload,
+        "run_id": run_id,
+        "owner": owner,
+        "flat_groups": flat_groups,
+        "flat_ls_configs": flat_ls_configs,
+        "normalized_ls_configs": normalized_ls_configs,
+        "resolved_backtest_settings": resolved_backtest_settings,
+        "resolved_settings_by_alias": resolved_settings_by_alias,
+        "group_owner": group_owner,
+        "all_products": all_products,
+        "local_settings": local_settings,
+        "market_rule_fallback": market_rule_fallback,
+        "evaluation_split": evaluation_split,
+        "run_registry": run_registry,
+        "factor_mode": factor_mode,
+        "start_dt": start_dt,
+        "end_dt": end_dt,
+    }
+
+
 # ═══════════════════════════════════════════════════
 #  SSE 流式端点
 # ═══════════════════════════════════════════════════
 
-@sft_bp.route('/cancel_group_test', methods=['POST'])
-def cancel_group_test():
-    from server.services import backtest_runs
-
-    data = request.get_json(silent=True) or {}
-    run_token = str(data.get('run_token') or '')
-    page_uuid = str(data.get('page_uuid') or '')
-    if not run_token or not page_uuid:
-        return jsonify({'success': False, 'error': '缺少 run_token 或 page_uuid'}), 400
-    try:
-        cancelled = backtest_runs.cancel(run_token, page_uuid, str(current_user() or ''))
-    except PermissionError as exc:
-        return jsonify({'success': False, 'error': str(exc)}), 403
-    return jsonify({'success': True, 'cancelled': cancelled})
-
-@sft_bp.route('/run_group_test_stream', methods=['POST'])
-def run_group_test_stream():
-    """SSE 流式分组测试：先处理 groups，再处理 ls_configs，然后把建好的
-    BacktestRunState 交给页面级 FactorTester，固定任务 "backtest"，由它调用
-    backtester（run_backtest_task）——三步串行，不绕 _FactorGroupTestGroup/
-    FactorGroupTester/execute_group_plan 这条已删除的旧链路。
-    """
-    import threading
-    import json as _json
-    from flask import Response
-    from server.services.sse_progress import SSEProgressEmitter
-    from server.services import backtest_runs
-    from server.services.factor_registry import page_factors
+def execute_group_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -> None:
+    """Execute a frozen group RunSpec without reading Flask or page runtime."""
+    from tools.factors.FactorTester import FactorTester
     from tools.testers.backtest.engines.cancellation import BacktestCancelled
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState
+    from tools.testers.backtest.engines.native.state import BacktestRunState
     from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
+    from server.services.external_factor_artifacts import result_metadata
 
-    data = request.get_json(silent=True) or {}
+    prepared = prepare_group_run_spec(data)
+    payload = prepared["payload"]
+    run_id = prepared["run_id"]
+    owner = prepared["owner"]
+    flat_groups = prepared["flat_groups"]
+    flat_ls_configs = prepared["flat_ls_configs"]
+    normalized_ls_configs = prepared["normalized_ls_configs"]
+    resolved_backtest_settings = prepared["resolved_backtest_settings"]
+    resolved_settings_by_alias = prepared["resolved_settings_by_alias"]
+    group_owner = prepared["group_owner"]
+    all_products = prepared["all_products"]
+    local_settings = prepared["local_settings"]
+    market_rule_fallback = prepared["market_rule_fallback"]
+    evaluation_split = prepared["evaluation_split"]
+    run_registry = prepared["run_registry"]
+    factor_mode = prepared["factor_mode"]
+    start_dt = prepared["start_dt"]
+    end_dt = prepared["end_dt"]
+    step_mode = bool(payload.get("step_mode"))
 
-    flat_groups_raw = data.get('groups')
-    if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
-        def _early_err():
-            yield f"event: error\ndata: {_json.dumps({'success': False, 'error': 'groups 必须是非空数组'}, default=str)}\n\n"
-        return Response(_early_err(), mimetype='text/event-stream',
-                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+    account = BacktestRunState()
+    strategy_book_payload = payload.get("strategy_book")
+    strategy_book = None
+    if isinstance(strategy_book_payload, dict) and strategy_book_payload:
+        from tools.testers.backtest.modules.strategy_book import StrategyBook
 
-    page_uuid = str(data.get('page_uuid') or '')
-    owner = str(current_user() or '')
-    run_user = current_user_obj()
-    if not page_uuid or runtime_state.get_page_owner(page_uuid) != owner:
-        return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
-    run_token = str(data.get('run_token') or uuid.uuid4().hex)
+        strategy_book = StrategyBook.from_dict(strategy_book_payload)
+    ledger_configs = payload.get("ledger_configs")
+    if ledger_configs is not None and not isinstance(ledger_configs, dict):
+        raise ValueError("ledger_configs 必须是对象")
+    apply_strategy_configs(
+        account,
+        resolved_settings_by_alias,
+        strategy_book=strategy_book,
+        ledger_configs=ledger_configs,
+    )
+    account.runtime_info_sink = sink
+    account.market_data_request = {
+        "products": all_products,
+        "start_dt": start_dt,
+        "end_dt": end_dt,
+        "policy": market_rule_fallback,
+    }
+
+    def on_progress(completed: int, total: int, label: str) -> None:
+        if cancel_event.is_set():
+            raise BacktestCancelled("group job cancelled")
+        sink.emit_progress(completed, total, "event_replay", message=label)
+
+    tester = FactorTester(products=[], alias=f"group_run:{run_id[:8]}")
+    step_callback = None
+    if step_mode:
+        after_index = max(0, int(payload.get("step_after_index") or 0))
+        raw_until = str(payload.get("step_until") or "").strip()
+        until = pd.Timestamp(raw_until).tz_localize(None) if raw_until else None
+        cursor = {"flow_index": 0, "until": until, "run_to_end": False}
+
+        def _should_capture(timestamp: Any) -> bool:
+            cursor["flow_index"] += 1
+            if cursor["run_to_end"]:
+                return False
+            if cursor["flow_index"] <= after_index:
+                return False
+            if cursor["until"] is None:
+                return True
+            if timestamp is None:
+                return False
+            return pd.Timestamp(timestamp).tz_localize(None) >= cursor["until"]
+
+        def _checkpoint(info: dict[str, Any]) -> None:
+            checkpoint = {**info, "flow_index": cursor["flow_index"]}
+            sink.emit_step(checkpoint)
+            command = sink.emit_pause(checkpoint) or {}
+            action = str(command.get("action") or "continue")
+            if action == "cancel":
+                raise BacktestCancelled("group step job cancelled")
+            if action == "end":
+                cursor["run_to_end"] = True
+                return
+            raw_next_until = str(command.get("until") or "").strip()
+            cursor["until"] = (
+                pd.Timestamp(raw_next_until).tz_localize(None)
+                if raw_next_until else None
+            )
+
+        _checkpoint.should_capture = _should_capture
+        step_callback = _checkpoint
+
     try:
-        active_run = backtest_runs.register(run_token, page_uuid, owner)
-    except ValueError as exc:
-        return jsonify({'success': False, 'error': str(exc)}), 400
-    data = dict(data)
-    data['_run_user'] = run_user
-    data['_group_owner_username'] = owner
+        execution = tester.dispatch(
+            "backtest",
+            run_state=account,
+            group_owner=group_owner,
+            settings_by_strategy=resolved_settings_by_alias,
+            run_id=run_id,
+            progress=on_progress,
+            activity_sink=sink,
+            step_mode=step_mode,
+            step_callback=step_callback,
+        )
+    except BacktestCancelled as exc:
+        sink.emit_error(str(exc), cancelled=True, cancel_reason="explicit_cancel")
+        return
 
-    emitter = SSEProgressEmitter()
+    serialized_execution = _serialize_event_execution(
+        execution,
+        settings_by_group=execution["settings_by_strategy"],
+        evaluation_split=evaluation_split,
+        registry=run_registry,
+    )
+    from .backtest_research_artifacts import project_net_returns
 
-    def _compute_and_emit():
-        try:
-            flat_groups = _groups_with_parent_fallback(flat_groups_raw)
-            payload = dict(data)
-            payload['groups'] = flat_groups
-            flat_ls_configs = payload.get('ls_configs') or []
-            if not isinstance(flat_ls_configs, list):
-                flat_ls_configs = []
-
-            _progress(
-                f"group simulations request start groups={len(flat_groups)} "
-                f"ls_configs={len(flat_ls_configs)}"
-            )
-
-            local_settings = _payload_local_settings(payload)
-            data_source = str(local_settings.get('data_source') or '').strip()
-            frequency = str(local_settings.get('frequency') or '').strip()
-            if data_source and data_source != 'auto':
-                raise ValueError(f'当前分组测试不支持数据源 {data_source}，请使用自动')
-            if frequency and frequency != 'auto':
-                raise ValueError(f'当前分组测试不支持数据频率 {frequency}，请使用自动')
-            _parse_initial_capital(local_settings.get('initial_capital'))
-            _parse_currency_code(local_settings.get('base_currency'))
-
-            resolved_backtest_settings = _resolve_flat_backtest_settings(
-                payload, flat_groups, flat_ls_configs)
-            run_registry = _get_group_test_registry()
-            local_settings_by_module = run_registry.collect_local_only_settings(resolved_backtest_settings)
-            market_rule_fallback = local_settings_by_module.get(
-                "market_rules", {}).get("market_rule_fallback", "latest_available")
-            evaluation_split = local_settings_by_module.get(
-                "evaluation_range", {}).get("evaluation_split") or None
-            first_group_id = str(flat_groups[0].get('id') or 'group-0')
-            fallback_group_settings = resolved_backtest_settings.get(first_group_id, {})
-            factor_mode = fallback_group_settings.get("factor_mode", "auto")
-            start_dt, end_dt = _resolve_run_datetimes(local_settings, resolved_backtest_settings)
-
-            page_factors_dict = page_factors.get(page_uuid, {})
-            selection_cache: dict[str, Any] = {}
-            resolved_settings_by_alias: dict[str, dict[str, Any]] = {}
-            group_owner: list[dict[str, Any]] = []
-
-            # 步骤 1：处理 groups
-            for g in flat_groups:
-                if not isinstance(g, dict):
-                    continue
-                group_id = str(g.get('id') or f'group-{len(resolved_settings_by_alias)}')
-                resolved_settings_by_alias[group_id] = _resolve_group_strategy_settings(
-                    g, resolved_backtest_settings=resolved_backtest_settings,
-                    fallback_group_settings=fallback_group_settings,
-                    page_uuid=page_uuid, data=payload, page_factors_dict=page_factors_dict,
-                    selection_cache=selection_cache,
-                )
-            group_owner.extend(_build_group_owner_rows(flat_groups, is_ls=False))
-            group_owner_by_id = {str(row.get("group_id")): row for row in group_owner}
-
-            # 步骤 2：处理 ls_configs
-            normalized_ls_configs: list[dict[str, Any]] = []
-            for index, g in enumerate(flat_ls_configs):
-                if not isinstance(g, dict):
-                    continue
-                normalized = dict(g)
-                group_id = _long_short_strategy_id(normalized, index)
-                normalized["strategy_id"] = group_id
-                normalized.setdefault("id", group_id)
-                normalized_ls_configs.append(normalized)
-                resolved_settings_by_alias[group_id] = _resolve_long_short_strategy_settings(
-                    normalized,
-                    resolved_backtest_settings=resolved_backtest_settings,
-                    source_settings_by_alias=resolved_settings_by_alias,
-                    fallback_group_settings=fallback_group_settings,
-                )
-            group_owner.extend(_build_long_short_owner_rows(
-                normalized_ls_configs, source_owner_by_id=group_owner_by_id))
-
-            if not resolved_settings_by_alias:
-                raise ValueError('没有有效的分组配置')
-
-            # 步骤 3：建 BacktestRunState，交给页面级 FactorTester 调度 "backtest" 任务
-            account = BacktestRunState()
-            apply_strategy_configs(account, resolved_settings_by_alias)
-
-            all_products: list = []
-            seen_products: set = set()
-            for selection in selection_cache.values():
-                for product in selection.products:
-                    if product not in seen_products:
-                        seen_products.add(product)
-                        all_products.append(product)
-            account.runtime_info_sink = emitter
-            account.market_data_request = {
-                "products": all_products,
-                "start_dt": start_dt,
-                "end_dt": end_dt,
-                "policy": market_rule_fallback,
-            }
-
-            tester = _get_or_create_group_test_tester(page_uuid)
-
-            def _on_progress(completed: int, total: int, label: str) -> None:
-                if active_run.cancelled.is_set():
-                    raise BacktestCancelled()
-
-            execution = tester.dispatch(
-                "backtest", run_state=account, group_owner=group_owner,
-                settings_by_strategy=resolved_settings_by_alias,
-                run_id=run_token, progress=_on_progress, activity_sink=emitter,
-            )
-            runtime_info_rows = list(getattr(account, "runtime_info_rows", ()))
-            serialized_execution = _serialize_event_execution(
-                execution, settings_by_group=execution["settings_by_strategy"],
-                evaluation_split=evaluation_split, registry=run_registry,
-            )
-            runtime_state.update_page_state(
-                page_uuid,
-                latest_group_execution={
-                    "run_id": execution["payload"]["run_id"],
-                    "engine_result": execution["engine_result"],
-                    "group_owner": execution["group_owner"],
-                    "serialized_execution": serialized_execution,
-                    "detail_context": {
-                        "payload": {
-                            "instruments": execution["payload"].get("instruments") or [],
-                            "market_rules": execution["payload"].get("market_rules") or {},
-                        },
-                        "settings_by_strategy": execution["settings_by_strategy"],
-                    },
-                },
-            )
-
-            first_owner = group_owner[0]
-            result = {
-                "success": True,
-                **serialized_execution,
-                "metrics_meta": _get_metrics_meta(),
-                "n_groups": len(serialized_execution["groups"]),
-                "multi_session_active": False,
-                "multi_session_entries": [],
-                "runtime_info_rows": runtime_info_rows,
-                "product_path_selection_id": str(first_owner.get("product_path_selection_id") or ""),
-                "factor_alias": str(first_owner.get("factor_alias") or ""),
-                "product_path_selection_count": len(all_products),
-                "simulation_count": 1,
-                "cross_entry_ls_count": len(flat_ls_configs),
-                "errors": None,
-                "backtest_settings": {
-                    "engine": "native",
-                    "factor_mode": factor_mode,
-                    "market_rule_fallback": market_rule_fallback,
-                    "groups": resolved_backtest_settings,
-                },
-                "silent_default_settings": _silent_default_settings_for_run(
-                    payload, flat_groups, flat_ls_configs, resolved_backtest_settings,
-                ),
-                "evaluation_window": {
-                    "start_ms": int(cast(Any, start_dt).ts.timestamp() * 1000),
-                    "end_ms": int(cast(Any, end_dt).ts.timestamp() * 1000),
-                    "split_ms": (
-                        int(pd.Timestamp(evaluation_split, tz=cast(Any, start_dt).ts.tz).timestamp() * 1000)
-                        if evaluation_split else None
-                    ),
-                },
-            }
-            emitter.emit_result(result)
-        except BacktestCancelled as exc:
-            emitter.emit_error(str(exc), cancelled=True, run_token=run_token)
-        except Exception as e:
-            import traceback as _tb
-            emitter.emit_error(str(e), traceback=_tb.format_exc())
-        finally:
-            backtest_runs.finish(run_token)
-            emitter.close()
-
-    threading.Thread(target=_compute_and_emit, daemon=True).start()
-    return emitter.get_response()
+    net_returns = project_net_returns(
+        engine_result=execution["engine_result"],
+        group_owner=execution["group_owner"],
+    )
+    if net_returns is not None:
+        sink.emit_artifact("net_returns", net_returns)
+    event_execution = {
+        "run_id": execution["payload"]["run_id"],
+        "engine_result": execution["engine_result"],
+        "group_owner": execution["group_owner"],
+        "serialized_execution": serialized_execution,
+        "detail_context": {
+            "payload": {
+                "instruments": execution["payload"].get("instruments") or [],
+                "market_rules": execution["payload"].get("market_rules") or {},
+            },
+            "settings_by_strategy": execution["settings_by_strategy"],
+        },
+    }
+    sink.emit_artifact("group_execution", event_execution)
+    first_owner = group_owner[0]
+    sink.emit_result({
+        "success": True,
+        "run_id": run_id,
+        **serialized_execution,
+        "metrics_meta": _get_metrics_meta(),
+        "n_groups": len(serialized_execution["groups"]),
+        "runtime_info_rows": list(getattr(account, "runtime_info_rows", ())),
+        "product_path_selection_id": str(first_owner.get("product_path_selection_id") or ""),
+        "factor_alias": str(first_owner.get("factor_alias") or ""),
+        "product_path_selection_count": len(all_products),
+        "simulation_count": 1,
+        "cross_entry_ls_count": len(flat_ls_configs),
+        "errors": None,
+        "external_factor_artifacts": result_metadata(
+            payload.get("external_factor_artifacts")
+        ),
+        "backtest_settings": {
+            "engine": "native",
+            "factor_mode": factor_mode,
+            "market_rule_fallback": market_rule_fallback,
+            "groups": resolved_backtest_settings,
+        },
+        "silent_default_settings": _silent_default_settings_for_run(
+            payload, flat_groups, flat_ls_configs, resolved_backtest_settings,
+        ),
+    })

@@ -31,6 +31,8 @@ def test_ic_evaluation_reuses_computed_factor_source_frequency(monkeypatch):
         products = ["P"]
         start_date = None
         end_date = None
+        start_dt = None
+        end_dt = None
 
         def _get_result(self, factor):
             return SimpleNamespace(data_present_mask=pd.DataFrame())
@@ -43,7 +45,7 @@ def test_ic_evaluation_reuses_computed_factor_source_frequency(monkeypatch):
         [SimpleNamespace(_source_freq=DataFreq.MIN1)],
     )
 
-    assert evaluate_kwargs == {"freq": DataFreq.MIN1}
+    assert evaluate_kwargs == {"freq": DataFreq.MIN1, "start_dt": None, "end_dt": None}
 
 
 def test_ic_evaluation_uses_declared_source_frequency_before_factor_is_computed(monkeypatch):
@@ -69,6 +71,8 @@ def test_ic_evaluation_uses_declared_source_frequency_before_factor_is_computed(
         products = ["P"]
         start_date = None
         end_date = None
+        start_dt = None
+        end_dt = None
 
         def _get_result(self, factor):
             return SimpleNamespace(data_present_mask=pd.DataFrame())
@@ -81,4 +85,4 @@ def test_ic_evaluation_uses_declared_source_frequency_before_factor_is_computed(
         [SimpleNamespace(_source_freq=None, family=SimpleNamespace(_source_freq="1m"))],
     )
 
-    assert evaluate_kwargs == {"freq": DataFreq.MIN1}
+    assert evaluate_kwargs == {"freq": DataFreq.MIN1, "start_dt": None, "end_dt": None}

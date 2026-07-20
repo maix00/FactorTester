@@ -15,10 +15,12 @@ from server.modules.factors.helpers import (
     series_to_frontend,
 )
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_run
+from server.modules.shared.factor_tester_runtime import create_isolated_factor_tester_for_run
+from server.modules.shared.factor_tester_runtime import selection_from_request
 from server.modules.shared.submission_helpers import product_attrs
 from tools.products.product_path_selection import ProductPathSelection
-from server.services.factor_registry import get_factor_family_instance
-from server.services.session_runtime import current_user_obj
+from server.services.factor_registry import factor_from_alias, get_factor_family_instance
+from server.services.session_runtime import current_user_obj, user_obj_for_name
 from tools.data.types import DataTime
 from tools.data.types import finest_index
 
@@ -38,6 +40,10 @@ class FactorEvaluation:
     page_uuid: str
     product_name: str = ""
     settings: dict[str, Any] | None = None
+    owner: str = ""
+    run_id: str = ""
+    isolated: bool = False
+    external_factor_artifacts: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_request(cls, data: dict[str, Any], *, page_uuid: str) -> "FactorEvaluation":
@@ -64,30 +70,74 @@ class FactorEvaluation:
             settings=data.get("settings") if isinstance(data.get("settings"), dict) else None,
         )
 
+    @classmethod
+    def from_run_spec(cls, data: dict[str, Any]) -> "FactorEvaluation":
+        owner = str(data.get("_owner") or data.get("owner_username") or "").strip()
+        run_id = str(data.get("run_id") or data.get("run_token") or "").strip()
+        if not owner or not run_id:
+            raise ValueError("factor evaluation RunSpec requires owner and run_id")
+        factor_family_alias = str(data.get("factor_family_alias") or "").strip()
+        factor_alias = str(data.get("factor_alias") or data.get("factor_name") or "").strip()
+        if not factor_family_alias or not factor_alias:
+            raise ValueError("请先选择因子")
+        selection = selection_from_request(data, page_uuid="")
+        return cls(
+            selection=selection,
+            factor_family_alias=factor_family_alias,
+            factor_alias=factor_alias,
+            page_uuid="",
+            product_name=str(data.get("product") or "").strip(),
+            settings=data.get("settings") if isinstance(data.get("settings"), dict) else None,
+            owner=owner,
+            run_id=run_id,
+            isolated=True,
+            external_factor_artifacts=list(data.get("external_factor_artifacts") or []),
+        )
+
     def run(self) -> dict[str, Any]:
         started_at = time.time()
         start_dt, end_dt = self._run_window_datetimes()
-        tester = create_factor_tester_for_run(
-            self.selection,
-            page_uuid=self.page_uuid,
-            start_dt=start_dt,
-            end_dt=end_dt,
-            user=current_user_obj(),
+        tester = (
+            create_isolated_factor_tester_for_run(
+                self.selection,
+                run_id=self.run_id,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                user=user_obj_for_name(self.owner),
+            )
+            if self.isolated
+            else create_factor_tester_for_run(
+                self.selection,
+                page_uuid=self.page_uuid,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                user=current_user_obj(),
+            )
         )
-        factor_family = get_factor_family_instance(
-            self.factor_family_alias,
-            page_uuid=self.page_uuid,
-        )
-        # Factors from page_factors (single source of truth)
-        from server.services.factor_registry import page_factors
-        page_dict = page_factors.get(str(self.page_uuid), {})
-        family_alias = getattr(factor_family, 'alias', '')
-        factors = [
-            f for alias, f in page_dict.items()
-            if getattr(getattr(f, 'family', None), 'alias', None) == family_alias
-        ]
-        factor_family.factors = factors
-        factor = _find_factor(factors, self.factor_alias, self.factor_alias)
+        if self.isolated:
+            from server.services.external_factor_artifacts import factor_by_alias
+
+            factor = factor_by_alias(
+                self.external_factor_artifacts, self.factor_alias,
+            ) or factor_from_alias(self.factor_alias, username=self.owner)
+        else:
+            factor = None
+        if factor is None:
+            factor_family = get_factor_family_instance(
+                self.factor_family_alias,
+                username=self.owner or None,
+                page_uuid=self.page_uuid,
+            )
+            # Legacy synchronous pages still resolve submitted page factors.
+            from server.services.factor_registry import page_factors
+            page_dict = page_factors.get(str(self.page_uuid), {})
+            family_alias = getattr(factor_family, 'alias', '')
+            factors = [
+                item for item in page_dict.values()
+                if getattr(getattr(item, 'family', None), 'alias', None) == family_alias
+            ]
+            factor_family.factors = factors
+            factor = _find_factor(factors, self.factor_alias, self.factor_alias)
         if factor is None:
             raise LookupError("请先提交参数设置，或从模板加载已有因子")
 
@@ -141,6 +191,8 @@ class FactorEvaluation:
 
         if not series_items:
             raise LookupError("所选产品没有该因子的可显示序列")
+        from server.services.external_factor_artifacts import result_metadata
+
         return {
             "success": True,
             "factor": {
@@ -154,6 +206,9 @@ class FactorEvaluation:
                 "elapsed_ms": round((time.time() - started_at) * 1000),
                 "product_count": len(series_items),
             },
+            "external_factor_artifacts": result_metadata(
+                self.external_factor_artifacts
+            ),
         }
 
     def _run_window_datetimes(self) -> tuple[DataTime | None, DataTime | None]:

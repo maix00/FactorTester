@@ -145,6 +145,7 @@ def build_factor_param_item(
     # 条目级 category 优先于因子家族 meta category
     row_category = params.get('category', '') if isinstance(params, dict) else ''
     family_category = meta.get('category') or ''
+    metadata = config.get('metadata') if isinstance(config.get('metadata'), dict) else {}
     return {
         'id': f"{owner_username}:{getattr(factor_family, 'alias', '')}:{config.get('id')}:{row_idx}",
         'factor_alias': factor_family.get_alias(**normalized_row),
@@ -166,4 +167,7 @@ def build_factor_param_item(
         'owner_organization_name': owner_acct.get('organization_name') or '',
         'can_edit': owner_username == current_username,
         'updated_at': config.get('updated_at') or '',
+        'metadata': metadata,
+        'note': metadata.get('note') or '',
+        'research_report': metadata.get('research_report') or '',
     }

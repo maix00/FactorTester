@@ -8,6 +8,15 @@ import json
 import sys
 
 from .contracts import WorkerRequest, WorkerResponse
+from .operations import (
+    HEALTH,
+    RUN_STRATEGY_INTENTS,
+    RUN_TARGET_WEIGHTS,
+    canonical_operation,
+    operation_keys_for_health,
+    operation_manifest,
+    runner_name_for_operation,
+)
 
 
 PACKAGES = {
@@ -21,14 +30,16 @@ PACKAGES = {
 def execute(request: WorkerRequest, progress=None) -> dict:
     if request.engine not in PACKAGES:
         raise ValueError(f"unknown worker engine: {request.engine}")
-    if request.operation == "health":
-        operations = ["health", "run_target_weights", "run_group_strategy"]
+    operation = canonical_operation(request.operation)
+    if operation == HEALTH:
         return {
             "framework_version": version(PACKAGES[request.engine]),
-            "operations": operations,
+            "operations": operation_keys_for_health(),
+            "operation_manifest": operation_manifest(),
             "process_isolation": "conda-subprocess",
         }
-    if request.operation == "run_target_weights":
+    runner_name = runner_name_for_operation(operation)
+    if operation == RUN_TARGET_WEIGHTS:
         if request.engine == "backtrader":
             from .runners.backtrader import run_target_weights
         elif request.engine == "qlib":
@@ -38,18 +49,18 @@ def execute(request: WorkerRequest, progress=None) -> dict:
         else:
             raise NotImplementedError("RQAlpha target-weight runner is not implemented")
         return run_target_weights(request.payload)
-    if request.operation == "run_group_strategy":
+    if operation == RUN_STRATEGY_INTENTS:
         if request.engine == "backtrader":
-            from .runners.backtrader import run_group_strategy
+            from .runners.backtrader import run_strategy_intents
         elif request.engine == "qlib":
-            from .runners.qlib import run_group_strategy
+            from .runners.qlib import run_strategy_intents
         elif request.engine == "zipline":
-            from .runners.zipline import run_group_strategy
+            from .runners.zipline import run_strategy_intents
         else:
-            raise NotImplementedError("RQAlpha group-strategy runner is not implemented")
-        return run_group_strategy(request.payload, progress=progress)
+            raise NotImplementedError("RQAlpha strategy-intent runner is not implemented")
+        return run_strategy_intents(request.payload, progress=progress)
     raise ValueError(
-        f"operation {request.operation!r} is not implemented for {request.engine}"
+        f"operation {request.operation!r} ({runner_name}) is not implemented for {request.engine}"
     )
 
 

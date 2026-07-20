@@ -14,7 +14,10 @@ class FactorModule(ExecutableModule):
     label: ClassVar[str] = "因子"
     order: ClassVar[int] = 20
 
-    factor: ClassVar[FieldRef[Any]] = FieldRef("factor")  # a FactorExpr (tools.factors.expr.core.FactorExpr)
+    # A resolved ``Factor`` is itself a ``FactorExpr`` and retains its alias
+    # and result-cache lifecycle. The runtime must not replace it with an
+    # execution-specific wrapper.
+    factor: ClassVar[FieldRef[Any]] = FieldRef("factor")
     factor_candidates: ClassVar[FieldRef[list[Any]]] = FieldRef("factor_candidates")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {

@@ -1,11 +1,10 @@
-"""Native event-driven runner — dispatches to the new Event/Order/Flow
-scheduler (`tools.testers.backtest.engines.native.scheduler`).
+"""Native worker runner.
 
-`run_group_strategy`'s real body, plus `_build_pipeline`/the StagePipeline-
-based wiring, was deleted as part of the issue-114 rewrite (old
-`PhaseContext`/`StagePipeline`/`EventRuntime` no longer exist). Production
-rewiring onto the new scheduler happens in step 11; until then this raises
-clearly instead of silently doing nothing.
+The native HTTP/server path uses the Event/Order/Flow scheduler directly.
+The framework-worker contract tests still exercise the compact worker payload
+shape, so this module delegates that payload to the framework-free reference
+loop. That keeps parity checks alive without resurrecting the deleted
+PhaseContext/StagePipeline runtime.
 """
 
 from __future__ import annotations
@@ -14,12 +13,22 @@ from collections.abc import Mapping
 from typing import Any
 
 
-def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
-    """Run a group strategy backtest using the new Event/Order/Flow scheduler.
+def run_strategy_intents(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    from .reference import run_group_strategy as run_reference_group_strategy
 
-    Pending issue-114 step 11 production rewiring — the old
-    PhaseContext/StagePipeline/EventRuntime-based implementation was removed
-    in step 0 of the rewrite."""
-    raise NotImplementedError(
-        "run_group_strategy: pending issue-114 step 11 production rewiring "
-        "onto the new Event/Order/Flow scheduler")
+    if progress is None:
+        return run_reference_group_strategy(payload, progress=None, engine="native")
+
+    timestamps = tuple(payload.get("timestamps", ()))
+    bar_count = len(timestamps)
+
+    def _progress(completed: int, total: int, timestamp: Any) -> None:
+        if bar_count <= 0 or completed > bar_count:
+            return
+        progress(completed, bar_count, timestamp)
+
+    return run_reference_group_strategy(payload, progress=_progress, engine="native")
+
+
+def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    return run_strategy_intents(payload, progress=progress)

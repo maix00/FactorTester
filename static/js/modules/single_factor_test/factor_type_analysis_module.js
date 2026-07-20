@@ -78,6 +78,54 @@
         renderSettingChips();
     }
 
+    async function runJobResult(kind, payload) {
+        var submitted = await window.SingleFactorResearch.submit(kind, payload);
+        var job = submitted.jobs && submitted.jobs[0];
+        if (!job || !job.job_id) throw new Error('任务提交失败');
+        job.stream_url = '/api/jobs/' + encodeURIComponent(job.job_id) + '/stream';
+        job.result_url = '/api/jobs/' + encodeURIComponent(job.job_id) + '/result';
+        var response = await fetch(job.stream_url);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        var reader = response.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        var lastEvent = '';
+        var result = null;
+        var error = null;
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+                if (line.indexOf('event: ') === 0) {
+                    lastEvent = line.slice(7).trim();
+                } else if (line.indexOf('data: ') === 0) {
+                    try {
+                        var data = JSON.parse(line.slice(6));
+                        if (lastEvent === 'result') result = data;
+                        if (lastEvent === 'error') error = data;
+                    } catch (err) {
+                        // Ignore malformed SSE payloads.
+                    }
+                }
+            }
+        }
+        if (error) throw new Error(error.error || 'job failed');
+        if (result) return result;
+        if (job.result_url) {
+            var resultResponse = await fetch(job.result_url, { headers: { Accept: 'application/json' } });
+            var resultPayload = await resultResponse.json().catch(function() { return {}; });
+            if (!resultResponse.ok || resultPayload.success === false) {
+                throw new Error(resultPayload.error || ('HTTP ' + resultResponse.status));
+            }
+            if (resultPayload.result) return resultPayload.result;
+        }
+        throw new Error('job finished without result');
+    }
+
     function updateStatus(text) {
         var el = document.getElementById('factor-type-analysis-status');
         if (el) el.textContent = text;
@@ -433,20 +481,15 @@
         setProgress(25, '分析因子类型');
 
         try {
-            var data = await fetch('/api/factor_type_analysis/analyze', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    product_path_selection: compactProductPathSelectionForRun(state.values.product_path_selection),
-                    factor_family_alias: document.getElementById('factor_type_analysis_module').getAttribute('data-factor-family-alias') || '',
-                    factor_alias: factor.alias || factor.name,
-                    page_uuid: window._pageUuid || '',
-                    settings: state.values || {},
-                    method: state.values.correlation_method || 'pearson',
-                    min_periods: state.values.min_periods || 30,
-                }),
+            var result = await runJobResult('factor_type_analysis', {
+                product_path_selection: compactProductPathSelectionForRun(state.values.product_path_selection),
+                factor_family_alias: document.getElementById('factor_type_analysis_module').getAttribute('data-factor-family-alias') || '',
+                factor_alias: factor.alias || factor.name,
+                page_uuid: window._pageUuid || '',
+                settings: state.values || {},
+                method: state.values.correlation_method || 'pearson',
+                min_periods: state.values.min_periods || 30,
             });
-            var result = await data.json();
 
             if (!result || result.success === false) {
                 panel.innerHTML = msg(result.error || '分析失败', true);

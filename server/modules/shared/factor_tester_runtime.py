@@ -217,6 +217,39 @@ def create_factor_tester_for_run(
     return tester
 
 
+def create_isolated_factor_tester_for_run(
+    selection: ProductPathSelection,
+    *,
+    run_id: str,
+    start_dt: Any | None = None,
+    end_dt: Any | None = None,
+    user: Any | None = None,
+):
+    """Create a worker-local tester without reading or registering PageRuntime."""
+    default_start, default_end = runtime_state.get_default_time()
+    start_dt = _as_data_time(start_dt if start_dt is not None else default_start)
+    end_dt = _as_data_time(end_dt if end_dt is not None else default_end)
+
+    from tools.factors.FactorTester import FactorTester
+
+    tester = FactorTester(
+        products=selection.products,
+        alias=f"run:{str(run_id)}",
+        start_dt=start_dt,
+        end_dt=end_dt,
+        user=user,
+    )
+    tester.selected_paths = list(selection.selected_paths)
+    tester.label = selection.label
+    tester.product_group = selection.product_group
+    tester.product_group_template_id = selection.product_group_template_id
+    tester.selection_source_type = selection.source_type
+    tester.selection_source_key = selection.source_key
+    tester.product_selection = selection
+    tester._page_uuid = ""
+    return tester
+
+
 def create_factor_tester_from_request(data: dict[str, Any], *, page_uuid: str, user: Any | None = None):
     selection = selection_from_request(data, page_uuid=page_uuid)
     return create_factor_tester_for_run(selection, page_uuid=page_uuid, user=user)

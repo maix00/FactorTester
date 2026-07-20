@@ -2,9 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
-    <!-- 作为客户端访问用户填写的服务器地址 -->
+    <!-- 本地研究客户端需要启动已安装的 factortester/Vibe helper。
+         因此首版不启用 App Sandbox；Hardened Runtime 仍由 project.yml 开启。 -->
     <key>com.apple.security.network.client</key>
     <true/>
 </dict>

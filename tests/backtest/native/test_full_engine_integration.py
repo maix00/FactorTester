@@ -16,7 +16,7 @@ import pytest
 from tools.data.types import DataColumn, DataFreq
 from tools.factors.FactorExpr import ColumnRef
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 from tools.testers.backtest.modules.equity_curve import equity_curve_for, position_curve_for
@@ -43,7 +43,7 @@ class _FakeFactor:
     def __init__(self, table: pd.DataFrame) -> None:
         self._table = table
 
-    def evaluate(self) -> pd.DataFrame:
+    def evaluate(self, products, **kwargs) -> pd.DataFrame:
         return self._table
 
 
@@ -52,8 +52,6 @@ def _build_registry() -> FlowRegistry:
     for cls in _ALL_MODULE_CLASSES:
         for flow in getattr(cls, "flows", ()):
             registry.register_flow(flow)
-        for override in getattr(cls, "overrides", ()):
-            registry.register_override(override)
     return registry
 
 
@@ -72,7 +70,7 @@ def test_full_engine_runs_two_product_two_day_backtest():
             "factor": factor,
             "factor_mode": "precomputed",
             "split_count": 2,
-            "group_index": 1,  # highest-signal half
+            "group_index": 0,  # highest-signal half
             "initial_capital_major": 1_000_000.0,
             "base_currency": "CNY",
             "engine_mode": "basic",
@@ -138,15 +136,8 @@ def test_full_engine_two_strategies_independent_results():
     assert curve_a1.iloc[-1] != curve_a2.iloc[-1]
 
 
-class _RollingMeanFactorAdapter:
-    """Wraps a real `FactorExpr` (ColumnRef(...).rolling(...).mean()) so it
-    matches the explicit-window `.evaluate(start_dt=..., end_dt=...)`
-    contract FactorSignalModule calls in the precomputed path -- the real
-    ApplicationSettings/candidate-resolution layer is what normally builds
-    this kind of adapter around a user-selected FactorExpr before it reaches
-    StrategyConfig; this test stands in for that layer, not for FactorExpr
-    itself (the rolling-mean computation below is the real expression
-    engine, not a stub)."""
+class _PreloadedFactorExprFixture:
+    """Injects the test-only preloaded data into a real FactorExpr call."""
 
     def __init__(self, expr, products: list[Product], freq: "DataFreq", preloaded: dict) -> None:
         self._expr = expr
@@ -154,9 +145,9 @@ class _RollingMeanFactorAdapter:
         self._freq = freq
         self._preloaded = preloaded
 
-    def evaluate(self, *, start_dt=None, end_dt=None) -> pd.DataFrame:
+    def evaluate(self, products, *, start_dt=None, end_dt=None, **kwargs) -> pd.DataFrame:
         return self._expr.evaluate(
-            self._products,
+            products,
             self._freq,
             preloaded=self._preloaded,
             start_dt=start_dt,
@@ -183,7 +174,7 @@ def test_full_engine_with_real_moving_average_factor_expression():
     preloaded = {(p1, "DAY1"): close_p1, (p2, "DAY1"): close_p2}
 
     moving_average = ColumnRef(DataColumn.CLOSE).rolling(5).mean()
-    factor = _RollingMeanFactorAdapter(moving_average, [p1, p2], DataFreq.DAY1, preloaded)
+    factor = _PreloadedFactorExprFixture(moving_average, [p1, p2], DataFreq.DAY1, preloaded)
 
     raw_prices = pd.DataFrame(
         {p1: close_p1["CLOSE"].to_numpy(), p2: close_p2["CLOSE"].to_numpy()}, index=idx)
@@ -199,7 +190,7 @@ def test_full_engine_with_real_moving_average_factor_expression():
         "A1": {
             "factor_mode": "precomputed",
             "split_count": 2,
-            "group_index": 1,  # highest-MA half
+            "group_index": 0,  # highest-MA half
                 "initial_capital_major": 1_000_000.0,
                 "base_currency": "CNY",
                 "engine_mode": "basic",
@@ -221,7 +212,7 @@ def test_full_engine_with_real_moving_average_factor_expression():
     curve = equity_curve_for(account, strategy)
     assert not curve.empty
     # The real rolling-mean ranking must put p1 (consistently higher MA
-    # level) in the group_index=1 (top) bucket -- proof the engine's
+    # level) in the group_index=0 (top) bucket -- proof the engine's
     # allocation decision was actually driven by FactorExpr.evaluate()'s
     # real output, not a hand-built signal table.
     positions_by_ts = position_curve_for(account, strategy)

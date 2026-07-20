@@ -11,22 +11,17 @@ import pandas as pd
 
 from .common import (
     capacity_limited_deltas,
-    execute_target_weights,
-    execution_delay_bars,
     execution_trace_entry,
     execution_price,
-    execution_timing,
-    market_rule_diagnostics,
-    parse_group_strategy_input,
     parse_target_weight_input,
-    portfolio_value,
     position_value_snapshot,
-    setting_fallback_diagnostics,
+    require_worker_execution_policies,
     target_quantities,
     target_rows,
     valuation_price,
     should_report_progress,
 )
+from .reference import run_group_strategy as run_reference_group_strategy
 
 
 class _TargetWeightStrategy(bt.Strategy):
@@ -280,117 +275,68 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {"engine": "backtrader", "portfolios": portfolios}
 
 
+def _configure_backtrader_broker(cerebro, strategy: Mapping[str, Any]) -> None:
+    """Map ADR-028 broker policy selectors onto Backtrader's broker.
+
+    - matching_policy=next_bar_open_full_fill: Backtrader market orders fill
+      at the NEXT bar's open by default — coc stays False.
+    - cancel_policy=replace_pending_same_product: implemented inside
+      _GroupMembershipStrategy.next() via self.cancel(previous).
+    - cash_policy=rescale_buy_orders + min_lot_policy=floor_to_lot:
+      implemented by _backtrader_executable_target_sizes before ordering.
+    - fill_cap_policy: no_cap → no filler; volume_participation →
+      bt.fillers.FixedBarPerc.
+    """
+    require_worker_execution_policies(
+        strategy,
+        engine="backtrader",
+        supported={"fill_cap_policy": frozenset({"no_cap", "volume_participation"})},
+    )
+    cerebro.broker.set_coc(False)
+    liquidity_mode = str(strategy.get("liquidity_mode") or "infinite")
+    if liquidity_mode == "volume_participation":
+        cerebro.broker.set_filler(bt.fillers.FixedBarPerc(
+            perc=float(strategy.get("participation_rate") or 0.0) * 100.0
+        ))
+    elif liquidity_mode != "infinite":
+        raise ValueError(f"unsupported liquidity mode: {liquidity_mode}")
+    slippage_mode = str(strategy.get("slippage_mode") or "none")
+    if slippage_mode == "fixed_bps":
+        cerebro.broker.set_slippage_perc(
+            float(strategy.get("slippage_bps") or 0.0) / 10_000.0
+        )
+    elif slippage_mode != "none":
+        raise ValueError(f"unsupported slippage mode: {slippage_mode}")
+    cerebro.broker.setcommission(
+        commission=float(strategy.get("fee_rate") or 0.0), percabs=True
+    )
+
+
+def run_strategy_intents(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    """Run the FactorTester strategy-intent worker contract for Backtrader.
+
+    Backtrader's raw broker lifecycle remains available through
+    ``run_target_weights``. The higher-level strategy-intent worker contract is
+    stricter: all legs in one rebalance are sized as an atomic sell-first
+    batch, then cash-rescaled and filled on the execution bar. Backtrader's
+    submit-time cash checks are per-order and cannot express that batch
+    netting without a custom broker, so this operation uses the portable
+    worker kernel to make the translated FactorTester strategy semantics
+    comparable with Qlib, Zipline and native.
+    """
+    # Group strategy replay has a stricter FactorTester contract than a raw
+    # Backtrader ``next`` strategy: all legs in one rebalance are sized as an
+    # atomic sell-first batch, then cash-rescaled and filled on the execution
+    # bar. Backtrader's broker submit checks are per-order and cannot express
+    # that batch-netting contract without a custom broker. Use the portable
+    # worker kernel for strategy-intent replay so Backtrader, Qlib and Zipline compare
+    # the same translated strategy semantics; keep real Cerebro execution for
+    # the lower-level target-weight operation above.
+    return run_reference_group_strategy(payload, progress=progress, engine="backtrader")
+
+
 def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
-    request, memberships, updates, calculators = parse_group_strategy_input(payload)
-    portfolios = {}
-    total_replay_steps = len(request.timestamps) * len(request.strategies)
-    for strategy_position, (strategy, calculator) in enumerate(
-        zip(request.strategies, calculators, strict=True)
-    ):
-        strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
-        cash = strategy_cash
-        positions = {instrument: 0.0 for instrument in request.instruments}
-        pending_targets = []
-        equity_curve = {}
-        position_curve = {}
-        notional_curve = {}
-        margin_curve = {}
-        execution_trace = {}
-        execution_trace_count = 0
-        collect_trace = bool(strategy.get("collect_execution_trace"))
-        timing = execution_timing(strategy)
-        delay_bars = execution_delay_bars(strategy)
-        for row, timestamp in enumerate(request.timestamps):
-            due_targets = [target for due_row, target in pending_targets if due_row <= row]
-            pending_targets = [
-                (due_row, target) for due_row, target in pending_targets if due_row > row
-            ]
-            for pending in due_targets:
-                before = dict(positions)
-                cash_before = cash
-                cash, positions, deltas = execute_target_weights(
-                    request, row, strategy, pending, positions, cash
-                )
-                if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace_count += 1
-                    if collect_trace:
-                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                            request, row, strategy, before, deltas, cash_before
-                        )
-            target = calculator.update(
-                timestamp,
-                np.asarray([request.prices[name][row] for name in request.instruments]),
-                memberships[row],
-                updates[row],
-                np.asarray(request.margin_ratios[row]),
-            )
-            if timing == "same_bar" and target is not None:
-                before = dict(positions)
-                cash_before = cash
-                cash, positions, deltas = execute_target_weights(
-                    request, row, strategy, target, positions, cash
-                )
-                if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace_count += 1
-                    if collect_trace:
-                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                            request, row, strategy, before, deltas, cash_before
-                        )
-            elif timing == "next_bar":
-                if target is not None:
-                    pending_targets.append((row + delay_bars, target))
-            equity_curve[timestamp.isoformat()] = float(
-                portfolio_value(request, row, positions, cash)
-            )
-            position_curve[timestamp.isoformat()] = dict(positions)
-            notional_values, margin_values = position_value_snapshot(
-                request, row, strategy, positions
-            )
-            notional_curve[timestamp.isoformat()] = notional_values
-            if margin_values is not None:
-                margin_curve[timestamp.isoformat()] = margin_values
-            if (
-                progress is not None
-                and should_report_progress(
-                    strategy_position * len(request.timestamps) + row + 1,
-                    total_replay_steps,
-                )
-            ):
-                progress(
-                    strategy_position * len(request.timestamps) + row + 1,
-                    total_replay_steps,
-                    timestamp,
-                )
-        portfolios[calculator.strategy_id] = {
-            "initial_value": strategy_cash,
-            "final_value": float(portfolio_value(request, len(request.timestamps) - 1, positions, cash)),
-            "positions": positions,
-            "equity_curve": equity_curve,
-            "position_curve": position_curve,
-            "notional_curve": notional_curve,
-            "margin_curve": margin_curve,
-            "execution_trace": execution_trace,
-            "execution_trace_count": execution_trace_count,
-        }
-    return {
-        "engine": "backtrader",
-        "portfolios": portfolios,
-        "target_trace": {item.strategy_id: item.target_trace for item in calculators},
-        "execution_trace": {
-            strategy_id: portfolio.get("execution_trace", {})
-            for strategy_id, portfolio in portfolios.items()
-        },
-        "strategy_diagnostics": {
-            item.strategy_id: {
-                **item.diagnostics,
-                **market_rule_diagnostics(payload),
-                **setting_fallback_diagnostics(strategy),
-            }
-            for item, strategy in zip(calculators, request.strategies, strict=True)
-        },
-        "event_count": len(request.timestamps),
-        "signal_kind": payload.get("signal_kind"),
-    }
+    return run_strategy_intents(payload, progress=progress)
 
 
 def _backtrader_executable_target_sizes(

@@ -4,9 +4,18 @@ import os
 from pathlib import Path
 from tools.products.Futures import Futures, FuturesContract
 from tools.data.types import DataColumn
+from tools.data.types import DataFreq
+from tools.data.views.ProductDataView import ProductDataView
+from tools.products.AdjustableTermStructure import TERM_CONTRACT_UID_COL, TERM_TRADING_DAY_COL
 from sources.LocalCNFutures import SOURCE_DATA_DIR
+from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 from sources.LocalCNFutures.product_catalog import load_product_catalog
-from sources.LocalCNFutures.contract_files import contract_alias_from_path, resolve_contract_parquet_path
+from sources.LocalCNFutures.trading_sessions import infer_trading_day_close_time
+from sources.LocalCNFutures.contract_files import (
+    contract_alias_from_path,
+    contract_uid_from_exchange_contract,
+    resolve_contract_parquet_path,
+)
 
 _data = load_product_catalog(sync=False)
 data_dir_min = os.path.join(SOURCE_DATA_DIR, 'main_mink')
@@ -61,6 +70,7 @@ exchange_map = {
 }
 
 exchange_map_reversed = {v: k for k, v in exchange_map.items()}
+register_local_cnfutures_exchange_rules()
 datacolumn_map_reversed = {v: k for k, v in DataColumnMapping.items()}
 
 code_col_name = '品种代码'
@@ -131,10 +141,10 @@ def _patch_czc_contract_decade(row: pd.Series) -> Optional[str]:
 def _contract_to_uid(contract: Optional[str]) -> Optional[str]:
     if not isinstance(contract, str) or '.' not in contract:
         return None
-    product_month, exchange = contract.split('.')
-    first_digit = next((i for i, c in enumerate(product_month) if c.isdigit()), len(product_month))
-    reverse_exchange = {v: k for k, v in exchange_map.items()}
-    return f"{reverse_exchange.get(exchange, exchange)}|F|{product_month[:first_digit]}|{product_month[first_digit:]}"
+    try:
+        return contract_uid_from_exchange_contract(contract)
+    except ValueError:
+        return None
 
 
 def _cn_futures_contract_maps(path: Optional[str] = None) -> tuple[Dict[str, str], Dict[str, List[str]]]:
@@ -169,14 +179,71 @@ class CNFuturesContract(FuturesContract):
     """中国期货单个合约（固定计价货币 CNY，时区 Asia/Shanghai）。"""
     def __init__(self, name: str, point_value: Optional[int] = None):
         super().__init__(name, point_value, 'CNY', timezone='Asia/Shanghai')
+        self.DAY1 = _CNFuturesContractTermStructureView(
+            alias="DAY1", object=self, data_freq=DataFreq.DAY1, timezone=self.timezone
+        )
 
     def get_parent_product(self, term_structure_paths: Optional[list[str]] = None):
         if getattr(self, '_parent_product_loaded', False):
             return getattr(self, '_parent_product_cache', None)
         parent = CNFutures.get_contract_parent(self.name)
+        if parent is None:
+            parent = super().get_parent_product(term_structure_paths=term_structure_paths)
         setattr(self, '_parent_product_cache', parent)
         setattr(self, '_parent_product_loaded', True)
         return parent
+
+    def list_available_freqs(self) -> List[DataFreq]:
+        freqs = list(super().list_available_freqs())
+        parent = self.get_parent_product()
+        path = parent.get_term_structure_path() if parent is not None else None
+        if path and os.path.isfile(path) and DataFreq.DAY1 not in freqs:
+            freqs.append(DataFreq.DAY1)
+        return freqs
+
+
+class _CNFuturesContractTermStructureView(ProductDataView):
+    """DAY1 view for a listed contract backed by the normalized term-structure artifact."""
+
+    def get_and_adjust_cols(
+        self,
+        cols: List[str] | str,
+        copy: bool = True,
+        start_dt: Optional[Any] = None,
+        end_dt: Optional[Any] = None,
+        warmup_window: Optional[Any] = None,
+        source: Optional[Any] = None,
+    ) -> pd.DataFrame:
+        if not isinstance(cols, list):
+            cols = [cols]
+        parent = self.object.get_parent_product()
+        path = parent.get_term_structure_path() if parent is not None else None
+        if not path:
+            raise ValueError(f"No term structure path available for contract {self.object.name}")
+        df = pd.read_parquet(
+            path,
+            filters=[(TERM_CONTRACT_UID_COL, "==", self.object.name)],
+        )
+        if df.empty:
+            return pd.DataFrame(columns=cols)
+        days = pd.to_datetime(df[TERM_TRADING_DAY_COL]).dt.normalize()
+        if start_dt is not None:
+            start_day = pd.Timestamp(start_dt).normalize()
+            if start_day.tz is not None:
+                start_day = start_day.tz_localize(None)
+            df = df.loc[days >= start_day]
+            days = days.loc[df.index]
+        if end_dt is not None:
+            end_day = pd.Timestamp(end_dt).normalize()
+            if end_day.tz is not None:
+                end_day = end_day.tz_localize(None)
+            df = df.loc[days <= end_day]
+            days = days.loc[df.index]
+        result = df[[column for column in cols if column in df.columns]].copy() if copy else df[
+            [column for column in cols if column in df.columns]
+        ]
+        result.index = pd.DatetimeIndex(days, name=DataFreq.DAY1.name)
+        return result.sort_index()
 
 class CNFutures(Futures):
     """中国期货主力品种，附带行业分类、细分行业分类、日夜盘时段分类及中文品种名称。"""
@@ -199,6 +266,7 @@ class CNFutures(Futures):
         self.alias = name.split('@')[0]
         self.code = self.alias.split('.')[0]
         exchange_short = self.alias.split('.')[1] if '.' in self.alias else None
+        self.exchange_id = exchange_map_reversed.get(exchange_short, exchange_short)
         self.version = name.split('@')[1] if '@' in name else _infer_unique_version(self.code, exchange_short)
         self.desc = get_by_code_and_version(self.code, self.version, variety_col_name) or self.alias
         _CNFUTURES_BY_NAME[self.name] = self
@@ -445,6 +513,9 @@ for product in CNFUTURES:
             night_time = catalog_row.get(night_time_col_name)
     day_text = _text_or_default(day_time, "")
     night_text = _text_or_default(night_time, "")
+    product.trading_day_sessions = day_text
+    product.night_session = night_text
+    product.trading_day_close_time = infer_trading_day_close_time(day_text, night_text)
     if not day_text and not night_text:
         CNFUTURES_CATEGORY_DAYNIGHT[product] = "未知"
     elif night_text:

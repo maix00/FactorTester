@@ -14,23 +14,25 @@ individual module files.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from tools.data.modules.registry import ModuleRegistry
 
 from .base import ExecutableModule
 from .engine import EngineModule
+from .strategy_book import StrategyBookModule
+from .cash_pool import CashPoolModule
 from .run_window import RunWindowModule
 from .fee import FeeModule
 from .slippage import SlippageModule
-from .liquidity import LiquidityModule
+from .volume_capacity import VolumeCapacityMode
 from .margin import MarginModule
 from .order_execution import OrderExecutionModule
 from .custom_product import CustomProductModule, refresh_custom_product_field_definitions
-from .position_sizing import PositionSizingModule
+from .order_construct import OrderConstructModule
 from .cash_rescale import LedgerCashConstraintModule
 from .ledger_module import LedgerModule
-from .order_book import OrderBookModule
 from .trading_rule import TradingRuleModule
 from .product_selection import ProductSelectionModule
 from .term_structure import (
@@ -43,9 +45,10 @@ from .bar_events import BarEventModule
 from .minor_unit import MinorUnitModule
 from .factor import FactorModule
 from .factor_signal import FactorSignalModule
+from .target import TargetStrategyModule
 from .group_membership import GroupMembershipModule
+from .threshold_signal import ThresholdSignalModule
 from .long_short import LongShortCompositionModule
-from .order_lifecycle import OrderLifecycleModule
 from .order_flow import OrderFlowModule
 from .equity_curve import EquityCurveModule
 from .risk_metrics import RiskMetricsModule
@@ -55,9 +58,11 @@ from .risk_metrics import RiskMetricsModule
 
 _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     EngineModule,
+    StrategyBookModule,
+    CashPoolModule,
     RunWindowModule,
     LedgerModule,
-    OrderBookModule,
+    OrderConstructModule,
     TradingRuleModule,
     ProductSelectionModule,
     TermStructureExpandModule,
@@ -68,17 +73,17 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     MinorUnitModule,
     FactorModule,
     FactorSignalModule,
+    TargetStrategyModule,
     GroupMembershipModule,
+    ThresholdSignalModule,
     LongShortCompositionModule,
     FeeModule,
     SlippageModule,
-    LiquidityModule,
+    VolumeCapacityMode,
     MarginModule,
     OrderExecutionModule,
-    PositionSizingModule,
     CustomProductModule,
     LedgerCashConstraintModule,
-    OrderLifecycleModule,
     OrderFlowModule,
     EquityCurveModule,
     RiskMetricsModule,
@@ -98,53 +103,42 @@ def _module_class_by_key() -> dict[str, type[ExecutableModule]]:
 
 # ── Settings registration (standalone — import-safe) ──────────────
 
-def register_all_module_settings(app: Any) -> None:
-    """Register SettingDefinitions from all executable modules into an ApplicationSettings.
+def register_module_field_settings(
+    app: Any,
+    module_classes: Iterable[type[ExecutableModule]],
+    *,
+    setting_module_keys: Mapping[type[ExecutableModule], str] | None = None,
+    tab_keys: Mapping[type[ExecutableModule], str] | None = None,
+    scope_policy_overrides: Mapping[str, str] | None = None,
+    add_missing_modules: bool = True,
+) -> None:
+    """Register an application's settings from executable module fields.
 
-    Iterates _ALL_MODULE_CLASSES, reads each class's `fields` classvar
-    (FieldRef name -> FieldDefinition, the issue-114 replacement for the old
-    `setting_definitions` tuple-of-dict mechanism), and calls
-    app.register_setting() for every `public=True` field. Internal/ctx-scoped
-    fields (`public=False`, e.g. LedgerModule.cash, OrderBookModule.deltas)
-    are intentionally skipped — they were never part of the old
-    setting_definitions contract either.
-
-    This is a module-level function (not a method) so applications.py can
-    import it without triggering a circular import through BacktestModuleRegistry.
-
-    Some new ExecutableModule keys deliberately match an existing frontend
-    SettingModule (e.g. LedgerModule.key="portfolio_capital",
-    GroupMembershipModule.key="group_strategy") -- those already have a
-    SettingModule/tabs registered by register_group_test_settings, and this
-    function must not re-register them (duplicate key -> ValueError). Keys
-    with no old equivalent (e.g. "trading_rule", merging what used to be two
-    separate "accounting"/"margin" modules by design) get a SettingModule
-    auto-registered here.
+    `FieldDefinition` is the single field-schema source. Applications may
+    retain their own high-level SettingModules/tabs, but must not duplicate a
+    module field merely to change where it is mounted.
     """
     from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingModule, SettingOption, TabMountPoint
-
-    refresh_custom_product_field_definitions()
-
+    setting_module_keys = setting_module_keys or {}
+    tab_keys = tab_keys or {}
+    scope_policy_overrides = scope_policy_overrides or {}
     _SCOPE_MAP = {p.value: p for p in ScopePolicy}
-    for cls in sorted(_ALL_MODULE_CLASSES, key=lambda c: getattr(c, "order", 0)):
-        if getattr(cls, "fields", None) and cls.key not in app.modules:
+    for cls in sorted(module_classes, key=lambda c: getattr(c, "order", 0)):
+        setting_module_key = setting_module_keys.get(cls, cls.key)
+        if add_missing_modules and getattr(cls, "fields", None) and setting_module_key not in app.modules:
             app.register_module(SettingModule(
-                key=cls.key, label=getattr(cls, "label", cls.key), layer="backtest",
+                key=setting_module_key, label=getattr(cls, "label", cls.key), layer="backtest",
                 order=getattr(cls, "order", 100),
             ))
         for field_name, fd in getattr(cls, "fields", {}).items():
             if not fd.public:
                 continue
             if field_name in app.settings:
-                # Already registered by the existing candidate-list/selection
-                # machinery (e.g. ProductSelectionModule.product_path_selection,
-                # FactorModule.factor) -- that registration owns the rich
-                # candidate/fallback serialization metadata FieldDefinition
-                # doesn't carry. This FieldRef is a consumer of the value
-                # that registration resolves (via strategy_config_builder),
-                # not a second, competing owner of the setting itself.
                 continue
-            scope = _SCOPE_MAP.get(fd.scope_policy, ScopePolicy.OVERRIDABLE)
+            scope = _SCOPE_MAP.get(
+                scope_policy_overrides.get(field_name, fd.scope_policy),
+                ScopePolicy.OVERRIDABLE,
+            )
             options = tuple(SettingOption(str(o[0]), str(o[1])) for o in fd.options)
             tab_defaults = tuple(
                 TabMountPoint(value) for value in fd.tab_default_mount_points
@@ -152,10 +146,10 @@ def register_all_module_settings(app: Any) -> None:
             app.register_setting(SettingDefinition(
                 key=field_name,
                 label=fd.label or field_name,
-                tab=fd.tab or cls.key,
+                tab=tab_keys.get(cls, fd.tab or cls.key),
                 control_template=fd.control_template or "text",
                 default=fd.default,
-                module=cls.key,
+                module=setting_module_key,
                 scope_policy=scope,
                 options=options,
                 minimum=fd.minimum,
@@ -179,6 +173,15 @@ def register_all_module_settings(app: Any) -> None:
                 tab_summary_template=fd.tab_summary_template,
                 tab_summary_keys=fd.tab_summary_keys,
             ))
+
+
+def register_all_module_settings(app: Any) -> None:
+    """Register every executable module's public fields for group_test."""
+    from tools.testers.settings.counterparty import apply_counterparty_profile_defaults
+
+    refresh_custom_product_field_definitions()
+    apply_counterparty_profile_defaults()
+    register_module_field_settings(app, _ALL_MODULE_CLASSES)
 
 
 # ── BacktestModuleRegistry ────────────────────────────────────────
@@ -341,7 +344,7 @@ class GroupTestModuleRegistry(BacktestModuleRegistry):
         return (
             "transaction_cost",
             "slippage",
-            "liquidity",
+            "volume_capacity",
             "margin",
             "order_sizing",
             "cash_rescale",
@@ -454,7 +457,7 @@ class LongShortModuleRegistry(BacktestModuleRegistry):
         return (
             "transaction_cost",
             "slippage",
-            "liquidity",
+            "volume_capacity",
             "margin",
             "order_sizing",
             "cash_rescale",

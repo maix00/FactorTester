@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "lock_id": "factor-research-provider-sources",
+  "providers": {
+    "vibe-trading": {
+      "root_env": "VIBE_TRADING_ROOT",
+      "root_hint": "~/Documents/Vibe-Trading-Integration/repos/Vibe-Trading",
+      "reviewed_revision": "e494ed06d75a290818be3d4e7a5133484b4d8d7e"
+    },
+    "factortester-research-package": {
+      "root_package": "cli_anything.factortester_research"
+    }
+  },
+  "implementations": {
+    "vibe.research-goal": {
+      "source_path": "agent/src/skills/research-goal/SKILL.md",
+      "sha256": "eeaf0bb21cbff865616369da85f638a091ad5adc687aad341791ba5569ae635f"
+    },
+    "local.quantitative-research": {
+      "source_paths": [
+        "quantitative-research/SKILL.md",
+        "quantitative-research/references/patterns.md",
+        "quantitative-research/references/sharp_edges.md",
+        "quantitative-research/references/validations.md"
+      ],
+      "root_env": "AGENTS_SKILLS_ROOT",
+      "root_hint": "~/.agents/skills",
+      "sha256": "fb3b71ba85f30476a41d3215f1a54a7594971304aedd1e76eaa53bda2977cab3"
+    },
+    "vibe.factor-research": {
+      "source_path": "agent/src/skills/factor-research/SKILL.md",
+      "sha256": "df5e90c3fb39c41741314f24487abcbd80a40fe408ac0aa3f772f09bd2e4c880"
+    },
+    "vibe.quant-statistics.bootstrap": {
+      "source_path": "agent/src/skills/quant-statistics/SKILL.md",
+      "sha256": "45f3c6d5cd6f147e9668f39a2903c3023fe1332931627712410ec43922746bab"
+    },
+    "vibe.china-futures-engine": {
+      "source_path": "agent/backtest/engines/china_futures.py",
+      "sha256": "a30785bea4cc1b2dcde36f27ad337b9e37020c54823f7bf7b534c531dc9a6769"
+    },
+    "vibe.performance-attribution": {
+      "source_path": "agent/src/skills/performance-attribution/SKILL.md",
+      "sha256": "434df366d1ed46e9d16be2d2d3be891dd32112a18975a24f0dea81d1c88f0109"
+    },
+    "vibe.risk-analysis": {
+      "source_path": "agent/src/skills/risk-analysis/SKILL.md",
+      "sha256": "b9f4696fe645584e1bc5174f508963066cd5b062ceab21c2b89a1f6e71c4a599"
+    },
+    "vibe.alpha-zoo.registry": {
+      "source_path": "agent/src/tools/alpha_zoo_tool.py",
+      "sha256": "52abdd8bf2f278e78f2dab7fb613c2ccdd3a27159cd4930c923306f1efe0166c"
+    },
+    "vibe.alpha-zoo": {
+      "source_path": "agent/src/skills/alpha-zoo/SKILL.md",
+      "sha256": "38a2168fe94d8516a56224738d038ae23fbc209abdcbc143dfedf8aa092aaa2d"
+    },
+    "vibe.data-routing": {
+      "source_path": "agent/src/skills/data-routing/SKILL.md",
+      "sha256": "cf80d4e531466f45a63eff8fd8b134d2e7524b1b9eb62c4a7953803c2d8d73d5"
+    },
+    "vibe.quant-statistics": {
+      "source_path": "agent/src/skills/quant-statistics/SKILL.md",
+      "sha256": "45f3c6d5cd6f147e9668f39a2903c3023fe1332931627712410ec43922746bab"
+    },
+    "vibe.market-microstructure": {
+      "source_path": "agent/src/skills/market-microstructure/SKILL.md",
+      "sha256": "59fab51b6bea0b5d074e8f256888c3a2fd46a4f243e1e3cef2808aa40bc299c1"
+    },
+    "vibe.minute-analysis": {
+      "source_path": "agent/src/skills/minute-analysis/SKILL.md",
+      "sha256": "07738c13d374acd86430a76fe42c800e7714a77d7263cc280af4ea104aa9f048"
+    },
+    "vibe.multi-factor": {
+      "source_paths": [
+        "agent/src/skills/multi-factor/SKILL.md",
+        "agent/src/skills/multi-factor/example_signal_engine.py",
+        "agent/src/skills/multi-factor/zoo_signal_engine.py"
+      ],
+      "sha256": "59bef3d34af35178cd42459d814569e8c48bb1b7dfdecb9bcbde0daeb6d8e7ec"
+    },
+    "vibe.execution-model": {
+      "source_path": "agent/src/skills/execution-model/SKILL.md",
+      "sha256": "1d42ba51319d1b241472d8113e53ba2104ef0615e67f8c4fbe0bb9686dbdc900"
+    },
+    "vibe.commodity-analysis": {
+      "source_path": "agent/src/skills/commodity-analysis/SKILL.md",
+      "sha256": "1719e229159831bae3f02a4842b18e9cb9185508b58c7dc9840df0c559b9a517"
+    },
+    "local.diagnose": {
+      "source_paths": [
+        "diagnose/SKILL.md",
+        "diagnose/scripts/hitl-loop.template.sh"
+      ],
+      "root_env": "AGENTS_SKILLS_ROOT",
+      "root_hint": "~/.agents/skills",
+      "sha256": "515f2b6afade25c8283bb4413e949ff980fe5ef1e8e2c40c6f9b2a22a9776afb"
+    },
+    "codex.skill-installer.list-search": {
+      "source_paths": [
+        "skills/.system/skill-installer/SKILL.md",
+        "skills/.system/skill-installer/agents/openai.yaml",
+        "skills/.system/skill-installer/scripts/github_utils.py",
+        "skills/.system/skill-installer/scripts/install-skill-from-github.py",
+        "skills/.system/skill-installer/scripts/list-skills.py"
+      ],
+      "root_env": "CODEX_HOME",
+      "root_hint": "~/.codex",
+      "sha256": "c2eae6c8dd90b59b44ed42c21553154d70de1cb5de3305ef434ea00f7e5d6b1b"
+    },
+    "vibe.skills-loader.metadata": {
+      "source_path": "agent/src/agent/skills.py",
+      "sha256": "698f7946fb8aeb71a4a75f46c1d4e65c2ad9140da9696de940d936690f4a6c7a"
+    },
+    "vibe.load-skill": {
+      "source_path": "agent/src/tools/load_skill_tool.py",
+      "sha256": "c80e2ca961e196461f85586c4273363ceb12a432896536092ba87e8c09477443"
+    },
+    "codex.skill-creator": {
+      "source_paths": [
+        "skills/.system/skill-creator/SKILL.md",
+        "skills/.system/skill-creator/agents/openai.yaml",
+        "skills/.system/skill-creator/references/openai_yaml.md",
+        "skills/.system/skill-creator/scripts/generate_openai_yaml.py",
+        "skills/.system/skill-creator/scripts/init_skill.py",
+        "skills/.system/skill-creator/scripts/quick_validate.py"
+      ],
+      "root_env": "CODEX_HOME",
+      "root_hint": "~/.codex",
+      "sha256": "80e419afc5e33a21143a1addd50bd95a6bfe39f7cd0cedb63665c7b4a4bf3e2c"
+    },
+    "vibe.skill-writer": {
+      "source_path": "agent/src/tools/skill_writer_tool.py",
+      "sha256": "69379c0cf0e72613354bbccc8bc732a753f2c6a369e58843d4c3158060a51d5c"
+    },
+    "local.grill-me": {
+      "source_path": "grill-me/SKILL.md",
+      "root_env": "AGENTS_SKILLS_ROOT",
+      "root_hint": "~/.agents/skills",
+      "sha256": "74147eb6010a65957efef2b9e0f0b3ff935c1def7fc117697151b1d0f3610556"
+    },
+    "vibe.research-discipline": {
+      "source_path": "agent/src/skills/research-discipline/SKILL.md",
+      "sha256": "be1a1297dbb3eeecbed1e8b3fd6898c031c30a2d79ba7a422480a6320c8fd89d"
+    },
+    "local.research-obligation-cycle": {
+      "source_paths": [
+        "skills/research-obligation-cycle/SKILL.md",
+        "skills/research-obligation-cycle/agents/openai.yaml",
+        "skills/research-obligation-cycle/references/evidence-adjudication.md",
+        "skills/research-obligation-cycle/references/market-context-event-search.md",
+        "skills/research-obligation-cycle/references/methodology-impact.md",
+        "skills/research-obligation-cycle/references/obligation-discovery.md",
+        "skills/research-obligation-cycle/references/search-exhaustion.md",
+        "skills/research-obligation-cycle/references/trial-synthesis.md",
+        "skills/research-obligation-cycle/scripts/_proposal_validation.py",
+        "skills/research-obligation-cycle/scripts/_trial_synthesis_validation.py",
+        "skills/research-obligation-cycle/scripts/validate-adjudication-proposal.py",
+        "skills/research-obligation-cycle/scripts/validate-obligation-proposal.py",
+        "skills/research-obligation-cycle/scripts/validate-trial-synthesis.py"
+      ],
+      "sha256": "939553ace0da1907e9a43d0d3680db22b581228c61cdedeec4d207d325b4bfec"
+    }
+  }
+}

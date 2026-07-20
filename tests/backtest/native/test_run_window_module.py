@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext, FlowRegistry, sort_and_validate
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.flow import Phase
@@ -52,18 +53,11 @@ def test_resolve_run_window_sets_account_and_market_data_defaults():
     assert "warmup_window" not in account.market_data_request
 
 
-def test_auto_warmup_unwraps_factor_evaluate_adapter_shape():
+def test_auto_warmup_reads_resolved_factor_expression_shape():
     class _Factor:
         _expr = ColumnRef(DataColumn.CLOSE).rolling_mean("2D").shift("1D")
 
-    class _Adapter:
-        def __init__(self, factor):
-            self._factor = factor
-
-        def required_warmup_window(self):
-            return None
-
-    assert auto_warmup_window(_Adapter(_Factor())) == pd.Timedelta("3D")
+    assert auto_warmup_window(_Factor()) == pd.Timedelta("3D")
 
 
 def test_auto_warmup_uses_longest_parallel_dependency_chain():

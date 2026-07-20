@@ -1,0 +1,908 @@
+{
+  "schema_version": 1,
+  "catalog_id": "factor-research-capabilities",
+  "catalog_version": 1,
+  "product_profiles": {
+    "china_futures": {
+      "authoritative_executor": "factortester",
+      "external_factor_default": "experimental_unvalidated",
+      "requires_effective_dated_accounting": true
+    }
+  },
+  "capabilities": [
+    {
+      "capability_id": "research-hypothesis.preregister",
+      "industry_semantics": "Freeze the economic hypothesis, target, universe, timing, primary metric, trial family, selection sample, holdout sample, and rejection criteria before inspecting result-dependent choices.",
+      "when_to_use": ["at the start of every new factor hypothesis", "before adding a factor, horizon, slice, transform, or parameter to the tested family"],
+      "preconditions": ["the research question and intended China-futures universe are stated"],
+      "prohibitions": ["do not silently redefine the primary hypothesis after seeing results", "do not treat an Alpha Zoo ranking as validation"],
+      "evidence_sources": [
+        {"kind": "paper", "url": "https://academic.oup.com/rfs/article/29/1/5/1843824", "topic": "multiple testing in expected-return research"}
+      ],
+      "implementations": [
+        {
+          "implementation_id": "vibe.research-goal",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/research-goal/SKILL.md"
+        },
+        {
+          "implementation_id": "factortester.research-plan",
+          "provider": "factortester-harness",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "factor-expr.operator-registry.inspect",
+      "industry_semantics": "Verify that every factor operator exists and has causal, point-in-time semantics before factor evaluation.",
+      "when_to_use": ["before evaluating a FactorExpr", "after factor source or operator-registry changes"],
+      "preconditions": ["factor family or expression is known"],
+      "prohibitions": ["do not infer operator semantics from a display name alone"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.custom-factors.operators",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "factor-workspace.prepare",
+      "industry_semantics": "Materialize the versioned factor source workspace used by the authoritative runtime.",
+      "when_to_use": ["before source inspection or factor-source modification"],
+      "preconditions": ["authenticated FactorTester CLI is configured"],
+      "prohibitions": ["do not edit generated or unrelated server source as a substitute for the factor workspace"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.custom-factors.workspace",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "factor-workspace.source.inspect",
+      "industry_semantics": "Reconcile factor source, declared parameters, compiled expression tree, data fields, and operator keys.",
+      "when_to_use": ["before the first run", "after a source or parameter change"],
+      "preconditions": ["factor workspace is prepared"],
+      "prohibitions": ["do not equate source-code presence with the production expression tree"],
+      "implementations": [
+        {
+          "implementation_id": "factortester-harness.workspace-inspect",
+          "provider": "factortester-harness",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "factor-workspace.source.modify",
+      "industry_semantics": "Change writable factor source or parameters with a reviewable diff and rerun causal and statistical diagnostics.",
+      "when_to_use": ["after a research-backed factor-improvement decision"],
+      "preconditions": ["factor-improvement reason and evidence are recorded", "the operator has factor-workspace write authority"],
+      "prohibitions": ["do not change source merely to erase an unfavorable holdout result", "do not modify platform source under a factor-improvement decision"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.custom-factors.workspace-git",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "data-availability.inspect",
+      "industry_semantics": "Inspect actual historical coverage and delayed, paper, or live stream reachability for the exact user-confirmed products and sources before designing samples, without treating entitlement as verified latency or point-in-time provenance.",
+      "when_to_use": ["after the Planning Agent confirms product and source scope", "before synthesizing a TrialPlan"],
+      "preconditions": ["the exact product identifiers and requested sources are known"],
+      "prohibitions": ["do not expand products or fall back to another source implicitly", "do not return the full provider catalog or raw probe output to the Agent"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.products.availability",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["all"]
+        }
+      ]
+    },
+    {
+      "capability_id": "data-provenance.point-in-time",
+      "industry_semantics": "Bind every observation to source version, trading calendar, session, timezone, availability time, membership, contract identity, and checksum so future information cannot enter the signal.",
+      "when_to_use": ["before computing a factor panel", "when joining contract, macro, inventory, fundamental, or membership data"],
+      "preconditions": ["raw and processed dataset identities are available"],
+      "prohibitions": ["do not use today's dominant contract mapping for historical dates", "do not discard contract lifecycle fields to fit a narrow OHLCV view"],
+      "implementations": [
+        {
+          "implementation_id": "vibe-integration.dataset-manifest",
+          "provider": "vibe-integration",
+          "kind": "library",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "factor-timing.causal-align",
+      "industry_semantics": "Align data visibility, signal timestamp, forward-return horizon, and the next tradable execution bar without look-ahead.",
+      "when_to_use": ["for every factor panel and each tested holding horizon", "when changing bar frequency or session rules"],
+      "preconditions": ["field availability and exchange session semantics are known"],
+      "prohibitions": ["do not trade on the same close used to compute a close-based signal unless an executable timing proof exists"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.runspec.timing",
+          "provider": "factortester",
+          "kind": "server",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        },
+        {
+          "implementation_id": "vibe.factor-bridge.next-bar",
+          "provider": "vibe-integration",
+          "kind": "library",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "research-validation.slice-plan",
+      "industry_semantics": "Separate selection from holdout evidence and define rolling, calendar, and regime slices before result-dependent selection.",
+      "when_to_use": ["before submitting a research run"],
+      "preconditions": ["sample bounds and intended selection role are known"],
+      "prohibitions": ["do not use holdout slices for model or parameter selection"],
+      "implementations": [
+        {
+          "implementation_id": "factortester-harness.slice-plan",
+          "provider": "factortester-harness",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        },
+        {
+          "implementation_id": "local.quantitative-research",
+          "provider": "codex-local",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "quantitative-research/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-workspace.create",
+      "industry_semantics": "Create the durable owner of one editable research configuration and its provenance.",
+      "when_to_use": ["after preflight semantics and slice design pass"],
+      "preconditions": ["factor identities and configuration inputs are known"],
+      "prohibitions": ["do not use a UI page identifier as the research lifecycle owner"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.workspace.create",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "research-configuration.freeze",
+      "industry_semantics": "Freeze an immutable RunSpec containing universe, product mask, factor aliases, dates, costs, capacity, margin, fees, rollover, timing, sample role, slices, and tested-grid metadata.",
+      "when_to_use": ["immediately before execution", "after any configuration revision"],
+      "preconditions": ["all effective settings are explicit"],
+      "prohibitions": ["do not rely on silent defaults for allocation, fee, margin, timing, or rollover semantics"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.workspace.update",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "research-run.submit",
+      "industry_semantics": "Submit requested analyses against one immutable RunSpec and retain stable run and job identities.",
+      "when_to_use": ["after configuration freeze and capability resolution"],
+      "preconditions": ["all mandatory capabilities are bound or explicitly waived by audit"],
+      "prohibitions": ["do not bypass the authoritative FactorTester execution path for China-futures conclusions"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.run.submit",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "research-job.observe",
+      "industry_semantics": "Observe durable job state, progress, attempts, errors, results, and artifacts without conflating transport loss with research failure.",
+      "when_to_use": ["while an authoritative run is executing", "when resuming an interrupted Agent session"],
+      "preconditions": ["job identity exists"],
+      "prohibitions": ["do not infer completion from a disconnected UI or stream"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.job.watch",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "research-job.control",
+      "industry_semantics": "Cancel or retry an identified job while retaining attempt lineage and partial evidence.",
+      "when_to_use": ["after an explicit stop condition or retryable operational failure"],
+      "preconditions": ["job identity and current state are known"],
+      "prohibitions": ["do not discard completed unaffected jobs when one branch is paused"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.job.control",
+          "provider": "factortester",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "factor-validation.cross-sectional-ic",
+      "industry_semantics": "Measure date-wise cross-sectional rank association between a point-in-time factor and future returns, reporting coverage, mean IC, uncertainty, stability, and horizon decay.",
+      "when_to_use": ["after causal alignment and before expensive portfolio simulation"],
+      "preconditions": ["a multi-product point-in-time panel and forward-return definition exist"],
+      "prohibitions": ["do not interpret one aggregate IC as sufficient evidence", "do not pool unavailable or stale products as valid zeros"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.analysis.ic",
+          "provider": "factortester",
+          "kind": "server",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        },
+        {
+          "implementation_id": "vibe.factor-research",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "quarantined",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/factor-research/SKILL.md",
+          "limitation": "does not provide the full China-futures uncertainty, FDR, OOS, cost, and accounting contract"
+        }
+      ]
+    },
+    {
+      "capability_id": "factor-validation.quantile-monotonicity",
+      "industry_semantics": "Test whether ordered factor portfolios produce economically ordered outcomes with sufficient cross-sectional breadth, turnover disclosure, and stable direction.",
+      "when_to_use": ["alongside IC for cross-sectional factors"],
+      "preconditions": ["factor direction and grouping policy are frozen"],
+      "prohibitions": ["do not select direction or group count from holdout performance"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.analysis.factor-evaluation",
+          "provider": "factortester",
+          "kind": "server",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "multiple-testing.trial-ledger",
+      "industry_semantics": "Count every factor, transform, horizon, universe, slice, parameter, and adaptive choice in the family of attempted hypotheses.",
+      "when_to_use": ["before the first test and whenever the search family expands"],
+      "preconditions": ["the primary hypothesis has been preregistered"],
+      "prohibitions": ["do not count only the winning configurations"],
+      "implementations": [
+        {
+          "implementation_id": "factortester-harness.trial-plan-ledger",
+          "provider": "factortester-harness",
+          "kind": "guidance",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "product_scopes": ["all"],
+          "limitation": "the deterministic ledger covers the frozen Decision Contract, TrialPlan, and RunSpec family; the Planning Agent must add prior informal, rejected, and adaptive trials that cannot be inferred from those objects"
+        }
+      ]
+    },
+    {
+      "capability_id": "multiple-testing.false-discovery-control",
+      "industry_semantics": "Control the expected false-discovery burden across the complete tested family and report both raw and adjusted evidence.",
+      "when_to_use": ["when more than one factor, horizon, transform, slice, or parameter participates in selection"],
+      "preconditions": ["the complete trial family and dependence assumptions are recorded"],
+      "prohibitions": ["do not apply correction only to the surviving subset"],
+      "evidence_sources": [
+        {"kind": "paper", "url": "https://academic.oup.com/rfs/article/29/1/5/1843824", "topic": "multiple-testing framework for expected returns"}
+      ],
+      "implementations": [
+        {
+          "implementation_id": "local.quantitative-research",
+          "provider": "codex-local",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "quantitative-research/SKILL.md",
+          "limitation": "Bonferroni and Benjamini-Hochberg guidance requires the complete trial ledger and explicit dependence caveats; it does not manufacture p-values for backtest-only outcomes"
+        }
+      ]
+    },
+    {
+      "capability_id": "performance.bootstrap-sharpe",
+      "industry_semantics": "Estimate Sharpe uncertainty with a resampling scheme that preserves relevant serial dependence, regime structure, and the exact return construction.",
+      "when_to_use": ["after a viable net return series exists", "when asymptotic Sharpe uncertainty is questionable"],
+      "preconditions": ["return frequency, dependence, block rule, and resample count are declared"],
+      "prohibitions": ["do not independently shuffle autocorrelated returns", "do not use bootstrap output to conceal the number of attempted strategies"],
+      "implementations": [
+        {
+          "implementation_id": "vibe.quant-statistics.bootstrap",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "quarantined",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/quant-statistics/SKILL.md",
+          "limitation": "generic examples are not a reviewed FactorTester implementation"
+        }
+      ]
+    },
+    {
+      "capability_id": "performance.deflated-sharpe",
+      "industry_semantics": "Evaluate whether observed Sharpe exceeds the selection-bias and non-normality-adjusted benchmark implied by the number and dependence of trials.",
+      "when_to_use": ["after selecting among multiple strategies or configurations"],
+      "preconditions": ["trial ledger, sample length, return skewness, kurtosis, and candidate Sharpe distribution are available"],
+      "prohibitions": ["do not substitute an unadjusted Sharpe threshold"],
+      "evidence_sources": [
+        {"kind": "paper", "url": "https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf", "topic": "deflated Sharpe ratio"}
+      ],
+      "implementations": []
+    },
+    {
+      "capability_id": "performance.backtest-overfit-probability",
+      "industry_semantics": "Estimate selection-induced out-of-sample degradation using combinatorially symmetric cross-validation when a sufficiently complete strategy matrix exists.",
+      "when_to_use": ["for a material grid or strategy-selection exercise where CSCV assumptions can be met"],
+      "preconditions": ["all candidate return paths over common partitions are retained"],
+      "prohibitions": ["do not run CSCV on only the selected winner", "do not treat PBO as a replacement for a true holdout"],
+      "evidence_sources": [
+        {"kind": "paper", "url": "https://papers.ssrn.com/sol3/Papers.cfm?abstract_id=2326253", "topic": "CSCV and probability of backtest overfitting"}
+      ],
+      "implementations": []
+    },
+    {
+      "capability_id": "market-accounting.replay",
+      "industry_semantics": "Replay China-futures positions with effective-dated contract multiplier, fees, intraday-close rules, margin, settlement, price limits, sessions, capacity, expiry, delivery, and rollover semantics.",
+      "when_to_use": ["for every net performance conclusion", "after a factor survives cheap diagnostics"],
+      "preconditions": ["contract-level market and rule histories are bound to the RunSpec"],
+      "prohibitions": ["do not use one static fee or margin table across history without proof", "do not use Vibe generic defaults as authoritative China-futures evidence"],
+      "evidence_sources": [
+        {"kind": "exchange_rule", "url": "https://www.shfe.com.cn/regulation/ineregulation/businessmethods/riskcontrol/202606/t20260622_832195.html", "topic": "effective and lifecycle-dependent margin rules"},
+        {"kind": "exchange_notice", "url": "https://www.shfe.com.cn/eng/CircularNews/Circular/202603/t20260309_830638.html", "topic": "effective-dated fee changes and intraday close fees"}
+      ],
+      "implementations": [
+        {
+          "implementation_id": "factortester.analysis.backtest",
+          "provider": "factortester",
+          "kind": "server",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        },
+        {
+          "implementation_id": "vibe.china-futures-engine",
+          "provider": "vibe-trading",
+          "kind": "library",
+          "approval_status": "quarantined",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"],
+          "source_path": "agent/backtest/engines/china_futures.py",
+          "limitation": "simplified sessions and product defaults are unsuitable for authoritative replay"
+        }
+      ]
+    },
+    {
+      "capability_id": "performance.attribution",
+      "industry_semantics": "Explain realized returns by factor, product, sector, regime, timing, turnover, carry, rollover, and residual sources using an appropriate benchmark.",
+      "when_to_use": ["after an economically viable net backtest", "when hidden beta or concentrated contribution is suspected"],
+      "preconditions": ["positions, trades, returns, benchmark, and exposure histories are available"],
+      "prohibitions": ["do not use equity Brinson attribution unchanged for a futures strategy", "do not interpret attribution as prediction"],
+      "implementations": [
+        {
+          "implementation_id": "vibe.performance-attribution",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "quarantined",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/performance-attribution/SKILL.md",
+          "limitation": "predominantly equity examples; futures-specific attribution is not implemented"
+        }
+      ]
+    },
+    {
+      "capability_id": "risk.stress-and-tail",
+      "industry_semantics": "Measure drawdown, tail loss, liquidity, concentration, margin-call, limit-move, and historical scenario risk without assuming normal independent returns.",
+      "when_to_use": ["after authoritative position and return paths exist", "before a production-readiness decision"],
+      "preconditions": ["position, collateral, margin, and liquidity histories are available"],
+      "prohibitions": ["do not apply square-root-of-time scaling without validating dependence", "do not omit forced-liquidation and limit-move scenarios"],
+      "implementations": [
+        {
+          "implementation_id": "vibe.risk-analysis",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "quarantined",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/risk-analysis/SKILL.md",
+          "limitation": "generic VaR examples are not an authoritative China-futures margin stress engine"
+        }
+      ]
+    },
+    {
+      "capability_id": "factor-candidate.alpha-zoo.inspect",
+      "industry_semantics": "Inspect external formula libraries for prior art, required fields, timing operators, provenance, and duplicate hypotheses without treating catalog rank as evidence of validity.",
+      "when_to_use": ["when a hypothesis begins from an external formula library", "when checking whether a proposed formula has already been tested"],
+      "preconditions": ["factor identity and formula provenance can be retained"],
+      "prohibitions": ["do not batch-screen the full zoo by default", "do not infer product validity from formula compatibility", "do not bypass the authoritative validation backend"],
+      "implementations": [
+        {
+          "implementation_id": "vibe.alpha-zoo.registry",
+          "provider": "vibe-trading",
+          "kind": "library",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["all"],
+          "source_path": "agent/src/tools/alpha_zoo_tool.py"
+        },
+        {
+          "implementation_id": "vibe.alpha-zoo",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/alpha-zoo/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "data-source.route",
+      "industry_semantics": "Select a source that satisfies the selected product profile, field, frequency, availability-time, license, authentication, and reproducibility contract, with explicit fallback and provenance.",
+      "when_to_use": ["when required data is absent from the authoritative local contract", "when external data is needed for hypothesis formation"],
+      "preconditions": ["product group, field semantics, frequency, and point-in-time requirements are explicit"],
+      "prohibitions": ["do not substitute a convenient OHLCV source for missing contract semantics", "do not hide source fallback or authentication failure"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.market-data-routing",
+          "provider": "factortester",
+          "kind": "server",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["all"]
+        },
+        {
+          "implementation_id": "vibe.data-routing",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/data-routing/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "time-series.relationship-diagnostics",
+      "industry_semantics": "Diagnose stationarity, cointegration, residual dependence, lag structure, and model assumptions before interpreting level, spread, or predictive time-series relations.",
+      "when_to_use": ["when a factor thesis uses price levels or spreads", "when regression residuals or predictive lag relations drive the hypothesis"],
+      "preconditions": ["series alignment and economic direction are specified"],
+      "prohibitions": ["do not equate Granger predictability with structural causality", "do not use fixed p-value thresholds without recording the tested family"],
+      "implementations": [
+        {
+          "implementation_id": "vibe.quant-statistics",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/quant-statistics/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "market-microstructure.intraday-diagnose",
+      "industry_semantics": "Evaluate session boundaries, timestamp ordering, spread, depth, volume, liquidity, price limits, and execution feasibility for intraday signals.",
+      "when_to_use": ["when signal frequency is intraday", "when the thesis depends on order flow, volume, spread, or market impact"],
+      "preconditions": ["exchange session and timestamp conventions are explicit"],
+      "prohibitions": ["do not reuse equity or crypto session defaults for another product profile", "do not infer fillability from bar OHLCV alone"],
+      "evidence_sources": [
+        {"kind": "exchange-guidance", "url": "https://www.cmegroup.com/education/courses/trading-and-analysis/liquidity-and-immediacy", "topic": "cross-market spread, liquidity, and trading-hours review dimensions"},
+        {"kind": "exchange-rule", "url": "https://www.cffex.com.cn/cn/ssxz/20230414/43079.html", "topic": "China-futures price limits, margin changes, and position controls"}
+      ],
+      "implementations": [
+        {
+          "implementation_id": "factortester-harness.china-futures-microstructure",
+          "provider": "factortester-harness",
+          "kind": "guidance",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "product_scopes": ["china_futures"],
+          "limitation": "reuse cross-market spread, depth, volume, liquidity, timing, and impact dimensions, but resolve sessions, contract roll, tick size, limits, margin, fees, settlement, and fillability from the China-futures product profile; retain unknowns when only bars are available"
+        },
+        {
+          "implementation_id": "vibe.market-microstructure",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["equities"],
+          "source_path": "agent/src/skills/market-microstructure/SKILL.md"
+        },
+        {
+          "implementation_id": "vibe.minute-analysis",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "quarantined",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["equities"],
+          "source_path": "agent/src/skills/minute-analysis/SKILL.md",
+          "limitation": "generic data and fee examples are not product-profile authority"
+        }
+      ]
+    },
+    {
+      "capability_id": "factor-combination.multi-factor",
+      "industry_semantics": "Combine multiple factors under frozen normalization, direction, weighting, missing-value, exposure, and collinearity rules, counting every adaptive combination as a trial.",
+      "when_to_use": ["when two or more factors are normalized, selected, or weighted together"],
+      "preconditions": ["component factors have distinct identities and point-in-time panels"],
+      "prohibitions": ["do not optimize weights on holdout data", "do not hide correlated variants as independent discoveries"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.multi-factor-runspec",
+          "provider": "factortester",
+          "kind": "server",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["all"]
+        },
+        {
+          "implementation_id": "vibe.multi-factor",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/multi-factor/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "execution-cost.capacity-model",
+      "industry_semantics": "Model explicit fees and implicit spread, slippage, delay, participation, impact, limit-move, and opportunity costs at the product profile's execution grain.",
+      "when_to_use": ["when turnover or participation is material", "when intraday execution or market impact can change the conclusion"],
+      "preconditions": ["orders or position changes, liquidity, and effective fee rules are available"],
+      "prohibitions": ["do not use generic fixed basis-point defaults as authoritative evidence", "do not report gross performance as net"],
+      "implementations": [
+        {
+          "implementation_id": "factortester.execution-cost-model",
+          "provider": "factortester",
+          "kind": "server",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        },
+        {
+          "implementation_id": "vibe.execution-model",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "quarantined",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/execution-model/SKILL.md",
+          "limitation": "market examples and defaults require product-specific review"
+        }
+      ]
+    },
+    {
+      "capability_id": "hypothesis.commodity-structure",
+      "industry_semantics": "Generate testable commodity hypotheses from supply, inventory, term structure, carry, seasonality, and macro mechanisms while preserving publication-time and contract semantics.",
+      "when_to_use": ["when the factor thesis explicitly depends on commodity fundamentals, curve structure, inventory, or seasonality"],
+      "preconditions": ["data publication timing and futures contract mapping can be obtained"],
+      "prohibitions": ["do not turn generic thresholds or narrative scores into validated signals without preregistration and backtesting"],
+      "implementations": [
+        {
+          "implementation_id": "vibe.commodity-analysis",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["china_futures"],
+          "source_path": "agent/src/skills/commodity-analysis/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "capability-gap.classify",
+      "industry_semantics": "Distinguish missing platform capability, unavailable approved implementation, invalid data contract, research rejection, and operational failure before choosing a branch.",
+      "when_to_use": ["when a required capability cannot bind or a command fails"],
+      "preconditions": ["failed requirement, command, evidence, and current graph node are recorded"],
+      "prohibitions": ["do not relabel a platform gap as a failed factor", "do not auto-install or execute a discovered skill"],
+      "implementations": [
+        {
+          "implementation_id": "local.diagnose",
+          "provider": "codex-local",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "diagnose/SKILL.md"
+        },
+        {
+          "implementation_id": "factortester-harness.gap",
+          "provider": "factortester-harness",
+          "kind": "cli",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["china_futures"]
+        }
+      ]
+    },
+    {
+      "capability_id": "capability-skill.discover",
+      "industry_semantics": "Search installed and external skill inventories for an implementation matching a missing semantic capability, then quarantine the candidate until review.",
+      "when_to_use": ["after capability-gap classification confirms no approved binding exists"],
+      "preconditions": ["the missing capability contract and product constraints are explicit"],
+      "prohibitions": ["do not download, install, load as executable instructions, or run a discovered skill without approval"],
+      "implementations": [
+        {
+          "implementation_id": "codex.skill-installer.list-search",
+          "provider": "codex-local",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "external_service",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/.system/skill-installer/SKILL.md"
+        },
+        {
+          "implementation_id": "vibe.skills-loader.metadata",
+          "provider": "vibe-trading",
+          "kind": "library",
+          "approval_status": "approved",
+          "execution_mode": "real_backend",
+          "product_scopes": ["all"],
+          "source_path": "agent/src/agent/skills.py"
+        },
+        {
+          "implementation_id": "vibe.load-skill",
+          "provider": "vibe-trading",
+          "kind": "library",
+          "approval_status": "quarantined",
+          "execution_mode": "real_backend",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/tools/load_skill_tool.py"
+        }
+      ]
+    },
+    {
+      "capability_id": "capability-skill.create",
+      "industry_semantics": "Package a repeatedly needed, reviewed workflow as a validated skill whose triggers, resources, scope, and safety boundaries are explicit.",
+      "when_to_use": ["after a capability gap is accepted for implementation and the function is reusable as guidance or a bounded tool workflow"],
+      "preconditions": ["grill audit approves the capability and implementation scope", "tests or validation fixtures exist"],
+      "prohibitions": ["do not create a skill to hide a missing authoritative backend", "do not activate the new skill without approval"],
+      "implementations": [
+        {
+          "implementation_id": "codex.skill-creator",
+          "provider": "codex-local",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/.system/skill-creator/SKILL.md"
+        },
+        {
+          "implementation_id": "vibe.skill-writer",
+          "provider": "vibe-trading",
+          "kind": "library",
+          "approval_status": "quarantined",
+          "execution_mode": "real_backend",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/tools/skill_writer_tool.py"
+        }
+      ]
+    },
+    {
+      "capability_id": "graph-change.grill-audit",
+      "industry_semantics": "Challenge a proposed graph edge, skill binding, or platform change against industry semantics, counterexamples, evidence sufficiency, scope, and token cost before activation.",
+      "when_to_use": ["before activating a new edge", "before approving skill installation or execution", "before authorizing a platform code change"],
+      "preconditions": ["proposal, evidence, counterexamples, affected jobs, and rollback plan are available"],
+      "prohibitions": ["do not let the proposing Agent be the only reviewer for a material graph change"],
+      "implementations": [
+        {
+          "implementation_id": "local.grill-me",
+          "provider": "codex-local",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "grill-me/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-result.audit",
+      "industry_semantics": "Audit provenance, configuration, causal timing, trial counts, raw and adjusted statistics, gross-to-net performance, accounting, artifacts, failure evidence, and unresolved gaps before a decision.",
+      "when_to_use": ["after diagnostics or backtests finish", "before any factor-validity or graph-change proposal"],
+      "preconditions": ["applicable diagnostic command or run/job identity, artifact, configuration, data, and graph references are retained"],
+      "prohibitions": ["do not allow an executor to self-declare factor validity", "do not suppress failed or null experiments"],
+      "implementations": [
+        {
+          "implementation_id": "factortester-harness.audit-checklist",
+          "provider": "factortester-harness",
+          "kind": "guidance",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "product_scopes": ["china_futures"]
+        },
+        {
+          "implementation_id": "vibe.research-discipline",
+          "provider": "vibe-trading",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "agent/src/skills/research-discipline/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-obligation.discover",
+      "industry_semantics": "Derive material, falsifiable, factor-specific Verification Obligations from the current Decision Contract, Claim state, evidence boundary, and first-principles alternatives without strengthening a Claim.",
+      "when_to_use": ["when a Contract or Claim is first initialized", "when evidence or semantic review exposes a material untracked question"],
+      "preconditions": ["current Decision Contract and compact Claim/obligation checkpoint are available"],
+      "prohibitions": ["do not apply a universal checklist", "do not convert a new question into empirical Claim support"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-trial.synthesize",
+      "industry_semantics": "Select an actionable Verification Obligation and freeze a TrialPlan whose outcomes, samples, alternatives, multiplicity, stopping rules, identities, and resource boundary can resolve it.",
+      "when_to_use": ["when an open material obligation has a feasible authoritative test"],
+      "preconditions": ["the obligation and current Contract scope are known", "required backend capability is available"],
+      "prohibitions": ["do not create a TrialPlan for every obligation", "do not select outcome rules after seeing results"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-evidence.adjudicate",
+      "industry_semantics": "Interpret factual EvidenceEnvelope v2 through a bounded Decision Warrant and propose atomic paired Claim-evidence and obligation deltas plus one next action; only an accepted authority-bearing decision may authorize the server-derived route.",
+      "when_to_use": ["when current factual evidence may change Claim or obligation state"],
+      "preconditions": ["current v2 evidence, checkpoint, Contract, TrialPlan when applicable, and methodology identities are available"],
+      "prohibitions": ["do not treat an EvidenceEnvelope as a decision", "do not read or reuse legacy EvidenceEnvelope v1"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-exhaustion.assess",
+      "industry_semantics": "Assess whether the bounded TrialPlan and obligation frontier is exhausted, blocked, resource-stopped, unsupported, or decision-ready, and require an independent closure challenge with re-entry predicates.",
+      "when_to_use": ["when no further meaningful obligation or TrialPlan is currently proposed"],
+      "preconditions": ["current projection hashes, attempted trials, remaining unknowns, discovery lenses, and resource boundary are available"],
+      "prohibitions": ["do not equate having no idea with exhaustion", "do not close with unresolved decision-blocking obligations"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
+    },
+    {
+      "capability_id": "research-methodology.impact",
+      "industry_semantics": "Describe a provider-neutral methodology change, identify affected Decision Contracts deterministically, estimate token and backend cost, and propose selective reopening with validation and rollback evidence.",
+      "when_to_use": ["when repeated omissions, new evidence, statistical guidance, Graph semantics, or backend corrections may change the research method"],
+      "preconditions": ["semantic diff, evidence, counterexamples, validation, compatibility, and rollback target are available"],
+      "prohibitions": ["do not persist concrete Skill identity on the server", "do not stop unaffected branches or Jobs"],
+      "implementations": [
+        {
+          "implementation_id": "local.research-obligation-cycle",
+          "provider": "factortester-research-package",
+          "kind": "skill",
+          "approval_status": "approved",
+          "execution_mode": "guidance_only",
+          "requires_execution_approval": true,
+          "product_scopes": ["all"],
+          "source_path": "skills/research-obligation-cycle/SKILL.md"
+        }
+      ]
+    }
+  ]
+}

@@ -88,6 +88,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Local agent work directories
+.claude/
+
 # Translations
 *.mo
 *.pot

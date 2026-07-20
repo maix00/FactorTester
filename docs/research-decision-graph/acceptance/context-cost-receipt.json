@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "receipt_id": "context-cost-697f8011",
+  "implementation_commit": "697f801161782bbf465ee35d18294ffe93c26745",
+  "measured_at": "2026-07-20",
+  "environment": {
+    "platform": "macOS-26.5-arm64-arm-64bit-Mach-O",
+    "python": "3.14.0",
+    "sqlite": "3.51.0"
+  },
+  "command": "conda run -n GTHT pytest -q tests/server/test_research_graph_context_cost.py",
+  "query_plan": {
+    "lookup_count": 3,
+    "table_scans": 0,
+    "owners": [
+      "research_graph_instances",
+      "research_graph_branches",
+      "research_graph_trace"
+    ]
+  },
+  "measurements": [
+    {
+      "case": "empty_history",
+      "history_rows": 0,
+      "select_count": 1,
+      "write_count": 0,
+      "transaction_count": 0,
+      "context_bytes": 1902,
+      "elapsed_ms": 0.207,
+      "database_bytes_delta": 0,
+      "wal_bytes_delta": 0
+    },
+    {
+      "case": "large_history",
+      "history_rows": 1000,
+      "select_count": 1,
+      "write_count": 0,
+      "transaction_count": 0,
+      "context_bytes": 1902,
+      "elapsed_ms": 0.189,
+      "database_bytes_delta": 0,
+      "wal_bytes_delta": 0
+    }
+  ],
+  "comparisons": {
+    "sql_equal": true,
+    "context_equal": true
+  },
+  "acceptance": {
+    "test_result": "2 passed",
+    "history_independent": true
+  },
+  "receipt_hash": "fcfcbbdce7a99365a58bb75b11af83a9e722df52c77c343d77b251fe3947b505"
+}

@@ -84,10 +84,12 @@ def get_cat_tree() -> CategoryTree:
     from tools.products.categories.Category import CategoryTree, combine_trees
     from tools.products.Product import Product
     from sources.LocalCNFutures.CNFutures import CNFuturesSectorNightTimeCategory
-    return combine_trees(
+    from sources.Tiger.products import get_jp_futures_tree
+    cn_tree = combine_trees(
         CNFuturesSectorNightTimeCategory.get_tree_with_parents(ancester=Product),
         CNFuturesSectorNightTimeCategory.get_tree(ancester=Product),
     )
+    return combine_trees(cn_tree, get_jp_futures_tree())
 
 def get_all_products():
     """
@@ -97,4 +99,6 @@ def get_all_products():
         List[CNFutures]，每个元素对应一个主力合约品种
     """
     from sources.LocalCNFutures.CNFutures import get_all_futures
-    return get_all_futures()
+    from sources.Tiger import source as _tiger_source  # noqa: F401
+    from sources.Tiger.products import get_all_jp_futures
+    return [*get_all_futures(), *get_all_jp_futures()]

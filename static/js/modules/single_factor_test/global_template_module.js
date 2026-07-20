@@ -15,7 +15,6 @@
  */
 (function() {
     const FF_ALIAS = window.factorFamilyAlias || '';
-    const TEMPLATE_API_BASE = '/api/single_factor_setting_templates/';
     var _templateListRequest = null;
     var _templateDetailCache = {};
 
@@ -540,14 +539,7 @@
         setTransientStatus(statusEl, '保存中...', '#0078d4', 60000);
         try {
             const data = await restoreScrollAfter(function() {
-                return requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS), {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        name: name,
-                        ff_alias: FF_ALIAS,
-                        snapshot: snapshot
-                    })
-                });
+                return window.SingleFactorResearch.saveTemplate(name, snapshot);
             });
             if (data.success) {
                 rememberLoadedTemplateName(name);
@@ -577,14 +569,15 @@
         const listEl = document.getElementById('global-tpl-list');
         if (!listEl) return;
         try {
-            const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS));
-            if (!data.success || !data.templates || data.templates.length === 0) {
+            const templates = await window.SingleFactorResearch.listTemplates();
+            if (!templates || templates.length === 0) {
                 listEl.innerHTML = '<div class="global-template-empty">暂无已保存的模板</div>';
                 return;
             }
             let html = '';
-            data.templates.forEach(tpl => {
-                const tplId = tpl.id;
+            templates.forEach(tpl => {
+                const tplId = tpl.configuration_id;
+                _templateDetailCache[tplId] = Promise.resolve(tpl);
 
                 html += `
                 <div class="tpl-row" style="border-bottom:1px solid #eef2f7;">
@@ -647,12 +640,11 @@
 
     function fetchTemplateDetail(tplId) {
         if (_templateDetailCache[tplId]) return _templateDetailCache[tplId];
-        _templateDetailCache[tplId] = requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId)
-            .then(function(data) {
-                if (!data.template) {
-                    throw new Error(data.error || '模板不存在');
-                }
-                return data.template;
+        _templateDetailCache[tplId] = window.SingleFactorResearch.listTemplates()
+            .then(function(items) {
+                var template = (items || []).find(function(item) { return item.configuration_id === tplId; });
+                if (!template) throw new Error('模板不存在');
+                return template;
             })
             .catch(function(error) {
                 delete _templateDetailCache[tplId];
@@ -694,7 +686,7 @@
         try {
             var template = await fetchTemplateDetail(tplId);
             if (title) title.textContent = template.name || '模板摘要';
-            var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
+            var summaryHtml = SnapshotRegistry.summarizeAll((template.payload && template.payload.ui) || {});
             if (body) body.innerHTML = summaryHtml || '<div class="global-template-empty">无设置信息</div>';
             bindTemplateSummaryTabs(body);
         } catch (error) {
@@ -728,10 +720,8 @@
         setTransientStatus(statusEl, '覆盖中...', '#7a4b00', 60000);
         try {
             const snapshot = await collectSnapshot();
-            const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, {
-                method: 'PUT',
-                body: JSON.stringify({ snapshot: snapshot })
-            });
+            await window.SingleFactorResearch.updateUiSnapshot(snapshot);
+            const data = await window.SingleFactorResearch.overwriteTemplate(tplId);
             if (data.success) {
                 delete _templateDetailCache[tplId];
                 setTransientStatus(statusEl, '已覆盖', '#28a745');
@@ -750,7 +740,8 @@
         setTransientStatus(statusEl, '加载中...', '#0078d4', 60000);
         try {
             const template = await fetchTemplateDetail(tplId);
-            await applySnapshot(template.snapshot, tplId);
+            const configuration = await window.SingleFactorResearch.loadTemplate(tplId);
+            await applySnapshot((configuration.payload && configuration.payload.ui) || {}, tplId);
             rememberLoadedTemplateName(template.name);
             setTransientStatus(statusEl, '已加载', '#28a745');
         } catch (e) {
@@ -763,7 +754,7 @@
         if (!confirm('确定要删除此模板吗？')) return;
         const statusEl = templateStatusEl();
         try {
-            const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, { method: 'DELETE' });
+            const data = await window.SingleFactorResearch.deleteTemplate(tplId);
             if (data.success) {
                 delete _templateDetailCache[tplId];
                 setTransientStatus(statusEl, '已删除', '#28a745');

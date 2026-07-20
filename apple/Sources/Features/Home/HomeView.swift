@@ -10,6 +10,7 @@ struct HomeView: View {
     @State private var path: [Module] = []
     @State private var showLogin = false
     @State private var showSettings = false
+    @State private var showClientSettings = false
     @State private var pendingModule: Module?
 
     private let columns = [GridItem(.adaptive(minimum: Theme.cardMinWidth), spacing: Theme.gridSpacing)]
@@ -17,6 +18,10 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
+                ClientAdapterPanel()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+
                 LazyVGrid(columns: columns, spacing: Theme.gridSpacing) {
                     ForEach(registry.visibleModules(forRole: session.role)) { module in
                         ModuleCard(module: module) { tap(module) }
@@ -48,6 +53,9 @@ struct HomeView: View {
                 ServerSettingsView()
                     .environmentObject(config)
             }
+            .sheet(isPresented: $showClientSettings) {
+                ClientReleaseSettingsView()
+            }
         }
         .task {
             await session.refresh()
@@ -67,6 +75,7 @@ struct HomeView: View {
                 }
                 Divider()
                 Button("服务器设置…") { showSettings = true }
+                Button("客户端设置…") { showClientSettings = true }
             } label: {
                 Label(session.user?.username ?? "未登录", systemImage: "person.crop.circle")
             }

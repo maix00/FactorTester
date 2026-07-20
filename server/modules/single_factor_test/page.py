@@ -190,8 +190,6 @@ def single_factor_page():
     factor_type = request.args.get('type', '')
     include_subordinates = request.args.get('include_subordinates') == '1'
     owner_username = request.args.get('owner_username', '')
-    page_uuid = runtime_state.create_page_uuid()
-    runtime_state.register_page(page_uuid, owner=current_user(), page_kind='single_factor_test', factor_family_alias=selected_name)
     show_runtime_ids = is_developer_account(get_account(current_user()))
     return render_template(
         'single_factor_test.html',
@@ -200,7 +198,7 @@ def single_factor_page():
         initial_factor=selected_name,
         initial_factor_type=factor_type or 'public',
         initial_owner_username=owner_username,
-        page_uuid=page_uuid,
+        page_uuid='',
         session_id=get_session_id(),
         show_runtime_ids=show_runtime_ids,
     )
@@ -208,14 +206,18 @@ def single_factor_page():
 
 @sft_bp.route('/api/single_factor_test/page', methods=['POST'])
 def single_factor_page_bootstrap_api():
-    """JSON-only page bootstrap：与 single_factor_page() 走同一套 page_uuid
-    创建/注册逻辑，但不渲染 HTML——给非浏览器客户端（如 factortester CLI）用。
-    """
+    """Attach or reclaim an ephemeral browser view runtime."""
     payload = request.get_json(silent=True) or {}
     selected_name = payload.get('factor', '')
-    page_uuid = runtime_state.create_page_uuid()
-    runtime_state.register_page(page_uuid, owner=current_user(), page_kind='single_factor_test', factor_family_alias=selected_name)
-    return jsonify({'success': True, 'page_uuid': page_uuid})
+    view_uuid = str(payload.get('view_uuid') or '').strip() or runtime_state.create_page_uuid()
+    existing_owner = runtime_state.get_page_owner(view_uuid)
+    if existing_owner not in (None, current_user()):
+        return jsonify({'success': False, 'error': 'view_uuid belongs to another user'}), 403
+    runtime_state.register_page(
+        view_uuid, owner=current_user(), page_kind='single_factor_test',
+        factor_family_alias=selected_name,
+    )
+    return jsonify({'success': True, 'view_uuid': view_uuid})
 
 
 @sft_bp.route('/single_factor_test/api/list', methods=['GET'])
