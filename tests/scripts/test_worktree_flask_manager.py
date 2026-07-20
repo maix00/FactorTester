@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,27 @@ def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkey
     assert created[1][1]["env"]["FLASK_SECRET_KEY"]
     assert created[1][1]["env"]["FLASK_SECRET_KEY"] == created[2][1]["env"]["FLASK_SECRET_KEY"]
     assert (tmp_path / ".workspace" / "flask-manager" / "flask-secret.key").stat().st_mode & 0o777 == 0o600
+
+
+def test_service_env_adds_repo_harness_without_losing_pythonpath(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    existing = os.pathsep.join(["/existing/one", "/existing/two"])
+    monkeypatch.setenv("PYTHONPATH", existing)
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: "abc123\n",
+    )
+    state = manager.ManagerState(tmp_path, "python")
+
+    env, _, _ = state._service_env(tmp_path, 8000)
+
+    harness = str((tmp_path / "tools/cli/agent-harness").resolve())
+    entries = env["PYTHONPATH"].split(os.pathsep)
+    assert entries == [harness, "/existing/one", "/existing/two"]
+    assert entries.count(harness) == 1
 
 
 def test_paused_step_job_blocks_drained_bundle_restart(tmp_path, monkeypatch) -> None:

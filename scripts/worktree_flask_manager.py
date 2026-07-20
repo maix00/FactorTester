@@ -186,10 +186,21 @@ class ManagerState:
         deployment_id = f"{safe_name(path.name)}-{port}"
         socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
         env = os.environ.copy()
+        harness_root = str(
+            (path / "tools" / "cli" / "agent-harness").resolve()
+        )
+        python_path = [
+            item
+            for item in env.get("PYTHONPATH", "").split(os.pathsep)
+            if item
+        ]
+        if harness_root not in python_path:
+            python_path.insert(0, harness_root)
         env.update({
             "FLASK_DEBUG": "1",
             "FACTORTESTER_WERKZEUG_RELOADER": "0",
             "PYTHONUNBUFFERED": "1",
+            "PYTHONPATH": os.pathsep.join(python_path),
             "GTHT_DEPLOYMENT_ID": deployment_id,
             "GTHT_JOB_DAEMON_SOCKET": str(socket_path),
             "GTHT_SOURCE_REVISION": subprocess.check_output(
