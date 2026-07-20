@@ -6,6 +6,7 @@ import zipfile
 
 from script.release.assets import build_app_archive
 from script.release.manifest import create_manifest
+from tools.cli.release.app_archive import install_macos_app
 from tools.cli.release.contracts import validate_release_manifest
 
 
@@ -61,3 +62,6 @@ def test_app_archive_is_deterministic_and_preserves_executable(
             "GTHTClient.app/Contents/MacOS/GTHTClient"
         ).external_attr >> 16
     assert mode & 0o111
+    installed = install_macos_app(first, tmp_path / "installed")
+    installed_binary = tmp_path / "installed" / installed["name"]
+    assert (installed_binary / "Contents/MacOS/GTHTClient").stat().st_mode & 0o111

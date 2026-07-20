@@ -57,7 +57,8 @@ def build_app_archive(app: Path, output: Path) -> Path:
             if source.is_symlink():
                 raise ValueError(f"macOS application contains symlink: {source}")
             relative = Path(app.name) / source.relative_to(app)
-            info = zipfile.ZipInfo(str(relative), (2026, 1, 1, 0, 0, 0))
+            name = str(relative) + ("/" if source.is_dir() else "")
+            info = zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             mode = 0o40755 if source.is_dir() else 0o100755
             if source.is_file() and not source.stat().st_mode & 0o111:
