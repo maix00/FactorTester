@@ -55,6 +55,15 @@ def test_release_builder_requires_public_source_revision() -> None:
     assert "source_revision" in build_release.__annotations__
 
 
+def test_local_build_script_uses_installed_app_identity() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "script/build_and_run.sh"
+    ).read_text(encoding="utf-8")
+    assert 'APP_NAME="FTClient"' in source
+    assert 'APP_NAME="FactorTester-Client"' not in source
+
+
 def test_manifest_accepts_current_and_legacy_app_archive_names() -> None:
     assert _kind("FTClient.zip") == "macos-app"
     assert _kind("FactorTester-Client.zip") == "macos-app"
