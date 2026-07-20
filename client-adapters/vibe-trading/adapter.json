@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "adapter_id": "vibe-trading",
+  "version": "0.1.11",
+  "display_name": "Vibe-Trading",
+  "ui": {
+    "kind": "web",
+    "url": "http://127.0.0.1:7899"
+  },
+  "actions": {
+    "health": {
+      "argv": ["bin/health"],
+      "mode": "foreground",
+      "timeout_seconds": 5
+    },
+    "start": {
+      "argv": ["bin/start"],
+      "mode": "background",
+      "timeout_seconds": 15
+    },
+    "stop": {
+      "argv": ["bin/stop"],
+      "mode": "foreground",
+      "timeout_seconds": 5
+    },
+    "open": {
+      "argv": ["bin/open"],
+      "mode": "foreground",
+      "timeout_seconds": 5
+    }
+  }
+}

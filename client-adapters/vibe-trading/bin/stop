@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+"""The client manager terminates the recorded Vibe-Trading process group."""
+
+raise SystemExit(0)
