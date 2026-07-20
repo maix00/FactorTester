@@ -118,6 +118,24 @@ are stable enough for review, while a release receipt pins the final commit.
   bounded liquidity/crowding considerations rather than a universal
   factor-research requirement:
   [NBER](https://www.nber.org/papers/w14465).
+- **S-EVENT-STUDY** — Miller, “An Introductory Guide to Event Study Models,”
+  including pre-event pseudo-effects as placebo evidence rather than automatic
+  causal attribution:
+  [AEA](https://www.aeaweb.org/articles?id=10.1257/jep.37.2.203).
+- **S-PREREG** — Center for Open Science preregistration guidance: hypotheses
+  formed after observing outcomes remain exploratory and require new evidence
+  for confirmation:
+  [COS](https://www.cos.io/initiatives/prereg).
+- **S-REALITY-CHECK** — White, “A Reality Check for Data Snooping,” on
+  selection and inference after repeated use of one time series:
+  [Econometrica](https://onlinelibrary.wiley.com/doi/10.1111/1468-0262.00152).
+- **S-REUSABLE-HOLDOUT** — Dwork et al., “The reusable holdout,” on loss of
+  untouched-test semantics under adaptive repeated access:
+  [arXiv](https://arxiv.org/abs/1506.02629).
+- **S-HYPOTHETICAL-PERFORMANCE** — CFTC guidance that historical simulations
+  and real-time computer/paper trading remain hypothetical and cannot reproduce
+  every fill, liquidity, margin, and risk condition:
+  [CFTC](https://www.cftc.gov/LearnAndProtect/AdvisoriesAndArticles/fraudadv_tradingsystem.html).
 
 These papers support statistical principles, not exact FactorTester thresholds
 or graph edges. Numeric gates require product-specific validation and may not
@@ -174,7 +192,7 @@ be inferred from a citation alone.
 | 140 | D-MAP, D-PLAN, C-GRAPH | A backend anomaly already has canonical Job, conversation, commit, and test refs. One compact case tracks dedup/claim/status; no copied bodies, per-kind queue, event table, unchanged-state write, or UI approval is required. |
 | 141 | D-MAP, D-PLAN, C-GRAPH, I-LANGGRAPH, I-OPENAI-HITL, I-TEMPORAL, I-INTOTO, I-NIST-RMF | Owner-pinned transfer prevents double spending; plan-bearing trace retention prevents orphaned Run hashes. Runtime uses checkpoint/hash/AuthN-Z, high-risk effects use exact-hash single-use conversation approval, and signed attestation is reserved for real cross-boundary supply chains. |
 | 142 | D-MAP, D-PLAN, C-GRAPH, D-IDENTITY, I-LANGGRAPH, I-OPENAI-HITL, I-TEMPORAL | Current activation spans six gate/version reads plus authorization consumption, active-copy insertion, and pointer update. Target activation reads one immutable version and one satisfied Maintenance Case then updates one pointer; final ownership is six Graph tables plus two Agent Flow tables. |
-| 143 | D-MAP, D-PLAN, C-GRAPH, C-HARNESS, S-COGDEBT, S-FACTORMAD, S-SHAP-LIMITS, S-MHT, S-ML, S-ALPHA-CROWDING | A favorable exploratory backtest may narrow a Claim while opening confirmatory or transfer obligations; a failed preregistered test can discharge the test obligation while contradicting the Claim. Both changes require one paired adjudication. Closure records bounded search coverage and a reviewer challenge, never universal truth. New method/evidence reopens only matched Contracts, without a second graph, full-history context, or new per-concept tables. |
+| 143 | D-MAP, D-PLAN, C-GRAPH, C-HARNESS, S-COGDEBT, S-FACTORMAD, S-SHAP-LIMITS, S-MHT, S-ML, S-ALPHA-CROWDING, S-EVENT-STUDY, S-PREREG, S-REALITY-CHECK, S-REUSABLE-HOLDOUT, S-HYPOTHETICAL-PERFORMANCE | A favorable exploratory backtest may narrow a Claim while opening confirmatory or transfer obligations; a failed preregistered test can discharge the test obligation while contradicting the Claim. Both changes require one paired adjudication. Closure records bounded search coverage and a reviewer challenge, never universal truth. New method/evidence reopens only matched Contracts, without a second graph, full-history context, or new per-concept tables. Market-event context stays in the same obligation cycle: co-occurrence cannot self-upgrade to causality, adaptive reuse consumes a pristine holdout, and historical/delayed shadow/live execution remain distinct evidence grades. |
 
 ## Release-time evidence rule
 

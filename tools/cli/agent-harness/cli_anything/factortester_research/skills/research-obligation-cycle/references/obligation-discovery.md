@@ -74,6 +74,16 @@ mechanism, an important alternative explanation, or a declared transfer
 boundary. Record uncovered regions as bounded limitations or later
 obligations.
 
+Create `performance_transportability` as a coverage obligation when the
+Decision Contract depends on transfer across time, market state, or products.
+Store the coverage intent and selection policy, not every
+interval-by-instrument cell; let the TrialPlan expand only feasible,
+decision-relevant contrasts. Create `market_context_heterogeneity` only after a
+predeclared event or deterministic diagnostic exposes a material break,
+instrument difference, or execution/liquidity anomaly. It is non-blocking
+unless the unresolved context changes the product scope, execution assumptions,
+sample design, permitted use, or promotion decision.
+
 ## Reject low-value obligations
 
 Reject a candidate that merely restates a metric, duplicates an open

@@ -85,6 +85,23 @@ TrialPlan were frozen. Historical regime evidence seen during selection
 remains regime validation, not holdout. When future-transfer relevance is part
 of the decision, preserve the latest feasible interval or prospective stream
 as a protected final stage instead of consuming it during earlier selection.
+After an Agent uses a holdout result to alter a factor, parameter, event
+hypothesis, or rule, reclassify that interval as
+`historical_adaptive_evidence`; it is no longer pristine OOS. Create a new
+forward obligation for the next available sealed interval.
+
+Keep data-delivery evidence grades explicit:
+
+- `live_execution_evidence` requires real orders, fills, fees, slippage,
+  rejects, and funding constraints;
+- `forward_shadow_evidence` covers prospective paper/shadow execution, with
+  `latency_class=delayed` when the feed is delayed;
+- `historical_simulation_evidence` covers every replay of historical data,
+  including tick-by-tick playback.
+
+Forward shadow evidence can test signal generation, drift, and prospective
+stability, but it cannot discharge actual fill, impact, or latency obligations.
+Live evidence remains bounded to the market states actually observed.
 
 ## Output
 

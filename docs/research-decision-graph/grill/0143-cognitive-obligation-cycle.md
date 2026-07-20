@@ -2056,3 +2056,50 @@ Grill 143 is accepted through 143.6. The accepted design:
 
 Implementation is intentionally outside this grill record and must proceed in
 independently reviewable, revertible batches.
+
+## Post-acceptance market-context refinement
+
+The human auditor later authorized a bounded industry review of the obligation
+Skill's market-environment semantics. This did not add a second graph, a new
+edge per event, or a new persistence owner. It refined the existing
+Decision Contract → obligation discovery → TrialPlan → Evidence Envelope →
+adjudication/closure cycle.
+
+The reviewed refinement is:
+
+- create `performance_transportability` as a coverage intent when the bounded
+  decision depends on transfer across time, market state, or products; do not
+  persist the Cartesian product of every interval and instrument;
+- create or elevate `market_context_heterogeneity` only after a predeclared
+  event or deterministic diagnostic exposes a material break, product
+  difference, or execution/liquidity anomaly;
+- distinguish `co_occurrence`, a falsifiable `mechanism_hypothesis`, and
+  separately identified `causal_evidence`; an event narrative cannot promote
+  itself from temporal coincidence to causation;
+- keep post-outcome event search exploratory, bounded to at most three compact
+  mechanism candidates, and require a new unexposed window or product for
+  confirmation;
+- treat the latest feasible interval as a sealed holdout only while it remains
+  unseen by the factor/parameter/event-rule selection chain. Once used for an
+  adaptive change it becomes `historical_adaptive_evidence`, and a new forward
+  obligation is required;
+- distinguish real-order `live_execution_evidence`, prospective
+  `forward_shadow_evidence` (including `latency_class=delayed`), and
+  `historical_simulation_evidence`. Neither delayed Tiger L2 paper execution
+  nor tick replay discharges real fill, impact, or latency obligations;
+- allow a market explanation to end as `bounded_unknown` with searched scope
+  and reopening predicate. Complete causal explanation is not a universal
+  closure requirement.
+
+The implementation remains token-bounded: deterministic heterogeneity
+diagnostics trigger the search; the Agent receives only the anomaly summary,
+window, products, cutoff, and existing event refs; local cached event refs are
+checked before network search; one specialist sub-agent is reserved for a
+decision-blocking, cross-jurisdictional, timestamp-conflicted, or
+multi-mechanism question.
+
+Industry support is recorded in the evidence registry under
+`S-EVENT-STUDY`, `S-PREREG`, `S-REALITY-CHECK`,
+`S-REUSABLE-HOLDOUT`, and `S-HYPOTHETICAL-PERFORMANCE`. These sources constrain
+evidence language and sample-use semantics; they do not hard-code a specific
+calendar split, causal model, metric threshold, or graph edge.

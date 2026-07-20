@@ -827,7 +827,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "4d534870a4c8577b4407dd1eeaa6f9fd3fc219e59b77640d36d9450c26a78917"
+        "f42fec088c6ec6ce024ed0a24cff53797c72bb6408611d24174b1fc824d190fc"
     )
 
 
@@ -857,10 +857,23 @@ def test_obligation_skill_guides_temporal_product_and_event_transfer() -> None:
     assert "latest feasible interval or prospective stream" in synthesis
     assert "unseen product is not out-of-sample" in synthesis
     assert "event-source cutoff" in synthesis
+    assert "historical_adaptive_evidence" in synthesis
+    assert "live_execution_evidence" in synthesis
+    assert "forward_shadow_evidence" in synthesis
+    assert "latency_class=delayed" in synthesis
+    assert "historical_simulation_evidence" in synthesis
     assert "publicly_available_at" in event_search
     assert "at most three distinguishable" in event_search
     assert "one event-research sub-agent only" in event_search
     assert "bounded_unknown" in event_search
+    assert "`co_occurrence`" in event_search
+    assert "`mechanism_hypothesis`" in event_search
+    assert "`causal_evidence`" in event_search
+    assert "Never promote `co_occurrence` directly to `caused_by`" in (
+        event_search
+    )
+    assert "`performance_transportability`" in discovery
+    assert "`market_context_heterogeneity`" in discovery
 
 
 def test_reference_change_invalidates_whole_skill_manifest(
