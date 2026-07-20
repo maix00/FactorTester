@@ -222,6 +222,38 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
     return "custom", active_user or "", factor_id, f"{active_user}:{factor_id}" if active_user else factor_id
 
 
+def resolve_factor_family_source(
+    module_name: str,
+    *,
+    username: str | None,
+) -> dict[str, str]:
+    """Resolve executable source identity without exposing it over HTTP."""
+    source_kind, owner, factor_id, _ = _resolve_factor_family_ref(
+        module_name,
+        username,
+    )
+    source_code = (
+        load_public_factor_source(factor_id)
+        if source_kind == "public"
+        else load_factor_source(owner, factor_id)
+    ) or ""
+    if not source_code:
+        raise ImportError(
+            f"Cannot load factor family source for {module_name!r}"
+        )
+    canonical_ref = (
+        f"$COMMON:{factor_id}"
+        if source_kind == "public" else f"{owner}:{factor_id}"
+    )
+    return {
+        "canonical_family_ref": canonical_ref,
+        "source_kind": source_kind,
+        "source_owner": owner,
+        "factor_id": factor_id,
+        "source_code": source_code,
+    }
+
+
 def get_factor_family_instance(module_name, username: str | None = None, page_uuid: str | None = None):
     """Load a FactorFamily instance.
 

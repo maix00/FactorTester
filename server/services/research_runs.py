@@ -27,7 +27,7 @@ from server.services.research_graph.trial_plan.sample_identity import (
 from tools.data.sqlite.db import connect_sqlite
 
 
-RUN_SPEC_VERSION = 1
+RUN_SPEC_VERSION = 2
 _SCHEMA_READY_PATHS: set[str] = set()
 _SCHEMA_LOCK = threading.Lock()
 
@@ -65,6 +65,12 @@ def create_run(
     configuration_revision: int, run_spec: dict[str, Any],
     trial_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # Historical internal callers created v1 specs before the body declared
+    # its version. Preserve those records; HTTP preview/submit always declares
+    # the current version explicitly.
+    run_spec_version = int(run_spec.get("run_spec_version") or 1)
+    if run_spec_version not in {1, RUN_SPEC_VERSION}:
+        raise ValueError("unsupported run_spec_version")
     run_id = uuid.uuid4().hex
     raw = orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
     run_spec_hash = hash_run_spec(run_spec)
@@ -126,7 +132,7 @@ def create_run(
             """,
             (
                 run_id, owner, workspace_id, configuration_id,
-                int(configuration_revision), RUN_SPEC_VERSION,
+                int(configuration_revision), run_spec_version,
                 run_spec_hash, raw.decode(),
                 str(
                     (binding or {}).get("decision_contract_hash") or ""
@@ -158,7 +164,7 @@ def create_run(
         "configuration_id": configuration_id,
         "configuration_revision": int(configuration_revision),
         "kind": "factor_research",
-        "run_spec_version": RUN_SPEC_VERSION,
+        "run_spec_version": run_spec_version,
         "run_spec_hash": run_spec_hash,
         "run_spec": deepcopy(run_spec),
         "decision_contract_hash": str(

@@ -307,6 +307,14 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     preview_payload = preview.get_json()
     assert preview_payload["success"] is True
     assert len(preview_payload["run_spec_hash"]) == 64
+    assert preview_payload["run_spec_version"] == 2
+    assert preview_payload["factor_revision_manifests"]
+    assert all(
+        "source_code" not in manifest
+        and "tree_repr" not in manifest
+        and "math_expr" not in manifest
+        for manifest in preview_payload["factor_revision_manifests"]
+    )
     assert JobRepository().list(owner="alice") == []
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         assert conn.execute(
@@ -321,6 +329,11 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     assert submitted.status_code == 202, submitted.get_data(as_text=True)
     run = submitted.get_json()["run"]
     assert preview_payload["run_spec_hash"] == run["run_spec_hash"]
+    assert preview_payload["factor_revision_manifests"] == (
+        run["run_spec"]["configuration"]["shared"][
+            "factor_revision_manifests"
+        ]
+    )
     assert preview_payload["configuration_fingerprint"] == (
         run["run_spec"]["configuration_fingerprint"]
     )

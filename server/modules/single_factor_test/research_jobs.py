@@ -12,6 +12,7 @@ import settings as Settings
 from server.modules.single_factor_test import sft_bp
 from server.services import (
     external_factor_artifacts,
+    factor_revisions,
     research_configurations,
     research_runs,
     research_workspaces,
@@ -101,6 +102,10 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         )
         frozen_configuration = _freeze_external_factor_artifacts(
             frozen_configuration
+        )
+        frozen_configuration = factor_revisions.freeze_factor_revisions(
+            frozen_configuration,
+            owner=owner,
         )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
@@ -527,6 +532,11 @@ def preview_research_run():
         "retention_mode": prepared["retention_mode"],
         "step_mode": prepared["step_mode"],
         "sample_identity": sample_identity,
+        "factor_revision_manifests": deepcopy(
+            run_spec["configuration"]["shared"].get(
+                "factor_revision_manifests"
+            ) or []
+        ),
     })
 
 

@@ -48,6 +48,16 @@ adjudication to resolve or bound it.
 Treat the workspace as editable configuration, the `ResearchRun` as immutable
 RunSpec ownership, and `Job` as lifecycle/result/artifact ownership. Never use
 `page_uuid` as execution ownership; observe, cancel, and retry by `job_id`.
+Local `workspace inspect` is provisional source understanding, not executable
+factor identity. `run preview` and `run submit` use the same RunSpec-v2 freeze
+path and return source-free `factor_revision_manifests`. Each manifest hashes
+the family source, family expression, stable parameter contract, operator
+registry, selected alias, and resolved selected-factor expression. It contains
+no source, formula, tree, or parameter values. If execution-time revalidation
+finds a changed manifest, the Job fails closed and requires a new preview and
+TrialPlan member. Treat `resolution_status=family_contract_only` as an
+unresolved factor-semantics obligation, not as verified selected-factor
+semantics.
 
 ## Use Active Graph without loading global state
 

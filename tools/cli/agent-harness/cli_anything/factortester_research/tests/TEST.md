@@ -157,6 +157,11 @@ Contract/Methodology EvidenceEnvelope, override client guard booleans, reject
 stale/oversized requests without transition writes, and derive identical
 guard facts during offline replay. Availability never discharges an
 obligation or claims PIT, replayability, or latency fitness.
+Factor-revision server tests verify stable source-free manifests, hash changes
+for source or resolved-expression changes, RunSpec-v2 preview/submit identity,
+legacy RunSpec-v1 readability, and execution-time failure when the current
+factor implementation no longer matches the frozen manifest. Random
+Parameter display UUIDs are excluded from semantic hashes.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.
@@ -214,7 +219,7 @@ test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
 
-61 passed, 123 warnings in 16.86s
+61 passed, 123 warnings in 14.88s
 ```
 
 All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in

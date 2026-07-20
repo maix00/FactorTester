@@ -47,6 +47,15 @@ and each `Job` owns status, progress, cancellation, errors, results, and
 artifacts. Observe, cancel, and retry by `job_id`; never use `page_uuid` as
 execution ownership.
 
+New previews and submissions use RunSpec v2. The common freeze path embeds
+source-free factor revision manifests: only hashes of the executable family
+source, family/selected-factor expression contracts, stable parameter schema,
+operator registry, and selected alias are retained. Preview returns the same
+manifests for TrialPlan design. Worker planning recomputes them and fails
+closed if factor source or resolved semantics changed after submission. A
+legacy alias that cannot be resolved is explicitly marked
+`family_contract_only`; it is not silently presented as verified semantics.
+
 The Planning Agent must confirm the concrete product list and requested sources
 with the user before calling `plan`. The first executable phase records a
 compact real-backend availability probe. It never expands scope or silently
