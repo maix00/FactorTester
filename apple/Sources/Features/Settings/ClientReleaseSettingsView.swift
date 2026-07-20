@@ -1,31 +1,18 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ClientReleaseSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var controller = ClientReleaseController()
-    @State private var choosingProfile = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
             TabView {
-                ScrollView {
-                    VStack(spacing: 18) {
-                        ClientReleaseStatusCard(controller: controller)
-                        configuration
-                        actions
-                        if let error = controller.lastError {
-                            errorCallout(error)
-                        }
+                updatePanel
+                    .tabItem {
+                        Label("客户端更新", systemImage: "arrow.down.app")
                     }
-                    .padding(24)
-                }
-                .tabItem {
-                    Label("组件", systemImage: "shippingbox")
-                }
-
                 LocalProfilesView()
                     .tabItem {
                         Label("Profiles", systemImage: "person.2")
@@ -34,15 +21,6 @@ struct ClientReleaseSettingsView: View {
         }
         .frame(width: 720, height: 620)
         .background(.regularMaterial)
-        .fileImporter(
-            isPresented: $choosingProfile,
-            allowedContentTypes: [.json],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                controller.profilePath = url.path
-            }
-        }
         .task { await controller.refresh() }
     }
 
@@ -53,9 +31,9 @@ struct ClientReleaseSettingsView: View {
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 3) {
-                Text("客户端与组件")
+                Text("FactorTester-Client")
                     .font(.title2.weight(.semibold))
-                Text("保持 FactorTester CLI 与本地研究组件兼容")
+                Text("更新客户端，并管理所有人类与 Agent Profiles")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -67,63 +45,49 @@ struct ClientReleaseSettingsView: View {
         .padding(.vertical, 18)
     }
 
-    private var configuration: some View {
-        GroupBox("安装来源") {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
-                configRow(
-                    icon: "terminal",
-                    title: "命令",
-                    prompt: "factortester 或可执行文件绝对路径",
-                    text: $controller.cliPath
-                )
-                GridRow {
-                    Label("Profile", systemImage: "doc.badge.gearshape")
-                        .frame(width: 92, alignment: .leading)
-                    HStack(spacing: 8) {
-                        TextField("选择发布 Profile JSON", text: $controller.profilePath)
-                            .textFieldStyle(.roundedBorder)
-                        Button("选择…") { choosingProfile = true }
-                    }
+    private var updatePanel: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                ClientReleaseStatusCard(controller: controller)
+                GroupBox("安全状态") {
+                    LabeledContent("App 签名", value: controller.signatureText)
+                        .padding(8)
                 }
+                GroupBox("更新来源") {
+                    LabeledContent(
+                        "公开仓库",
+                        value: "maix00/FactorTester-Client"
+                    )
+                    .padding(8)
+                    Text("Release 必须且只能包含 FactorTester-Client.dmg；下载后先校验 GitHub SHA-256 digest，再打开安装镜像。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 8)
+                }
+                if let message = controller.lastError {
+                    Label(message, systemImage: "info.circle.fill")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                }
+                HStack {
+                    Button("检查更新") {
+                        Task { await controller.refresh() }
+                    }
+                    Spacer()
+                    Button("打开上一版 DMG") {
+                        Task { await controller.rollback() }
+                    }
+                    .disabled(!controller.canRollback)
+                    Button("下载、校验并打开 DMG") {
+                        Task { await controller.update() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .disabled(controller.isWorking)
             }
-            .padding(8)
+            .padding(24)
         }
-    }
-
-    private var actions: some View {
-        HStack {
-            Text("密码、token 与审批不会由此界面保存。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button("回滚") { Task { await controller.rollback() } }
-            Button("首次安装") { Task { await controller.bootstrap() } }
-            Button("更新") { Task { await controller.update() } }
-                .buttonStyle(.borderedProminent)
-        }
-        .disabled(controller.isWorking)
-    }
-
-    private func configRow(
-        icon: String,
-        title: String,
-        prompt: String,
-        text: Binding<String>
-    ) -> some View {
-        GridRow {
-            Label(title, systemImage: icon)
-                .frame(width: 92, alignment: .leading)
-            TextField(prompt, text: text)
-                .textFieldStyle(.roundedBorder)
-        }
-    }
-
-    private func errorCallout(_ message: String) -> some View {
-        Label(message, systemImage: "exclamationmark.triangle.fill")
-            .font(.callout)
-            .foregroundStyle(.red)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 }

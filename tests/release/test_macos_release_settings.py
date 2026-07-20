@@ -6,12 +6,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = ROOT / "apple" / "Sources"
 
 
-def test_macos_settings_use_the_same_deterministic_client_cli() -> None:
+def test_macos_settings_use_single_verified_github_dmg() -> None:
     controller = (
         SOURCES / "Features" / "Settings" / "ClientReleaseController.swift"
-    ).read_text(encoding="utf-8")
-    command = (
-        SOURCES / "Features" / "Settings" / "ClientReleaseCommand.swift"
     ).read_text(encoding="utf-8")
     view = (
         SOURCES / "Features" / "Settings" / "ClientReleaseSettingsView.swift"
@@ -23,17 +20,23 @@ def test_macos_settings_use_the_same_deterministic_client_cli() -> None:
         SOURCES / "Features" / "Home" / "HomeView.swift"
     ).read_text(encoding="utf-8")
 
-    assert 'static let cliPath = "client.release.cliPath"' in controller
-    assert "Application Support/FactorTester/bin" in command
-    assert "isExecutableFile" in command
-    assert "[executable] + arguments" in command
-    for command in ("bootstrap", "update", "status", "rollback"):
-        assert f'"{command}"' in controller
+    models = (
+        SOURCES / "Features" / "Updates" / "GitHubReleaseModels.swift"
+    ).read_text(encoding="utf-8")
+    store = (
+        SOURCES / "Features" / "Updates" / "AppUpdateStore.swift"
+    ).read_text(encoding="utf-8")
+    assert "maix00/FactorTester-Client/releases/latest" in controller
+    assert 'name == "FactorTester-Client.dmg"' in models
+    assert 'hasPrefix("sha256:")' in models
+    assert "SHA256()" in store
+    assert "prefix(2)" in store
+    assert "NSWorkspace.shared.open" in controller
+    assert "replaceItemAt" not in controller
     for label in ("当前版本", "可用版本", "运行状态"):
         assert label in status
-    for label in ("安装来源", "选择发布 Profile", "首次安装"):
+    for label in ("公开仓库", "客户端更新", "下载、校验并打开 DMG"):
         assert label in view
-    assert "密码、token 与审批不会由此界面保存" in view
     assert "客户端与 Profiles…" in home
     assert "approval" not in view.lower()
 
@@ -65,6 +68,13 @@ def test_apple_project_generation_and_new_swift_syntax(tmp_path: Path) -> None:
                 "-parse",
                 str(SOURCES / "Features" / "Settings" / filename),
             ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    for path in sorted((SOURCES / "Features" / "Updates").glob("*.swift")):
+        subprocess.run(
+            ["swiftc", "-frontend", "-parse", str(path)],
             check=True,
             capture_output=True,
             text=True,
