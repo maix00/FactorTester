@@ -19,6 +19,7 @@ REPO = Path(__file__).resolve().parents[2]
 def build_release(
     *,
     version: str,
+    source_revision: str,
     output: Path,
     private_key: Path,
     base_url: str,
@@ -40,16 +41,9 @@ def build_release(
     )
     assets.append(adapter)
     public_key = REPO / "tools/cli/release/trusted-release-public.pem"
-    revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=REPO,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
     manifest = create_manifest(
         version=version,
-        revision=revision,
+        revision=source_revision,
         base_url=base_url,
         assets=assets,
         private_key=private_key,
@@ -62,6 +56,7 @@ def build_release(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True)
+    parser.add_argument("--source-revision", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--private-key", required=True, type=Path)
     parser.add_argument("--base-url", required=True)

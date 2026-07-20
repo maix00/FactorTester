@@ -5,6 +5,7 @@ import subprocess
 import zipfile
 
 from script.release.assets import build_app_archive
+from script.release.build import build_release
 from script.release.manifest import create_manifest
 from tools.cli.release.app_archive import install_macos_app
 from tools.cli.release.contracts import validate_release_manifest
@@ -42,6 +43,10 @@ def test_manifest_builder_signs_explicit_assets(tmp_path: Path) -> None:
     release = validate_release_manifest(manifest, public_key=public)
     assert release.assets[0].url.endswith(wheel.name)
     assert release.assets[0].size == 5
+
+
+def test_release_builder_requires_public_source_revision() -> None:
+    assert "source_revision" in build_release.__annotations__
 
 
 def test_app_archive_is_deterministic_and_preserves_executable(
