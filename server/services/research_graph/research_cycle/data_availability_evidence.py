@@ -61,6 +61,7 @@ def project_availability_evidence(
     normalized = _validate_profile(profile, request=request)
     present = _requested_products_present(normalized)
     profile_hash = str(normalized["profile_hash"]).removeprefix("sha256:")
+    profile_ref = "data-availability-profile:sha256:" + profile_hash
     value = {
         "schema_version": 2,
         "envelope_id": (
@@ -72,13 +73,22 @@ def project_availability_evidence(
             })
         ),
         "evidence_kind": "data_availability",
-        "source_refs": ["data-availability-profile:" + profile_hash],
+        "source_refs": [profile_ref],
         "identity_refs": {
             "contract_hash": checkpoint["contract_hash"],
             "methodology_hash": checkpoint["methodology_hash"],
         },
         "facts": {
-            "profile": normalized,
+            "profile_ref": profile_ref,
+            "profile_as_of": normalized["as_of"],
+            "request": deepcopy(request),
+            "product_status": [
+                {
+                    "product": product,
+                    "available": product in _available_products(normalized),
+                }
+                for product in request["products"]
+            ],
             "requested_product_availability_present": present,
         },
         "metric_refs": [],
@@ -125,12 +135,18 @@ def _validate_profile(
 
 
 def _requested_products_present(profile: dict[str, Any]) -> bool:
-    available = {
+    return all(
+        product in _available_products(profile)
+        for product in profile["product_scope"]
+    )
+
+
+def _available_products(profile: dict[str, Any]) -> set[str]:
+    return {
         str(entry.get("product") or "")
         for entry in profile["entries"]
         if entry.get("status") == "available"
     }
-    return all(product in available for product in profile["product_scope"])
 
 
 def _scope(value: Any, *, field: str) -> list[str]:

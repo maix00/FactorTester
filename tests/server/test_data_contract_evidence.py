@@ -76,13 +76,86 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
         "contract_hash": "1" * 64,
         "methodology_hash": "2" * 64,
     }
-    assert envelope["facts"]["profile"]["profile_hash"] == (
-        profile()["profile_hash"]
+    assert envelope["facts"]["profile_ref"] == (
+        "data-availability-profile:" + profile()["profile_hash"]
     )
+    assert envelope["facts"]["request"] == {
+        "products": ["A.DCE"],
+        "sources": ["Local"],
+        "probe": False,
+        "expanded": False,
+    }
+    assert envelope["facts"]["product_status"] == [{
+        "product": "A.DCE",
+        "available": True,
+    }]
+    assert "profile" not in envelope["facts"]
     assert envelope["facts"]["requested_product_availability_present"] is True
     assert trace["evidence_refs"] == [
         "evidence:" + envelope["envelope_hash"]
     ]
+
+
+def test_data_contract_trace_stays_bounded_for_multi_product_profile(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    initialize(path)
+    products = [f"P{index}.DCE" for index in range(20)]
+    large_profile = profile_document(
+        product_scope=products,
+        source_scope=["Local"],
+        probe=False,
+        expanded=False,
+        entries=[
+            {
+                "product": product,
+                "source": f"LocalCNFutures{frequency}",
+                "mode": "historical_snapshot",
+                "status": "available",
+                "frequency": frequency,
+                "replayable": True,
+                "point_in_time": False,
+                "coverage": {
+                    "start": "2010-01-01T00:00:00+00:00",
+                    "end": "2026-07-20T00:00:00+00:00",
+                    "rows": 1_000_000,
+                },
+            }
+            for product in products
+            for frequency in ("MIN1", "DAY1", "CONTRACT_MIN1")
+        ],
+        as_of=datetime(2026, 7, 20, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        data_contract_service,
+        "availability_for_scope",
+        lambda **_kwargs: large_profile,
+    )
+    payload = transition_evidence()
+    payload["data_availability_request"]["products"] = products
+
+    result = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="data_contract__factor_semantics",
+        evidence=payload,
+    )
+
+    assert result["current_node"] == "factor_semantics"
+    with connect_sqlite(path) as conn:
+        row = conn.execute(
+            """
+            SELECT evidence_json FROM research_graph_trace
+            WHERE trace_id=(SELECT latest_trace_id
+                            FROM research_graph_branches
+                            WHERE branch_id='branch-1')
+            """
+        ).fetchone()
+    assert len(row["evidence_json"].encode()) <= 6000
 
 
 def test_client_cannot_submit_server_evidence(
@@ -195,7 +268,7 @@ def test_preflight_rejects_a_concurrent_branch_change(
     assert tuple(row) == ("data_contract", "trace-race")
 
 
-def test_oversized_profile_fails_before_transition_write(
+def test_large_profile_is_referenced_without_copying_it_into_trace(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -221,20 +294,25 @@ def test_oversized_profile_fails_before_transition_write(
         lambda **_kwargs: large,
     )
 
-    with pytest.raises(ValueError, match="exceeds 6000 bytes"):
-        advance_graph_branch(
-            instance_id="instance-1",
-            branch_id="branch-1",
-            owner="alice",
-            edge_id="data_contract__factor_semantics",
-            evidence=transition_evidence(),
-        )
+    advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="data_contract__factor_semantics",
+        evidence=transition_evidence(),
+    )
 
     with connect_sqlite(path) as conn:
         row = conn.execute(
             """
-            SELECT current_node, latest_trace_id
-            FROM research_graph_branches WHERE branch_id='branch-1'
+            SELECT b.current_node, b.latest_trace_id, t.evidence_json
+            FROM research_graph_branches AS b
+            JOIN research_graph_trace AS t
+              ON t.trace_id=b.latest_trace_id
+            WHERE b.branch_id='branch-1'
             """
         ).fetchone()
-    assert tuple(row) == ("data_contract", "trace-bootstrap")
+    assert row["current_node"] == "factor_semantics"
+    assert row["latest_trace_id"] != "trace-bootstrap"
+    assert len(row["evidence_json"].encode()) <= 6000
+    assert '"detail"' not in row["evidence_json"]
