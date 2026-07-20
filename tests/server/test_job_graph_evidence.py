@@ -41,23 +41,37 @@ def _graph() -> dict:
                 "required_capabilities": [],
             },
             {
-                "node_id": "statistical_robustness",
-                "kind": "research",
+                "node_id": "job_evidence_ready",
+                "kind": "validation",
                 "required_capabilities": [],
             },
-        ],
-        "edges": [{
-            "edge_id": "backtest__statistical_robustness",
-            "from_node": "authoritative_backtest",
-            "to_node": "statistical_robustness",
-            "guard": {
-                "terminal_job_evidence_retained": True,
-                "terminal_job_trusted": True,
-                "net_return_series_available": True,
+            {
+                "node_id": "statistical_robustness",
+                "kind": "research",
+                "required_capabilities": ["performance.bootstrap-sharpe"],
             },
-            "required_evidence": [],
-            "server_action": "bind_job_attempt",
-        }],
+        ],
+        "edges": [
+            {
+                "edge_id": "backtest__job_evidence_ready",
+                "from_node": "authoritative_backtest",
+                "to_node": "job_evidence_ready",
+                "guard": {
+                    "terminal_job_evidence_retained": True,
+                    "terminal_job_trusted": True,
+                    "net_return_series_available": True,
+                },
+                "required_evidence": [],
+                "server_action": "bind_job_attempt",
+            },
+            {
+                "edge_id": "job_evidence_ready__statistical_robustness",
+                "from_node": "job_evidence_ready",
+                "to_node": "statistical_robustness",
+                "guard": {"mandatory_bindings_resolved": True},
+                "required_evidence": [],
+            },
+        ],
     }
 
 
@@ -177,11 +191,11 @@ def test_backtest_edge_binds_trusted_job_evidence(tmp_path, monkeypatch) -> None
         instance_id="instance-1",
         branch_id="branch-1",
         owner="alice",
-        edge_id="backtest__statistical_robustness",
+        edge_id="backtest__job_evidence_ready",
         evidence=_request(),
     )
 
-    assert result["current_node"] == "statistical_robustness"
+    assert result["current_node"] == "job_evidence_ready"
     with connect_sqlite(path) as conn:
         trace = orjson.loads(conn.execute(
             """
@@ -221,7 +235,7 @@ def test_generic_result_cannot_certify_net_returns(
             instance_id="instance-1",
             branch_id="branch-1",
             owner="alice",
-            edge_id="backtest__statistical_robustness",
+            edge_id="backtest__job_evidence_ready",
             evidence=forged,
         )
     assert repository.require("job-1").status is JobStatus.SUCCEEDED
@@ -237,6 +251,51 @@ def test_job_from_other_branch_is_rejected(tmp_path, monkeypatch) -> None:
             instance_id="instance-1",
             branch_id="branch-1",
             owner="alice",
-            edge_id="backtest__statistical_robustness",
+            edge_id="backtest__job_evidence_ready",
             evidence=_request(),
         )
+
+
+def test_downstream_capability_gap_does_not_rollback_bound_job_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+
+    bound = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="backtest__job_evidence_ready",
+        evidence=_request(),
+    )
+    with pytest.raises(ValueError, match="unresolved capabilities"):
+        advance_graph_branch(
+            instance_id="instance-1",
+            branch_id="branch-1",
+            owner="alice",
+            edge_id="job_evidence_ready__statistical_robustness",
+            evidence={"mandatory_bindings_resolved": True},
+        )
+
+    assert bound["current_node"] == "job_evidence_ready"
+    with connect_sqlite(path) as conn:
+        branch = conn.execute(
+            """
+            SELECT current_node, latest_trace_id
+            FROM research_graph_branches WHERE branch_id='branch-1'
+            """
+        ).fetchone()
+        trace = orjson.loads(conn.execute(
+            """
+            SELECT evidence_json FROM research_graph_trace WHERE trace_id=?
+            """,
+            (branch["latest_trace_id"],),
+        ).fetchone()["evidence_json"])
+    assert branch["current_node"] == "job_evidence_ready"
+    assert (
+        trace["server_evidence"]["job_attempt"]["facts"]["job_id"]
+        == "job-1"
+    )

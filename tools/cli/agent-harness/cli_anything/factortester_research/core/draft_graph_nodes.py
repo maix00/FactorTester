@@ -87,6 +87,13 @@ def build_draft_nodes() -> list[dict[str, Any]]:
             ],
         ),
         (
+            "job_evidence_ready",
+            "validation",
+            "Retain a trusted terminal JobAttempt evidence envelope before "
+            "resolving any downstream analytical capability.",
+            [],
+        ),
+        (
             "result_audit",
             "audit",
             "Audit causal, statistical, operational, and accounting evidence.",

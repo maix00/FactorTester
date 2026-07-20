@@ -311,15 +311,23 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
         "preregistered_execution_eligibility_satisfied": True,
         "current_trial_stage_executable": True,
     }
-    assert edges["backtest__statistical_robustness"]["guard"] == {
+    assert nodes["job_evidence_ready"]["required_capabilities"] == []
+    assert edges["backtest__job_evidence_ready"]["guard"] == {
         "terminal_job_evidence_retained": True,
         "terminal_job_trusted": True,
         "net_return_series_available": True,
     }
     assert (
-        edges["backtest__statistical_robustness"]["server_action"]
+        edges["backtest__job_evidence_ready"]["server_action"]
         == "bind_job_attempt"
     )
+    assert edges["job_evidence_ready__statistical_robustness"]["guard"] == {
+        "mandatory_bindings_resolved": True,
+    }
+    assert edges["job_evidence_ready__capability_gap"]["guard"] == {
+        "mandatory_binding_missing": True,
+    }
+    assert "backtest__statistical_robustness" not in edges
     assert edges["statistical_robustness__result_audit"]["guard"] == {
         "uncertainty_evidence_complete": True,
     }

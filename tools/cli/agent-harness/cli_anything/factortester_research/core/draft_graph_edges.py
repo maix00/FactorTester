@@ -132,15 +132,32 @@ def build_draft_edges() -> list[dict[str, Any]]:
             ],
         ),
         edge(
-            "backtest__statistical_robustness",
+            "backtest__job_evidence_ready",
             "authoritative_backtest",
-            "statistical_robustness",
+            "job_evidence_ready",
             guard={
                 "terminal_job_evidence_retained": True,
                 "terminal_job_trusted": True,
                 "net_return_series_available": True,
             },
             server_action="bind_job_attempt",
+        ),
+        edge(
+            "job_evidence_ready__statistical_robustness",
+            "job_evidence_ready",
+            "statistical_robustness",
+            guard={"mandatory_bindings_resolved": True},
+        ),
+        edge(
+            "job_evidence_ready__capability_gap",
+            "job_evidence_ready",
+            "capability_gap",
+            edge_type="failure",
+            guard={"mandatory_binding_missing": True},
+            risk_level="L2",
+            required_transition_facts=[
+                "missing downstream capability ids and attempted bindings",
+            ],
         ),
         edge(
             "statistical_robustness__result_audit",
