@@ -237,6 +237,42 @@ def test_macos_profiles_show_workspace_ownership_and_folder_picker() -> None:
     assert "Owner:" in view
 
 
+def test_macos_settings_manage_personal_workspace_through_cli() -> None:
+    settings_root = SOURCES / "Features" / "Settings"
+    hub = (settings_root / "ClientSettingsHub.swift").read_text(
+        encoding="utf-8"
+    )
+    view = (settings_root / "PersonalWorkspaceView.swift").read_text(
+        encoding="utf-8"
+    )
+    migration = (
+        settings_root / "PersonalWorkspaceMigrationView.swift"
+    ).read_text(encoding="utf-8")
+    controller = (
+        settings_root / "PersonalWorkspaceController.swift"
+    ).read_text(encoding="utf-8")
+
+    assert "PersonalWorkspaceView()" in hub
+    assert "LocalProfilesView()" not in hub
+    assert "Profile、实时研究步骤、Trial Plan、义务与报告不属于设置" in hub
+    assert "Documents/FactorTester/personal-workspaces" in view
+    assert "当前 canonical 因子库" in view
+    assert "cleanup preview" in view
+    assert "不会从 UI 直接删除目录" in view
+    for label in (
+        "Dirty 文件", "关联 Profiles", "关联 Worktrees",
+        "保留所有 branch", "保留所有 commit", "保留未提交内容",
+    ):
+        assert label in migration
+    assert '"personal-workspace", "show"' in controller
+    assert '"personal-workspace", "migration", "plan"' in controller
+    assert '"personal-workspace", "migration", "apply"' in controller
+    assert '"personal-workspace", "migration", "verify"' in controller
+    assert "Process()" not in controller
+    assert '"git"' not in controller
+    assert "receiptRef" in migration
+
+
 def test_macos_tabs_and_account_center_use_real_routes() -> None:
     navigation = "\n".join(
         path.read_text(encoding="utf-8")
@@ -333,8 +369,12 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
     account = (
         SOURCES / "Features" / "Account" / "AccountCenterView.swift"
     ).read_text(encoding="utf-8")
-    assert "case server, workspaces, language, updates" in settings_hub
-    assert "LocalProfilesView()" in settings_hub
+    assert (
+        "case server, personalWorkspace, workspaces, language, updates"
+        in settings_hub
+    )
+    assert "LocalProfilesView()" not in settings_hub
+    assert "Button(\"打开 Profiles\"" in settings_hub
     assert "case account, security, productGroups, factorGrants" in account
     assert "case language" not in account
 
