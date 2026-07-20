@@ -107,6 +107,52 @@ def fake_server() -> Iterator[str]:
     def list_jobs():
         return jsonify(success=True, jobs=[{"job_id": "job-1", "status": "queued"}])
 
+    @app.get("/api/profile-research")
+    def profile_research():
+        assert session.get("username") == "alice"
+        assert request.args["workspace_ref"] == "workspace:workspace-1"
+        assert request.args["limit"] == "7"
+        assert request.args["after"] == "research-cursor"
+        return jsonify(
+            success=True,
+            schema_version=1,
+            workspace_ref="workspace:workspace-1",
+            items=[{
+                "research_ref": "graph-branch:instance-1:branch-1",
+                "current_node": "statistical_robustness",
+            }],
+            next_cursor="next-research-cursor",
+            etag="sha256:list",
+        )
+
+    @app.get("/api/profile-research/<research_ref>")
+    def profile_research_detail(research_ref: str):
+        assert session.get("username") == "alice"
+        assert research_ref == "graph-branch:instance-1:branch-1"
+        return jsonify(
+            success=True,
+            schema_version=1,
+            research_ref=research_ref,
+            timeline_href=f"/api/profile-research/{research_ref}/timeline",
+            refresh={"mode": "conditional_etag", "terminal": False},
+            etag="sha256:detail",
+        )
+
+    @app.get("/api/profile-research/<research_ref>/timeline")
+    def profile_research_timeline(research_ref: str):
+        assert session.get("username") == "alice"
+        assert research_ref == "graph-branch:instance-1:branch-1"
+        assert request.args["limit"] == "11"
+        assert request.args["after"] == "timeline-cursor"
+        return jsonify(
+            success=True,
+            schema_version=1,
+            research_ref=research_ref,
+            items=[{"step_ref": "trace:trace-1"}],
+            next_cursor=None,
+            etag="sha256:timeline",
+        )
+
     @app.get("/api/testers/modules")
     def modules():
         parent = request.args.get("parent")
@@ -191,6 +237,23 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         "/research/gtht_handoff.json"
     )["artifact_id"] == "academic_mom:abc"
     assert client.list_jobs(workspace_id="workspace-1")[0]["job_id"] == "job-1"
+    research = client.list_profile_research(
+        workspace_ref="workspace:workspace-1",
+        limit=7,
+        after="research-cursor",
+    )
+    assert research["items"][0]["research_ref"] == (
+        "graph-branch:instance-1:branch-1"
+    )
+    research_ref = research["items"][0]["research_ref"]
+    assert client.get_profile_research(research_ref)["refresh"]["mode"] == (
+        "conditional_etag"
+    )
+    assert client.list_profile_research_timeline(
+        research_ref,
+        limit=11,
+        after="timeline-cursor",
+    )["items"] == [{"step_ref": "trace:trace-1"}]
     assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
     assert client.data_availability(

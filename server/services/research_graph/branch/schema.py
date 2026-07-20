@@ -67,6 +67,10 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
     )
     for statement in statements:
         conn.execute(statement)
+    from server.services.research_graph.profile_research_projection import (
+        ensure_profile_research_indexes,
+    )
+    ensure_profile_research_indexes(conn)
 
 
 def ensure_instance_branch_schema(conn: sqlite3.Connection) -> None:

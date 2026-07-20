@@ -8,6 +8,48 @@ from .client_base import ClientMixinBase
 
 
 class ResearchGraphClientMixin(ClientMixinBase):
+    def list_profile_research(
+        self,
+        *,
+        workspace_ref: str,
+        limit: int = 20,
+        after: str = "",
+    ) -> dict[str, Any]:
+        """List one local Profile workspace's authorized research refs."""
+        return self._expect_success(self.session.get(
+            "/api/profile-research",
+            query={
+                "workspace_ref": workspace_ref,
+                "limit": limit,
+                "after": after or None,
+            },
+        ))
+
+    def get_profile_research(
+        self,
+        research_ref: str,
+    ) -> dict[str, Any]:
+        """Load one bounded current-state projection."""
+        return self._expect_success(self.session.get(
+            f"/api/profile-research/{research_ref}"
+        ))
+
+    def list_profile_research_timeline(
+        self,
+        research_ref: str,
+        *,
+        limit: int = 50,
+        after: str = "",
+    ) -> dict[str, Any]:
+        """Page compact transition refs without replaying evidence history."""
+        return self._expect_success(self.session.get(
+            f"/api/profile-research/{research_ref}/timeline",
+            query={
+                "limit": limit,
+                "after": after or None,
+            },
+        ))
+
     def publish_research_graph(self, graph: dict[str, Any]) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             "/api/research-graphs/versions",

@@ -212,6 +212,28 @@ source/heavy payloads, and a server-free CLI render path. Factor-workspace
 tests separately prove that regeneration preserves `research/` reports and
 notes.
 
+### Profile research projection refinement plan
+
+This refinement exposes the existing Active Graph state to profile-aware
+clients without persisting a server-side profile or copying report Markdown
+into the database.
+
+- `tests/server/test_profile_research_projection.py`: bounded list, detail, and
+  keyset timeline projections; owner/workspace isolation; response byte limits;
+  no raw evidence, stdout, source, or Markdown; constant query counts; index
+  plans; and large-history fixtures.
+- The route cases in `test_profile_research_projection.py`: authenticated HTTP
+  list/detail/timeline workflows, invalid cursors and limits, ETag conditional
+  reads, and cross-user denial.
+- `tests/cli/test_factortester_client.py`: typed client adapter paths, cursors,
+  and limits over a real HTTP transport.
+
+The realistic workflow lists a profile's registered workspace research,
+opens one current branch projection, pages transition references, and follows
+existing Job SSE links only for running jobs. It verifies that terminal
+research does not advertise live polling and that no endpoint replays full
+history or writes progress rows.
+
 ## Commands
 
 Run the Harness package suite:
@@ -268,3 +290,27 @@ All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in
 parameter and FactorExpr shift code outside this Harness refactor. The command
 exit status and collected test names remain authoritative; no production logic
 uses a hard-coded expected count.
+
+### Profile research projection refinement
+
+Last run: 2026-07-20
+
+```text
+PYTHONPATH=tools/cli/agent-harness conda run -n GTHT python -m pytest \
+  tests/server/test_profile_research_projection.py \
+  tests/cli/test_factortester_client.py \
+  tests/server/test_research_graph_context_cost.py \
+  tests/server/test_research_cycle_object_read.py \
+  tests/server/test_research_graph_final_schema.py \
+  tests/server/test_active_graph_final_cutover.py \
+  tests/server/test_research_graphs.py -v --tb=no
+
+collected 64 items
+64 passed in 4.47s
+```
+
+The projection-specific large fixture contains 1,000 branches and 100,000
+trace rows. List, detail, and timeline remain single-read projections; query
+plans use the owner/workspace and branch/timeline indexes. The HTTP acceptance
+also verifies owner isolation, 64 KiB bounds, opaque keyset cursors, ETag/304,
+and exclusion of raw evidence, stdout, factor source, and report Markdown.
