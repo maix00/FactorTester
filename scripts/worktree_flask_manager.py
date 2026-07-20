@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 
 
-MASTER_PORT = 8000
+MAIN_PORT = 8000
 FEAT_PORT = 7999
 VIBE_TRADING_PORT = 7899
 VIBE_TRADING_ROOT = Path(
@@ -107,14 +107,14 @@ class ManagerState:
             branch = branch_ref.removeprefix("refs/heads/") if branch_ref else "(detached)"
             head = entry.get("HEAD", "")[:8]
 
-            if branch == "master":
-                port = MASTER_PORT
+            if branch in {"main", "master"}:
+                port = MAIN_PORT
             elif branch == "feat":
                 port = FEAT_PORT
             else:
                 issue_num = _extract_issue_number(branch)
                 if issue_num is not None:
-                    port = MASTER_PORT + issue_num
+                    port = MAIN_PORT + issue_num
                 else:
                     port = 0  # no port — should be cleaned up
 

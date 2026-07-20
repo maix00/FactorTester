@@ -24,6 +24,28 @@ class _Process:
         return 0
 
 
+@pytest.mark.parametrize("branch", ["main", "master"])
+def test_primary_branch_uses_fixed_port_8000(tmp_path, monkeypatch, branch) -> None:
+    worktree = tmp_path / "repo"
+    worktree.mkdir()
+    porcelain = (
+        f"worktree {worktree}\n"
+        "HEAD abcdef1234567890\n"
+        f"branch refs/heads/{branch}\n\n"
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: porcelain,
+    )
+
+    result = manager.ManagerState(worktree, "python").worktrees()
+
+    assert len(result) == 1
+    assert result[0].branch == branch
+    assert result[0].port == 8000
+
+
 def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkeypatch) -> None:
     (tmp_path / "start_server.py").write_text("", encoding="ascii")
     (tmp_path / "scripts").mkdir()
