@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import json
 from pathlib import Path
 import re
 from typing import Any
-
-import orjson
 
 
 MAX_SNAPSHOT_BYTES = 64 * 1024
@@ -58,7 +57,12 @@ def canonical_report_snapshot(snapshot: Any) -> dict[str, Any]:
     value["sections"] = _canonical_sections(value.get("sections"))
     value["assets"] = _canonical_assets(value.get("assets"))
     value["gaps"] = _canonical_gaps(value.get("gaps"))
-    encoded = orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
     if len(encoded) > MAX_SNAPSHOT_BYTES:
         raise ValueError(
             f"report snapshot exceeds {MAX_SNAPSHOT_BYTES} bytes"
