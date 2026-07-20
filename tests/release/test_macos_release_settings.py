@@ -79,6 +79,13 @@ def test_apple_project_generation_and_new_swift_syntax(tmp_path: Path) -> None:
             capture_output=True,
             text=True,
         )
+    app = (SOURCES / "App" / "FactorTesterClientApp.swift").read_text()
+    activator = (
+        SOURCES / "Features" / "Updates" / "BundledRuntimeActivator.swift"
+    ).read_text()
+    assert "await BundledRuntimeActivator.run()" in app
+    assert '"activate-bundle"' in activator
+    assert '"--bundle-resources"' in activator
 
 
 def test_macos_embeds_signed_local_adapter_web_ui() -> None:

@@ -18,7 +18,10 @@ struct FactorTesterClientApp: App {
                     AppLanguage(rawValue: language)?.locale ?? .autoupdatingCurrent
                 )
                 #if os(macOS)
-                .task { try? LegacyAppNameMigration.run() }
+                .task {
+                    try? await BundledRuntimeActivator.run()
+                    _ = try? LegacyAppNameMigration.run()
+                }
                 #endif
         }
         #if os(macOS)

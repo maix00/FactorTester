@@ -10,6 +10,8 @@ import click
 from tools.cli.core.errors import friendly_errors
 from tools.cli.release.profile import load_profile_root, load_release_inputs
 from tools.cli.release.transaction import ClientReleaseStore
+from tools.cli.release.bundle_runtime import activate_bundled_runtime
+from tools.cli.release.locations import default_client_root, validate_client_root
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_profile import client_profile
 
@@ -32,6 +34,33 @@ def client_release() -> None:
 
 client_release.add_command(client_adapter)
 client_release.add_command(client_profile)
+
+
+@client_release.command("activate-bundle", hidden=True)
+@click.option(
+    "--bundle-resources",
+    required=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+)
+@click.option(
+    "--client-root",
+    type=click.Path(file_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def activate_bundle(
+    bundle_resources: Path,
+    client_root: Path | None,
+    as_json: bool,
+) -> None:
+    """Activate the verified offline runtime embedded in FTClient."""
+    result = activate_bundled_runtime(
+        bundle_resources,
+        validate_client_root(client_root)
+        if client_root is not None
+        else default_client_root(),
+    )
+    _echo(result, as_json)
 
 
 def _release_options(function):

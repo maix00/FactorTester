@@ -90,6 +90,7 @@
 "View original report" = "View original report";
 "Legacy report section summary is unavailable." = "Legacy report section summary is unavailable.";
 "旧客户端身份校验失败，未删除任何应用。" = "The legacy client identity check failed. No application was removed.";
+"内嵌客户端运行时缺失。" = "The bundled client runtime is missing.";
 "迁移工作区" = "Migrate Workspace";
 "迁移预览" = "Migration Preview";
 "验证迁移" = "Verify Migration";
