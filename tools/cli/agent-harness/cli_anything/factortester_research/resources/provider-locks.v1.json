@@ -148,6 +148,7 @@
         "skills/research-obligation-cycle/SKILL.md",
         "skills/research-obligation-cycle/agents/openai.yaml",
         "skills/research-obligation-cycle/references/evidence-adjudication.md",
+        "skills/research-obligation-cycle/references/market-context-event-search.md",
         "skills/research-obligation-cycle/references/methodology-impact.md",
         "skills/research-obligation-cycle/references/obligation-discovery.md",
         "skills/research-obligation-cycle/references/search-exhaustion.md",
@@ -156,7 +157,7 @@
         "skills/research-obligation-cycle/scripts/validate-adjudication-proposal.py",
         "skills/research-obligation-cycle/scripts/validate-obligation-proposal.py"
       ],
-      "sha256": "a175cff377120b8403ec8bfd7120cfb3cb1cda30924c2d04b566469715d67c65"
+      "sha256": "4d534870a4c8577b4407dd1eeaa6f9fd3fc219e59b77640d36d9450c26a78917"
     }
   }
 }

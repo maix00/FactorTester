@@ -83,6 +83,9 @@ artifact contracts produced by the workflow.
   questions without Cartesian-product expansion; preserve sequential
   walk-forward exposure, high-frequency day/month staging, purge/embargo, and
   a genuinely untouched latest interval in TrialPlan guidance.
+- Load market-event search guidance only for a material anomaly, preserve
+  occurrence and public-availability time, bound post-hoc narratives, and use
+  at most one event-research sub-agent at the declared risk threshold.
 - Reject server proposal payloads containing concrete Skill identity.
 - Keep canonical and packaged Skill trees byte-identical.
 - Require every newly persisted adjudication or closure proposal to name the

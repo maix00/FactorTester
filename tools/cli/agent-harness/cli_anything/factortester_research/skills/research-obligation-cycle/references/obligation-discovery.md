@@ -62,6 +62,12 @@ source references. An event noticed after outcome inspection is exploratory:
 it may open a new obligation, but cannot retroactively redefine a frozen test
 or rescue a failed Claim.
 
+When a decision-blocking performance break, cross-instrument difference,
+trading/liquidity anomaly, or preregistered institutional event makes event
+context material, load
+[market-context-event-search.md](market-context-event-search.md). Do not load
+it or search the web for ordinary stable windows.
+
 Do not generate the Cartesian product of every interval, regime, event, and
 instrument. Prefer the smallest representative coverage that distinguishes the
 mechanism, an important alternative explanation, or a declared transfer

@@ -74,7 +74,9 @@ Bind each stage to its market-state definition and relevant event-evidence
 references. Report whether a result is broad, regime-dependent,
 instrument-specific, or confounded by a material interval event. Post-outcome
 event explanations create exploratory obligations and a new trial; they do not
-alter the current stage's predeclared interpretation.
+alter the current stage's predeclared interpretation. Freeze an independent
+event-source cutoff with every walk-forward stage so later event labels cannot
+enter an earlier context snapshot.
 
 Never select a threshold after looking at the outcome. Recency alone does not
 create out-of-sample status: the latest interval or prospective stream is

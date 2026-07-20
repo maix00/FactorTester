@@ -827,7 +827,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "a175cff377120b8403ec8bfd7120cfb3cb1cda30924c2d04b566469715d67c65"
+        "4d534870a4c8577b4407dd1eeaa6f9fd3fc219e59b77640d36d9450c26a78917"
     )
 
 
@@ -841,16 +841,26 @@ def test_obligation_skill_guides_temporal_product_and_event_transfer() -> None:
     synthesis = (
         skill_root / "references" / "trial-synthesis.md"
     ).read_text(encoding="utf-8")
+    event_search = (
+        skill_root / "references" / "market-context-event-search.md"
+    ).read_text(encoding="utf-8")
 
     assert "time, market state, or instruments" in discovery
     assert "interval-specific events" in discovery
     assert "Do not generate the Cartesian product" in discovery
+    assert "Do not load" in discovery
+    assert "search the web for ordinary stable windows" in discovery
     assert "expanding or rolling" in synthesis
     assert "2024 for selection and seal 2025 as holdout" in synthesis
     assert "month- or day-scale stages" in synthesis
     assert "purge or embargo" in synthesis
     assert "latest feasible interval or prospective stream" in synthesis
     assert "unseen product is not out-of-sample" in synthesis
+    assert "event-source cutoff" in synthesis
+    assert "publicly_available_at" in event_search
+    assert "at most three distinguishable" in event_search
+    assert "one event-research sub-agent only" in event_search
+    assert "bounded_unknown" in event_search
 
 
 def test_reference_change_invalidates_whole_skill_manifest(
