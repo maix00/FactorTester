@@ -30,6 +30,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             run_spec_version INTEGER NOT NULL,
             run_spec_hash TEXT NOT NULL,
             run_spec_json TEXT NOT NULL,
+            decision_contract_hash TEXT NOT NULL DEFAULT '',
+            methodology_hash TEXT NOT NULL DEFAULT '',
             trial_plan_id TEXT NOT NULL DEFAULT '',
             trial_plan_hash TEXT NOT NULL DEFAULT '',
             trial_plan_version INTEGER NOT NULL DEFAULT 0,
@@ -47,6 +49,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     columns = _columns(conn)
     additions = (
         ("trial_plan_id", "TEXT NOT NULL DEFAULT ''"),
+        ("decision_contract_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("methodology_hash", "TEXT NOT NULL DEFAULT ''"),
         ("trial_plan_hash", "TEXT NOT NULL DEFAULT ''"),
         ("trial_plan_version", "INTEGER NOT NULL DEFAULT 0"),
         ("trial_role", "TEXT NOT NULL DEFAULT ''"),
@@ -105,6 +109,8 @@ def _remove_legacy_lifecycle(conn: sqlite3.Connection) -> None:
             run_spec_version INTEGER NOT NULL,
             run_spec_hash TEXT NOT NULL,
             run_spec_json TEXT NOT NULL,
+            decision_contract_hash TEXT NOT NULL DEFAULT '',
+            methodology_hash TEXT NOT NULL DEFAULT '',
             trial_plan_id TEXT NOT NULL DEFAULT '',
             trial_plan_hash TEXT NOT NULL DEFAULT '',
             trial_plan_version INTEGER NOT NULL DEFAULT 0,

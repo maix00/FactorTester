@@ -11,6 +11,9 @@ from cli_anything.factortester_research.core.capabilities import (
     load_builtin_capability_registry,
     resolve_graph_capabilities,
 )
+from cli_anything.factortester_research.core.backend_evidence import (
+    extract_job_attempt,
+)
 from cli_anything.factortester_research.core.plan import build_factor_research_plan, validation_checklist
 from cli_anything.factortester_research.core.replay import replay_graph_trace
 from cli_anything.factortester_research.core.external_factor import (
@@ -1155,6 +1158,10 @@ def test_local_evidence_envelope_keeps_output_behind_hashed_refs(
     assert '{"status"' not in json.dumps(envelope)
     assert len(envelope["envelope_hash"]) == 64
 
+    tampered = {**envelope, "envelope_hash": "0" * 64}
+    with pytest.raises(ValueError, match="envelope_hash mismatch"):
+        validate_evidence_envelope(tampered)
+
     run_evidence = {
         **envelope,
         "evidence_kind": "job_attempt",
@@ -1164,6 +1171,56 @@ def test_local_evidence_envelope_keeps_output_behind_hashed_refs(
         match="job_attempt evidence requires identity_refs.contract_hash",
     ):
         validate_evidence_envelope(run_evidence)
+
+
+def test_job_evidence_adapter_rejects_assurance_identity_mismatch() -> None:
+    envelope = validate_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "job-attempt:job-1",
+        "evidence_kind": "job_attempt",
+        "source_refs": ["research-job:job-1"],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+            "trial_plan_hash": "3" * 64,
+            "run_spec_hash": "4" * 64,
+        },
+        "facts": {
+            "job_id": "job-1",
+            "status": "succeeded",
+            "assurance": {
+                "policy_hash": "7" * 64,
+                "backend_revision": "backend-1",
+                "disposition": "trusted",
+                "anomaly_codes": [],
+            },
+        },
+        "metric_refs": ["result-summary:sha256:" + "5" * 64],
+        "artifact_refs": ["artifact-manifest:sha256:" + "6" * 64],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    })
+    payload = {
+        "job_id": "job-1",
+        "status": "succeeded",
+        "evidence": {
+            "job_attempt": envelope,
+            "terminal_assurance": {
+                "run_spec_hash": "8" * 64,
+                "result_summary_hash": "5" * 64,
+                "artifact_manifest_hash": "6" * 64,
+                "policy_hash": "7" * 64,
+                "backend_revision": "backend-1",
+                "disposition": "trusted",
+                "anomaly_codes": [],
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="terminal run_spec_hash"):
+        extract_job_attempt(payload)
 
 
 def test_agent_session_view_hides_legacy_evidence_but_persistence_retains_it(

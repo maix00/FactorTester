@@ -76,6 +76,10 @@ def normalize_run_binding(
         "trial_plan_hash": actual_hash,
         "trial_plan_schema_version": int(plan["schema_version"]),
         "trial_plan_version": int(plan["version"]),
+        "decision_contract_hash": str(
+            plan.get("decision_contract_hash") or ""
+        ),
+        "methodology_hash": str(plan.get("methodology_hash") or ""),
         "trial_role": str(trial_role),
         "trial_stage": trial_stage,
         "comparison_id": str(comparison_id),

@@ -10,6 +10,7 @@ import pytest
 
 import settings as Settings
 from server.jobs.repository import JobRepository
+from server.jobs.states import JobStatus
 from server.modules.single_factor_test import sft_bp
 from server.services import research_runs
 from server.services.research_graph.trial_plan import (
@@ -161,6 +162,97 @@ def test_research_run_binds_plan_and_jobs_inherit_through_run(
         "trial_stage",
         "comparison_id",
     }.isdisjoint(job_columns)
+
+
+def test_terminal_job_detail_projects_server_owned_research_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "job-evidence.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    run_spec_value = run_spec()
+    run_hash = semantic_hash(run_spec_value)
+    sample_hash = derive_sample_identity(run_spec_value)["sample_hash"]
+    plan = {
+        **trial_plan(run_hash),
+        "schema_version": 3,
+        "decision_contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "obligation_refs": ["obligation-job-evidence"],
+    }
+    plan["sample_roles"][0]["sample_hash"] = sample_hash
+    plan_hash = trial_plan_hash(plan)
+    initialize_branch(path, plan_hash)
+    run = research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-1",
+        configuration_id="configuration-1",
+        configuration_revision=1,
+        run_spec=run_spec_value,
+        trial_binding=trial_binding(plan),
+    )
+    repository = JobRepository(path)
+    job = repository.create(replace(
+        job_record(run["run_id"], run_spec_value),
+        source_revision="backend-revision-1",
+    ))
+    repository.transition(job.job_id, JobStatus.PLANNING)
+    repository.set_execution_plan(
+        job.job_id,
+        plan={"runner": "test:ic", "steps": ["compute"]},
+        notices=[],
+        requires_confirmation=False,
+    )
+    repository.transition(job.job_id, JobStatus.RUNNING)
+    repository.transition(
+        job.job_id,
+        JobStatus.SUCCEEDED,
+        worker_exitcode=0,
+        result_summary={"rank_ic": 0.04, "observations": 800},
+    )
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    response = client.get(f"/api/jobs/{job.job_id}")
+    envelope = response.get_json()["evidence"]["job_attempt"]
+    result_response = client.get(f"/api/jobs/{job.job_id}/result")
+    result_envelope = result_response.get_json()["evidence"]["job_attempt"]
+
+    assert response.status_code == 200
+    assert result_response.status_code == 200
+    assert result_envelope["envelope_hash"] == envelope["envelope_hash"]
+    assert envelope["schema_version"] == 2
+    assert envelope["evidence_kind"] == "job_attempt"
+    assert envelope["identity_refs"] == {
+        "contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "trial_plan_hash": plan_hash,
+        "run_spec_hash": run_hash,
+    }
+    assert envelope["source_refs"] == [
+        f"research-job:{job.job_id}",
+        f"research-run:{run['run_id']}",
+    ]
+    assert envelope["facts"]["status"] == "succeeded"
+    assert envelope["facts"]["trial_stage"] == "selection"
+    assert envelope["facts"]["assurance"]["disposition"] == "trusted"
+    assert envelope["metric_refs"] == [
+        "result-summary:sha256:"
+        + repository.require(
+            job.job_id,
+            owner="alice",
+        ).terminal_assurance.result_summary_hash
+    ]
+    assert envelope["artifact_refs"][0].startswith(
+        "artifact-manifest:sha256:"
+    )
+    assert envelope["envelope_hash"]
+    assert "result_summary" not in envelope
+    assert "terminal_assurance" not in envelope
 
 
 def test_unbound_research_run_remains_readable_without_trial_projection(

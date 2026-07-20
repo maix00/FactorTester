@@ -80,19 +80,24 @@ def validate_evidence_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
         identity_refs=identity_refs,
     )
     command = envelope.get("command")
-    if not isinstance(command, dict):
-        raise ValueError("evidence envelope requires command")
-    argv = command.get("argv")
-    if not isinstance(argv, list) or not all(
-        isinstance(item, str) for item in argv
-    ):
-        raise ValueError("evidence command argv must be an array of strings")
-    returncode = command.get("returncode")
-    if not isinstance(returncode, int) or isinstance(returncode, bool):
-        raise ValueError("evidence command returncode must be an integer")
-    for field in ("stdout_ref", "stderr_ref"):
-        if not isinstance(command.get(field), str):
-            raise ValueError(f"evidence command {field} must be a string")
+    if command is not None:
+        if not isinstance(command, dict):
+            raise ValueError("evidence command must be an object")
+        argv = command.get("argv")
+        if not isinstance(argv, list) or not all(
+            isinstance(item, str) for item in argv
+        ):
+            raise ValueError(
+                "evidence command argv must be an array of strings"
+            )
+        returncode = command.get("returncode")
+        if not isinstance(returncode, int) or isinstance(returncode, bool):
+            raise ValueError(
+                "evidence command returncode must be an integer"
+            )
+        for field in ("stdout_ref", "stderr_ref"):
+            if not isinstance(command.get(field), str):
+                raise ValueError(f"evidence command {field} must be a string")
     for field in ("metric_refs", "artifact_refs"):
         value = envelope.get(field)
         if not isinstance(value, list) or not all(
@@ -115,7 +120,13 @@ def validate_evidence_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
             isinstance(item, str) and item.strip() for item in value
         ):
             raise ValueError(f"evidence {field} must be a text array")
-    return deepcopy(envelope)
+    value = deepcopy(envelope)
+    declared_hash = str(value.pop("envelope_hash", "") or "")
+    computed_hash = _evidence_hash(value)
+    if declared_hash and declared_hash != computed_hash:
+        raise ValueError("envelope_hash mismatch")
+    value["envelope_hash"] = computed_hash
+    return value
 
 
 def persist_command_evidence(
@@ -163,16 +174,7 @@ def persist_command_evidence(
         "limitations": [],
         "conflicts": [],
     }
-    value = validate_evidence_envelope(envelope)
-    value["envelope_hash"] = hashlib.sha256(
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
-    return value
+    return validate_evidence_envelope(envelope)
 
 
 def _validate_identity_refs(
@@ -227,6 +229,17 @@ def _find_fields(value: Any, forbidden: set[str]) -> set[str]:
         for item in value:
             found.update(_find_fields(item, forbidden))
     return found
+
+
+def _evidence_hash(value: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
 
 
 def _looks_like_legacy_envelope(value: dict[str, Any]) -> bool:

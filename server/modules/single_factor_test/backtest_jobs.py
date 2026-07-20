@@ -18,6 +18,9 @@ from server.jobs.states import JobStatus, TERMINAL_STATUSES
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.research_jobs import _daemon_client, _deployment_id
 from server.services import research_runs
+from server.services.research_graph.research_cycle.job_evidence import (
+    project_job_attempt_evidence,
+)
 from server.services.session_runtime import require_user
 
 
@@ -58,6 +61,35 @@ def _require_job(job_id: str):
         return _repository().require(job_id, owner=require_user()), None
     except KeyError:
         return None, (jsonify({"success": False, "error": "research job not found"}), 404)
+
+
+def _job_evidence(job: JobRecord) -> dict:
+    projection = research_runs.load_job_evidence_projection(
+        job_id=job.job_id,
+        owner=job.owner,
+    )
+    trial_binding = (
+        projection["trial_binding"] if projection is not None else None
+    )
+    return {
+        "trial_binding": trial_binding,
+        "terminal_assurance": (
+            job.terminal_assurance.to_dict()
+            if job.terminal_assurance is not None
+            else None
+        ),
+        "job_attempt": project_job_attempt_evidence(
+            job,
+            identity_refs=(
+                projection["identity_refs"]
+                if projection is not None
+                else None
+            ),
+            trial_stage=str(
+                (trial_binding or {}).get("trial_stage") or ""
+            ),
+        ),
+    }
 
 
 def _sse(event: str, data: dict, *, event_id: int | None = None) -> str:
@@ -146,17 +178,7 @@ def get_test_job(job_id: str):
         "execution_plan": job.execution_plan,
         "result_summary": job.result_summary,
         "error": job.error,
-        "evidence": {
-            "trial_binding": research_runs.load_job_trial_binding(
-                job_id=job.job_id,
-                owner=job.owner,
-            ),
-            "terminal_assurance": (
-                job.terminal_assurance.to_dict()
-                if job.terminal_assurance is not None
-                else None
-            ),
-        },
+        "evidence": _job_evidence(job),
         **_urls(job.job_id),
     })
 
@@ -235,12 +257,7 @@ def get_test_job_result(job_id: str):
         "kind": job.kind,
         "run_id": job.run_id,
         "status": job.status.value,
-        "evidence": {
-            "trial_binding": research_runs.load_job_trial_binding(
-                job_id=job.job_id,
-                owner=job.owner,
-            ),
-        },
+        "evidence": _job_evidence(job),
     }
     if job.status is JobStatus.SUCCEEDED:
         return jsonify({"success": True, **base, "result": job.result_summary})

@@ -124,6 +124,22 @@ backtests, robustness, and JobAttempt evidence must additionally bind
 `trial_plan_hash` and `run_spec_hash`. A local `control_command` envelope audits
 CLI execution only and is not admissible research evidence.
 
+After a Job reaches a terminal state, capture its server-owned evidence once:
+
+```bash
+cli-anything-factortester-research \
+  --session research.json \
+  evidence capture-job <job_id> --json
+```
+
+This command reuses the authenticated Job detail envelope, verifies its
+Contract/Methodology/TrialPlan/RunSpec identity against terminal assurance,
+and records only the bounded envelope plus local audit metadata. It never
+derives research identity from stdout, a Skill, or local source. A repeated
+capture reuses the same envelope hash. `not_usable` and
+`maintenance_required` attempts remain auditable facts but are not trusted
+research-result evidence.
+
 For activation validation, send canonical instance/branch/baseline-run
 references. The server derives replay, shadow comparison, and token evidence;
 never invent client-side pass booleans.

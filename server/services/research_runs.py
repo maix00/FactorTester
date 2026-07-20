@@ -110,7 +110,8 @@ def create_run(
             INSERT INTO research_runs (
                 run_id, owner, workspace_id, configuration_id,
                 configuration_revision, kind, run_spec_version,
-                run_spec_hash, run_spec_json, trial_plan_id, trial_plan_hash,
+                run_spec_hash, run_spec_json, decision_contract_hash,
+                methodology_hash, trial_plan_id, trial_plan_hash,
                 trial_plan_version, trial_role, trial_stage, comparison_id,
                 graph_instance_id, graph_branch_id, sample_ref, sample_hash,
                 sample_identity_hash, sample_start, sample_end,
@@ -119,7 +120,7 @@ def create_run(
                 created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, 'factor_research',
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
@@ -127,6 +128,10 @@ def create_run(
                 run_id, owner, workspace_id, configuration_id,
                 int(configuration_revision), RUN_SPEC_VERSION,
                 run_spec_hash, raw.decode(),
+                str(
+                    (binding or {}).get("decision_contract_hash") or ""
+                ),
+                str((binding or {}).get("methodology_hash") or ""),
                 str((binding or {}).get("trial_plan_id") or ""),
                 str((binding or {}).get("trial_plan_hash") or ""),
                 int((binding or {}).get("trial_plan_version") or 0),
@@ -156,6 +161,12 @@ def create_run(
         "run_spec_version": RUN_SPEC_VERSION,
         "run_spec_hash": run_spec_hash,
         "run_spec": deepcopy(run_spec),
+        "decision_contract_hash": str(
+            persisted_binding.get("decision_contract_hash") or ""
+        ),
+        "methodology_hash": str(
+            persisted_binding.get("methodology_hash") or ""
+        ),
         "trial_plan_id": str(
             persisted_binding.get("trial_plan_id") or ""
         ),
@@ -207,6 +218,8 @@ def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:
         "run_spec_version": int(row["run_spec_version"]),
         "run_spec_hash": str(row["run_spec_hash"]),
         "run_spec": _loads(row["run_spec_json"]) or {},
+        "decision_contract_hash": str(row["decision_contract_hash"]),
+        "methodology_hash": str(row["methodology_hash"]),
         "trial_plan_id": str(row["trial_plan_id"]),
         "trial_plan_hash": str(row["trial_plan_hash"]),
         "trial_plan_version": int(row["trial_plan_version"]),
@@ -237,6 +250,20 @@ def load_job_trial_binding(
     owner: str,
 ) -> dict[str, Any] | None:
     """Project a JobAttempt's immutable binding from its owning ResearchRun."""
+    projection = load_job_evidence_projection(job_id=job_id, owner=owner)
+    return (
+        dict(projection["trial_binding"])
+        if projection is not None
+        else None
+    )
+
+
+def load_job_evidence_projection(
+    *,
+    job_id: str,
+    owner: str,
+) -> dict[str, Any] | None:
+    """Load one JobAttempt's trial binding and immutable evidence identity."""
     try:
         with _connect() as conn:
             row = conn.execute(
@@ -246,7 +273,10 @@ def load_job_trial_binding(
                        runs.trial_stage,
                        runs.comparison_id, runs.sample_ref, runs.sample_hash
                        , runs.sample_identity_hash,
-                       runs.sample_identity_assurance
+                       runs.sample_identity_assurance,
+                       runs.decision_contract_hash,
+                       runs.methodology_hash,
+                       runs.run_spec_hash
                 FROM research_jobs AS jobs
                 JOIN research_runs AS runs ON runs.run_id=jobs.run_id
                 WHERE jobs.job_id=? AND jobs.owner=? AND runs.owner=?
@@ -261,7 +291,7 @@ def load_job_trial_binding(
         return None
     if not str(row["trial_plan_hash"]):
         return None
-    return {
+    trial_binding = {
         "trial_plan_id": str(row["trial_plan_id"]),
         "trial_plan_hash": str(row["trial_plan_hash"]),
         "trial_plan_version": int(row["trial_plan_version"]),
@@ -274,6 +304,16 @@ def load_job_trial_binding(
         "sample_identity_assurance": str(
             row["sample_identity_assurance"]
         ),
+    }
+    identity = {
+        "contract_hash": str(row["decision_contract_hash"]),
+        "methodology_hash": str(row["methodology_hash"]),
+        "trial_plan_hash": str(row["trial_plan_hash"]),
+        "run_spec_hash": str(row["run_spec_hash"]),
+    }
+    return {
+        "trial_binding": trial_binding,
+        "identity_refs": identity if all(identity.values()) else None,
     }
 
 

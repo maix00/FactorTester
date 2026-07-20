@@ -50,6 +50,9 @@ artifact contracts produced by the workflow.
 - Persist compact factual EvidenceEnvelope v2 records with command exit status
   and artifact references instead of inline stdout/stderr bodies or research
   decisions.
+- Capture a terminal JobAttempt envelope projected by the authenticated server,
+  verify its frozen research identity against terminal assurance, and reuse
+  the same envelope hash without duplicating the local audit record.
 - Keep legacy EvidenceEnvelope v1 payloads in the persistence-only historical
   record while excluding their decisions, metrics, artifacts, paths, and
   nested copies from every Agent-facing session JSON view.
@@ -98,6 +101,8 @@ Workflows cover:
 - current-node capability resolution with full contracts omitted by default;
 - explicit `--include-contracts` audit output;
 - dry-run and real delegation to the configured `factortester` executable;
+- server-owned terminal JobAttempt evidence capture without reconstructing
+  research identity from CLI output or local Skill state;
 - factor-workspace inspection and platform-gap EvidenceEnvelope persistence;
 - external daily/minute/factor/handoff manifest validation.
 
@@ -190,12 +195,12 @@ CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
 
 [_resolve_cli] Using installed command:
   /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
-collected 55 items
+collected 59 items
 
 test_core.py
-  39 passed
+  41 passed
 test_full_e2e.py::TestCLISubprocess
-  15 passed
+  17 passed
 test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
   [_resolve_cli] Using installed command:
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/factortester
@@ -203,7 +208,7 @@ test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
 
-55 passed, 123 warnings in 13.64s
+59 passed, 123 warnings in 19.81s
 ```
 
 All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in

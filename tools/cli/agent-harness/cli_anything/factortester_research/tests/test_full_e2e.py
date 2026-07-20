@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -303,6 +304,103 @@ class TestCLISubprocess:
         )
 
         assert json.loads(result.stdout)["obligation_id"] == "obligation-1"
+
+    def test_capture_job_evidence_reuses_server_owned_envelope(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        envelope = {
+            "schema_version": 2,
+            "envelope_id": "job-attempt:job-1",
+            "evidence_kind": "job_attempt",
+            "source_refs": ["research-job:job-1", "research-run:run-1"],
+            "identity_refs": {
+                "contract_hash": "1" * 64,
+                "methodology_hash": "2" * 64,
+                "trial_plan_hash": "3" * 64,
+                "run_spec_hash": "4" * 64,
+            },
+            "facts": {
+                "job_id": "job-1",
+                "run_id": "run-1",
+                "kind": "ic",
+                "status": "succeeded",
+                "attempt": 1,
+                "trial_stage": "selection",
+                "assurance": {
+                    "policy_hash": "7" * 64,
+                    "backend_revision": "backend-1",
+                    "disposition": "trusted",
+                    "anomaly_codes": [],
+                },
+            },
+            "metric_refs": ["result-summary:sha256:" + "5" * 64],
+            "artifact_refs": [
+                "artifact-manifest:sha256:" + "6" * 64
+            ],
+            "hypotheses_tested": 0,
+            "stop_condition": None,
+            "limitations": [
+                "The backend does not emit a canonical hypotheses-tested count."
+            ],
+            "conflicts": [],
+        }
+        envelope["envelope_hash"] = hashlib.sha256(
+            json.dumps(
+                envelope,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        backend = {
+            "job_id": "job-1",
+            "status": "succeeded",
+            "evidence": {
+                "job_attempt": envelope,
+                "terminal_assurance": {
+                    "run_spec_hash": "4" * 64,
+                    "result_summary_hash": "5" * 64,
+                    "artifact_manifest_hash": "6" * 64,
+                    "policy_hash": "7" * 64,
+                    "backend_revision": "backend-1",
+                    "disposition": "trusted",
+                    "anomaly_codes": [],
+                },
+            },
+        }
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "factortester"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            f"print(json.dumps({backend!r}))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+        session = tmp_path / "session.json"
+        env = {
+            "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")
+        }
+
+        first = self._run([
+            "--session", str(session),
+            "evidence", "capture-job", "job-1", "--json",
+        ], env=env)
+        second = self._run([
+            "--session", str(session),
+            "evidence", "capture-job", "job-1", "--json",
+        ], env=env)
+        first_payload = json.loads(first.stdout)
+        second_payload = json.loads(second.stdout)
+        persisted = json.loads(session.read_text(encoding="utf-8"))
+
+        assert first_payload["reused"] is False
+        assert second_payload["reused"] is True
+        assert first_payload["evidence_envelope"] == envelope
+        assert len(persisted["evidence_envelopes"]) == 1
+        assert persisted["events"][-1]["event"] == "job_evidence_captured"
+        assert persisted["events"][-1]["assurance_disposition"] == "trusted"
 
     def test_cycle_advance_validates_before_real_backend_submission(
         self,

@@ -158,6 +158,18 @@ Rejected or non-blocking deltas leave closure unchanged.
 referenced full current body is necessary; it performs one current-checkpoint
 read and never scans the full trace.
 
+After a Job becomes terminal, capture its server-projected audit envelope:
+
+```bash
+cli-anything-factortester-research \
+  --session research.json \
+  evidence capture-job <job_id> --json
+```
+
+The Harness validates the envelope against the same response's terminal
+assurance and deduplicates it by content hash. It does not copy the result
+body, artifact payloads, stdout, or source into the session.
+
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its
 observations were sealed after the factor, selection boundary, and TrialPlan
