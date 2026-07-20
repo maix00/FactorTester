@@ -11,11 +11,50 @@ import WebKit
 /// cookie store，避免进 web 页后又要登录一次。
 struct WebPageView: View {
     let path: String
+    @EnvironmentObject private var session: SessionStore
+    @State private var loadError: String?
+    @State private var reloadID = UUID()
+    @State private var showLogin = false
 
     var body: some View {
-        if let url = ServerConfig.shared.url(forPath: path) {
-            WebViewRepresentable(url: url, syncServerCookies: true)
+        Group {
+            if let loadError {
+                VStack(spacing: 12) {
+                    Image(systemName: "network.slash")
+                        .font(.largeTitle)
+                    Text("页面无法打开").font(.headline)
+                    Text(loadError)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    HStack {
+                        Button("重新加载") {
+                            self.loadError = nil
+                            reloadID = UUID()
+                        }
+                        Button("登录 / 注册") { showLogin = true }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(30)
+            } else if let url = ServerConfig.shared.url(forPath: path) {
+                WebViewRepresentable(
+                    url: url,
+                    syncServerCookies: true,
+                    loadError: $loadError
+                )
+                .id(reloadID)
                 .ignoresSafeArea(edges: .bottom)
+            } else {
+                Text("服务器地址无效，请在设置中修正。")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .sheet(isPresented: $showLogin) {
+            LoginView { success in
+                showLogin = false
+                if success { loadError = nil; reloadID = UUID() }
+            }
+            .environmentObject(session)
         }
     }
 }
@@ -31,8 +70,21 @@ typealias PlatformViewRepresentable = NSViewRepresentable
 struct WebViewRepresentable: PlatformViewRepresentable {
     let url: URL
     let syncServerCookies: Bool
+    @Binding var loadError: String?
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    init(
+        url: URL,
+        syncServerCookies: Bool,
+        loadError: Binding<String?> = .constant(nil)
+    ) {
+        self.url = url
+        self.syncServerCookies = syncServerCookies
+        _loadError = loadError
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(loadError: $loadError)
+    }
 
     private func makeWebView(context: Context) -> WKWebView {
         let webView = WKWebView(frame: .zero)
@@ -63,6 +115,44 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
+        @Binding private var loadError: String?
+
+        init(loadError: Binding<String?>) {
+            _loadError = loadError
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFail navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            loadError = error.localizedDescription
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            loadError = error.localizedDescription
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationResponse: WKNavigationResponse,
+            decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+        ) {
+            let status = (
+                navigationResponse.response as? HTTPURLResponse
+            )?.statusCode
+            if status == 401 || status == 403 {
+                loadError = L10n.text("登录已失效或没有访问权限。")
+                decisionHandler(.cancel)
+            } else {
+                decisionHandler(.allow)
+            }
+        }
+
         // 放行自签名证书（与 SelfSignedTrustDelegate 同一策略）。
         func webView(_ webView: WKWebView,
                      didReceive challenge: URLAuthenticationChallenge,

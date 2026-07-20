@@ -230,8 +230,8 @@ def test_macos_tabs_and_account_center_use_real_routes() -> None:
     assert "case profile(id: String)" in navigation
     assert "case web(path: String)" in navigation
     assert "/api/account/password" in api
-    assert "/products" in account
-    assert "/custom-factors/editor" in account
+    assert ".products" in account
+    assert ".factorLibrary" in account
     assert '"127.0.0.1"' in config
     assert '"8000"' in config
 
@@ -269,7 +269,9 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
     server = (
         SOURCES / "Features" / "Settings" / "ServerSettingsView.swift"
     ).read_text(encoding="utf-8")
-    api = (SOURCES / "Networking" / "APIClient.swift").read_text(
+    projection_service = (
+        SOURCES / "Networking" / "ProfileResearchService.swift"
+    ).read_text(
         encoding="utf-8"
     )
 
@@ -292,5 +294,61 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
     assert "Form {" not in server
     assert "DisclosureGroup" in server
     assert "127.0.0.1" in server and "8000" in server
-    assert 'components.path = "/api/profile-research"' in api
-    assert "min(max(limit, 1), 50)" in api
+    assert '"/api/profile-research"' in projection_service
+    assert 'URLQueryItem(name: "limit", value: "50")' in projection_service
+    assert '"If-None-Match"' in projection_service
+    assert "/custom-factors/library" in tab_model
+    assert "/custom-factors/editor" not in tab_model
+    assert ".safeAreaInset(edge: .bottom" in sidebar
+    assert ".onTapGesture { open(tab) }" in sidebar
+    settings_hub = (
+        SOURCES / "Features" / "Settings" / "ClientSettingsHub.swift"
+    ).read_text(encoding="utf-8")
+    account = (
+        SOURCES / "Features" / "Account" / "AccountCenterView.swift"
+    ).read_text(encoding="utf-8")
+    assert "case server, workspaces, language, updates" in settings_hub
+    assert "LocalProfilesView()" in settings_hub
+    assert "case account, security, productGroups, factorGrants" in account
+    assert "case language" not in account
+
+
+def test_live_profile_ui_is_bounded_refreshable_and_source_free() -> None:
+    service = (
+        SOURCES / "Networking" / "ProfileResearchService.swift"
+    ).read_text(encoding="utf-8")
+    controller = (
+        SOURCES / "Stores" / "ProfileLiveProcessController.swift"
+    ).read_text(encoding="utf-8")
+    live_root = SOURCES / "Features" / "Profiles"
+    combined = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(live_root.glob("ProfileLive*.swift"))
+    )
+    ui_test = (
+        ROOT / "apple" / "UITests" / "SidebarNavigationUITests.swift"
+    ).read_text(encoding="utf-8")
+
+    assert 'URLQueryItem(name: "limit", value: "50")' in service
+    assert '"If-None-Match"' in service
+    assert "statusCode == 304" in service
+    assert 'line.hasPrefix("data:")' in service
+    assert "max(" in controller and "minimumIntervalSeconds" in controller
+    assert "directive.terminal" in controller
+    assert "Task.checkCancellation()" in controller
+    assert "nextTimelineCursor" in controller
+    assert "loadEarlierTimeline" in combined
+    assert "ResearchReportIndex.load" in combined
+    assert "selectedWorkspaceID" in combined
+    for forbidden in ("stdout", "full trace", "markdown"):
+        assert forbidden not in service.lower() + controller.lower()
+    for identifier in (
+        "sidebar.launch.home",
+        "sidebar.launch.research",
+        "sidebar.launch.profiles",
+        "sidebar.launch.account",
+        "sidebar.launch.settings",
+        "sidebar.launch.web:factor-library",
+        "sidebar.launch.web:products",
+    ):
+        assert identifier in ui_test

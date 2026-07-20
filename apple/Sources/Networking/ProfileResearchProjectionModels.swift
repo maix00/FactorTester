@@ -1,14 +1,12 @@
 import Foundation
 
 struct ProfileResearchListResponse: Decodable {
-    let schemaVersion: Int
     let workspaceRef: String
     let items: [ProfileResearchSummary]
     let nextCursor: String?
     let etag: String
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion = "schema_version"
         case workspaceRef = "workspace_ref"
         case items
         case nextCursor = "next_cursor"
@@ -18,19 +16,20 @@ struct ProfileResearchListResponse: Decodable {
 
 struct ProfileResearchSummary: Decodable, Identifiable {
     let researchRef: String
+    let workspaceRef: String
     let label: String
     let currentNode: String
     let status: String
     let trialPlanRef: String?
     let latestTraceRef: String?
-    let updatedAt: String?
+    let updatedAt: Double
     let detailHref: String
     let reportLookupRef: String?
-
     var id: String { researchRef }
 
     enum CodingKeys: String, CodingKey {
         case researchRef = "research_ref"
+        case workspaceRef = "workspace_ref"
         case label
         case currentNode = "current_node"
         case status
@@ -40,4 +39,180 @@ struct ProfileResearchSummary: Decodable, Identifiable {
         case detailHref = "detail_href"
         case reportLookupRef = "report_lookup_ref"
     }
+}
+
+struct ProfileResearchDetail: Decodable {
+    let researchRef: String
+    let label: String
+    let currentNode: String
+    let status: String
+    let trialPlanRef: String?
+    let reportLookupRef: String?
+    let evidenceRefs: [String]
+    let omittedEvidenceCount: Int
+    let researchCycle: ResearchCycleProjection
+    let jobRefs: [String]
+    let runRefs: [String]
+    let timelineHref: String
+    let refresh: ResearchRefreshDirective
+    let etag: String
+
+    enum CodingKeys: String, CodingKey {
+        case researchRef = "research_ref"
+        case label
+        case currentNode = "current_node"
+        case status
+        case trialPlanRef = "trial_plan_ref"
+        case reportLookupRef = "report_lookup_ref"
+        case evidenceRefs = "evidence_refs"
+        case omittedEvidenceCount = "omitted_evidence_count"
+        case researchCycle = "research_cycle"
+        case jobRefs = "job_refs"
+        case runRefs = "run_refs"
+        case timelineHref = "timeline_href"
+        case refresh
+        case etag
+    }
+}
+
+struct ResearchCycleProjection: Decodable {
+    let claims: [ResearchClaimProjection]
+    let obligations: [ResearchObligationProjection]
+    let closure: ResearchClosureProjection?
+}
+
+struct ResearchClaimProjection: Decodable, Identifiable {
+    let claimRef: String
+    let claimType: String
+    let evidenceState: String
+    var id: String { claimRef }
+    enum CodingKeys: String, CodingKey {
+        case claimRef = "claim_ref"
+        case claimType = "claim_type"
+        case evidenceState = "evidence_state"
+    }
+}
+
+struct ResearchObligationProjection: Decodable, Identifiable {
+    let obligationRef: String
+    let status: String
+    let materiality: String
+    let questionSummary: String
+    var id: String { obligationRef }
+    enum CodingKeys: String, CodingKey {
+        case obligationRef = "obligation_ref"
+        case status, materiality
+        case questionSummary = "question_summary"
+    }
+}
+
+struct ResearchClosureProjection: Decodable {
+    let proposalRef: String?
+    let disposition: String
+    enum CodingKeys: String, CodingKey {
+        case proposalRef = "proposal_ref"
+        case disposition
+    }
+}
+
+struct ResearchRefreshDirective: Decodable {
+    let mode: String
+    let href: String?
+    let minimumIntervalSeconds: Double?
+    let onlyWhileVisible: Bool?
+    let terminal: Bool
+    enum CodingKeys: String, CodingKey {
+        case mode, href, terminal
+        case minimumIntervalSeconds = "minimum_interval_seconds"
+        case onlyWhileVisible = "only_while_visible"
+    }
+}
+
+struct ProfileResearchTimelinePage: Decodable {
+    let researchRef: String
+    let items: [ResearchTransitionStep]
+    let nextCursor: String?
+    let etag: String
+    enum CodingKeys: String, CodingKey {
+        case researchRef = "research_ref"
+        case items
+        case nextCursor = "next_cursor"
+        case etag
+    }
+}
+
+struct ResearchTransitionStep: Decodable, Identifiable {
+    let stepRef: String
+    let edgeRef: String
+    let fromNode: String
+    let toNode: String
+    let createdAt: Double
+    let evidenceRefs: [String]
+    let trialPlanRefs: [String]
+    let obligationRefs: [String]
+    let claimRefs: [String]
+    let jobRefs: [String]
+    let runRefs: [String]
+    let obligationChanges: [ResearchStateChange]
+    let claimChanges: [ResearchStateChange]
+    var id: String { stepRef }
+
+    enum CodingKeys: String, CodingKey {
+        case stepRef = "step_ref"
+        case edgeRef = "edge_ref"
+        case fromNode = "from_node"
+        case toNode = "to_node"
+        case createdAt = "created_at"
+        case evidenceRefs = "evidence_refs"
+        case trialPlanRefs = "trial_plan_refs"
+        case obligationRefs = "obligation_refs"
+        case claimRefs = "claim_refs"
+        case jobRefs = "job_refs"
+        case runRefs = "run_refs"
+        case obligationChanges = "obligation_changes"
+        case claimChanges = "claim_changes"
+    }
+
+    var allRefs: Set<String> {
+        Set(
+            evidenceRefs + trialPlanRefs + obligationRefs
+                + claimRefs + jobRefs + runRefs
+        )
+    }
+}
+
+struct ResearchStateChange: Decodable, Identifiable {
+    let objectID: String
+    let fromState: String
+    let toState: String
+    var id: String { "\(objectID):\(fromState):\(toState)" }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(
+            keyedBy: DynamicCodingKey.self
+        )
+        objectID = try values.decodeIfPresent(
+            String.self,
+            forKey: DynamicCodingKey("obligation_id")
+        ) ?? values.decode(
+            String.self,
+            forKey: DynamicCodingKey("claim_id")
+        )
+        fromState = try values.decode(
+            String.self,
+            forKey: DynamicCodingKey("from_state")
+        )
+        toState = try values.decode(
+            String.self,
+            forKey: DynamicCodingKey("to_state")
+        )
+    }
+}
+
+private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int? = nil
+    init(_ value: String) { stringValue = value }
+    init?(stringValue: String) { self.init(stringValue) }
+    init?(intValue: Int) { return nil }
 }

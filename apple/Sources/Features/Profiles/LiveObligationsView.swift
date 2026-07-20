@@ -1,0 +1,41 @@
+import SwiftUI
+
+struct LiveObligationsView: View {
+    let obligations: [ResearchObligationProjection]
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                if obligations.isEmpty {
+                    Label(
+                        "当前 projection 没有研究义务",
+                        systemImage: "checklist"
+                    )
+                    .foregroundStyle(.secondary)
+                }
+                ForEach(obligations) { obligation in
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack {
+                                Text(obligation.questionSummary)
+                                    .font(.headline)
+                                Spacer()
+                                Text(obligation.status)
+                                    .font(.caption.weight(.semibold))
+                            }
+                            Text(obligation.materiality)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                            Text(obligation.obligationRef)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }
+}

@@ -7,22 +7,59 @@ struct ProfileOverviewSection: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 GroupBox("工作区") {
-                    LabeledContent("服务器", value: profile.serverURL)
-                    LabeledContent("本地目录", value: profile.workspaceRoot)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(
+                            "独立可写研究工作区",
+                            systemImage: "pencil.and.list.clipboard"
+                        )
+                        .font(.headline)
+                        Text(profile.workspaceRoot)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                        Text("Agent 的因子修改、过程文件和报告写入这里。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
                 }
-                GroupBox("初始化与 Agent") {
-                    LabeledContent(
-                        "因子库授权", value: "\(profile.initializationSources.count)"
-                    )
-                    LabeledContent("Agents", value: "\(profile.agents.count)")
-                    LabeledContent("研究记录", value: "\(profile.researchRecords.count)")
+                GroupBox("共享只读初始化来源") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if profile.initializationSources.isEmpty {
+                            Text("尚未绑定已授权的个人因子库。")
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(profile.initializationSources) { source in
+                            HStack {
+                                Label(
+                                    source.ownerRef,
+                                    systemImage: "books.vertical"
+                                )
+                                Spacer()
+                                Text("只读 · \(source.mode)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("初始化来源只提供引用，不是 Agent 的可写源码目录。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
                 }
-                if profile.initializationSources.isEmpty {
-                    Label(
-                        "尚未从已授权的个人因子库初始化。",
-                        systemImage: "books.vertical"
-                    )
-                    .foregroundStyle(.secondary)
+                GroupBox("研究身份") {
+                    HStack {
+                        LabeledContent(
+                            "Agents", value: "\(profile.agents.count)"
+                        )
+                        Spacer()
+                        LabeledContent(
+                            "研究记录",
+                            value: "\(profile.researchRecords.count)"
+                        )
+                    }
+                    .padding(8)
                 }
             }
             .padding(20)

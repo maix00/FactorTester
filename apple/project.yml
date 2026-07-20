@@ -64,3 +64,33 @@ targets:
         CFBundleDisplayName: FTClient
         LSMinimumSystemVersion: "13.0"
         <<: *ats
+
+  FactorTester-ClientTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Tests
+    dependencies:
+      - target: FactorTester-Client-macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client.tests
+        CODE_SIGNING_ALLOWED: NO
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/FTClient.app/Contents/MacOS/FTClient"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+  FactorTester-ClientUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: UITests
+    dependencies:
+      - target: FactorTester-Client-macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client.uitests
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        GENERATE_INFOPLIST_FILE: YES

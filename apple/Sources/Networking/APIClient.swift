@@ -95,20 +95,4 @@ final class APIClient: NSObject {
         return manifest.modules
     }
 
-    func profileResearchList(
-        workspaceRef: String,
-        limit: Int = 20
-    ) async throws -> ProfileResearchListResponse {
-        var components = URLComponents()
-        components.path = "/api/profile-research"
-        components.queryItems = [
-            URLQueryItem(name: "workspace_ref", value: workspaceRef),
-            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 50))),
-        ]
-        guard let path = components.string else {
-            throw APIError.transport("Invalid research projection request")
-        }
-        let data = try await request(path: path)
-        return try decoder.decode(ProfileResearchListResponse.self, from: data)
-    }
 }

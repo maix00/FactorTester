@@ -41,22 +41,14 @@ struct AccountCenterView: View {
             resource(
                 "管理研究与回测可用的产品范围",
                 "shippingbox",
-                .web(
-                    id: "products", title: "产品",
-                    systemImage: "shippingbox", path: "/products"
-                )
+                .products
             )
         case .factorGrants:
             resource(
                 "管理个人因子库与 Profile 初始化授权",
                 "books.vertical",
-                .web(
-                    id: "factor-library", title: "因子库",
-                    systemImage: "function", path: "/custom-factors/editor"
-                )
+                .factorLibrary
             )
-        case .language:
-            LanguagePreferenceCard()
         }
     }
 
@@ -79,7 +71,7 @@ struct AccountCenterView: View {
 }
 
 private enum AccountSection: String, CaseIterable, Identifiable {
-    case account, security, productGroups, factorGrants, language
+    case account, security, productGroups, factorGrants
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -87,7 +79,6 @@ private enum AccountSection: String, CaseIterable, Identifiable {
         case .security: return "安全"
         case .productGroups: return "产品组"
         case .factorGrants: return "因子库授权"
-        case .language: return "语言"
         }
     }
     var systemImage: String {
@@ -96,7 +87,6 @@ private enum AccountSection: String, CaseIterable, Identifiable {
         case .security: return "lock.shield"
         case .productGroups: return "shippingbox"
         case .factorGrants: return "books.vertical"
-        case .language: return "globe"
         }
     }
 }
@@ -130,27 +120,6 @@ private struct AccountIdentityCard: View {
                 }
                 .padding(24)
             }
-        }
-    }
-}
-
-private struct LanguagePreferenceCard: View {
-    @AppStorage("client.language") private var language =
-        AppLanguage.system.rawValue
-
-    var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("界面语言", selection: $language) {
-                    Text("跟随系统").tag(AppLanguage.system.rawValue)
-                    Text("简体中文").tag(AppLanguage.simplifiedChinese.rawValue)
-                    Text("English").tag(AppLanguage.english.rawValue)
-                }
-                .pickerStyle(.segmented)
-                Text("语言设置仅影响界面文案；机器 JSON、状态值与 API 协议保持不变。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .padding(8)
         }
     }
 }

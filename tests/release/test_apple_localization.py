@@ -64,16 +64,16 @@ def test_english_critical_ui_is_not_left_as_chinese() -> None:
 def test_language_override_is_durable_and_does_not_rewrite_protocol_values() -> None:
     app = (APPLE / "Sources" / "App" / "FactorTesterClientApp.swift").read_text()
     language = (APPLE / "Sources" / "Localization" / "AppLanguage.swift").read_text()
-    account = (
-        APPLE / "Sources" / "Features" / "Account" / "AccountCenterView.swift"
+    settings = (
+        APPLE / "Sources" / "Features" / "Settings" / "ClientSettingsHub.swift"
     ).read_text()
     assert '@AppStorage("client.language")' in app
-    assert '@AppStorage("client.language")' in account
+    assert '@AppStorage("client.language")' in settings
     assert "case system" in language
     assert 'case simplifiedChinese = "zh-Hans"' in language
     assert 'case english = "en"' in language
     assert ".environment(" in app and "\\.locale" in app
-    assert "机器 JSON、状态值与 API 协议保持不变" in account
+    assert "JSON、状态值与 API 协议不会随界面语言改变" in settings
 
 
 def test_localizations_are_bundled_for_both_apple_targets() -> None:

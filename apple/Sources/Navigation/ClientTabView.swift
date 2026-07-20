@@ -56,7 +56,7 @@ struct ClientTabView: View {
         case .account:
             AccountCenterView(open: open)
         case .settings:
-            ClientSettingsHub()
+            ClientSettingsHub(open: open)
         }
     }
 }

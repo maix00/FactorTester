@@ -94,6 +94,20 @@ struct ClientTab: Identifiable {
         content: .settings
     )
 
+    static let factorLibrary = ClientTab.web(
+        id: "factor-library",
+        title: "因子库",
+        systemImage: "function",
+        path: "/custom-factors/library"
+    )
+
+    static let products = ClientTab.web(
+        id: "products",
+        title: "产品",
+        systemImage: "shippingbox",
+        path: "/products"
+    )
+
     var isHome: Bool { id == Self.home.id }
 
     var isPinnedLauncher: Bool {
