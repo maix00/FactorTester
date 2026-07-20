@@ -85,6 +85,7 @@ def replay_shadow_trace(
                         evidence=evidence,
                         graph=graph,
                         runtime=runtime,
+                        bootstrap_node=fork_node,
                     )
                 )
                 or
@@ -204,6 +205,7 @@ def _continuation_bootstrap_valid(
     evidence: dict[str, Any],
     graph: dict[str, Any],
     runtime: sqlite3.Row,
+    bootstrap_node: str,
 ) -> bool:
     continuation = evidence.get("graph_continuation")
     server_evidence = evidence.get("server_evidence")
@@ -237,7 +239,7 @@ def _continuation_bootstrap_valid(
         or str(descriptor.get("target_graph_hash") or "")
         != str(graph.get("content_hash") or "")
         or str(descriptor.get("target_node") or "")
-        != str(runtime["current_node"])
+        != bootstrap_node
         or str(descriptor.get("workspace_id") or "")
         != str(runtime["workspace_id"])
         or str(descriptor.get("job_id") or "")

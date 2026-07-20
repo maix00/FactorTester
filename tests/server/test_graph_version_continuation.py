@@ -279,6 +279,40 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
         graph=target,
         runtime=runtime,
     )["passed"] is True
+    paused = advance_graph_branch(
+        instance_id=continued["instance_id"],
+        branch_id=branch["branch_id"],
+        owner="alice",
+        edge_id="job_evidence_ready__capability_gap",
+        evidence={"mandatory_binding_missing": True},
+    )
+    assert paused["current_node"] == "capability_gap"
+    with connect_sqlite(path) as conn:
+        runtime = load_instance_branch_row(
+            conn,
+            instance_id=continued["instance_id"],
+            branch_id=branch["branch_id"],
+            owner="alice",
+        )
+    assert runtime is not None
+    assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is True
+    recovered = advance_graph_branch(
+        instance_id=continued["instance_id"],
+        branch_id=branch["branch_id"],
+        owner="alice",
+        edge_id="capability_gap__job_evidence_ready",
+        evidence={"approved_binding_now_available": True},
+    )
+    assert recovered["current_node"] == "job_evidence_ready"
+    with connect_sqlite(path) as conn:
+        runtime = load_instance_branch_row(
+            conn,
+            instance_id=continued["instance_id"],
+            branch_id=branch["branch_id"],
+            owner="alice",
+        )
+    assert runtime is not None
+    assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is True
 
 
 @pytest.mark.parametrize(
