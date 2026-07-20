@@ -43,6 +43,25 @@ Each workspace retains its own `owner_ref` and access mode; an authorized
 workspace is never relabeled as the profile owner. Large local data is
 referenced from `local-data` rather than copied into the profile.
 
+An Agent can idempotently discover, claim, and register a provider-neutral
+profile in one command:
+
+```bash
+factortester client profile bootstrap \
+  --profile-id maxa \
+  --display-name MaxA \
+  --server-url http://127.0.0.1:8000 \
+  --agent-id research-maxa \
+  --source-owner-ref 18717974771
+```
+
+The returned `agent_prompt` is the compact hand-off text for any Agent
+provider. The source account is recorded only as factor-library provenance
+(`factortester://factor-library/18717974771`). It does not become the profile
+owner and no source-account password or token is stored. MaxA and MaxB may use
+the same authorized initialization source while retaining different profile
+IDs, Agent IDs, workspace roots, and research records.
+
 Workspace migration starts with an inventory-only plan:
 
 ```bash

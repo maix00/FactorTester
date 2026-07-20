@@ -32,8 +32,9 @@ def test_local_profile_is_strict_private_and_version_independent(
     assert path.stat().st_mode & 0o777 == 0o600
     assert not (root / "current.json").exists()
     assert not {"password", "token", "email"}.intersection(stored)
-    assert stored["schema_version"] == 2
+    assert stored["schema_version"] == 3
     assert stored["workspaces"] == []
+    assert stored["initialization_sources"] == []
 
     with pytest.raises(ValueError, match="fields"):
         validate_local_profile({**stored, "token": "must-not-be-stored"})
@@ -81,9 +82,48 @@ def test_version_one_profile_is_upgraded_without_losing_identity(
 
     upgraded = LocalProfileStore(root).load("legacy")
 
-    assert upgraded["schema_version"] == 2
+    assert upgraded["schema_version"] == 3
     assert upgraded["profile_id"] == "legacy"
     assert upgraded["workspaces"] == []
+    assert upgraded["initialization_sources"] == []
+
+
+def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "client-support"
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    runner = CliRunner()
+
+    for profile_id, agent_id in (
+        ("maxa", "research-maxa"),
+        ("maxb", "research-maxb"),
+    ):
+        result = runner.invoke(cli, [
+            "client", "profile", "bootstrap",
+            "--profile-id", profile_id,
+            "--display-name", profile_id.upper(),
+            "--server-url", "http://127.0.0.1:8000",
+            "--agent-id", agent_id,
+            "--source-owner-ref", "18717974771",
+        ])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["claimed"] and payload["registered"]
+        profile = payload["profile"]
+        assert profile["profile_id"] == profile_id
+        assert profile["agents"][0]["agent_id"] == agent_id
+        source = profile["initialization_sources"][0]
+        assert source["owner_ref"] == "18717974771"
+        assert source["mode"] == "reference"
+        assert source["source_ref"].endswith("/18717974771")
+        assert not {"password", "token"}.intersection(source)
+
+    maxa = LocalProfileStore(root).load("maxa")
+    maxb = LocalProfileStore(root).load("maxb")
+    assert maxa["workspace_root"] != maxb["workspace_root"]
+    assert maxa["agents"] != maxb["agents"]
 
 
 def test_local_agent_identity_resumes_without_provider_or_model_fields(

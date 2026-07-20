@@ -91,6 +91,19 @@ class LocalProfileStore:
         profile["adapters"] = [*adapters, descriptor]
         return self.save(profile)
 
+    def upsert_initialization_source(
+        self,
+        profile_id: str,
+        descriptor: dict[str, Any],
+    ) -> dict[str, Any]:
+        profile = self.load(profile_id)
+        sources = [
+            item for item in profile["initialization_sources"]
+            if item["source_id"] != descriptor.get("source_id")
+        ]
+        profile["initialization_sources"] = [*sources, descriptor]
+        return self.save(profile)
+
     def load_agent(
         self,
         profile_id: str,

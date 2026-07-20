@@ -75,6 +75,92 @@ def list_profiles(release_profile: Path | None) -> None:
     ))
 
 
+@client_profile.command("bootstrap")
+@click.option("--profile-id", required=True)
+@click.option("--display-name", required=True)
+@click.option("--server-url", required=True)
+@click.option("--agent-id", required=True)
+@click.option(
+    "--role",
+    type=click.Choice(["planning", "research"]),
+    default="research",
+)
+@click.option("--source-owner-ref", default="")
+@click.option(
+    "--source-mode",
+    type=click.Choice(["reference", "snapshot"]),
+    default="reference",
+)
+@click.option("--snapshot-ref", default="")
+@click.option(
+    "--workspace-root",
+    type=click.Path(file_okay=False, path_type=Path),
+)
+@_root_option
+@friendly_errors
+def bootstrap_profile(
+    profile_id: str,
+    display_name: str,
+    server_url: str,
+    agent_id: str,
+    role: str,
+    source_owner_ref: str,
+    source_mode: str,
+    snapshot_ref: str,
+    workspace_root: Path | None,
+    release_profile: Path | None,
+) -> None:
+    """Idempotently discover, claim, and register one local Agent profile."""
+    root = load_profile_root(release_profile)
+    store = LocalProfileStore(root)
+    discovered = True
+    try:
+        store.load(profile_id)
+    except ValueError:
+        discovered = False
+        store.save(new_local_profile(
+            profile_id=profile_id,
+            display_name=display_name,
+            server_url=server_url,
+            workspace_root=workspace_root
+            or default_profile_workspace_root(profile_id),
+        ))
+    if source_owner_ref:
+        store.upsert_initialization_source(profile_id, {
+            "source_id": "factor-library-initial",
+            "kind": "server_factor_library",
+            "owner_ref": source_owner_ref,
+            "mode": source_mode,
+            "source_ref": (
+                "factortester://factor-library/"
+                f"{source_owner_ref}"
+            ),
+            "snapshot_ref": snapshot_ref,
+        })
+    scope = (
+        {"workspace_id": "all"}
+        if role == "planning"
+        else {"instance_id": "unbound", "branch_id": "unbound"}
+    )
+    profile = store.upsert_agent(profile_id, {
+        "agent_id": agent_id,
+        "role": role,
+        "scope": scope,
+    })
+    click.echo(_json({
+        "schema_version": 1,
+        "discovered_existing_profile": discovered,
+        "claimed": True,
+        "registered": True,
+        "profile": profile,
+        "agent_prompt": (
+            f"Use FactorTester profile '{profile_id}' as Agent "
+            f"'{agent_id}', inspect its initialization provenance, "
+            "then resume the authorized research scope."
+        ),
+    }))
+
+
 @client_profile.group("workspace")
 def profile_workspace() -> None:
     """Plan and audit visible local factor workspaces."""

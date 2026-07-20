@@ -21,12 +21,13 @@ def new_local_profile(
     workspace_root: Path,
 ) -> dict[str, Any]:
     return validate_local_profile({
-        "schema_version": 2,
+        "schema_version": 3,
         "profile_id": profile_id,
         "display_name": display_name,
         "server": {"base_url": server_url},
         "workspace_root": str(workspace_root.expanduser().resolve()),
         "workspaces": [],
+        "initialization_sources": [],
         "agents": [],
         "adapters": [],
     })
@@ -38,11 +39,13 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
     allowed = {
         "schema_version", "profile_id", "display_name", "server",
         "workspace_root", "workspaces", "agents", "adapters",
+        "initialization_sources",
     }
     observed = set(value)
-    if observed != allowed and observed != allowed - {"workspaces"}:
+    legacy_optional = {"workspaces", "initialization_sources"}
+    if not (allowed - legacy_optional).issubset(observed) or observed - allowed:
         raise ValueError("local profile fields are invalid")
-    if value.get("schema_version") not in {1, 2}:
+    if value.get("schema_version") not in {1, 2, 3}:
         raise ValueError("local profile schema_version is unsupported")
     server = value.get("server")
     if not isinstance(server, dict) or set(server) != {"base_url"}:
@@ -53,8 +56,12 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
     agents = _array(value.get("agents"), "agents")
     adapters = _array(value.get("adapters"), "adapters")
     workspaces = _array(value.get("workspaces", []), "workspaces")
+    sources = _array(
+        value.get("initialization_sources", []),
+        "initialization_sources",
+    )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
@@ -64,8 +71,57 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
             value.get("workspace_root"), "workspace_root"
         ),
         "workspaces": [_workspace(item) for item in workspaces],
+        "initialization_sources": [
+            _initialization_source(item) for item in sources
+        ],
         "agents": [_agent(item) for item in agents],
         "adapters": [_adapter(item) for item in adapters],
+    }
+
+
+def _initialization_source(value: Any) -> dict[str, Any]:
+    fields = {
+        "source_id", "kind", "owner_ref", "mode", "source_ref",
+        "snapshot_ref",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("initialization source fields are invalid")
+    kind = _text(value.get("kind"), "initialization_source.kind")
+    if kind != "server_factor_library":
+        raise ValueError("initialization source kind is unsupported")
+    mode = _text(value.get("mode"), "initialization_source.mode")
+    if mode not in {"reference", "snapshot"}:
+        raise ValueError("initialization source mode is unsupported")
+    source_ref = _text(
+        value.get("source_ref"),
+        "initialization_source.source_ref",
+    )
+    _reference(
+        source_ref,
+        field="initialization_source.source_ref",
+        schemes={"factortester"},
+    )
+    snapshot_ref = str(value.get("snapshot_ref") or "").strip()
+    _reference(
+        snapshot_ref,
+        field="initialization_source.snapshot_ref",
+        schemes={"file", "artifact"},
+    )
+    if mode == "snapshot" and not snapshot_ref:
+        raise ValueError("snapshot initialization requires snapshot_ref")
+    return {
+        "source_id": validate_local_identifier(
+            value.get("source_id"),
+            "initialization_source.source_id",
+        ),
+        "kind": kind,
+        "owner_ref": _text(
+            value.get("owner_ref"),
+            "initialization_source.owner_ref",
+        ),
+        "mode": mode,
+        "source_ref": source_ref,
+        "snapshot_ref": snapshot_ref,
     }
 
 
