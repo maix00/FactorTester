@@ -63,6 +63,7 @@ def signed_manifest(
         "release": {
             "id": f"factortester-client-{version}",
             "version": version,
+            "source_revision": "a" * 40,
         },
         "client_protocol": {"minimum": 1, "maximum": 1},
         "assets": [{
@@ -107,6 +108,7 @@ def test_signed_release_manifest_verifies_and_is_compact(
     validated = validate_release_manifest(manifest, public_key=public_key)
 
     assert validated.version == "1.2.3"
+    assert validated.source_revision == "a" * 40
     assert validated.manifest_hash
     assert validated.assets[0].asset_id == "factortester-cli"
     assert len(json.dumps(manifest)) < 4_000

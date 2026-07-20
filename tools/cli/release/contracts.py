@@ -19,6 +19,7 @@ from .signature import verify_ecdsa_sha256
 
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_REVISION = re.compile(r"^[0-9a-f]{40}$")
 _VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
 _ASSET_KINDS = {
     "python-wheel",
@@ -42,6 +43,7 @@ class ReleaseAsset:
 class ValidatedRelease:
     release_id: str
     version: str
+    source_revision: str
     manifest_hash: str
     assets: tuple[ReleaseAsset, ...]
 
@@ -88,12 +90,17 @@ def validate_release_manifest(
     )
 
     release = _object(manifest.get("release"), "release")
-    if set(release) != {"id", "version"}:
+    if set(release) != {"id", "version", "source_revision"}:
         raise ValueError("release fields are invalid")
     release_id = _text(release.get("id"), "release.id")
     version = _text(release.get("version"), "release.version")
     if not _VERSION.fullmatch(version):
         raise ValueError("release.version must be semantic version")
+    source_revision = _text(
+        release.get("source_revision"), "release.source_revision"
+    )
+    if not _REVISION.fullmatch(source_revision):
+        raise ValueError("release.source_revision must be a Git commit")
 
     protocol = _object(manifest.get("client_protocol"), "client_protocol")
     if set(protocol) != {"minimum", "maximum"}:
@@ -117,6 +124,7 @@ def validate_release_manifest(
     return ValidatedRelease(
         release_id=release_id,
         version=version,
+        source_revision=source_revision,
         manifest_hash=sha256(payload).hexdigest(),
         assets=assets,
     )

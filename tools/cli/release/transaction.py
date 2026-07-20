@@ -79,6 +79,7 @@ class ClientReleaseStore:
             receipt = self._build_receipt(
                 version=release.version,
                 release_id=release.release_id,
+                source_revision=release.source_revision,
                 manifest_hash=release.manifest_hash,
                 previous_version=str(current.get("version") or ""),
                 assets=asset_receipts,
@@ -146,6 +147,7 @@ class ClientReleaseStore:
         *,
         version: str,
         release_id: str,
+        source_revision: str,
         manifest_hash: str,
         previous_version: str,
         assets: list[dict[str, Any]],
@@ -155,6 +157,7 @@ class ClientReleaseStore:
             "schema_version": 1,
             "release_id": release_id,
             "version": version,
+            "source_revision": source_revision,
             "manifest_hash": manifest_hash,
             "previous_version": previous_version or None,
             "installed_at": utc_now(),
