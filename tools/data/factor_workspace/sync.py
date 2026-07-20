@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -25,8 +26,33 @@ from .construct import (
 )
 
 
+def _assert_workspace_owner(root: str, username: str) -> None:
+    """Refuse any sync against a non-empty workspace owned elsewhere."""
+    if not os.path.isdir(root) or not os.listdir(root):
+        return
+
+    manifest_path = os.path.join(root, ".factor_workspace", "manifest.json")
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as file:
+            manifest = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+
+    owner = str(manifest.get("username") or "").strip() if isinstance(manifest, dict) else ""
+    if not owner:
+        raise PermissionError(
+            f"拒绝清空非空目录 {root!r}：没有有效的 Factor Workspace 所有权标记"
+        )
+    if owner != username:
+        raise PermissionError(
+            f"拒绝清空 Factor Workspace {root!r}：所有者为 {owner!r}，"
+            f"当前 profile 为 {username!r}"
+        )
+
+
 def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_existing: bool = False) -> dict[str, Any]:
     root = _workspace_root(username)
+    _assert_workspace_owner(root, username)
     _ensure_workspace_layout(root)
     repository = FactorWorkspaceRepository(username)
     git_info = repository.ensure()
@@ -110,7 +136,9 @@ def sync_factor_workspace(username: str, branch_mode: str = "force") -> dict[str
     result = sync_database_to_workspace(username, branch_mode=branch_mode)
     if branch_mode == "force":
         root = str(result.get("workspace_root") or _workspace_root(username))
-        commit_sha = FactorWorkspaceRepository(username).commit("chore: sync database to workspace")
+        commit_sha = FactorWorkspaceRepository(username).commit_generated(
+            "chore: sync database to workspace"
+        )
         if commit_sha:
             result["git_commit_sha"] = commit_sha
     return result
@@ -118,6 +146,7 @@ def sync_factor_workspace(username: str, branch_mode: str = "force") -> dict[str
 
 def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict[str, Any]:
     root = _workspace_root(username)
+    _assert_workspace_owner(root, username)
     _ensure_workspace_layout(root)
     repository = FactorWorkspaceRepository(username)
     repository.ensure()
@@ -163,6 +192,7 @@ def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict
 
 def push_factor_workspace(username: str, allow_public_write: bool = False, branch_mode: str = "auto") -> dict[str, Any]:
     root = _workspace_root(username)
+    _assert_workspace_owner(root, username)
     _ensure_workspace_layout(root)
     repository = FactorWorkspaceRepository(username)
     repository.ensure()

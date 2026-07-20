@@ -169,6 +169,16 @@ def _artifact_plan_rows(data: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def build_execution_plan(kind: str, data: dict[str, Any]) -> dict[str, Any]:
+    from server.services.factor_revisions import (
+        assert_run_spec_factor_revisions_current,
+    )
+
+    run_spec = data.get("run_spec")
+    if isinstance(run_spec, dict):
+        assert_run_spec_factor_revisions_current(
+            run_spec,
+            owner=str(data.get("_owner") or ""),
+        )
     if kind == "backtest":
         resolved, notices = _backtest_plan(data)
     elif kind in {"ic", "factor_evaluation", "factor_type_analysis"}:

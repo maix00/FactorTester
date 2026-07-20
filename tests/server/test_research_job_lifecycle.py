@@ -287,6 +287,58 @@ def test_run_freezes_configuration_while_workspace_keeps_editing(client) -> None
     assert frozen["run_spec"]["configuration"]["analyses"]["ic"]["factor_configs"] == [{"N": "10d"}]
 
 
+def test_run_preview_matches_submission_without_persisting(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic", "backtest"],
+        "retention_mode": "summary",
+        "step_mode": False,
+    }
+
+    preview = client.post(
+        "/api/runs/preview",
+        json=request_payload,
+    )
+
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    preview_payload = preview.get_json()
+    assert preview_payload["success"] is True
+    assert len(preview_payload["run_spec_hash"]) == 64
+    assert preview_payload["run_spec_version"] == 2
+    assert preview_payload["factor_revision_manifests"]
+    assert all(
+        "source_code" not in manifest
+        and "tree_repr" not in manifest
+        and "math_expr" not in manifest
+        for manifest in preview_payload["factor_revision_manifests"]
+    )
+    assert JobRepository().list(owner="alice") == []
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            """
+            SELECT COUNT(*) FROM sqlite_master
+            WHERE type='table' AND name='research_runs'
+            """
+        ).fetchone()[0] == 0
+
+    submitted = client.post("/api/runs", json=request_payload)
+
+    assert submitted.status_code == 202, submitted.get_data(as_text=True)
+    run = submitted.get_json()["run"]
+    assert preview_payload["run_spec_hash"] == run["run_spec_hash"]
+    assert preview_payload["factor_revision_manifests"] == (
+        run["run_spec"]["configuration"]["shared"][
+            "factor_revision_manifests"
+        ]
+    )
+    assert preview_payload["configuration_fingerprint"] == (
+        run["run_spec"]["configuration_fingerprint"]
+    )
+
+
 def test_run_revalidates_and_freezes_external_factor_artifact(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)
@@ -442,6 +494,10 @@ def test_all_analyses_dispatch_importable_process_runners(client) -> None:
     assert all(":run_" in job.runner_path for job in jobs)
     assert all(job.summary()["execution_mode"] == "process" for job in jobs)
     assert all("page_uuid" not in job.job_spec and "view_uuid" not in job.job_spec for job in jobs)
+    assert all(
+        job.run_spec_hash == response.get_json()["run"]["run_spec_hash"]
+        for job in jobs
+    )
 
 
 def test_submission_snapshots_server_side_scheduling_entitlement(client, monkeypatch) -> None:
@@ -467,6 +523,30 @@ def test_submission_snapshots_server_side_scheduling_entitlement(client, monkeyp
     assert job.entitlement.priority_class == "high"
     assert job.entitlement.weight == 2.0
     assert job.entitlement.max_concurrency == 2
+
+
+def test_submission_payload_cannot_write_terminal_assurance(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+        "terminal_assurance": {
+            "disposition": "trusted",
+            "policy_hash": "forged",
+        },
+    })
+
+    assert response.status_code == 202
+    job = JobRepository().list(
+        owner="alice",
+        run_id=response.get_json()["run_id"],
+    )[0]
+    assert job.terminal_assurance is None
+    assert job.summary()["has_terminal_assurance"] is False
+    assert "terminal_assurance" not in job.summary()
 
 
 def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monkeypatch) -> None:

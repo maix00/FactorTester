@@ -762,6 +762,12 @@ def migrate_legacy_workspaces_and_runs(*, apply: bool = False) -> dict[str, Any]
                         run_spec_version INTEGER NOT NULL,
                         run_spec_hash TEXT NOT NULL,
                         run_spec_json TEXT NOT NULL,
+                        trial_plan_id TEXT NOT NULL DEFAULT '',
+                        trial_plan_hash TEXT NOT NULL DEFAULT '',
+                        trial_plan_version INTEGER NOT NULL DEFAULT 0,
+                        trial_role TEXT NOT NULL DEFAULT '',
+                        trial_stage TEXT NOT NULL DEFAULT '',
+                        comparison_id TEXT NOT NULL DEFAULT '',
                         created_at REAL NOT NULL
                     )
                     """

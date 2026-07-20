@@ -213,7 +213,10 @@ AUTHOR_SDK_MODULES = (
     AuthorSdkModule(
         "tools/factors/Parameters.pyi",
         source="tools/factors/Parameters.py",
-        prelude="from enum import Enum\n",
+        prelude=(
+            "from enum import Enum\n"
+            "from tools.parameters.Parameter import Parameter\n"
+        ),
     ),
     AuthorSdkModule(
         "tools/parameters/__init__.pyi",

@@ -15,6 +15,60 @@ from server.jobs.states import JobStatus
 from server.modules.single_factor_test import sft_bp
 
 
+def _create_job(
+    repository: JobRepository,
+    *,
+    job_id: str,
+    owner: str = "alice",
+    workspace_id: str = "workspace-1",
+    status: JobStatus = JobStatus.SUCCEEDED,
+    kind: str = "backtest",
+) -> None:
+    run_spec = {"workspace_id": workspace_id}
+    repository.create(JobRecord(
+        job_id=job_id,
+        run_id=f"run-{job_id}",
+        owner=owner,
+        workspace_id=workspace_id,
+        kind=kind,
+        status=JobStatus.SUBMITTED,
+        retention_mode="full",
+        deployment_id="test",
+        source_revision="test-backend-revision",
+        runner_path="tests.server.long_lived_worker_fakes:artifact_runner",
+        job_spec={"run_spec": run_spec},
+        run_spec_hash=hashlib.sha256(
+            orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
+        ).hexdigest(),
+        created_at=time.time(),
+    ))
+    repository.transition(job_id, JobStatus.PLANNING)
+    repository.set_execution_plan(
+        job_id,
+        plan={"runner": "artifact_runner"},
+        notices=[],
+        requires_confirmation=False,
+    )
+    if status is JobStatus.CANCELLED:
+        repository.request_cancel(job_id, owner=owner, reason="test_cancel")
+        return
+    repository.transition(job_id, JobStatus.RUNNING)
+    if status is JobStatus.RUNNING:
+        return
+    if status is JobStatus.SUCCEEDED:
+        repository.transition(
+            job_id,
+            status,
+            result_summary={"success": True},
+        )
+    elif status is JobStatus.FAILED:
+        repository.transition(
+            job_id,
+            status,
+            error={"code": "test_failure", "message": "test failure"},
+        )
+
+
 def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
     monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
@@ -26,19 +80,11 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
         session["username"] = "alice"
 
     repository = JobRepository()
-    repository.create(JobRecord(
+    _create_job(
+        repository,
         job_id="job-full",
-        run_id="run-full",
-        owner="alice",
-        workspace_id="workspace-1",
-        kind="backtest",
-        status=JobStatus.SUCCEEDED,
-        retention_mode="full",
-        deployment_id="test",
-        runner_path="tests.server.long_lived_worker_fakes:artifact_runner",
-        job_spec={},
-        created_at=time.time(),
-    ))
+        status=JobStatus.RUNNING,
+    )
     root = tmp_path / "artifacts"
     target = root / "job-full" / "result.json"
     target.parent.mkdir(parents=True)
@@ -52,6 +98,11 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
         content_hash=hashlib.sha256(raw).hexdigest(),
         size_bytes=len(raw),
     )
+    repository.transition(
+        "job-full",
+        JobStatus.SUCCEEDED,
+        result_summary={"success": True},
+    )
 
     loaded = client.get("/api/jobs/job-full/artifacts/result")
     cleared = client.delete("/api/jobs/job-full/artifacts")
@@ -63,6 +114,12 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     assert not target.exists()
     assert job.status_code == 200
     assert job.get_json()["status"] == "succeeded"
+    assert job.get_json()["has_terminal_assurance"] is True
+    assert "terminal_assurance" not in job.get_json()
+    assert (
+        job.get_json()["evidence"]["terminal_assurance"]["disposition"]
+        == "trusted"
+    )
     assert repository.storage_usage(owner="alice") == 0
 
 
@@ -79,19 +136,12 @@ def test_user_can_bulk_clear_retained_results_by_workspace(tmp_path, monkeypatch
     repository = JobRepository()
     root = tmp_path / "artifacts"
     for job_id, workspace_id in (("job-a", "workspace-1"), ("job-b", "workspace-1"), ("job-c", "workspace-2")):
-        repository.create(JobRecord(
+        _create_job(
+            repository,
             job_id=job_id,
-            run_id=f"run-{job_id}",
-            owner="alice",
             workspace_id=workspace_id,
-            kind="backtest",
-            status=JobStatus.SUCCEEDED,
-            retention_mode="full",
-            deployment_id="test",
-            runner_path="tests.server.long_lived_worker_fakes:artifact_runner",
-            job_spec={},
-            created_at=time.time(),
-        ))
+            status=JobStatus.RUNNING,
+        )
         target = root / job_id / "result.json"
         target.parent.mkdir(parents=True)
         raw = orjson.dumps({"job_id": job_id})
@@ -103,6 +153,11 @@ def test_user_can_bulk_clear_retained_results_by_workspace(tmp_path, monkeypatch
             content_type="application/json",
             content_hash=hashlib.sha256(raw).hexdigest(),
             size_bytes=len(raw),
+        )
+        repository.transition(
+            job_id,
+            JobStatus.SUCCEEDED,
+            result_summary={"success": True},
         )
 
     cleared = client.delete("/api/jobs/artifacts?workspace_id=workspace-1")
@@ -137,19 +192,17 @@ def test_user_can_delete_terminal_job_history_without_touching_active_or_other_j
         ("other-owner", "bob", "workspace-1", JobStatus.SUCCEEDED),
     )
     for job_id, owner, workspace_id, status in rows:
-        repository.create(JobRecord(
+        _create_job(
+            repository,
             job_id=job_id,
-            run_id=f"run-{job_id}",
             owner=owner,
             workspace_id=workspace_id,
-            kind="backtest",
-            status=status,
-            retention_mode="full",
-            deployment_id="test",
-            runner_path="tests.server.long_lived_worker_fakes:artifact_runner",
-            job_spec={},
-            created_at=time.time(),
-        ))
+            status=(
+                JobStatus.RUNNING
+                if job_id == "done"
+                else status
+            ),
+        )
     root = tmp_path / "artifacts"
     target = root / "done" / "result.json"
     target.parent.mkdir(parents=True)
@@ -162,6 +215,11 @@ def test_user_can_delete_terminal_job_history_without_touching_active_or_other_j
         content_type="application/json",
         content_hash=hashlib.sha256(raw).hexdigest(),
         size_bytes=len(raw),
+    )
+    repository.transition(
+        "done",
+        JobStatus.SUCCEEDED,
+        result_summary={"success": True},
     )
 
     missing_workspace = client.delete("/api/jobs")
@@ -206,19 +264,13 @@ def test_terminal_job_stream_resets_when_daemon_lost_live_event_state(tmp_path, 
     client = app.test_client()
     with client.session_transaction() as session:
         session["username"] = "alice"
-    JobRepository().create(JobRecord(
+    repository = JobRepository()
+    _create_job(
+        repository,
         job_id="job-after-restart",
-        run_id="run-after-restart",
-        owner="alice",
-        workspace_id="workspace-1",
         kind="ic",
         status=JobStatus.SUCCEEDED,
-        deployment_id="test",
-        runner_path="tests.server.long_lived_worker_fakes:cpu_runner",
-        job_spec={},
-        result_summary={"success": True},
-        created_at=time.time(),
-    ))
+    )
 
     class EmptyDaemon:
         def events(self, job_id, *, after, timeout):
@@ -228,7 +280,7 @@ def test_terminal_job_stream_resets_when_daemon_lost_live_event_state(tmp_path, 
             }
 
     monkeypatch.setattr(
-        "server.modules.single_factor_test.backtest_jobs._daemon_client",
+        "server.modules.single_factor_test.backtest_job_reads._daemon_client",
         lambda: EmptyDaemon(),
     )
 

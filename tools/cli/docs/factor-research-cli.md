@@ -42,3 +42,40 @@ Saved templates use the same open ResearchConfiguration schema as a workspace. L
 CLI jobs use the `durable` lifecycle and do not depend on `page_uuid` or a browser view lease. Web observer-bound jobs may be cancelled after their view lease expires; refresh can reclaim the same view UUID during its grace period.
 
 Every comparison must keep the ranking universe/product mask, signal visibility, forward-return window, next-open execution, fees, capacity, and sample slices aligned. Failed jobs retain their traceback, cancelled jobs retain a reason, and terminal records remain queryable until the configured TTL.
+
+## Confirm data availability before sample design
+
+The Planning Agent first confirms the product range with the user. It then
+requests only that scope; availability must never widen it through an implicit
+provider fallback.
+
+```bash
+factortester products availability \
+  --product A.DCE \
+  --source Local \
+  --json
+```
+
+The default command performs a low-cost static inspection. `--probe` explicitly
+authorizes a registered connector to perform a network or stream probe. A
+provider being installed, reachable, or entitled does not by itself prove
+real-time latency or point-in-time coverage.
+
+Tiger is a selectable source for the first-class OSE products `JNI.OSE`,
+`JMI.OSE`, `JTM.OSE`, `JTI.OSE`, and `NK225MC.OSE`. Its SDK runtime and
+protected properties path are server-side settings; they are never returned
+to the CLI.
+
+```bash
+factortester products availability \
+  --product JNI.OSE \
+  --product JMI.OSE \
+  --source Tiger \
+  --probe \
+  --json
+```
+
+The response reports the file-backed MIN1/DAY1 cache independently from the
+L2 probe. An active `OSEFuturesQuoteLv2` entitlement is reported separately
+from `latency_class`; the latter remains `unverified` until a market-session
+latency test has been accepted.

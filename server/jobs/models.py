@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .assurance import TerminalAssuranceSummary
 from .states import JobStatus
 
 
@@ -57,6 +58,7 @@ class JobRecord:
     runner_path: str = ""
     job_spec: dict[str, Any] = field(default_factory=dict)
     job_spec_hash: str = ""
+    run_spec_hash: str = ""
     worker_pid: int | None = None
     worker_exitcode: int | None = None
     cancel_requested_at: float | None = None
@@ -67,6 +69,7 @@ class JobRecord:
     plan_notices: list[dict[str, Any]] = field(default_factory=list)
     result_summary: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
+    terminal_assurance: TerminalAssuranceSummary | None = None
     created_at: float = 0.0
     planned_at: float | None = None
     approved_at: float | None = None
@@ -91,6 +94,7 @@ class JobRecord:
             "deployment_id": self.deployment_id,
             "source_revision": self.source_revision,
             "job_spec_hash": self.job_spec_hash,
+            "run_spec_hash": self.run_spec_hash,
             "worker_pid": self.worker_pid,
             "worker_exitcode": self.worker_exitcode,
             "cancel_requested": self.cancel_requested_at is not None,
@@ -101,6 +105,7 @@ class JobRecord:
             "plan_notices": list(self.plan_notices),
             "has_result": self.result_summary is not None,
             "has_error": self.error is not None,
+            "has_terminal_assurance": self.terminal_assurance is not None,
             "pinned": pinned,
             "created_at": self.created_at,
             "planned_at": self.planned_at,

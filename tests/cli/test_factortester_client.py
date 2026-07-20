@@ -65,7 +65,33 @@ def fake_server() -> Iterator[str]:
         payload = request.get_json()
         assert payload["workspace_id"] == "workspace-1"
         assert payload["configuration_revision"] == 1
+        assert payload["trial_binding"] == {
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+        }
         return jsonify(success=True, run_id="run-1", jobs=[{"job_id": "job-1", "kind": "ic"}]), 202
+
+    @app.post("/api/runs/preview")
+    def preview_run():
+        payload = request.get_json()
+        assert payload == {
+            "workspace_id": "workspace-1",
+            "configuration_revision": 1,
+            "analyses": ["ic"],
+            "retention_mode": "summary",
+            "step_mode": False,
+        }
+        return jsonify(
+            success=True,
+            run_spec_hash="a" * 64,
+            run_spec_version=1,
+            configuration_id="configuration-1",
+            configuration_revision=1,
+            configuration_fingerprint="b" * 64,
+            analyses=["ic"],
+            retention_mode="summary",
+            step_mode=False,
+        )
 
     @app.post("/api/external-factor-artifacts/validate")
     def validate_external_factor_artifact():
@@ -114,6 +140,23 @@ def fake_server() -> Iterator[str]:
     def product_groups():
         return jsonify(success=True, product_groups=[{"id": "pg-1", "name": "中国期货日盘"}])
 
+    @app.post("/api/data-availability")
+    def data_availability():
+        payload = request.get_json()
+        assert payload == {
+            "products": ["A.DCE"],
+            "sources": ["Local"],
+            "probe": False,
+            "expanded": False,
+        }
+        return jsonify(
+            success=True,
+            schema_version=1,
+            profile_hash="sha256:availability",
+            product_scope=["A.DCE"],
+            entries=[],
+        )
+
     @app.get("/api/factor-library-overview")
     def factor_library():
         return jsonify(success=True, factors=[{"alias": "SgCCS|N:2m"}])
@@ -130,13 +173,30 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     workspace = client.create_workspace(factor_families=[{"alias": "MmRet"}])
     assert workspace["workspace_id"] == "workspace-1"
     assert client.list_workspaces()[0]["workspace_id"] == "workspace-1"
-    assert client.submit_run("workspace-1", 1, analyses=["ic"])["run_id"] == "run-1"
+    assert client.submit_run(
+        "workspace-1",
+        1,
+        analyses=["ic"],
+        trial_binding={
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+        },
+    )["run_id"] == "run-1"
+    assert client.preview_run(
+        "workspace-1",
+        1,
+        analyses=["ic"],
+    )["run_spec_hash"] == "a" * 64
     assert client.validate_external_factor_artifact(
         "/research/gtht_handoff.json"
     )["artifact_id"] == "academic_mom:abc"
     assert client.list_jobs(workspace_id="workspace-1")[0]["job_id"] == "job-1"
     assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
+    assert client.data_availability(
+        products=["A.DCE"],
+        sources=["Local"],
+    )["profile_hash"] == "sha256:availability"
 
 
 def test_client_login_persists_across_processes_and_logout_clears_cookie(

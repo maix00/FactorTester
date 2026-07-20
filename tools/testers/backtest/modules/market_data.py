@@ -289,7 +289,7 @@ class MarketDataModule(ExecutableModule):
         "data_source": FieldDefinition(
             public=True, label="数据源", default="", control_template="select", tab="data_source",
             visible_when={"data_source_mode": ("list",)},
-            options=(("", "自动"), ("Local", "Local")),
+            options=(("", "自动"), ("Local", "Local"), ("Tiger", "Tiger")),
             chip_template="数据源: {value}",
             tab_label="数据源",
             tab_order=35,

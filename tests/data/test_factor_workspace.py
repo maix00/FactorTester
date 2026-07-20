@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -22,6 +23,12 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     public_dir = workspace_root / "public_factors"
     custom_dir.mkdir(parents=True)
     public_dir.mkdir(parents=True)
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$alice@1"}),
+        encoding="utf-8",
+    )
 
     stale_custom = custom_dir / "OldFactor.py"
     stale_public = public_dir / "OldPublic.py"
@@ -29,6 +36,12 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     stale_custom.write_text("class OldFactor(FactorFamily):\n    pass\n", encoding="utf-8")
     stale_public.write_text("class OldPublic(FactorFamily):\n    pass\n", encoding="utf-8")
     stale_root.write_text("old\n", encoding="utf-8")
+    report = workspace_root / "research" / "branches" / "branch-1" / "REPORT.md"
+    note = workspace_root / "research" / "notes" / "agent-note.md"
+    report.parent.mkdir(parents=True)
+    note.parent.mkdir(parents=True)
+    report.write_text("derived report\n", encoding="utf-8")
+    note.write_text("provisional note\n", encoding="utf-8")
 
     factor_storage = factor_workspace_storage
     monkeypatch.setattr(factor_storage, "factor_source_root", lambda username: str(workspace_root))
@@ -74,6 +87,8 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert not stale_custom.exists()
     assert not stale_public.exists()
     assert not stale_root.exists()
+    assert report.read_text(encoding="utf-8") == "derived report\n"
+    assert note.read_text(encoding="utf-8") == "provisional note\n"
     assert (custom_dir / "FreshFactor.py").read_text(encoding="utf-8") == "class FreshFactor(FactorFamily):\n    pass\n"
     assert (public_dir / "PublicFactor.py").read_text(encoding="utf-8") == "class PublicFactor(FactorFamily):\n    pass\n"
     assert (workspace_root / ".factor_workspace" / "manifest.json").exists()
@@ -105,6 +120,7 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert settings["python.analysis.diagnosticSeverityOverrides"]["reportMissingModuleSource"] == "none"
     pyright_config = json.loads((workspace_root / "pyrightconfig.json").read_text(encoding="utf-8"))
     assert pyright_config["include"] == ["custom_factors", "public_factors", "policies", "tools", "pandas"]
+    assert pyright_config["pythonVersion"] == "3.10"
     assert pyright_config["reportMissingModuleSource"] == "none"
     assert "venv" not in pyright_config
     assert "venvPath" not in pyright_config
@@ -123,10 +139,134 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert manifest["git_selected_branch"] == "upload"
 
 
+def test_factor_workspace_build_refuses_root_owned_by_another_profile(monkeypatch, tmp_path):
+    workspace_root = tmp_path / "shared-factor-root"
+    custom_dir = workspace_root / "custom_factors"
+    custom_dir.mkdir(parents=True)
+    protected_source = custom_dir / "OwnerFactor.py"
+    protected_source.write_text("owner source\n", encoding="utf-8")
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$owner@1"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(workspace_root),
+    )
+
+    with pytest.raises(PermissionError, match="default\\$owner@1"):
+        factor_workspace.build_factor_workspace("default$other@1")
+
+    assert protected_source.read_text(encoding="utf-8") == "owner source\n"
+
+
+def test_factor_workspace_sync_refuses_root_owned_by_another_profile(
+    monkeypatch,
+    tmp_path,
+):
+    workspace_root = tmp_path / "shared-factor-root"
+    custom_dir = workspace_root / "custom_factors"
+    custom_dir.mkdir(parents=True)
+    protected_source = custom_dir / "OwnerFactor.py"
+    protected_source.write_text("owner source\n", encoding="utf-8")
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$owner@1"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(workspace_root),
+    )
+
+    with pytest.raises(PermissionError, match="default\\$owner@1"):
+        factor_workspace.sync_factor_workspace(
+            "default$other@1",
+            branch_mode="force",
+        )
+
+    assert protected_source.read_text(encoding="utf-8") == "owner source\n"
+
+
+def test_factor_workspace_push_refuses_root_owned_by_another_profile(
+    monkeypatch,
+    tmp_path,
+):
+    workspace_root = tmp_path / "shared-factor-root"
+    custom_dir = workspace_root / "custom_factors"
+    custom_dir.mkdir(parents=True)
+    protected_source = custom_dir / "OwnerFactor.py"
+    protected_source.write_text("owner source\n", encoding="utf-8")
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$owner@1"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(workspace_root),
+    )
+
+    with pytest.raises(PermissionError, match="default\\$owner@1"):
+        factor_workspace.push_factor_workspace("default$other@1")
+
+    assert protected_source.read_text(encoding="utf-8") == "owner source\n"
+
+
+def test_factor_workspace_build_refuses_nonempty_unmanaged_root(monkeypatch, tmp_path):
+    workspace_root = tmp_path / "unmanaged-root"
+    workspace_root.mkdir()
+    protected_file = workspace_root / "research-notes.md"
+    protected_file.write_text("keep me\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(workspace_root),
+    )
+
+    with pytest.raises(PermissionError, match="没有有效的 Factor Workspace 所有权标记"):
+        factor_workspace.build_factor_workspace("default$alice@1")
+
+    assert protected_file.read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_generated_workspace_commit_suppresses_recursive_autosync(monkeypatch):
+    observed: list[str | None] = []
+    monkeypatch.delenv("FACTOR_WORKSPACE_SKIP_AUTOSYNC", raising=False)
+    monkeypatch.setattr(
+        FactorWorkspaceRepository,
+        "commit",
+        lambda self, message: observed.append(
+            __import__("os").environ.get("FACTOR_WORKSPACE_SKIP_AUTOSYNC")
+        ),
+    )
+
+    repository = FactorWorkspaceRepository("default$alice@1")
+    repository.commit_generated("chore: generated")
+
+    assert observed == ["1"]
+    assert __import__("os").environ.get("FACTOR_WORKSPACE_SKIP_AUTOSYNC") is None
+
+
 def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, tmp_path):
     workspace_root = tmp_path / "factor-root"
     public_dir = workspace_root / "public_factors"
     public_dir.mkdir(parents=True)
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$alice@1"}),
+        encoding="utf-8",
+    )
     (public_dir / "PublicFactor.py").write_text("class PublicFactor(FactorFamily):\n    pass\n", encoding="utf-8")
 
     factor_storage = factor_workspace_storage
@@ -144,6 +284,12 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
     subprocess.run(["git", "-C", str(workspace_root), "config", "user.name", "Test User"], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(workspace_root), "config", "user.email", "test@example.com"], check=True, capture_output=True, text=True)
     (workspace_root / "README.md").write_text("hello\n", encoding="utf-8")
+    manifest_dir = workspace_root / ".factor_workspace"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"username": "default$alice@1"}),
+        encoding="utf-8",
+    )
     subprocess.run(["git", "-C", str(workspace_root), "add", "README.md"], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(workspace_root), "commit", "-m", "init"], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(workspace_root), "checkout", "-b", "download"], check=True, capture_output=True, text=True)
@@ -236,6 +382,32 @@ def test_author_sdk_is_explicit_resolvable_and_excludes_runtime_internals(tmp_pa
             assert module_path.with_suffix(".pyi").exists() or (module_path / "__init__.pyi").exists(), (
                 f"{stub_path.relative_to(workspace_root)} imports missing {node.module}"
             )
+
+
+def test_generated_factor_workspace_passes_real_pyright(tmp_path):
+    workspace_root = tmp_path / "workspace"
+    factor_workspace_construct._ensure_workspace_layout(str(workspace_root))
+    factor_workspace_construct._sync_tools_sdk(str(workspace_root))
+    (workspace_root / "custom_factors" / "ClientAlpha.py").write_text(
+        "from tools.factors import FactorFamily\n\n"
+        "class ClientAlpha(FactorFamily):\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+
+    pyright = shutil.which("pyright")
+    assert pyright is not None, "real Pyright is required for factor-workspace acceptance"
+    completed = subprocess.run(
+        [pyright, "--outputjson"],
+        cwd=workspace_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    report = json.loads(completed.stdout)
+    assert report["summary"]["errorCount"] == 0, report
+    assert report["generalDiagnostics"] == [], report
 
 
 def test_workspace_hooks_target_stable_feat_root(monkeypatch, tmp_path):

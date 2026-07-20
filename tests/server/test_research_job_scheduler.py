@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import replace
+
+import orjson
 
 from server.jobs.models import JobRecord, SchedulingEntitlement
 from server.jobs.repository import JobRepository
@@ -20,8 +23,13 @@ def _record(
     loops: int = 50_000,
     seconds: float | None = None,
 ) -> JobRecord:
+    run_spec = {
+        "workspace_id": "workspace-1",
+        "products": ["A.DCE"],
+    }
     job_spec = {
         "run_id": f"run-{job_id}",
+        "run_spec": run_spec,
         "loops": loops,
         "product_selections": {
             "core": {
@@ -41,8 +49,12 @@ def _record(
         kind="fake",
         status=JobStatus.SUBMITTED,
         deployment_id="test",
+        source_revision="test-backend-revision",
         runner_path=f"{RUNNERS}:{runner}",
         job_spec=job_spec,
+        run_spec_hash=hashlib.sha256(
+            orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
+        ).hexdigest(),
         entitlement=SchedulingEntitlement(max_concurrency=1),
         created_at=time.time(),
     )
@@ -80,10 +92,13 @@ def test_scheduler_plans_and_executes_real_job_in_child_process(tmp_path) -> Non
     assert JobStatus.RUNNING in seen
     assert completed.worker_pid is not None
     assert completed.worker_pid != 0
+    assert completed.worker_exitcode is None
     assert completed.result_summary["success"] is True
     assert completed.result_summary["pid"] == completed.worker_pid
     assert len(completed.execution_plan["cache_keys"]) == 1
     assert "A.DCE" in completed.execution_plan["cache_keys"][0]
+    assert completed.terminal_assurance is not None
+    assert completed.terminal_assurance.disposition == "trusted"
     assert events["latest_progress"]["event"] == "progress"
 
 
@@ -199,8 +214,13 @@ def test_scheduler_persists_failure_cancel_and_worker_crash(tmp_path) -> None:
 
     assert cancelled.cancel_reason == "explicit_cancel"
     assert cancelled.error["cancelled"] is True
+    assert cancelled.terminal_assurance is not None
+    assert cancelled.terminal_assurance.disposition == "not_usable"
     assert crashed.error["code"] == "worker_crashed"
     assert crashed.worker_exitcode == 17
+    assert crashed.terminal_assurance is not None
+    assert crashed.terminal_assurance.disposition == "maintenance_required"
+    assert "worker_crashed" in crashed.terminal_assurance.anomaly_codes
 
 
 def test_cancel_requested_before_result_commit_wins_result_race(tmp_path) -> None:
@@ -315,7 +335,10 @@ def test_paused_step_job_cancels_and_releases_its_worker(tmp_path) -> None:
             scheduler, repository, "after-cancel", {JobStatus.SUCCEEDED}
         )
 
-    assert repository.require("step-cancel").status is JobStatus.CANCELLED
+    cancelled = repository.require("step-cancel")
+    assert cancelled.status is JobStatus.CANCELLED
+    assert cancelled.terminal_assurance is not None
+    assert cancelled.terminal_assurance.disposition == "not_usable"
     assert completed.worker_pid == pid
 
 

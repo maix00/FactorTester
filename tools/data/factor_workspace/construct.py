@@ -413,7 +413,7 @@ def _clear_workspace_generated(root: str) -> list[str]:
     removed: list[str] = []
     if not os.path.isdir(root):
         return removed
-    preserve = {".git", ".gitignore"}
+    preserve = {".git", ".gitignore", "research"}
     for name in sorted(os.listdir(root)):
         if name in preserve:
             continue
@@ -535,6 +535,7 @@ def _sync_pyright_config(root: str) -> bool:
         {
             "include": ["custom_factors", "public_factors", "policies", "tools", "pandas"],
             "extraPaths": ["."],
+            "pythonVersion": "3.10",
             "reportMissingModuleSource": "none",
         },
     )
@@ -642,7 +643,7 @@ def build_factor_workspace(username: str) -> dict[str, Any]:
     git_info = result.get("git") or {}
     if git_info.get("git_enabled"):
         repository = FactorWorkspaceRepository(username)
-        commit_sha = repository.commit("chore: rebuild factor workspace")
+        commit_sha = repository.commit_generated("chore: rebuild factor workspace")
         if commit_sha:
             created_branches = repository.materialize_branches()
             result["git_commit_sha"] = commit_sha

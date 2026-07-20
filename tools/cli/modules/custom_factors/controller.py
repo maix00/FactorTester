@@ -121,20 +121,48 @@ def describe_factor(
     import json
 
     client = client_from_config()
-    factor = _resolve_factor_from_catalog(
-        client.custom_factor_catalog(include_subordinates=include_subordinates),
-        factor_family,
-        source_mode=source_mode,
+    qualified_owner, lookup_family = _split_owner_qualified_factor_ref(
+        factor_family
     )
+    requested_owner = owner_username or qualified_owner or ""
+    factor = _resolve_factor_from_catalog(
+        client.custom_factor_catalog(
+            include_subordinates=(
+                include_subordinates or bool(requested_owner)
+            )
+        ),
+        lookup_family,
+        source_mode=source_mode,
+        owner_username=requested_owner,
+    )
+    current_username = str(factor.pop("_current_username", "") or "")
+    factor_owner = str(
+        factor.get("owner_username") or requested_owner or ""
+    )
+    cross_owner = bool(
+        not factor.get("is_public")
+        and factor_owner
+        and current_username
+        and factor_owner != current_username
+    )
+    if source_code and cross_owner:
+        raise click.ClickException(
+            "跨账号登记因子只授权执行，不授权读取源码或数学表达式"
+        )
     validation_payload: dict[str, Any]
     if factor.get("is_public"):
         validation_payload = {"is_public": True, "factor_name": factor.get("name") or factor_family}
+    elif cross_owner:
+        validation_payload = {}
     else:
         validation_payload = {
-            "factor_id": factor.get("id") or factor_family,
-            "owner_username": owner_username or factor.get("owner_username") or "",
+            "factor_id": factor.get("id") or lookup_family,
+            "owner_username": factor_owner,
         }
-    validation = client.validate_factor_expr(validation_payload)
+    validation = (
+        client.validate_factor_expr(validation_payload)
+        if validation_payload else {}
+    )
     if validation.get("valid") is False:
         raise click.ClickException(str(validation.get("error") or "因子表达式解析失败"))
     payload = {
@@ -142,7 +170,8 @@ def describe_factor(
             "id": factor.get("id") or "",
             "name": factor.get("name") or factor_family,
             "source": "public" if factor.get("is_public") else "custom",
-            "owner_username": factor.get("owner_username") or owner_username or "",
+            "owner_username": factor_owner,
+            "source_access": not cross_owner,
             "chinese_name": factor.get("chinese_name") or validation.get("desc") or "",
             "description": factor.get("description") or validation.get("description") or "",
             "params": validation.get("params") or factor.get("params") or [],
@@ -811,6 +840,7 @@ def _resolve_factor_from_catalog(
     factor_family: str,
     *,
     source_mode: str,
+    owner_username: str = "",
 ) -> dict[str, Any]:
     needle = factor_family.strip()
     if not needle:
@@ -829,10 +859,29 @@ def _resolve_factor_from_catalog(
             str(item.get("name") or ""),
             str(item.get("factor_family") or ""),
         }
+        and (
+            not owner_username
+            or str(item.get("owner_username") or "") == owner_username
+        )
     ]
     if not matches:
         raise click.ClickException(f"找不到因子家族: {factor_family}")
-    return matches[0]
+    return dict(
+        matches[0],
+        _current_username=str(payload.get("current_username") or ""),
+    )
+
+
+def _split_owner_qualified_factor_ref(
+    factor_family: str,
+) -> tuple[str, str]:
+    value = str(factor_family or "").strip()
+    if ":" not in value:
+        return "", value
+    owner, family = value.split(":", 1)
+    if not owner or not family or owner == "$COMMON":
+        return "", value
+    return owner, family
 
 
 def _operator_keys_from_tree(tree_repr: str) -> list[str]:
