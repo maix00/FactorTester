@@ -23,7 +23,7 @@ def cli() -> None:
     \b
     常用路径:
       factortester configure --host 127.0.0.1 --port 8114
-      factortester login --username 18717974771
+      factortester login --username <username>
       factortester doctor
       factortester factor-plan --factor-family SgCCS --configuration-file research-config.json
       # agent 因子研究：安装/使用 longbridge-quant、quantitative-research，并阅读 tools/cli/docs/factor-research-cli.md
