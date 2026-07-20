@@ -10,7 +10,9 @@ import uuid
 
 from .artifacts import install_asset
 from .contracts import validate_release_manifest
+from .health import release_is_healthy
 from .locations import validate_client_root
+from .materialize import materialize_release, install_stable_launchers
 from .storage import json_hash, read_json, utc_now, write_json
 
 
@@ -57,6 +59,8 @@ class ClientReleaseStore:
                 raise ValueError("installed version conflicts with manifest")
             if current.get("version") != release.version:
                 self._write_pointer(release.version, release.manifest_hash)
+            if (existing.get("materialized") or {}).get("python"):
+                install_stable_launchers(self.root)
             return existing
 
         self.releases.mkdir(parents=True, exist_ok=True)
@@ -71,16 +75,20 @@ class ClientReleaseStore:
                 )
                 for asset in release.assets
             ]
+            materialized = materialize_release(staging, asset_receipts)
             receipt = self._build_receipt(
                 version=release.version,
                 release_id=release.release_id,
                 manifest_hash=release.manifest_hash,
                 previous_version=str(current.get("version") or ""),
                 assets=asset_receipts,
+                materialized=materialized,
             )
             write_json(staging / "receipt.json", receipt)
             os.replace(staging, target)
             self._write_pointer(release.version, release.manifest_hash)
+            if materialized.get("python"):
+                install_stable_launchers(self.root)
             return receipt
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
@@ -102,13 +110,14 @@ class ClientReleaseStore:
             if current.get("version")
             else None
         )
+        version_root = self.releases / str(current.get("version") or "")
         return {
             "schema_version": 1,
             "install_root": str(self.root),
             "current_version": current.get("version"),
             "manifest_hash": current.get("manifest_hash"),
             "installed_versions": versions,
-            "healthy": receipt is not None,
+            "healthy": release_is_healthy(version_root, receipt),
             "receipt": receipt,
         }
 
@@ -140,6 +149,7 @@ class ClientReleaseStore:
         manifest_hash: str,
         previous_version: str,
         assets: list[dict[str, Any]],
+        materialized: dict[str, Any],
     ) -> dict[str, Any]:
         body = {
             "schema_version": 1,
@@ -149,6 +159,7 @@ class ClientReleaseStore:
             "previous_version": previous_version or None,
             "installed_at": utc_now(),
             "assets": assets,
+            "materialized": materialized,
         }
         return {**body, "receipt_hash": json_hash(body)}
 

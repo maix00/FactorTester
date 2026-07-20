@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from io import BytesIO
 import json
 from pathlib import Path
+import subprocess
+import zipfile
 
 import pytest
 
@@ -15,16 +18,18 @@ def _release(
     root: Path,
     *,
     version: str,
-    content: bytes,
 ) -> tuple[dict, Path]:
     root.mkdir(parents=True, exist_ok=True)
-    asset = root / f"asset-{version}.whl"
+    content = _wheel(version)
+    filename = f"factortester-{version}-py3-none-any.whl"
+    asset = root / filename
     asset.write_bytes(content)
     manifest, public_key = signed_manifest(
         root,
         version=version,
         sha256=sha256(content).hexdigest(),
         size=len(content),
+        filename=filename,
     )
     manifest["assets"][0]["url"] = asset.as_uri()
 
@@ -32,8 +37,6 @@ def _release(
     from .test_release_manifest import _keys
     from tools.cli.release.contracts import canonical_unsigned_manifest
     import base64
-    import subprocess
-
     private_key, public_key = _keys(root / f"keys-{version}")
     payload = root / f"payload-{version}"
     signature = root / f"signature-{version}"
@@ -55,6 +58,36 @@ def _release(
     return manifest, public_key
 
 
+def _wheel(version: str) -> bytes:
+    output = BytesIO()
+    dist_info = f"factortester-{version}.dist-info"
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("tools/__init__.py", "")
+        archive.writestr("tools/cli/__init__.py", "")
+        archive.writestr(
+            "tools/cli/app.py",
+            "def cli():\n"
+            f"    print('fixture client {version}')\n",
+        )
+        archive.writestr(
+            f"{dist_info}/METADATA",
+            "Metadata-Version: 2.1\n"
+            f"Name: factortester\nVersion: {version}\n",
+        )
+        archive.writestr(
+            f"{dist_info}/WHEEL",
+            "Wheel-Version: 1.0\nGenerator: tests\n"
+            "Root-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr(
+            f"{dist_info}/entry_points.txt",
+            "[console_scripts]\n"
+            "factortester = tools.cli.app:cli\n",
+        )
+        archive.writestr(f"{dist_info}/RECORD", "")
+    return output.getvalue()
+
+
 def test_install_update_status_and_rollback_are_atomic(
     tmp_path: Path,
 ) -> None:
@@ -62,12 +95,10 @@ def test_install_update_status_and_rollback_are_atomic(
     first, first_key = _release(
         tmp_path / "first",
         version="1.0.0",
-        content=b"wheel-one",
     )
     second, second_key = _release(
         tmp_path / "second",
         version="1.1.0",
-        content=b"wheel-two",
     )
 
     planned = store.plan(first, public_key=first_key)
@@ -86,6 +117,13 @@ def test_install_update_status_and_rollback_are_atomic(
     )
     assert retry == first_receipt
     assert store.status()["current_version"] == "1.0.0"
+    assert first_receipt["materialized"]["python"]["commands"] == [
+        "factortester"
+    ]
+    launcher = store.root / "bin" / "factortester"
+    assert subprocess.check_output([launcher], text=True).strip().endswith(
+        "1.0.0"
+    )
 
     second_receipt = store.install(
         second,
@@ -94,11 +132,22 @@ def test_install_update_status_and_rollback_are_atomic(
     )
     assert second_receipt["previous_version"] == "1.0.0"
     assert store.status()["current_version"] == "1.1.0"
+    assert subprocess.check_output([launcher], text=True).strip().endswith(
+        "1.1.0"
+    )
     assert store.rollback()["current_version"] == "1.0.0"
+    assert subprocess.check_output([launcher], text=True).strip().endswith(
+        "1.0.0"
+    )
 
     assert (store.root / "releases" / "1.0.0" / "receipt.json").is_file()
     assert (store.root / "releases" / "1.1.0" / "receipt.json").is_file()
     assert not list((store.root / "releases").glob(".staging-*"))
+    (
+        store.root / "releases" / "1.0.0"
+        / "runtime" / "python" / "bin" / "factortester"
+    ).unlink()
+    assert store.status()["healthy"] is False
 
 
 def test_failed_asset_verification_preserves_current_pointer(
@@ -108,13 +157,11 @@ def test_failed_asset_verification_preserves_current_pointer(
     first, first_key = _release(
         tmp_path / "first",
         version="1.0.0",
-        content=b"wheel-one",
     )
     store.install(first, public_key=first_key, allow_file_urls=True)
     broken, broken_key = _release(
         tmp_path / "broken",
         version="1.1.0",
-        content=b"expected",
     )
     Path(broken["assets"][0]["url"].removeprefix("file://")).write_bytes(
         b"tampered"
