@@ -6,6 +6,7 @@ struct FactorTesterClientApp: App {
     @StateObject private var config = ServerConfig.shared
     @StateObject private var session = SessionStore()
     @StateObject private var registry = ModuleRegistry()
+    @StateObject private var updates = ClientReleaseController()
 
     var body: some Scene {
         WindowGroup {
@@ -19,6 +20,7 @@ struct FactorTesterClientApp: App {
                 )
                 #if os(macOS)
                 .task {
+                    Task { await updates.checkAtLaunch() }
                     try? await BundledRuntimeActivator.run()
                     _ = try? LegacyAppNameMigration.run()
                 }

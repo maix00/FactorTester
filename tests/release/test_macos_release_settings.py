@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = ROOT / "apple" / "Sources"
 
 
-def test_macos_settings_use_single_verified_github_dmg() -> None:
+def test_macos_settings_use_signed_server_first_update_channels() -> None:
     controller = (
         SOURCES / "Features" / "Settings" / "ClientReleaseController.swift"
     ).read_text(encoding="utf-8")
@@ -20,23 +20,49 @@ def test_macos_settings_use_single_verified_github_dmg() -> None:
         SOURCES / "Features" / "Home" / "HomeView.swift"
     ).read_text(encoding="utf-8")
 
-    models = (
-        SOURCES / "Features" / "Updates" / "GitHubReleaseModels.swift"
-    ).read_text(encoding="utf-8")
     store = (
         SOURCES / "Features" / "Updates" / "AppUpdateStore.swift"
     ).read_text(encoding="utf-8")
-    assert "maix00/FactorTester-Client/releases/latest" in controller
-    assert 'name == "FactorTester-Client.dmg"' in models
-    assert 'hasPrefix("sha256:")' in models
+    resolution = (
+        SOURCES / "Features" / "Settings" / "ClientReleaseResolution.swift"
+    ).read_text(encoding="utf-8")
+    app = (SOURCES / "App" / "FactorTesterClientApp.swift").read_text(
+        encoding="utf-8"
+    )
+    manifest = (
+        SOURCES / "Features" / "Updates" / "AppUpdateManifest.swift"
+    ).read_text(encoding="utf-8")
+    inspector = (
+        SOURCES / "Features" / "Updates" / "AppInstallerInspector.swift"
+    ).read_text(encoding="utf-8")
+    installer = (
+        SOURCES / "Features" / "Updates" / "AppUpdateInstaller.swift"
+    ).read_text(encoding="utf-8")
+    assert "/api/client/releases/\\(channel).json" in resolution
+    assert "github.com/maix00/FactorTester-Client/releases/latest/download" in resolution
+    assert "api.github.com" not in resolution + controller
     assert "SHA256()" in store
     assert "prefix(2)" in store
-    assert "NSWorkspace.shared.open" in controller
+    assert "NSWorkspace.shared.open" in installer
     assert "replaceItemAt" not in controller
     for label in ("当前版本", "可用版本", "运行状态"):
         assert label in status
-    for label in ("公开仓库", "客户端更新", "下载、校验并打开 DMG"):
+    for label in ("公开仓库", "客户端更新", "验证、下载并打开 DMG"):
         assert label in view
+    for label in ("Stable", "Beta", "最后检查", "启动时自动检查"):
+        assert label in view
+    assert "checkAtLaunch" in app and "Task {" in app
+    assert "6 * 60 * 60" in controller
+    for contract in (
+        "manifestDigestMismatch", "manifestSignatureMismatch",
+        "bundleID == \"com.gtht.client\"", "VersionOrder.isNewer",
+    ):
+        assert contract in manifest + controller
+    assert "hdiutil" in inspector
+    assert "Developer ID Application" in inspector
+    assert "source=Notarized Developer ID" in inspector
+    assert "AppUpdateInstalling" in installer
+    assert "Sparkle" in installer
     assert "ClientSidebar" in home
     assert "openTab: open" in home
     assert "approval" not in view.lower()

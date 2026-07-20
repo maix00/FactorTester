@@ -11,6 +11,7 @@ PROJECT="$APPLE_DIR/FactorTester-Client.xcodeproj"
 DERIVED_DATA="$APPLE_DIR/build"
 APP_BUNDLE="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+INSTALLED_APP="/Applications/$APP_NAME.app"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 
@@ -27,6 +28,43 @@ xcodebuild \
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
+}
+
+bundle_hash() {
+  (
+    cd "$1"
+    find . -type f -print0 | LC_ALL=C sort -z |
+      xargs -0 shasum -a 256 | shasum -a 256 | awk '{print $1}'
+  )
+}
+
+verify_install() {
+  local source="$1"
+  local installed="$2"
+  local source_plist="$source/Contents/Info.plist"
+  local installed_plist="$installed/Contents/Info.plist"
+  local key
+  for key in CFBundleIdentifier CFBundleShortVersionString CFBundleVersion; do
+    test "$(/usr/libexec/PlistBuddy -c "Print :$key" "$source_plist")" = \
+      "$(/usr/libexec/PlistBuddy -c "Print :$key" "$installed_plist")"
+  done
+  test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$installed_plist")" = \
+    "$BUNDLE_ID"
+  test "$(bundle_hash "$source")" = "$(bundle_hash "$installed")"
+  local cli="Contents/Resources/FactorTester/bin/factortester"
+  local receipt="Contents/Resources/FactorTester/bundle-receipt.json"
+  test -x "$installed/$cli"
+  test -f "$installed/$receipt"
+  test "$(shasum -a 256 "$source/$cli" | awk '{print $1}')" = \
+    "$(shasum -a 256 "$installed/$cli" | awk '{print $1}')"
+  /usr/bin/python3 - "$installed" <<'PY'
+import hashlib, json, pathlib, sys
+app = pathlib.Path(sys.argv[1])
+root = app / "Contents/Resources/FactorTester"
+receipt = json.loads((root / "bundle-receipt.json").read_text())
+cli = root / "bin/factortester"
+assert hashlib.sha256(cli.read_bytes()).hexdigest() == receipt["files"]["bin/factortester"]
+PY
 }
 
 case "$MODE" in
@@ -51,8 +89,19 @@ case "$MODE" in
     sleep 2
     pgrep -x "$APP_NAME" >/dev/null
     ;;
+  --install|install)
+    staging="/Applications/.$APP_NAME.staging.$$"
+    trap 'rm -rf "$staging"' EXIT
+    test -f "$APP_BUNDLE/Contents/Resources/FactorTester/bundle-receipt.json"
+    rm -rf "$staging"
+    ditto "$APP_BUNDLE" "$staging"
+    verify_install "$APP_BUNDLE" "$staging"
+    rm -rf "$INSTALLED_APP"
+    mv "$staging" "$INSTALLED_APP"
+    verify_install "$APP_BUNDLE" "$INSTALLED_APP"
+    ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install]" >&2
     exit 2
     ;;
 esac

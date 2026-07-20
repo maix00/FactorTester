@@ -6,6 +6,8 @@ struct CachedInstaller: Codable, Equatable {
     let sha256: String
     let filename: String
     let downloadedAt: Date
+    let manifestHash: String?
+    let source: String?
 }
 
 struct AppUpdateReceipt: Codable {
@@ -25,7 +27,9 @@ struct AppUpdateStore {
     func save(
         temporaryURL: URL,
         version: String,
-        expectedSHA256: String
+        expectedSHA256: String,
+        manifestHash: String? = nil,
+        source: String? = nil
     ) throws -> CachedInstaller {
         let digest = try Self.sha256(temporaryURL)
         guard digest.caseInsensitiveCompare(expectedSHA256) == .orderedSame else {
@@ -47,7 +51,9 @@ struct AppUpdateStore {
             version: version,
             sha256: digest,
             filename: filename,
-            downloadedAt: Date()
+            downloadedAt: Date(),
+            manifestHash: manifestHash,
+            source: source
         )
         var receipt = loadReceipt()
         receipt.installers.removeAll { $0.version == version }
@@ -127,6 +133,10 @@ enum AppUpdateError: LocalizedError {
     case invalidRelease
     case missingDigest
     case checksumMismatch
+    case manifestDigestMismatch
+    case manifestSignatureMismatch
+    case invalidManifest
+    case bundleIdentityMismatch
     case server(String)
 
     var errorDescription: String? {
@@ -137,6 +147,14 @@ enum AppUpdateError: LocalizedError {
             return L10n.text("GitHub Release 未提供 DMG 的 SHA-256 digest。")
         case .checksumMismatch:
             return L10n.text("下载的 DMG 校验失败，未保存也未打开。")
+        case .manifestDigestMismatch:
+            return L10n.text("更新清单摘要与 GitHub 记录不一致。")
+        case .manifestSignatureMismatch:
+            return L10n.text("更新清单签名无效。")
+        case .invalidManifest:
+            return L10n.text("更新清单的渠道、版本或 Bundle 身份无效。")
+        case .bundleIdentityMismatch:
+            return L10n.text("DMG 内 App 的 Bundle ID 或版本与清单不一致。")
         case .server(let detail):
             return detail
         }

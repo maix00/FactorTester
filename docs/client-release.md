@@ -19,6 +19,18 @@ this DMG. The CLI, research Harness, their Python runtime dependencies, and
 approved adapters live inside the signed app Resources and are covered by an
 internal hash receipt; users do not download those components separately.
 
+The updater supports stable and beta channels. Its launch check is optional,
+throttled to one request per six hours, and runs separately from runtime
+activation so research can start immediately.
+
+Before opening a downloaded image, FTClient mounts it read-only and verifies
+the embedded app's bundle ID, version, build, code signature and notarization
+status. Current development releases without Developer ID and notarization may
+only be downloaded and presented as a DMG. FTClient never silently replaces
+the running app or describes that handoff as automatic installation. The
+installer protocol is intentionally narrow so a future notarized helper or
+Sparkle adapter can implement replacement without changing manifest trust.
+
 Update discovery uses a compact signed `stable.json` or `beta.json` manifest.
 The server serves this file from `FACTORTESTER_RELEASE_MANIFEST_ROOT` at
 `/api/client/releases/<channel>.json` with ETag and public cache headers; it

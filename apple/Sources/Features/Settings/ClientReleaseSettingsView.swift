@@ -56,6 +56,28 @@ struct ClientReleaseSettingsView: View {
         ScrollView {
             VStack(spacing: 18) {
                 ClientReleaseStatusCard(controller: controller)
+                GroupBox("更新策略") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Picker("渠道", selection: $controller.channel) {
+                            Text("Stable").tag("stable")
+                            Text("Beta").tag("beta")
+                        }
+                        .pickerStyle(.segmented)
+                        Toggle(
+                            "启动时自动检查（最多每 6 小时一次）",
+                            isOn: $controller.automaticallyChecks
+                        )
+                        if let checked = controller.lastChecked {
+                            LabeledContent(
+                                "最后检查",
+                                value: checked.formatted(
+                                    date: .abbreviated, time: .shortened
+                                )
+                            )
+                        }
+                    }
+                    .padding(8)
+                }
                 GroupBox("安全状态") {
                     LabeledContent("App 签名", value: controller.signatureText)
                         .padding(8)
@@ -66,7 +88,7 @@ struct ClientReleaseSettingsView: View {
                         value: "maix00/FactorTester-Client"
                     )
                     .padding(8)
-                    Text("Release 必须且只能包含 FactorTester-Client.dmg；下载后先校验 GitHub SHA-256 digest，再打开安装镜像。")
+                    Text("下载前验证签名更新清单及 GitHub manifest digest；下载后验证 DMG SHA-256、Bundle ID、版本和签名，再由用户打开安装。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
@@ -87,7 +109,7 @@ struct ClientReleaseSettingsView: View {
                         Task { await controller.rollback() }
                     }
                     .disabled(!controller.canRollback)
-                    Button("下载、校验并打开 DMG") {
+                    Button("验证、下载并打开 DMG") {
                         Task { await controller.update() }
                     }
                     .buttonStyle(.borderedProminent)
