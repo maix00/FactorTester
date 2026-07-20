@@ -5,6 +5,11 @@ enum ClientTabContent {
     case module(Module)
     case adapter(ClientAdapterModel)
     case web(path: String)
+    case research
+    case profiles
+    case profile(id: String)
+    case account
+    case settings
 }
 
 struct ClientTab: Identifiable {
@@ -52,5 +57,51 @@ struct ClientTab: Identifiable {
         )
     }
 
+    static let research = ClientTab(
+        id: "research",
+        title: "研究",
+        systemImage: "chart.xyaxis.line",
+        content: .research
+    )
+
+    static let profiles = ClientTab(
+        id: "profiles",
+        title: "Profiles",
+        systemImage: "person.2.crop.square.stack",
+        content: .profiles
+    )
+
+    static func profile(id: String, title: String) -> ClientTab {
+        ClientTab(
+            id: "profile:\(id)",
+            title: title,
+            systemImage: "person.crop.rectangle.stack",
+            content: .profile(id: id)
+        )
+    }
+
+    static let account = ClientTab(
+        id: "account",
+        title: "个人中心",
+        systemImage: "person.crop.circle",
+        content: .account
+    )
+
+    static let settings = ClientTab(
+        id: "settings",
+        title: "设置",
+        systemImage: "gearshape",
+        content: .settings
+    )
+
     var isHome: Bool { id == Self.home.id }
+
+    var isPinnedLauncher: Bool {
+        [
+            "home", "research", "web:factor-library", "web:products",
+            "profiles", "account", "settings",
+        ].contains(id)
+    }
+
+    var isClosable: Bool { !isPinnedLauncher }
 }

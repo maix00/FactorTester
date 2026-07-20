@@ -3,20 +3,27 @@ import SwiftUI
 struct ClientReleaseSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var controller = ClientReleaseController()
+    var embedded = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            TabView {
+        Group {
+            if embedded {
                 updatePanel
-                    .tabItem {
-                        Label("客户端更新", systemImage: "arrow.down.app")
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    Divider()
+                    TabView {
+                        updatePanel
+                            .tabItem {
+                                Label("客户端更新", systemImage: "arrow.down.app")
+                            }
+                        LocalProfilesView()
+                            .tabItem {
+                                Label("Profiles", systemImage: "person.2")
+                            }
                     }
-                LocalProfilesView()
-                    .tabItem {
-                        Label("Profiles", systemImage: "person.2")
-                    }
+                }
             }
         }
         .frame(width: 720, height: 620)

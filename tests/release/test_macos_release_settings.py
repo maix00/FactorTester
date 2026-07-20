@@ -37,7 +37,8 @@ def test_macos_settings_use_single_verified_github_dmg() -> None:
         assert label in status
     for label in ("公开仓库", "客户端更新", "下载、校验并打开 DMG"):
         assert label in view
-    assert "客户端与 Profiles…" in home
+    assert "ClientSidebar" in home
+    assert "openTab: open" in home
     assert "approval" not in view.lower()
 
 
@@ -225,10 +226,71 @@ def test_macos_tabs_and_account_center_use_real_routes() -> None:
         encoding="utf-8"
     )
 
-    assert "返回主页" in navigation
+    assert "isPinnedLauncher" in navigation
+    assert "case profile(id: String)" in navigation
     assert "case web(path: String)" in navigation
     assert "/api/account/password" in api
     assert "/products" in account
     assert "/custom-factors/editor" in account
     assert '"127.0.0.1"' in config
     assert '"8000"' in config
+
+
+def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
+    navigation_root = SOURCES / "Navigation"
+    sidebar = (navigation_root / "ClientSidebar.swift").read_text(
+        encoding="utf-8"
+    )
+    tab_model = (navigation_root / "ClientTab.swift").read_text(
+        encoding="utf-8"
+    )
+    home = (SOURCES / "Features" / "Home" / "HomeView.swift").read_text(
+        encoding="utf-8"
+    )
+    dashboard = (
+        SOURCES / "Features" / "Home" / "HomeDashboardView.swift"
+    ).read_text(encoding="utf-8")
+    profile_root = SOURCES / "Features" / "Profiles"
+    directory = (profile_root / "ProfilesDirectoryView.swift").read_text(
+        encoding="utf-8"
+    )
+    workspace = (profile_root / "ProfileWorkspaceView.swift").read_text(
+        encoding="utf-8"
+    )
+    sections = (profile_root / "ProfileWorkspaceSections.swift").read_text(
+        encoding="utf-8"
+    )
+    live = (profile_root / "ProfileLiveProcessView.swift").read_text(
+        encoding="utf-8"
+    )
+    login = (SOURCES / "Features" / "Auth" / "LoginView.swift").read_text(
+        encoding="utf-8"
+    )
+    server = (
+        SOURCES / "Features" / "Settings" / "ServerSettingsView.swift"
+    ).read_text(encoding="utf-8")
+    api = (SOURCES / "Networking" / "APIClient.swift").read_text(
+        encoding="utf-8"
+    )
+
+    for label in (
+        "主页", "研究", "因子库", "产品", "Profiles", "个人中心", "设置",
+    ):
+        assert label in sidebar + tab_model
+    assert 'Section("已打开")' in sidebar
+    assert "openTabs.filter(\\.isClosable)" in sidebar
+    assert "TabView(selection:" not in home
+    assert "LocalProfileController()" in home
+    assert "ForEach(controller.profiles)" in directory
+    assert "MaxA" not in directory and "MaxB" not in directory
+    for label in ("实时过程", "Trial Plans", "义务", "Evidence", "报告"):
+        assert label in workspace
+    assert "不轮询完整 trace" in sections + live
+    for label in ("研究进度", "Profiles", "个人中心"):
+        assert label in dashboard
+    assert "Form {" not in login
+    assert "Form {" not in server
+    assert "DisclosureGroup" in server
+    assert "127.0.0.1" in server and "8000" in server
+    assert 'components.path = "/api/profile-research"' in api
+    assert "min(max(limit, 1), 50)" in api

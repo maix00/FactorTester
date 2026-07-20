@@ -2,34 +2,12 @@ import SwiftUI
 
 struct ClientTabView: View {
     let tab: ClientTab
-    let goHome: () -> Void
-    let close: () -> Void
+    @ObservedObject var profiles: LocalProfileController
+    let open: (ClientTab) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            tabBar
-            Divider()
-            content
-        }
-    }
-
-    private var tabBar: some View {
-        HStack(spacing: 10) {
-            Button(action: goHome) {
-                Label("返回主页", systemImage: "chevron.left")
-            }
-            .keyboardShortcut("[", modifiers: .command)
-            Text(tab.title)
-                .font(.headline)
-            Spacer()
-            Button(action: close) {
-                Label("关闭 Tab", systemImage: "xmark")
-            }
-            .keyboardShortcut("w", modifiers: .command)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.bar)
+        content
+            .navigationTitle(tab.title)
     }
 
     @ViewBuilder
@@ -53,6 +31,32 @@ struct ClientTabView: View {
             }
         case .web(let path):
             WebPageView(path: path)
+        case .research:
+            ProfileResearchOverview(
+                profiles: profiles.profiles,
+                openProfile: { open(.profile(id: $0.id, title: $0.displayName)) }
+            )
+        case .profiles:
+            ProfilesDirectoryView(
+                controller: profiles,
+                openProfile: { open(.profile(id: $0.id, title: $0.displayName)) }
+            )
+        case .profile(let id):
+            if let profile = profiles.profiles.first(where: { $0.id == id }) {
+                ProfileWorkspaceView(profile: profile)
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "person.crop.circle.badge.questionmark")
+                        .font(.largeTitle)
+                    Text("Profile 不可用").font(.headline)
+                    Text("该 Profile 已被移除或尚未从本地注册表加载。")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .account:
+            AccountCenterView(open: open)
+        case .settings:
+            ClientSettingsHub()
         }
     }
 }
