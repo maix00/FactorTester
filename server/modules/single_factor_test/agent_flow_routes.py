@@ -6,7 +6,51 @@ from flask import jsonify, request
 
 from server.modules.single_factor_test import sft_bp
 from server.services import agent_flow
+from server.services.agent_flow.resume import build_agent_resume_packet
 from server.services.session_runtime import require_user
+
+
+@sft_bp.post("/api/agent-flow/agents/<agent_id>/resume")
+def resume_agent(agent_id: str):
+    data = request.get_json(silent=True) or {}
+    role = str(data.get("role") or "")
+    allowed = {
+        "research": {"role", "instance_id", "branch_id"},
+        "planning": {"role", "workspace_id"},
+        "server_maintenance": {"role"},
+    }.get(role)
+    if allowed is None:
+        return jsonify({
+            "success": False,
+            "error": "unsupported Agent resume role",
+        }), 400
+    unexpected = sorted(set(data) - allowed)
+    if unexpected:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Agent resume contains unsupported fields: "
+                + ", ".join(unexpected)
+            ),
+        }), 400
+    owner = require_user()
+    store = agent_flow.get_store()
+    try:
+        packet = build_agent_resume_packet(
+            owner=owner,
+            agent_id=agent_id,
+            role=role,
+            budget_period=store.load_current_budget_period(
+                owner_user_id=owner,
+                agent_id=agent_id,
+            ),
+            instance_id=str(data.get("instance_id") or ""),
+            branch_id=str(data.get("branch_id") or ""),
+            workspace_id=str(data.get("workspace_id") or ""),
+        )
+    except (KeyError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "resume": packet})
 
 
 @sft_bp.get("/api/agent-flow/agents/<agent_id>/budget")

@@ -17,6 +17,20 @@ The harness is a remote HTTP client, not a local replacement for FactorTester.
 Use `--json` for agent-readable output and an explicit `--session` path when
 several agents work independently.
 
+Use one role-specific startup packet rather than assembling infrastructure
+context with an Agent:
+
+```bash
+factortester agent-flow resume research-agent-1 --role research \
+  --instance-id <instance-id> --branch-id <branch-id>
+```
+
+Planning supplies `--workspace-id`; Server Maintenance needs no graph or
+workspace argument. The deterministic packet is at most 6000 bytes, omits
+other roles' queues and full history/catalog/output, and includes the current
+Agent budget summary. Repeated unchanged resume is byte-stable and writes
+nothing.
+
 ## Research execution
 
 Freeze one complete `ResearchConfiguration`, then let immutable `ResearchRun`

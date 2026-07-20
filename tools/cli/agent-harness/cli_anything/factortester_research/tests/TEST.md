@@ -42,6 +42,12 @@ artifact contracts produced by the workflow.
   fail-closed without loading their Skill body.
 - Keep capability descriptions and descriptor hashes independent from concrete
   locally used Skill identity.
+- Return byte-stable role-specific Agent resume packets capped at 6000 bytes:
+  Research receives one branch, Planning one bounded workspace-factor summary,
+  and Server Maintenance only its actionable case queue.
+- Keep unconfigured profiles immediately usable, expose configured remaining
+  budget without usage history, and omit other roles' state, complete graph,
+  catalogs, output, and future gaps.
 
 ### Local research audit
 

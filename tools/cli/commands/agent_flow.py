@@ -26,6 +26,49 @@ def agent_flow() -> None:
     """管理 Agent Budget Period 与 Agent Invocation 生命周期。"""
 
 
+@agent_flow.command("resume")
+@click.argument("agent_id")
+@click.option(
+    "--role",
+    type=click.Choice([
+        "planning",
+        "research",
+        "server_maintenance",
+    ]),
+    required=True,
+)
+@click.option("--instance-id", default="")
+@click.option("--branch-id", default="")
+@click.option("--workspace-id", default="")
+def resume_agent(
+    agent_id: str,
+    role: str,
+    instance_id: str,
+    branch_id: str,
+    workspace_id: str,
+) -> None:
+    """获取一个无需模型组装的角色化小型启动/恢复包。"""
+    if role == "research" and (not instance_id or not branch_id):
+        raise click.ClickException(
+            "research 需要 --instance-id 和 --branch-id"
+        )
+    if role == "planning" and not workspace_id:
+        raise click.ClickException("planning 需要 --workspace-id")
+    if role == "server_maintenance" and any(
+        (instance_id, branch_id, workspace_id)
+    ):
+        raise click.ClickException(
+            "server_maintenance 不接受 workspace/instance/branch"
+        )
+    click.echo(_json(client_from_config().resume_agent(
+        agent_id,
+        role=role,
+        instance_id=instance_id,
+        branch_id=branch_id,
+        workspace_id=workspace_id,
+    )))
+
+
 @agent_flow.group("budget")
 def agent_budget() -> None:
     """读取、配置或重置一个 Agent 的当前预算周期。"""

@@ -444,6 +444,25 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             env=env,
         )
         shadow_branch_id = shadow_instance["branches"][0]["branch_id"]
+        resume = _run_json(
+            factortester,
+            [
+                "agent-flow",
+                "resume",
+                f"instance:{shadow_instance['instance_id']}",
+                "--role",
+                "research",
+                "--instance-id",
+                shadow_instance["instance_id"],
+                "--branch-id",
+                shadow_branch_id,
+            ],
+            env=env,
+        )
+        assert resume["packet_bytes"] <= 6000
+        assert resume["research"]["branch"]["branch_id"] == (
+            shadow_branch_id
+        )
         _commit_usage(
             factortester=factortester,
             env=env,

@@ -12,6 +12,22 @@ cli-anything-factortester-research \
   --session /path/to/agent-session.json doctor --json
 ```
 
+Start or resume from one deterministic role packet instead of loading
+architecture documents:
+
+```bash
+factortester agent-flow resume <agent-id> --role research \
+  --instance-id <instance-id> --branch-id <branch-id>
+```
+
+Planning uses `--role planning --workspace-id <workspace-id>`; Server
+Maintenance uses `--role server_maintenance`. The packet is capped at 6000
+bytes, contains only that role's current work and budget summary, and is
+unlimited when the user has not configured a token cap. A model launcher must
+reserve one `agent-flow invocation` before a real model call and settle it
+afterward. Do not create model reservations for deterministic graph
+transitions, backend Jobs, cache hits, or unchanged heartbeat/resume checks.
+
 ## Run the ordinary research loop
 
 Before planning, confirm the products and requested sources with the user in

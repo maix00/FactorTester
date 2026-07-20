@@ -6,11 +6,14 @@ from flask import Flask
 import settings as Settings
 from server.modules.single_factor_test import sft_bp
 from server.services import agent_flow, research_graphs
+from server.services import research_configurations
 from server.services.agent_flow import (
     AgentFlowStore,
     migrate_legacy_graph_accounting,
 )
 from server.services.agent_flow import invocations as invocation_module
+from server.services.maintenance_cases import MaintenanceCaseStore
+from tests.server.data_contract_fixtures import initialize
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -84,6 +87,142 @@ def test_uncapped_agent_invocation_settles_without_provider_attestation(
         "revision": 1,
         "status": "open",
     }
+
+
+def test_role_resume_packets_are_bounded_stable_and_isolated(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    graph_path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", graph_path)
+    agent_flow.clear_store_cache()
+    initialize(graph_path)
+    research_configurations.create_workspace_configuration(
+        owner="alice",
+        workspace_id="workspace-1",
+        factor_families=[{"alias": "alice:SgCCS"}],
+    )
+    maintenance_case = MaintenanceCaseStore(graph_path).open_case(
+        owner_user_id="alice",
+        kind="capability_gap",
+        descriptor_hash="a" * 64,
+        affected_refs=["workspace:workspace-1"],
+        change_refs=[],
+    )
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    research = client.post(
+        "/api/agent-flow/agents/research-agent-1/resume",
+        json={
+            "role": "research",
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+        },
+    ).get_json()["resume"]
+    with connect_sqlite(graph_path) as connection:
+        before_graph_counts = tuple(
+            connection.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0]
+            for table in (
+                "research_graph_trace",
+                "research_maintenance_cases",
+                "research_configurations",
+            )
+        )
+    with connect_sqlite(agent_flow.database_path()) as connection:
+        before_flow_counts = tuple(
+            connection.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0]
+            for table in ("agent_budget_periods", "agent_invocations")
+        )
+    repeated = client.post(
+        "/api/agent-flow/agents/research-agent-1/resume",
+        json={
+            "role": "research",
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+        },
+    ).get_json()["resume"]
+    with connect_sqlite(graph_path) as connection:
+        after_graph_counts = tuple(
+            connection.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0]
+            for table in (
+                "research_graph_trace",
+                "research_maintenance_cases",
+                "research_configurations",
+            )
+        )
+    with connect_sqlite(agent_flow.database_path()) as connection:
+        after_flow_counts = tuple(
+            connection.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0]
+            for table in ("agent_budget_periods", "agent_invocations")
+        )
+    planning = client.post(
+        "/api/agent-flow/agents/planning-agent-1/resume",
+        json={
+            "role": "planning",
+            "workspace_id": "workspace-1",
+        },
+    ).get_json()["resume"]
+    maintenance = client.post(
+        "/api/agent-flow/agents/server-agent-1/resume",
+        json={"role": "server_maintenance"},
+    ).get_json()["resume"]
+
+    assert research == repeated
+    assert after_graph_counts == before_graph_counts
+    assert after_flow_counts == before_flow_counts
+    assert research["packet_bytes"] <= 6000
+    assert research["agent"]["budget"]["configured"] is False
+    assert research["research"]["node"]["node_id"] == "data_contract"
+    assert [
+        item["obligation_id"]
+        for item in research["research"]["current_obligations"]
+    ] == ["obligation-data"]
+    assert "planning" not in research
+    assert "maintenance" not in research
+
+    assert planning["packet_bytes"] <= 6000
+    assert planning["planning"]["workspace_id"] == "workspace-1"
+    assert planning["planning"]["factor_summary"] == {
+        "configuration_id": planning["planning"]["factor_summary"][
+            "configuration_id"
+        ],
+        "revision": 1,
+        "fingerprint": planning["planning"]["factor_summary"][
+            "fingerprint"
+        ],
+        "family_count": 1,
+        "factor_count": 0,
+        "family_refs": ["alice:SgCCS"],
+        "omitted_family_count": 0,
+    }
+    assert "research" not in planning
+    assert "maintenance" not in planning
+
+    assert maintenance["packet_bytes"] <= 6000
+    assert maintenance["maintenance"]["cases"] == [{
+        "case_id": maintenance_case["case_id"],
+        "kind": "capability_gap",
+        "status": "open",
+        "descriptor_hash": "a" * 64,
+        "affected_refs": ["workspace:workspace-1"],
+        "change_refs": [],
+        "claimed_agent_id": "",
+    }]
+    assert "research" not in maintenance
+    assert "planning" not in maintenance
 
 
 def test_routine_reserve_and_settle_keep_the_sql_floor(
