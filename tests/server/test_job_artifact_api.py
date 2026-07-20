@@ -280,7 +280,7 @@ def test_terminal_job_stream_resets_when_daemon_lost_live_event_state(tmp_path, 
             }
 
     monkeypatch.setattr(
-        "server.modules.single_factor_test.backtest_jobs._daemon_client",
+        "server.modules.single_factor_test.backtest_job_reads._daemon_client",
         lambda: EmptyDaemon(),
     )
 
