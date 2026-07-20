@@ -56,6 +56,27 @@ final class LocalProfileController: ObservableObject {
         await run(arguments)
     }
 
+    func saveAdapter(
+        profileID: String,
+        adapterID: String,
+        enabled: Bool,
+        credentialRef: String,
+        configurationRef: String
+    ) async {
+        var arguments = [
+            "client", "profile", "adapter", "set", profileID,
+            "--adapter-id", adapterID,
+            enabled ? "--enabled" : "--disabled",
+        ]
+        if !credentialRef.isEmpty {
+            arguments += ["--credential-ref", credentialRef]
+        }
+        if !configurationRef.isEmpty {
+            arguments += ["--configuration-ref", configurationRef]
+        }
+        await run(arguments)
+    }
+
     private func run(_ arguments: [String]) async {
         await perform {
             _ = try await ReleaseCommand.runObject(

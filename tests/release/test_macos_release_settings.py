@@ -132,3 +132,24 @@ def test_macos_manages_provider_neutral_local_profiles() -> None:
             capture_output=True,
             text=True,
         )
+
+
+def test_macos_adapter_secrets_go_to_keychain_not_cli_arguments() -> None:
+    profile_root = SOURCES / "Features" / "Profiles"
+    form = (profile_root / "LocalAdapterProfileForm.swift").read_text(
+        encoding="utf-8"
+    )
+    controller = (profile_root / "LocalProfileController.swift").read_text(
+        encoding="utf-8"
+    )
+    keychain = (SOURCES / "Services" / "KeychainStore.swift").read_text(
+        encoding="utf-8"
+    )
+
+    assert "SecureField" in form
+    assert "KeychainStore.save" in form
+    assert "keychain://" in form
+    assert '"--credential-ref"' in controller
+    assert "secret" not in controller.lower()
+    assert "kSecClassGenericPassword" in keychain
+    assert "UserDefaults" not in keychain

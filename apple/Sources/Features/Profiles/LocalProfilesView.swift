@@ -24,6 +24,10 @@ struct LocalProfilesView: View {
                             controller: controller,
                             profileID: profile.id
                         )
+                        LocalAdapterProfileForm(
+                            controller: controller,
+                            profileID: profile.id
+                        )
                     }
                     if let error = controller.error {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
