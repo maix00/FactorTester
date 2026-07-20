@@ -25,11 +25,18 @@ def project_factor_semantics_evidence(
     resolved = all(
         item["resolution_status"] == "resolved" for item in refs
     )
+    configuration_id = str(configuration["configuration_id"])
+    configuration_revision = int(configuration["revision"])
+    configuration_fingerprint = str(configuration["fingerprint"])
     facts = {
-        "configuration_id": str(configuration["configuration_id"]),
-        "configuration_revision": int(configuration["revision"]),
-        "configuration_fingerprint": str(configuration["fingerprint"]),
-        "factor_revision_refs": refs,
+        "configuration_id": configuration_id,
+        "configuration_revision": configuration_revision,
+        "configuration_fingerprint": configuration_fingerprint,
+        "factor_revision_count": len(refs),
+        "factor_family_refs": sorted({
+            item["factor_family_ref"] for item in refs
+        }),
+        "factor_revision_set_hash": json_hash(refs),
         "selected_factor_semantics_resolved": resolved,
     }
     value = {
@@ -40,9 +47,10 @@ def project_factor_semantics_evidence(
             "methodology_hash": checkpoint["methodology_hash"],
         }),
         "evidence_kind": "factor_semantics",
-        "source_refs": [
-            "factor-revision:" + item["manifest_hash"] for item in refs
-        ],
+        "source_refs": [(
+            f"research-configuration:{configuration_id}"
+            f"@{configuration_revision}:{configuration_fingerprint}"
+        )],
         "identity_refs": {
             "contract_hash": checkpoint["contract_hash"],
             "methodology_hash": checkpoint["methodology_hash"],

@@ -145,13 +145,61 @@ def test_factor_semantics_edge_binds_source_free_server_evidence(
         "methodology_hash": "2" * 64,
     }
     assert envelope["facts"]["configuration_revision"] == 3
-    assert envelope["facts"]["factor_revision_refs"] == [{
-        "factor_family_ref": "alice:Alpha",
-        "factor_alias_hash": "a" * 64,
-        "manifest_hash": "b" * 64,
-        "resolution_status": "resolved",
-    }]
+    assert envelope["facts"]["factor_revision_count"] == 1
+    assert envelope["facts"]["factor_family_refs"] == ["alice:Alpha"]
+    assert envelope["facts"]["factor_revision_set_hash"]
+    assert "factor_revision_refs" not in envelope["facts"]
     assert "source_code" not in orjson.dumps(envelope).decode()
+
+
+def test_many_factor_revisions_are_bound_by_set_hash_not_trace_copy(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    configuration = _configuration()
+    configuration["payload"]["shared"]["factor_revision_manifests"] = [
+        {
+            "schema_version": 1,
+            "factor_family_ref": "alice:Alpha",
+            "factor_alias_hash": f"{index:064x}",
+            "manifest_hash": f"{index + 1000:064x}",
+            "resolution_status": "resolved",
+        }
+        for index in range(100)
+    ]
+    monkeypatch.setattr(
+        factor_semantics_service.research_configurations,
+        "load_workspace_configuration",
+        lambda **_kwargs: configuration,
+    )
+    monkeypatch.setattr(
+        factor_semantics_service.factor_revisions,
+        "freeze_factor_revisions",
+        lambda selected, **_kwargs: selected,
+    )
+
+    advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="factor_semantics__validation_design",
+        evidence=_evidence(),
+    )
+
+    with connect_sqlite(path) as conn:
+        row = conn.execute(
+            """
+            SELECT evidence_json FROM research_graph_trace
+            WHERE trace_id=(SELECT latest_trace_id
+                            FROM research_graph_branches
+                            WHERE branch_id='branch-1')
+            """
+        ).fetchone()
+    assert len(row["evidence_json"].encode()) <= 6000
+    assert '"factor_revision_refs"' not in row["evidence_json"]
 
 
 def test_unresolved_selected_factor_semantics_cannot_advance(
