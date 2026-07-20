@@ -79,6 +79,10 @@ artifact contracts produced by the workflow.
   unchanged approved fingerprint.
 - Validate obligation-discovery and paired-adjudication proposals with
   standalone deterministic scripts.
+- Cover material time, market-state, instrument, and interval-event transfer
+  questions without Cartesian-product expansion; preserve sequential
+  walk-forward exposure, high-frequency day/month staging, purge/embargo, and
+  a genuinely untouched latest interval in TrialPlan guidance.
 - Reject server proposal payloads containing concrete Skill identity.
 - Keep canonical and packaged Skill trees byte-identical.
 - Require every newly persisted adjudication or closure proposal to name the

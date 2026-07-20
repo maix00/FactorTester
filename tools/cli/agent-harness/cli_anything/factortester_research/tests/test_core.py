@@ -827,8 +827,30 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "d70039be78592dd23c09076d79acf819169b5548b3a8b272fc90e90b2b74dd62"
+        "a175cff377120b8403ec8bfd7120cfb3cb1cda30924c2d04b566469715d67c65"
     )
+
+
+def test_obligation_skill_guides_temporal_product_and_event_transfer() -> None:
+    skill_root = (
+        Path(__file__).parents[1] / "skills" / "research-obligation-cycle"
+    )
+    discovery = (
+        skill_root / "references" / "obligation-discovery.md"
+    ).read_text(encoding="utf-8")
+    synthesis = (
+        skill_root / "references" / "trial-synthesis.md"
+    ).read_text(encoding="utf-8")
+
+    assert "time, market state, or instruments" in discovery
+    assert "interval-specific events" in discovery
+    assert "Do not generate the Cartesian product" in discovery
+    assert "expanding or rolling" in synthesis
+    assert "2024 for selection and seal 2025 as holdout" in synthesis
+    assert "month- or day-scale stages" in synthesis
+    assert "purge or embargo" in synthesis
+    assert "latest feasible interval or prospective stream" in synthesis
+    assert "unseen product is not out-of-sample" in synthesis
 
 
 def test_reference_change_invalidates_whole_skill_manifest(
