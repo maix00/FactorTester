@@ -3,6 +3,7 @@ import SwiftUI
 struct LocalProfilesView: View {
     @StateObject private var controller = LocalProfileController()
     @State private var selectedID: String?
+    @AppStorage("client.profile.activeID") private var activeID = ""
 
     var body: some View {
         HSplitView {
@@ -20,6 +21,14 @@ struct LocalProfilesView: View {
                     LocalProfileForm(controller: controller)
                     if let profile = selectedProfile {
                         profileDetails(profile)
+                        Button(
+                            activeID == profile.id
+                                ? "当前 Adapter Profile"
+                                : "用于本地 Adapter"
+                        ) {
+                            activeID = profile.id
+                        }
+                        .disabled(activeID == profile.id)
                         LocalAgentForm(
                             controller: controller,
                             profileID: profile.id

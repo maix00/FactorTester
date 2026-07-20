@@ -14,11 +14,13 @@ from .execution import (
     pid_alive,
     terminate_process_group,
 )
+from .profile_binding import adapter_binding
 
 
 class ClientAdapterManager:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, profile_id: str = "") -> None:
         self.root = validate_client_root(root)
+        self.profile_id = profile_id
         self.state_root = self.root / "state" / "adapters"
 
     def list(self) -> list[dict[str, Any]]:
@@ -55,7 +57,9 @@ class ClientAdapterManager:
             return self.status(adapter_id)
         action = _required_action(contract, "start")
         log_path = self.state_root / f"{adapter_id}.log"
-        pid = self._runner(adapter_root, adapter_id).background(
+        pid = self._runner(
+            adapter_root, adapter_id, bind=True
+        ).background(
             action,
             log_path=log_path,
         )
@@ -94,10 +98,16 @@ class ClientAdapterManager:
         self,
         adapter_root: Path,
         adapter_id: str,
+        *,
+        bind: bool = False,
     ) -> AdapterActionRunner:
         return AdapterActionRunner(
             adapter_root=adapter_root,
             adapter_id=adapter_id,
+            binding=(
+                adapter_binding(self.root, self.profile_id, adapter_id)
+                if bind else {}
+            ),
         )
 
     def _contracts(self) -> list[tuple[AdapterContract, Path]]:

@@ -153,3 +153,12 @@ def test_macos_adapter_secrets_go_to_keychain_not_cli_arguments() -> None:
     assert "secret" not in controller.lower()
     assert "kSecClassGenericPassword" in keychain
     assert "UserDefaults" not in keychain
+    adapter_controller = (
+        SOURCES / "Features" / "Adapters" / "ClientAdapterController.swift"
+    ).read_text(encoding="utf-8")
+    profiles = (
+        SOURCES / "Features" / "Profiles" / "LocalProfilesView.swift"
+    ).read_text(encoding="utf-8")
+    assert '"--profile-id"' in adapter_controller
+    assert "client.profile.activeID" in adapter_controller
+    assert "用于本地 Adapter" in profiles

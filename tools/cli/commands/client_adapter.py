@@ -28,12 +28,20 @@ def _root_option(function):
     )(function)
 
 
+def _profile_option(function):
+    return click.option("--profile-id", default="")(function)
+
+
 @client_adapter.command("list")
+@_profile_option
 @_root_option
 @friendly_errors
-def list_adapters(release_profile: Path | None) -> None:
+def list_adapters(release_profile: Path | None, profile_id: str) -> None:
     click.echo(_json(
-        ClientAdapterManager(load_profile_root(release_profile)).list()
+        ClientAdapterManager(
+            load_profile_root(release_profile),
+            profile_id=profile_id,
+        ).list()
     ))
 
 
@@ -41,15 +49,22 @@ def _adapter_action(name: str):
     def decorator(function):
         command = client_adapter.command(name)(function)
         command = click.argument("adapter_id")(command)
+        command = _profile_option(command)
         return _root_option(command)
     return decorator
 
 
 @_adapter_action("status")
 @friendly_errors
-def adapter_status(adapter_id: str, release_profile: Path | None) -> None:
+def adapter_status(
+    adapter_id: str,
+    release_profile: Path | None,
+    profile_id: str,
+) -> None:
     click.echo(_json(
-        ClientAdapterManager(load_profile_root(release_profile)).status(
+        ClientAdapterManager(
+            load_profile_root(release_profile), profile_id=profile_id
+        ).status(
             adapter_id
         )
     ))
@@ -57,9 +72,15 @@ def adapter_status(adapter_id: str, release_profile: Path | None) -> None:
 
 @_adapter_action("start")
 @friendly_errors
-def adapter_start(adapter_id: str, release_profile: Path | None) -> None:
+def adapter_start(
+    adapter_id: str,
+    release_profile: Path | None,
+    profile_id: str,
+) -> None:
     click.echo(_json(
-        ClientAdapterManager(load_profile_root(release_profile)).start(
+        ClientAdapterManager(
+            load_profile_root(release_profile), profile_id=profile_id
+        ).start(
             adapter_id
         )
     ))
@@ -67,9 +88,15 @@ def adapter_start(adapter_id: str, release_profile: Path | None) -> None:
 
 @_adapter_action("stop")
 @friendly_errors
-def adapter_stop(adapter_id: str, release_profile: Path | None) -> None:
+def adapter_stop(
+    adapter_id: str,
+    release_profile: Path | None,
+    profile_id: str,
+) -> None:
     click.echo(_json(
-        ClientAdapterManager(load_profile_root(release_profile)).stop(
+        ClientAdapterManager(
+            load_profile_root(release_profile), profile_id=profile_id
+        ).stop(
             adapter_id
         )
     ))
@@ -77,9 +104,15 @@ def adapter_stop(adapter_id: str, release_profile: Path | None) -> None:
 
 @_adapter_action("open")
 @friendly_errors
-def adapter_open(adapter_id: str, release_profile: Path | None) -> None:
+def adapter_open(
+    adapter_id: str,
+    release_profile: Path | None,
+    profile_id: str,
+) -> None:
     click.echo(_json(
-        ClientAdapterManager(load_profile_root(release_profile)).open(
+        ClientAdapterManager(
+            load_profile_root(release_profile), profile_id=profile_id
+        ).open(
             adapter_id
         )
     ))

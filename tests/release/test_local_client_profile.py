@@ -10,6 +10,7 @@ from tools.cli.app import cli
 from tools.cli.client import FactorTesterClient
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.local_profile import validate_local_profile
+from tools.cli.release.adapters.profile_binding import adapter_binding
 
 
 def test_local_profile_is_strict_private_and_version_independent(
@@ -143,3 +144,33 @@ def test_adapter_credentials_are_opaque_keychain_references(
             "credential_ref": "secret-token",
             "configuration_ref": "",
         })
+
+
+def test_adapter_profile_binding_exposes_only_opaque_references(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    config = tmp_path / "vibe.json"
+    config.write_text('{"executable": "/tmp/vibe-trading"}')
+    store = LocalProfileStore(root)
+    store.save(new_local_profile(
+        profile_id="human",
+        display_name="Human",
+        server_url="http://127.0.0.1:8123",
+        workspace_root=tmp_path / "workspace",
+    ))
+    store.upsert_adapter("human", {
+        "adapter_id": "vibe-trading",
+        "enabled": True,
+        "credential_ref": "keychain://com.gtht.client.adapters/human/vibe",
+        "configuration_ref": config.as_uri(),
+    })
+
+    binding = adapter_binding(root, "human", "vibe-trading")
+
+    assert binding["FACTORTESTER_ADAPTER_PROFILE_ID"] == "human"
+    assert binding["FACTORTESTER_ADAPTER_CONFIGURATION_REF"] == str(config)
+    assert binding["FACTORTESTER_ADAPTER_CREDENTIAL_REF"].startswith(
+        "keychain://"
+    )
+    assert "password" not in json.dumps(binding).lower()

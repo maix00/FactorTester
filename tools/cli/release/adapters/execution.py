@@ -16,9 +16,16 @@ MAX_ACTION_OUTPUT_BYTES = 64 * 1024
 
 
 class AdapterActionRunner:
-    def __init__(self, *, adapter_root: Path, adapter_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        adapter_root: Path,
+        adapter_id: str,
+        binding: dict[str, str] | None = None,
+    ) -> None:
         self.adapter_root = adapter_root
         self.adapter_id = adapter_id
+        self.binding = binding or {}
 
     def foreground(
         self,
@@ -88,6 +95,7 @@ class AdapterActionRunner:
             "FACTORTESTER_ADAPTER_ID": self.adapter_id,
             "FACTORTESTER_ADAPTER_ROOT": str(self.adapter_root),
             "FACTORTESTER_ADAPTER_PID": str(pid or ""),
+            **self.binding,
         }
 
 

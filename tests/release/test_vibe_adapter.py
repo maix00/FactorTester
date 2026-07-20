@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import zipfile
 
 from tools.cli.release.adapters.archive import install_adapter_archive
@@ -55,3 +58,38 @@ def test_vibe_adapter_start_never_downloads_or_invokes_a_shell() -> None:
     assert "os.execv(" in source
     for forbidden in ("pip install", "git clone", "subprocess", "shell=True"):
         assert forbidden not in source
+
+
+def test_vibe_adapter_uses_user_selected_official_executable(
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "vibe-trading"
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\nprint(json.dumps(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps({"executable": str(executable)}),
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "FACTORTESTER_ADAPTER_ROOT": str(ADAPTER),
+        "FACTORTESTER_ADAPTER_CONFIGURATION_REF": str(config),
+        "FACTORTESTER_VIBE_PORT": "17899",
+    }
+
+    result = subprocess.run(
+        [ADAPTER / "bin" / "start"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == [
+        "serve", "--host", "127.0.0.1", "--port", "17899",
+    ]

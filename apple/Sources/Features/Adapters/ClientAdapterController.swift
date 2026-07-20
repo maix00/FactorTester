@@ -20,6 +20,12 @@ final class ClientAdapterController: ObservableObject {
         ) ?? ""
     }
 
+    private var localProfileID: String {
+        UserDefaults.standard.string(
+            forKey: "client.profile.activeID"
+        ) ?? ""
+    }
+
     func refresh() async {
         await perform {
             self.adapters = try await self.loadAdapters()
@@ -68,6 +74,9 @@ final class ClientAdapterController: ObservableObject {
         var value = ["client"] + tail
         if !releaseProfilePath.isEmpty {
             value += ["--release-profile", releaseProfilePath]
+        }
+        if !localProfileID.isEmpty {
+            value += ["--profile-id", localProfileID]
         }
         return value
     }
