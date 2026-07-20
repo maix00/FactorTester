@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cli-anything-factortester-research"
-version = "0.1.1"
+version = "0.1.2"
 description = "CLI-Anything harness for FactorTester factor research workflows"
 requires-python = ">=3.10"
 dependencies = ["click>=8.0"]
