@@ -22,9 +22,9 @@ def build_draft_graph() -> dict[str, Any]:
     graph = {
         "schema_version": 1,
         "graph_id": "factor-research",
-        "version": 4,
+        "version": 5,
         "lifecycle": "draft",
-        "parent_version": 3,
+        "parent_version": 4,
         "research_semantics": "product_neutral",
         "entry_node": "hypothesis_preregistration",
         "nodes": nodes,
@@ -35,15 +35,12 @@ def build_draft_graph() -> dict[str, Any]:
         "provenance": {
             "source": "observed-harness-plus-reviewed-industry-semantics",
             "description": (
-                "First candidate graph. Product support is resolved through "
-                "capability bindings and does not define the graph topology."
+                "Candidate graph with server-derived transition evidence. "
+                "Product support is resolved through capability bindings and "
+                "does not define the graph topology."
             ),
         },
     }
-    from .capabilities import (
-        capability_descriptor,
-        load_builtin_capability_registry,
-    )
     registry = load_builtin_capability_registry()
     contracts = {
         str(item["capability_id"]): item

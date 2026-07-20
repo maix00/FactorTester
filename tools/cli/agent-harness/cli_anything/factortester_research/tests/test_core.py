@@ -253,8 +253,8 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     nodes = {item["node_id"]: item for item in graph["nodes"]}
 
     assert graph["lifecycle"] == "draft"
-    assert graph["version"] == 4
-    assert graph["parent_version"] == 3
+    assert graph["version"] == 5
+    assert graph["parent_version"] == 4
     assert {
         item["capability_id"]
         for item in graph["research_cycle_operations"]
