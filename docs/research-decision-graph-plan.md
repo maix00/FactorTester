@@ -1511,8 +1511,14 @@ accepts only evidence derived by the authoritative Agent Flow/Graph owners.
 
 ## Issue 140 Batch 6 release evidence
 
-Batch 6 finalizes the cutover from parent `2d951a42`. It does not activate,
-merge, or push the branch.
+Batch 6 finalized the cutover from parent `2d951a42`. The original six-batch
+cutover did not activate, merge, or push the branch. The independently audited
+follow-on activated immutable Graph v6 at
+`aee02eed6ec617cebf3e208390fa826460c28fc88fb3919c3637162e31537d41`
+and continued the real SgCCS and Trend branches without rewriting their v5
+instances, traces, Runs, or Jobs. The current bounded acceptance facts are
+content-addressed in
+[`batch6-token-context-receipt.json`](research-decision-graph/acceptance/batch6-token-context-receipt.json).
 
 - Final Graph persistence has exactly six owner tables. Final Agent Flow
   persistence has exactly two owner tables, and its Invocation owner has 33
@@ -1552,6 +1558,14 @@ merge, or push the branch.
   Pylance/Pyright gate `1 passed`; targeted production Pyright
   `0 errors, 0 warnings`; both canonical and packaged Skills pass
   `skill-creator` validation and are byte-identical.
+- The 2026-07-20 v6 activation gate derived a 2,703-byte routine context,
+  charged 800 conservative fallback tokens against a 1,000-token baseline,
+  found zero token failures, and proved like-for-like shadow equivalence.
+  Post-activation SgCCS and Trend contexts measured 3,611 and 3,566 bytes.
+  Both branches retain one trusted Job evidence delta, replay through their
+  continuation and blocked-closure traces, preserve unknown Claims and open
+  obligations, and therefore correctly remain `release_ready=false` until the
+  deferred bootstrap-Sharpe capability becomes available.
 
 ## Decision 143 follow-on
 
