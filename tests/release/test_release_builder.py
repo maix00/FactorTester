@@ -4,7 +4,13 @@ from pathlib import Path
 import subprocess
 import zipfile
 
-from script.release.assets import build_app_archive, build_installer_dmg
+from script.release import assets as release_assets
+from script.release.assets import (
+    build_app_archive,
+    build_installer_dmg,
+    embed_client_runtime,
+)
+from script.release import build as release_build
 from script.release.build import build_release
 from script.release.manifest import create_manifest
 from tools.cli.release.app_archive import install_macos_app
@@ -47,6 +53,97 @@ def test_manifest_builder_signs_explicit_assets(tmp_path: Path) -> None:
 
 def test_release_builder_requires_public_source_revision() -> None:
     assert "source_revision" in build_release.__annotations__
+
+
+def test_release_builder_exposes_only_one_dmg(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    app = (
+        repo
+        / "apple/build/Build/Products/Release/FactorTester-Client.app"
+    )
+    (app / "Contents").mkdir(parents=True)
+    (app / "Contents/Info.plist").write_text("<plist/>")
+    monkeypatch.setattr(release_build, "REPO", repo)
+
+    def fake_embed(repo, app, *, version, source_revision):
+        receipt = app / "Contents/Resources/FactorTester/bundle-receipt.json"
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text("{}")
+        return receipt
+
+    def fake_dmg(app, output):
+        assert (
+            app
+            / "Contents/Resources/FactorTester/bundle-receipt.json"
+        ).is_file()
+        output.write_bytes(b"dmg")
+        return output
+
+    monkeypatch.setattr(release_build, "embed_client_runtime", fake_embed)
+    monkeypatch.setattr(release_build, "build_installer_dmg", fake_dmg)
+
+    output = tmp_path / "release"
+    result = build_release(
+        version="0.2.0",
+        source_revision="a" * 40,
+        output=output,
+    )
+
+    assert result == output / "FactorTester-Client.dmg"
+    assert [path.name for path in output.iterdir()] == [
+        "FactorTester-Client.dmg"
+    ]
+
+
+def test_embedded_runtime_writes_internal_hash_receipt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    adapter_builder = repo / "client-adapters/vibe-trading/build_archive.py"
+    adapter_builder.parent.mkdir(parents=True)
+    adapter_builder.write_text("")
+    app = tmp_path / "FactorTester-Client.app"
+    (app / "Contents/Resources").mkdir(parents=True)
+
+    class FakeEnvironment:
+        def __init__(self, **kwargs):
+            pass
+
+        def create(self, path):
+            (path / "bin").mkdir(parents=True)
+            (path / "bin/python").write_text("")
+            (path / "bin/pyinstaller").write_text("")
+
+    def fake_run(command, **kwargs):
+        if "pyinstaller" in Path(command[0]).name:
+            destination = Path(command[command.index("--distpath") + 1])
+            destination.mkdir()
+            runtime = destination / "factortester"
+            runtime.write_bytes(b"runtime")
+            runtime.chmod(0o755)
+        elif command[-2:] and str(command[-2]).endswith("build_archive.py"):
+            Path(command[-1]).write_bytes(b"adapter")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(release_assets.venv, "EnvBuilder", FakeEnvironment)
+    monkeypatch.setattr(release_assets.subprocess, "run", fake_run)
+
+    receipt = embed_client_runtime(
+        repo,
+        app,
+        version="0.2.0",
+        source_revision="b" * 40,
+    )
+
+    body = receipt.read_text()
+    assert '"version":"0.2.0"' in body
+    assert '"bin/factortester"' in body
+    assert '"bin/cli-anything-factortester-research"' in body
+    assert '"adapters/vibe-trading-adapter.zip"' in body
 
 
 def test_app_archive_is_deterministic_and_preserves_executable(

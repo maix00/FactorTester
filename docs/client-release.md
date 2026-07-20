@@ -3,56 +3,19 @@
 ## Requirements
 
 - macOS 13 or newer for `FactorTester-Client.app`;
-- Python 3.11 or newer to run the bootstrap CLI;
 - HTTPS access to the public FactorTester client release;
 - a FactorTester server account for remote research.
 
 No server source checkout, database driver, or local backtest engine is needed.
 
-## Release profile
-
-Create a local JSON file. It contains paths and a manifest URL, never a
-password or token:
-
-```json
-{
-  "schema_version": 1,
-  "release": {
-    "manifest_url": "https://github.com/maix00/FactorTester-Client/releases/download/v0.1.2/release-manifest.json",
-    "install_root": "~/Library/Application Support/FactorTester"
-  }
-}
-```
-
-The trusted release public key is fixed inside the client wheel. A profile
-cannot replace it.
-
 ## Install and update
 
 For the normal macOS installation experience, download
 `FactorTester-Client.dmg` from the public GitHub Release, open it, and drag
-`FactorTester-Client.app` to Applications. The DMG is the human-facing
-installer; the signed manifest and app ZIP remain the transactional updater
-payload.
-
-Always inspect the deterministic plan before mutation:
-
-```bash
-factortester client bootstrap --profile client-profile.json --dry-run --json
-factortester client bootstrap --profile client-profile.json --json
-factortester client status --profile client-profile.json --json
-```
-
-Updating uses the same transaction:
-
-```bash
-factortester client update --profile client-profile.json --dry-run --json
-factortester client update --profile client-profile.json --json
-```
-
-Artifacts are downloaded into a staging version, checked against the signed
-manifest, materialized without dependency resolution, and health-checked
-before `current.json` changes.
+`FactorTester-Client.app` to Applications. The GitHub Release exposes only
+this DMG. The CLI, research Harness, their Python runtime dependencies, and
+approved adapters live inside the signed app Resources and are covered by an
+internal hash receipt; users do not download those components separately.
 
 ## Login and local profiles
 

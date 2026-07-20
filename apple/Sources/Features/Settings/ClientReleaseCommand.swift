@@ -65,6 +65,12 @@ enum ReleaseCommand {
         if executable.contains("/") {
             return (URL(fileURLWithPath: executable), arguments)
         }
+        if let bundled = Bundle.main.resourceURL?
+            .appendingPathComponent("FactorTester/bin")
+            .appendingPathComponent(executable),
+           FileManager.default.isExecutableFile(atPath: bundled.path) {
+            return (bundled, arguments)
+        }
         let installed = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(
                 "Library/Application Support/FactorTester/bin"

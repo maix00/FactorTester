@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from hashlib import sha256
+import json
 import shutil
 import subprocess
 import sys
 import tempfile
+import venv
 import zipfile
 
 
@@ -18,6 +21,7 @@ DEPENDENCIES = (
     "pygments==2.20.0",
     "rich==15.0.0",
 )
+PYINSTALLER_VERSION = "6.21.0"
 
 
 def build_python_assets(repo: Path, output: Path) -> list[Path]:
@@ -102,6 +106,112 @@ def build_installer_dmg(app: Path, output: Path) -> Path:
             capture_output=True,
         )
     return output
+
+
+def embed_client_runtime(
+    repo: Path,
+    app: Path,
+    *,
+    version: str,
+    source_revision: str,
+) -> Path:
+    """Embed a provider-neutral CLI runtime and approved adapters in the app."""
+    resources = app / "Contents" / "Resources" / "FactorTester"
+    if resources.exists():
+        shutil.rmtree(resources)
+    bin_dir = resources / "bin"
+    adapter_dir = resources / "adapters"
+    bin_dir.mkdir(parents=True)
+    adapter_dir.mkdir()
+
+    with tempfile.TemporaryDirectory(
+        prefix="factortester-runtime-build-"
+    ) as raw:
+        root = Path(raw)
+        environment = root / "venv"
+        venv.EnvBuilder(with_pip=True).create(environment)
+        python = environment / "bin" / "python"
+        subprocess.run(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                f"pyinstaller=={PYINSTALLER_VERSION}",
+                str(repo / "tools" / "cli"),
+                str(repo / "tools" / "cli" / "agent-harness"),
+            ],
+            check=True,
+        )
+        bootstrap = root / "factortester_runtime.py"
+        bootstrap.write_text(
+            "from pathlib import Path\n"
+            "import sys\n"
+            "entry = Path(sys.argv[0]).name\n"
+            "if entry == 'cli-anything-factortester-research':\n"
+            "    from cli_anything.factortester_research.factortester_research_cli import cli\n"
+            "else:\n"
+            "    from tools.cli.app import cli\n"
+            "cli()\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [
+                str(environment / "bin" / "pyinstaller"),
+                "--clean",
+                "--noconfirm",
+                "--onefile",
+                "--name",
+                "factortester",
+                "--collect-all",
+                "cli_anything.factortester_research",
+                "--distpath",
+                str(root / "dist"),
+                "--workpath",
+                str(root / "work"),
+                "--specpath",
+                str(root / "spec"),
+                str(bootstrap),
+            ],
+            check=True,
+        )
+        shutil.copy2(root / "dist" / "factortester", bin_dir / "factortester")
+        shutil.copy2(
+            bin_dir / "factortester",
+            bin_dir / "cli-anything-factortester-research",
+        )
+        subprocess.run(
+            [
+                sys.executable,
+                str(repo / "client-adapters/vibe-trading/build_archive.py"),
+                str(adapter_dir / "vibe-trading-adapter.zip"),
+            ],
+            check=True,
+        )
+
+    files = {
+        str(path.relative_to(resources)): sha256(path.read_bytes()).hexdigest()
+        for path in sorted(resources.rglob("*"))
+        if path.is_file()
+    }
+    receipt = {
+        "schema_version": 1,
+        "version": version,
+        "source_revision": source_revision,
+        "files": files,
+    }
+    receipt_path = resources / "bundle-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            receipt,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ) + "\n",
+        encoding="utf-8",
+    )
+    return receipt_path
 
 
 def _build_wheel(
