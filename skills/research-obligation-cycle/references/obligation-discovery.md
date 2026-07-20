@@ -42,6 +42,38 @@ representativeness, transfer boundary, TrialPlan, or permitted use.
 The lenses above are prompts, not a universal checklist. Create factor-specific
 obligations when first principles require them, and omit irrelevant lenses.
 
+## Discover transfer and market-context obligations
+
+For each researched factor, ask whether the bounded decision depends on
+transfer across time, market state, or instruments. When it does, consider:
+
+- materially different time intervals and market environments rather than one
+  aggregate full-period result;
+- heterogeneous behavior across the authorized products or instruments,
+  including concentration in one product;
+- interval-specific events that could affect the selected instrument, such as
+  contract-rule, session, price-limit, liquidity, listing, policy, supply,
+  inventory, venue, or data-source changes.
+
+Turn these lenses into obligations only when the answer could change the
+factor's permitted use, construction, product scope, or next TrialPlan. Define
+the market-state or event question with observable, point-in-time inputs and
+source references. An event noticed after outcome inspection is exploratory:
+it may open a new obligation, but cannot retroactively redefine a frozen test
+or rescue a failed Claim.
+
+When a decision-blocking performance break, cross-instrument difference,
+trading/liquidity anomaly, or preregistered institutional event makes event
+context material, load
+[market-context-event-search.md](market-context-event-search.md). Do not load
+it or search the web for ordinary stable windows.
+
+Do not generate the Cartesian product of every interval, regime, event, and
+instrument. Prefer the smallest representative coverage that distinguishes the
+mechanism, an important alternative explanation, or a declared transfer
+boundary. Record uncovered regions as bounded limitations or later
+obligations.
+
 ## Reject low-value obligations
 
 Reject a candidate that merely restates a metric, duplicates an open
