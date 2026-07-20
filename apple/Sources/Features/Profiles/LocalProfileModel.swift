@@ -46,9 +46,26 @@ struct LocalInitializationSourceModel: Identifiable {
     }
 }
 
+struct FactorWorkspaceBindingModel {
+    let id: String
+    let branch: String
+    let worktreePath: String
+    let receiptRef: String
+
+    init?(json: [String: Any]) {
+        let bindingID = json["binding_id"] as? String ?? ""
+        guard !bindingID.isEmpty else { return nil }
+        id = bindingID
+        branch = json["branch"] as? String ?? ""
+        worktreePath = json["worktree_path"] as? String ?? ""
+        receiptRef = json["receipt_ref"] as? String ?? ""
+    }
+}
+
 struct LocalProfileModel: Identifiable {
     let id: String
     let displayName: String
+    let status: String
     let serverURL: String
     let workspaceRoot: String
     let workspaces: [LocalWorkspaceModel]
@@ -56,10 +73,12 @@ struct LocalProfileModel: Identifiable {
     let agents: [LocalAgentModel]
     let principalRef: String
     let researchRecords: [ResearchRecordModel]
+    let factorWorkspaceBinding: FactorWorkspaceBindingModel?
 
     init(json: [String: Any]) {
         id = json["profile_id"] as? String ?? ""
         displayName = json["display_name"] as? String ?? id
+        status = json["status"] as? String ?? "active"
         serverURL = (json["server"] as? [String: Any])?["base_url"]
             as? String ?? ""
         workspaceRoot = json["workspace_root"] as? String ?? ""
@@ -76,5 +95,8 @@ struct LocalProfileModel: Identifiable {
         researchRecords = (
             json["research_records"] as? [[String: Any]] ?? []
         ).map(ResearchRecordModel.init)
+        factorWorkspaceBinding = FactorWorkspaceBindingModel(
+            json: json["factor_workspace_binding"] as? [String: Any] ?? [:]
+        )
     }
 }

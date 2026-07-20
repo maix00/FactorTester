@@ -16,9 +16,18 @@ struct ProfilesDirectoryView: View {
                         spacing: 14
                     ) {
                         ForEach(controller.profiles) { profile in
-                            profileCard(profile)
+                            ProfileDirectoryCard(
+                                profile: profile,
+                                open: { openProfile(profile) },
+                                controller: controller
+                            )
                         }
                     }
+                }
+                if let receipt = controller.lifecycleReceipt {
+                    ProfileLifecycleReceiptView(
+                        receipt: receipt, controller: controller
+                    )
                 }
                 Divider()
                 LocalProfileForm(controller: controller)
@@ -53,34 +62,4 @@ struct ProfilesDirectoryView: View {
         }
     }
 
-    private func profileCard(_ profile: LocalProfileModel) -> some View {
-        Button { openProfile(profile) } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Image(systemName: "person.crop.rectangle.stack")
-                        .font(.title2)
-                        .foregroundStyle(.tint)
-                    Text(profile.displayName).font(.title3.weight(.semibold))
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .foregroundStyle(.secondary)
-                }
-                Label(
-                    "\(profile.researchRecords.count) 项研究",
-                    systemImage: "doc.text.magnifyingglass"
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                Text(profile.workspaceRoot)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
 }

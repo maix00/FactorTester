@@ -24,6 +24,37 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class ProfileResearchServiceTests: XCTestCase {
+    func testProfileParsesFactorWorkspaceBinding() {
+        let profile = LocalProfileModel(json: [
+            "profile_id": "maxa",
+            "factor_workspace_binding": [
+                "binding_id": "factor-worktree-1",
+                "branch": "agent/maxa",
+                "worktree_path": "/profiles/maxa/factor-worktrees/maxa",
+                "receipt_ref": "file:///receipt.json",
+            ],
+        ])
+
+        XCTAssertEqual(profile.factorWorkspaceBinding?.id, "factor-worktree-1")
+        XCTAssertEqual(profile.factorWorkspaceBinding?.branch, "agent/maxa")
+    }
+
+    func testLifecycleReceiptDefaultsToGitRetention() {
+        let receipt = ProfileLifecycleReceipt(
+            json: [
+                "action": "delete",
+                "status": "deleted",
+                "profile_id": "maxa",
+                "receipt_ref": "file:///receipt.json",
+            ],
+            fallbackAction: "unknown"
+        )
+
+        XCTAssertTrue(receipt.branchRetained)
+        XCTAssertTrue(receipt.commitsRetained)
+        XCTAssertEqual(receipt.profileID, "maxa")
+    }
+
     override func tearDown() {
         StubURLProtocol.handler = nil
         super.tearDown()

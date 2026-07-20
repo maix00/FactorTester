@@ -3,21 +3,32 @@ import UniformTypeIdentifiers
 
 struct LocalProfileForm: View {
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var config: ServerConfig
     @ObservedObject var controller: LocalProfileController
     @State private var id = ""
     @State private var name = ""
     @State private var serverURL = ""
     @State private var workspaceRoot = ""
     @State private var agentID = ""
+    @State private var role = "research"
     @State private var choosingWorkspace = false
 
     var body: some View {
-        GroupBox("新建或更新 Profile") {
+        GroupBox("新建 Profile") {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                 row("ID", "例如 maxa", $id)
                 row("名称", "显示名称", $name)
                 row("服务器", "https://server.example", $serverURL)
                 row("Agent ID", "例如 research-maxa", $agentID)
+                GridRow {
+                    Text("角色").frame(width: 64, alignment: .leading)
+                    Picker("角色", selection: $role) {
+                        Text("研究 Agent").tag("research")
+                        Text("规划 Agent").tag("planning")
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                }
                 GridRow {
                     Text("初始化").frame(width: 64, alignment: .leading)
                     Text(session.user?.username ?? "请先在个人中心登录")
@@ -25,7 +36,7 @@ struct LocalProfileForm: View {
                 }
                 GridRow {
                     Spacer()
-                    Text("Profile 只绑定当前登录身份；创建后再从服务器授权列表选择初始化因子库。")
+                    Text("使用当前登录身份和 canonical 因子库初始化；自动创建 agent/\(branchProfileID) 独立分支与 worktree。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -42,20 +53,21 @@ struct LocalProfileForm: View {
                 }
                 GridRow {
                     Spacer()
-                    Button("保存 Profile") {
+                    Button("创建独立 Profile") {
                         Task {
-                            await controller.bootstrapProfile(
+                            await controller.createIsolatedProfile(
                                 id: id, name: name,
                                 serverURL: serverURL,
-                                workspaceRoot: workspaceRoot,
+                                workspaceRoot: effectiveWorkspaceRoot,
                                 agentID: agentID,
+                                role: role,
                                 principalRef: session.user?.username ?? ""
                             )
                         }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!session.isLoggedIn || [
-                        id, name, serverURL, workspaceRoot, agentID
+                        id, name, serverURL, agentID
                     ].contains(""))
                 }
             }
@@ -70,6 +82,11 @@ struct LocalProfileForm: View {
                 workspaceRoot = url.path
             }
         }
+        .onAppear {
+            if serverURL.isEmpty {
+                serverURL = config.baseURL?.absoluteString ?? ""
+            }
+        }
     }
 
     private func row(
@@ -81,5 +98,17 @@ struct LocalProfileForm: View {
             Text(title).frame(width: 64, alignment: .leading)
             TextField(prompt, text: value).textFieldStyle(.roundedBorder)
         }
+    }
+
+    private var branchProfileID: String {
+        id.isEmpty ? "<profile-id>" : id
+    }
+
+    private var effectiveWorkspaceRoot: String {
+        guard workspaceRoot.isEmpty else { return workspaceRoot }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/FactorTester/profiles")
+            .appendingPathComponent(id)
+            .path
     }
 }

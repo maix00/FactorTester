@@ -313,6 +313,28 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
     assert "case language" not in account
 
 
+def test_macos_profile_directory_uses_cli_lifecycle_and_git_receipts() -> None:
+    profile_root = SOURCES / "Features" / "Profiles"
+    lifecycle = (
+        profile_root / "LocalProfileLifecycleController.swift"
+    ).read_text(encoding="utf-8")
+    card = (profile_root / "ProfileDirectoryCard.swift").read_text(
+        encoding="utf-8"
+    )
+    receipt = (
+        profile_root / "ProfileLifecycleReceiptView.swift"
+    ).read_text(encoding="utf-8")
+
+    for command in ("create", "deactivate", "delete", "purge"):
+        assert f'"{command}"' in lifecycle
+    assert '"factor-worktree", "rollback"' in lifecycle
+    assert "Process()" not in lifecycle
+    assert "git " not in lifecycle.lower()
+    assert "dirty worktree 会被拒绝" in card
+    assert "不删除分支、提交或 receipt" in card + receipt
+    assert "清理已删除 Profile 的空目录" in receipt
+
+
 def test_live_profile_ui_is_bounded_refreshable_and_source_free() -> None:
     service = (
         SOURCES / "Networking" / "ProfileResearchService.swift"

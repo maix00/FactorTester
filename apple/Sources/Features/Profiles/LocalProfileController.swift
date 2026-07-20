@@ -2,11 +2,11 @@ import Foundation
 
 @MainActor
 final class LocalProfileController: ObservableObject {
-    @Published private(set) var profiles: [LocalProfileModel] = []
+    @Published var profiles: [LocalProfileModel] = []
     @Published private(set) var isWorking = false
     @Published var error: String?
-
-    private var cliPath: String {
+    @Published var lifecycleReceipt: ProfileLifecycleReceipt?
+    var cliPath: String {
         UserDefaults.standard.string(
             forKey: "client.release.cliPath"
         ) ?? "factortester"
@@ -96,7 +96,7 @@ final class LocalProfileController: ObservableObject {
         await run(arguments)
     }
 
-    private func run(_ arguments: [String]) async {
+    func run(_ arguments: [String]) async {
         await perform {
             _ = try await ReleaseCommand.runObject(
                 arguments,
@@ -106,7 +106,7 @@ final class LocalProfileController: ObservableObject {
         }
     }
 
-    private func loadProfiles() async throws -> [LocalProfileModel] {
+    func loadProfiles() async throws -> [LocalProfileModel] {
         let values = try await ReleaseCommand.runArray(
             ["client", "profile", "list"],
             executable: cliPath
@@ -115,7 +115,7 @@ final class LocalProfileController: ObservableObject {
             .filter { !$0.id.isEmpty }
     }
 
-    private func perform(
+    func perform(
         _ operation: @escaping @MainActor () async throws -> Void
     ) async {
         isWorking = true
