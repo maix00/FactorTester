@@ -97,6 +97,43 @@ before a reference is rendered.
   protocol, provided they implement the same bounded document and asset
   interfaces.
 
+### Quantitative visualization and navigation boundary
+
+The backend may emit only deterministic, compact series/table artifacts.
+Charts and PDF pages are cold-path derived assets over those reviewed
+artifacts; they are not additional research results and never trigger a new
+database read during report rendering.
+
+The minimum v1 report presentation is:
+
+- the compact result table;
+- conditional net-equity and drawdown series when the tested strategy
+  semantics make those series meaningful;
+- ordered group-return and group-spread series for cross-sectional tests.
+
+Heatmaps and PDF rendering remain deferred. Chart assets remain components
+inside Markdown/PDF report sections rather than standalone report records.
+Their provenance links to the exact compact backend artifact.
+
+Realized turnover and cost drag, observation count and coverage, the exact
+Sharpe and annualization convention, uncertainty for monotonicity claims, and
+multiplicity-adjustment references are explicit backend capability gaps. The
+client or report renderer must not infer them.
+
+Opening a holdout artifact is an auditable event. The report index retains its
+stable holdout reference and access receipt; routine in-sample navigation must
+not silently load or display holdout content.
+
+`ProfileResearchProjection` reserves bounded `list`, `detail`, and `timeline`
+seams. `ReportDocument` v2 and `REPORT.index.json` reserve bidirectional stable
+anchors between report sections and TrialPlan, obligation, and evidence
+references. The UI consumes those projections and anchors rather than reading
+database schema or scanning complete Markdown. A future server implementation
+must preserve a one-query profile index, at most two detail queries, keyset
+timeline pages of at most 50 rows, one cached object lookup per click, and zero
+database writes for SSE delivery. This ADR reserves the interface only; it
+does not authorize new database objects or server endpoints.
+
 ## Acceptance
 
 The first implementation must prove:
