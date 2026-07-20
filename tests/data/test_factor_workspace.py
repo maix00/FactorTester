@@ -36,6 +36,12 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     stale_custom.write_text("class OldFactor(FactorFamily):\n    pass\n", encoding="utf-8")
     stale_public.write_text("class OldPublic(FactorFamily):\n    pass\n", encoding="utf-8")
     stale_root.write_text("old\n", encoding="utf-8")
+    report = workspace_root / "research" / "branches" / "branch-1" / "REPORT.md"
+    note = workspace_root / "research" / "notes" / "agent-note.md"
+    report.parent.mkdir(parents=True)
+    note.parent.mkdir(parents=True)
+    report.write_text("derived report\n", encoding="utf-8")
+    note.write_text("provisional note\n", encoding="utf-8")
 
     factor_storage = factor_workspace_storage
     monkeypatch.setattr(factor_storage, "factor_source_root", lambda username: str(workspace_root))
@@ -81,6 +87,8 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert not stale_custom.exists()
     assert not stale_public.exists()
     assert not stale_root.exists()
+    assert report.read_text(encoding="utf-8") == "derived report\n"
+    assert note.read_text(encoding="utf-8") == "provisional note\n"
     assert (custom_dir / "FreshFactor.py").read_text(encoding="utf-8") == "class FreshFactor(FactorFamily):\n    pass\n"
     assert (public_dir / "PublicFactor.py").read_text(encoding="utf-8") == "class PublicFactor(FactorFamily):\n    pass\n"
     assert (workspace_root / ".factor_workspace" / "manifest.json").exists()

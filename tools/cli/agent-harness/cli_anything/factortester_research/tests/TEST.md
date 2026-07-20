@@ -205,6 +205,13 @@ use, and changed source always fails closed. They also keep equity-only
 microstructure guidance out of China-futures resolution and bind the built-in
 TrialPlan/RunSpec trial ledger plus reviewed false-discovery guidance.
 
+Derived-report tests verify byte-stable Markdown, content-addressed asset
+embedding, explicit missing/unauthorized gaps, atomic incremental writes,
+preservation of the previous complete report after write failure, rejection of
+source/heavy payloads, and a server-free CLI render path. Factor-workspace
+tests separately prove that regeneration preserves `research/` reports and
+notes.
+
 ## Commands
 
 Run the Harness package suite:
@@ -239,10 +246,10 @@ CLI_ANYTHING_FORCE_INSTALLED=1 PYTHONPATH=tools/cli/agent-harness \
 
 [_resolve_cli] Using installed command:
   /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
-collected 61 items
+collected 73 items
 
 test_core.py
-  43 passed
+  46 passed
 test_full_e2e.py::TestCLISubprocess
   17 passed
 test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
@@ -251,8 +258,10 @@ test_real_server_e2e.py::test_installed_clis_drive_real_server_active_graph_e2e
   [_resolve_cli] Using installed command:
     /opt/homebrew/Caskroom/miniconda/base/envs/GTHT/bin/cli-anything-factortester-research
   PASSED
+test_report_rendering.py
+  9 passed
 
-61 passed, 123 warnings in 14.88s
+73 passed, 123 warnings in 16.27s
 ```
 
 All warnings are existing Pandas frequency-alias deprecations (`d` to `D`) in

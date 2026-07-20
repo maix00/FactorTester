@@ -413,7 +413,7 @@ def _clear_workspace_generated(root: str) -> list[str]:
     removed: list[str] = []
     if not os.path.isdir(root):
         return removed
-    preserve = {".git", ".gitignore"}
+    preserve = {".git", ".gitignore", "research"}
     for name in sorted(os.listdir(root)):
         if name in preserve:
             continue

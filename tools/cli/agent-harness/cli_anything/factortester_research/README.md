@@ -224,6 +224,23 @@ The Harness validates the envelope against the same response's terminal
 assurance and deduplicates it by content hash. It does not copy the result
 body, artifact payloads, stdout, or source into the session.
 
+Render a reviewed, bounded local snapshot without contacting the server:
+
+```bash
+cli-anything-factortester-research report render \
+  --snapshot-file report-snapshot.json \
+  --workspace-root <factor-workspace> \
+  --json
+```
+
+The deterministic target writes
+`research/branches/<branch-id>/REPORT.md` only when content changes. Factor
+workspace regeneration preserves `research/`, including provisional notes.
+Reports link content-addressed evidence and assets; they reject factor source,
+formula/expression trees, credentials, and raw stdout/stderr. Markdown is the
+only implemented target. PDF and chart producers remain optional future
+targets; a chart is an embedded report asset, not a separate report.
+
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its
 observations were sealed after the factor, selection boundary, and TrialPlan

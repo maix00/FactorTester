@@ -15,6 +15,7 @@ from .commands.evidence import evidence
 from .commands.external import external_factor, external_factor_plan, external_factor_validate
 from .commands.graph import graph, graph_capabilities, graph_draft, graph_observed, graph_replay
 from .commands.operations import operator, operator_set, service, service_list, service_restart, workspace, workspace_inspect, workspace_prepare
+from .commands.report import report
 from .commands.research import checklist, doctor, plan, run_step, slice_plan
 from .core.session import DEFAULT_SESSION, load_session
 from .utils.repl_skin import ReplSkin
@@ -46,6 +47,7 @@ for command in (
     workspace, decision, gap, status, checklist, external_factor,
     cycle,
     evidence,
+    report,
 ):
     cli.add_command(command)
 
