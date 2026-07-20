@@ -1,7 +1,10 @@
 """Hard-budget checks for the real-factor acceptance fixtures."""
 
+import hashlib
 from pathlib import Path
 import runpy
+
+import orjson
 
 from server.services.research_graph.protocol import MAX_AGENT_PACKET_BYTES
 
@@ -9,6 +12,24 @@ from server.services.research_graph.protocol import MAX_AGENT_PACKET_BYTES
 ROOT = Path(__file__).resolve().parents[2]
 ACCEPTANCE = ROOT / "docs" / "research-decision-graph" / "acceptance"
 GENERATOR = ACCEPTANCE / "generate_batch6_live_artifacts.py"
+TOKEN_CONTEXT_RECEIPT = ACCEPTANCE / "batch6-token-context-receipt.json"
+
+
+def test_batch6_token_context_receipt_is_truthful_and_addressed() -> None:
+    receipt = orjson.loads(TOKEN_CONTEXT_RECEIPT.read_bytes())
+    declared_hash = receipt.pop("receipt_hash")
+
+    assert hashlib.sha256(
+        orjson.dumps(receipt, option=orjson.OPT_SORT_KEYS)
+    ).hexdigest() == declared_hash
+    assert receipt["assessment"]["status"] == "partial"
+    assert receipt["assessment"]["release_ready"] is False
+    assert receipt["assessment"]["actual_token_telemetry_proven"] is False
+    assert receipt["assessment"]["accepted_evidence_proven"] is False
+    assert all(
+        item["measurement_quality"] == "reserved_fallback"
+        for item in receipt["invocations"]
+    )
 
 
 def test_batch6_trial_plan_binding_fits_trace_budget(monkeypatch) -> None:
