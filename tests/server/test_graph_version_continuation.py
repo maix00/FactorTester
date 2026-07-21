@@ -26,6 +26,9 @@ from server.services.research_graph.branch import (
 from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
+from server.services.research_graph.branch.context import (
+    build_graph_branch_context,
+)
 from server.services.research_graph.branch.repository import (
     load_instance_branch_row,
 )
@@ -39,7 +42,11 @@ from tests.server.data_contract_fixtures import initialize
 from tools.data.sqlite.db import connect_sqlite
 
 
-def _install_active_target(path) -> dict:
+def _install_active_target(
+    path,
+    *,
+    capability_gap_requires_classification: bool = False,
+) -> dict:
     target = deepcopy(_graph())
     target.update({
         "version": 2,
@@ -47,6 +54,11 @@ def _install_active_target(path) -> dict:
         "lifecycle": "draft",
         "content_hash": "d" * 64,
     })
+    if capability_gap_requires_classification:
+        next(
+            node for node in target["nodes"]
+            if node["node_id"] == "capability_gap"
+        )["required_capabilities"] = ["capability-gap.classify"]
     with connect_sqlite(path) as conn:
         conn.execute(
             """
@@ -337,7 +349,10 @@ def test_pretrial_continuation_preserves_paused_gap_without_job_evidence(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
     initialize(path)
     _pause_pretrial_branch(path)
-    target = _install_active_target(path)
+    target = _install_active_target(
+        path,
+        capability_gap_requires_classification=True,
+    )
 
     preview = preview_graph_continuation(
         source_instance_id="instance-1",
@@ -384,6 +399,16 @@ def test_pretrial_continuation_preserves_paused_gap_without_job_evidence(
     )
     assert runtime is not None
     assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is True
+    context = build_graph_branch_context(
+        instance_id=continued["instance_id"],
+        branch_id=branch["branch_id"],
+        owner="alice",
+    )
+    assert context["required_capabilities"] == [{
+        "capability_id": "capability-gap.classify",
+        "binding": None,
+        "gap": None,
+    }]
 
 
 def test_pretrial_continuation_rejects_source_with_trial_plan(
@@ -394,7 +419,10 @@ def test_pretrial_continuation_rejects_source_with_trial_plan(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
     _prepare(path)
     _pause_legacy_branch_without_bound_job(path)
-    _install_active_target(path)
+    _install_active_target(
+        path,
+        capability_gap_requires_classification=True,
+    )
 
     with pytest.raises(ValueError, match="empty TrialPlan"):
         preview_graph_continuation(
@@ -414,7 +442,10 @@ def test_pretrial_continuation_shadow_replay_rejects_tampered_mode(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
     initialize(path)
     _pause_pretrial_branch(path)
-    target = _install_active_target(path)
+    target = _install_active_target(
+        path,
+        capability_gap_requires_classification=True,
+    )
     preview = preview_graph_continuation(
         source_instance_id="instance-1",
         source_branch_id="branch-1",

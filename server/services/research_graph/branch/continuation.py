@@ -249,7 +249,12 @@ def _prepare(
             source["omitted_evidence_count"] or 0
         )
     target = target_nodes.get(target_node)
-    if target is None or target.get("required_capabilities"):
+    if target is None:
+        raise ValueError(f"target Graph lacks {target_node} node")
+    if (
+        continuation_mode == JOB_EVIDENCE_MODE
+        and target.get("required_capabilities")
+    ):
         raise ValueError(
             f"target Graph lacks capability-free {target_node} node"
         )
