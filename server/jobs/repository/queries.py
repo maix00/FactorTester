@@ -145,6 +145,61 @@ class JobQueryImplementation:
             if (record := self._record(row)) is not None
         ]
 
+    def list_global_summaries(
+        self,
+        *,
+        limit: int = 20,
+        before_updated_at: float | None = None,
+        before_job_id: str = "",
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Return a bounded, non-sensitive all-owner administrative view."""
+        bounded_limit = min(100, max(1, int(limit)))
+        clauses: list[str] = []
+        args: list[Any] = []
+        if before_updated_at is not None:
+            clauses.append("(updated_at, job_id) < (?, ?)")
+            args.extend((
+                float(before_updated_at),
+                str(before_job_id),
+            ))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        args.append(bounded_limit + 1)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT job_id, run_id, owner, workspace_id, kind, status,
+                       attempt, step_mode, deployment_id,
+                       cancel_requested_at, created_at, started_at,
+                       finished_at, updated_at
+                FROM research_jobs
+                {where}
+                ORDER BY updated_at DESC, job_id DESC
+                LIMIT ?
+                """,
+                args,
+            ).fetchall()
+        has_more = len(rows) > bounded_limit
+        rows = rows[:bounded_limit]
+        return [
+            {
+                "job_id": str(row["job_id"]),
+                "run_id": str(row["run_id"]),
+                "owner": str(row["owner"]),
+                "workspace_id": str(row["workspace_id"]),
+                "kind": str(row["kind"]),
+                "status": str(row["status"]),
+                "attempt": int(row["attempt"] or 1),
+                "step_mode": bool(row["step_mode"]),
+                "deployment_id": str(row["deployment_id"] or ""),
+                "cancel_requested": row["cancel_requested_at"] is not None,
+                "created_at": float(row["created_at"]),
+                "started_at": row["started_at"],
+                "finished_at": row["finished_at"],
+                "updated_at": float(row["updated_at"]),
+            }
+            for row in rows
+        ], has_more
+
     def list_for_deployment(
         self,
         *,

@@ -63,6 +63,16 @@
       "roles": ["super_admin", "org_admin", "level_admin"]
     },
     {
+      "id": "server_operations",
+      "title": "服务器运行状态",
+      "desc": "管理 FactorTester 服务端口并查看全服测试任务队列",
+      "icon": "OPS",
+      "sfSymbol": "server.rack",
+      "path": "/admin/server-operations",
+      "requiresAuth": true,
+      "roles": ["super_admin"]
+    },
+    {
       "id": "docs",
       "title": "技术文档",
       "desc": "前后端架构、API 接口、因子说明",

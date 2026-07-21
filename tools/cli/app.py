@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from tools.cli.commands.agent import doctor, factor_plan
+from tools.cli.commands.admin import admin
 from tools.cli.commands.agent_flow import agent_flow
 from tools.cli.commands.auth import configure, login, logout
 from tools.cli.commands.client_release import client_release
@@ -38,6 +39,7 @@ def cli() -> None:
 
 
 cli.add_command(configure)
+cli.add_command(admin)
 cli.add_command(client_release)
 cli.add_command(login)
 cli.add_command(logout)

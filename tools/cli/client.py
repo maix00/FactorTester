@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .client_agent_flow import AgentFlowClientMixin
+from .client_admin import AdminClientMixin
 from .client_factor_library import FactorLibraryClientMixin
 from .client_protocol import ProtocolClientMixin
 from .client_research import ResearchClientMixin
@@ -13,6 +14,7 @@ from .http import HttpSession
 
 
 class FactorTesterClient(
+    AdminClientMixin,
     ProtocolClientMixin,
     ResearchGraphClientMixin,
     AgentFlowClientMixin,

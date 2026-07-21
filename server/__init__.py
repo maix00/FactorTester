@@ -45,7 +45,9 @@ def create_app() -> Flask:
     from server.services.research_runs import ensure_schema as ensure_research_run_schema
     from server.services.research_graphs import ensure_schema as ensure_research_graph_schema
     ensure_account_manager_sqlite_store()
-    JobRepository().ensure_schema()
+    job_repository = JobRepository()
+    job_repository.ensure_schema()
+    app.extensions['job_repository'] = job_repository
     ensure_research_configuration_schema()
     ensure_research_run_schema()
     ensure_research_graph_schema()
@@ -63,6 +65,7 @@ def create_app() -> Flask:
     from server.modules.custom_factors import cf_bp
     from server.modules.custom_factors import register_routes as register_custom_factor_routes
     from server.admin import admin_bp
+    from server.server_operations import server_operations_bp
 
     register_shared_routes()
     register_factor_routes()
@@ -77,6 +80,7 @@ def create_app() -> Flask:
     app.register_blueprint(cn_futures_bp)
     app.register_blueprint(cf_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(server_operations_bp)
 
     mount_sqlite_web(app)
 

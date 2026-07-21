@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import webbrowser
 from dataclasses import dataclass
@@ -82,6 +83,20 @@ class ManagerState:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.secret_path = self.log_dir.parent / "flask-secret.key"
         self.capability_path = self.log_dir.parent / "manager-capability.key"
+
+    def submit_action(self, operation, label: str) -> None:
+        """Run one already-authorized operation after its HTTP receipt."""
+        def run() -> None:
+            try:
+                operation()
+            except Exception as exc:
+                sys.stderr.write(f"[manager] async action {label} failed: {exc}\n")
+
+        threading.Thread(
+            target=run,
+            name=f"manager-action-{hashlib.sha256(label.encode()).hexdigest()[:8]}",
+            daemon=True,
+        ).start()
 
     def _flask_secret(self) -> str:
         if not self.secret_path.exists():
@@ -248,15 +263,16 @@ class ManagerState:
             ).strip(),
             "GTHT_JOB_ARTIFACT_ROOT": str(path / ".workspace" / "job-results"),
             "FLASK_SECRET_KEY": self._flask_secret(),
-            "GTHT_MANAGER_CAPABILITY_TOKEN": self.capability_token(),
         })
         return env, deployment_id, socket_path
 
     def _start_api(self, path: Path, port: int, env: dict[str, str], log) -> subprocess.Popen:
+        api_env = env.copy()
+        api_env["GTHT_MANAGER_CAPABILITY_TOKEN"] = self.capability_token()
         return subprocess.Popen(
             [self.python, "start_server.py", "--port", str(port)],
             cwd=path,
-            env=env,
+            env=api_env,
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -350,7 +366,12 @@ class ManagerState:
     def restart_bundle(self, path: Path, port: int, *, timeout: float = 120.0) -> str:
         path = path.resolve()
         bundle = self.processes.get(self.key(path))
-        if bundle is None or bundle.daemon.poll() is not None:
+        if bundle is None:
+            return self.start(path, port)
+        if bundle.daemon.poll() is not None:
+            self._terminate(bundle.api)
+            self._terminate(bundle.daemon)
+            self.processes.pop(self.key(path), None)
             return self.start(path, port)
         health = self._daemon_request(bundle, "drain")
         if health.get("paused_jobs"):
@@ -629,31 +650,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         instance_id = str(params["instance_id"][0])
         try:
-            if self.path == "/vibe/start":
-                if instance_id != "service-vibe-trading":
-                    raise LookupError("managed instance not found")
-                message = self.state.start_vibe()
-            elif self.path == "/vibe/stop":
-                if instance_id != "service-vibe-trading":
-                    raise LookupError("managed instance not found")
-                message = self.state.stop_vibe()
-            else:
-                worktree = self.state.worktree_for_instance(instance_id)
-                if worktree is None:
-                    raise LookupError("managed instance not found")
-                if self.path == "/start":
-                    message = self.state.start(worktree.path, worktree.port)
-                elif self.path == "/stop":
-                    message = self.state.stop(worktree.path)
-                elif self.path == "/restart-api":
-                    message = self.state.restart_api(worktree.path, worktree.port)
-                elif self.path == "/restart-bundle":
-                    message = self.state.restart_bundle(worktree.path, worktree.port)
-                else:
-                    message = self.state.stop(worktree.path, force=True)
+            operation = self._resolve_operation(instance_id)
         except LookupError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 404)
             return
+        if self.headers.get("Prefer", "").strip().lower() == "respond-async":
+            json_response(self, {
+                "success": True,
+                "submitted": True,
+                "instance_id": instance_id,
+            }, 202)
+            self.state.submit_action(operation, f"{self.path} {instance_id}")
+            return
+        try:
+            message = operation()
         except Exception as exc:
             sys.stderr.write(f"[manager] action {self.path} failed: {exc}\n")
             json_response(
@@ -667,6 +677,28 @@ class Handler(BaseHTTPRequestHandler):
             "instance_id": instance_id,
             "message": message,
         })
+
+    def _resolve_operation(self, instance_id: str):
+        if self.path == "/vibe/start":
+            if instance_id != "service-vibe-trading":
+                raise LookupError("managed instance not found")
+            return self.state.start_vibe
+        if self.path == "/vibe/stop":
+            if instance_id != "service-vibe-trading":
+                raise LookupError("managed instance not found")
+            return self.state.stop_vibe
+        worktree = self.state.worktree_for_instance(instance_id)
+        if worktree is None:
+            raise LookupError("managed instance not found")
+        if self.path == "/start":
+            return lambda: self.state.start(worktree.path, worktree.port)
+        if self.path == "/stop":
+            return lambda: self.state.stop(worktree.path)
+        if self.path == "/restart-api":
+            return lambda: self.state.restart_api(worktree.path, worktree.port)
+        if self.path == "/restart-bundle":
+            return lambda: self.state.restart_bundle(worktree.path, worktree.port)
+        return lambda: self.state.stop(worktree.path, force=True)
 
     def log_message(self, fmt: str, *args: object) -> None:
         sys.stderr.write("[manager] " + (fmt % args) + "\n")

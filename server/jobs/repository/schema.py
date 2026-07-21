@@ -76,6 +76,8 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_research_jobs_owner_updated
             ON research_jobs(owner, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_research_jobs_global_updated
+            ON research_jobs(updated_at DESC, job_id DESC);
         CREATE INDEX IF NOT EXISTS idx_research_jobs_workspace_updated
             ON research_jobs(owner, workspace_id, updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_research_jobs_queue

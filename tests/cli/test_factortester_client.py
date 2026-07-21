@@ -107,6 +107,34 @@ def fake_server() -> Iterator[str]:
     def list_jobs():
         return jsonify(success=True, jobs=[{"job_id": "job-1", "status": "queued"}])
 
+    @app.get("/admin/api/server-instances")
+    def admin_server_instances():
+        return jsonify(success=True, instances=[{
+            "instance_id": "worktree-opaque",
+            "kind": "factortester",
+            "port": 8141,
+            "running": True,
+        }])
+
+    @app.post("/admin/api/server-instances/<instance_id>/actions")
+    def admin_server_action(instance_id: str):
+        return jsonify(
+            success=True,
+            instance_id=instance_id,
+            action=request.get_json()["action"],
+        )
+
+    @app.get("/admin/api/jobs")
+    def admin_jobs():
+        assert request.args["limit"] == "9"
+        assert request.args["cursor"] == "cursor-1"
+        return jsonify(
+            success=True,
+            jobs=[{"job_id": "global-job-1", "owner": "bob"}],
+            has_more=False,
+            next_cursor=None,
+        )
+
     @app.get("/api/profile-research")
     def profile_research():
         assert session.get("username") == "alice"
@@ -260,6 +288,15 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         products=["A.DCE"],
         sources=["Local"],
     )["profile_hash"] == "sha256:availability"
+    assert client.list_server_instances()["instances"][0]["port"] == 8141
+    assert client.run_server_instance_action(
+        "worktree-opaque",
+        "restart",
+    )["action"] == "restart"
+    assert client.list_global_jobs(
+        limit=9,
+        cursor="cursor-1",
+    )["jobs"][0]["job_id"] == "global-job-1"
 
 
 def test_client_login_persists_across_processes_and_logout_clears_cookie(

@@ -232,6 +232,62 @@ def test_mutation_resolves_opaque_instance_id_server_side(tmp_path, monkeypatch)
     assert str(source) not in raw
 
 
+def test_async_mutation_responds_before_the_destructive_action(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state.capability_path.write_text("test-capability", encoding="ascii")
+    source = tmp_path / "private" / "issue-141"
+    worktree = manager.Worktree(
+        path=source,
+        branch="fix/issue-141-secure-manager",
+        head="abcdef12",
+        label="fix/issue-141-secure-manager",
+        port=8141,
+    )
+    monkeypatch.setattr(state, "worktrees", lambda: [worktree])
+    called = []
+    scheduled = []
+    monkeypatch.setattr(
+        state,
+        "restart_bundle",
+        lambda path, port: called.append((path, port)) or "restarted",
+    )
+    monkeypatch.setattr(
+        state,
+        "submit_action",
+        lambda operation, label: scheduled.append((operation, label)),
+    )
+    instance_id = state.instance_id(worktree)
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/restart-bundle",
+            data=urlencode({"instance_id": instance_id}).encode(),
+            headers={
+                "Authorization": "Bearer test-capability",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Prefer": "respond-async",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            raw = response.read().decode("utf-8")
+            assert response.status == 202
+
+    assert json.loads(raw) == {
+        "success": True,
+        "submitted": True,
+        "instance_id": instance_id,
+    }
+    assert called == []
+    operation, label = scheduled[0]
+    assert label == f"/restart-bundle {instance_id}"
+    operation()
+    assert called == [(source, 8141)]
+
+
 def test_mutation_error_does_not_disclose_managed_path(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(tmp_path, "python")
     state.capability_path.write_text("test-capability", encoding="ascii")
@@ -358,6 +414,9 @@ def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkey
     assert created[1][1]["env"]["FACTORTESTER_WERKZEUG_RELOADER"] == "0"
     assert created[1][1]["env"]["FLASK_SECRET_KEY"]
     assert created[1][1]["env"]["FLASK_SECRET_KEY"] == created[2][1]["env"]["FLASK_SECRET_KEY"]
+    assert "GTHT_MANAGER_CAPABILITY_TOKEN" not in created[0][1]["env"]
+    assert created[1][1]["env"]["GTHT_MANAGER_CAPABILITY_TOKEN"]
+    assert created[2][1]["env"]["GTHT_MANAGER_CAPABILITY_TOKEN"]
     assert (tmp_path / ".workspace" / "flask-manager" / "flask-secret.key").stat().st_mode & 0o777 == 0o600
 
 
@@ -380,6 +439,51 @@ def test_service_env_adds_repo_harness_without_losing_pythonpath(
     entries = env["PYTHONPATH"].split(os.pathsep)
     assert entries == [harness, "/existing/one", "/existing/two"]
     assert entries.count(harness) == 1
+
+
+def test_bundle_restart_recovers_api_when_daemon_has_died(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    (tmp_path / "start_server.py").write_text("", encoding="ascii")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "research_job_daemon.py").write_text(
+        "", encoding="ascii"
+    )
+    old_api = _Process(["api"])
+    dead_daemon = _Process(["daemon"])
+    dead_daemon.returncode = 1
+    state = manager.ManagerState(tmp_path, "python")
+    state.processes[state.key(tmp_path)] = manager.ServiceBundle(
+        api=old_api,
+        daemon=dead_daemon,
+        socket_path=tmp_path / "jobs.sock",
+        deployment_id="test",
+    )
+    monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: "abc123\n",
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "Popen",
+        lambda command, **kwargs: _Process(command),
+    )
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "_terminate",
+        staticmethod(lambda process: setattr(process, "returncode", 0)),
+    )
+
+    state.restart_bundle(tmp_path, 8135)
+
+    replacement = state.processes[state.key(tmp_path)]
+    assert old_api.returncode == 0
+    assert replacement.api is not old_api
+    assert replacement.api.poll() is None
+    assert replacement.daemon.poll() is None
 
 
 def test_paused_step_job_blocks_drained_bundle_restart(tmp_path, monkeypatch) -> None:
