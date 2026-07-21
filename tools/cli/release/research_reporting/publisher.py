@@ -160,10 +160,16 @@ def publish_research_checkpoint(
         gaps=snapshot["gaps"],
         lineage=value["report_lineage"],
     )
+    journal_prefix_branch_id = _journal_prefix_branch_id(
+        value["report_lineage"],
+        work_package_id=work_package_id,
+        branch_id=branch_id,
+    )
     report = render_branch_report(
         snapshot,
         workspace_root=Path(profile["workspace_root"]),
         journal_fragment=fragment,
+        journal_prefix_branch_id=journal_prefix_branch_id,
     )
     if (
         previous_checkpoint == value["checkpoint_ref"]
@@ -248,9 +254,11 @@ def _canonical_carrier(carrier: Any) -> dict[str, Any]:
         if not isinstance(value[field], str) or not _SHA256.fullmatch(value[field]):
             raise ValueError(f"{field} must be lowercase sha256")
     lineage = value["report_lineage"]
-    if not isinstance(lineage, dict) or set(lineage) != {
+    if not isinstance(lineage, dict) or set(lineage) not in ({
         "status", "predecessor_checkpoint_ref",
-    }:
+    }, {
+        "status", "predecessor_checkpoint_ref", "source_branch_ref",
+    }):
         raise ValueError("report_lineage fields are invalid")
     lineage_status = lineage["status"]
     predecessor = lineage["predecessor_checkpoint_ref"]
@@ -265,6 +273,12 @@ def _canonical_carrier(carrier: Any) -> dict[str, Any]:
         _reference(predecessor, "report_lineage.predecessor_checkpoint_ref")
         if not predecessor.startswith("trace:"):
             raise ValueError("report lineage predecessor must be a trace ref")
+        if "source_branch_ref" in lineage:
+            _reference(lineage["source_branch_ref"], "report_lineage.source_branch_ref")
+            if not lineage["source_branch_ref"].startswith("graph-branch:"):
+                raise ValueError(
+                    "report lineage source must be a graph branch ref"
+                )
     else:
         raise ValueError("report_lineage status is invalid")
     trial_plan_hash = value["trial_plan_hash"]
@@ -413,6 +427,32 @@ def _report_snapshot(
             ),
         }] if carrier["omitted_evidence_count"] else []),
     }
+
+
+def _journal_prefix_branch_id(
+    lineage: dict[str, Any], *, work_package_id: str, branch_id: str,
+) -> str | None:
+    """Return a trusted source branch for a forked report continuation.
+
+    The source is deliberately encoded as a logical graph reference rather
+    than a local path.  The writer resolves it inside this Work Package and
+    rejects self/cross-package references, keeping the carrier portable and
+    preventing a report from importing arbitrary local files.
+    """
+    source = lineage.get("source_branch_ref")
+    if not source:
+        return None
+    parts = str(source).split(":")
+    if (
+        len(parts) != 3
+        or parts[0] != "graph-branch"
+        or parts[1] != work_package_id
+    ):
+        raise ValueError("report lineage source branch is outside Work Package")
+    source_branch_id = _safe_id(parts[2], "report_lineage.source_branch_id")
+    if source_branch_id == branch_id:
+        raise ValueError("report lineage source branch cannot equal target")
+    return source_branch_id
 
 
 def _canonical_narrative(

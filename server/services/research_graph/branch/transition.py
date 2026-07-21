@@ -352,12 +352,43 @@ def advance_graph_branch(
                 f"branch-resolution:{instance_id}:{branch_id}"
             )
         previous_trace_id = str(branch_row["latest_trace_id"] or "")
-        trace_evidence["report_lineage"] = {
+        report_lineage = {
             "status": "linked" if previous_trace_id else "root",
             "predecessor_checkpoint_ref": (
                 f"trace:{previous_trace_id}" if previous_trace_id else ""
             ),
         }
+        # A fork trace is a relationship marker, not a report checkpoint.
+        # Preserve its source branch so the local publisher can materialize
+        # the trusted source journal prefix instead of inventing a new root.
+        if str(branch_row["latest_trace_edge_id"] or "") == "__branch_fork__":
+            fork_evidence = loads(branch_row["latest_trace_evidence_json"]) or {}
+            fork = fork_evidence.get("branch_fork")
+            source_branch_id = (
+                str(fork.get("source_branch_id") or "")
+                if isinstance(fork, dict) else ""
+            )
+            source_trace_ref = (
+                str(fork.get("source_trace_ref") or "")
+                if isinstance(fork, dict) else ""
+            )
+            if source_branch_id and source_trace_ref:
+                # The fork marker is not a report checkpoint.  Link the
+                # first child fragment to the source branch's last trusted
+                # checkpoint so the local journal can materialize one
+                # continuous root-to-child history.
+                report_lineage["predecessor_checkpoint_ref"] = source_trace_ref
+                report_lineage["source_branch_ref"] = (
+                    f"graph-branch:{instance_id}:{source_branch_id}"
+                )
+            elif not source_trace_ref:
+                # A fork before the source emitted a report starts a new
+                # trusted journal; no synthetic predecessor is allowed.
+                report_lineage = {
+                    "status": "root",
+                    "predecessor_checkpoint_ref": "",
+                }
+        trace_evidence["report_lineage"] = report_lineage
         trace_evidence_json = serialize_bounded_trace_evidence(trace_evidence)
         bounded_evidence_refs, omitted_evidence_count = (
             merge_bounded_evidence_refs(

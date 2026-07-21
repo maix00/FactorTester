@@ -72,6 +72,7 @@ def render_branch_report(
     workspace_root: Path,
     target: ReportTarget | None = None,
     journal_fragment: dict[str, Any] | None = None,
+    journal_prefix_branch_id: str | None = None,
 ) -> dict[str, Any]:
     """Update one branch and its Work Package generation under one lock."""
     canonical = canonical_report_snapshot(snapshot)
@@ -92,8 +93,31 @@ def render_branch_report(
         fragment_targets = []
         journal_path = branch_path.parent / "JOURNAL.json"
         if journal_fragment is not None:
+            target_sections_path = branch_path.parent / "sections"
+            existing_fragments = _load_fragments(target_sections_path)
+            prefix_fragments: list[dict[str, Any]] = []
+            prefix_targets: list[tuple[str, Path, bytes]] = []
+            if journal_prefix_branch_id and not existing_fragments:
+                source_sections_path = (
+                    package_root / "branches" / journal_prefix_branch_id
+                    / "sections"
+                )
+                prefix_fragments = _load_fragments(source_sections_path)
+                if not prefix_fragments:
+                    raise ValueError(
+                        "fork report continuation requires a trusted source journal"
+                    )
+                target_sections_path.mkdir(parents=True, exist_ok=True)
+                prefix_targets = [
+                    (
+                        "journal_prefix_fragment",
+                        target_sections_path / f"{item['section_hash']}.json",
+                        _fragment_payload(item),
+                    )
+                    for item in prefix_fragments
+                ]
             fragments, fragment_changed = _merge_fragment(
-                _load_fragments(branch_path.parent / "sections"),
+                [*prefix_fragments, *existing_fragments],
                 journal_fragment,
             )
             rendered_snapshot = canonical_report_snapshot(
@@ -138,6 +162,7 @@ def render_branch_report(
         ]
         if journal_bytes is not None:
             targets.append(("journal", journal_path, journal_bytes))
+        targets.extend(prefix_targets)
         targets.extend(fragment_targets)
         changed = _publish_generation(targets)
 

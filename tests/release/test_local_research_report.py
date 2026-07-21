@@ -258,6 +258,106 @@ def test_checkpoint_publish_accumulates_complete_chinese_narrative(
     assert len(list((branch_root / "sections").glob("*.json"))) == 2
 
 
+def test_checkpoint_publish_materializes_source_prefix_for_fork(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    profile = store.load("maxa")
+    profile["agents"].append({
+        "agent_id": "research-maxa-fork",
+        "role": "research",
+        "scope": {
+            "instance_id": "sgccs-review",
+            "branch_id": "branch-fork",
+        },
+        "status": "ready",
+        "next_action": "Resume the authorized research scope.",
+    })
+    source_record = profile["research_records"][0]
+    target_record = deepcopy(source_record)
+    target_record.update({
+        "record_id": "sgccs-review-fork",
+        "agent_id": "research-maxa-fork",
+        "graph_branch_ref": "graph-branch:sgccs-review:branch-fork",
+    })
+    profile["research_records"].append(target_record)
+    store.save(profile)
+
+    source = _carrier()
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=source,
+        narrative=_narrative(source, body="源分支首先确认了因子语义与时间对齐。"),
+    )
+    fork = deepcopy(source)
+    fork.update({
+        "branch_ref": "graph-branch:sgccs-review:branch-fork",
+        "checkpoint_ref": "trace:checkpoint-fork-1",
+    })
+    fork["latest_transition"].update({
+        "step_ref": "trace:checkpoint-fork-1",
+        "created_at": 3.0,
+        "edge_ref": "graph-edge:fork__cost_review",
+    })
+    fork["report_lineage"] = {
+        "status": "linked",
+        "predecessor_checkpoint_ref": "trace:checkpoint-1",
+        "source_branch_ref": "graph-branch:sgccs-review:branch-sgccs",
+    }
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa-fork",
+        carrier=fork,
+        narrative=_narrative(fork, body="分支随后检验了交易成本义务是否仍然成立。"),
+    )
+
+    branch_root = (
+        root / "profile-root" / "research" / "sgccs-review"
+        / "branches" / "branch-fork"
+    )
+    journal = json.loads((branch_root / "JOURNAL.json").read_text())
+    assert [item["checkpoint_ref"] for item in journal["checkpoints"]] == [
+        "trace:checkpoint-1",
+        "trace:checkpoint-fork-1",
+    ]
+    assert journal["checkpoints"][0]["lineage_status"] == "root"
+    assert journal["checkpoints"][1]["lineage_status"] == "linked"
+    report = (branch_root / "REPORT.md").read_text(encoding="utf-8")
+    assert report.index("源分支首先") < report.index("分支随后")
+    assert len(list((branch_root / "sections").glob("*.json"))) == 2
+
+
+def test_checkpoint_publish_rejects_fork_without_source_journal(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    profile = store.load("maxa")
+    profile["agents"][0]["scope"]["branch_id"] = "branch-fork"
+    profile["research_records"][0]["graph_branch_ref"] = (
+        "graph-branch:sgccs-review:branch-fork"
+    )
+    store.save(profile)
+    carrier = _carrier()
+    carrier["branch_ref"] = "graph-branch:sgccs-review:branch-fork"
+    carrier["report_lineage"] = {
+        "status": "linked",
+        "predecessor_checkpoint_ref": "trace:checkpoint-1",
+        "source_branch_ref": "graph-branch:sgccs-review:branch-sgccs",
+    }
+    with pytest.raises(ValueError, match="trusted source journal"):
+        publish_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+        )
+
+
 def test_checkpoint_publish_requires_trusted_root_and_unbroken_lineage(
     tmp_path: Path,
 ) -> None:

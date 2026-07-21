@@ -122,6 +122,7 @@ def report_lineage_projection(value: Any) -> dict[str, str]:
         }
     status = str(value.get("status") or "")
     predecessor = str(value.get("predecessor_checkpoint_ref") or "")
+    source_branch_ref = str(value.get("source_branch_ref") or "")
     if status == "root" and not predecessor:
         return {"status": status, "predecessor_checkpoint_ref": ""}
     if (
@@ -129,7 +130,13 @@ def report_lineage_projection(value: Any) -> dict[str, str]:
         and predecessor.startswith("trace:")
         and safe_identifier(predecessor.removeprefix("trace:"))
     ):
-        return {"status": status, "predecessor_checkpoint_ref": predecessor}
+        result = {
+            "status": status,
+            "predecessor_checkpoint_ref": predecessor,
+        }
+        if source_branch_ref.startswith("graph-branch:"):
+            result["source_branch_ref"] = source_branch_ref
+        return result
     return {
         "status": "history_incomplete",
         "predecessor_checkpoint_ref": "",
