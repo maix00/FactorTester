@@ -246,7 +246,7 @@ struct ResearchVersionTreePane: View {
                     && selectedLineage?.relation == "root",
                 isLineage: false,
                 sourceLane: nil,
-                branchID: detail.branchRef
+                branchID: branchID(for: detail.branchRef)
             )
         }
         for branch in visibleBranches {
@@ -334,7 +334,7 @@ struct ResearchVersionTreePane: View {
                 isRoot: node.isRoot,
                 isLineage: lineage != nil,
                 sourceLane: sourceLane,
-                branchID: node.branchRef
+                branchID: branchID(for: node.branchRef)
             )
         }
         // A branch may have no checkpoint yet (or may be outside the bounded
@@ -425,6 +425,10 @@ struct ResearchVersionTreePane: View {
             $0.branchRef == branchRef
         } ?? 0
         return index
+    }
+
+    private func branchID(for branchRef: String) -> String {
+        branchRef.split(separator: ":").last.map(String.init) ?? branchRef
     }
 
     private func laneX(_ lane: Int) -> CGFloat {

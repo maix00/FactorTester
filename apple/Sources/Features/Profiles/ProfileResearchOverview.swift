@@ -53,9 +53,10 @@ final class ResearchDirectoryController: ObservableObject {
                     binding.workspaceRef
                 )
                 loaded += page.items.map { summary in
-                    let owners = binding.profiles.filter {
-                        $0.owns(workPackageRef: summary.workPackageRef)
-                    }
+                    let owners = authoritativeOwners(
+                        for: summary,
+                        in: binding.profiles
+                    )
                     return ResearchDirectoryItem(
                         serverURL: binding.serverURL,
                         workspaceID: binding.workspaceID,
@@ -78,6 +79,33 @@ final class ResearchDirectoryController: ObservableObject {
         if !failures.isEmpty {
             error = failures.joined(separator: " · ")
         }
+    }
+
+    /// The server owns the current Work Package ownership projection.  Local
+    /// research records remain useful for resolving report artifacts, but an
+    /// Agent's mutable execution scope must not hide historical ownership.
+    private func authoritativeOwners(
+        for summary: ProfileResearchSummary,
+        in profiles: [LocalProfileModel]
+    ) -> [LocalProfileModel] {
+        let reference = summary.currentOwnerProfileRef
+            ?? summary.createdByProfileRef
+        guard let reference, let profileID = profileID(from: reference) else {
+            return profiles.filter {
+                $0.owns(workPackageRef: summary.workPackageRef)
+            }
+        }
+        return profiles.filter { $0.id == profileID }
+    }
+
+    private func profileID(from reference: String) -> String? {
+        let value = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        if value.hasPrefix("profile:") {
+            let id = String(value.dropFirst("profile:".count))
+            return id.isEmpty ? nil : id
+        }
+        return value
     }
 
     private func uniqueBindings() -> [ResearchWorkspaceBinding] {

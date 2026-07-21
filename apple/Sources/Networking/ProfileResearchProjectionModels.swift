@@ -25,6 +25,8 @@ struct ProfileResearchSummary: Decodable, Identifiable {
     let updatedAt: Double
     let detailHref: String
     let reportLookupRef: String?
+    let createdByProfileRef: String?
+    let currentOwnerProfileRef: String?
     var id: String { researchRef }
 
     enum CodingKeys: String, CodingKey {
@@ -38,6 +40,8 @@ struct ProfileResearchSummary: Decodable, Identifiable {
         case updatedAt = "updated_at"
         case detailHref = "detail_href"
         case reportLookupRef = "report_lookup_ref"
+        case createdByProfileRef = "created_by_profile_ref"
+        case currentOwnerProfileRef = "current_owner_profile_ref"
     }
 }
 
@@ -175,6 +179,9 @@ struct ProfileResearchBranchSummary: Decodable, Identifiable {
     let updatedAt: Double
     let detailHref: String
     let reportLookupRef: String?
+    let createdByProfileRef: String?
+    let currentOwnerProfileRef: String?
+    let latestActingProfileRef: String?
     var id: String { branchRef }
 
     var branchID: String {
@@ -193,6 +200,9 @@ struct ProfileResearchBranchSummary: Decodable, Identifiable {
         case updatedAt = "updated_at"
         case detailHref = "detail_href"
         case reportLookupRef = "report_lookup_ref"
+        case createdByProfileRef = "created_by_profile_ref"
+        case currentOwnerProfileRef = "current_owner_profile_ref"
+        case latestActingProfileRef = "latest_acting_profile_ref"
     }
 }
 
@@ -228,6 +238,9 @@ struct ProfileResearchDetail: Decodable {
     let timelineHref: String
     let refresh: ResearchRefreshDirective
     let etag: String
+    let createdByProfileRef: String?
+    let currentOwnerProfileRef: String?
+    let latestActingProfileRef: String?
 
     enum CodingKeys: String, CodingKey {
         case researchRef = "research_ref"
@@ -247,6 +260,9 @@ struct ProfileResearchDetail: Decodable {
         case timelineHref = "timeline_href"
         case refresh
         case etag
+        case createdByProfileRef = "created_by_profile_ref"
+        case currentOwnerProfileRef = "current_owner_profile_ref"
+        case latestActingProfileRef = "latest_acting_profile_ref"
     }
 }
 

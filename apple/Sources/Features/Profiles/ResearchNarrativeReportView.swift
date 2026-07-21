@@ -326,7 +326,7 @@ struct ResearchNarrativeReportView: View {
     private func loadReport() async {
         guard let artifact, !artifact.journalRef.isEmpty else {
             sections = []
-            reportError = "该历史记录没有经过校验的中文 journal；不会用摘要卡片冒充完整报告。"
+            reportError = "报告未按新协议完成，需重做：本地记录缺少 JOURNAL.json，没有经过校验的中文 journal。请让对应 research Agent 从可信 root 重新提交该分支的 checkpoint；客户端不会用旧 REPORT.md 或 INDEX.json 冒充完整报告。"
             return
         }
         do {

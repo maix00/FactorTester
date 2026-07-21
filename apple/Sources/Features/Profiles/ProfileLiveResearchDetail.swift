@@ -9,6 +9,9 @@ struct ProfileLiveResearchDetail: View {
             if let detail = controller.detail,
                let workPackage = controller.workPackage {
                 let context = reportContext(for: detail)
+                let artifact = context?.record.artifacts.first {
+                    !$0.journalRef.isEmpty
+                }
                 ResearchNarrativeReportView(
                     detail: detail,
                     workPackage: workPackage,
@@ -21,9 +24,7 @@ struct ProfileLiveResearchDetail: View {
                     reportTitle: ResearchDisplayText.reportTitle(
                         context?.record.title ?? ""
                     ),
-                    artifact: context?.record.artifacts.first {
-                        !$0.journalRef.isEmpty
-                    },
+                    artifact: artifact,
                     selectBranch: { branchID in
                         controller.selectedBranchID = branchID
                     },
@@ -56,14 +57,16 @@ struct ProfileLiveResearchDetail: View {
     private func reportContext(
         for detail: ProfileResearchDetail
     ) -> (profile: LocalProfileModel, record: ResearchRecordModel)? {
-        for profile in profiles {
-            if let record = profile.researchRecords.first(where: {
-                $0.graphBranchRef == detail.branchRef
-                    && $0.artifacts.contains { !$0.journalRef.isEmpty }
-            }) {
-                return (profile, record)
-            }
+        let matches = profiles.flatMap { profile in
+            profile.researchRecords
+                .filter { $0.graphBranchRef == detail.branchRef }
+                .map { (profile: profile, record: $0) }
         }
-        return nil
+        // Prefer a protocol-complete record when a stale duplicate exists,
+        // but retain an exact legacy record so the UI can explain why the
+        // report is unavailable instead of pretending the Profile is absent.
+        return matches.first { item in
+            item.record.artifacts.contains { !$0.journalRef.isEmpty }
+        } ?? matches.first
     }
 }
