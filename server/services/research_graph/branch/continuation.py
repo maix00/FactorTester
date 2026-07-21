@@ -16,7 +16,10 @@ from server.services.research_graph.branch.job_attempt import (
     prepare_bound_job_evidence,
 )
 from server.services.research_graph.branch.continuation_store import (
-    TARGET_NODE,
+    JOB_EVIDENCE_MODE,
+    JOB_EVIDENCE_TARGET_NODE,
+    PRE_TRIAL_CHECKPOINT_MODE,
+    PRE_TRIAL_TARGET_NODE,
     insert_continuation as _insert_continuation,
 )
 from server.services.research_graph.branch.repository import (
@@ -130,8 +133,8 @@ def continue_graph_branch(
         "branch_id": branch_id,
         "instance_id": instance_id,
         "label": f"continuation-v{int(target_graph_version)}",
-        "current_node": TARGET_NODE,
-        "status": "running",
+        "current_node": prepared["target_node"],
+        "status": prepared["target_status"],
         "created_at": now,
         "updated_at": now,
     }
@@ -195,9 +198,6 @@ def _prepare(
         str(node.get("node_id") or ""): node
         for node in target_graph.get("nodes") or []
     }
-    target = target_nodes.get(TARGET_NODE)
-    if target is None or target.get("required_capabilities"):
-        raise ValueError("target Graph lacks capability-free job evidence node")
     if (
         str(source["current_node"]) != "capability_gap"
         or str(source["status"]) != "paused"
@@ -207,15 +207,55 @@ def _prepare(
     if checkpoint is None:
         raise ValueError("Graph continuation requires a Research Cycle")
     source_identity = branch_identity(source)
-    job = prepare_bound_job_evidence(
-        job_id=job_id,
-        owner=owner,
-        checkpoint=checkpoint,
-        expected=source_identity,
-    )
-    envelope = _continuation_envelope(job["envelope"])
+    if job_id:
+        continuation_mode = JOB_EVIDENCE_MODE
+        target_node = JOB_EVIDENCE_TARGET_NODE
+        target_status = "running"
+        job = prepare_bound_job_evidence(
+            job_id=job_id,
+            owner=owner,
+            checkpoint=checkpoint,
+            expected=source_identity,
+        )
+        envelope: dict[str, Any] | None = _continuation_envelope(
+            job["envelope"]
+        )
+        evidence_refs = ["evidence:" + envelope["envelope_hash"]]
+        omitted_evidence_count = 0
+    else:
+        continuation_mode = PRE_TRIAL_CHECKPOINT_MODE
+        target_node = PRE_TRIAL_TARGET_NODE
+        target_status = "paused"
+        if (
+            str(checkpoint.get("trial_plan_hash") or "")
+            or str(source["current_trial_plan_hash"] or "")
+        ):
+            raise ValueError(
+                "pre-trial Graph continuation requires an empty TrialPlan"
+            )
+        envelope = None
+        try:
+            source_refs = orjson.loads(
+                str(source["evidence_refs_json"] or "[]")
+            )
+        except orjson.JSONDecodeError as exc:
+            raise ValueError("source evidence refs are invalid") from exc
+        if not isinstance(source_refs, list) or not all(
+            isinstance(reference, str) for reference in source_refs
+        ):
+            raise ValueError("source evidence refs are invalid")
+        evidence_refs = source_refs
+        omitted_evidence_count = int(
+            source["omitted_evidence_count"] or 0
+        )
+    target = target_nodes.get(target_node)
+    if target is None or target.get("required_capabilities"):
+        raise ValueError(
+            f"target Graph lacks capability-free {target_node} node"
+        )
     descriptor = {
         "schema_version": 1,
+        "continuation_mode": continuation_mode,
         "owner": owner,
         "graph_id": str(source["graph_id"]),
         "source_graph_version": int(source["graph_version"]),
@@ -226,17 +266,26 @@ def _prepare(
         "source_checkpoint_hash": str(checkpoint["projection_hash"]),
         "target_graph_version": int(target_graph_version),
         "target_graph_hash": str(target_graph["content_hash"]),
-        "target_node": TARGET_NODE,
+        "target_node": target_node,
         "workspace_id": str(source["workspace_id"]),
-        "job_id": job_id,
-        "job_evidence_hash": str(envelope["envelope_hash"]),
     }
+    if continuation_mode == JOB_EVIDENCE_MODE:
+        assert envelope is not None
+        descriptor.update({
+            "job_id": job_id,
+            "job_evidence_hash": str(envelope["envelope_hash"]),
+        })
     return {
         "target_hash": _hash(descriptor),
         "descriptor": descriptor,
         "source_identity": source_identity,
         "checkpoint": checkpoint,
         "envelope": envelope,
+        "continuation_mode": continuation_mode,
+        "target_node": target_node,
+        "target_status": target_status,
+        "evidence_refs": evidence_refs,
+        "omitted_evidence_count": omitted_evidence_count,
         "graph_id": str(source["graph_id"]),
         "product_group": str(source["product_group"]),
         "workspace_id": str(source["workspace_id"]),
@@ -268,4 +317,3 @@ def _hash(value: dict[str, Any]) -> str:
     return hashlib.sha256(
         orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
     ).hexdigest()
-

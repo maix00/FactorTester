@@ -646,6 +646,37 @@ def test_research_graph_continuation_is_previewed_then_exactly_authorized(
     )
 
 
+def test_research_graph_pretrial_continuation_omits_job_id(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    runner = CliRunner()
+
+    preview = runner.invoke(cli, [
+        "research-graph", "continuation-preview",
+        "instance-v6", "branch-v6",
+        "--target-version", "7",
+    ])
+    continued = runner.invoke(cli, [
+        "research-graph", "continue",
+        "instance-v6", "branch-v6",
+        "--target-version", "7",
+        "--expected-target-hash", "c" * 64,
+        "--human-authorization-id", "gate-pretrial",
+    ])
+
+    assert preview.exit_code == 0
+    assert continued.exit_code == 0
+    assert fake.continuation_preview == (
+        "instance-v6", "branch-v6", 7, "",
+    )
+    assert fake.continuation == (
+        "instance-v6", "branch-v6", 7, "", "c" * 64,
+        "gate-pretrial",
+    )
+
+
 def test_research_graph_rollback_requires_exact_authorization(
     tmp_path,
     monkeypatch,

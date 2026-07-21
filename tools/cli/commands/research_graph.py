@@ -417,7 +417,11 @@ def fork_graph_branch(
 @click.argument("instance_id")
 @click.argument("branch_id")
 @click.option("--target-version", required=True, type=click.IntRange(min=1))
-@click.option("--job-id", required=True)
+@click.option(
+    "--job-id",
+    default="",
+    help="已绑定 Job；暂停于 TrialPlan 前的分支可省略。",
+)
 def preview_graph_continuation(
     instance_id: str,
     branch_id: str,
@@ -439,7 +443,11 @@ def preview_graph_continuation(
 @click.argument("instance_id")
 @click.argument("branch_id")
 @click.option("--target-version", required=True, type=click.IntRange(min=1))
-@click.option("--job-id", required=True)
+@click.option(
+    "--job-id",
+    default="",
+    help="已绑定 Job；暂停于 TrialPlan 前的分支可省略。",
+)
 @click.option("--expected-target-hash", required=True)
 @click.option("--human-authorization-id", required=True)
 def continue_graph_branch(

@@ -8,6 +8,12 @@ from typing import Any
 import orjson
 
 import settings as Settings
+from server.services.research_graph.branch.continuation_store import (
+    JOB_EVIDENCE_MODE,
+    JOB_EVIDENCE_TARGET_NODE,
+    PRE_TRIAL_CHECKPOINT_MODE,
+    PRE_TRIAL_TARGET_NODE,
+)
 from server.services.research_graph.protocol import json_hash
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
@@ -214,7 +220,7 @@ def _continuation_bootstrap_valid(
         if isinstance(server_evidence, dict)
         else None
     )
-    if not isinstance(continuation, dict) or not isinstance(envelope, dict):
+    if not isinstance(continuation, dict):
         return False
     authorization_ref = str(continuation.get("authorization_ref") or "")
     if not authorization_ref.startswith("maintenance-case:"):
@@ -226,11 +232,10 @@ def _continuation_bootstrap_valid(
         if key != "authorization_ref"
     }
     target_hash = json_hash(descriptor)
-    try:
-        validated_envelope = validate_agent_evidence_envelope(envelope)
-    except ValueError:
+    mode = str(descriptor.get("continuation_mode") or "")
+    checkpoint = evidence.get("research_cycle_checkpoint")
+    if not isinstance(checkpoint, dict):
         return False
-    facts = validated_envelope.get("facts") or {}
     if (
         str(descriptor.get("owner") or "") != str(runtime["owner"])
         or str(descriptor.get("graph_id") or "") != str(runtime["graph_id"])
@@ -242,11 +247,38 @@ def _continuation_bootstrap_valid(
         != bootstrap_node
         or str(descriptor.get("workspace_id") or "")
         != str(runtime["workspace_id"])
-        or str(descriptor.get("job_id") or "")
-        != str(facts.get("job_id") or "")
-        or str(descriptor.get("job_evidence_hash") or "")
-        != str(validated_envelope.get("envelope_hash") or "")
+        or str(checkpoint.get("projection_hash") or "")
+        != str(descriptor.get("source_checkpoint_hash") or "")
     ):
+        return False
+    if mode == JOB_EVIDENCE_MODE:
+        if (
+            bootstrap_node != JOB_EVIDENCE_TARGET_NODE
+            or not isinstance(envelope, dict)
+        ):
+            return False
+        try:
+            validated_envelope = validate_agent_evidence_envelope(envelope)
+        except ValueError:
+            return False
+        facts = validated_envelope.get("facts") or {}
+        if (
+            str(descriptor.get("job_id") or "")
+            != str(facts.get("job_id") or "")
+            or str(descriptor.get("job_evidence_hash") or "")
+            != str(validated_envelope.get("envelope_hash") or "")
+        ):
+            return False
+    elif mode == PRE_TRIAL_CHECKPOINT_MODE:
+        if (
+            bootstrap_node != PRE_TRIAL_TARGET_NODE
+            or server_evidence is not None
+            or "job_id" in descriptor
+            or "job_evidence_hash" in descriptor
+            or str(checkpoint.get("trial_plan_hash") or "")
+        ):
+            return False
+    else:
         return False
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         source = conn.execute(
@@ -281,7 +313,7 @@ def _continuation_bootstrap_valid(
     try:
         source_evidence = orjson.loads(source["evidence_json"])
         source_graph = orjson.loads(source["graph_json"])
-        checkpoint = source_evidence["research_cycle_checkpoint"]
+        source_checkpoint = source_evidence["research_cycle_checkpoint"]
         affected_refs = orjson.loads(source["gate_affected_refs_json"])
         change_refs = orjson.loads(source["gate_change_refs_json"])
     except (KeyError, TypeError, orjson.JSONDecodeError):
@@ -300,7 +332,7 @@ def _continuation_bootstrap_valid(
         == str(descriptor.get("source_graph_hash") or "")
         and str(source["latest_trace_id"])
         == str(descriptor.get("source_trace_id") or "")
-        and str(checkpoint.get("projection_hash") or "")
+        and str(source_checkpoint.get("projection_hash") or "")
         == str(descriptor.get("source_checkpoint_hash") or "")
         and str(source["gate_status"]) == "resolved"
         and f"gate-action:continue_graph_branch" in affected_refs

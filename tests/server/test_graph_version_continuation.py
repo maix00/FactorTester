@@ -35,6 +35,7 @@ from tests.server.test_job_graph_evidence import (
     _prepare,
     _request,
 )
+from tests.server.data_contract_fixtures import initialize
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -134,6 +135,36 @@ def _pause_legacy_branch_without_bound_job(path) -> None:
             UPDATE research_graph_branches
             SET current_node='capability_gap', status='paused',
                 latest_trace_id='trace-legacy-gap'
+            WHERE branch_id='branch-1'
+            """
+        )
+
+
+def _pause_pretrial_branch(path) -> None:
+    with connect_sqlite(path) as conn:
+        checkpoint_evidence = conn.execute(
+            "SELECT evidence_json FROM research_graph_trace "
+            "WHERE trace_id='trace-bootstrap'"
+        ).fetchone()["evidence_json"]
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id, from_node, to_node,
+                evidence_json, telemetry_json, actor, created_at
+            ) VALUES (
+                'trace-pretrial-gap', 'instance-1', 'branch-1',
+                'data_contract__capability_gap', 'data_contract',
+                'capability_gap', ?, '{}', 'alice', 2
+            )
+            """,
+            (checkpoint_evidence,),
+        )
+        conn.execute(
+            """
+            UPDATE research_graph_branches
+            SET current_node='capability_gap', status='paused',
+                current_trial_plan_hash='',
+                latest_trace_id='trace-pretrial-gap'
             WHERE branch_id='branch-1'
             """
         )
@@ -296,15 +327,128 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
         )
     assert runtime is not None
     assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is True
-    recovered = advance_graph_branch(
-        instance_id=continued["instance_id"],
-        branch_id=branch["branch_id"],
+
+
+def test_pretrial_continuation_preserves_paused_gap_without_job_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    initialize(path)
+    _pause_pretrial_branch(path)
+    target = _install_active_target(path)
+
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
         owner="alice",
-        edge_id="capability_gap__job_evidence_ready",
-        evidence={"approved_binding_now_available": True},
+        target_graph_version=2,
+        job_id="",
     )
-    assert recovered["current_node"] == "job_evidence_ready"
+    assert preview["descriptor"]["continuation_mode"] == "pre_trial_checkpoint"
+    assert preview["descriptor"]["target_node"] == "capability_gap"
+    case_id = _approve(path, target_hash=preview["target_hash"])
+
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+        expected_target_hash=preview["target_hash"],
+        human_authorization_id=case_id,
+    )
+
+    branch = continued["branches"][0]
+    assert branch["current_node"] == "capability_gap"
+    assert branch["status"] == "paused"
     with connect_sqlite(path) as conn:
+        trace = conn.execute(
+            """
+            SELECT evidence_json FROM research_graph_trace
+            WHERE instance_id=? AND branch_id=?
+            """,
+            (continued["instance_id"], branch["branch_id"]),
+        ).fetchone()
+        runtime = load_instance_branch_row(
+            conn,
+            instance_id=continued["instance_id"],
+            branch_id=branch["branch_id"],
+            owner="alice",
+        )
+    evidence = orjson.loads(trace["evidence_json"])
+    assert "server_evidence" not in evidence
+    assert (
+        evidence["research_cycle_checkpoint"]["trial_plan_hash"] == ""
+    )
+    assert runtime is not None
+    assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is True
+
+
+def test_pretrial_continuation_rejects_source_with_trial_plan(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    _pause_legacy_branch_without_bound_job(path)
+    _install_active_target(path)
+
+    with pytest.raises(ValueError, match="empty TrialPlan"):
+        preview_graph_continuation(
+            source_instance_id="instance-1",
+            source_branch_id="branch-1",
+            owner="alice",
+            target_graph_version=2,
+            job_id="",
+        )
+
+
+def test_pretrial_continuation_shadow_replay_rejects_tampered_mode(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    initialize(path)
+    _pause_pretrial_branch(path)
+    target = _install_active_target(path)
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+    )
+    case_id = _approve(path, target_hash=preview["target_hash"])
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+        expected_target_hash=preview["target_hash"],
+        human_authorization_id=case_id,
+    )
+    branch = continued["branches"][0]
+    with connect_sqlite(path) as conn:
+        trace = conn.execute(
+            """
+            SELECT trace_id, evidence_json FROM research_graph_trace
+            WHERE instance_id=? AND branch_id=?
+            """,
+            (continued["instance_id"], branch["branch_id"]),
+        ).fetchone()
+        evidence = orjson.loads(trace["evidence_json"])
+        evidence["graph_continuation"]["continuation_mode"] = (
+            "job_evidence"
+        )
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? WHERE trace_id=?",
+            (orjson.dumps(evidence).decode(), trace["trace_id"]),
+        )
         runtime = load_instance_branch_row(
             conn,
             instance_id=continued["instance_id"],
@@ -312,7 +456,7 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
             owner="alice",
         )
     assert runtime is not None
-    assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is True
+    assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is False
 
 
 @pytest.mark.parametrize(

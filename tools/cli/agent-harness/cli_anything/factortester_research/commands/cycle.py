@@ -91,7 +91,11 @@ def cycle_inspect(
 @click.argument("instance_id")
 @click.argument("branch_id")
 @click.option("--target-version", required=True, type=click.IntRange(min=1))
-@click.option("--job-id", required=True)
+@click.option(
+    "--job-id",
+    default="",
+    help="Bound Job; omit only for a paused pre-TrialPlan branch.",
+)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 def cycle_continuation_preview(
     instance_id: str,
@@ -101,16 +105,17 @@ def cycle_continuation_preview(
     as_json: bool,
 ) -> None:
     """Read the exact continuation hash without changing any state."""
-    result = run_factortester([
+    arguments = [
         "research-graph",
         "continuation-preview",
         instance_id,
         branch_id,
         "--target-version",
         str(target_version),
-        "--job-id",
-        job_id,
-    ], timeout=60)
+    ]
+    if job_id:
+        arguments.extend(["--job-id", job_id])
+    result = run_factortester(arguments, timeout=60)
     payload = _backend_json(
         result.returncode,
         result.stdout,
@@ -126,7 +131,11 @@ def cycle_continuation_preview(
 @click.argument("instance_id")
 @click.argument("branch_id")
 @click.option("--target-version", required=True, type=click.IntRange(min=1))
-@click.option("--job-id", required=True)
+@click.option(
+    "--job-id",
+    default="",
+    help="Bound Job; omit only for a paused pre-TrialPlan branch.",
+)
 @click.option("--expected-target-hash", required=True)
 @click.option("--human-authorization-id", required=True)
 @click.option("--timeout", default=120, show_default=True, type=int)
@@ -144,20 +153,21 @@ def cycle_continue(
     as_json: bool,
 ) -> None:
     """Consume one exact Gate and retain a bounded local command receipt."""
-    result = run_factortester([
+    arguments = [
         "research-graph",
         "continue",
         instance_id,
         branch_id,
         "--target-version",
         str(target_version),
-        "--job-id",
-        job_id,
         "--expected-target-hash",
         expected_target_hash,
         "--human-authorization-id",
         human_authorization_id,
-    ], timeout=timeout)
+    ]
+    if job_id:
+        arguments.extend(["--job-id", job_id])
+    result = run_factortester(arguments, timeout=timeout)
     backend = _backend_json(
         result.returncode,
         result.stdout,

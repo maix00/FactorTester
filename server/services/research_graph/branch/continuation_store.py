@@ -15,7 +15,10 @@ from server.services.research_graph.protocol import (
 )
 
 
-TARGET_NODE = "job_evidence_ready"
+JOB_EVIDENCE_MODE = "job_evidence"
+PRE_TRIAL_CHECKPOINT_MODE = "pre_trial_checkpoint"
+JOB_EVIDENCE_TARGET_NODE = "job_evidence_ready"
+PRE_TRIAL_TARGET_NODE = "capability_gap"
 
 
 def insert_continuation(
@@ -30,9 +33,11 @@ def insert_continuation(
     now: float,
 ) -> None:
     """Insert one instance, branch, and bootstrap trace in one transaction."""
+    target_node = str(prepared["target_node"])
+    target_status = str(prepared["target_status"])
     _, resolution_json, resolution_hash = serialize_capability_resolution(
-        {"node_id": TARGET_NODE},
-        node_id=TARGET_NODE,
+        {"node_id": target_node},
+        node_id=target_node,
     )
     conn.execute(
         """
@@ -60,39 +65,34 @@ def insert_continuation(
             current_trial_plan_hash, trial_stage_projection_json,
             evidence_refs_json, omitted_evidence_count, latest_trace_id,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             branch_id,
             instance_id,
             f"continuation-v{prepared['target_graph_version']}",
-            TARGET_NODE,
+            target_node,
+            target_status,
             resolution_json,
             resolution_hash,
             prepared["current_trial_plan_hash"],
             prepared["trial_stage_projection_json"],
-            orjson.dumps([
-                "evidence:" + prepared["envelope"]["envelope_hash"]
-            ]).decode(),
+            orjson.dumps(prepared["evidence_refs"]).decode(),
+            int(prepared["omitted_evidence_count"]),
             trace_id,
             now,
             now,
         ),
     )
     checkpoint = prepared["checkpoint"]
-    evidence = {
+    evidence: dict[str, Any] = {
         "graph_continuation": {
             **prepared["descriptor"],
             "authorization_ref": (
                 f"maintenance-case:{authorization_id}"
             ),
         },
-        "server_evidence": {
-            "job_attempt": prepared["envelope"],
-        },
-        "evidence_refs": [
-            "evidence:" + prepared["envelope"]["envelope_hash"],
-        ],
+        "evidence_refs": prepared["evidence_refs"],
         "research_cycle": {
             "schema_version": 1,
             "parent_trace_ref": "",
@@ -102,6 +102,10 @@ def insert_continuation(
         },
         "research_cycle_checkpoint": checkpoint,
     }
+    if prepared["continuation_mode"] == JOB_EVIDENCE_MODE:
+        evidence["server_evidence"] = {
+            "job_attempt": prepared["envelope"],
+        }
     conn.execute(
         """
         INSERT INTO research_graph_trace (
@@ -113,8 +117,8 @@ def insert_continuation(
             trace_id,
             instance_id,
             branch_id,
-            TARGET_NODE,
-            TARGET_NODE,
+            target_node,
+            target_node,
             serialize_bounded_trace_evidence(evidence),
             owner,
             now,
