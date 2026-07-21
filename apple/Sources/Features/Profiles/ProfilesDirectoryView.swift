@@ -8,23 +8,33 @@ struct ProfilesDirectoryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                if controller.loadState == .loading {
+                if controller.profiles.isEmpty && controller.loadState == .loading {
                     loadingState
-                } else if controller.loadState == .failed {
+                } else if controller.profiles.isEmpty && controller.loadState == .failed {
                     failedState
                 } else if controller.profiles.isEmpty {
                     emptyState
                 } else {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 260), spacing: 14)],
-                        spacing: 14
-                    ) {
-                        ForEach(controller.profiles) { profile in
-                            ProfileDirectoryCard(
-                                profile: profile,
-                                open: { openProfile(profile) },
-                                controller: controller
+                    VStack(alignment: .leading, spacing: 10) {
+                        if controller.loadState == .loading {
+                            Label(
+                                "正在后台刷新本地 Profile…",
+                                systemImage: "arrow.triangle.2.circlepath"
                             )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 260), spacing: 14)],
+                            spacing: 14
+                        ) {
+                            ForEach(controller.profiles) { profile in
+                                ProfileDirectoryCard(
+                                    profile: profile,
+                                    open: { openProfile(profile) },
+                                    controller: controller
+                                )
+                            }
                         }
                     }
                 }

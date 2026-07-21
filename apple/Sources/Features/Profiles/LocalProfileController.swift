@@ -11,9 +11,21 @@ enum LocalProfileLoadState: Equatable {
 final class LocalProfileController: ObservableObject {
     @Published var profiles: [LocalProfileModel] = []
     @Published private(set) var isWorking = false
-    @Published private(set) var loadState: LocalProfileLoadState = .idle
+    @Published private(set) var loadState: LocalProfileLoadState = .loading
     @Published var error: String?
     @Published var lifecycleReceipt: ProfileLifecycleReceipt?
+    private let defaults: UserDefaults
+    private let cacheKey = "client.profile.list.cache.v1"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: cacheKey),
+           let value = try? JSONSerialization.jsonObject(with: data),
+           let values = value as? [[String: Any]] {
+            profiles = values.map(LocalProfileModel.init)
+                .filter { !$0.id.isEmpty }
+        }
+    }
     var cliPath: String {
         ClientCLIResolution.executable()
     }
@@ -22,7 +34,10 @@ final class LocalProfileController: ObservableObject {
         loadState = .loading
         error = nil
         do {
-            profiles = try await loadProfiles()
+            let values = try await loadProfileValues()
+            profiles = values.map(LocalProfileModel.init)
+                .filter { !$0.id.isEmpty }
+            cacheProfileValues(values)
             loadState = .loaded
         } catch {
             loadState = .failed
@@ -99,12 +114,25 @@ final class LocalProfileController: ObservableObject {
     }
 
     func loadProfiles() async throws -> [LocalProfileModel] {
+        (try await loadProfileValues()).map(LocalProfileModel.init)
+            .filter { !$0.id.isEmpty }
+    }
+
+    private func loadProfileValues() async throws -> [[String: Any]] {
         let values = try await ReleaseCommand.runArray(
             ["client", "profile", "list"],
             executable: cliPath
         )
-        return values.map(LocalProfileModel.init)
-            .filter { !$0.id.isEmpty }
+        return values
+    }
+
+    private func cacheProfileValues(_ values: [[String: Any]]) {
+        guard JSONSerialization.isValidJSONObject(values),
+              let data = try? JSONSerialization.data(
+                  withJSONObject: values,
+                  options: []
+              ) else { return }
+        defaults.set(data, forKey: cacheKey)
     }
 
     func perform(
