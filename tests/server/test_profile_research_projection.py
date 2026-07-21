@@ -227,6 +227,49 @@ def test_research_projects_one_work_package_with_hypothesis_branches(
     assert sum(node["is_head"] for node in tree["nodes"]) == 1
 
 
+def test_projection_exposes_server_profile_ownership_and_trace_actor(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "profile-research-profile-refs.sqlite"
+    _seed(path, branch_count=1, trace_count=1)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            UPDATE research_graph_instances
+            SET created_by_profile_ref=?, current_owner_profile_ref=?
+            WHERE instance_id=?
+            """,
+            ("profile:maxa", "profile:maxb", "instance-a"),
+        )
+        conn.execute(
+            "UPDATE research_graph_trace SET acting_profile_ref=? "
+            "WHERE trace_id=?",
+            ("profile:maxa", "trace-000000"),
+        )
+    service = _service(path, monkeypatch)
+
+    summary = service.list_research(
+        owner="alice",
+        workspace_ref="workspace:workspace-a",
+    )["items"][0]
+    assert summary["created_by_profile_ref"] == "profile:maxa"
+    assert summary["current_owner_profile_ref"] == "profile:maxb"
+
+    branch = service.get_branch(
+        owner="alice",
+        branch_ref="graph-branch:instance-a:branch-0000",
+    )
+    assert branch["created_by_profile_ref"] == "profile:maxa"
+    assert branch["current_owner_profile_ref"] == "profile:maxb"
+    assert branch["latest_acting_profile_ref"] == "profile:maxa"
+    timeline = service.list_timeline(
+        owner="alice",
+        research_ref="graph-branch:instance-a:branch-0000",
+    )
+    assert timeline["items"][0]["acting_profile_ref"] == "profile:maxa"
+
+
 def test_work_package_tree_contains_real_fork_edge_without_fake_merge(
     tmp_path,
     monkeypatch,

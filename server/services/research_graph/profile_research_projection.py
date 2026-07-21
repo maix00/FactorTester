@@ -46,7 +46,9 @@ TREE_LAST_WINDOW = 1
 MAX_TREE_NODES = 120
 
 LIST_FIRST_SQL = """
-    SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
+    SELECT i.instance_id, i.created_by_profile_ref,
+           i.current_owner_profile_ref, i.graph_id, i.graph_version,
+           i.product_group,
            i.workspace_id, i.mode, i.created_at AS instance_created_at,
            COUNT(b.branch_id) AS branch_count,
            SUM(CASE WHEN b.status='running' THEN 1 ELSE 0 END)
@@ -62,7 +64,9 @@ LIST_FIRST_SQL = """
 """
 
 LIST_AFTER_SQL = """
-    SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
+    SELECT i.instance_id, i.created_by_profile_ref,
+           i.current_owner_profile_ref, i.graph_id, i.graph_version,
+           i.product_group,
            i.workspace_id, i.mode, i.created_at AS instance_created_at,
            COUNT(b.branch_id) AS branch_count,
            SUM(CASE WHEN b.status='running' THEN 1 ELSE 0 END)
@@ -82,7 +86,9 @@ LIST_AFTER_SQL = """
 """
 
 WORK_PACKAGE_DETAIL_SQL = """
-    SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
+    SELECT i.instance_id, i.created_by_profile_ref,
+           i.current_owner_profile_ref, i.graph_id, i.graph_version,
+           i.product_group,
            i.workspace_id, i.mode, i.created_at AS instance_created_at,
            b.branch_id, b.label, b.current_node, b.status,
            b.current_trial_plan_hash, b.latest_trace_id,
@@ -170,7 +176,9 @@ WORK_PACKAGE_DETAIL_SQL = """
 """
 
 BRANCH_DETAIL_SQL = """
-    SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
+    SELECT i.instance_id, i.created_by_profile_ref,
+           i.current_owner_profile_ref, i.graph_id, i.graph_version,
+           i.product_group,
            i.workspace_id, i.mode, i.created_at AS instance_created_at,
            b.branch_id, b.label, b.current_node, b.status,
            b.current_capability_resolution_hash,
@@ -180,6 +188,7 @@ BRANCH_DETAIL_SQL = """
            t.edge_id AS latest_trace_edge_id,
            t.from_node AS latest_trace_from_node,
            t.created_at AS latest_trace_created_at,
+           t.acting_profile_ref AS latest_trace_acting_profile_ref,
            t.evidence_json AS latest_trace_evidence_json,
            lineage.edge_id AS lineage_edge_id,
            lineage.evidence_json AS lineage_evidence_json
@@ -206,6 +215,7 @@ BRANCH_DETAIL_SQL = """
 
 TIMELINE_FIRST_SQL = """
     SELECT t.trace_id, t.edge_id, t.from_node, t.to_node, t.actor,
+           t.acting_profile_ref,
            t.created_at, t.evidence_json, b.status AS branch_status,
            b.latest_trace_id
     FROM research_graph_instances AS i
@@ -646,6 +656,10 @@ def _work_package_summary(row: sqlite3.Row) -> dict[str, Any]:
         "research_ref": work_package_ref,
         "work_package_ref": work_package_ref,
         "workspace_ref": workspace_ref_for(str(row["workspace_id"])),
+        "created_by_profile_ref": _profile_ref(row, "created_by_profile_ref"),
+        "current_owner_profile_ref": _profile_ref(
+            row, "current_owner_profile_ref"
+        ),
         "graph_ref": (
             f"{str(row['graph_id'])}@v{int(row['graph_version'])}"
         ),
@@ -672,6 +686,10 @@ def _branch_summary(row: sqlite3.Row) -> dict[str, Any]:
         "work_package_ref": work_package_ref,
         "branch_ref": branch_ref,
         "workspace_ref": workspace_ref_for(str(row["workspace_id"])),
+        "created_by_profile_ref": _profile_ref(row, "created_by_profile_ref"),
+        "current_owner_profile_ref": _profile_ref(
+            row, "current_owner_profile_ref"
+        ),
         "graph_ref": (
             f"{str(row['graph_id'])}@v{int(row['graph_version'])}"
         ),
@@ -689,6 +707,9 @@ def _branch_summary(row: sqlite3.Row) -> dict[str, Any]:
             f"trace:{str(row['latest_trace_id'])}"
             if row["latest_trace_id"]
             else None
+        ),
+        "latest_acting_profile_ref": _profile_ref(
+            row, "latest_trace_acting_profile_ref"
         ),
         "created_at": float(row["created_at"]),
         "updated_at": float(row["updated_at"]),
@@ -951,6 +972,7 @@ def _transition_step(
     return {
         **step,
         "research_ref": research_ref,
+        "acting_profile_ref": _profile_ref(row, "acting_profile_ref"),
         "actor_ref": f"actor:{str(row['actor'])}",
         "object_hrefs": [
             (
@@ -1034,3 +1056,13 @@ def _json_object(value: Any) -> dict[str, Any]:
         return {}
     parsed = loads(value) if isinstance(value, str) else value
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _profile_ref(row: sqlite3.Row, key: str) -> str | None:
+    """Expose only the opaque Profile reference, never local Profile data."""
+    try:
+        value = row[key]
+    except (IndexError, KeyError):
+        return None
+    value = str(value or "")
+    return value or None
