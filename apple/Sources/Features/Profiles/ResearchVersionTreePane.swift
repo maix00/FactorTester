@@ -227,7 +227,9 @@ struct ResearchVersionTreePane: View {
                 subtitle: compactDate(step.createdAt),
                 timestamp: step.createdAt,
                 lane: selectedLane,
-                status: detail.status,
+                status: step.status
+                    ?? (step.stepRef == detail.latestTraceRef
+                        ? detail.status : "historical"),
                 isHead: step.stepRef == detail.latestTraceRef,
                 isCurrentHead: step.stepRef == detail.latestTraceRef,
                 isRoot: step.stepRef == rootStepRef

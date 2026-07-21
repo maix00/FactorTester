@@ -142,7 +142,8 @@ BRANCH_DETAIL_SQL = """
 
 TIMELINE_FIRST_SQL = """
     SELECT t.trace_id, t.edge_id, t.from_node, t.to_node, t.actor,
-           t.created_at, t.evidence_json
+           t.created_at, t.evidence_json, b.status AS branch_status,
+           b.latest_trace_id
     FROM research_graph_instances AS i
     JOIN research_graph_branches AS b
       ON b.instance_id=i.instance_id AND b.branch_id=?
@@ -155,7 +156,8 @@ TIMELINE_FIRST_SQL = """
 
 TIMELINE_AFTER_SQL = """
     SELECT t.trace_id, t.edge_id, t.from_node, t.to_node, t.actor,
-           t.created_at, t.evidence_json
+           t.created_at, t.evidence_json, b.status AS branch_status,
+           b.latest_trace_id
     FROM research_graph_instances AS i
     JOIN research_graph_branches AS b
       ON b.instance_id=i.instance_id AND b.branch_id=?
@@ -714,6 +716,11 @@ def _transition_step(
         to_node=str(row["to_node"]),
         created_at=float(row["created_at"]),
         evidence=evidence,
+    )
+    step["status"] = (
+        str(row["branch_status"])
+        if str(row["trace_id"]) == str(row["latest_trace_id"])
+        else "historical"
     )
     object_refs = [*step["obligation_refs"], *step["claim_refs"]]
     plan = evidence.get("trial_plan")

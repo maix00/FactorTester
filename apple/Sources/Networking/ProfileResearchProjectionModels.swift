@@ -230,6 +230,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
     let claimRefs: [String]
     let jobRefs: [String]
     let runRefs: [String]
+    let status: String?
     let objectHrefs: [String]?
     let obligationChanges: [ResearchStateChange]
     let claimChanges: [ResearchStateChange]
@@ -247,6 +248,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
         case claimRefs = "claim_refs"
         case jobRefs = "job_refs"
         case runRefs = "run_refs"
+        case status
         case objectHrefs = "object_hrefs"
         case obligationChanges = "obligation_changes"
         case claimChanges = "claim_changes"
