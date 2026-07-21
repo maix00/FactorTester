@@ -68,6 +68,15 @@ def test_macos_settings_use_signed_server_first_update_channels() -> None:
     assert "approval" not in view.lower()
 
 
+def test_macos_info_plist_uses_project_version_settings() -> None:
+    project = (ROOT / "apple" / "project.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "CFBundleShortVersionString: $(MARKETING_VERSION)" in project
+    assert "CFBundleVersion: $(CURRENT_PROJECT_VERSION)" in project
+
+
 def test_apple_project_generation_and_new_swift_syntax(tmp_path: Path) -> None:
     subprocess.run(
         [

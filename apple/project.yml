@@ -62,6 +62,8 @@ targets:
       path: Resources/macOS/Info.plist
       properties:
         CFBundleDisplayName: FTClient
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: "13.0"
         <<: *ats
 
