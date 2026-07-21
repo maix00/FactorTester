@@ -302,6 +302,7 @@ def rollback_graph(
 @click.option("--workspace-id", required=True)
 @click.option("--shadow-graph-version", type=click.IntRange(min=1))
 @click.option("--shadow-run-id", default="")
+@click.option("--profile-ref", default="")
 @click.option(
     "--capability-resolution-file",
     required=True,
@@ -313,6 +314,7 @@ def start_graph_instance(
     workspace_id: str,
     shadow_graph_version: int | None,
     shadow_run_id: str,
+    profile_ref: str,
     capability_resolution_file: Path,
 ) -> None:
     """按当前 Active Graph 和产品实现解析启动研究实例。"""
@@ -336,6 +338,7 @@ def start_graph_instance(
         capability_resolution=resolution,
         shadow_graph_version=shadow_graph_version,
         shadow_run_id=shadow_run_id,
+        profile_ref=profile_ref,
     )))
 
 
@@ -400,16 +403,54 @@ def show_research_cycle_object(
 @click.argument("instance_id")
 @click.argument("branch_id")
 @click.option("--label", required=True)
+@click.option("--acting-profile-ref", default="")
 def fork_graph_branch(
     instance_id: str,
     branch_id: str,
     label: str,
+    acting_profile_ref: str,
 ) -> None:
     """仅在需要独立假设路径时分叉研究分支。"""
     click.echo(_json(client_from_config().fork_research_graph_branch(
         instance_id,
         branch_id,
         label=label,
+        acting_profile_ref=acting_profile_ref,
+    )))
+
+
+@research_graph.command("handoff")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--source-profile-ref", required=True)
+@click.option("--destination-profile-ref", required=True)
+@click.option("--expected-checkpoint-ref", required=True)
+@click.option("--expected-checkpoint-hash", required=True)
+@click.option("--authorization-ref", required=True)
+@click.option("--source-display-name", default="")
+@click.option("--destination-display-name", default="")
+def handoff_graph_branch(
+    instance_id: str,
+    branch_id: str,
+    source_profile_ref: str,
+    destination_profile_ref: str,
+    expected_checkpoint_ref: str,
+    expected_checkpoint_hash: str,
+    authorization_ref: str,
+    source_display_name: str,
+    destination_display_name: str,
+) -> None:
+    """在已验证 checkpoint 处把分支交给另一个 Profile。"""
+    click.echo(_json(client_from_config().handoff_research_graph_branch(
+        instance_id,
+        branch_id,
+        source_profile_ref=source_profile_ref,
+        destination_profile_ref=destination_profile_ref,
+        expected_checkpoint_ref=expected_checkpoint_ref,
+        expected_checkpoint_hash=expected_checkpoint_hash,
+        authorization_ref=authorization_ref,
+        source_display_name=source_display_name,
+        destination_display_name=destination_display_name,
     )))
 
 
@@ -486,6 +527,7 @@ def continue_graph_branch(
 )
 @click.option("--profile-id")
 @click.option("--agent-id")
+@click.option("--acting-profile-ref", default="")
 @click.option(
     "--narrative-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -503,6 +545,7 @@ def advance_graph_branch(
     target_capability_resolution_file: Path | None,
     profile_id: str | None,
     agent_id: str | None,
+    acting_profile_ref: str,
     narrative_file: Path | None,
     release_profile: Path | None,
 ) -> None:
@@ -545,11 +588,16 @@ def advance_graph_branch(
         if client_root is not None and profile_id is not None
         else client_from_config()
     )
+    transition_kwargs = {
+        "edge_id": edge_id,
+        "evidence": evidence,
+    }
+    if acting_profile_ref:
+        transition_kwargs["acting_profile_ref"] = acting_profile_ref
     branch = client.advance_research_graph_branch(
         instance_id,
         branch_id,
-        edge_id=edge_id,
-        evidence=evidence,
+        **transition_kwargs,
     )
     report_checkpoint = branch.get("report_checkpoint")
     if profile_id and agent_id and report_checkpoint is not None:

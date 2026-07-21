@@ -30,6 +30,9 @@ from server.services.research_graph.branch.runtime import (
     fork_graph_branch,
     load_graph_branch,
 )
+from server.services.research_graph.branch.handoff import (
+    handoff_graph_branch,
+)
 from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
@@ -65,6 +68,7 @@ __all__ = [
     "create_graph_instance",
     "ensure_schema",
     "fork_graph_branch",
+    "handoff_graph_branch",
     "list_graph_versions",
     "load_active_graph",
     "load_graph",

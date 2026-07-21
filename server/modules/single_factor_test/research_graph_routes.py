@@ -232,6 +232,11 @@ def create_research_graph_instance():
             capability_resolution=data.get("capability_resolution") or {},
             shadow_graph_version=data.get("shadow_graph_version"),
             shadow_run_id=str(data.get("shadow_run_id") or ""),
+            profile_ref=str(
+                data.get("profile_ref")
+                or data.get("created_by_profile_ref")
+                or ""
+            ),
         )
     except (ValueError, research_graphs.GraphActivationBlocked) as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
@@ -249,10 +254,51 @@ def fork_research_graph_branch(instance_id: str, branch_id: str):
             source_branch_id=branch_id,
             owner=require_user(),
             label=str(data.get("label") or "fork"),
+            acting_profile_ref=str(
+                data.get("acting_profile_ref")
+                or data.get("profile_ref")
+                or ""
+            ),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
+    except (PermissionError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
     return jsonify({"success": True, "branch": branch}), 201
+
+
+@sft_bp.post(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/handoff"
+)
+def handoff_research_graph_branch(instance_id: str, branch_id: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        handoff = research_graphs.handoff_graph_branch(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+            source_profile_ref=str(data.get("source_profile_ref") or ""),
+            destination_profile_ref=str(
+                data.get("destination_profile_ref") or ""
+            ),
+            expected_checkpoint_ref=str(
+                data.get("expected_checkpoint_ref") or ""
+            ),
+            expected_checkpoint_hash=str(
+                data.get("expected_checkpoint_hash") or ""
+            ),
+            authorization_ref=str(data.get("authorization_ref") or ""),
+            source_display_name=str(data.get("source_display_name") or ""),
+            destination_display_name=str(
+                data.get("destination_display_name") or ""
+            ),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except (PermissionError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "handoff": handoff}), 201
 
 
 @sft_bp.post(
@@ -391,9 +437,16 @@ def advance_research_graph_branch(instance_id: str, branch_id: str):
             owner=require_user(),
             edge_id=str(data.get("edge_id") or ""),
             evidence=data.get("evidence") or {},
+            acting_profile_ref=str(
+                data.get("acting_profile_ref")
+                or data.get("profile_ref")
+                or ""
+            ),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
     except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    except PermissionError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
     return jsonify({"success": True, "branch": branch})

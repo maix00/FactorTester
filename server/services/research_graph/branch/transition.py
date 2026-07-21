@@ -29,6 +29,9 @@ from server.services.research_graph.branch.research_cycle import (
     prepare_research_cycle_trace,
     release_trial_plan_for_new_hypothesis,
 )
+from server.services.research_graph.branch.profile_identity import (
+    optional_profile_ref,
+)
 from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
     validate_resolution_against_node,
@@ -73,11 +76,15 @@ def advance_graph_branch(
     owner: str,
     edge_id: str,
     evidence: dict[str, Any],
+    acting_profile_ref: str = "",
 ) -> dict[str, Any]:
     if not isinstance(evidence, dict):
         raise ValueError("transition evidence must be an object")
+    acting_profile_ref = optional_profile_ref(acting_profile_ref)
     if "server_evidence" in evidence or "report_lineage" in evidence:
-        raise ValueError("server evidence and report lineage are server-owned")
+        raise ValueError(
+            "server_evidence and report_lineage are server-owned"
+        )
     evidence = validate_agent_evidence_payload(evidence)
     prepared_evidence, proposed_trial_plan_hash, has_trial_plan_body = (
         prepare_trial_plan_evidence(evidence)
@@ -126,6 +133,13 @@ def advance_graph_branch(
         )
         if branch_row is None:
             raise KeyError("graph branch not found")
+        current_owner_profile_ref = str(
+            branch_row["current_owner_profile_ref"] or ""
+        )
+        if current_owner_profile_ref and (
+            acting_profile_ref != current_owner_profile_ref
+        ):
+            raise PermissionError("branch is owned by another Profile")
         branch = branch_payload(branch_row) or {}
         current_stage_projection = (
             loads(branch_row["trial_stage_projection_json"]) or {}
@@ -430,8 +444,9 @@ def advance_graph_branch(
             """
             INSERT INTO research_graph_trace (
                 trace_id, instance_id, branch_id, edge_id, from_node, to_node,
-                evidence_json, telemetry_json, actor, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                evidence_json, telemetry_json, actor, acting_profile_ref,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trace_id,
@@ -443,6 +458,7 @@ def advance_graph_branch(
                 trace_evidence_json,
                 "{}",
                 owner,
+                acting_profile_ref,
                 now,
             ),
         )

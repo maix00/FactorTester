@@ -259,6 +259,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
         capability_resolution: dict[str, Any],
         shadow_graph_version: int | None = None,
         shadow_run_id: str = "",
+        profile_ref: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             "/api/research-graph-instances",
@@ -269,6 +270,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
                 "capability_resolution": capability_resolution,
                 "shadow_graph_version": shadow_graph_version,
                 "shadow_run_id": shadow_run_id,
+                "profile_ref": profile_ref,
             },
         ))
         return dict(data.get("instance") or {})
@@ -279,13 +281,42 @@ class ResearchGraphClientMixin(ClientMixinBase):
         branch_id: str,
         *,
         label: str,
+        acting_profile_ref: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graph-instances/{instance_id}"
             f"/branches/{branch_id}/fork",
-            {"label": label},
+            {"label": label, "acting_profile_ref": acting_profile_ref},
         ))
         return dict(data.get("branch") or {})
+
+    def handoff_research_graph_branch(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        source_profile_ref: str,
+        destination_profile_ref: str,
+        expected_checkpoint_ref: str,
+        expected_checkpoint_hash: str,
+        authorization_ref: str,
+        source_display_name: str = "",
+        destination_display_name: str = "",
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/handoff",
+            {
+                "source_profile_ref": source_profile_ref,
+                "destination_profile_ref": destination_profile_ref,
+                "expected_checkpoint_ref": expected_checkpoint_ref,
+                "expected_checkpoint_hash": expected_checkpoint_hash,
+                "authorization_ref": authorization_ref,
+                "source_display_name": source_display_name,
+                "destination_display_name": destination_display_name,
+            },
+        ))
+        return dict(data.get("handoff") or {})
 
     def preview_research_graph_continuation(
         self,
@@ -380,10 +411,15 @@ class ResearchGraphClientMixin(ClientMixinBase):
         *,
         edge_id: str,
         evidence: dict[str, Any],
+        acting_profile_ref: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graph-instances/{instance_id}"
             f"/branches/{branch_id}/advance",
-            {"edge_id": edge_id, "evidence": evidence},
+            {
+                "edge_id": edge_id,
+                "evidence": evidence,
+                "acting_profile_ref": acting_profile_ref,
+            },
         ))
         return dict(data.get("branch") or {})

@@ -20,6 +20,9 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
 )
+from server.services.research_graph.branch.profile_identity import (
+    optional_profile_ref,
+)
 from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
     validate_resolution_against_node,
@@ -42,7 +45,9 @@ def create_graph_instance(
     capability_resolution: dict[str, Any],
     shadow_graph_version: int | None = None,
     shadow_run_id: str = "",
+    profile_ref: str = "",
 ) -> dict[str, Any]:
+    profile_ref = optional_profile_ref(profile_ref)
     if shadow_graph_version is not None:
         active = load_graph(
             graph_id=graph_id,
@@ -118,13 +123,16 @@ def create_graph_instance(
         conn.execute(
             """
             INSERT INTO research_graph_instances (
-                instance_id, owner, graph_id, graph_version, product_group,
-                workspace_id, mode, shadow_run_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                instance_id, owner, created_by_profile_ref,
+                current_owner_profile_ref, graph_id, graph_version,
+                product_group, workspace_id, mode, shadow_run_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 instance_id,
                 owner,
+                profile_ref,
+                profile_ref,
                 graph_id,
                 int(active["version"]),
                 product_group,
@@ -173,6 +181,8 @@ def create_graph_instance(
     return {
         "instance_id": instance_id,
         "owner": owner,
+        "created_by_profile_ref": profile_ref,
+        "current_owner_profile_ref": profile_ref,
         "graph_id": graph_id,
         "graph_version": int(active["version"]),
         "product_group": product_group,
@@ -207,7 +217,9 @@ def fork_graph_branch(
     source_branch_id: str,
     owner: str,
     label: str,
+    acting_profile_ref: str = "",
 ) -> dict[str, Any]:
+    acting_profile_ref = optional_profile_ref(acting_profile_ref)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         source = load_instance_branch_with_latest_trace(
             conn,
@@ -217,6 +229,13 @@ def fork_graph_branch(
         )
         if source is None:
             raise KeyError("source branch not found")
+        current_owner_profile_ref = str(
+            source["current_owner_profile_ref"] or ""
+        )
+        if current_owner_profile_ref and (
+            acting_profile_ref != current_owner_profile_ref
+        ):
+            raise PermissionError("branch is owned by another Profile")
         branch_id = uuid.uuid4().hex
         trace_id = uuid.uuid4().hex
         now = time.time()
@@ -276,8 +295,9 @@ def fork_graph_branch(
             """
             INSERT INTO research_graph_trace (
                 trace_id, instance_id, branch_id, edge_id, from_node, to_node,
-                evidence_json, telemetry_json, actor, created_at
-            ) VALUES (?, ?, ?, '__branch_fork__', ?, ?, ?, '{}', ?, ?)
+                evidence_json, telemetry_json, actor, acting_profile_ref,
+                created_at
+            ) VALUES (?, ?, ?, '__branch_fork__', ?, ?, ?, '{}', ?, ?, ?)
             """,
             (
                 trace_id,
@@ -287,6 +307,7 @@ def fork_graph_branch(
                 str(source["current_node"]),
                 serialize_bounded_trace_evidence(fork_evidence),
                 owner,
+                acting_profile_ref,
                 now,
             ),
         )

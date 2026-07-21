@@ -30,6 +30,12 @@ def branch_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return {
         "branch_id": str(row["branch_id"]),
         "instance_id": str(row["instance_id"]),
+        "created_by_profile_ref": str(
+            row["created_by_profile_ref"] or ""
+        ),
+        "current_owner_profile_ref": str(
+            row["current_owner_profile_ref"] or ""
+        ),
         "label": str(row["label"]),
         "current_node": str(row["current_node"]),
         "status": str(row["status"]),

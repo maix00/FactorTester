@@ -11,6 +11,8 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS research_graph_instances (
             instance_id TEXT PRIMARY KEY,
             owner TEXT NOT NULL,
+            created_by_profile_ref TEXT NOT NULL DEFAULT '',
+            current_owner_profile_ref TEXT NOT NULL DEFAULT '',
             graph_id TEXT NOT NULL,
             graph_version INTEGER NOT NULL,
             product_group TEXT NOT NULL,
@@ -57,6 +59,7 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
             evidence_json TEXT NOT NULL,
             telemetry_json TEXT NOT NULL DEFAULT '{}',
             actor TEXT NOT NULL,
+            acting_profile_ref TEXT NOT NULL DEFAULT '',
             created_at REAL NOT NULL
         )
         """,
@@ -83,6 +86,28 @@ def ensure_instance_branch_schema(conn: sqlite3.Connection) -> None:
             "ADD COLUMN trial_stage_projection_json "
             "TEXT NOT NULL DEFAULT '{}'"
         )
+    instance_columns = table_columns(conn, "research_graph_instances")
+    if "created_by_profile_ref" not in instance_columns:
+        conn.execute(
+            "ALTER TABLE research_graph_instances "
+            "ADD COLUMN created_by_profile_ref TEXT NOT NULL DEFAULT ''"
+        )
+    if "current_owner_profile_ref" not in instance_columns:
+        conn.execute(
+            "ALTER TABLE research_graph_instances "
+            "ADD COLUMN current_owner_profile_ref TEXT NOT NULL DEFAULT ''"
+        )
+    trace_columns = table_columns(conn, "research_graph_trace")
+    if "acting_profile_ref" not in trace_columns:
+        conn.execute(
+            "ALTER TABLE research_graph_trace "
+            "ADD COLUMN acting_profile_ref TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS "
+        "idx_research_graph_instances_profile_owner "
+        "ON research_graph_instances(owner, current_owner_profile_ref, created_at)"
+    )
 
 
 def table_columns(
