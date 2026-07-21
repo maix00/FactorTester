@@ -12,7 +12,7 @@ from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
-from tools.testers.backtest.modules.order_flow import record_order_terminal_state
+from tools.testers.backtest.modules.order_flow import OrderFlowStore, record_order_terminal_state
 
 
 def _product() -> Product:
@@ -76,3 +76,22 @@ def test_multiple_orders_in_one_batch_finalize_independently():
     record_order_terminal_state(account, ctx)
     assert order1.status == OrderStatus.FILLED
     assert order2.status == OrderStatus.REJECTED
+
+
+def test_order_ids_are_stable_when_other_strategies_are_interleaved():
+    timestamp = pd.Timestamp("2024-01-01")
+    primary = Strategy(alias="primary")
+    auxiliary = Strategy(alias="auxiliary")
+
+    uninterrupted = OrderFlowStore()
+    expected = [
+        uninterrupted.next_order_id(primary, timestamp),
+        uninterrupted.next_order_id(primary, timestamp),
+    ]
+
+    interleaved = OrderFlowStore()
+    actual = [interleaved.next_order_id(primary, timestamp)]
+    interleaved.next_order_id(auxiliary, timestamp)
+    actual.append(interleaved.next_order_id(primary, timestamp))
+
+    assert actual == expected

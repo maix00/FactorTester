@@ -26,15 +26,16 @@ class OrderStore:
 
 @dataclass
 class OrderFlowStore:
-    _next_id: int = 0
+    _next_id_by_strategy: dict[str, int] = field(default_factory=dict)
     records_by_strategy: dict[Any, list[dict[str, Any]]] = field(default_factory=dict)
     records_by_order: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def next_order_id(self, strategy: Any, timestamp: Any) -> str:
-        self._next_id += 1
         alias = str(getattr(strategy, "alias", strategy))
+        next_id = self._next_id_by_strategy.get(alias, 0) + 1
+        self._next_id_by_strategy[alias] = next_id
         ts = _timestamp_key(timestamp)
-        return f"{alias}-{ts}-{self._next_id}"
+        return f"{alias}-{ts}-{next_id}"
 
     def record(
         self,
