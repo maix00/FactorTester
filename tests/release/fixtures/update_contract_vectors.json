@@ -1,0 +1,44 @@
+{
+  "valid_versions": [
+    "0.0.0",
+    "1.2.3",
+    "1.2.3-alpha",
+    "1.2.3-alpha.1",
+    "1.2.3-0A",
+    "1.2.3+build.5",
+    "1.2.3-alpha.1+build.5"
+  ],
+  "invalid_versions": [
+    "01.2.3",
+    "1.02.3",
+    "1.2.03",
+    "1.2",
+    "1.2.3-.",
+    "1.2.3-alpha..1",
+    "1.2.3-01",
+    "1.2.3+"
+  ],
+  "valid_published_at": [
+    "2026-07-21T12:00:00Z",
+    "2026-07-21T12:00:00+08:00",
+    "2026-07-21T12:00:00.123456-04:00"
+  ],
+  "invalid_published_at": [
+    "2026-07-21 12:00:00+00:00",
+    "2026-07-21T12:00:00",
+    "2026-13-21T12:00:00Z",
+    "2026-07-21T12:00:00.1234567Z",
+    "2026-07-21T29:00:00Z"
+  ],
+  "valid_dmg_urls": [
+    "https://example.test/FTClient.dmg",
+    "http://127.0.0.1:8141/abc.dmg",
+    "http://[::1]:8141/abc.dmg"
+  ],
+  "invalid_dmg_urls": [
+    "http://example.test/abc.dmg",
+    "https://example.test/abc.DMG",
+    "https://example.test/abc.zip",
+    "https://user@example.test/abc.dmg"
+  ]
+}

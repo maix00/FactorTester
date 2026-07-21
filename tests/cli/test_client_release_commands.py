@@ -7,7 +7,12 @@ from click.testing import CliRunner
 
 from tools.cli.app import cli
 from tools.cli.commands import client_release as commands
-from tools.cli.release.profile import load_release_inputs
+from tools.cli.release import profile as release_profile
+from tools.cli.release.profile import (
+    MAIN_GITHUB_MANIFEST_URL,
+    load_release_inputs,
+    load_update_inputs,
+)
 from tests.release.test_release_manifest import signed_manifest
 from tools.cli.release.update_channel import ValidatedUpdateManifest
 
@@ -115,3 +120,53 @@ def test_check_update_reports_only_verified_server_first_metadata(
         "manifest_hash": "b" * 64,
         "signature_verified": True,
     }
+
+
+def test_main_update_source_is_fixed_before_network_access(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps({
+        "schema_version": 1,
+        "release": {
+            "channel": "stable",
+            "github_manifest_url": "https://example.test/stable.json",
+        },
+    }))
+    monkeypatch.setattr(
+        release_profile,
+        "resolve_update_manifest",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("network resolver must not be called")
+        ),
+    )
+
+    try:
+        load_update_inputs(profile)
+    except ValueError as exc:
+        assert "fixed to the public GitHub release" in str(exc)
+    else:
+        raise AssertionError("non-GitHub Main source was accepted")
+
+
+def test_main_update_source_defaults_to_public_github(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps({
+        "schema_version": 1,
+        "release": {"channel": "stable"},
+    }))
+    captured = {}
+    expected = ({}, object(), "github")
+
+    def resolve(**kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(release_profile, "resolve_update_manifest", resolve)
+
+    assert load_update_inputs(profile) == expected
+    assert captured["github_manifest_url"] == MAIN_GITHUB_MANIFEST_URL

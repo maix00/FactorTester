@@ -6,6 +6,7 @@ import json
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from tools.cli.release.update_channel import (
     MAX_UPDATE_MANIFEST_BYTES,
@@ -28,9 +29,23 @@ def load_client_release_channel(
     value: Any = json.loads(raw)
     if not isinstance(value, dict):
         raise ValueError("update manifest must be a JSON object")
-    validate_update_manifest(
+    validated = validate_update_manifest(
         value,
         public_key=public_key,
         expected_channel=channel,
     )
+    if channel == "beta":
+        parsed_dmg = urlparse(validated.dmg_url)
+        expected_path = (
+            "/api/client/releases/assets/beta/"
+            f"{validated.dmg_sha256}.dmg"
+        )
+        if (
+            parsed_dmg.path != expected_path
+            or parsed_dmg.query
+            or parsed_dmg.fragment
+        ):
+            raise ValueError(
+                "Beta DMG URL is not the SHA-addressed server asset route"
+            )
     return raw, sha256(raw).hexdigest()

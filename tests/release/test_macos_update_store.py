@@ -4,6 +4,7 @@ import json
 import subprocess
 
 from script.release.update_manifest import create_update_manifest
+from tools.cli.release.update_channel import validate_update_manifest
 
 ROOT = Path(__file__).resolve().parents[2]
 STORE = (
@@ -13,6 +14,9 @@ STORE = (
 LOCALIZATION = ROOT / "apple/Sources/Localization/AppLanguage.swift"
 MANIFEST = (
     ROOT / "apple/Sources/Features/Updates/AppUpdateManifest.swift"
+)
+CONTRACT_VECTORS = (
+    ROOT / "tests/release/fixtures/update_contract_vectors.json"
 )
 
 
@@ -121,6 +125,9 @@ def test_swift_accepts_server_signed_update_manifest(
         json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
     )
     digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    semantic_hash = validate_update_manifest(
+        value, public_key=public, expected_channel="stable"
+    ).manifest_hash
     runner = tmp_path / "Verify.swift"
     runner.write_text(
         """
@@ -135,6 +142,13 @@ import Foundation
     )
     precondition(value.manifest.version == "1.2.0")
     precondition(value.manifest.build == 12)
+    precondition(value.manifestHash == CommandLine.arguments[4])
+    precondition(TrustedUpdateURL.accepts(
+      URL(string: "http://127.0.0.1:8141/FTClient.dmg")!
+    ))
+    precondition(!TrustedUpdateURL.accepts(
+      URL(string: "http://factor.example/FTClient.dmg")!
+    ))
   }
 }
 """
@@ -150,7 +164,78 @@ import Foundation
         text=True,
     )
     subprocess.run(
-        [str(executable), str(manifest), str(public), digest],
+        [str(executable), str(manifest), str(public), digest, semantic_hash],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_swift_update_contract_matches_shared_vectors(tmp_path: Path) -> None:
+    runner = tmp_path / "ContractVectors.swift"
+    runner.write_text(
+        r'''
+import Foundation
+
+struct Vectors: Decodable {
+    let validVersions: [String]
+    let invalidVersions: [String]
+    let validPublishedAt: [String]
+    let invalidPublishedAt: [String]
+    let validDMGURLs: [String]
+    let invalidDMGURLs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case validVersions = "valid_versions"
+        case invalidVersions = "invalid_versions"
+        case validPublishedAt = "valid_published_at"
+        case invalidPublishedAt = "invalid_published_at"
+        case validDMGURLs = "valid_dmg_urls"
+        case invalidDMGURLs = "invalid_dmg_urls"
+    }
+}
+
+@main struct ContractVectors {
+    static func main() throws {
+        let data = try Data(contentsOf: URL(
+            fileURLWithPath: CommandLine.arguments[1]
+        ))
+        let values = try JSONDecoder().decode(Vectors.self, from: data)
+        for value in values.validVersions {
+            precondition(UpdateContract.isSemanticVersion(value), value)
+        }
+        for value in values.invalidVersions {
+            precondition(!UpdateContract.isSemanticVersion(value), value)
+        }
+        for value in values.validPublishedAt {
+            precondition(UpdateContract.isPublishedAt(value), value)
+        }
+        for value in values.invalidPublishedAt {
+            precondition(!UpdateContract.isPublishedAt(value), value)
+        }
+        for value in values.validDMGURLs {
+            precondition(UpdateContract.isDMGURL(URL(string: value)!), value)
+        }
+        for value in values.invalidDMGURLs {
+            precondition(!UpdateContract.isDMGURL(URL(string: value)!), value)
+        }
+    }
+}
+''',
+        encoding="utf-8",
+    )
+    executable = tmp_path / "contract-vectors"
+    subprocess.run(
+        [
+            "swiftc", str(LOCALIZATION), str(STORE), str(MANIFEST),
+            str(runner), "-o", str(executable),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [str(executable), str(CONTRACT_VECTORS)],
         check=True,
         capture_output=True,
         text=True,

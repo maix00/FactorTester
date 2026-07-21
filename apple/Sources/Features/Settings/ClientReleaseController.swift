@@ -78,6 +78,16 @@ final class ClientReleaseController: ObservableObject {
                 from: value.manifest.dmgURL
             )
             try self.requireSuccess(response)
+            guard let finalURL = response.url,
+                  TrustedUpdateURL.accepts(finalURL),
+                  value.manifest.channel != "beta"
+                    || TrustedUpdateURL.sameOrigin(
+                        finalURL, value.manifest.dmgURL
+                    )
+            else { throw AppUpdateError.invalidManifest }
+            guard try AppUpdateStore.sha256(temporary)
+                    .caseInsensitiveCompare(value.manifest.sha256) == .orderedSame
+            else { throw AppUpdateError.checksumMismatch }
             let inspection = try await AppInstallerInspector.inspect(temporary)
             guard inspection.bundleID == "com.gtht.client",
                   inspection.version == value.manifest.version,

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import plistlib
 import subprocess
 import zipfile
+
+import pytest
 
 from script.release import assets as release_assets
 from script.release.assets import (
@@ -86,10 +89,18 @@ def test_release_builder_exposes_only_one_dmg(
         / "apple/build/Build/Products/Release/FTClient.app"
     )
     (app / "Contents").mkdir(parents=True)
-    (app / "Contents/Info.plist").write_text("<plist/>")
+    with (app / "Contents/Info.plist").open("wb") as stream:
+        plistlib.dump({
+            "CFBundleShortVersionString": "0.2.0",
+            "CFBundleVersion": "4",
+        }, stream)
     monkeypatch.setattr(release_build, "REPO", repo)
+    monkeypatch.setattr(
+        release_build, "_validate_source_checkout", lambda *_args: None
+    )
 
     def fake_embed(repo, app, *, version, source_revision):
+        assert version == "bundle-b4-r" + "a" * 40
         receipt = app / "Contents/Resources/FactorTester/bundle-receipt.json"
         receipt.parent.mkdir(parents=True)
         receipt.write_text("{}")
@@ -117,6 +128,62 @@ def test_release_builder_exposes_only_one_dmg(
     assert [path.name for path in output.iterdir()] == [
         "FactorTester-Client.dmg"
     ]
+
+
+def test_release_builder_rejects_app_version_or_revision_reuse_inputs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    app = repo / "apple/build/Build/Products/Release/FTClient.app"
+    (app / "Contents").mkdir(parents=True)
+    with (app / "Contents/Info.plist").open("wb") as stream:
+        plistlib.dump({
+            "CFBundleShortVersionString": "0.2.0",
+            "CFBundleVersion": "4",
+        }, stream)
+    monkeypatch.setattr(release_build, "REPO", repo)
+    monkeypatch.setattr(
+        release_build, "_validate_source_checkout", lambda *_args: None
+    )
+
+    with pytest.raises(ValueError, match="full lowercase Git SHA"):
+        build_release(
+            version="0.2.0",
+            source_revision="short",
+            output=tmp_path / "bad-revision",
+        )
+    with pytest.raises(ValueError, match="does not match"):
+        build_release(
+            version="0.2.1",
+            source_revision="a" * 40,
+            output=tmp_path / "bad-version",
+        )
+
+
+def test_release_builder_binds_revision_and_clean_client_checkout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    revision = "a" * 40
+
+    def clean(command, **_kwargs):
+        return revision + "\n" if command[1:3] == ["rev-parse", "HEAD"] else ""
+
+    monkeypatch.setattr(release_build.subprocess, "check_output", clean)
+    release_build._validate_source_checkout(tmp_path, revision)
+
+    with pytest.raises(ValueError, match="does not match"):
+        release_build._validate_source_checkout(tmp_path, "b" * 40)
+
+    def dirty(command, **_kwargs):
+        if command[1:3] == ["rev-parse", "HEAD"]:
+            return revision + "\n"
+        return " M apple/Sources/App.swift\n"
+
+    monkeypatch.setattr(release_build.subprocess, "check_output", dirty)
+    with pytest.raises(ValueError, match="unpublished client changes"):
+        release_build._validate_source_checkout(tmp_path, revision)
 
 
 def test_embedded_runtime_writes_internal_hash_receipt(

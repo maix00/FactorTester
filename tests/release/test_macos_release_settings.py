@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = ROOT / "apple" / "Sources"
 
 
-def test_macos_settings_use_signed_server_first_update_channels() -> None:
+def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     controller = (
         SOURCES / "Features" / "Settings" / "ClientReleaseController.swift"
     ).read_text(encoding="utf-8")
@@ -40,18 +40,34 @@ def test_macos_settings_use_signed_server_first_update_channels() -> None:
     ).read_text(encoding="utf-8")
     assert "/api/client/releases/\\(channel).json" in resolution
     assert "github.com/maix00/FactorTester-Client/releases/latest/download" in resolution
+    assert '[("server", server)]' in resolution
+    assert '[("github", github)]' in resolution
+    assert '"trusted-beta-release-public"' in resolution
+    assert 'source == "server"' in resolution
+    assert "minimumClient" in resolution
+    assert "incompatibleClient" in resolution
+    assert ".reloadIgnoringLocalCacheData" in resolution
     assert "api.github.com" not in resolution + controller
     assert "SHA256()" in store
     assert "prefix(2)" in store
     assert "NSWorkspace.shared.open" in installer
     assert "replaceItemAt" not in controller
+    assert controller.index("AppUpdateStore.sha256") < controller.index(
+        "AppInstallerInspector.inspect"
+    )
     for label in ("当前版本", "可用版本", "运行状态"):
         assert label in status
-    for label in ("公开仓库", "客户端更新", "验证、下载并打开 DMG"):
+    for label in ("更新来源", "客户端更新", "验证、下载并打开 DMG"):
         assert label in view
-    for label in ("Stable", "Beta", "最后检查", "启动时自动检查"):
+    for label in (
+        "Main · GitHub", "Beta · 服务器", "最后检查", "启动时自动检查",
+    ):
         assert label in view
+    assert "不会回退到 GitHub" in view
+    assert "不会回退到服务器 Beta" in view
     assert "checkAtLaunch" in app and "Task {" in app
+    assert "runtimeActivationError" in app
+    assert "try? await BundledRuntimeActivator.run()" not in app
     assert "6 * 60 * 60" in controller
     for contract in (
         "manifestDigestMismatch", "manifestSignatureMismatch",

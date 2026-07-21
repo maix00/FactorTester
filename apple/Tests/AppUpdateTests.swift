@@ -29,4 +29,41 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertEqual(manifest.channel, "stable")
         XCTAssertEqual(manifest.dmgURL.scheme, "https")
     }
+
+    func testUpdateTransportAllowsOnlyHTTPSOrLoopbackHTTP() {
+        XCTAssertTrue(TrustedUpdateURL.accepts(
+            URL(string: "http://127.0.0.1:8141/FTClient.dmg")!
+        ))
+        XCTAssertTrue(TrustedUpdateURL.accepts(
+            URL(string: "http://[::1]:8141/FTClient.dmg")!
+        ))
+        XCTAssertTrue(TrustedUpdateURL.accepts(
+            URL(string: "https://example.test/FTClient.dmg")!
+        ))
+        XCTAssertFalse(TrustedUpdateURL.accepts(
+            URL(string: "http://example.test/FTClient.dmg")!
+        ))
+        XCTAssertFalse(TrustedUpdateURL.sameOrigin(
+            URL(string: "http://127.0.0.1:8141/FTClient.dmg")!,
+            URL(string: "http://127.0.0.1:8142/beta.json")!
+        ))
+    }
+
+    func testMinimumClientCompatibilityFailsClosed() {
+        XCTAssertFalse(ClientCompatibility.accepts(
+            installed: "1.1.9", minimum: "1.2.0"
+        ))
+        XCTAssertTrue(ClientCompatibility.accepts(
+            installed: "1.2.0", minimum: "1.2.0"
+        ))
+        XCTAssertTrue(ClientCompatibility.accepts(
+            installed: "1.3.0", minimum: "1.2.0"
+        ))
+        XCTAssertFalse(ClientCompatibility.accepts(
+            installed: "unknown", minimum: "1.2.0"
+        ))
+        XCTAssertFalse(ClientCompatibility.accepts(
+            installed: "1.2.0", minimum: "01.2.0"
+        ))
+    }
 }

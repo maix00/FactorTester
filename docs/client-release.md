@@ -23,33 +23,45 @@ The updater supports stable and beta channels. Its launch check is optional,
 throttled to one request per six hours, and runs separately from runtime
 activation so research can start immediately.
 
-Before opening a downloaded image, FTClient mounts it read-only and verifies
-the embedded app's bundle ID, version, build, code signature and notarization
-status. Current development releases without Developer ID and notarization may
+Before mounting a downloaded image, FTClient verifies its signed SHA-256. It
+then mounts the verified image read-only and checks the embedded app's bundle
+ID, version, build, code signature and notarization status. Current development releases without Developer ID and notarization may
 only be downloaded and presented as a DMG. FTClient never silently replaces
 the running app or describes that handoff as automatic installation. The
 installer protocol is intentionally narrow so a future notarized helper or
 Sparkle adapter can implement replacement without changing manifest trust.
 
 Update discovery uses a compact signed `stable.json` or `beta.json` manifest.
-The server serves this file from `FACTORTESTER_RELEASE_MANIFEST_ROOT` at
-`/api/client/releases/<channel>.json` with ETag and public cache headers; it
-does not store the DMG or query a database. A client profile may select a
-server manifest and a public GitHub fallback:
+Main and Beta have separate authoritative sources and separate packaged trust
+anchors. Main reads only
+`https://github.com/maix00/FactorTester-Client/releases/latest/download/stable.json`.
+Beta reads only `beta.json` from the currently configured FactorTester server.
+Beta DMGs use their complete SHA-256 as the filename under
+`/api/client/releases/assets/beta/`; the server re-hashes the same opened file
+descriptor before serving it and retains prior digest-addressed assets so a
+client holding the preceding signed manifest can finish downloading. Neither
+path queries a database and neither falls back to the other source. Remote URLs
+require HTTPS; loopback development servers may use HTTP on `localhost`,
+`127.0.0.1`, or `::1` only.
+
+A client profile selects exactly one channel:
 
 ```json
 {
   "schema_version": 1,
   "release": {
     "channel": "stable",
-    "server_manifest_url": "https://factor.example/api/client/releases/stable.json",
-    "github_manifest_url": "https://github.example/releases/latest/download/stable.json"
+    "server_manifest_url": "https://factor.example/api/client/releases/beta.json",
+    "github_manifest_url": "https://github.com/maix00/FactorTester-Client/releases/latest/download/stable.json"
   }
 }
 ```
 
-Both sources must pass the same packaged ECDSA trust anchor. Failure of the
-server source may select GitHub, but never unsigned GitHub API metadata.
+The Main URL is fixed by the client; profiles cannot redirect it to another
+HTTPS host. The non-selected URL is never requested. GitHub cache ETags are not treated as
+content digests; the ECDSA signature is the Main authenticity boundary. The
+FactorTester server defines its own ETag as the raw manifest digest in addition
+to the Beta signature.
 `factortester client check-update --profile client-profile.json --json`
 returns the verified version, build, channel, DMG URL/SHA256, minimum client,
 mandatory flag, publication time, source, and manifest hash.

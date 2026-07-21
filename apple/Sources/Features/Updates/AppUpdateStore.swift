@@ -31,10 +31,6 @@ struct AppUpdateStore {
         manifestHash: String? = nil,
         source: String? = nil
     ) throws -> CachedInstaller {
-        let digest = try Self.sha256(temporaryURL)
-        guard digest.caseInsensitiveCompare(expectedSHA256) == .orderedSame else {
-            throw AppUpdateError.checksumMismatch
-        }
         try FileManager.default.createDirectory(
             at: root,
             withIntermediateDirectories: true
@@ -43,13 +39,24 @@ struct AppUpdateStore {
         let destination = root.appendingPathComponent(filename)
         let staging = root.appendingPathComponent(".\(filename).staging")
         try? FileManager.default.removeItem(at: staging)
-        try FileManager.default.copyItem(at: temporaryURL, to: staging)
+        do {
+            try FileManager.default.copyItem(at: temporaryURL, to: staging)
+            let stagedDigest = try Self.sha256(staging)
+            guard stagedDigest.caseInsensitiveCompare(
+                expectedSHA256
+            ) == .orderedSame else {
+                throw AppUpdateError.checksumMismatch
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            throw error
+        }
         try? FileManager.default.removeItem(at: destination)
         try FileManager.default.moveItem(at: staging, to: destination)
 
         let item = CachedInstaller(
             version: version,
-            sha256: digest,
+            sha256: expectedSHA256.lowercased(),
             filename: filename,
             downloadedAt: Date(),
             manifestHash: manifestHash,
@@ -136,6 +143,7 @@ enum AppUpdateError: LocalizedError {
     case manifestDigestMismatch
     case manifestSignatureMismatch
     case invalidManifest
+    case incompatibleClient
     case bundleIdentityMismatch
     case server(String)
 
@@ -153,6 +161,8 @@ enum AppUpdateError: LocalizedError {
             return L10n.text("更新清单签名无效。")
         case .invalidManifest:
             return L10n.text("更新清单的渠道、版本或 Bundle 身份无效。")
+        case .incompatibleClient:
+            return L10n.text("当前客户端版本低于该更新要求的最低版本。")
         case .bundleIdentityMismatch:
             return L10n.text("DMG 内 App 的 Bundle ID 或版本与清单不一致。")
         case .server(let detail):

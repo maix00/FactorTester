@@ -59,8 +59,8 @@ struct ClientReleaseSettingsView: View {
                 GroupBox("更新策略") {
                     VStack(alignment: .leading, spacing: 12) {
                         Picker("渠道", selection: $controller.channel) {
-                            Text("Stable").tag("stable")
-                            Text("Beta").tag("beta")
+                            Text("Main · GitHub").tag("stable")
+                            Text("Beta · 服务器").tag("beta")
                         }
                         .pickerStyle(.segmented)
                         Toggle(
@@ -84,11 +84,15 @@ struct ClientReleaseSettingsView: View {
                 }
                 GroupBox("更新来源") {
                     LabeledContent(
-                        "公开仓库",
-                        value: "maix00/FactorTester-Client"
+                        controller.channel == "beta" ? "Beta" : "Main",
+                        value: controller.channel == "beta"
+                            ? "当前 FactorTester 服务器"
+                            : "GitHub · maix00/FactorTester-Client"
                     )
                     .padding(8)
-                    Text("下载前验证签名更新清单及 GitHub manifest digest；下载后验证 DMG SHA-256、Bundle ID、版本和签名，再由用户打开安装。")
+                    Text(controller.channel == "beta"
+                        ? "Beta 仅从当前服务器获取，并使用独立的 Beta 信任密钥验证；不会回退到 GitHub。"
+                        : "Main 仅从 GitHub 的签名发布清单获取；不会回退到服务器 Beta。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)

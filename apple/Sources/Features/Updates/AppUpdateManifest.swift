@@ -58,12 +58,26 @@ enum AppUpdateManifestVerifier {
             != rawHash {
             throw AppUpdateError.manifestDigestMismatch
         }
+        guard let rawObject = try JSONSerialization.jsonObject(
+            with: data
+        ) as? [String: Any],
+              Set(rawObject.keys) == Set([
+                "schema_version", "version", "build", "channel", "dmg_url",
+                "sha256", "minimum_client", "mandatory", "published_at",
+                "signature",
+              ]),
+              let rawSignature = rawObject["signature"] as? [String: Any],
+              Set(rawSignature.keys) == Set(["algorithm", "key_id", "value"])
+        else { throw AppUpdateError.invalidManifest }
         let manifest = try JSONDecoder().decode(AppUpdateManifest.self, from: data)
         guard manifest.schemaVersion == 1,
               manifest.channel == expectedChannel,
               manifest.build > 0,
-              manifest.dmgURL.scheme == "https",
-              manifest.dmgURL.pathExtension == "dmg",
+              TrustedUpdateURL.accepts(manifest.dmgURL),
+              UpdateContract.isDMGURL(manifest.dmgURL),
+              UpdateContract.isSemanticVersion(manifest.version),
+              UpdateContract.isSemanticVersion(manifest.minimumClient),
+              UpdateContract.isPublishedAt(manifest.publishedAt),
               manifest.sha256.range(
                 of: "^[0-9a-f]{64}$", options: .regularExpression
               ) != nil,
@@ -73,7 +87,7 @@ enum AppUpdateManifestVerifier {
                 == manifest.signature.keyID else {
             throw AppUpdateError.manifestSignatureMismatch
         }
-        var object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        var object: [String: Any]? = rawObject
         object?.removeValue(forKey: "signature")
         guard let object,
               let signature = Data(base64Encoded: manifest.signature.value)
@@ -87,8 +101,69 @@ enum AppUpdateManifestVerifier {
             throw AppUpdateError.manifestSignatureMismatch
         }
         return VerifiedAppUpdate(
-            manifest: manifest, manifestHash: rawHash, source: source
+            manifest: manifest,
+            manifestHash: SHA256.hash(data: payload).hex,
+            source: source
         )
+    }
+
+}
+
+enum UpdateContract {
+    private static let semverIdentifier =
+        "(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    private static let semverPattern =
+        "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\."
+        + "(?:0|[1-9][0-9]*)"
+        + "(?:-\(semverIdentifier)(?:\\.\(semverIdentifier))*)?"
+        + "(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    private static let publishedAtPattern =
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+        + "[0-2][0-9]:[0-5][0-9]:[0-5][0-9]"
+        + "(?:\\.[0-9]{1,6})?"
+        + "(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
+
+    static func isSemanticVersion(_ value: String) -> Bool {
+        value.range(of: semverPattern, options: .regularExpression) != nil
+    }
+
+    static func isPublishedAt(_ value: String) -> Bool {
+        guard value.range(
+            of: publishedAtPattern, options: .regularExpression
+        ) != nil else { return false }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if formatter.date(from: value) != nil { return true }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value) != nil
+    }
+
+    static func isDMGURL(_ url: URL) -> Bool {
+        TrustedUpdateURL.accepts(url) && url.path.hasSuffix(".dmg")
+    }
+}
+
+enum TrustedUpdateURL {
+    private static let loopbackHosts = Set(["127.0.0.1", "::1", "localhost"])
+
+    static func accepts(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased(),
+              url.user == nil,
+              url.password == nil else { return false }
+        return scheme == "https" || (scheme == "http" && loopbackHosts.contains(host))
+    }
+
+    static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+        guard accepts(lhs), accepts(rhs) else { return false }
+        return lhs.scheme?.lowercased() == rhs.scheme?.lowercased()
+            && lhs.host?.lowercased() == rhs.host?.lowercased()
+            && effectivePort(lhs) == effectivePort(rhs)
+    }
+
+    private static func effectivePort(_ url: URL) -> Int? {
+        if let port = url.port { return port }
+        return url.scheme?.lowercased() == "https" ? 443 : 80
     }
 }
 
@@ -110,11 +185,20 @@ enum VersionOrder {
     }
 }
 
+enum ClientCompatibility {
+    static func accepts(installed: String, minimum: String) -> Bool {
+        guard UpdateContract.isSemanticVersion(installed),
+              UpdateContract.isSemanticVersion(minimum) else { return false }
+        return !VersionOrder.isNewer(minimum, than: installed)
+    }
+}
+
 private struct SemanticVersion: Comparable {
     let core: [Int]
     let prerelease: [String]
 
     init?(_ raw: String) {
+        guard UpdateContract.isSemanticVersion(raw) else { return nil }
         let withoutBuild = raw.split(separator: "+", maxSplits: 1)[0]
         let pieces = withoutBuild.split(
             separator: "-", maxSplits: 1, omittingEmptySubsequences: false

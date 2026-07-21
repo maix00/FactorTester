@@ -41,4 +41,7 @@ packages = [
 "tools.cli.release.adapters" = "release/adapters"
 
 [tool.setuptools.package-data]
-"tools.cli.release" = ["trusted-release-public.pem"]
+"tools.cli.release" = [
+  "trusted-release-public.pem",
+  "trusted-beta-release-public.pem",
+]

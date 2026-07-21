@@ -18,7 +18,21 @@ from .signature import verify_ecdsa_sha256
 MAX_UPDATE_MANIFEST_BYTES = 64 * 1024
 _CHANNELS = {"stable", "beta"}
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
+_SEMVER_IDENTIFIER = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+_VERSION = re.compile(
+    r"^(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)"
+    rf"(?:-{_SEMVER_IDENTIFIER}(?:\.{_SEMVER_IDENTIFIER})*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+_PUBLISHED_AT = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+    r"[0-2][0-9]:[0-5][0-9]:[0-5][0-9]"
+    r"(?:\.[0-9]{1,6})?"
+    r"(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
+)
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,12 +101,11 @@ def validate_update_manifest(
     if expected_channel is not None and channel != expected_channel:
         raise ValueError("update manifest channel does not match request")
     dmg_url = str(manifest.get("dmg_url") or "").strip()
-    if (
-        urlparse(dmg_url).scheme != "https"
-        or not urlparse(dmg_url).netloc
-        or not urlparse(dmg_url).path.endswith(".dmg")
-    ):
-        raise ValueError("update manifest dmg_url must be an HTTPS DMG URL")
+    parsed_dmg = urlparse(dmg_url)
+    if not is_dmg_url(dmg_url):
+        raise ValueError(
+            "update manifest dmg_url must be an HTTPS or loopback HTTP DMG URL"
+        )
     digest = str(manifest.get("sha256") or "")
     if not _SHA256.fullmatch(digest):
         raise ValueError("update manifest sha256 is invalid")
@@ -100,12 +113,8 @@ def validate_update_manifest(
     if not isinstance(mandatory, bool):
         raise ValueError("update manifest mandatory must be boolean")
     published_at = str(manifest.get("published_at") or "")
-    try:
-        timestamp = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("update manifest published_at is invalid") from exc
-    if timestamp.tzinfo is None:
-        raise ValueError("update manifest published_at must include timezone")
+    if not is_published_at(published_at):
+        raise ValueError("update manifest published_at is invalid")
     return ValidatedUpdateManifest(
         version=version,
         build=build,
@@ -127,37 +136,44 @@ def resolve_update_manifest(
     public_key: Path,
     opener=urlopen,
 ) -> tuple[dict[str, Any], ValidatedUpdateManifest, str]:
-    """Try server metadata, then a signed public GitHub manifest."""
+    """Resolve one channel only from its authoritative source."""
     if channel not in _CHANNELS:
         raise ValueError("update channel is invalid")
-    sources = [
-        ("server", server_manifest_url),
-        ("github", github_manifest_url),
-    ]
+    sources = (
+        [("server", server_manifest_url)]
+        if channel == "beta"
+        else [("github", github_manifest_url)]
+    )
     failures: list[str] = []
     for source, url in sources:
         if not url:
             continue
         try:
-            raw = _read_https(url, opener=opener)
+            raw, final_url = _read_https(url, opener=opener)
+            if channel == "beta" and _origin(final_url) != _origin(url):
+                raise ValueError("server Beta manifest redirected off origin")
             manifest = _json_object(raw)
             validated = validate_update_manifest(
                 manifest,
                 public_key=public_key,
                 expected_channel=channel,
             )
+            if (
+                channel == "beta"
+                and _origin(validated.dmg_url) != _origin(final_url)
+            ):
+                raise ValueError("server Beta DMG must use the manifest origin")
             return manifest, validated, source
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             failures.append(f"{source}: {exc}")
-    raise ValueError(
-        "no trusted update manifest is available: " + "; ".join(failures)
-    )
+    detail = "; ".join(failures) or "authoritative source is not configured"
+    raise ValueError(f"no trusted {channel} update manifest is available: {detail}")
 
 
-def _read_https(url: str, *, opener) -> bytes:
+def _read_https(url: str, *, opener) -> tuple[bytes, str]:
     parsed = urlparse(str(url))
-    if parsed.scheme != "https" or not parsed.netloc:
-        raise ValueError("update manifest URL must use HTTPS")
+    if not _trusted_update_transport(parsed):
+        raise ValueError("update manifest URL must use HTTPS or loopback HTTP")
     request = Request(
         url,
         headers={
@@ -166,10 +182,35 @@ def _read_https(url: str, *, opener) -> bytes:
         },
     )
     with opener(request, timeout=15) as response:
+        final_url = (
+            response.geturl()
+            if callable(getattr(response, "geturl", None))
+            else url
+        )
+        if not _trusted_update_transport(urlparse(str(final_url))):
+            raise ValueError("update manifest redirected to an untrusted URL")
         raw = response.read(MAX_UPDATE_MANIFEST_BYTES + 1)
     if len(raw) > MAX_UPDATE_MANIFEST_BYTES:
         raise ValueError("update manifest exceeds size limit")
-    return raw
+    return raw, str(final_url)
+
+
+def _trusted_update_transport(parsed) -> bool:
+    if not parsed.netloc or parsed.username is not None or parsed.password is not None:
+        return False
+    if parsed.scheme == "https":
+        return True
+    return parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS
+
+
+def _origin(url: str) -> tuple[str, str, int]:
+    parsed = urlparse(url)
+    if not _trusted_update_transport(parsed) or parsed.hostname is None:
+        raise ValueError("update URL origin is invalid")
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    return parsed.scheme, parsed.hostname.lower(), port
 
 
 def _json_object(raw: bytes) -> dict[str, Any]:
@@ -187,6 +228,28 @@ def _object(value: Any, field: str) -> dict[str, Any]:
 
 def _version(value: Any, field: str) -> str:
     text = str(value or "").strip()
-    if not _VERSION.fullmatch(text):
+    if not is_semantic_version(text):
         raise ValueError(f"update manifest {field} must be semantic version")
     return text
+
+
+def is_semantic_version(value: str) -> bool:
+    """Return whether *value* is exactly one SemVer 2.0 version."""
+    return _VERSION.fullmatch(value) is not None
+
+
+def is_published_at(value: str) -> bool:
+    """Accept the shared, deliberately narrow RFC 3339 timestamp profile."""
+    if _PUBLISHED_AT.fullmatch(value) is None:
+        return False
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+def is_dmg_url(value: str) -> bool:
+    """Accept a trusted transport whose path has an exact lowercase suffix."""
+    parsed = urlparse(value)
+    return _trusted_update_transport(parsed) and parsed.path.endswith(".dmg")
