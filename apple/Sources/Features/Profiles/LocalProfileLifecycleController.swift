@@ -30,7 +30,7 @@ extension LocalProfileController {
             self.lifecycleReceipt = ProfileLifecycleReceipt(
                 json: created, fallbackAction: "create"
             )
-            self.profiles = try await self.loadProfiles()
+            try await self.refreshFromCLI()
         }
     }
 
@@ -62,7 +62,7 @@ extension LocalProfileController {
             self.lifecycleReceipt = ProfileLifecycleReceipt(
                 json: value, fallbackAction: action
             )
-            self.profiles = try await self.loadProfiles()
+            try await self.refreshFromCLI()
         }
     }
 }

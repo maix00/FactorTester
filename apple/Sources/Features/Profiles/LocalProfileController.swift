@@ -34,11 +34,7 @@ final class LocalProfileController: ObservableObject {
         loadState = .loading
         error = nil
         do {
-            let values = try await loadProfileValues()
-            profiles = values.map(LocalProfileModel.init)
-                .filter { !$0.id.isEmpty }
-            cacheProfileValues(values)
-            loadState = .loaded
+            try await refreshFromCLI()
         } catch {
             loadState = .failed
             self.error = error.localizedDescription
@@ -109,13 +105,21 @@ final class LocalProfileController: ObservableObject {
                 arguments,
                 executable: self.cliPath
             )
-            self.profiles = try await self.loadProfiles()
+            try await self.refreshFromCLI()
         }
     }
 
     func loadProfiles() async throws -> [LocalProfileModel] {
         (try await loadProfileValues()).map(LocalProfileModel.init)
             .filter { !$0.id.isEmpty }
+    }
+
+    func refreshFromCLI() async throws {
+        let values = try await loadProfileValues()
+        profiles = values.map(LocalProfileModel.init)
+            .filter { !$0.id.isEmpty }
+        cacheProfileValues(values)
+        loadState = .loaded
     }
 
     private func loadProfileValues() async throws -> [[String: Any]] {
@@ -145,6 +149,9 @@ final class LocalProfileController: ObservableObject {
             try await operation()
         } catch {
             self.error = error.localizedDescription
+            if loadState == .loading {
+                loadState = .failed
+            }
         }
     }
 }
