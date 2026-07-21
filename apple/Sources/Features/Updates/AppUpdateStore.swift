@@ -14,6 +14,15 @@ struct AppUpdateReceipt: Codable {
     var installers: [CachedInstaller] = []
 }
 
+struct PendingApplicationUpdate: Codable, Equatable {
+    let version: String
+    let build: String
+    let channel: String
+    let appPath: String
+    let sha256: String
+    let preparedAt: Date
+}
+
 struct AppUpdateStore {
     let root: URL
 
@@ -87,8 +96,48 @@ struct AppUpdateStore {
         return url
     }
 
+    func savePendingApplication(
+        version: String,
+        build: String,
+        channel: String,
+        appURL: URL,
+        sha256: String
+    ) throws -> PendingApplicationUpdate {
+        let pending = PendingApplicationUpdate(
+            version: version,
+            build: build,
+            channel: channel,
+            appPath: appURL.path,
+            sha256: sha256.lowercased(),
+            preparedAt: Date()
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        let data = try JSONEncoder.sorted.encode(pending)
+        let staging = pendingURL.appendingPathExtension("staging")
+        try data.write(to: staging, options: .atomic)
+        try? FileManager.default.removeItem(at: pendingURL)
+        try FileManager.default.moveItem(at: staging, to: pendingURL)
+        return pending
+    }
+
+    func loadPendingApplication() -> PendingApplicationUpdate? {
+        guard let data = try? Data(contentsOf: pendingURL) else { return nil }
+        return try? JSONDecoder().decode(PendingApplicationUpdate.self, from: data)
+    }
+
+    func clearPendingApplication() {
+        try? FileManager.default.removeItem(at: pendingURL)
+    }
+
     private var receiptURL: URL {
         root.appendingPathComponent("receipt.json")
+    }
+
+    private var pendingURL: URL {
+        root.appendingPathComponent("pending-update.json")
     }
 
     private func loadReceipt() -> AppUpdateReceipt {
@@ -133,6 +182,14 @@ struct AppUpdateStore {
             hasher.update(data: data)
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private extension JSONEncoder {
+    static var sorted: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
     }
 }
 

@@ -63,6 +63,54 @@ enum AppInstallerInspector {
         }.value
     }
 
+    /// Materialize the already verified App from a DMG into the private
+    /// update store. The DMG is mounted read-only and detached before this
+    /// method returns; the staged bundle is independently code-signature
+    /// verified before it becomes eligible for restart.
+    static func stage(
+        _ dmg: URL,
+        at destination: URL,
+        expected: AppInstallerInspection
+    ) async throws -> URL {
+        try await Task.detached {
+            let attached = try run(
+                "/usr/bin/hdiutil",
+                ["attach", "-nobrowse", "-readonly", "-plist", dmg.path]
+            )
+            let plist = try PropertyListSerialization.propertyList(
+                from: attached, format: nil
+            ) as? [String: Any]
+            let entities = plist?["system-entities"] as? [[String: Any]] ?? []
+            guard let rawMount = entities.compactMap({
+                $0["mount-point"] as? String
+            }).first else { throw AppUpdateError.bundleIdentityMismatch }
+            let mount = URL(fileURLWithPath: rawMount)
+            defer {
+                _ = try? run("/usr/bin/hdiutil", ["detach", mount.path])
+            }
+            let source = mount.appendingPathComponent("FTClient.app")
+            guard let bundle = Bundle(url: source),
+                  bundle.bundleIdentifier == expected.bundleID,
+                  bundle.infoDictionary?["CFBundleShortVersionString"]
+                    as? String == expected.version,
+                  bundle.infoDictionary?["CFBundleVersion"]
+                    as? String == expected.build else {
+                throw AppUpdateError.bundleIdentityMismatch
+            }
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.copyItem(at: source, to: destination)
+            _ = try run(
+                "/usr/bin/codesign",
+                ["--verify", "--deep", "--strict", destination.path]
+            )
+            return destination
+        }.value
+    }
+
     private static func run(
         _ executable: String,
         _ arguments: [String],

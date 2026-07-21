@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ClientSidebar: View {
+    @EnvironmentObject private var releaseController: ClientReleaseController
     @Binding var selection: String
     let openTabs: [ClientTab]
     let open: (ClientTab) -> Void
@@ -49,15 +50,27 @@ struct ClientSidebar: View {
 
     private func bottomLauncher(_ tab: ClientTab) -> some View {
         Button { open(tab) } label: {
-            Label(tab.title, systemImage: tab.systemImage)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    selection == tab.id
-                        ? Color.accentColor.opacity(0.14) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 7)
-                )
+            HStack(spacing: 8) {
+                Label(tab.title, systemImage: tab.systemImage)
+                Spacer(minLength: 4)
+                if tab.id == ClientTab.settings.id,
+                   releaseController.pendingUpdate != nil {
+                    Text("重启更新")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.orange.opacity(0.12), in: Capsule())
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                selection == tab.id
+                    ? Color.accentColor.opacity(0.14) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 7)
+            )
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 8)

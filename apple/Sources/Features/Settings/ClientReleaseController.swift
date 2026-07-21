@@ -15,28 +15,33 @@ final class ClientReleaseController: ObservableObject {
     @Published private(set) var canRollback = false
     @Published private(set) var isWorking = false
     @Published private(set) var lastChecked: Date?
+    @Published private(set) var pendingUpdate: PendingApplicationUpdate?
     @Published var lastError: String?
     @Published var channel: String {
         didSet { defaults.set(channel, forKey: Keys.channel) }
     }
-    @Published var automaticallyChecks: Bool {
-        didSet { defaults.set(automaticallyChecks, forKey: Keys.automatic) }
+    @Published var automaticallyUpdates: Bool {
+        didSet { defaults.set(automaticallyUpdates, forKey: Keys.automatic) }
     }
 
     private let store = AppUpdateStore()
-    private let installer: AppUpdateInstalling
     private let defaults: UserDefaults
     private var resolved: VerifiedAppUpdate?
 
     init(
-        defaults: UserDefaults = .standard,
-        installer: AppUpdateInstalling = HumanDMGInstaller()
+        defaults: UserDefaults = .standard
     ) {
         self.defaults = defaults
-        self.installer = installer
         channel = defaults.string(forKey: Keys.channel) ?? "stable"
-        automaticallyChecks = defaults.object(forKey: Keys.automatic) as? Bool ?? true
+        automaticallyUpdates = defaults.object(forKey: Keys.automatic) as? Bool ?? false
         lastChecked = defaults.object(forKey: Keys.lastChecked) as? Date
+        let pending = store.loadPendingApplication()
+        if pending?.version == installedVersion {
+            store.clearPendingApplication()
+            pendingUpdate = nil
+        } else {
+            pendingUpdate = pending
+        }
     }
 
     func refresh(force: Bool = true) async {
@@ -61,8 +66,16 @@ final class ClientReleaseController: ObservableObject {
     }
 
     func checkAtLaunch() async {
-        guard automaticallyChecks else { return }
+        guard automaticallyUpdates else { return }
         await refresh(force: false)
+        guard let resolved,
+              VersionOrder.isNewerRelease(
+                version: resolved.manifest.version,
+                build: resolved.manifest.build,
+                thanVersion: installedVersion,
+                build: Int(installedBuild) ?? 0
+              ), pendingUpdate == nil else { return }
+        await update()
     }
 
     func update() async {
@@ -101,12 +114,40 @@ final class ClientReleaseController: ObservableObject {
                 source: value.source
             )
             let url = self.store.root.appendingPathComponent(cached.filename)
-            try self.installer.presentVerifiedInstaller(
-                at: url, inspection: inspection
+            let staged = self.store.root
+                .appendingPathComponent("pending")
+                .appendingPathComponent(value.manifest.version)
+                .appendingPathComponent("FTClient.app")
+            let stagedApp = try await AppInstallerInspector.stage(
+                url,
+                at: staged,
+                expected: inspection
             )
-            self.lastError = inspection.developerIDSigned && inspection.notarized
-                ? L10n.text("已验证并打开 DMG。请拖入 Applications 完成安装。")
-                : L10n.text("已验证并打开 DMG；当前构建尚未完成 Developer ID 公证，客户端不会静默替换 App。")
+            self.pendingUpdate = try self.store.savePendingApplication(
+                version: value.manifest.version,
+                build: String(value.manifest.build),
+                channel: value.manifest.channel,
+                appURL: stagedApp,
+                sha256: value.manifest.sha256
+            )
+            self.lastError = L10n.text(
+                "更新已下载并验证。请点击左下角‘设置’旁的‘重启更新’。"
+            )
+        }
+    }
+
+    func restartToApply() async {
+        guard let pendingUpdate else {
+            lastError = L10n.text("当前没有已准备好的更新。")
+            return
+        }
+        do {
+            try PendingApplicationUpdater.launch(
+                pending: pendingUpdate,
+                currentBundle: Bundle.main.bundleURL
+            )
+        } catch {
+            lastError = error.localizedDescription
         }
     }
 
@@ -117,8 +158,33 @@ final class ClientReleaseController: ObservableObject {
             lastError = L10n.text("没有可用的上一版已验证 DMG。")
             return
         }
-        NSWorkspace.shared.open(installer)
-        lastError = L10n.text("上一版 DMG 已打开。请拖入 Applications 完成回滚。")
+        do {
+            let inspection = try await AppInstallerInspector.inspect(installer)
+            guard inspection.bundleID == "com.gtht.client" else {
+                throw AppUpdateError.bundleIdentityMismatch
+            }
+            let staged = self.store.root
+                .appendingPathComponent("pending")
+                .appendingPathComponent(inspection.version)
+                .appendingPathComponent("FTClient.app")
+            let stagedApp = try await AppInstallerInspector.stage(
+                installer,
+                at: staged,
+                expected: inspection
+            )
+            pendingUpdate = try store.savePendingApplication(
+                version: inspection.version,
+                build: inspection.build,
+                channel: "rollback",
+                appURL: stagedApp,
+                sha256: try AppUpdateStore.sha256(installer)
+            )
+            lastError = L10n.text(
+                "上一版已准备好。请点击‘重启更新’完成回滚。"
+            )
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     private var shouldCheckAtLaunch: Bool {
@@ -142,6 +208,6 @@ final class ClientReleaseController: ObservableObject {
 
 private enum Keys {
     static let channel = "client.update.channel"
-    static let automatic = "client.update.automaticChecks"
+    static let automatic = "client.update.automaticDownloads"
     static let lastChecked = "client.update.lastChecked"
 }

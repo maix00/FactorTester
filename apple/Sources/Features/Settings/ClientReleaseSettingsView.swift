@@ -2,8 +2,13 @@ import SwiftUI
 
 struct ClientReleaseSettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var controller = ClientReleaseController()
+    @ObservedObject var controller: ClientReleaseController
     var embedded = false
+
+    init(controller: ClientReleaseController, embedded: Bool = false) {
+        self.controller = controller
+        self.embedded = embedded
+    }
 
     var body: some View {
         Group {
@@ -64,9 +69,12 @@ struct ClientReleaseSettingsView: View {
                         }
                         .pickerStyle(.segmented)
                         Toggle(
-                            "启动时自动检查（最多每 6 小时一次）",
-                            isOn: $controller.automaticallyChecks
+                            "自动下载当前渠道更新（Beta / 稳定版）",
+                            isOn: $controller.automaticallyUpdates
                         )
+                        Text("下载完成后不会自动替换正在运行的 App；左下角‘设置’旁会提示‘重启更新’。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         if let checked = controller.lastChecked {
                             LabeledContent(
                                 "最后检查",
@@ -109,16 +117,35 @@ struct ClientReleaseSettingsView: View {
                         Task { await controller.refresh() }
                     }
                     Spacer()
-                    Button("打开上一版 DMG") {
+                    Button("准备上一版并重启") {
                         Task { await controller.rollback() }
                     }
                     .disabled(!controller.canRollback)
-                    Button("验证、下载并打开 DMG") {
+                    Button("下载并准备更新") {
                         Task { await controller.update() }
                     }
                     .buttonStyle(.borderedProminent)
                 }
                 .disabled(controller.isWorking)
+                if let pending = controller.pendingUpdate {
+                    GroupBox("已准备好的更新") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label(
+                                "(pending.version) · (pending.channel)",
+                                systemImage: "arrow.down.app.fill"
+                            )
+                            Text("更新包已通过校验，重启后自动切换；当前研究任务不会被后台强制中断。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button("重启应用更新") {
+                                Task { await controller.restartToApply() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                    }
+                }
             }
             .padding(24)
         }

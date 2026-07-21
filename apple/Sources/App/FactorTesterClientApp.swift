@@ -15,6 +15,7 @@ struct FactorTesterClientApp: App {
                 .environmentObject(config)
                 .environmentObject(session)
                 .environmentObject(registry)
+                .environmentObject(updates)
                 .environment(
                     \.locale,
                     AppLanguage(rawValue: language)?.locale ?? .autoupdatingCurrent

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ClientSettingsHub: View {
     let open: (ClientTab) -> Void
+    @EnvironmentObject private var releaseController: ClientReleaseController
     @State private var selection = SettingSection.server
 
     var body: some View {
@@ -25,7 +26,10 @@ struct ClientSettingsHub: View {
                 case .language:
                     SettingsLanguageView()
                 case .updates:
-                    ClientReleaseSettingsView(embedded: true)
+                    ClientReleaseSettingsView(
+                        controller: releaseController,
+                        embedded: true
+                    )
                 }
             }
             .frame(minWidth: 560, maxWidth: .infinity)
