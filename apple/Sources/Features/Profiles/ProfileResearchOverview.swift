@@ -141,14 +141,17 @@ private struct ResearchWorkspaceBinding {
 
 struct ProfileResearchOverview: View {
     let profiles: [LocalProfileModel]
+    let profileLoadState: LocalProfileLoadState
     let openWorkPackage: (ResearchDirectoryItem) -> Void
     @StateObject private var controller: ResearchDirectoryController
 
     init(
         profiles: [LocalProfileModel],
+        profileLoadState: LocalProfileLoadState = .loaded,
         openWorkPackage: @escaping (ResearchDirectoryItem) -> Void
     ) {
         self.profiles = profiles
+        self.profileLoadState = profileLoadState
         self.openWorkPackage = openWorkPackage
         _controller = StateObject(
             wrappedValue: ResearchDirectoryController(profiles: profiles)
@@ -173,6 +176,22 @@ struct ProfileResearchOverview: View {
                     ProgressView("正在读取研究目录…")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 48)
+                } else if controller.items.isEmpty,
+                          profileLoadState == .loading {
+                    Label(
+                        "正在读取本地 Profile；暂不判断为空。",
+                        systemImage: "person.crop.circle"
+                    )
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 40)
+                } else if controller.items.isEmpty,
+                          profileLoadState == .failed {
+                    Label(
+                        "本地 Profile 读取失败；暂不判断为空。",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                    .padding(.vertical, 40)
                 } else if controller.items.isEmpty {
                     Label(
                         profiles.isEmpty

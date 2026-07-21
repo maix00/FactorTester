@@ -34,13 +34,25 @@ struct ClientTabView: View {
         case .research:
             ProfileResearchOverview(
                 profiles: profiles.profiles,
+                profileLoadState: profiles.loadState,
                 openWorkPackage: { open(.workPackage($0)) }
             )
         case .workPackage(let item):
             let visibleProfiles = profiles.profiles.filter {
                 item.profileIDs.contains($0.id)
             }
-            if visibleProfiles.count == 1,
+            if profiles.loadState == .loading && visibleProfiles.isEmpty {
+                ProgressView("正在读取本地 Profile…")
+            } else if profiles.loadState == .failed && visibleProfiles.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                    Text("本地 Profile 读取失败")
+                        .font(.headline)
+                    Text("暂不判断该研究是否没有 Profile。")
+                        .foregroundStyle(.secondary)
+                }
+            } else if visibleProfiles.count == 1,
                let primaryProfile = visibleProfiles.first {
                 WorkPackageResearchView(
                     item: item,
@@ -71,7 +83,9 @@ struct ClientTabView: View {
                 openProfile: { open(.profile(id: $0.id, title: $0.displayName)) }
             )
         case .profile(let id):
-            if let profile = profiles.profiles.first(where: { $0.id == id }) {
+            if profiles.loadState == .loading {
+                ProgressView("正在读取本地 Profile…")
+            } else if let profile = profiles.profiles.first(where: { $0.id == id }) {
                 ProfileWorkspaceView(profile: profile)
             } else {
                 VStack(spacing: 10) {
