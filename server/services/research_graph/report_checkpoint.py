@@ -79,7 +79,7 @@ def report_checkpoint_projection(
         evidence=trace_evidence,
     )
     value = {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_ref": f"workspace:{workspace_id}",
         "work_package_ref": f"work-package:{instance_id}",
         "branch_ref": f"graph-branch:{instance_id}:{branch_id}",
@@ -103,12 +103,37 @@ def report_checkpoint_projection(
             if item["status"] in {"open", "reopened"}
         ][:MAX_CARRIER_ITEMS],
         "closure": cycle["closure"],
+        "report_lineage": report_lineage_projection(
+            trace_evidence.get("report_lineage")
+        ),
         "latest_transition": step,
     }
     encoded = orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
     if len(encoded) > MAX_REPORT_CHECKPOINT_BYTES:
         raise ValueError("report checkpoint exceeds bounded carrier size")
     return value
+
+
+def report_lineage_projection(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {
+            "status": "history_incomplete",
+            "predecessor_checkpoint_ref": "",
+        }
+    status = str(value.get("status") or "")
+    predecessor = str(value.get("predecessor_checkpoint_ref") or "")
+    if status == "root" and not predecessor:
+        return {"status": status, "predecessor_checkpoint_ref": ""}
+    if (
+        status == "linked"
+        and predecessor.startswith("trace:")
+        and safe_identifier(predecessor.removeprefix("trace:"))
+    ):
+        return {"status": status, "predecessor_checkpoint_ref": predecessor}
+    return {
+        "status": "history_incomplete",
+        "predecessor_checkpoint_ref": "",
+    }
 
 
 def transition_step_projection(

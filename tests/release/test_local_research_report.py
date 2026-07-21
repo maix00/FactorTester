@@ -15,7 +15,7 @@ from tools.cli.release.research_reporting import (
 
 def _carrier() -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_ref": "workspace:workspace-maxa",
         "work_package_ref": "work-package:sgccs-review",
         "branch_ref": "graph-branch:sgccs-review:branch-sgccs",
@@ -45,6 +45,10 @@ def _carrier() -> dict:
             "question_summary": "Does the signal survive costs?",
         }],
         "closure": None,
+        "report_lineage": {
+            "status": "root",
+            "predecessor_checkpoint_ref": "",
+        },
         "latest_transition": {
             "step_ref": "trace:checkpoint-1",
             "edge_ref": "graph-edge:backtest__job_evidence_ready",
@@ -60,6 +64,13 @@ def _carrier() -> dict:
             "obligation_changes": [],
             "claim_changes": [],
         },
+    }
+
+
+def _link_after(carrier: dict, predecessor: str) -> None:
+    carrier["report_lineage"] = {
+        "status": "linked",
+        "predecessor_checkpoint_ref": predecessor,
     }
 
 
@@ -205,6 +216,7 @@ def test_checkpoint_publish_accumulates_complete_chinese_narrative(
         "step_ref": "trace:checkpoint-2",
         "created_at": 3.0,
     })
+    _link_after(second, first["checkpoint_ref"])
     publish_research_checkpoint(
         client_root=root,
         profile_id="maxa",
@@ -226,6 +238,56 @@ def test_checkpoint_publish_accumulates_complete_chinese_narrative(
         "trace:checkpoint-2",
     ]
     assert len(list((branch_root / "sections").glob("*.json"))) == 2
+
+
+def test_checkpoint_publish_requires_trusted_root_and_unbroken_lineage(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    incomplete = _carrier()
+    incomplete["report_lineage"] = {
+        "status": "history_incomplete",
+        "predecessor_checkpoint_ref": "",
+    }
+    with pytest.raises(ValueError, match="restart from a trusted root"):
+        publish_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=incomplete,
+        )
+    assert not (root / "profile-root" / "research").exists()
+
+    first = _carrier()
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=first,
+    )
+    skipped = deepcopy(first)
+    skipped["checkpoint_ref"] = "trace:checkpoint-3"
+    skipped["latest_transition"].update({
+        "step_ref": "trace:checkpoint-3",
+        "created_at": 4.0,
+    })
+    _link_after(skipped, "trace:checkpoint-2")
+    with pytest.raises(ValueError, match="lineage is incomplete"):
+        publish_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=skipped,
+        )
+
+    journal = json.loads((
+        root / "profile-root" / "research" / "sgccs-review"
+        / "branches" / "branch-sgccs" / "JOURNAL.json"
+    ).read_text())
+    assert journal["schema_version"] == 3
+    assert journal["history_status"] == "complete"
+    assert journal["root_checkpoint_ref"] == "trace:checkpoint-1"
 
 
 def test_checkpoint_publish_preserves_structured_list_and_result_table(
@@ -281,7 +343,7 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
     )
     journal = json.loads(journal_path.read_text())
     section = journal["checkpoints"][0]["sections"][0]
-    assert journal["schema_version"] == 2
+    assert journal["schema_version"] == 3
     assert [block["kind"] for block in section["blocks"]] == [
         "list", "table",
     ]
@@ -452,6 +514,7 @@ def test_distinct_trace_checkpoints_remain_linked_in_chronological_index(
         "created_at": 3.0,
         "evidence_refs": ["evidence:job-attempt-2"],
     })
+    _link_after(later, "trace:checkpoint-1")
 
     publish_research_checkpoint(
         client_root=root,
@@ -579,6 +642,7 @@ def test_replaying_pruned_branch_checkpoint_is_strictly_idempotent(
     )
     trend = deepcopy(_carrier())
     trend["branch_ref"] = "graph-branch:sgccs-review:branch-trend"
+    previous_trend_ref = ""
     for index in range(101):
         checkpoint_ref = f"trace:trend-{index:03d}"
         trend["checkpoint_ref"] = checkpoint_ref
@@ -586,12 +650,20 @@ def test_replaying_pruned_branch_checkpoint_is_strictly_idempotent(
             "step_ref": checkpoint_ref,
             "created_at": 3.0 + index,
         })
+        if previous_trend_ref:
+            _link_after(trend, previous_trend_ref)
+        else:
+            trend["report_lineage"] = {
+                "status": "root",
+                "predecessor_checkpoint_ref": "",
+            }
         publish_research_checkpoint(
             client_root=root,
             profile_id="maxa",
             agent_id="research-maxa-trend",
             carrier=trend,
         )
+        previous_trend_ref = checkpoint_ref
     index_path = (
         root / "profile-root" / "research" / "sgccs-review" / "INDEX.json"
     )
@@ -876,7 +948,12 @@ def test_server_checkpoint_carrier_publishes_without_translation(
             "claims": [],
             "obligations": [],
         },
-        trace_evidence={},
+        trace_evidence={
+            "report_lineage": {
+                "status": "root",
+                "predecessor_checkpoint_ref": "",
+            },
+        },
         evidence_refs=[
             "evidence:valid",
             "https://user:secret@example.com/evidence",

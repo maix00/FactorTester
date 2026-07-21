@@ -76,8 +76,8 @@ def advance_graph_branch(
 ) -> dict[str, Any]:
     if not isinstance(evidence, dict):
         raise ValueError("transition evidence must be an object")
-    if "server_evidence" in evidence:
-        raise ValueError("server_evidence is server-owned")
+    if "server_evidence" in evidence or "report_lineage" in evidence:
+        raise ValueError("server evidence and report lineage are server-owned")
     evidence = validate_agent_evidence_payload(evidence)
     prepared_evidence, proposed_trial_plan_hash, has_trial_plan_body = (
         prepare_trial_plan_evidence(evidence)
@@ -351,6 +351,13 @@ def advance_graph_branch(
             trace_evidence["target_capability_resolution_ref"] = (
                 f"branch-resolution:{instance_id}:{branch_id}"
             )
+        previous_trace_id = str(branch_row["latest_trace_id"] or "")
+        trace_evidence["report_lineage"] = {
+            "status": "linked" if previous_trace_id else "root",
+            "predecessor_checkpoint_ref": (
+                f"trace:{previous_trace_id}" if previous_trace_id else ""
+            ),
+        }
         trace_evidence_json = serialize_bounded_trace_evidence(trace_evidence)
         bounded_evidence_refs, omitted_evidence_count = (
             merge_bounded_evidence_refs(

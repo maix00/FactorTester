@@ -2243,6 +2243,11 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert carrier["latest_transition"]["edge_ref"] == (
         "graph-edge:hypothesis__resolution"
     )
+    assert carrier["schema_version"] == 2
+    assert carrier["report_lineage"] == {
+        "status": "root",
+        "predecessor_checkpoint_ref": "",
+    }
     serialized_carrier = orjson.dumps(carrier)
     assert b"source_code" not in serialized_carrier
     assert b"stdout" not in serialized_carrier
@@ -2259,6 +2264,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             ),
         ).fetchone()
     envelope = orjson.loads(trace["evidence_json"])["evidence_envelope"]
+    persisted_lineage = orjson.loads(trace["evidence_json"])[
+        "report_lineage"
+    ]
+    assert persisted_lineage == carrier["report_lineage"]
     assert len(envelope["envelope_hash"]) == 64
     assert "decision" not in envelope
     before_oversized = research_graphs.load_graph_branch(
@@ -2442,6 +2451,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
 
     assert paused["status"] == "paused"
     assert paused["current_node"] == "capability_gap"
+    assert paused["report_checkpoint"]["report_lineage"] == {
+        "status": "linked",
+        "predecessor_checkpoint_ref": carrier["checkpoint_ref"],
+    }
     assert untouched["status"] == "running"
     assert untouched["current_node"] == "hypothesis"
 

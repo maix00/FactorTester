@@ -17,6 +17,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FRAGMENT_FIELDS = {
     "schema_version", "language", "checkpoint_ref", "created_at", "carrier_hash",
     "narrative_hash", "section_hash", "sections", "evidence_refs", "gaps",
+    "lineage_status", "predecessor_checkpoint_ref",
 }
 
 
@@ -28,9 +29,10 @@ def build_fragment(
     *, checkpoint_ref: str, created_at: float, carrier_hash: str,
     narrative_hash: str, sections: list[dict[str, Any]],
     evidence_refs: list[str], gaps: list[dict[str, str]],
+    lineage: dict[str, str],
 ) -> dict[str, Any]:
     value = {
-        "schema_version": 1,
+        "schema_version": 2,
         "language": "zh-Hans",
         "checkpoint_ref": checkpoint_ref,
         "created_at": float(created_at),
@@ -39,6 +41,10 @@ def build_fragment(
         "sections": deepcopy(sections),
         "evidence_refs": list(evidence_refs),
         "gaps": deepcopy(gaps),
+        "lineage_status": lineage["status"],
+        "predecessor_checkpoint_ref": lineage[
+            "predecessor_checkpoint_ref"
+        ],
     }
     value["section_hash"] = content_hash(value)
     return validate_fragment(value)
@@ -63,10 +69,12 @@ def load_fragments(path: Path) -> list[dict[str, Any]]:
             raise ValueError("research journal contains duplicate checkpoint")
         checkpoints.add(fragment["checkpoint_ref"])
         entries.append(fragment)
-    return sorted(
+    ordered = sorted(
         entries,
         key=lambda item: (item["created_at"], item["checkpoint_ref"]),
     )
+    validate_fragment_sequence(ordered)
+    return ordered
 
 
 def merge_fragment(
@@ -79,10 +87,12 @@ def merge_fragment(
         if item["section_hash"] != candidate["section_hash"]:
             raise ValueError("checkpoint has a conflicting narrative fragment")
         return fragments, False
-    return sorted(
+    merged = sorted(
         [*fragments, candidate],
         key=lambda item: (item["created_at"], item["checkpoint_ref"]),
-    ), True
+    )
+    validate_fragment_sequence(merged)
+    return merged, True
 
 
 def assemble_snapshot(
@@ -108,17 +118,11 @@ def journal_payload(
     *, branch_id: str, fragments: list[dict[str, Any]],
 ) -> bytes:
     value = {
-        "schema_version": (
-            2
-            if any(
-                "blocks" in section
-                for fragment in fragments
-                for section in fragment["sections"]
-            )
-            else 1
-        ),
+        "schema_version": 3,
         "language": "zh-Hans",
         "branch_id": branch_id,
+        "history_status": "complete",
+        "root_checkpoint_ref": fragments[0]["checkpoint_ref"],
         "checkpoints": [
             {
                 "checkpoint_ref": fragment["checkpoint_ref"],
@@ -126,6 +130,10 @@ def journal_payload(
                 "carrier_hash": fragment["carrier_hash"],
                 "narrative_hash": fragment["narrative_hash"],
                 "section_hash": fragment["section_hash"],
+                "lineage_status": fragment["lineage_status"],
+                "predecessor_checkpoint_ref": fragment[
+                    "predecessor_checkpoint_ref"
+                ],
                 "sections": fragment["sections"],
             }
             for fragment in fragments
@@ -152,7 +160,7 @@ def validate_fragment(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != _FRAGMENT_FIELDS:
         raise ValueError("research journal fragment fields are invalid")
     candidate = deepcopy(value)
-    if candidate.get("schema_version") != 1:
+    if candidate.get("schema_version") != 2:
         raise ValueError("research journal fragment schema is invalid")
     if candidate.get("language") != "zh-Hans":
         raise ValueError("research journal fragment language is invalid")
@@ -179,11 +187,43 @@ def validate_fragment(value: Any) -> dict[str, Any]:
         or len(candidate["gaps"]) > 32
     ):
         raise ValueError("research journal fragment content is invalid")
+    lineage_status = candidate.get("lineage_status")
+    predecessor = candidate.get("predecessor_checkpoint_ref")
+    if lineage_status not in {"root", "linked"}:
+        raise ValueError("research journal fragment lineage is invalid")
+    if not isinstance(predecessor, str):
+        raise ValueError("research journal predecessor is invalid")
+    if lineage_status == "root" and predecessor:
+        raise ValueError("root research fragment cannot have a predecessor")
+    if lineage_status == "linked" and not predecessor.startswith("trace:"):
+        raise ValueError("linked research fragment requires a trace predecessor")
     section_hash = candidate.pop("section_hash")
     if not isinstance(section_hash, str) or content_hash(candidate) != section_hash:
         raise ValueError("research journal fragment hash is invalid")
     candidate["section_hash"] = section_hash
     return candidate
+
+
+def validate_fragment_sequence(fragments: list[dict[str, Any]]) -> None:
+    if not fragments:
+        raise ValueError("research journal requires a trusted root")
+    for index, fragment in enumerate(fragments):
+        status = fragment["lineage_status"]
+        predecessor = fragment["predecessor_checkpoint_ref"]
+        if index == 0:
+            if status != "root" or predecessor:
+                raise ValueError(
+                    "research journal does not begin at a trusted root"
+                )
+            continue
+        previous = fragments[index - 1]
+        if (
+            status != "linked"
+            or predecessor != previous["checkpoint_ref"]
+        ):
+            raise ValueError(
+                "research journal checkpoint lineage is incomplete"
+            )
 
 
 def _canonical_bytes(value: Any) -> bytes:

@@ -465,6 +465,10 @@ def test_list_detail_and_timeline_are_bounded_source_free_and_keyset_paged(
     assert carrier["decision_contract_hash"] == "b" * 64
     assert carrier["methodology_hash"] == "d" * 64
     assert carrier["trial_plan_hash"] == "c" * 64
+    assert carrier["report_lineage"] == {
+        "status": "history_incomplete",
+        "predecessor_checkpoint_ref": "",
+    }
     assert carrier["latest_transition"]["step_ref"] == (
         "trace:trace-000000"
     )

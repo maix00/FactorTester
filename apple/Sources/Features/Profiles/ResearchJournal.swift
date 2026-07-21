@@ -6,12 +6,16 @@ struct ResearchJournalDocument: Decodable {
     let schemaVersion: Int
     let language: String
     let branchID: String
+    let historyStatus: String?
+    let rootCheckpointRef: String?
     let checkpoints: [ResearchJournalCheckpoint]
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case language
         case branchID = "branch_id"
+        case historyStatus = "history_status"
+        case rootCheckpointRef = "root_checkpoint_ref"
         case checkpoints
     }
 }
@@ -22,6 +26,8 @@ struct ResearchJournalCheckpoint: Decodable, Identifiable {
     let carrierHash: String
     let narrativeHash: String
     let sectionHash: String
+    let lineageStatus: String?
+    let predecessorCheckpointRef: String?
     let sections: [ResearchJournalSection]
 
     var id: String { checkpointRef }
@@ -32,6 +38,8 @@ struct ResearchJournalCheckpoint: Decodable, Identifiable {
         case carrierHash = "carrier_hash"
         case narrativeHash = "narrative_hash"
         case sectionHash = "section_hash"
+        case lineageStatus = "lineage_status"
+        case predecessorCheckpointRef = "predecessor_checkpoint_ref"
         case sections
     }
 }
@@ -238,14 +246,21 @@ enum ResearchJournalLoader {
     }
 
     private static func validate(_ value: ResearchJournalDocument) throws {
-        guard [1, 2].contains(value.schemaVersion),
-              value.language == "zh-Hans",
+        guard value.schemaVersion == 3,
+              value.historyStatus == "complete",
+              !value.checkpoints.isEmpty,
+              value.rootCheckpointRef
+                == value.checkpoints.first?.checkpointRef else {
+            throw ResearchJournalError.historyIncomplete
+        }
+        guard value.language == "zh-Hans",
               !value.branchID.isEmpty,
               value.checkpoints.count <= maximumCheckpoints else {
             throw ResearchJournalError.invalidContract
         }
         var checkpointRefs = Set<String>()
         var sectionIDs = Set<String>()
+        var previousCheckpoint: ResearchJournalCheckpoint?
         for checkpoint in value.checkpoints {
             guard checkpointRefs.insert(checkpoint.checkpointRef).inserted,
                   checkpoint.createdAt.isFinite,
@@ -256,6 +271,19 @@ enum ResearchJournalLoader {
                   !checkpoint.sections.isEmpty,
                   checkpoint.sections.count <= 8 else {
                 throw ResearchJournalError.invalidContract
+            }
+            if let previousCheckpoint {
+                guard checkpoint.lineageStatus == "linked",
+                      checkpoint.predecessorCheckpointRef
+                        == previousCheckpoint.checkpointRef,
+                      checkpoint.createdAt >= previousCheckpoint.createdAt else {
+                    throw ResearchJournalError.historyIncomplete
+                }
+            } else {
+                guard checkpoint.lineageStatus == "root",
+                      checkpoint.predecessorCheckpointRef == "" else {
+                    throw ResearchJournalError.historyIncomplete
+                }
             }
             for section in checkpoint.sections {
                 guard !section.sectionID.isEmpty,
@@ -269,6 +297,7 @@ enum ResearchJournalLoader {
                 }
                 try validateBlocks(section)
             }
+            previousCheckpoint = checkpoint
         }
     }
 
@@ -335,6 +364,7 @@ enum ResearchJournalError: LocalizedError {
     case workspaceAccessRequired
     case invalidSize
     case hashMismatch
+    case historyIncomplete
     case invalidContract
 
     var errorDescription: String? {
@@ -347,6 +377,8 @@ enum ResearchJournalError: LocalizedError {
             return "研究报告超出本地安全读取上限。"
         case .hashMismatch:
             return "研究报告完整性校验失败。"
+        case .historyIncomplete:
+            return "研究报告未能从可信起点连续重建，需要从根起点重新研究。"
         case .invalidContract:
             return "研究报告格式不受支持。"
         }

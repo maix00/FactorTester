@@ -34,7 +34,7 @@ _CARRIER_FIELDS = {
     "product_group", "current_node", "status", "decision_contract_hash",
     "methodology_hash", "trial_plan_hash", "evidence_refs",
     "omitted_evidence_count", "job_refs", "run_refs", "claims",
-    "open_obligations", "closure",
+    "open_obligations", "closure", "report_lineage",
     "latest_transition",
 }
 _TRANSITION_FIELDS = {
@@ -153,6 +153,7 @@ def publish_research_checkpoint(
         sections=snapshot["sections"],
         evidence_refs=snapshot["evidence_refs"],
         gaps=snapshot["gaps"],
+        lineage=value["report_lineage"],
     )
     report = render_branch_report(
         snapshot,
@@ -227,8 +228,8 @@ def _canonical_carrier(carrier: Any) -> dict[str, Any]:
     if len(encoded) > MAX_CARRIER_BYTES:
         raise ValueError(f"checkpoint carrier exceeds {MAX_CARRIER_BYTES} bytes")
     value = deepcopy(carrier)
-    if value["schema_version"] != 1:
-        raise ValueError("checkpoint carrier schema_version must be 1")
+    if value["schema_version"] != 2:
+        raise ValueError("checkpoint carrier schema_version must be 2")
     for field in (
         "workspace_ref", "work_package_ref", "branch_ref", "checkpoint_ref",
         "research_cycle_ref",
@@ -241,6 +242,26 @@ def _canonical_carrier(carrier: Any) -> dict[str, Any]:
     ):
         if not isinstance(value[field], str) or not _SHA256.fullmatch(value[field]):
             raise ValueError(f"{field} must be lowercase sha256")
+    lineage = value["report_lineage"]
+    if not isinstance(lineage, dict) or set(lineage) != {
+        "status", "predecessor_checkpoint_ref",
+    }:
+        raise ValueError("report_lineage fields are invalid")
+    lineage_status = lineage["status"]
+    predecessor = lineage["predecessor_checkpoint_ref"]
+    if lineage_status == "history_incomplete":
+        raise ValueError(
+            "research history is incomplete; restart from a trusted root"
+        )
+    if lineage_status == "root":
+        if predecessor != "":
+            raise ValueError("root report lineage cannot have a predecessor")
+    elif lineage_status == "linked":
+        _reference(predecessor, "report_lineage.predecessor_checkpoint_ref")
+        if not predecessor.startswith("trace:"):
+            raise ValueError("report lineage predecessor must be a trace ref")
+    else:
+        raise ValueError("report_lineage status is invalid")
     trial_plan_hash = value["trial_plan_hash"]
     if (
         not isinstance(trial_plan_hash, str)
