@@ -310,7 +310,7 @@ struct ResearchVersionTreePane: View {
             }.map { ($0.targetNodeRef, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        return projection.nodes.map { node in
+        var result = projection.nodes.map { node in
             let lineage = lineageByTarget[node.nodeRef]
             let sourceLane = lineage.flatMap { edge in
                 visibleBranches.firstIndex {
@@ -332,7 +332,29 @@ struct ResearchVersionTreePane: View {
                 isLineage: lineage != nil,
                 sourceLane: sourceLane
             )
-        }.sorted {
+        }
+        // A branch may have no checkpoint yet (or may be outside the bounded
+        // sample). Keep its status/head visible as a non-clickable branch
+        // marker instead of silently dropping the branch lane.
+        let projectedBranches = Set(projection.nodes.map(\.branchRef))
+        for branch in visibleBranches
+        where !projectedBranches.contains(branch.branchRef) {
+            result.append(ResearchTreeNode(
+                id: "branch|\(branch.branchRef)",
+                checkpointRef: branch.latestTraceRef ?? "",
+                title: branch.label,
+                subtitle: treeStatusLabel(branch.status),
+                timestamp: branch.updatedAt,
+                lane: lane(for: branch.branchRef),
+                status: branch.status,
+                isHead: true,
+                isCurrentHead: branch.branchRef == detail.branchRef,
+                isRoot: false,
+                isLineage: false,
+                sourceLane: nil
+            ))
+        }
+        return result.sorted {
             ResearchTreeOrdering.isBefore(
                 timestamp: $0.timestamp,
                 id: $0.id,
