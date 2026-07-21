@@ -68,9 +68,24 @@ def ensure_schema() -> None:
             create_schema(conn)
             definitions = _table_definitions(conn)
             tables = set(definitions)
-        if "trial_stage_projection_json" not in definitions.get(
-            "research_graph_branches",
-            "",
+        # Branch projection and Profile ownership columns were introduced in
+        # separate migrations.  Testing only the newest branch column can
+        # falsely declare an older database migrated (and then projection /
+        # transition queries fail with ``no such column``).  Inspect all
+        # columns in the CREATE TABLE definitions before entering the
+        # idempotent DDL path; the normal warm path remains one read with no
+        # PRAGMA/DDL.
+        required_columns = {
+            "research_graph_instances": (
+                "created_by_profile_ref", "current_owner_profile_ref",
+            ),
+            "research_graph_branches": ("trial_stage_projection_json",),
+            "research_graph_trace": ("acting_profile_ref",),
+        }
+        if any(
+            column not in definitions.get(table, "")
+            for table, columns in required_columns.items()
+            for column in columns
         ):
             ensure_instance_branch_schema(conn)
         missing = sorted(GRAPH_OWNER_TABLES - tables)
