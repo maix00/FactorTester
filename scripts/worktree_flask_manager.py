@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import html
 import json
 import os
@@ -43,6 +44,17 @@ def _extract_issue_number(branch: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _write_owner_only_once(path: Path, value: str) -> None:
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return
+    try:
+        os.write(fd, value.encode("ascii"))
+    finally:
+        os.close(fd)
+
+
 @dataclass(frozen=True)
 class Worktree:
     path: Path
@@ -69,6 +81,7 @@ class ManagerState:
         self.log_dir = self.repo / ".workspace" / "flask-manager" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.secret_path = self.log_dir.parent / "flask-secret.key"
+        self.capability_path = self.log_dir.parent / "manager-capability.key"
 
     def _flask_secret(self) -> str:
         if not self.secret_path.exists():
@@ -77,6 +90,15 @@ class ManagerState:
         value = self.secret_path.read_text(encoding="ascii").strip()
         if not value:
             raise RuntimeError("Flask session secret is empty")
+        return value
+
+    def capability_token(self) -> str:
+        if not self.capability_path.exists():
+            _write_owner_only_once(self.capability_path, secrets.token_hex(32))
+        self.capability_path.chmod(0o600)
+        value = self.capability_path.read_text(encoding="ascii").strip()
+        if not value:
+            raise RuntimeError("manager capability token is empty")
         return value
 
     def worktrees(self) -> list[Worktree]:
@@ -128,6 +150,24 @@ class ManagerState:
 
     def key(self, path: Path) -> str:
         return str(path.resolve())
+
+    def instance_id(self, worktree: Worktree) -> str:
+        digest = hmac.new(
+            self.capability_token().encode("ascii"),
+            self.key(worktree.path).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()[:24]
+        return f"worktree-{digest}"
+
+    def worktree_for_instance(self, instance_id: str) -> Worktree | None:
+        return next(
+            (
+                item
+                for item in self.worktrees()
+                if self.instance_id(item) == str(instance_id)
+            ),
+            None,
+        )
 
     def is_running(self, path: Path) -> bool:
         bundle = self.processes.get(self.key(path))
@@ -208,6 +248,7 @@ class ManagerState:
             ).strip(),
             "GTHT_JOB_ARTIFACT_ROOT": str(path / ".workspace" / "job-results"),
             "FLASK_SECRET_KEY": self._flask_secret(),
+            "GTHT_MANAGER_CAPABILITY_TOKEN": self.capability_token(),
         })
         return env, deployment_id, socket_path
 
@@ -391,13 +432,14 @@ def page(state: ManagerState, message: str = "") -> bytes:
     lan = _lan_ip()
     rows = []
     for wt in state.worktrees():
+        instance_id = state.instance_id(wt)
         if wt.port == 0:
             # No issue number — show warning, no Start/Stop actions
             rows.append(
                 f"""
             <tr class="orphan">
               <td><strong>{html.escape(wt.label)}</strong><div class="muted">{html.escape(wt.branch)} · {html.escape(wt.head)}</div></td>
-              <td><code>{html.escape(str(wt.path))}</code></td>
+              <td><code>{html.escape(instance_id)}</code></td>
               <td><span class="muted">—</span></td>
               <td><span class="pill orphan-pill">no-issue</span></td>
               <td><span class="muted">⚠️ 建议清理：分支名不含 issue 编号</span></td>
@@ -416,15 +458,15 @@ def page(state: ManagerState, message: str = "") -> bytes:
             f"""
             <tr>
               <td><strong>{html.escape(wt.label)}</strong><div class="muted">{html.escape(wt.branch)} · {html.escape(wt.head)}</div></td>
-              <td><code>{html.escape(str(wt.path))}</code></td>
+              <td><code>{html.escape(instance_id)}</code></td>
               <td><a href="http://localhost:{wt.port}/" target="_blank" title="localhost">{wt.port}</a> <span class="muted">|</span> <a href="http://{lan}:{wt.port}/" target="_blank" title="LAN ({lan})" class="lan-link">🌐</a></td>
               <td><span class="pill {status}">{status}</span></td>
               <td>
-                <form method="post" action="/start"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><input type="hidden" name="port" value="{wt.port}"><button {start_disabled}>Start</button></form>
-                <form method="post" action="/stop"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><button {stop_disabled}>Stop</button></form>
-                <form method="post" action="/restart-api"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><input type="hidden" name="port" value="{wt.port}"><button {'' if daemon_running else 'disabled'}>Restart API</button></form>
-                <form method="post" action="/restart-bundle"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><input type="hidden" name="port" value="{wt.port}"><button {'' if daemon_running else 'disabled'}>Restart Bundle</button></form>
-                <form method="post" action="/force-stop"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><button {stop_disabled}>Force Stop</button></form>
+                <form method="post" action="/start"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {start_disabled}>Start</button></form>
+                <form method="post" action="/stop"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {stop_disabled}>Stop</button></form>
+                <form method="post" action="/restart-api"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {'' if daemon_running else 'disabled'}>Restart API</button></form>
+                <form method="post" action="/restart-bundle"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {'' if daemon_running else 'disabled'}>Restart Bundle</button></form>
+                <form method="post" action="/force-stop"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {stop_disabled}>Force Stop</button></form>
                 <a class="button {open_disabled}" href="http://localhost:{wt.port}/" target="_blank">Open</a>
                 <a class="button {open_disabled}" href="http://{lan}:{wt.port}/" target="_blank" title="LAN 访问">🌐 Open</a>
               </td>
@@ -443,12 +485,12 @@ def page(state: ManagerState, message: str = "") -> bytes:
     vibe_row = f"""
       <tr>
         <td><strong>Vibe-Trading</strong><div class="muted">research UI + MaxA MCP gateway</div></td>
-        <td><code>{html.escape(str(VIBE_TRADING_ROOT))}</code></td>
+        <td><code>service-vibe-trading</code></td>
         <td><a href="http://localhost:{VIBE_TRADING_PORT}/" target="_blank">{VIBE_TRADING_PORT}</a></td>
         <td><span class="pill {vibe_status}">{vibe_status}</span></td>
         <td>
-          <form method="post" action="/vibe/start"><button {vibe_start_disabled}>Start</button></form>
-          <form method="post" action="/vibe/stop"><button {vibe_stop_disabled}>Stop</button></form>
+          <form method="post" action="/vibe/start"><input type="hidden" name="instance_id" value="service-vibe-trading"><button {vibe_start_disabled}>Start</button></form>
+          <form method="post" action="/vibe/stop"><input type="hidden" name="instance_id" value="service-vibe-trading"><button {vibe_stop_disabled}>Stop</button></form>
           <a class="button {vibe_open_disabled}" href="http://localhost:{VIBE_TRADING_PORT}/" target="_blank">Open</a>
         </td>
       </tr>
@@ -491,7 +533,7 @@ def page(state: ManagerState, message: str = "") -> bytes:
   <p class="muted" style="margin-bottom:12px">🌐 局域网访问本机: <strong>{lan}</strong>（同一热点/网络下的设备使用此 IP + 端口号访问）</p>
   {msg}
   <table>
-    <thead><tr><th>Worktree</th><th>Path</th><th>Port</th><th>Status</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Worktree</th><th>Instance</th><th>Port</th><th>Status</th><th>Actions</th></tr></thead>
     <tbody>{vibe_row}{''.join(rows)}</tbody>
   </table>
 </body>
@@ -501,14 +543,36 @@ def page(state: ManagerState, message: str = "") -> bytes:
 class Handler(BaseHTTPRequestHandler):
     state: ManagerState
 
+    def _has_capability(self) -> bool:
+        scheme, _, supplied = self.headers.get("Authorization", "").partition(" ")
+        return (
+            scheme.lower() == "bearer"
+            and bool(supplied)
+            and hmac.compare_digest(supplied, self.state.capability_token())
+        )
+
+    def _require_capability(self) -> bool:
+        if self._has_capability():
+            return True
+        self.send_response(401)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("WWW-Authenticate", "Bearer")
+        body = b'{"error":"manager capability required"}'
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return False
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/worktrees":
+            if not self._require_capability():
+                return
             data = [
                 {
+                    "instance_id": self.state.instance_id(wt),
                     "label": wt.label,
                     "branch": wt.branch,
-                    "path": str(wt.path),
                     "port": wt.port,
                     "running": self.state.is_running(wt.path),
                     "daemon_running": self.state.daemon_running(wt.path),
@@ -519,7 +583,7 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {
                 "worktrees": data,
                 "vibe_trading": {
-                    "path": str(VIBE_TRADING_ROOT),
+                    "instance_id": "service-vibe-trading",
                     "port": VIBE_TRADING_PORT,
                     "running": self.state.vibe_running(),
                     "port_in_use": port_in_use(VIBE_TRADING_PORT),
@@ -528,6 +592,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path != "/":
             self.send_error(404)
+            return
+        if not self._require_capability():
             return
         message = parse_qs(parsed.query).get("message", [""])[0]
         body = page(self.state, message)
@@ -538,35 +604,69 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        actions = {
+            "/vibe/start",
+            "/vibe/stop",
+            "/start",
+            "/stop",
+            "/restart-api",
+            "/restart-bundle",
+            "/force-stop",
+        }
+        if self.path not in actions:
+            self.send_error(404)
+            return
+        if not self._require_capability():
+            return
         length = int(self.headers.get("Content-Length", "0"))
         params = parse_qs(self.rfile.read(length).decode("utf-8"))
-        path = Path(params.get("path", [""])[0])
+        if set(params) != {"instance_id"} or len(params["instance_id"]) != 1:
+            json_response(
+                self,
+                {"success": False, "error": "instance_id is required and is the only accepted target"},
+                400,
+            )
+            return
+        instance_id = str(params["instance_id"][0])
         try:
             if self.path == "/vibe/start":
+                if instance_id != "service-vibe-trading":
+                    raise LookupError("managed instance not found")
                 message = self.state.start_vibe()
             elif self.path == "/vibe/stop":
+                if instance_id != "service-vibe-trading":
+                    raise LookupError("managed instance not found")
                 message = self.state.stop_vibe()
-            elif self.path == "/start":
-                port = int(params.get("port", ["0"])[0])
-                message = self.state.start(path, port)
-            elif self.path == "/stop":
-                message = self.state.stop(path)
-            elif self.path == "/restart-api":
-                port = int(params.get("port", ["0"])[0])
-                message = self.state.restart_api(path, port)
-            elif self.path == "/restart-bundle":
-                port = int(params.get("port", ["0"])[0])
-                message = self.state.restart_bundle(path, port)
-            elif self.path == "/force-stop":
-                message = self.state.stop(path, force=True)
             else:
-                self.send_error(404)
-                return
+                worktree = self.state.worktree_for_instance(instance_id)
+                if worktree is None:
+                    raise LookupError("managed instance not found")
+                if self.path == "/start":
+                    message = self.state.start(worktree.path, worktree.port)
+                elif self.path == "/stop":
+                    message = self.state.stop(worktree.path)
+                elif self.path == "/restart-api":
+                    message = self.state.restart_api(worktree.path, worktree.port)
+                elif self.path == "/restart-bundle":
+                    message = self.state.restart_bundle(worktree.path, worktree.port)
+                else:
+                    message = self.state.stop(worktree.path, force=True)
+        except LookupError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 404)
+            return
         except Exception as exc:
-            message = f"error: {exc}"
-        self.send_response(303)
-        self.send_header("Location", "/?message=" + html.escape(message))
-        self.end_headers()
+            sys.stderr.write(f"[manager] action {self.path} failed: {exc}\n")
+            json_response(
+                self,
+                {"success": False, "error": "manager action failed"},
+                409,
+            )
+            return
+        json_response(self, {
+            "success": True,
+            "instance_id": instance_id,
+            "message": message,
+        })
 
     def log_message(self, fmt: str, *args: object) -> None:
         sys.stderr.write("[manager] " + (fmt % args) + "\n")
@@ -575,13 +675,14 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parents[1]))
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7998)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
     Handler.state = ManagerState(Path(args.repo), args.python)
-    server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://localhost:{args.port}/"
     print(f"Worktree Flask manager running at {url}")
     try:

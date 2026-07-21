@@ -1490,10 +1490,16 @@ def test_agent_session_view_hides_legacy_evidence_but_persistence_retains_it(
 
 def test_service_target_selection_requires_unambiguous_worktree() -> None:
     worktrees = [
-        ManagedWorktree("feat", "feat", "/repo", 7999, False, False),
-        ManagedWorktree("fix/issue-123", "fix/issue-123", "/repo/.workspace/fix/issue-123", 8123, True, True),
+        ManagedWorktree("worktree-feat", "feat", "feat", 7999, False, False),
+        ManagedWorktree(
+            "worktree-issue-123", "fix/issue-123", "fix/issue-123",
+            8123, True, True,
+        ),
     ]
     assert select_worktree(worktrees, target_port=8123).branch == "fix/issue-123"
+    assert select_worktree(
+        worktrees, instance_id="worktree-issue-123"
+    ).port == 8123
 
 
 def test_explicit_legacy_validation_plan_separates_selection_from_holdout() -> None:
