@@ -615,6 +615,16 @@ enum ResearchDisplayText {
         }
     }
 
+    static func branchLabel(
+        _ label: String,
+        currentNode: String
+    ) -> String {
+        if label.range(of: "\\p{Han}", options: .regularExpression) != nil {
+            return label
+        }
+        return "\(node(currentNode))研究"
+    }
+
     static func node(_ node: String) -> String {
         switch node {
         case "candidate_discovery": return "候选发现"

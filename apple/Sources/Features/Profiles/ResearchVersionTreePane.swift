@@ -255,7 +255,10 @@ struct ResearchVersionTreePane: View {
                 result.append(ResearchTreeNode(
                     id: "branch|\(branch.branchRef)",
                     checkpointRef: branch.latestTraceRef ?? "",
-                    title: branch.label,
+                    title: ResearchDisplayText.branchLabel(
+                        branch.label,
+                        currentNode: branch.currentNode
+                    ),
                     subtitle: treeStatusLabel(branch.status),
                     timestamp: branch.updatedAt,
                     lane: branchLane,
@@ -275,12 +278,17 @@ struct ResearchVersionTreePane: View {
                     $0.branchRef == sourceBranchRef
                 }
                 let sourceLabel = sourceIndex.map {
-                    visibleBranches[$0].label
-                } ?? treeReference(sourceBranchRef)
+                    ResearchDisplayText.branchLabel(
+                        visibleBranches[$0].label,
+                        currentNode: visibleBranches[$0].currentNode
+                    )
+                } ?? "较早研究分支"
                 result.append(ResearchTreeNode(
                     id: "lineage|\(branch.branchRef)",
                     checkpointRef: "",
-                    title: lineage.relation == "fork" ? "从 \(sourceLabel) 分叉" : "接续 \(sourceLabel)",
+                    title: lineage.relation == "fork"
+                        ? "从 \(sourceLabel) 分叉"
+                        : "沿用 \(sourceLabel) 的研究证据",
                     subtitle: sourceIndex == nil ? "来源未载入" : "已验证来源",
                     timestamp: branch.createdAt,
                     lane: branchLane,
@@ -346,7 +354,10 @@ struct ResearchVersionTreePane: View {
             result.append(ResearchTreeNode(
                 id: "branch|\(branch.branchRef)",
                 checkpointRef: branch.latestTraceRef ?? "",
-                title: branch.label,
+                title: ResearchDisplayText.branchLabel(
+                    branch.label,
+                    currentNode: branch.currentNode
+                ),
                 subtitle: treeStatusLabel(branch.status),
                 timestamp: branch.updatedAt,
                 lane: lane(for: branch.branchRef),

@@ -42,7 +42,45 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(ResearchDisplayText.node("future_internal_node"), "研究进行中")
         XCTAssertEqual(ResearchDisplayText.linkKind("future_internal_link"), "审计对象")
         XCTAssertEqual(ResearchDisplayText.reportTitle("continuation-v7"), "因子研究报告")
+        XCTAssertEqual(
+            ResearchDisplayText.branchLabel(
+                "continuation-v7",
+                currentNode: "factor_semantics"
+            ),
+            "因子语义研究"
+        )
         XCTAssertEqual(ResearchDisplayText.productGroup("unknown_group"), "其他产品组")
+    }
+
+    func testStoredWorkspaceAuthorizationSurvivesBookmarkReplacement() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let root = home.appendingPathComponent(
+            "Documents/FactorTester/users/18717974771",
+            isDirectory: true
+        )
+        let report = root.appendingPathComponent(
+            "profiles/maxa/research/example/REPORT.md"
+        )
+
+        XCTAssertEqual(
+            PersonalWorkspaceAccessStore.storedAuthorizedRoot(
+                path: root.path,
+                for: report
+            )?.path,
+            root.path
+        )
+        XCTAssertNil(
+            PersonalWorkspaceAccessStore.storedAuthorizedRoot(
+                path: home.appendingPathComponent("Documents").path,
+                for: report
+            )
+        )
+        XCTAssertNil(
+            PersonalWorkspaceAccessStore.storedAuthorizedRoot(
+                path: root.appendingPathComponent("profiles/maxa").path,
+                for: report
+            )
+        )
     }
 
     func testLoadsVerifiedChineseJournalAndBindsCheckpointIdentity() async throws {
