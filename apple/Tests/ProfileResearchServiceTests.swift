@@ -67,6 +67,24 @@ final class ProfileResearchServiceTests: XCTestCase {
         ))
     }
 
+    func testResearchTreeConnectorUsesActualSourceCheckpointRow() {
+        XCTAssertEqual(
+            ResearchTreeConnector.sourceRowIndex(
+                sourceCheckpointRef: "trace:root",
+                nodeCheckpointRefs: [
+                    "trace:root", "trace:middle", "trace:fork",
+                ]
+            ),
+            0
+        )
+        XCTAssertNil(
+            ResearchTreeConnector.sourceRowIndex(
+                sourceCheckpointRef: "trace:outside-window",
+                nodeCheckpointRefs: ["trace:root", "trace:fork"]
+            )
+        )
+    }
+
     func testTimelineResolvesCycleObjectAtItsOwnCheckpoint() throws {
         let page = try JSONDecoder().decode(
             ProfileResearchTimelinePage.self,
@@ -224,8 +242,8 @@ final class ProfileResearchServiceTests: XCTestCase {
         }],"omitted_node_count":4},
         """#
         let json = workPackageJSON().replacingOccurrences(
-            of: #""""report_lookup_ref":"work-package:i"""#,
-            with: tree + #""""report_lookup_ref":"work-package:i"""#
+            of: #""report_lookup_ref":"work-package:i""#,
+            with: tree + #""report_lookup_ref":"work-package:i""#
         )
         let detail = try JSONDecoder().decode(
             ProfileResearchWorkPackageDetail.self,
@@ -236,6 +254,60 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertTrue(node.isHead)
         XCTAssertEqual(detail.tree?.edges.first?.relation, "fork")
         XCTAssertEqual(detail.tree?.omittedNodeCount, 4)
+    }
+
+    func testResearchTreeMergesLoadedTimelineIntoBoundedProjection() throws {
+        let tree = try JSONDecoder().decode(
+            ResearchVersionTreeProjection.self,
+            from: Data(
+                """
+                {"schema_version":1,"nodes":[{
+                  "node_ref":"trace:root","checkpoint_ref":"trace:root",
+                  "trace_ref":"trace:root","branch_ref":"graph-branch:i:b",
+                  "edge_ref":"edge:root","from_node":"start","to_node":"scope",
+                  "created_at":1,"status":"historical","is_head":false,
+                  "is_root":true,"sequence_rank":1,"history_rank":4
+                },{
+                  "node_ref":"trace:head","checkpoint_ref":"trace:head",
+                  "trace_ref":"trace:head","branch_ref":"graph-branch:i:b",
+                  "edge_ref":"edge:head","from_node":"data","to_node":"semantics",
+                  "created_at":4,"status":"running","is_head":true,
+                  "is_root":false,"sequence_rank":4,"history_rank":1
+                }],"edges":[],"omitted_node_count":2}
+                """.utf8
+            )
+        )
+        let page = try JSONDecoder().decode(
+            ProfileResearchTimelinePage.self,
+            from: Data(
+                """
+                {"success":true,"research_ref":"graph-branch:i:b","items":[{
+                  "step_ref":"trace:middle-1","edge_ref":"edge:middle-1",
+                  "from_node":"scope","to_node":"capability","created_at":2,
+                  "evidence_refs":[],"trial_plan_refs":[],"obligation_refs":[],
+                  "claim_refs":[],"job_refs":[],"run_refs":[],
+                  "object_hrefs":[],"obligation_changes":[],"claim_changes":[]
+                },{
+                  "step_ref":"trace:middle-2","edge_ref":"edge:middle-2",
+                  "from_node":"capability","to_node":"data","created_at":3,
+                  "evidence_refs":[],"trial_plan_refs":[],"obligation_refs":[],
+                  "claim_refs":[],"job_refs":[],"run_refs":[],
+                  "object_hrefs":[],"obligation_changes":[],"claim_changes":[]
+                }],"next_cursor":null,"etag":"sha256:timeline"}
+                """.utf8
+            )
+        )
+
+        let merge = ResearchTreeHistoryMerge(
+            projection: tree,
+            loadedSteps: page.items
+        )
+
+        XCTAssertEqual(
+            merge.supplementalSteps.map(\.stepRef),
+            ["trace:middle-1", "trace:middle-2"]
+        )
+        XCTAssertEqual(merge.remainingOmittedNodeCount, 0)
     }
 
     @MainActor

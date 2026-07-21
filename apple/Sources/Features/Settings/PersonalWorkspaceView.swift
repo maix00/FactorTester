@@ -97,15 +97,22 @@ struct PersonalWorkspaceView: View {
 
     private var reportAccessSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("研究报告读取权限")
+            Text("本地研究报告")
                 .font(.title3.weight(.semibold))
-            Text("选择当前用户目录后，FTClient 才会读取其中的中文研究报告；该授权不会上传因子源码。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
             if let authorizedRoot {
-                pathText("已授权目录", authorizedRoot)
+                Label("已启用", systemImage: "checkmark.circle.fill")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.green)
+                Text("FTClient 会持续读取该目录中的中文研究报告；应用更新后无需重新授权，也不会因此上传因子源码。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                pathText("正在读取", authorizedRoot)
             } else {
-                Text("尚未授权个人工作区。")
+                Text("首次选择当前用户目录后，FTClient 会在本机读取其中的中文研究报告；不会因此上传因子源码。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text("尚未选择个人工作区。")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
             if let accessError {
@@ -113,10 +120,17 @@ struct PersonalWorkspaceView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
-            Button("选择用户目录…") {
-                chooseWorkspace()
+            if authorizedRoot == nil {
+                Button("选择用户目录…") {
+                    chooseWorkspace()
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Button("更改用户目录…") {
+                    chooseWorkspace()
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.borderedProminent)
         }
     }
 

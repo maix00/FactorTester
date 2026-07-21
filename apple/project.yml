@@ -9,8 +9,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "0.1.3-beta.24"
-    CURRENT_PROJECT_VERSION: "27"
+    MARKETING_VERSION: "0.1.3-beta.25"
+    CURRENT_PROJECT_VERSION: "28"
     DEVELOPMENT_TEAM: ""              # 填入你的 Apple Developer Team ID（自签名调试可留空）
     CODE_SIGN_STYLE: Automatic
 
@@ -97,3 +97,13 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  FactorTester-Client-macOS:
+    build:
+      targets:
+        FactorTester-Client-macOS: all
+        FactorTester-ClientTests: [test]
+    test:
+      targets:
+        - FactorTester-ClientTests

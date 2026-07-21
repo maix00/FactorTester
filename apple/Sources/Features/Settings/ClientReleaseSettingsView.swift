@@ -131,7 +131,7 @@ struct ClientReleaseSettingsView: View {
                     GroupBox("已准备好的更新") {
                         VStack(alignment: .leading, spacing: 10) {
                             Label(
-                                "(pending.version) · (pending.channel)",
+                                "\(pending.version) · \(pending.channel == "beta" ? "Beta" : "Main")",
                                 systemImage: "arrow.down.app.fill"
                             )
                             Text("更新包已通过校验，重启后自动切换；当前研究任务不会被后台强制中断。")

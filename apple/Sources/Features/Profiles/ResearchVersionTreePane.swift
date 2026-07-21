@@ -25,6 +25,46 @@ enum ResearchTreeOrdering {
     }
 }
 
+struct ResearchTreeHistoryMerge {
+    let supplementalSteps: [ResearchTransitionStep]
+    let remainingOmittedNodeCount: Int
+
+    init(
+        projection: ResearchVersionTreeProjection,
+        loadedSteps: [ResearchTransitionStep]
+    ) {
+        let projectedRefs = Set(
+            projection.nodes.map(\.checkpointRef)
+        )
+        supplementalSteps = loadedSteps
+            .filter { !projectedRefs.contains($0.stepRef) }
+            .sorted {
+                ResearchTreeOrdering.isBefore(
+                    timestamp: $0.createdAt,
+                    id: $0.stepRef,
+                    than: $1.createdAt,
+                    id: $1.stepRef
+                )
+            }
+        remainingOmittedNodeCount = max(
+            projection.omittedNodeCount - supplementalSteps.count,
+            0
+        )
+    }
+}
+
+enum ResearchTreeConnector {
+    static func sourceRowIndex(
+        sourceCheckpointRef: String?,
+        nodeCheckpointRefs: [String]
+    ) -> Int? {
+        guard let sourceCheckpointRef, !sourceCheckpointRef.isEmpty else {
+            return nil
+        }
+        return nodeCheckpointRefs.firstIndex(of: sourceCheckpointRef)
+    }
+}
+
 struct ResearchVersionTreePane: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
@@ -46,17 +86,23 @@ struct ResearchVersionTreePane: View {
                 Text("时间向下 · 点击定位正文")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                HStack(spacing: 10) {
-                    treeLegend(filled: true, label: "报告")
-                    treeLegend(filled: false, label: "分叉/接续")
-                    if hiddenBranchCount > 0 {
-                        Text("另有 \(hiddenBranchCount) 条分支")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 10) {
+                        treeLegend(filled: true, label: "检查点")
+                        treeLegend(filled: false, label: "分叉/承接")
                     }
-                    if let omittedNodeCount = workPackage.tree?.omittedNodeCount,
+                    HStack(spacing: 9) {
+                        statusLegend(color: .orange, label: "暂停")
+                        statusLegend(color: .green, label: "完成")
+                        if hiddenBranchCount > 0 {
+                            Text("另有 \(hiddenBranchCount) 条分支")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if let omittedNodeCount = remainingOmittedNodeCount,
                        omittedNodeCount > 0 {
-                        Text("历史检查点已取样 \(omittedNodeCount) 个未展开")
+                        Text("尚有 \(omittedNodeCount) 个检查点未载入")
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
                     }
@@ -99,6 +145,14 @@ struct ResearchVersionTreePane: View {
                     }
                     .padding(.vertical, 8)
                 }
+                .onChange(of: selectedCheckpointRef) { checkpointRef in
+                    guard let node = nodes.first(where: {
+                        $0.checkpointRef == checkpointRef
+                    }) else { return }
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        proxy.scrollTo(node.id, anchor: .center)
+                    }
+                }
             }
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
@@ -136,12 +190,26 @@ struct ResearchVersionTreePane: View {
                     y: (CGFloat(index) + 0.5) * rowHeight
                 )
                 let sourceX = node.sourceLane.map(laneX) ?? 0
+                let sourceRow = ResearchTreeConnector.sourceRowIndex(
+                    sourceCheckpointRef: node.sourceCheckpointRef,
+                    nodeCheckpointRefs: nodes.map(\.checkpointRef)
+                )
+                let sourceY = sourceRow.map {
+                    (CGFloat($0) + 0.5) * rowHeight
+                } ?? target.y - 13
+                let source = CGPoint(x: sourceX, y: sourceY)
                 var connector = Path()
-                connector.move(to: CGPoint(x: sourceX, y: target.y - 13))
+                connector.move(to: source)
                 connector.addCurve(
                     to: target,
-                    control1: CGPoint(x: sourceX, y: target.y),
-                    control2: CGPoint(x: target.x, y: target.y - 13)
+                    control1: CGPoint(
+                        x: sourceX,
+                        y: sourceY + (target.y - sourceY) * 0.55
+                    ),
+                    control2: CGPoint(
+                        x: target.x,
+                        y: sourceY + (target.y - sourceY) * 0.55
+                    )
                 )
                 context.stroke(
                     connector,
@@ -184,10 +252,13 @@ struct ResearchVersionTreePane: View {
                             .font(.caption.weight(node.isHead ? .semibold : .regular))
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        if node.isCurrentHead {
-                            Text("当前")
+                        if node.isHead {
+                            Text("HEAD")
                                 .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(.tint)
+                                .foregroundStyle(
+                                    node.isCurrentHead
+                                        ? Color.accentColor : Color.secondary
+                                )
                         }
                         if node.isRoot {
                             Text("根")
@@ -246,6 +317,7 @@ struct ResearchVersionTreePane: View {
                     && selectedLineage?.relation == "root",
                 isLineage: false,
                 sourceLane: nil,
+                sourceCheckpointRef: nil,
                 branchID: branchID(for: detail.branchRef)
             )
         }
@@ -268,6 +340,7 @@ struct ResearchVersionTreePane: View {
                     isRoot: false,
                     isLineage: false,
                     sourceLane: nil,
+                    sourceCheckpointRef: nil,
                     branchID: branch.branchID
                 ))
             }
@@ -298,6 +371,7 @@ struct ResearchVersionTreePane: View {
                     isRoot: false,
                     isLineage: true,
                     sourceLane: sourceIndex,
+                    sourceCheckpointRef: lineage.sourceTraceRef,
                     branchID: branch.branchID
                 ))
             }
@@ -342,9 +416,32 @@ struct ResearchVersionTreePane: View {
                 isRoot: node.isRoot,
                 isLineage: lineage != nil,
                 sourceLane: sourceLane,
+                sourceCheckpointRef: lineage?.sourceNodeRef,
                 branchID: branchID(for: node.branchRef)
             )
         }
+        let merge = ResearchTreeHistoryMerge(
+            projection: projection,
+            loadedSteps: steps
+        )
+        result.append(contentsOf: merge.supplementalSteps.map { step in
+            ResearchTreeNode(
+                id: "step|\(step.stepRef)",
+                checkpointRef: step.stepRef,
+                title: ResearchDisplayText.node(step.toNode),
+                subtitle: compactDate(step.createdAt),
+                timestamp: step.createdAt,
+                lane: selectedLane,
+                status: step.status ?? "historical",
+                isHead: step.stepRef == detail.latestTraceRef,
+                isCurrentHead: step.stepRef == detail.latestTraceRef,
+                isRoot: false,
+                isLineage: false,
+                sourceLane: nil,
+                sourceCheckpointRef: nil,
+                branchID: branchID(for: detail.branchRef)
+            )
+        })
         // A branch may have no checkpoint yet (or may be outside the bounded
         // sample). Keep its status/head visible as a non-clickable branch
         // marker instead of silently dropping the branch lane.
@@ -367,6 +464,7 @@ struct ResearchVersionTreePane: View {
                 isRoot: false,
                 isLineage: false,
                 sourceLane: nil,
+                sourceCheckpointRef: nil,
                 branchID: branch.branchID
             ))
         }
@@ -429,6 +527,14 @@ struct ResearchVersionTreePane: View {
             + max(workPackage.branches.count - visibleBranches.count, 0)
     }
 
+    private var remainingOmittedNodeCount: Int? {
+        guard let projection = workPackage.tree else { return nil }
+        return ResearchTreeHistoryMerge(
+            projection: projection,
+            loadedSteps: steps
+        ).remainingOmittedNodeCount
+    }
+
     private var selectedLane: Int { lane(for: detail.branchRef) }
 
     private func lane(for branchRef: String) -> Int {
@@ -473,6 +579,17 @@ struct ResearchVersionTreePane: View {
         .font(.system(size: 9))
         .foregroundStyle(.secondary)
     }
+
+    private func statusLegend(color: Color, label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(label)
+        }
+        .font(.system(size: 9))
+        .foregroundStyle(.secondary)
+    }
 }
 
 private struct ResearchTreeNode: Identifiable {
@@ -488,6 +605,7 @@ private struct ResearchTreeNode: Identifiable {
     let isRoot: Bool
     let isLineage: Bool
     let sourceLane: Int?
+    let sourceCheckpointRef: String?
     let branchID: String
 }
 
