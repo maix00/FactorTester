@@ -12,6 +12,10 @@ final class ResearchJournalTests: XCTestCase {
         let section = try XCTUnwrap(document.checkpoints.first?.sections.first)
 
         XCTAssertEqual(document.schemaVersion, 2)
+        XCTAssertEqual(
+            section.body,
+            "本阶段先说明研究判断，再列出结构化结果。"
+        )
         XCTAssertEqual(section.blocks.map(\.kind), ["list", "table"])
         XCTAssertEqual(section.blocks[0].rows[0].linkIDs, ["obligation-row"])
         XCTAssertEqual(section.blocks[1].rows[0].cells.last, "0.42")
@@ -203,7 +207,7 @@ final class ResearchJournalTests: XCTestCase {
     private func structuredJournalData() -> Data {
         Data(
             """
-            {"schema_version":2,"language":"zh-Hans","branch_id":"b","checkpoints":[{"checkpoint_ref":"trace:checkpoint-1","created_at":1,"carrier_hash":"\(String(repeating: "a", count: 64))","narrative_hash":"\(String(repeating: "b", count: 64))","section_hash":"\(String(repeating: "c", count: 64))","sections":[{"section_id":"progress","title":"研究进展","blocks":[{"kind":"list","rows":[{"text":"交易成本义务仍未清除。","link_ids":["obligation-row"]}]},{"kind":"table","columns":["检验","指标","结果"],"rows":[{"cells":["成本后回测","夏普比率","0.42"],"link_ids":["evidence-row"]}]}],"links":[{"link_id":"obligation-row","kind":"obligation","target_ref":"obligation:cost"},{"link_id":"evidence-row","kind":"evidence","target_ref":"evidence:cost"}]}]}]}
+            {"schema_version":2,"language":"zh-Hans","branch_id":"b","checkpoints":[{"checkpoint_ref":"trace:checkpoint-1","created_at":1,"carrier_hash":"\(String(repeating: "a", count: 64))","narrative_hash":"\(String(repeating: "b", count: 64))","section_hash":"\(String(repeating: "c", count: 64))","sections":[{"section_id":"progress","title":"研究进展","body":"本阶段先说明研究判断，再列出结构化结果。","blocks":[{"kind":"list","rows":[{"text":"交易成本义务仍未清除。","link_ids":["obligation-row"]}]},{"kind":"table","columns":["检验","指标","结果"],"rows":[{"cells":["成本后回测","夏普比率","0.42"],"link_ids":["evidence-row"]}]}],"links":[{"link_id":"obligation-row","kind":"obligation","target_ref":"obligation:cost"},{"link_id":"evidence-row","kind":"evidence","target_ref":"evidence:cost"}]}]}]}
             """.utf8
         )
     }

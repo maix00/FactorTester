@@ -303,6 +303,7 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
         "sections": [{
             "section_id": "research-progress",
             "title": "研究进展",
+            "body": "本阶段先说明研究判断，再列出支撑判断的结构化结果。",
             "blocks": [{
                 "kind": "list",
                 "rows": [{
@@ -349,6 +350,7 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
     ]
     assert section["blocks"][1]["rows"][0]["cells"][2] == "0.42"
     report = journal_path.with_name("REPORT.md").read_text(encoding="utf-8")
+    assert "本阶段先说明研究判断，再列出支撑判断的结构化结果。" in report
     assert "- 交易成本义务仍未清除。" in report
     assert "| 检验 | 指标 | 结果 |" in report
     assert "| 成本后回测 | 夏普比率 | 0.42 |" in report

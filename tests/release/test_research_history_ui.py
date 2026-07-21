@@ -18,7 +18,7 @@ def test_research_history_uses_verified_chinese_journal_as_primary_reading_view(
     assert "artifact.journalHash" in journal
     assert "ResearchNarrativeReportView" in view
     assert "ScrollViewReader" in view
-    assert "Text(section.body)" in view
+    assert "reportParagraph(section.body)" in view
     assert "auditChip" in view
     assert ".popover(item:" in view
     assert "ResearchVersionTreePane" in view

@@ -136,9 +136,10 @@ struct ResearchNarrativeReportView: View {
             Text(section.title)
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(.primary)
-            if section.blocks.isEmpty {
+            if !section.body.isEmpty {
                 reportParagraph(section.body)
-            } else {
+            }
+            if !section.blocks.isEmpty {
                 ForEach(Array(section.blocks.enumerated()), id: \.offset) {
                     _, block in
                     reportBlock(block, section: section)

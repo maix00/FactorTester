@@ -35,10 +35,10 @@ class MarkdownReportTarget:
         }
         for section in value["sections"]:
             lines.extend([f"## {section['title']}", ""])
+            if section["body"]:
+                lines.extend([section["body"], ""])
             if section.get("blocks"):
                 lines.extend(_block_lines(section["blocks"]))
-            elif section["body"]:
-                lines.extend([section["body"], ""])
             lines.extend(_reference_lines(
                 title="证据引用",
                 refs=section["evidence_refs"],

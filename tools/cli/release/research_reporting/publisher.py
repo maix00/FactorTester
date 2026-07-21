@@ -51,6 +51,9 @@ _CLAIM_CHANGE_FIELDS = {"claim_id", "from_state", "to_state"}
 _NARRATIVE_FIELDS = {"schema_version", "language", "title", "sections"}
 _NARRATIVE_SECTION_FIELDS_V1 = {"section_id", "title", "body", "links"}
 _NARRATIVE_SECTION_FIELDS_V2 = {"section_id", "title", "blocks", "links"}
+_NARRATIVE_SECTION_FIELDS_V2_WITH_BODY = {
+    "section_id", "title", "body", "blocks", "links",
+}
 _NARRATIVE_LINK_FIELDS = {"link_id", "kind", "target_ref"}
 _CHINESE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _LINK_KINDS = {
@@ -370,7 +373,10 @@ def _report_snapshot(
             "created_at": transition["created_at"],
         }
         if narrative["schema_version"] == 2:
-            projected["body"] = ""
+            # A v2 section may combine a short connective narrative with
+            # structured blocks.  Preserve that prose instead of silently
+            # dropping it while projecting the carrier into the journal.
+            projected["body"] = section.get("body", "")
             projected["blocks"] = deepcopy(section["blocks"])
         else:
             projected["body"] = section["body"]
@@ -424,12 +430,15 @@ def _canonical_narrative(
     result = []
     seen_ids = set()
     for item in sections:
-        expected_fields = (
-            _NARRATIVE_SECTION_FIELDS_V2
-            if schema_version == 2
-            else _NARRATIVE_SECTION_FIELDS_V1
-        )
-        if not isinstance(item, dict) or set(item) != expected_fields:
+        fields = set(item) if isinstance(item, dict) else set()
+        if schema_version == 2:
+            expected_fields = (
+                _NARRATIVE_SECTION_FIELDS_V2,
+                _NARRATIVE_SECTION_FIELDS_V2_WITH_BODY,
+            )
+        else:
+            expected_fields = (_NARRATIVE_SECTION_FIELDS_V1,)
+        if fields not in expected_fields:
             raise ValueError("local narrative section fields are invalid")
         section_id = _safe_id(item["section_id"], "narrative.section_id")
         if section_id in seen_ids:
@@ -461,6 +470,8 @@ def _canonical_narrative(
             "links": projected_links,
         }
         if schema_version == 2:
+            if "body" in item:
+                section["body"] = _zh_body(item["body"])
             section["blocks"] = _canonical_narrative_blocks(
                 item["blocks"], declared_link_ids=link_ids,
             )
