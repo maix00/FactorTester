@@ -31,6 +31,25 @@ final class ProfileResearchServiceTests: XCTestCase {
                 - ResearchTreeLayout.horizontalPadding * 2
         )
         XCTAssertEqual(ResearchTreeLayout.maximumVisibleBranches, 7)
+        XCTAssertGreaterThanOrEqual(
+            ResearchTreeLayout.minimumLabelWidth,
+            80
+        )
+    }
+
+    func testResearchTreeOrdersTrustedRootTowardHeadDownward() {
+        XCTAssertTrue(ResearchTreeOrdering.isBefore(
+            timestamp: 1,
+            id: "root",
+            than: 2,
+            id: "head"
+        ))
+        XCTAssertFalse(ResearchTreeOrdering.isBefore(
+            timestamp: 2,
+            id: "head",
+            than: 1,
+            id: "root"
+        ))
     }
 
     func testTimelineResolvesCycleObjectAtItsOwnCheckpoint() throws {

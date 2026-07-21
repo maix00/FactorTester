@@ -10,6 +10,19 @@ enum ResearchTreeLayout {
     static let maximumLaneFootprint = laneOriginX
         + CGFloat(maximumVisibleBranches - 1) * laneSpacing
         + selectedNodeDiameter
+    static let minimumLabelWidth = navigatorWidth
+        - horizontalPadding * 2 - maximumLaneFootprint
+}
+
+enum ResearchTreeOrdering {
+    static func isBefore(
+        timestamp: Double,
+        id: String,
+        than otherTimestamp: Double,
+        id otherID: String
+    ) -> Bool {
+        timestamp == otherTimestamp ? id < otherID : timestamp < otherTimestamp
+    }
 }
 
 struct ResearchVersionTreePane: View {
@@ -23,6 +36,7 @@ struct ResearchVersionTreePane: View {
 
     private let rowHeight: CGFloat = 46
     private let laneSpacing = ResearchTreeLayout.laneSpacing
+    @State private var isLoadingEarlier = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -45,27 +59,40 @@ struct ResearchVersionTreePane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
             Divider()
-            ScrollView {
-                ZStack(alignment: .topLeading) {
-                    laneBackground
-                    LazyVStack(spacing: 0) {
-                        ForEach(nodes) { node in
-                            nodeRow(node)
+            ScrollViewReader { proxy in
+                if canLoadEarlier {
+                    Button {
+                        loadEarlierPreservingAnchor(proxy)
+                    } label: {
+                        if isLoadingEarlier {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Label(
+                                "更早记录",
+                                systemImage: "clock.arrow.circlepath"
+                            )
+                            .frame(maxWidth: .infinity)
                         }
                     }
+                    .buttonStyle(.plain)
+                    .disabled(isLoadingEarlier)
+                    .padding(12)
+                    Divider()
                 }
-                .padding(.vertical, 8)
-            }
-            if canLoadEarlier {
-                Divider()
-                Button {
-                    Task { await loadEarlier() }
-                } label: {
-                    Label("更早记录", systemImage: "clock.arrow.circlepath")
-                        .frame(maxWidth: .infinity)
+                ScrollView {
+                    ZStack(alignment: .topLeading) {
+                        laneBackground
+                        LazyVStack(spacing: 0) {
+                            ForEach(nodes) { node in
+                                nodeRow(node)
+                                    .id(node.id)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 8)
                 }
-                .buttonStyle(.plain)
-                .padding(12)
             }
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
@@ -156,6 +183,11 @@ struct ResearchVersionTreePane: View {
                                 .font(.system(size: 8, weight: .bold))
                                 .foregroundStyle(.tint)
                         }
+                        if node.isRoot {
+                            Text("根")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Text(node.subtitle)
                         .font(.system(size: 10))
@@ -176,6 +208,17 @@ struct ResearchVersionTreePane: View {
     }
 
     private var nodes: [ResearchTreeNode] {
+        let rootStepRef = steps.min {
+            ResearchTreeOrdering.isBefore(
+                timestamp: $0.createdAt,
+                id: $0.id,
+                than: $1.createdAt,
+                id: $1.id
+            )
+        }?.stepRef
+        let selectedLineage = visibleBranches.first {
+            $0.branchRef == detail.branchRef
+        }?.lineage
         var result = steps.map { step in
             ResearchTreeNode(
                 id: "step|\(step.stepRef)",
@@ -187,6 +230,8 @@ struct ResearchVersionTreePane: View {
                 status: detail.status,
                 isHead: step.stepRef == detail.latestTraceRef,
                 isCurrentHead: step.stepRef == detail.latestTraceRef,
+                isRoot: step.stepRef == rootStepRef
+                    && selectedLineage?.relation == "root",
                 isLineage: false,
                 sourceLane: nil
             )
@@ -204,6 +249,7 @@ struct ResearchVersionTreePane: View {
                     status: branch.status,
                     isHead: true,
                     isCurrentHead: false,
+                    isRoot: false,
                     isLineage: false,
                     sourceLane: nil
                 ))
@@ -216,25 +262,45 @@ struct ResearchVersionTreePane: View {
                 }
                 let sourceLabel = sourceIndex.map {
                     visibleBranches[$0].label
-                } ?? "上一研究版本"
+                } ?? treeReference(sourceBranchRef)
                 result.append(ResearchTreeNode(
                     id: "lineage|\(branch.branchRef)",
                     checkpointRef: "",
                     title: lineage.relation == "fork" ? "从 \(sourceLabel) 分叉" : "接续 \(sourceLabel)",
-                    subtitle: sourceIndex == nil ? "外部研究工作包" : "已验证来源",
+                    subtitle: sourceIndex == nil ? "来源未载入" : "已验证来源",
                     timestamp: branch.createdAt,
                     lane: branchLane,
                     status: branch.status,
                     isHead: false,
                     isCurrentHead: false,
+                    isRoot: false,
                     isLineage: true,
                     sourceLane: sourceIndex
                 ))
             }
         }
         return result.sorted {
-            if $0.timestamp != $1.timestamp { return $0.timestamp > $1.timestamp }
-            return $0.id < $1.id
+            ResearchTreeOrdering.isBefore(
+                timestamp: $0.timestamp,
+                id: $0.id,
+                than: $1.timestamp,
+                id: $1.id
+            )
+        }
+    }
+
+    private func loadEarlierPreservingAnchor(
+        _ proxy: ScrollViewProxy
+    ) {
+        let anchor = nodes.first?.id
+        isLoadingEarlier = true
+        Task {
+            await loadEarlier()
+            await Task.yield()
+            if let anchor {
+                proxy.scrollTo(anchor, anchor: .top)
+            }
+            isLoadingEarlier = false
         }
     }
 
@@ -324,6 +390,7 @@ private struct ResearchTreeNode: Identifiable {
     let status: String
     let isHead: Bool
     let isCurrentHead: Bool
+    let isRoot: Bool
     let isLineage: Bool
     let sourceLane: Int?
 }
@@ -343,4 +410,11 @@ private func treeStatusLabel(_ status: String) -> String {
     case "failed": return "失败"
     default: return "状态未知"
     }
+}
+
+private func treeReference(_ value: String) -> String {
+    let suffix = value.split(separator: ":").last.map(String.init) ?? value
+    return suffix.count > 14
+        ? String(suffix.prefix(6)) + "…" + String(suffix.suffix(5))
+        : suffix
 }
