@@ -13,6 +13,7 @@ from script.release.update_manifest import (
     create_update_manifest,
     write_update_manifest,
 )
+from server.auth import auth_bp
 from server.modules.shared import shared_bp
 from server.modules.shared import client_releases as routes
 from tests.release.test_update_channel_manifest import _keys
@@ -49,6 +50,8 @@ def test_beta_release_channel_is_static_cacheable_and_conditional(
         routes, "trusted_release_public_key", lambda _channel: public
     )
     app = Flask(__name__)
+    app.secret_key = "test-only"
+    app.register_blueprint(auth_bp)
     app.register_blueprint(shared_bp)
     client = app.test_client()
 
@@ -253,6 +256,8 @@ def test_beta_manifest_to_dmg_works_over_real_loopback_http(
         routes, "trusted_release_public_key", lambda _channel: public
     )
     app = Flask(__name__)
+    app.secret_key = "test-only"
+    app.register_blueprint(auth_bp)
     app.register_blueprint(shared_bp)
     server = make_server("127.0.0.1", 0, app)
     port = server.server_port
