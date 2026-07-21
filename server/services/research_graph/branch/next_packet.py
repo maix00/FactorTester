@@ -55,6 +55,14 @@ def build_graph_branch_next(
             orjson.dumps(context, option=orjson.OPT_SORT_KEYS)
         ).hexdigest(),
         "capabilities": _compact_capabilities(context),
+        "unresolved_capability_conditions": [
+            {
+                "capability_id": str(item.get("capability_id") or ""),
+                "explanation": str(item.get("explanation") or ""),
+            }
+            for item in context.get("undetermined_conditions") or []
+            if isinstance(item, dict)
+        ],
         "current_obligations": obligations,
         "candidate_trial_frontier": {
             "current_trial_plan_hash": cycle.get("trial_plan_hash"),
@@ -147,7 +155,7 @@ def _edge_candidate(
             "code": "open_capability_gaps",
             "capability_ids": open_gap_ids,
         })
-    if undetermined_ids:
+    if undetermined_ids and edge.get("edge_type") != "failure":
         blockers.append({
             "code": "semantic_conditions_undetermined",
             "capability_ids": undetermined_ids,

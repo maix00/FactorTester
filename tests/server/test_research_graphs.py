@@ -2785,7 +2785,7 @@ def test_token_budget_reservation_denies_before_launch_and_fails_closed(
     assert budget["available_tokens"] == 100
 
 
-def test_context_exposes_only_triggered_and_undetermined_conditions(
+def test_undetermined_condition_is_compact_and_keeps_failure_route_open(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -2811,6 +2811,48 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
         graph["capability_descriptors"][capability_id] = _descriptor(
             capability_id
         )
+    graph["nodes"].extend([
+        {
+            "node_id": "data_contract",
+            "kind": "validation",
+            "purpose": "inspect exact data availability",
+            "enforcement": "deterministic",
+            "required_capabilities": [],
+            "entry_evidence": [],
+            "exit_evidence": [],
+        },
+        {
+            "node_id": "capability_gap",
+            "kind": "capability_gap",
+            "purpose": "resolve an unavailable or uncertain capability",
+            "enforcement": "deterministic",
+            "required_capabilities": [],
+            "entry_evidence": [],
+            "exit_evidence": [],
+        },
+    ])
+    graph["edges"] = [
+        {
+            "edge_id": "hypothesis__data_contract",
+            "from_node": "hypothesis",
+            "to_node": "data_contract",
+            "edge_type": "conditional",
+            "guard": {"hypothesis_frozen": True},
+            "required_evidence": [],
+            "counterexamples": [],
+            "risk_level": "L1",
+        },
+        {
+            "edge_id": "hypothesis__capability_gap",
+            "from_node": "hypothesis",
+            "to_node": "capability_gap",
+            "edge_type": "failure",
+            "guard": {"mandatory_binding_missing": True},
+            "required_evidence": [],
+            "counterexamples": [],
+            "risk_level": "L2",
+        },
+    ]
     graph["content_hash"] = _hash(graph)
     research_graphs.register_graph(graph, actor="curator")
     proposal, _ = _approve_proposal()
@@ -2857,6 +2899,11 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
         branch_id=instance["branches"][0]["branch_id"],
         owner="alice",
     )
+    next_packet = research_graphs.build_graph_branch_next(
+        instance_id=instance["instance_id"],
+        branch_id=instance["branches"][0]["branch_id"],
+        owner="alice",
+    )
 
     assert "conditional_capabilities" not in context
     assert [
@@ -2867,6 +2914,24 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
         "capability_id": "factor-combination.multi-factor",
         "explanation": "factor.is_multi is unavailable",
     }]
+    assert next_packet["unresolved_capability_conditions"] == [{
+        "capability_id": "factor-combination.multi-factor",
+        "explanation": "factor.is_multi is unavailable",
+    }]
+    next_edges = {
+        item["edge_id"]: item for item in next_packet["candidate_edges"]
+    }
+    assert next_edges["hypothesis__data_contract"]["readiness"] == "blocked"
+    assert next_edges["hypothesis__data_contract"]["blockers"] == [{
+        "code": "semantic_conditions_undetermined",
+        "capability_ids": ["factor-combination.multi-factor"],
+    }]
+    assert next_edges["hypothesis__capability_gap"]["readiness"] == (
+        "requires_evidence"
+    )
+    assert next_edges["hypothesis__capability_gap"]["blockers"] == []
+    assert next_packet["next_bytes"] == len(orjson.dumps(next_packet))
+    assert next_packet["next_bytes"] <= 6000
     assert context["context_bytes"] == len(orjson.dumps(context))
     assert context["context_bytes"] <= 6000
     assert active["version"] == 2
