@@ -13,18 +13,6 @@ protocol ProfileResearchTransport {
     ) -> AsyncThrowingStream<Void, Error>
 }
 
-protocol ResearchRefreshClock {
-    func sleep(seconds: Double) async throws
-}
-
-struct SystemResearchRefreshClock: ResearchRefreshClock {
-    func sleep(seconds: Double) async throws {
-        try await Task.sleep(
-            nanoseconds: UInt64(max(seconds, 0) * 1_000_000_000)
-        )
-    }
-}
-
 final class URLSessionProfileResearchTransport: ProfileResearchTransport {
     private let session: URLSession
 

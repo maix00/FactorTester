@@ -15,7 +15,6 @@ final class ProfileLiveProcessController: ObservableObject {
 
     let workspaces: [LocalWorkspaceModel]
     private let service: ProfileResearchService
-    private let clock: ResearchRefreshClock
     private var workPackageETag: String?
     private var detailETag: String?
     private var timelineETag: String?
@@ -23,7 +22,8 @@ final class ProfileLiveProcessController: ObservableObject {
     init(
         profile: LocalProfileModel,
         service: ProfileResearchService? = nil,
-        clock: ResearchRefreshClock = SystemResearchRefreshClock()
+        pinnedSummary: ProfileResearchSummary? = nil,
+        initialWorkspaceID: String? = nil
     ) {
         workspaces = profile.workspaces.filter {
             !$0.serverWorkspaceRef.isEmpty
@@ -32,8 +32,11 @@ final class ProfileLiveProcessController: ObservableObject {
             ?? ServerConfig.shared.baseURL
             ?? URL(string: "http://127.0.0.1:8000")!
         self.service = service ?? ProfileResearchService(baseURL: url)
-        self.clock = clock
-        selectedWorkspaceID = workspaces.first?.id ?? ""
+        selectedWorkspaceID = initialWorkspaceID ?? workspaces.first?.id ?? ""
+        if let pinnedSummary {
+            research = [pinnedSummary]
+            selectedResearchRef = pinnedSummary.researchRef
+        }
     }
 
     func loadSelectedWorkspace() async {
@@ -100,28 +103,15 @@ final class ProfileLiveProcessController: ObservableObject {
             detailETag = nil
             timelineETag = nil
             try await refresh(branch: branch, conditional: false)
-            while !Task.isCancelled, let directive = detail?.refresh {
-                if directive.terminal || directive.mode == "stopped" { return }
-                if directive.mode == "job_sse", let href = directive.href {
-                    for try await _ in service.events(href: href) {
-                        try Task.checkCancellation()
-                        try await refresh(branch: branch, conditional: true)
-                        if detail?.refresh.terminal == true { return }
-                    }
-                    try Task.checkCancellation()
-                    try await refresh(branch: branch, conditional: true)
-                    if detail?.refresh.mode == "job_sse",
-                       detail?.refresh.terminal == false {
-                        try await clock.sleep(seconds: 5)
-                    }
-                } else {
-                    let seconds = max(
-                        directive.minimumIntervalSeconds ?? 5,
-                        5
-                    )
-                    try await clock.sleep(seconds: seconds)
-                    try Task.checkCancellation()
-                    try await refresh(branch: branch, conditional: true)
+            guard let directive = detail?.refresh,
+                  !directive.terminal,
+                  directive.mode == "job_sse",
+                  let href = directive.href else { return }
+            for try await _ in service.events(href: href) {
+                try Task.checkCancellation()
+                try await refresh(branch: branch, conditional: true)
+                if detail?.refresh.terminal == true {
+                    return
                 }
             }
         } catch is CancellationError {
@@ -143,6 +133,17 @@ final class ProfileLiveProcessController: ObservableObject {
             let known = Set(timeline.map(\.id))
             timeline += page.items.filter { !known.contains($0.id) }
             nextTimelineCursor = page.nextCursor
+        } catch {
+            self.error = message(error)
+        }
+    }
+
+    func refreshSelectedResearch() async {
+        guard let branch = selectedBranch else { return }
+        do {
+            try await refresh(branch: branch, conditional: true)
+        } catch is CancellationError {
+            return
         } catch {
             self.error = message(error)
         }

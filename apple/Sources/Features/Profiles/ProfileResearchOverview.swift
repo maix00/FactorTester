@@ -138,54 +138,125 @@ private struct ResearchWorkspaceBinding {
 
 struct ProfileResearchOverview: View {
     let profiles: [LocalProfileModel]
-    let openProfile: (LocalProfileModel) -> Void
+    let openWorkPackage: (ResearchDirectoryItem) -> Void
+    @StateObject private var controller: ResearchDirectoryController
+
+    init(
+        profiles: [LocalProfileModel],
+        openWorkPackage: @escaping (ResearchDirectoryItem) -> Void
+    ) {
+        self.profiles = profiles
+        self.openWorkPackage = openWorkPackage
+        _controller = StateObject(
+            wrappedValue: ResearchDirectoryController(profiles: profiles)
+        )
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("研究进度").font(.largeTitle.weight(.semibold))
-                Text("按 Profile 查看当前研究步骤与已生成报告。")
+                Text("按 Work Package 查看跨 Profile 的阶段、义务、证据与报告。")
                     .foregroundStyle(.secondary)
-                ForEach(profiles) { profile in
-                    Button { openProfile(profile) } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "person.crop.rectangle")
-                                .font(.title2)
-                                .foregroundStyle(.tint)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(profile.displayName).font(.headline)
-                                Text(summary(profile))
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(16)
-                        .background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    .buttonStyle(.plain)
+                if let error = controller.error {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
                 }
-                if profiles.isEmpty {
+                ForEach(controller.items) { item in
+                    workPackageCard(item)
+                }
+                if controller.isLoading && controller.items.isEmpty {
+                    ProgressView("正在读取研究目录…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 48)
+                } else if controller.items.isEmpty {
                     Label(
-                        "尚未注册 Profile，因此没有可展示的研究进度。",
+                        profiles.isEmpty
+                            ? "尚未注册 Profile，因此没有可展示的研究。"
+                            : "绑定的工作区尚无 Work Package。",
                         systemImage: "chart.xyaxis.line"
                     )
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 40)
                 }
+                if !controller.items.isEmpty {
+                    Button("刷新") { Task { await controller.refresh() } }
+                        .buttonStyle(.bordered)
+                }
             }
             .padding(24)
         }
+        .task(id: bindingSignature) {
+            controller.replaceProfiles(profiles)
+            await controller.refresh()
+        }
     }
 
-    private func summary(_ profile: LocalProfileModel) -> String {
-        guard !profile.researchRecords.isEmpty else {
-            return "等待研究记录"
+    private func workPackageCard(_ item: ResearchDirectoryItem) -> some View {
+        Button { openWorkPackage(item) } label: {
+            HStack(spacing: 16) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 8) {
+                        Text(item.summary.productGroup).font(.headline)
+                        statusBadge(item.summary)
+                    }
+                    Text(
+                        "\(item.summary.branchCount) 个分支 · "
+                            + "\(item.summary.runningBranchCount) 个进行中"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    Label(
+                        "关联 Profile：\(item.profileNames.joined(separator: "、"))",
+                        systemImage: "person.2"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(item.serverURL.host ?? item.serverURL.absoluteString)
+                    Text(item.summary.workPackageRef)
+                }
+                .font(.caption.monospaced())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(.separator, lineWidth: 0.5)
+            }
         }
-        let ready = profile.researchRecords.filter { $0.status == "ready" }.count
-        return "\(profile.researchRecords.count) 项研究 · \(ready) 份报告可用"
+        .buttonStyle(.plain)
+    }
+
+    private func statusBadge(_ summary: ProfileResearchSummary) -> some View {
+        Text(summary.runningBranchCount > 0 ? "进行中" : summary.status)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(summary.runningBranchCount > 0 ? .blue : .secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                summary.runningBranchCount > 0
+                    ? Color.blue.opacity(0.10) : Color.secondary.opacity(0.10),
+                in: Capsule()
+            )
+    }
+
+    private var bindingSignature: String {
+        profiles.map { profile in
+            let refs = profile.workspaces.map(\.serverWorkspaceRef).joined(separator: ",")
+            return "\(profile.id)|\(profile.serverURL)|\(refs)"
+        }.sorted().joined(separator: ";")
     }
 }

@@ -6,6 +6,7 @@ enum ClientTabContent {
     case adapter(ClientAdapterModel)
     case web(path: String)
     case research
+    case workPackage(ResearchDirectoryItem)
     case profiles
     case profile(id: String)
     case account
@@ -63,6 +64,15 @@ struct ClientTab: Identifiable {
         systemImage: "chart.xyaxis.line",
         content: .research
     )
+
+    static func workPackage(_ item: ResearchDirectoryItem) -> ClientTab {
+        ClientTab(
+            id: "work-package:\(item.id)",
+            title: item.summary.productGroup,
+            systemImage: "point.3.connected.trianglepath.dotted",
+            content: .workPackage(item)
+        )
+    }
 
     static let profiles = ClientTab(
         id: "profiles",

@@ -25,11 +25,17 @@ struct HomeView: View {
                     .opacity(selection == ClientTab.home.id ? 1 : 0)
                     .allowsHitTesting(selection == ClientTab.home.id)
                 ForEach(tabs.filter { !$0.isHome }) { tab in
-                    ClientTabView(tab: tab, profiles: profiles, open: open)
+                    ClientTabView(
+                        tab: tab,
+                        profiles: profiles,
+                        open: open,
+                        isActive: selection == tab.id
+                    )
                         .opacity(selection == tab.id ? 1 : 0)
                         .allowsHitTesting(selection == tab.id)
                 }
             }
+            .navigationTitle(selectedTab?.title ?? ClientTab.home.title)
         }
         .sheet(isPresented: $showLogin) { loginSheet }
         .task {
@@ -81,5 +87,9 @@ struct HomeView: View {
         guard tab.isClosable else { return }
         tabs.removeAll { $0.id == tab.id }
         if selection == tab.id { selection = ClientTab.home.id }
+    }
+
+    private var selectedTab: ClientTab? {
+        tabs.first { $0.id == selection }
     }
 }

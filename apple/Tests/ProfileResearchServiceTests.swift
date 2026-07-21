@@ -136,6 +136,71 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertNotNil(controller.error)
     }
 
+    func testWorkPackageTabUsesCanonicalResearchIdentity() throws {
+        let page = try JSONDecoder().decode(
+            ProfileResearchListResponse.self,
+            from: listJSON().data(using: .utf8)!
+        )
+        let summary = try XCTUnwrap(page.items.first)
+        let first = ResearchDirectoryItem(
+            serverURL: URL(string: "http://one.example.test:8141")!,
+            workspaceID: "w",
+            workspaceRef: "workspace:w",
+            profileIDs: ["maxa"],
+            profileNames: ["MaxA"],
+            summary: summary
+        )
+        let second = ResearchDirectoryItem(
+            serverURL: URL(string: "http://two.example.test:8141")!,
+            workspaceID: "w",
+            workspaceRef: "workspace:w",
+            profileIDs: ["maxa"],
+            profileNames: ["MaxA"],
+            summary: summary
+        )
+
+        XCTAssertEqual(ClientTab.workPackage(first).id, ClientTab.workPackage(first).id)
+        XCTAssertNotEqual(ClientTab.workPackage(first).id, ClientTab.workPackage(second).id)
+    }
+
+    func testCheckpointLinksReportSectionsThroughStepEvidence() throws {
+        let page = try JSONDecoder().decode(
+            ProfileResearchTimelinePage.self,
+            from: timelineJSON().data(using: .utf8)!
+        )
+        let step = try XCTUnwrap(page.items.first)
+        let linked = ResearchReportSection(
+            id: "section:linked",
+            title: "Evidence",
+            summary: "linked",
+            links: [ResearchDeepLinkModel(json: [
+                "link_id": "link:1",
+                "kind": "evidence",
+                "target_ref": "artifact:e",
+                "section_ref": "section:linked",
+            ])]
+        )
+        let unrelated = ResearchReportSection(
+            id: "section:other",
+            title: "Other",
+            summary: "other",
+            links: [ResearchDeepLinkModel(json: [
+                "link_id": "link:2",
+                "kind": "evidence",
+                "target_ref": "artifact:other",
+                "section_ref": "section:other",
+            ])]
+        )
+
+        XCTAssertEqual(
+            ResearchCheckpointLinker.relatedSections(
+                to: step,
+                among: [unrelated, linked]
+            ).map(\.id),
+            ["section:linked"]
+        )
+    }
+
     func testProfileParsesFactorWorkspaceBinding() {
         let profile = LocalProfileModel(json: [
             "profile_id": "maxa",
@@ -252,25 +317,6 @@ final class ProfileResearchServiceTests: XCTestCase {
     }
 }
 
-private final class FakeClock: ResearchRefreshClock {
-    private(set) var seconds: [Double] = []
-    let cancelOnSleep: Bool
-    init(cancelOnSleep: Bool) { self.cancelOnSleep = cancelOnSleep }
-    func sleep(seconds: Double) async throws {
-        self.seconds.append(seconds)
-        if cancelOnSleep { throw CancellationError() }
-    }
-}
-
-private final class SuspendingClock: ResearchRefreshClock {
-    let started: XCTestExpectation
-    init(started: XCTestExpectation) { self.started = started }
-    func sleep(seconds: Double) async throws {
-        started.fulfill()
-        try await Task.sleep(nanoseconds: 60_000_000_000)
-    }
-}
-
 private final class FakeProjectionTransport: ProfileResearchTransport {
     var responses: [ResearchHTTPResponse]
     var eventCount = 0
@@ -305,16 +351,12 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
                 detailRefresh: #"{"mode":"stopped","terminal":true}"#
             )
         )
-        let clock = FakeClock(cancelOnSleep: false)
-        let controller = makeController(
-            transport: transport,
-            clock: clock
-        )
+        let controller = makeController(transport: transport)
         await controller.loadSelectedWorkspace()
         await controller.observeSelectedResearch()
         XCTAssertEqual(controller.detail?.currentNode, "audit")
         XCTAssertEqual(controller.timeline.count, 1)
-        XCTAssertTrue(clock.seconds.isEmpty)
+        XCTAssertEqual(transport.requests.count, 4)
         XCTAssertEqual(transport.eventCount, 0)
     }
 
@@ -336,10 +378,7 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         let transport = FakeProjectionTransport(
             responses: initial + [changedDetail, notModified]
         )
-        let controller = makeController(
-            transport: transport,
-            clock: FakeClock(cancelOnSleep: false)
-        )
+        let controller = makeController(transport: transport)
         await controller.loadSelectedWorkspace()
         await controller.observeSelectedResearch()
         XCTAssertEqual(transport.eventCount, 1)
@@ -347,32 +386,34 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         XCTAssertEqual(controller.timeline.count, 1)
     }
 
-    func testConditionalRefreshUsesMinimumFiveSecondsAndCancels() async {
+    func testConditionalProjectionDoesNotPoll() async {
         let transport = FakeProjectionTransport(
             responses: fixtureResponses(
                 detailRefresh:
                     #"{"mode":"conditional_etag","minimum_interval_seconds":1,"only_while_visible":true,"terminal":false}"#
             )
         )
-        let clock = FakeClock(cancelOnSleep: true)
-        let controller = makeController(
-            transport: transport,
-            clock: clock
-        )
+        let controller = makeController(transport: transport)
         await controller.loadSelectedWorkspace()
         await controller.observeSelectedResearch()
-        XCTAssertEqual(clock.seconds, [5])
         XCTAssertEqual(transport.requests.count, 4)
     }
 
-    func testLeavingVisibleTaskCancelsRefreshWithoutMoreRequests() async {
-        let transport = FakeProjectionTransport(
-            responses: fixtureResponses(
-                detailRefresh:
-                    #"{"mode":"conditional_etag","minimum_interval_seconds":5,"only_while_visible":true,"terminal":false}"#
-            )
+    func testPinnedWorkPackageSkipsDirectoryRequest() async throws {
+        let page = try JSONDecoder().decode(
+            ProfileResearchListResponse.self,
+            from: listJSON().data(using: .utf8)!
         )
-        let started = expectation(description: "refresh sleep started")
+        let transport = FakeProjectionTransport(
+            responses: [
+                response(workPackageJSON(), etag: "\"work-package-v1\""),
+                response(
+                    detailJSON(refresh: #"{"mode":"stopped","terminal":true}"#),
+                    etag: "\"detail-v1\""
+                ),
+                response(timelineJSON(), etag: "\"timeline-v1\""),
+            ]
+        )
         let profile = makeProfile()
         let controller = ProfileLiveProcessController(
             profile: profile,
@@ -380,19 +421,23 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
                 baseURL: URL(string: "http://example.test")!,
                 transport: transport
             ),
-            clock: SuspendingClock(started: started)
+            pinnedSummary: try XCTUnwrap(page.items.first),
+            initialWorkspaceID: "w"
         )
-        await controller.loadSelectedWorkspace()
-        let task = Task { await controller.observeSelectedResearch() }
-        await fulfillment(of: [started], timeout: 1)
-        task.cancel()
-        await task.value
-        XCTAssertEqual(transport.requests.count, 4)
+        await controller.observeSelectedResearch()
+
+        XCTAssertEqual(transport.requests.count, 3)
+        XCTAssertEqual(
+            transport.requests.first?.url?.path,
+            "/api/profile-research/work-package:i"
+        )
+        XCTAssertFalse(
+            transport.requests.contains { $0.url?.path == "/api/profile-research" }
+        )
     }
 
     private func makeController(
-        transport: FakeProjectionTransport,
-        clock: FakeClock
+        transport: FakeProjectionTransport
     ) -> ProfileLiveProcessController {
         let profile = makeProfile()
         return ProfileLiveProcessController(
@@ -400,8 +445,7 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
             service: ProfileResearchService(
                 baseURL: URL(string: "http://example.test")!,
                 transport: transport
-            ),
-            clock: clock
+            )
         )
     }
 

@@ -4,10 +4,10 @@ struct ClientTabView: View {
     let tab: ClientTab
     @ObservedObject var profiles: LocalProfileController
     let open: (ClientTab) -> Void
+    let isActive: Bool
 
     var body: some View {
         content
-            .navigationTitle(tab.title)
     }
 
     @ViewBuilder
@@ -34,8 +34,28 @@ struct ClientTabView: View {
         case .research:
             ProfileResearchOverview(
                 profiles: profiles.profiles,
-                openProfile: { open(.profile(id: $0.id, title: $0.displayName)) }
+                openWorkPackage: { open(.workPackage($0)) }
             )
+        case .workPackage(let item):
+            let visibleProfiles = profiles.profiles.filter {
+                item.profileIDs.contains($0.id)
+            }
+            if let primaryProfile = visibleProfiles.first {
+                WorkPackageResearchView(
+                    item: item,
+                    profiles: visibleProfiles,
+                    primaryProfile: primaryProfile,
+                    isActive: isActive
+                )
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "person.crop.circle.badge.questionmark")
+                        .font(.largeTitle)
+                    Text("研究 Profile 不可用").font(.headline)
+                    Text("该 Work Package 的本地 Profile 已被移除。")
+                        .foregroundStyle(.secondary)
+                }
+            }
         case .profiles:
             ProfilesDirectoryView(
                 controller: profiles,

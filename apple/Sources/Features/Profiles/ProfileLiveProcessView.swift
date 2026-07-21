@@ -1,106 +1,95 @@
 import SwiftUI
 
-struct ProfileLiveProcessView: View {
-    let profile: LocalProfileModel
-    @StateObject private var controller: ProfileLiveProcessController
+struct WorkPackageResearchView: View {
+    let item: ResearchDirectoryItem
+    let profiles: [LocalProfileModel]
+    let primaryProfile: LocalProfileModel
+    let isActive: Bool
 
-    init(profile: LocalProfileModel) {
-        self.profile = profile
+    @StateObject private var controller: ProfileLiveProcessController
+    @State private var branchTask: Task<Void, Never>?
+
+    init(
+        item: ResearchDirectoryItem,
+        profiles: [LocalProfileModel],
+        primaryProfile: LocalProfileModel,
+        isActive: Bool
+    ) {
+        self.item = item
+        self.profiles = profiles
+        self.primaryProfile = primaryProfile
+        self.isActive = isActive
         _controller = StateObject(
-            wrappedValue: ProfileLiveProcessController(profile: profile)
+            wrappedValue: ProfileLiveProcessController(
+                profile: primaryProfile,
+                pinnedSummary: item.summary,
+                initialWorkspaceID: item.workspaceID
+            )
         )
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            workspaceBar
+            header
             Divider()
-            HSplitView {
-                researchList
-                    .frame(minWidth: 220, idealWidth: 260)
-                ProfileLiveResearchDetail(
-                    profile: profile,
-                    controller: controller
-                )
-                .frame(minWidth: 520, maxWidth: .infinity)
-            }
+            ProfileLiveResearchDetail(
+                profiles: profiles,
+                controller: controller
+            )
         }
-        .task(id: controller.selectedWorkspaceID) {
-            await controller.loadSelectedWorkspace()
-        }
-        .task(id: controller.observationKey) {
+        .task(id: "\(isActive)|\(item.id)") {
+            guard isActive else { return }
             await controller.observeSelectedResearch()
         }
-    }
-
-    private var workspaceBar: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("实时过程").font(.title2.weight(.semibold))
-                Text("有界 projection · 离开页面即停止更新")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if controller.workspaces.isEmpty {
-                Label(
-                    "未映射服务器工作区",
-                    systemImage: "externaldrive.badge.questionmark"
-                )
-                .foregroundStyle(.secondary)
-            } else {
-                Picker(
-                    "工作区",
-                    selection: $controller.selectedWorkspaceID
-                ) {
-                    ForEach(controller.workspaces) { workspace in
-                        Text(workspaceLabel(workspace)).tag(workspace.id)
-                    }
-                }
-                .frame(maxWidth: 300)
+        .onChange(of: controller.selectedBranchID) { _ in
+            guard isActive, controller.detail != nil else { return }
+            branchTask?.cancel()
+            branchTask = Task { await controller.observeSelectedResearch() }
+        }
+        .onChange(of: isActive) { active in
+            if !active {
+                branchTask?.cancel()
+                branchTask = nil
             }
         }
-        .padding(18)
+        .onDisappear {
+            branchTask?.cancel()
+            branchTask = nil
+        }
     }
 
-    private var researchList: some View {
-        List(
-            controller.research,
-            selection: $controller.selectedResearchRef
-        ) { item in
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.productGroup).lineLimit(1)
-                HStack(spacing: 6) {
-                    Text("\(item.branchCount) 个假设分支").lineLimit(1)
-                    Spacer()
-                    Text(
-                        item.runningBranchCount > 0
-                            ? "\(item.runningBranchCount) 进行中"
-                            : item.status
-                    )
+    private var header: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(.title2)
+                .foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.summary.productGroup)
+                    .font(.title2.weight(.semibold))
+                HStack(spacing: 8) {
+                    Text("Work Package")
+                    Text(item.summary.workPackageRef).monospaced()
+                    Text("·")
+                    Text("Profile：\(item.profileNames.joined(separator: "、"))")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
-            .tag(item.researchRef)
-        }
-        .overlay {
+            Spacer()
             if controller.isLoading {
-                ProgressView()
-            } else if controller.research.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "clock.badge.questionmark")
-                    Text(controller.error ?? "尚无研究记录")
-                        .multilineTextAlignment(.center)
+                ProgressView().controlSize(.small)
+            }
+            if item.summary.runningBranchCount > 0 {
+                Button {
+                    Task { await controller.refreshSelectedResearch() }
+                } label: {
+                    Label("刷新进度", systemImage: "arrow.clockwise")
                 }
-                .foregroundStyle(.secondary)
-                .padding()
+                .buttonStyle(.bordered)
+                .disabled(controller.selectedBranch == nil)
             }
         }
-    }
-
-    private func workspaceLabel(_ workspace: LocalWorkspaceModel) -> String {
-        let owner = workspace.ownerRef.isEmpty
-            ? workspace.id : workspace.ownerRef
-        return "\(owner) · \(workspace.accessMode)"
+        .padding(18)
     }
 }
