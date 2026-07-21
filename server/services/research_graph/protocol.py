@@ -15,7 +15,13 @@ from cli_anything.factortester_research.core.graph import (
 
 
 MAX_AGENT_PACKET_BYTES = 6000
-MAX_TRACE_EVIDENCE_BYTES = MAX_AGENT_PACKET_BYTES
+# Agent-facing packets and submitted transition deltas are model-context
+# budgets.  A persisted trace is an audit/replay record and must retain the
+# server-bound evidence plus the current Research Cycle projection; it has a
+# separate storage budget rather than inheriting the context budget.
+MAX_AGENT_TRANSITION_BYTES = MAX_AGENT_PACKET_BYTES
+MAX_PERSISTED_TRACE_BYTES = 16_384
+MAX_TRACE_EVIDENCE_BYTES = MAX_PERSISTED_TRACE_BYTES
 MAX_CONTEXT_EVIDENCE_REFS = 8
 MAX_EVIDENCE_REF_BYTES = 256
 
@@ -118,6 +124,7 @@ def merge_bounded_evidence_refs(
 def serialize_bounded_trace_evidence(
     evidence: dict[str, Any],
 ) -> str:
+    """Serialize one persisted trace with the audit-storage budget."""
     serialized = orjson.dumps(
         evidence,
         option=orjson.OPT_SORT_KEYS,
@@ -127,5 +134,22 @@ def serialize_bounded_trace_evidence(
         raise ValueError(
             "transition evidence exceeds "
             f"{MAX_TRACE_EVIDENCE_BYTES} bytes: {size}"
+        )
+    return serialized.decode()
+
+
+def serialize_agent_transition_evidence(
+    evidence: dict[str, Any],
+) -> str:
+    """Serialize the complete Agent-submitted delta under the context budget."""
+    serialized = orjson.dumps(
+        evidence,
+        option=orjson.OPT_SORT_KEYS,
+    )
+    size = len(serialized)
+    if size > MAX_AGENT_TRANSITION_BYTES:
+        raise ValueError(
+            "agent transition evidence exceeds "
+            f"{MAX_AGENT_TRANSITION_BYTES} bytes: {size}"
         )
     return serialized.decode()

@@ -12,6 +12,7 @@ from server.services.research_graph.branch import (
 from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
+from server.services.research_graph.protocol import MAX_PERSISTED_TRACE_BYTES
 from tests.server.data_contract_fixtures import initialize
 from tools.data.sqlite.db import connect_sqlite
 
@@ -198,7 +199,7 @@ def test_many_factor_revisions_are_bound_by_set_hash_not_trace_copy(
                             WHERE branch_id='branch-1')
             """
         ).fetchone()
-    assert len(row["evidence_json"].encode()) <= 6000
+    assert len(row["evidence_json"].encode()) <= MAX_PERSISTED_TRACE_BYTES
     assert '"factor_revision_refs"' not in row["evidence_json"]
 
 

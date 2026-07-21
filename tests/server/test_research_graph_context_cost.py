@@ -16,6 +16,12 @@ from server.services.research_graph.branch import context as branch_context
 from server.services.research_graph.branch.repository import (
     CURRENT_BRANCH_CONTEXT_SQL,
 )
+from server.services.research_graph.protocol import (
+    MAX_AGENT_TRANSITION_BYTES,
+    MAX_PERSISTED_TRACE_BYTES,
+    serialize_agent_transition_evidence,
+    serialize_bounded_trace_evidence,
+)
 from tests.server.data_contract_fixtures import initialize
 from tools.data.sqlite.db import connect_sqlite
 
@@ -119,6 +125,20 @@ def test_context_cost_is_constant_for_empty_and_large_history(
         assert measurement["context"]["context_bytes"] <= 6000
     assert small["selects"] == large["selects"]
     assert small["context"] == large["context"]
+
+
+def test_agent_and_persisted_trace_budgets_are_distinct() -> None:
+    payload = {"research_note": "x" * 8_500}
+
+    with pytest.raises(
+        ValueError,
+        match=f"agent transition evidence exceeds {MAX_AGENT_TRANSITION_BYTES}",
+    ):
+        serialize_agent_transition_evidence(payload)
+
+    serialized = serialize_bounded_trace_evidence(payload)
+    assert len(serialized.encode()) == len(payload["research_note"].encode()) + 20
+    assert len(serialized.encode()) < MAX_PERSISTED_TRACE_BYTES
 
 
 def test_context_query_plan_uses_primary_key_lookups(

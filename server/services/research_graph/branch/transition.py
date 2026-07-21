@@ -50,6 +50,7 @@ from server.services.research_graph.protocol import (
     assert_no_skill_identity,
     loads,
     merge_bounded_evidence_refs,
+    serialize_agent_transition_evidence,
     serialize_bounded_trace_evidence,
 )
 from server.services.research_graph.report_checkpoint import (
@@ -86,6 +87,10 @@ def advance_graph_branch(
             "server_evidence and report_lineage are server-owned"
         )
     evidence = validate_agent_evidence_payload(evidence)
+    # Enforce the Agent-facing budget before removing server-only fields or
+    # binding server evidence.  Otherwise a large capability payload could be
+    # silently excluded from the size check.
+    serialize_agent_transition_evidence(evidence)
     prepared_evidence, proposed_trial_plan_hash, has_trial_plan_body = (
         prepare_trial_plan_evidence(evidence)
     )
@@ -98,7 +103,7 @@ def advance_graph_branch(
     )
     # Reject obviously oversized payloads before opening a transaction. A
     # second check below includes the server-created receipt reference.
-    serialize_bounded_trace_evidence(persisted_evidence)
+    serialize_agent_transition_evidence(persisted_evidence)
     invocation_ids = prepared_evidence.get("agent_invocation_ids") or []
     if not isinstance(invocation_ids, list) or not all(
         isinstance(item, str) and item for item in invocation_ids

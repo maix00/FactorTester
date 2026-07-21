@@ -15,6 +15,7 @@ from server.services.research_graph.branch import (
 from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
+from server.services.research_graph.protocol import MAX_PERSISTED_TRACE_BYTES
 from tests.server.data_contract_fixtures import (
     initialize,
     profile,
@@ -205,7 +206,7 @@ def test_data_contract_trace_stays_bounded_for_multi_product_profile(
                             WHERE branch_id='branch-1')
             """
         ).fetchone()
-    assert len(row["evidence_json"].encode()) <= 6000
+    assert len(row["evidence_json"].encode()) <= MAX_PERSISTED_TRACE_BYTES
 
 
 def test_client_cannot_submit_server_evidence(
@@ -408,5 +409,5 @@ def test_large_profile_is_referenced_without_copying_it_into_trace(
         ).fetchone()
     assert row["current_node"] == "factor_semantics"
     assert row["latest_trace_id"] != "trace-bootstrap"
-    assert len(row["evidence_json"].encode()) <= 6000
+    assert len(row["evidence_json"].encode()) <= MAX_PERSISTED_TRACE_BYTES
     assert '"detail"' not in row["evidence_json"]
