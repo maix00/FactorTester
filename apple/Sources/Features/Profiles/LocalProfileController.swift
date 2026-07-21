@@ -18,6 +18,8 @@ final class LocalProfileController: ObservableObject {
     private let profileDirectory: URL
     private let cacheKey = "client.profile.list.cache.v1"
     private var refreshInFlight = false
+    private static var sharedProfileListTask:
+        Task<[[String: Any]], Error>?
 
     init(
         defaults: UserDefaults = .standard,
@@ -138,11 +140,25 @@ final class LocalProfileController: ObservableObject {
     }
 
     private func loadProfileValues() async throws -> [[String: Any]] {
-        let values = try await ReleaseCommand.runArray(
-            ["client", "profile", "list"],
-            executable: cliPath
-        )
-        return values
+        if let task = Self.sharedProfileListTask {
+            return try await task.value
+        }
+        let executable = cliPath
+        let task = Task {
+            try await ReleaseCommand.runArray(
+                ["client", "profile", "list"],
+                executable: executable
+            )
+        }
+        Self.sharedProfileListTask = task
+        do {
+            let values = try await task.value
+            Self.sharedProfileListTask = nil
+            return values
+        } catch {
+            Self.sharedProfileListTask = nil
+            throw error
+        }
     }
 
     private func cacheProfileValues(_ values: [[String: Any]]) {
