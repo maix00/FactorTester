@@ -137,7 +137,7 @@ struct ResearchNarrativeReportView: View {
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(.primary)
             if !section.body.isEmpty {
-                reportParagraph(section.body)
+                reportParagraph(section.body, linkIDs: [], section: section)
             }
             if !section.blocks.isEmpty {
                 ForEach(Array(section.blocks.enumerated()), id: \.offset) {
@@ -166,12 +166,26 @@ struct ResearchNarrativeReportView: View {
         .accessibilityIdentifier("research.report.section.\(section.sectionID)")
     }
 
-    private func reportParagraph(_ text: String) -> some View {
-        Text(text)
-            .font(.body)
-            .lineSpacing(6)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func reportParagraph(
+        _ text: String,
+        linkIDs: [String],
+        section: ResearchJournalSection
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(text)
+                .font(.body)
+                .lineSpacing(6)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !linkIDs.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(section.links.filter { linkIDs.contains($0.linkID) }) {
+                        link in
+                        auditChip(link, checkpointRef: section.checkpointRef)
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -181,7 +195,11 @@ struct ResearchNarrativeReportView: View {
     ) -> some View {
         switch block.kind {
         case "paragraph":
-            reportParagraph(block.text ?? "")
+            reportParagraph(
+                block.text ?? "",
+                linkIDs: block.linkIDs,
+                section: section
+            )
         case "list":
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(block.rows.enumerated()), id: \.offset) {
@@ -276,7 +294,9 @@ struct ResearchNarrativeReportView: View {
         in section: ResearchJournalSection
     ) -> [ResearchJournalLink] {
         let bound = Set(
-            section.blocks.flatMap(\.rows).flatMap(\.linkIDs)
+            section.blocks.flatMap { block in
+                block.linkIDs + block.rows.flatMap(\.linkIDs)
+            }
         )
         return section.links.filter { !bound.contains($0.linkID) }
     }

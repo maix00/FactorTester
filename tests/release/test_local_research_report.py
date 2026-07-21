@@ -323,12 +323,16 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
             "title": "研究进展",
             "body": "本阶段先说明研究判断，再列出支撑判断的结构化结果。",
             "blocks": [{
+                "kind": "paragraph",
+                "text": "本段结论由试验计划约束。",
+                "link_ids": ["checkpoint-plan"],
+            }, {
                 "kind": "list",
                 "rows": [{
                     "text": "交易成本义务仍未清除。",
                     "link_ids": [
                         "cost-obligation", "checkpoint-job", "checkpoint-run",
-                        "checkpoint-plan", "checkpoint-claim",
+                        "checkpoint-claim",
                     ],
                 }],
             }, {
@@ -383,9 +387,10 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
     section = journal["checkpoints"][0]["sections"][0]
     assert journal["schema_version"] == 3
     assert [block["kind"] for block in section["blocks"]] == [
-        "list", "table",
+        "paragraph", "list", "table",
     ]
-    assert section["blocks"][1]["rows"][0]["cells"][2] == "0.42"
+    assert section["blocks"][0]["link_ids"] == ["checkpoint-plan"]
+    assert section["blocks"][2]["rows"][0]["cells"][2] == "0.42"
     report = journal_path.with_name("REPORT.md").read_text(encoding="utf-8")
     assert "本阶段先说明研究判断，再列出支撑判断的结构化结果。" in report
     assert "- 交易成本义务仍未清除。" in report

@@ -516,8 +516,26 @@ def _canonical_narrative_blocks(
         if not isinstance(block, dict):
             raise ValueError("narrative block must be an object")
         kind = block.get("kind")
-        if kind == "paragraph" and set(block) == {"kind", "text"}:
-            blocks.append({"kind": kind, "text": _zh_body(block["text"])})
+        if kind == "paragraph" and set(block) in (
+            {"kind", "text"}, {"kind", "text", "link_ids"}
+        ):
+            projected = {"kind": kind, "text": _zh_body(block["text"])}
+            if "link_ids" in block:
+                refs = block["link_ids"]
+                if (
+                    not isinstance(refs, list) or not refs
+                    or len(refs) > MAX_ITEMS
+                ):
+                    raise ValueError("narrative paragraph link_ids are invalid")
+                for link_id in refs:
+                    _safe_id(link_id, "narrative.paragraph.link_id")
+                    if link_id not in declared_link_ids:
+                        raise ValueError(
+                            "paragraph chip must reference a declared section link"
+                        )
+                    used_link_ids.add(link_id)
+                projected["link_ids"] = list(refs)
+            blocks.append(projected)
             continue
         if kind == "list" and set(block) == {"kind", "rows"}:
             rows = _canonical_narrative_rows(

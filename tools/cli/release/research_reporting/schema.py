@@ -151,17 +151,31 @@ def _canonical_blocks(
     if not isinstance(value, list) or not value or len(value) > 32:
         raise ValueError("section.blocks must be a bounded array")
     blocks = []
+    used_link_ids: set[str] = set()
     for block in value:
         if not isinstance(block, dict):
             raise ValueError("section block must be an object")
         kind = block.get("kind")
-        if kind == "paragraph" and set(block) == {"kind", "text"}:
-            blocks.append({
+        if kind == "paragraph" and set(block) in (
+            {"kind", "text"}, {"kind", "text", "link_ids"}
+        ):
+            projected = {
                 "kind": kind,
                 "text": _bounded_text(
                     block["text"], field="section.block.text", maximum=4000,
                 ),
-            })
+            }
+            if "link_ids" in block:
+                refs = block["link_ids"]
+                if (
+                    not isinstance(refs, list) or not refs
+                    or len(refs) > 16
+                    or any(ref not in link_ids for ref in refs)
+                ):
+                    raise ValueError("section paragraph links are invalid")
+                projected["link_ids"] = list(refs)
+                used_link_ids.update(refs)
+            blocks.append(projected)
             continue
         expected = (
             {"kind", "rows"}

@@ -108,17 +108,22 @@ struct ResearchJournalSection: Decodable, Identifiable {
 struct ResearchJournalBlock: Decodable {
     let kind: String
     let text: String?
+    let linkIDs: [String]
     let columns: [String]
     let rows: [ResearchJournalRow]
 
     enum CodingKeys: String, CodingKey {
         case kind, text, columns, rows
+        case linkIDs = "link_ids"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         kind = try container.decode(String.self, forKey: .kind)
         text = try container.decodeIfPresent(String.self, forKey: .text)
+        linkIDs = try container.decodeIfPresent(
+            [String].self, forKey: .linkIDs
+        ) ?? []
         columns = try container.decodeIfPresent(
             [String].self,
             forKey: .columns
@@ -318,9 +323,11 @@ enum ResearchJournalLoader {
             switch block.kind {
             case "paragraph":
                 guard let text = block.text, !text.isEmpty,
-                      block.columns.isEmpty, block.rows.isEmpty else {
+                      block.columns.isEmpty, block.rows.isEmpty,
+                      Set(block.linkIDs).isSubset(of: linkIDs) else {
                     throw ResearchJournalError.invalidContract
                 }
+                usedLinkIDs.formUnion(block.linkIDs)
             case "list":
                 guard block.text == nil, block.columns.isEmpty,
                       !block.rows.isEmpty, block.rows.count <= 64 else {
