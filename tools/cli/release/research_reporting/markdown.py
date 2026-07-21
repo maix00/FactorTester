@@ -18,9 +18,9 @@ class MarkdownReportTarget:
         lines = [
             f"# {value['title']}",
             "",
-            f"- 状态：`{value['status']}`",
-            f"- 产品范围：`{value['product_group']}`",
-            f"- 当前阶段：`{value['current_node']}`",
+            f"- 状态：`{_status_label(value['status'])}`",
+            f"- 产品范围：`{_product_group_label(value['product_group'])}`",
+            f"- 当前阶段：`{_node_label(value['current_node'])}`",
             (
                 "- TrialPlan：`已定义`"
                 if value["trial_plan_hash"]
@@ -105,3 +105,43 @@ def _asset_lines(
         f"- [{asset['caption']}](../../assets/{asset['filename']})",
         "",
     ]
+
+
+def _status_label(value: str) -> str:
+    return {
+        "running": "进行中",
+        "active": "进行中",
+        "paused": "已暂停",
+        "blocked": "等待处理",
+        "completed": "已完成",
+        "closed": "已完成",
+        "failed": "失败",
+    }.get(value, "状态未知")
+
+
+def _product_group_label(value: str) -> str:
+    return {
+        "china_futures": "中国期货",
+        "cnfutures": "中国期货",
+        "china_equities": "中国股票",
+        "cnequities": "中国股票",
+        "japan_futures": "日本期货",
+        "jpfutures": "日本期货",
+    }.get(value.lower(), "其他产品组")
+
+
+def _node_label(value: str) -> str:
+    return {
+        "candidate_discovery": "候选发现",
+        "hypothesis_preregistration": "假设预注册",
+        "capability_resolution": "研究能力确认",
+        "data_contract": "数据合同",
+        "factor_semantics": "因子语义审查",
+        "validation_design": "验证设计",
+        "trial_plan": "试验计划",
+        "capability_gap": "能力缺口",
+        "job_evidence_ready": "计算证据就绪",
+        "evidence_assessment": "证据评估",
+        "factor_improvement": "因子改进",
+        "completed": "研究完成",
+    }.get(value, "研究进行中")

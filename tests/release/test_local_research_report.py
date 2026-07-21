@@ -198,8 +198,8 @@ def test_checkpoint_publish_materializes_report_and_profile_reference(
     assert report.is_file()
     report_text = report.read_text(encoding="utf-8")
     assert "evidence:job-attempt-1" not in report_text
-    assert "CNFutures" in report_text
-    assert "job_evidence_ready" in report_text
+    assert "中国期货" in report_text
+    assert "计算证据就绪" in report_text
     assert "`已定义`" in report_text
     assert "2" * 64 not in report_text
     journal = json.loads(report.with_name("JOURNAL.json").read_text())
