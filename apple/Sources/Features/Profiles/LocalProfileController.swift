@@ -18,41 +18,6 @@ final class LocalProfileController: ObservableObject {
         }
     }
 
-    func saveProfile(
-        id: String,
-        name: String,
-        serverURL: String,
-        workspaceRoot: String
-    ) async {
-        await run([
-            "client", "profile", "init",
-            "--profile-id", id,
-            "--display-name", name,
-            "--server-url", serverURL,
-            "--workspace-root", workspaceRoot,
-        ])
-    }
-
-    func bootstrapProfile(
-        id: String,
-        name: String,
-        serverURL: String,
-        workspaceRoot: String,
-        agentID: String,
-        principalRef: String
-    ) async {
-        var arguments = [
-            "client", "profile", "bootstrap",
-            "--profile-id", id,
-            "--display-name", name,
-            "--server-url", serverURL,
-            "--workspace-root", workspaceRoot,
-            "--agent-id", agentID,
-        ]
-        arguments += ["--principal-ref", principalRef]
-        await run(arguments)
-    }
-
     func saveAgent(
         profileID: String,
         agentID: String,

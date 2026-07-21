@@ -238,7 +238,7 @@ def test_macos_profiles_use_principal_scoped_default_workspace() -> None:
     assert "Owner:" in view
 
 
-def test_macos_settings_manage_personal_workspace_through_cli() -> None:
+def test_macos_settings_show_only_active_unified_workspace() -> None:
     settings_root = SOURCES / "Features" / "Settings"
     hub = (settings_root / "ClientSettingsHub.swift").read_text(
         encoding="utf-8"
@@ -246,9 +246,6 @@ def test_macos_settings_manage_personal_workspace_through_cli() -> None:
     view = (settings_root / "PersonalWorkspaceView.swift").read_text(
         encoding="utf-8"
     )
-    migration = (
-        settings_root / "PersonalWorkspaceMigrationView.swift"
-    ).read_text(encoding="utf-8")
     controller = (
         settings_root / "PersonalWorkspaceController.swift"
     ).read_text(encoding="utf-8")
@@ -260,20 +257,12 @@ def test_macos_settings_manage_personal_workspace_through_cli() -> None:
     assert "personal-workspace/factor-library" in view
     assert "Profile 只链接 canonical repo 的独立 worktree" in view
     assert "当前 canonical 因子库" in view
-    assert "Legacy quarantine preview" in view
-    assert "不提供无门禁删除" in view
-    for label in (
-        "Dirty 文件", "关联 Profiles", "关联 Worktrees",
-        "保留所有 branch", "保留所有 commit", "保留未提交内容",
-    ):
-        assert label in migration
+    assert "Legacy quarantine" not in view
+    assert "迁移" not in view
     assert '"user-layout", "show"' in controller
-    assert '"user-layout", "migration", "plan"' in controller
-    assert '"user-layout", "migration", "apply"' in controller
-    assert '"user-layout", "migration", "verify"' in controller
+    assert '"user-layout", "migration"' not in controller
     assert "Process()" not in controller
     assert '"git"' not in controller
-    assert "receiptRef" in migration
 
 
 def test_macos_tabs_and_account_center_use_real_routes() -> None:

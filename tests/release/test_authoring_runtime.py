@@ -82,7 +82,7 @@ def test_bundled_pyright_ignores_empty_path_and_uses_pinned_runtime(
     captured = {}
 
     pyright = ModuleType("pyright")
-    pyright.__pyright_version__ = "1.1.410"
+    pyright.__pyright_version__ = "1.1.411"
     cli = ModuleType("pyright.cli")
 
     def run(*arguments, **kwargs):
@@ -109,7 +109,7 @@ def test_bundled_pyright_ignores_empty_path_and_uses_pinned_runtime(
     result = run_bundled_pyright(workspace)
 
     assert result == {
-        "version": "1.1.410",
+        "version": "1.1.411",
         "returncode": 0,
         "files_analyzed": 93,
         "error_count": 0,

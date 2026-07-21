@@ -11,7 +11,7 @@ from typing import Any
 
 
 AUTHORING_CONTRACT_ID = "factortester-authoring-sdk@1"
-PYRIGHT_VERSION = "1.1.410"
+PYRIGHT_VERSION = "1.1.411"
 _MANAGED_PATHS = frozenset({
     "pyrightconfig.json",
     "tools/factors/Parameters.pyi",

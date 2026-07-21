@@ -15,43 +15,12 @@ from tools.cli.release.local_profile import (
 )
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.profile_lifecycle import ProfileLifecycle
-from tools.cli.release.personal_workspace_migration import (
-    apply_personal_workspace_migration,
-    personal_workspace_status,
-    plan_personal_workspace_migration,
-    rollback_personal_workspace_migration,
-    verify_personal_workspace_migration,
-)
-from tools.cli.release.legacy_workspace_cleanup import (
-    plan_legacy_workspace_cleanup,
-    purge_legacy_workspaces,
-)
-from tools.cli.release.user_layout_migration import (
-    apply_user_layout_migration,
+from tools.cli.release.user_layout import (
+    default_user_factor_library,
     default_user_profile_root,
-    plan_user_layout_migration,
-    rollback_user_layout_migration,
     user_layout_status,
-    verify_user_layout_migration,
-)
-from tools.cli.release.quarantine_compaction import (
-    apply_quarantine_compaction,
-    plan_quarantine_compaction,
-    rollback_quarantine_compaction,
-    verify_quarantine_compaction,
 )
 from tools.cli.release.storage import read_json, write_json
-from tools.cli.release.workspace_migration import (
-    apply_workspace_migration,
-    apply_workspace_repair,
-    default_profile_workspace_root,
-    plan_workspace_migration,
-    plan_workspace_repair,
-    rollback_workspace_migration,
-    rollback_workspace_repair,
-    verify_workspace_migration,
-    verify_workspace_repair,
-)
 from tools.cli.release.factor_worktree import (
     CanonicalFactorRepoStore,
     apply_factor_worktree_binding,
@@ -115,54 +84,10 @@ def clear_ui_session(server_url: str) -> None:
     click.echo(_json({"schema_version": 1, "cleared": True}))
 
 
-@client_profile.command("init")
-@click.option("--profile-id", required=True)
-@click.option("--display-name", required=True)
-@click.option("--server-url", required=True)
-@click.option(
-    "--workspace-root",
-    type=click.Path(file_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def initialize_profile(
-    profile_id: str,
-    display_name: str,
-    server_url: str,
-    workspace_root: Path | None,
-    release_profile: Path | None,
-) -> None:
-    store = LocalProfileStore(load_profile_root(release_profile))
-    candidate = new_local_profile(
-        profile_id=profile_id,
-        display_name=display_name,
-        server_url=server_url,
-        workspace_root=workspace_root
-        or default_profile_workspace_root(profile_id),
-    )
-    try:
-        profile = store.load(profile_id)
-    except ValueError:
-        profile = store.save(candidate)
-    else:
-        stable = ("display_name", "server", "workspace_root")
-        if any(profile[key] != candidate[key] for key in stable):
-            raise ValueError(
-                "existing profile configuration differs; use an explicit "
-                "profile update"
-            )
-    store.ensure_workspace_root(profile_id)
-    click.echo(_json(profile))
-
-
 @client_profile.command("create")
 @click.option("--profile-id", required=True)
 @click.option("--display-name", required=True)
 @click.option("--server-url", required=True)
-@click.option(
-    "--workspace-root",
-    type=click.Path(file_okay=False, path_type=Path),
-)
 @click.option("--agent-id", default="")
 @click.option(
     "--role",
@@ -176,7 +101,6 @@ def create_profile(
     profile_id: str,
     display_name: str,
     server_url: str,
-    workspace_root: Path | None,
     agent_id: str,
     role: str,
     principal_ref: str,
@@ -189,7 +113,6 @@ def create_profile(
         profile_id=profile_id,
         display_name=display_name,
         server_url=server_url,
-        workspace_root=workspace_root,
         agent_id=agent_id,
         role=role,
         principal_ref=principal_ref,
@@ -265,148 +188,6 @@ def show_user_layout(
     )))
 
 
-@profile_user_layout.group("migration")
-def user_layout_migration() -> None:
-    """Move canonical and Profile roots as one recoverable transaction."""
-
-
-@profile_user_layout.group("compact")
-def user_layout_compaction() -> None:
-    """Compact verified legacy quarantine into rebuildable evidence."""
-
-
-@user_layout_compaction.command("plan")
-@click.argument("migration_id")
-@click.option(
-    "--output",
-    required=True,
-    type=click.Path(dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def plan_user_layout_compaction(
-    migration_id: str,
-    output: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = plan_quarantine_compaction(
-        load_profile_root(release_profile), migration_id
-    )
-    write_json(output, plan)
-    click.echo(_json(plan))
-
-
-@user_layout_compaction.command("apply")
-@click.argument(
-    "plan_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def apply_user_layout_compaction(
-    plan_path: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = read_json(plan_path)
-    if not isinstance(plan, dict):
-        raise ValueError("legacy quarantine compaction plan is invalid")
-    click.echo(_json(apply_quarantine_compaction(
-        load_profile_root(release_profile), plan
-    )))
-
-
-@user_layout_compaction.command("verify")
-@click.argument("plan_hash")
-@_root_option
-@friendly_errors
-def verify_user_layout_compaction(
-    plan_hash: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(verify_quarantine_compaction(
-        load_profile_root(release_profile), plan_hash
-    )))
-
-
-@user_layout_compaction.command("rollback")
-@click.argument("plan_hash")
-@_root_option
-@friendly_errors
-def rollback_user_layout_compaction(
-    plan_hash: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(rollback_quarantine_compaction(
-        load_profile_root(release_profile), plan_hash
-    )))
-
-
-@user_layout_migration.command("plan")
-@click.option("--principal", "principal_ref", required=True)
-@click.option(
-    "--output",
-    required=True,
-    type=click.Path(dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def plan_user_layout(
-    principal_ref: str,
-    output: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = plan_user_layout_migration(
-        load_profile_root(release_profile), principal_ref
-    )
-    write_json(output, plan)
-    click.echo(_json(plan))
-
-
-@user_layout_migration.command("apply")
-@click.argument(
-    "plan_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def apply_user_layout(
-    plan_path: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = read_json(plan_path)
-    if not isinstance(plan, dict):
-        raise ValueError("principal user layout migration plan is invalid")
-    click.echo(_json(apply_user_layout_migration(
-        load_profile_root(release_profile), plan
-    )))
-
-
-@user_layout_migration.command("verify")
-@click.argument("migration_id")
-@_root_option
-@friendly_errors
-def verify_user_layout(
-    migration_id: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(verify_user_layout_migration(
-        load_profile_root(release_profile), migration_id
-    )))
-
-
-@user_layout_migration.command("rollback")
-@click.argument("migration_id")
-@_root_option
-@friendly_errors
-def rollback_user_layout(
-    migration_id: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(rollback_user_layout_migration(
-        load_profile_root(release_profile), migration_id
-    )))
-
-
 @client_profile.command("bootstrap")
 @click.option("--profile-id", required=True)
 @click.option("--display-name", required=True)
@@ -418,10 +199,6 @@ def rollback_user_layout(
     default="research",
 )
 @click.option("--principal-ref", default="")
-@click.option(
-    "--workspace-root",
-    type=click.Path(file_okay=False, path_type=Path),
-)
 @_root_option
 @friendly_errors
 def bootstrap_profile(
@@ -431,7 +208,6 @@ def bootstrap_profile(
     agent_id: str,
     role: str,
     principal_ref: str,
-    workspace_root: Path | None,
     release_profile: Path | None,
 ) -> None:
     """Idempotently discover, claim, and register one local Agent profile."""
@@ -448,8 +224,9 @@ def bootstrap_profile(
         profile_id=profile_id,
         display_name=display_name,
         server_url=server_url,
-        workspace_root=workspace_root
-        or default_user_profile_root(principal_ref, profile_id),
+        workspace_root=default_user_profile_root(
+            principal_ref, profile_id
+        ),
         principal_ref=principal_ref,
     )
     try:
@@ -659,158 +436,6 @@ def upsert_profile_history(
     ).upsert_research_record(profile_id, value)))
 
 
-@client_profile.group("workspace")
-def profile_workspace() -> None:
-    """Plan and audit visible local factor workspaces."""
-
-
-@client_profile.group("personal-workspace")
-def profile_personal_workspace() -> None:
-    """Manage the canonical personal factor workspace."""
-
-
-@profile_personal_workspace.command("show")
-@click.option("--principal", "principal_ref", required=True)
-@_root_option
-@friendly_errors
-def show_personal_workspace(
-    principal_ref: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(personal_workspace_status(
-        load_profile_root(release_profile), principal_ref
-    )))
-
-
-@profile_personal_workspace.group("migration")
-def personal_workspace_migration() -> None:
-    """Relocate a canonical personal factor Git workspace safely."""
-
-
-@profile_personal_workspace.group("cleanup")
-def personal_workspace_cleanup() -> None:
-    """Audit legacy workspaces before any gated cleanup."""
-
-
-@personal_workspace_cleanup.command("plan")
-@click.option(
-    "--workspace",
-    "workspaces",
-    multiple=True,
-    required=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-)
-@click.option(
-    "--output",
-    required=True,
-    type=click.Path(dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def plan_legacy_personal_workspace_cleanup(
-    workspaces: tuple[Path, ...],
-    output: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = plan_legacy_workspace_cleanup(
-        load_profile_root(release_profile), list(workspaces)
-    )
-    write_json(output, plan)
-    click.echo(_json(plan))
-
-
-@personal_workspace_cleanup.command("purge")
-@click.argument(
-    "plan_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def purge_legacy_personal_workspaces(
-    plan_path: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = read_json(plan_path)
-    if not isinstance(plan, dict):
-        raise ValueError("legacy workspace cleanup plan is invalid")
-    click.echo(_json(purge_legacy_workspaces(
-        load_profile_root(release_profile), plan
-    )))
-
-
-@personal_workspace_migration.command("plan")
-@click.option("--principal", "principal_ref", required=True)
-@click.option(
-    "--target",
-    type=click.Path(file_okay=False, path_type=Path),
-)
-@click.option(
-    "--output",
-    required=True,
-    type=click.Path(dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def plan_personal_workspace(
-    principal_ref: str,
-    target: Path | None,
-    output: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = plan_personal_workspace_migration(
-        load_profile_root(release_profile),
-        principal_ref,
-        target=target,
-    )
-    write_json(output, plan)
-    click.echo(_json(plan))
-
-
-@personal_workspace_migration.command("apply")
-@click.argument(
-    "plan_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def apply_personal_workspace(
-    plan_path: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = read_json(plan_path)
-    if not isinstance(plan, dict):
-        raise ValueError("personal workspace migration plan is invalid")
-    click.echo(_json(apply_personal_workspace_migration(
-        load_profile_root(release_profile), plan
-    )))
-
-
-@personal_workspace_migration.command("verify")
-@click.argument("migration_id")
-@_root_option
-@friendly_errors
-def verify_personal_workspace(
-    migration_id: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(verify_personal_workspace_migration(
-        load_profile_root(release_profile), migration_id
-    )))
-
-
-@personal_workspace_migration.command("rollback")
-@click.argument("migration_id")
-@_root_option
-@friendly_errors
-def rollback_personal_workspace(
-    migration_id: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(rollback_personal_workspace_migration(
-        load_profile_root(release_profile), migration_id
-    )))
-
-
 @client_profile.group("factor-worktree")
 def profile_factor_worktree() -> None:
     """Bind isolated profile worktrees to one canonical factor Git repo."""
@@ -830,6 +455,11 @@ def register_canonical_factor_repo(
     owner_ref: str,
     release_profile: Path | None,
 ) -> None:
+    expected = default_user_factor_library(owner_ref).resolve()
+    if path.expanduser().resolve() != expected:
+        raise ValueError(
+            "canonical factor library must use the unified user layout"
+        )
     root = load_profile_root(release_profile)
     click.echo(_json(
         CanonicalFactorRepoStore(root).register(path, owner_ref=owner_ref)
@@ -942,171 +572,6 @@ def rollback_profile_factor_worktree(
 ) -> None:
     click.echo(_json(rollback_factor_worktree_binding(
         load_profile_root(release_profile), profile_id, binding_id
-    )))
-
-
-@profile_workspace.command("plan")
-@click.argument("profile_id")
-@click.option(
-    "--workspace",
-    "workspace_specs",
-    type=(str, click.Path(exists=True, file_okay=False, path_type=Path),
-          click.Choice(["owner", "granted", "read_only"]), str),
-    multiple=True,
-    required=True,
-    metavar="ID SOURCE ACCESS_MODE SERVER_REF",
-)
-@click.option(
-    "--target-root",
-    type=click.Path(file_okay=False, path_type=Path),
-)
-@click.option(
-    "--output",
-    required=True,
-    type=click.Path(dir_okay=False, path_type=Path),
-)
-@friendly_errors
-def plan_profile_workspace(
-    profile_id: str,
-    workspace_specs: tuple[tuple[str, Path, str, str], ...],
-    target_root: Path | None,
-    output: Path,
-) -> None:
-    plan = plan_workspace_migration(
-        profile_id,
-        target_root or default_profile_workspace_root(profile_id),
-        [
-            {
-                "workspace_id": workspace_id,
-                "source": str(source),
-                "access_mode": access_mode,
-                "server_workspace_ref": server_ref,
-            }
-            for workspace_id, source, access_mode, server_ref
-            in workspace_specs
-        ],
-    )
-    write_json(output, plan)
-    click.echo(_json(plan))
-
-
-@profile_workspace.command("apply")
-@click.argument(
-    "plan_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def apply_profile_workspace(
-    plan_path: Path,
-    release_profile: Path | None,
-) -> None:
-    plan = read_json(plan_path)
-    if not isinstance(plan, dict):
-        raise ValueError("workspace migration plan is invalid")
-    root = load_profile_root(release_profile)
-    click.echo(_json(apply_workspace_migration(root, plan)))
-
-
-@profile_workspace.command("verify")
-@click.argument("profile_id")
-@_root_option
-@friendly_errors
-def verify_profile_workspace(
-    profile_id: str,
-    release_profile: Path | None,
-) -> None:
-    root = load_profile_root(release_profile)
-    click.echo(_json(verify_workspace_migration(root, profile_id)))
-
-
-@profile_workspace.command("rollback")
-@click.argument("profile_id")
-@click.argument("migration_id")
-@_root_option
-@friendly_errors
-def rollback_profile_workspace(
-    profile_id: str,
-    migration_id: str,
-    release_profile: Path | None,
-) -> None:
-    root = load_profile_root(release_profile)
-    click.echo(_json(rollback_workspace_migration(
-        root, profile_id, migration_id
-    )))
-
-
-@profile_workspace.command("repair-plan")
-@click.argument("profile_id")
-@click.argument("workspace_id")
-@click.option(
-    "--output",
-    required=True,
-    type=click.Path(dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def plan_profile_workspace_repair(
-    profile_id: str,
-    workspace_id: str,
-    output: Path,
-    release_profile: Path | None,
-) -> None:
-    """Preview repair of an already materialized legacy workspace."""
-    plan = plan_workspace_repair(
-        load_profile_root(release_profile), profile_id, workspace_id
-    )
-    write_json(output, plan)
-    click.echo(_json(plan))
-
-
-@profile_workspace.command("repair-apply")
-@click.argument(
-    "plan_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def apply_profile_workspace_repair(
-    plan_path: Path,
-    release_profile: Path | None,
-) -> None:
-    """Atomically repair a previewed legacy workspace."""
-    plan = read_json(plan_path)
-    if not isinstance(plan, dict):
-        raise ValueError("workspace repair plan is invalid")
-    click.echo(_json(apply_workspace_repair(
-        load_profile_root(release_profile), plan
-    )))
-
-
-@profile_workspace.command("repair-verify")
-@click.argument("profile_id")
-@click.argument("repair_id")
-@_root_option
-@friendly_errors
-def verify_profile_workspace_repair(
-    profile_id: str,
-    repair_id: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(verify_workspace_repair(
-        load_profile_root(release_profile), profile_id, repair_id
-    )))
-
-
-@profile_workspace.command("repair-rollback")
-@click.argument("profile_id")
-@click.argument("repair_id")
-@_root_option
-@friendly_errors
-def rollback_profile_workspace_repair(
-    profile_id: str,
-    repair_id: str,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(rollback_workspace_repair(
-        load_profile_root(release_profile), profile_id, repair_id
     )))
 
 

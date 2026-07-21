@@ -22,7 +22,7 @@ DEPENDENCIES = (
     "rich==15.0.0",
 )
 PYINSTALLER_VERSION = "6.21.0"
-PYRIGHT_VERSION = "1.1.410"
+PYRIGHT_VERSION = "1.1.411"
 
 
 def build_python_assets(repo: Path, output: Path) -> list[Path]:

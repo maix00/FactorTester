@@ -52,27 +52,31 @@ def test_client_cli_exposes_generic_profile_and_adapter_commands(
 ) -> None:
     root = tmp_path / "client-support"
     monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     runner = CliRunner()
 
     result = runner.invoke(cli, [
-        "client", "profile", "init",
+        "client", "profile", "create",
         "--profile-id", "research-a",
         "--display-name", "Research A",
         "--server-url", "http://127.0.0.1:8123",
-        "--workspace-root", str(tmp_path / "workspace"),
+        "--principal-ref", "18717974771",
     ])
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["profile_id"] == "research-a"
-    workspace = tmp_path / "workspace"
+    assert json.loads(result.output)["profile"]["profile_id"] == "research-a"
+    workspace = (
+        tmp_path / "Documents/FactorTester/users/18717974771"
+        / "profiles/research-a"
+    )
     assert workspace.is_dir()
     assert workspace.stat().st_mode & 0o777 == 0o700
     repeated = runner.invoke(cli, [
-        "client", "profile", "init",
+        "client", "profile", "create",
         "--profile-id", "research-a",
         "--display-name", "Research A",
         "--server-url", "http://127.0.0.1:8123",
-        "--workspace-root", str(workspace),
+        "--principal-ref", "18717974771",
     ])
     assert repeated.exit_code == 0, repeated.output
     assert runner.invoke(cli, ["client", "profile", "list"]).exit_code == 0
@@ -112,6 +116,7 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
 ) -> None:
     root = tmp_path / "client-support"
     monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(
         FactorTesterClient,
         "current_principal",
@@ -155,7 +160,6 @@ def test_bootstrap_claims_isolated_agents_with_shared_library_provenance(
             "--server-url", "http://127.0.0.1:8000",
             "--agent-id", agent_id,
             "--principal-ref", "18717974771",
-            "--workspace-root", str(tmp_path / "profiles" / profile_id),
         ])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)

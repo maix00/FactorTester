@@ -29,7 +29,7 @@ def _bundled_pyright(monkeypatch):
         factor_worktree,
         "run_bundled_pyright",
         lambda _root: {
-            "version": "1.1.410",
+            "version": "1.1.411",
             "returncode": 0,
             "files_analyzed": 2,
             "error_count": 0,
@@ -49,8 +49,11 @@ def _git(root: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def _canonical(root: Path) -> tuple[Path, str]:
-    repo = root / "canonical"
+def _canonical(
+    root: Path,
+    name: str = "canonical",
+) -> tuple[Path, str]:
+    repo = root / name
     repo.mkdir()
     _git(repo, "init", "-b", "download")
     _git(repo, "config", "user.email", "tests@example.invalid")
@@ -227,10 +230,19 @@ def test_collisions_and_post_plan_changes_fail_closed(tmp_path: Path) -> None:
     ).returncode != 0
 
 
-def test_cli_requires_preview_and_keeps_sync_manual(tmp_path: Path) -> None:
-    repo, _ = _canonical(tmp_path)
+def test_cli_requires_preview_and_keeps_sync_manual(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    user_root = (
+        tmp_path / "Documents/FactorTester/users" / OWNER
+    )
+    canonical_parent = user_root / "personal-workspace"
+    canonical_parent.mkdir(parents=True)
+    repo, _ = _canonical(canonical_parent, "factor-library")
     client_root = tmp_path / "support"
-    _profile(LocalProfileStore(client_root), tmp_path, "maxa")
+    _profile(LocalProfileStore(client_root), user_root, "maxa")
     monkey_profile = tmp_path / "release-profile.json"
     monkey_profile.write_text(json.dumps({
         "release": {"install_root": str(client_root)}

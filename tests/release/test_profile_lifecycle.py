@@ -28,7 +28,7 @@ def _bundled_pyright(monkeypatch):
         factor_worktree,
         "run_bundled_pyright",
         lambda _root: {
-            "version": "1.1.410",
+            "version": "1.1.411",
             "returncode": 0,
             "files_analyzed": 2,
             "error_count": 0,
@@ -73,19 +73,23 @@ def _canonical(root: Path) -> Path:
 
 def test_cli_create_and_lifecycle_receipts_are_idempotent(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     client_root = tmp_path / "support"
     release_profile = tmp_path / "release.json"
     release_profile.write_text(json.dumps({
         "release": {"install_root": str(client_root)}
     }))
-    workspace = tmp_path / "maxa"
+    workspace = (
+        tmp_path / "Documents/FactorTester/users" / OWNER
+        / "profiles/maxa"
+    )
     args = [
         "client", "profile", "create",
         "--profile-id", "maxa",
         "--display-name", "MaxA",
         "--server-url", "http://127.0.0.1:8000",
-        "--workspace-root", str(workspace),
         "--agent-id", "research-a",
         "--role", "research",
         "--principal-ref", OWNER,
@@ -119,15 +123,19 @@ def test_cli_create_and_lifecycle_receipts_are_idempotent(
 
 def test_delete_refuses_dirty_worktree_and_retains_git_history(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     client_root = tmp_path / "support"
-    workspace = tmp_path / "maxa"
+    workspace = (
+        tmp_path / "Documents/FactorTester/users" / OWNER
+        / "profiles/maxa"
+    )
     lifecycle = ProfileLifecycle(client_root)
     lifecycle.create(
         profile_id="maxa",
         display_name="MaxA",
         server_url="http://127.0.0.1:8000",
-        workspace_root=workspace,
         principal_ref=OWNER,
     )
     repo = _canonical(tmp_path)
