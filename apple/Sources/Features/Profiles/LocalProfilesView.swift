@@ -7,12 +7,39 @@ struct LocalProfilesView: View {
 
     var body: some View {
         HSplitView {
-            List(controller.profiles, selection: $selectedID) { profile in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(profile.displayName)
-                    Text(profile.id).font(.caption).foregroundStyle(.secondary)
+            Group {
+                if controller.profiles.isEmpty {
+                    VStack(spacing: 10) {
+                        if controller.loadState == .loading {
+                            ProgressView().controlSize(.small)
+                            Text("正在读取本地 Profile…")
+                                .foregroundStyle(.secondary)
+                        } else if controller.loadState == .failed {
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundStyle(.orange)
+                            Text("本地 Profile 读取失败")
+                            Text("暂不判断为空，请稍后重试。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .foregroundStyle(.secondary)
+                            Text("尚无已注册 Profile")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(controller.profiles, selection: $selectedID) { profile in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(profile.displayName)
+                            Text(profile.id)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .tag(profile.id)
+                    }
                 }
-                .tag(profile.id)
             }
             .frame(minWidth: 170, idealWidth: 190)
 
