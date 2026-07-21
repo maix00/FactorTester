@@ -53,12 +53,15 @@ final class ResearchDirectoryController: ObservableObject {
                     binding.workspaceRef
                 )
                 loaded += page.items.map { summary in
-                    ResearchDirectoryItem(
+                    let owners = binding.profiles.filter {
+                        $0.owns(workPackageRef: summary.workPackageRef)
+                    }
+                    return ResearchDirectoryItem(
                         serverURL: binding.serverURL,
                         workspaceID: binding.workspaceID,
                         workspaceRef: binding.workspaceRef,
-                        profileIDs: binding.profiles.map(\.id),
-                        profileNames: binding.profiles.map(\.displayName),
+                        profileIDs: owners.map(\.id),
+                        profileNames: owners.map(\.displayName),
                         summary: summary
                     )
                 }
@@ -211,10 +214,17 @@ struct ProfileResearchOverview: View {
                     )
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    Label(
-                        "关联 Profile：\(item.profileNames.joined(separator: "、"))",
-                        systemImage: "person.2"
-                    )
+                    Label {
+                        Text(
+                            item.profileNames.isEmpty
+                                ? "Profile 归属不可用"
+                                : "关联 Profile：\(item.profileNames.joined(separator: "、"))"
+                        )
+                    } icon: {
+                        Image(systemName: item.profileNames.isEmpty
+                            ? "person.crop.circle.badge.questionmark"
+                            : "person.2")
+                    }
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }

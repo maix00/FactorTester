@@ -126,7 +126,11 @@ def test_client_research_checkpoint_publish_accepts_bounded_file(
 ) -> None:
     captured = {}
     carrier_path = tmp_path / "checkpoint.json"
+    narrative_path = tmp_path / "narrative.json"
     carrier_path.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
+    narrative_path.write_text(
+        json.dumps({"language": "zh-Hans"}), encoding="utf-8"
+    )
     monkeypatch.setattr(
         client_research,
         "load_profile_root",
@@ -142,6 +146,7 @@ def test_client_research_checkpoint_publish_accepts_bounded_file(
         "client", "research", "checkpoint", "publish", "maxa",
         "--agent-id", "research-maxa",
         "--checkpoint-file", str(carrier_path),
+        "--narrative-file", str(narrative_path),
         "--json",
     ])
 
@@ -152,6 +157,7 @@ def test_client_research_checkpoint_publish_accepts_bounded_file(
         "profile_id": "maxa",
         "agent_id": "research-maxa",
         "carrier": {"schema_version": 1},
+        "narrative": {"language": "zh-Hans"},
     }
 
 
@@ -160,6 +166,10 @@ def test_client_research_checkpoint_publish_accepts_stdin(
     tmp_path,
 ) -> None:
     captured = {}
+    narrative_path = tmp_path / "narrative.json"
+    narrative_path.write_text(
+        json.dumps({"language": "zh-Hans"}), encoding="utf-8"
+    )
     monkeypatch.setattr(
         client_research,
         "load_profile_root",
@@ -177,6 +187,7 @@ def test_client_research_checkpoint_publish_accepts_stdin(
             "client", "research", "checkpoint", "publish", "maxa",
             "--agent-id", "research-maxa",
             "--checkpoint-file", "-",
+            "--narrative-file", str(narrative_path),
             "--json",
         ],
         input='{"schema_version": 1}',
@@ -185,6 +196,7 @@ def test_client_research_checkpoint_publish_accepts_stdin(
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {"changed": False}
     assert captured["carrier"] == {"schema_version": 1}
+    assert captured["narrative"] == {"language": "zh-Hans"}
 
 
 def test_client_research_checkpoint_rejects_oversized_input_before_publish(
@@ -192,6 +204,10 @@ def test_client_research_checkpoint_rejects_oversized_input_before_publish(
     tmp_path,
 ) -> None:
     called = False
+    narrative_path = tmp_path / "narrative.json"
+    narrative_path.write_text(
+        json.dumps({"language": "zh-Hans"}), encoding="utf-8"
+    )
 
     def publish(**kwargs):
         nonlocal called
@@ -205,6 +221,7 @@ def test_client_research_checkpoint_rejects_oversized_input_before_publish(
             "client", "research", "checkpoint", "publish", "maxa",
             "--agent-id", "research-maxa",
             "--checkpoint-file", "-",
+            "--narrative-file", str(narrative_path),
         ],
         input="x" * (96 * 1024 + 1),
     )

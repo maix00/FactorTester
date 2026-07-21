@@ -5,6 +5,7 @@ struct WorkPackageResearchView: View {
     let profiles: [LocalProfileModel]
     let primaryProfile: LocalProfileModel
     let isActive: Bool
+    let onCheckpointChange: @MainActor (String) -> Void
 
     @StateObject private var controller: ProfileLiveProcessController
     @State private var branchTask: Task<Void, Never>?
@@ -13,17 +14,20 @@ struct WorkPackageResearchView: View {
         item: ResearchDirectoryItem,
         profiles: [LocalProfileModel],
         primaryProfile: LocalProfileModel,
-        isActive: Bool
+        isActive: Bool,
+        onCheckpointChange: @escaping @MainActor (String) -> Void
     ) {
         self.item = item
         self.profiles = profiles
         self.primaryProfile = primaryProfile
         self.isActive = isActive
+        self.onCheckpointChange = onCheckpointChange
         _controller = StateObject(
             wrappedValue: ProfileLiveProcessController(
                 profile: primaryProfile,
                 pinnedSummary: item.summary,
-                initialWorkspaceID: item.workspaceID
+                initialWorkspaceID: item.workspaceID,
+                onCheckpointChange: onCheckpointChange
             )
         )
     }

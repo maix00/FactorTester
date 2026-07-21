@@ -243,9 +243,13 @@ def _research_artifact(value: Any) -> dict[str, Any]:
         "section_refs",
     }
     fields = legacy_fields | {"index_ref"}
+    journal_fields = fields | {"journal_ref"}
     if (
         not isinstance(value, dict)
-        or set(value) not in {frozenset(legacy_fields), frozenset(fields)}
+        or set(value) not in {
+            frozenset(legacy_fields), frozenset(fields),
+            frozenset(journal_fields),
+        }
     ):
         raise ValueError("research artifact fields are invalid")
     format_name = _text(value.get("format"), "artifact.format")
@@ -256,6 +260,7 @@ def _research_artifact(value: Any) -> dict[str, Any]:
         raise ValueError("research artifact status is unsupported")
     local_ref = str(value.get("local_ref") or "")
     index_ref = str(value.get("index_ref") or "")
+    journal_ref = str(value.get("journal_ref") or "")
     section_refs = _array(value.get("section_refs"), "section_refs")
     _reference(
         local_ref,
@@ -267,7 +272,12 @@ def _research_artifact(value: Any) -> dict[str, Any]:
         field="artifact.index_ref",
         schemes={"file", "artifact"},
     )
-    return {
+    _reference(
+        journal_ref,
+        field="artifact.journal_ref",
+        schemes={"file", "artifact"},
+    )
+    result = {
         "artifact_ref": _text(
             value.get("artifact_ref"), "artifact.artifact_ref"
         ),
@@ -278,6 +288,9 @@ def _research_artifact(value: Any) -> dict[str, Any]:
         "index_ref": index_ref,
         "section_refs": [_deep_link(item) for item in section_refs],
     }
+    if "journal_ref" in value:
+        result["journal_ref"] = journal_ref
+    return result
 
 
 def _deep_link(value: Any) -> dict[str, str]:
@@ -285,7 +298,10 @@ def _deep_link(value: Any) -> dict[str, str]:
     if not isinstance(value, dict) or set(value) != fields:
         raise ValueError("research deep link fields are invalid")
     kind = _text(value.get("kind"), "deep_link.kind")
-    if kind not in {"trial_plan", "obligation", "evidence", "report_section"}:
+    if kind not in {
+        "checkpoint", "trial_plan", "obligation", "claim", "evidence",
+        "job", "run", "delta", "report_section",
+    }:
         raise ValueError("research deep link kind is unsupported")
     return {
         key: _text(value.get(key), f"deep_link.{key}")

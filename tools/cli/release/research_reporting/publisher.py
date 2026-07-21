@@ -14,10 +14,12 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ..local_profile import LocalProfileStore
+from .journal import build_fragment, content_hash
 from .writer import render_branch_report
 
 
 MAX_CARRIER_BYTES = 64 * 1024
+MAX_NARRATIVE_BYTES = 64 * 1024
 MAX_ITEMS = 16
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -46,6 +48,14 @@ _OBLIGATION_FIELDS = {
 }
 _OBLIGATION_CHANGE_FIELDS = {"obligation_id", "from_state", "to_state"}
 _CLAIM_CHANGE_FIELDS = {"claim_id", "from_state", "to_state"}
+_NARRATIVE_FIELDS = {"schema_version", "language", "title", "sections"}
+_NARRATIVE_SECTION_FIELDS = {"section_id", "title", "body", "links"}
+_NARRATIVE_LINK_FIELDS = {"link_id", "kind", "target_ref"}
+_CHINESE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+_LINK_KINDS = {
+    "checkpoint", "trial_plan", "obligation", "claim", "evidence",
+    "job", "run", "delta", "report_section",
+}
 _PROHIBITED_KEYS = {
     "api_key", "credential", "credentials", "expression_tree",
     "factor_source", "formula", "password", "raw_stderr", "raw_stdout",
@@ -59,9 +69,13 @@ def publish_research_checkpoint(
     profile_id: str,
     agent_id: str,
     carrier: dict[str, Any],
+    narrative: dict[str, Any],
 ) -> dict[str, Any]:
     """Materialize one checkpoint and update its existing local record."""
     value = _canonical_carrier(carrier)
+    narrative_value = _canonical_narrative(narrative, value)
+    carrier_hash = content_hash(value)
+    narrative_hash = content_hash(narrative_value)
     store = LocalProfileStore(client_root)
     profile = store.load(profile_id)
     agent = _find_agent(profile, agent_id)
@@ -121,34 +135,50 @@ def publish_research_checkpoint(
             incoming_timestamp != previous_timestamp
         ):
             raise ValueError("checkpoint identity has a conflicting timestamp")
-        if value["checkpoint_ref"] == previous_checkpoint:
-            existing_artifact = _existing_branch_artifact(
-                record,
-                work_package_id=work_package_id,
-                branch_id=branch_id,
-                checkpoint_ref=value["checkpoint_ref"],
-            )
-            if existing_artifact is not None:
-                return {
-                    "changed": False,
-                    "report_changed": False,
-                    "profile_changed": False,
-                    "checkpoint_ref": value["checkpoint_ref"],
-                    "artifact": existing_artifact,
-                }
-
     snapshot = _report_snapshot(
         value,
+        narrative=narrative_value,
         workspace_id=workspace_id,
         work_package_id=work_package_id,
         branch_id=branch_id,
         factor_family_versions=record["factor_family_versions"],
         scope_identity=scope_identity,
     )
+    fragment = build_fragment(
+        checkpoint_ref=value["checkpoint_ref"],
+        created_at=value["latest_transition"]["created_at"],
+        carrier_hash=carrier_hash,
+        narrative_hash=narrative_hash,
+        sections=snapshot["sections"],
+        evidence_refs=snapshot["evidence_refs"],
+        gaps=snapshot["gaps"],
+    )
     report = render_branch_report(
         snapshot,
         workspace_root=Path(profile["workspace_root"]),
+        journal_fragment=fragment,
     )
+    if (
+        previous_checkpoint == value["checkpoint_ref"]
+        and not report["journal_fragment_changed"]
+    ):
+        existing_artifact = _existing_branch_artifact(
+            record,
+            work_package_id=work_package_id,
+            branch_id=branch_id,
+            checkpoint_ref=value["checkpoint_ref"],
+        )
+        if existing_artifact is not None:
+            return {
+                "changed": bool(report["changed"]),
+                "report_changed": bool(report["changed"]),
+                "profile_changed": False,
+                "checkpoint_ref": value["checkpoint_ref"],
+                "artifact": existing_artifact,
+                "carrier_hash": carrier_hash,
+                "narrative_hash": narrative_hash,
+                "section_hash": fragment["section_hash"],
+            }
     descriptor = deepcopy(report["local_artifact_descriptor"])
     descriptor["section_refs"] = [
         item for item in descriptor["section_refs"]
@@ -180,6 +210,9 @@ def publish_research_checkpoint(
         "profile_changed": profile_changed,
         "checkpoint_ref": value["checkpoint_ref"],
         "artifact": descriptor,
+        "carrier_hash": carrier_hash,
+        "narrative_hash": narrative_hash,
+        "section_hash": fragment["section_hash"],
     }
 
 
@@ -279,7 +312,8 @@ def _canonical_carrier(carrier: Any) -> dict[str, Any]:
 
 
 def _report_snapshot(
-    carrier: dict[str, Any], *, workspace_id: str, work_package_id: str,
+    carrier: dict[str, Any], *, narrative: dict[str, Any],
+    workspace_id: str, work_package_id: str,
     branch_id: str, factor_family_versions: list[str],
     scope_identity: dict[str, Any],
 ) -> dict[str, Any]:
@@ -294,79 +328,32 @@ def _report_snapshot(
     checkpoint_key = hashlib.sha256(
         carrier["checkpoint_ref"].encode("utf-8")
     ).hexdigest()[:16]
-    state_links = _links([
-        ("evidence", carrier["checkpoint_ref"]),
-        ("evidence", carrier["research_cycle_ref"]),
-        ("evidence", transition["edge_ref"]),
-        *(("trial_plan", ref) for ref in transition["trial_plan_refs"]),
-        *(("evidence", item["claim_ref"]) for item in carrier["claims"]),
-        *(("obligation", item["obligation_ref"])
-          for item in carrier["open_obligations"]),
-        *(("obligation", ref) for ref in transition["obligation_refs"]),
-        *(("evidence", ref) for ref in transition["claim_refs"]),
-    ], "state")
-    claims = carrier["claims"]
-    obligations = carrier["open_obligations"]
-    body = [
-        f"Product group: {carrier['product_group']}",
-        f"Current node: {carrier['current_node']}",
-        f"Transition: {transition['from_node']} -> {transition['to_node']}",
-        "Scope fields: "
-        + ", ".join(f"`{item}`" for item in scope_identity["fields"]),
-        f"Canonical scope hash: `{scope_identity['scope_hash']}`",
-    ]
-    if claims:
-        body.extend([
-            "Claims:",
-            *(f"- {item['claim_type']}: {item['evidence_state']}"
-              for item in claims),
-        ])
-    if obligations:
-        body.extend([
-            "Open obligations:",
-            *(f"- {item['question_summary']} [{item['materiality']}]"
-              for item in obligations),
-        ])
-    if transition["obligation_changes"]:
-        body.extend([
-            "Obligation changes:",
-            *(
-                f"- {item['obligation_id']}: "
-                f"{item.get('from_state', '')} -> {item.get('to_state', '')}"
-                for item in transition["obligation_changes"]
-            ),
-        ])
-    if transition["claim_changes"]:
-        body.extend([
-            "Claim evidence changes:",
-            *(
-                f"- {item['claim_id']}: "
-                f"{item.get('from_state', '')} -> {item.get('to_state', '')}"
-                for item in transition["claim_changes"]
-            ),
-        ])
-    if carrier["closure"] is not None:
-        body.append(
-            "Closure: "
-            + json.dumps(
-                carrier["closure"], ensure_ascii=False, sort_keys=True,
-            )
-        )
-    sections = [{
-        "section_id": f"checkpoint-{checkpoint_key}",
-        "title": f"Checkpoint {carrier['checkpoint_ref']}",
-        "body": "\n\n".join(body),
-        "evidence_refs": checkpoint_refs,
-        "asset_refs": [],
-        "links": state_links,
-        "created_at": transition["created_at"],
-    }]
+    sections = []
+    for section in narrative["sections"]:
+        links = list(section["links"])
+        links.append({
+            "link_id": f"checkpoint-{checkpoint_key}",
+            "kind": "checkpoint",
+            "target_ref": carrier["checkpoint_ref"],
+        })
+        sections.append({
+            "section_id": f"{checkpoint_key}-{section['section_id']}",
+            "title": section["title"],
+            "body": section["body"],
+            "evidence_refs": [
+                item["target_ref"] for item in links
+                if item["kind"] == "evidence"
+            ],
+            "asset_refs": [],
+            "links": links,
+            "created_at": transition["created_at"],
+        })
     return {
         "schema_version": 1,
         "workspace_id": workspace_id,
         "work_package_id": work_package_id,
         "branch_id": branch_id,
-        "title": carrier["title"],
+        "title": narrative["title"],
         "status": carrier["status"],
         "graph_ref": carrier["graph_ref"],
         "methodology_hash": carrier["methodology_hash"],
@@ -379,11 +366,116 @@ def _report_snapshot(
         "gaps": ([{
             "gap_ref": "report-gap:omitted-evidence",
             "reason": (
-                f"{carrier['omitted_evidence_count']} evidence reference(s) "
-                "were omitted from this bounded checkpoint carrier."
+                "受 checkpoint 载荷上限约束，有 "
+                f"{carrier['omitted_evidence_count']} 条证据引用未随本次载荷提供。"
             ),
         }] if carrier["omitted_evidence_count"] else []),
     }
+
+
+def _canonical_narrative(
+    narrative: Any,
+    carrier: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(narrative, dict) or set(narrative) != _NARRATIVE_FIELDS:
+        raise ValueError("local narrative fields are invalid")
+    encoded = json.dumps(
+        narrative, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    if len(encoded) > MAX_NARRATIVE_BYTES:
+        raise ValueError(
+            f"local narrative exceeds {MAX_NARRATIVE_BYTES} bytes"
+        )
+    if narrative["schema_version"] != 1 or narrative["language"] != "zh-Hans":
+        raise ValueError("local narrative language must be zh-Hans")
+    title = _zh_text(narrative["title"], "narrative.title", maximum=256)
+    sections = narrative["sections"]
+    if not isinstance(sections, list) or not sections or len(sections) > 8:
+        raise ValueError("local narrative sections must be a bounded array")
+    allowed_refs = _carrier_reference_allowlist(carrier)
+    result = []
+    seen_ids = set()
+    for item in sections:
+        if not isinstance(item, dict) or set(item) != _NARRATIVE_SECTION_FIELDS:
+            raise ValueError("local narrative section fields are invalid")
+        section_id = _safe_id(item["section_id"], "narrative.section_id")
+        if section_id in seen_ids:
+            raise ValueError("local narrative section_id must be unique")
+        seen_ids.add(section_id)
+        links = item["links"]
+        if not isinstance(links, list) or len(links) > MAX_ITEMS:
+            raise ValueError("local narrative links must be a bounded array")
+        projected_links = []
+        for link in links:
+            if not isinstance(link, dict) or set(link) != _NARRATIVE_LINK_FIELDS:
+                raise ValueError("local narrative link fields are invalid")
+            if link["kind"] not in _LINK_KINDS:
+                raise ValueError("local narrative link kind is invalid")
+            _safe_id(link["link_id"], "narrative.link_id")
+            _reference(link["target_ref"], "narrative.target_ref")
+            if link["target_ref"] not in allowed_refs:
+                raise ValueError(
+                    "narrative links must belong to the same checkpoint carrier"
+                )
+            projected_links.append(dict(link))
+        result.append({
+            "section_id": section_id,
+            "title": _zh_text(item["title"], "narrative.section.title"),
+            "body": _zh_body(item["body"]),
+            "links": projected_links,
+        })
+    return {
+        "schema_version": 1,
+        "language": "zh-Hans",
+        "title": title,
+        "sections": result,
+    }
+
+
+def _carrier_reference_allowlist(carrier: dict[str, Any]) -> set[str]:
+    transition = carrier["latest_transition"]
+    values = {
+        carrier["checkpoint_ref"], carrier["research_cycle_ref"],
+        transition["step_ref"], transition["edge_ref"],
+        *carrier["evidence_refs"], *carrier["job_refs"], *carrier["run_refs"],
+        *transition["evidence_refs"], *transition["trial_plan_refs"],
+        *transition["obligation_refs"], *transition["claim_refs"],
+        *transition["job_refs"], *transition["run_refs"],
+        *(item["claim_ref"] for item in carrier["claims"]),
+        *(item["obligation_ref"] for item in carrier["open_obligations"]),
+    }
+    values.update(
+        f"obligation:{item['obligation_id']}"
+        for item in transition["obligation_changes"]
+    )
+    values.update(
+        f"claim:{item['claim_id']}" for item in transition["claim_changes"]
+    )
+    return values
+
+
+def _zh_text(value: Any, field: str, maximum: int = 512) -> str:
+    text = _text(value, field, maximum=maximum)
+    if not _CHINESE.search(text):
+        raise ValueError(f"{field} must contain Simplified Chinese prose")
+    return text
+
+
+def _zh_body(value: Any) -> str:
+    text = _text(value, "narrative.section.body", maximum=4000)
+    in_code = False
+    for raw_line in text.splitlines() or [text]:
+        line = raw_line.strip()
+        if line.startswith("```"):
+            in_code = not in_code
+            continue
+        if not line or in_code:
+            continue
+        if not _CHINESE.search(line):
+            raise ValueError(
+                "narrative.section.body lines must contain Chinese prose"
+            )
+    return text
 
 
 def _find_agent(profile: dict[str, Any], agent_id: str) -> dict[str, Any]:

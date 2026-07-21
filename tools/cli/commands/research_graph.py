@@ -487,6 +487,11 @@ def continue_graph_branch(
 @click.option("--profile-id")
 @click.option("--agent-id")
 @click.option(
+    "--narrative-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="与本次 checkpoint 绑定的简体中文研究叙事 JSON。",
+)
+@click.option(
     "--release-profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
@@ -498,6 +503,7 @@ def advance_graph_branch(
     target_capability_resolution_file: Path | None,
     profile_id: str | None,
     agent_id: str | None,
+    narrative_file: Path | None,
     release_profile: Path | None,
 ) -> None:
     """提交证据并沿 Active Graph 的一条已声明边前进。"""
@@ -524,6 +530,15 @@ def advance_graph_branch(
         raise click.ClickException(
             "--profile-id and --agent-id must be provided together"
         )
+    if narrative_file is not None and not profile_id:
+        raise click.ClickException(
+            "--narrative-file requires --profile-id and --agent-id"
+        )
+    narrative = None
+    if narrative_file is not None:
+        narrative = json.loads(narrative_file.read_text(encoding="utf-8"))
+        if not isinstance(narrative, dict):
+            raise click.ClickException("local narrative must be a JSON object")
     client_root = load_profile_root(release_profile) if profile_id else None
     client = (
         _client_for_profile(client_root, profile_id)
@@ -539,12 +554,29 @@ def advance_graph_branch(
     report_checkpoint = branch.get("report_checkpoint")
     if profile_id and agent_id and report_checkpoint is not None:
         assert client_root is not None
+        if narrative is None:
+            click.echo(_json({
+                "branch": branch,
+                "local_report_sync": {
+                    "status": "required",
+                    "error_code": "local_narrative_required",
+                    "message": (
+                        "Server transition completed; a Simplified Chinese "
+                        "local narrative is required to publish the report."
+                    ),
+                    "checkpoint_ref": report_checkpoint.get(
+                        "checkpoint_ref"
+                    ),
+                },
+            }))
+            return
         try:
             report_sync = publish_research_checkpoint(
                 client_root=client_root,
                 profile_id=profile_id,
                 agent_id=agent_id,
                 carrier=report_checkpoint,
+                narrative=narrative,
             )
         except (OSError, ValueError) as exc:
             error_code = (

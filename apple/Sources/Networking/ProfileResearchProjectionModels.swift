@@ -71,6 +71,7 @@ struct ProfileResearchBranchSummary: Decodable, Identifiable {
     let currentNode: String
     let status: String
     let trialPlanRef: String?
+    let latestTraceRef: String?
     let updatedAt: Double
     let detailHref: String
     let reportLookupRef: String?
@@ -86,6 +87,7 @@ struct ProfileResearchBranchSummary: Decodable, Identifiable {
         case currentNode = "current_node"
         case status
         case trialPlanRef = "trial_plan_ref"
+        case latestTraceRef = "latest_trace_ref"
         case updatedAt = "updated_at"
         case detailHref = "detail_href"
         case reportLookupRef = "report_lookup_ref"
@@ -100,6 +102,7 @@ struct ProfileResearchDetail: Decodable {
     let currentNode: String
     let status: String
     let trialPlanRef: String?
+    let latestTraceRef: String?
     let reportLookupRef: String?
     let evidenceRefs: [String]
     let omittedEvidenceCount: Int
@@ -118,6 +121,7 @@ struct ProfileResearchDetail: Decodable {
         case currentNode = "current_node"
         case status
         case trialPlanRef = "trial_plan_ref"
+        case latestTraceRef = "latest_trace_ref"
         case reportLookupRef = "report_lookup_ref"
         case evidenceRefs = "evidence_refs"
         case omittedEvidenceCount = "omitted_evidence_count"

@@ -25,11 +25,11 @@ final class StubURLProtocol: URLProtocol {
 
 final class ProfileResearchServiceTests: XCTestCase {
     @MainActor
-    func testResearchDirectoryDeduplicatesSharedWorkspaceAcrossProfiles() async {
+    func testResearchDirectoryAssignsSharedWorkspaceResearchToExactProfile() async {
         let profiles = [
-            ("maxa", "http://EXAMPLE.test:8141/"),
-            ("maxb", "http://example.test:8141"),
-        ].map { profileID, serverURL in
+            ("maxa", "http://EXAMPLE.test:8141/", "i", "b"),
+            ("maxb", "http://example.test:8141", "other", "other"),
+        ].map { profileID, serverURL, instanceID, branchID in
             LocalProfileModel(json: [
                 "profile_id": profileID,
                 "display_name": profileID.uppercased(),
@@ -39,6 +39,20 @@ final class ProfileResearchServiceTests: XCTestCase {
                     "server_workspace_ref": "workspace:w",
                     "access_mode": "owner",
                     "owner_ref": "18717974771",
+                ]],
+                "agents": [[
+                    "agent_id": "research-\(profileID)",
+                    "role": "research",
+                    "scope": [
+                        "instance_id": instanceID,
+                        "branch_id": branchID,
+                    ],
+                ]],
+                "research_records": [[
+                    "record_id": "record-\(profileID)",
+                    "agent_id": "research-\(profileID)",
+                    "graph_instance_ref": "work-package:\(instanceID)",
+                    "graph_branch_ref": "graph-branch:\(instanceID):\(branchID)",
                 ]],
             ])
         }
@@ -60,8 +74,8 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertEqual(requests.first?.0.absoluteString, "http://example.test:8141")
         XCTAssertEqual(requests.first?.1, "workspace:w")
         XCTAssertEqual(controller.items.count, 1)
-        XCTAssertEqual(controller.items[0].profileIDs, ["maxa", "maxb"])
-        XCTAssertEqual(controller.items[0].profileNames, ["MAXA", "MAXB"])
+        XCTAssertEqual(controller.items[0].profileIDs, ["maxa"])
+        XCTAssertEqual(controller.items[0].profileNames, ["MAXA"])
         XCTAssertEqual(controller.items[0].summary.workPackageRef, "work-package:i")
     }
 
@@ -113,6 +127,17 @@ final class ProfileResearchServiceTests: XCTestCase {
                 "workspaces": [[
                     "workspace_id": profileID,
                     "server_workspace_ref": "workspace:\(profileID)",
+                ]],
+                "agents": [[
+                    "agent_id": "research-\(profileID)",
+                    "role": "research",
+                    "scope": ["instance_id": "i", "branch_id": "b"],
+                ]],
+                "research_records": [[
+                    "record_id": "record-\(profileID)",
+                    "agent_id": "research-\(profileID)",
+                    "graph_instance_ref": "work-package:i",
+                    "graph_branch_ref": "graph-branch:i:b",
                 ]],
             ])
         }
@@ -320,6 +345,7 @@ final class ProfileResearchServiceTests: XCTestCase {
 private final class FakeProjectionTransport: ProfileResearchTransport {
     var responses: [ResearchHTTPResponse]
     var eventCount = 0
+    var yieldsEvent = true
     private(set) var requests: [URLRequest] = []
 
     init(responses: [ResearchHTTPResponse]) {
@@ -337,7 +363,7 @@ private final class FakeProjectionTransport: ProfileResearchTransport {
         requests.append(request)
         return AsyncThrowingStream { continuation in
             eventCount += 1
-            continuation.yield(())
+            if yieldsEvent { continuation.yield(()) }
             continuation.finish()
         }
     }
@@ -386,17 +412,66 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         XCTAssertEqual(controller.timeline.count, 1)
     }
 
-    func testConditionalProjectionDoesNotPoll() async {
+    func testConditionalProjectionHonorsMinimumIntervalAndPublishesCheckpoint() async {
+        let changedDetail = response(
+            detailJSON(
+                refresh: #"{"mode":"stopped","terminal":true}"#,
+                node: "completed",
+                latestTraceRef: "trace:changed"
+            ),
+            etag: "\"detail-v2\""
+        )
+        let notModified = ResearchHTTPResponse(
+            data: Data(), statusCode: 304, etag: "\"timeline-v1\""
+        )
         let transport = FakeProjectionTransport(
             responses: fixtureResponses(
                 detailRefresh:
-                    #"{"mode":"conditional_etag","minimum_interval_seconds":1,"only_while_visible":true,"terminal":false}"#
-            )
+                    #"{"mode":"conditional_etag","minimum_interval_seconds":7,"only_while_visible":true,"terminal":false}"#
+            ) + [changedDetail, notModified]
         )
-        let controller = makeController(transport: transport)
+        var slept: [TimeInterval] = []
+        var checkpoints: [String] = []
+        let controller = makeController(
+            transport: transport,
+            sleep: { slept.append($0) },
+            onCheckpointChange: { checkpoints.append($0) }
+        )
         await controller.loadSelectedWorkspace()
         await controller.observeSelectedResearch()
-        XCTAssertEqual(transport.requests.count, 4)
+        XCTAssertEqual(slept, [7])
+        XCTAssertEqual(transport.requests.count, 6)
+        XCTAssertEqual(checkpoints, ["trace:changed"])
+    }
+
+    func testSSEEndingBeforeTerminalFallsBackToBoundedConditionalRefresh() async {
+        let changedDetail = response(
+            detailJSON(
+                refresh: #"{"mode":"stopped","terminal":true}"#,
+                node: "completed"
+            ),
+            etag: "\"detail-v2\""
+        )
+        let notModified = ResearchHTTPResponse(
+            data: Data(), statusCode: 304, etag: "\"timeline-v1\""
+        )
+        let transport = FakeProjectionTransport(
+            responses: fixtureResponses(
+                detailRefresh:
+                    #"{"mode":"job_sse","href":"/api/jobs/j/stream","terminal":false}"#
+            ) + [changedDetail, notModified]
+        )
+        transport.yieldsEvent = false
+        var slept: [TimeInterval] = []
+        let controller = makeController(
+            transport: transport,
+            sleep: { slept.append($0) }
+        )
+        await controller.loadSelectedWorkspace()
+        await controller.observeSelectedResearch()
+        XCTAssertEqual(transport.eventCount, 1)
+        XCTAssertEqual(slept, [5])
+        XCTAssertEqual(controller.detail?.currentNode, "completed")
     }
 
     func testPinnedWorkPackageSkipsDirectoryRequest() async throws {
@@ -437,7 +512,9 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
     }
 
     private func makeController(
-        transport: FakeProjectionTransport
+        transport: FakeProjectionTransport,
+        sleep: @escaping @MainActor (TimeInterval) async throws -> Void = { _ in },
+        onCheckpointChange: @escaping @MainActor (String) -> Void = { _ in }
     ) -> ProfileLiveProcessController {
         let profile = makeProfile()
         return ProfileLiveProcessController(
@@ -445,7 +522,9 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
             service: ProfileResearchService(
                 baseURL: URL(string: "http://example.test")!,
                 transport: transport
-            )
+            ),
+            observationSleep: sleep,
+            onCheckpointChange: onCheckpointChange
         )
     }
 
@@ -516,7 +595,8 @@ private func workPackageJSON() -> String {
 
 private func detailJSON(
     refresh: String,
-    node: String = "audit"
+    node: String = "audit",
+    latestTraceRef: String = "trace:s"
 ) -> String {
     """
     {"success":true,"research_ref":"work-package:i",
@@ -524,6 +604,7 @@ private func detailJSON(
      "label":"R",
      "current_node":"\(node)","status":"running",
      "trial_plan_ref":"trial-plan:t",
+     "latest_trace_ref":"\(latestTraceRef)",
      "report_lookup_ref":"graph-branch:i:b",
      "evidence_refs":["artifact:e"],"omitted_evidence_count":0,
      "research_cycle":{"claims":[],"obligations":[{

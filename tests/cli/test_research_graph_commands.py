@@ -495,6 +495,9 @@ def test_research_graph_advance_publishes_checkpoint_for_bound_profile(
     )
     evidence_file = tmp_path / "evidence.json"
     evidence_file.write_text(json.dumps({"ready": True}))
+    narrative_file = tmp_path / "narrative.json"
+    narrative = {"schema_version": 1, "language": "zh-Hans"}
+    narrative_file.write_text(json.dumps(narrative))
 
     result = CliRunner().invoke(cli, [
         "research-graph", "advance", "instance-1", "branch-1",
@@ -502,6 +505,7 @@ def test_research_graph_advance_publishes_checkpoint_for_bound_profile(
         "--evidence-file", str(evidence_file),
         "--profile-id", "maxa",
         "--agent-id", "research-maxa",
+        "--narrative-file", str(narrative_file),
     ])
 
     assert result.exit_code == 0
@@ -510,6 +514,7 @@ def test_research_graph_advance_publishes_checkpoint_for_bound_profile(
         "profile_id": "maxa",
         "agent_id": "research-maxa",
         "carrier": carrier,
+        "narrative": narrative,
     }
     assert selected_client == {
         "root": tmp_path / "client-support",
@@ -556,6 +561,11 @@ def test_research_graph_advance_reports_local_sync_failure_after_transition(
     )
     evidence_file = tmp_path / "evidence.json"
     evidence_file.write_text(json.dumps({"ready": True}))
+    narrative_file = tmp_path / "narrative.json"
+    narrative_file.write_text(json.dumps({
+        "schema_version": 1,
+        "language": "zh-Hans",
+    }))
 
     result = CliRunner().invoke(cli, [
         "research-graph", "advance", "instance-1", "branch-1",
@@ -563,6 +573,7 @@ def test_research_graph_advance_reports_local_sync_failure_after_transition(
         "--evidence-file", str(evidence_file),
         "--profile-id", "maxa",
         "--agent-id", "research-maxa",
+        "--narrative-file", str(narrative_file),
     ])
 
     assert result.exit_code == 0
@@ -577,6 +588,49 @@ def test_research_graph_advance_reports_local_sync_failure_after_transition(
         "checkpoint_ref": "trace:checkpoint-1",
     }
     assert "/Users/" not in result.output
+    assert fake.advance_call_count == 1
+
+
+def test_research_graph_advance_requires_local_chinese_narrative_after_transition(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    fake.advance_response = {
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+        "current_node": "validation",
+        "report_checkpoint": {
+            "schema_version": 1,
+            "checkpoint_ref": "trace:checkpoint-1",
+        },
+    }
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    monkeypatch.setattr(
+        commands, "_client_for_profile", lambda _root, _profile_id: fake,
+    )
+    monkeypatch.setattr(
+        commands,
+        "load_profile_root",
+        lambda _profile: tmp_path / "client-support",
+    )
+    evidence_file = tmp_path / "evidence.json"
+    evidence_file.write_text(json.dumps({"ready": True}))
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "advance", "instance-1", "branch-1",
+        "--edge-id", "hypothesis__validation",
+        "--evidence-file", str(evidence_file),
+        "--profile-id", "maxa",
+        "--agent-id", "research-maxa",
+    ])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["local_report_sync"]["status"] == "required"
+    assert payload["local_report_sync"]["error_code"] == (
+        "local_narrative_required"
+    )
     assert fake.advance_call_count == 1
 
 

@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
-from tools.cli.release.research_reporting import publish_research_checkpoint
+from tools.cli.release.research_reporting import (
+    publish_research_checkpoint as _publish_checkpoint,
+)
 
 
 def _carrier() -> dict:
@@ -59,6 +61,39 @@ def _carrier() -> dict:
             "claim_changes": [],
         },
     }
+
+
+def _narrative(
+    carrier: dict,
+    *,
+    body: str = "本次检验显示信号仍需结合成本证据继续研究。",
+) -> dict:
+    target_ref = (
+        carrier["evidence_refs"][0]
+        if carrier["evidence_refs"]
+        else carrier["checkpoint_ref"]
+    )
+    return {
+        "schema_version": 1,
+        "language": "zh-Hans",
+        "title": "因子研究报告",
+        "sections": [{
+            "section_id": "research-progress",
+            "title": "研究进展",
+            "body": body,
+            "links": [{
+                "link_id": "checkpoint-evidence",
+                "kind": "evidence",
+                "target_ref": target_ref,
+            }],
+        }],
+    }
+
+
+def publish_research_checkpoint(**kwargs):
+    carrier = kwargs["carrier"]
+    kwargs.setdefault("narrative", _narrative(carrier))
+    return _publish_checkpoint(**kwargs)
 
 
 def _profile(root: Path) -> LocalProfileStore:
@@ -143,6 +178,128 @@ def test_checkpoint_publish_materializes_report_and_profile_reference(
     assert record["artifacts"][0]["content_hash"] == hashlib.sha256(
         report.read_bytes()
     ).hexdigest()
+    assert record["artifacts"][0]["journal_ref"].endswith("/JOURNAL.json")
+    assert len(result["carrier_hash"]) == 64
+    assert len(result["narrative_hash"]) == 64
+    assert len(result["section_hash"]) == 64
+    assert "本次检验显示信号" in report.read_text(encoding="utf-8")
+
+
+def test_checkpoint_publish_accumulates_complete_chinese_narrative(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    first = _carrier()
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=first,
+        narrative=_narrative(first, body="第一阶段确认了因子定义与时间对齐。"),
+    )
+    second = deepcopy(first)
+    second["checkpoint_ref"] = "trace:checkpoint-2"
+    second["latest_transition"].update({
+        "step_ref": "trace:checkpoint-2",
+        "created_at": 3.0,
+    })
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=second,
+        narrative=_narrative(second, body="第二阶段显示交易成本仍是主要不确定性。"),
+    )
+
+    branch_root = (
+        root / "profile-root" / "research" / "sgccs-review"
+        / "branches" / "branch-sgccs"
+    )
+    report = (branch_root / "REPORT.md").read_text(encoding="utf-8")
+    journal = json.loads((branch_root / "JOURNAL.json").read_text())
+    assert report.index("第一阶段") < report.index("第二阶段")
+    assert journal["language"] == "zh-Hans"
+    assert [item["checkpoint_ref"] for item in journal["checkpoints"]] == [
+        "trace:checkpoint-1",
+        "trace:checkpoint-2",
+    ]
+    assert len(list((branch_root / "sections").glob("*.json"))) == 2
+
+
+def test_checkpoint_publish_rejects_unbound_narrative_link_before_write(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    narrative = _narrative(carrier)
+    narrative["sections"][0]["links"][0]["target_ref"] = "job:other-job"
+
+    with pytest.raises(ValueError, match="same checkpoint carrier"):
+        _publish_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=narrative,
+        )
+
+    assert not (root / "profile-root" / "research").exists()
+
+
+def test_checkpoint_publish_requires_chinese_narrative(tmp_path: Path) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    narrative = _narrative(carrier, body="English terms only")
+    narrative["sections"][0]["title"] = "Research progress"
+
+    with pytest.raises(ValueError, match="Chinese"):
+        _publish_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=narrative,
+        )
+
+
+def test_checkpoint_fragment_conflict_and_tamper_fail_closed(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    first = _publish_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        narrative=_narrative(carrier, body="原始中文研究结论。"),
+    )
+    with pytest.raises(ValueError, match="conflicting narrative"):
+        _publish_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=_narrative(carrier, body="冲突的中文研究结论。"),
+        )
+
+    fragment = (
+        root / "profile-root" / "research" / "sgccs-review" / "branches"
+        / "branch-sgccs" / "sections" / f"{first['section_hash']}.json"
+    )
+    fragment.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="fragment"):
+        _publish_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=_narrative(carrier, body="原始中文研究结论。"),
+        )
 
 
 def test_checkpoint_publish_is_byte_and_profile_write_idempotent(
@@ -522,7 +679,7 @@ def test_checkpoint_publish_records_omitted_evidence_and_allows_no_trial_plan(
         root / "profile-root" / "research" / "sgccs-review"
         / "branches" / "branch-sgccs" / "REPORT.md"
     ).read_text(encoding="utf-8")
-    assert "7 evidence reference(s) were omitted" in report
+    assert "有 7 条证据引用未随本次载荷提供" in report
 
 
 @pytest.mark.parametrize("count", [-1, 1.5, True])
@@ -648,7 +805,7 @@ def test_server_checkpoint_carrier_publishes_without_translation(
         / "branches" / "branch-sgccs" / "REPORT.md"
     ).read_text(encoding="utf-8")
     assert "secret" not in report
-    assert "7 evidence reference(s) were omitted" in report
+    assert "有 7 条证据引用未随本次载荷提供" in report
 
 
 def test_checkpoint_publish_projects_only_bounded_scope_identity(
@@ -673,7 +830,7 @@ def test_checkpoint_publish_projects_only_bounded_scope_identity(
         root / "profile-root" / "research" / "sgccs-review"
         / "branches" / "branch-sgccs" / "REPORT.md"
     ).read_text(encoding="utf-8")
-    assert "Scope fields: `factor_families`" in report
+    assert "scope:sha256:" in report
     assert "scope:sha256:" in report
     assert "private-scope-marker" not in report
 

@@ -15,6 +15,13 @@ from urllib.parse import urlsplit
 
 from .generation import publish_generation as _publish_generation
 from .generation import work_package_lock as _work_package_lock
+from .journal import (
+    assemble_snapshot as _assemble_snapshot,
+    fragment_payload as _fragment_payload,
+    journal_payload as _journal_payload,
+    load_fragments as _load_fragments,
+    merge_fragment as _merge_fragment,
+)
 from .markdown import MarkdownReportTarget
 from .schema import canonical_report_snapshot
 
@@ -42,7 +49,10 @@ _SECTION_FIELDS = {
     "section_ref", "title", "summary", "links", "created_at",
 }
 _LINK_FIELDS = {"link_id", "kind", "target_ref", "section_ref"}
-_LINK_KINDS = {"trial_plan", "obligation", "evidence", "report_section"}
+_LINK_KINDS = {
+    "checkpoint", "trial_plan", "obligation", "claim", "evidence",
+    "job", "run", "delta", "report_section",
+}
 
 
 class ReportTarget(Protocol):
@@ -61,11 +71,11 @@ def render_branch_report(
     *,
     workspace_root: Path,
     target: ReportTarget | None = None,
+    journal_fragment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Update one branch and its Work Package generation under one lock."""
     canonical = canonical_report_snapshot(snapshot)
     renderer = target or MarkdownReportTarget()
-    branch_payload = renderer.render(canonical)
     package_root = (
         Path(workspace_root) / "research" / canonical["work_package_id"]
     )
@@ -76,25 +86,60 @@ def render_branch_report(
     aggregate_path = package_root / "REPORT.md"
     index_path = package_root / "INDEX.json"
     assets_path = package_root / "assets"
-    content_hash = hashlib.sha256(branch_payload).hexdigest()
     refs = _artifact_refs(canonical, renderer.extension)
 
     with _work_package_lock(package_root):
+        fragment_targets = []
+        journal_path = branch_path.parent / "JOURNAL.json"
+        if journal_fragment is not None:
+            fragments, fragment_changed = _merge_fragment(
+                _load_fragments(branch_path.parent / "sections"),
+                journal_fragment,
+            )
+            rendered_snapshot = canonical_report_snapshot(
+                _assemble_snapshot(canonical, fragments)
+            )
+            fragment_path = (
+                branch_path.parent / "sections"
+                / f"{journal_fragment['section_hash']}.json"
+            )
+            if fragment_changed:
+                fragment_targets.append((
+                    "journal_fragment",
+                    fragment_path,
+                    _fragment_payload(journal_fragment),
+                ))
+            journal_bytes = _journal_payload(
+                branch_id=canonical["branch_id"], fragments=fragments,
+            )
+        else:
+            fragments = []
+            rendered_snapshot = canonical
+            journal_bytes = None
+        branch_payload = renderer.render(rendered_snapshot)
+        content_hash = hashlib.sha256(branch_payload).hexdigest()
         index = _merge_index(
             _load_index(index_path, canonical),
-            canonical,
+            rendered_snapshot,
             renderer,
             content_hash,
             refs,
+            project_sections=(
+                journal_fragment is None or fragment_changed
+            ),
         )
         index_payload = _encode_index(index)
         aggregate_payload = _render_work_package_report(index)
         assets_path.mkdir(parents=True, exist_ok=True)
-        changed = _publish_generation([
+        targets = [
             ("branch", branch_path, branch_payload),
             ("work_package_report", aggregate_path, aggregate_payload),
             ("index", index_path, index_payload),
-        ])
+        ]
+        if journal_bytes is not None:
+            targets.append(("journal", journal_path, journal_bytes))
+        targets.extend(fragment_targets)
+        changed = _publish_generation(targets)
 
     descriptor = _local_artifact_descriptor(
         refs=refs,
@@ -103,6 +148,7 @@ def render_branch_report(
         content_hash=content_hash,
         branch_id=canonical["branch_id"],
         index=index,
+        journal_path=journal_path if journal_fragment is not None else None,
     )
     return {
         "path": branch_path,
@@ -117,6 +163,10 @@ def render_branch_report(
         "assets_path": assets_path,
         "artifact_refs": refs,
         "local_artifact_descriptor": descriptor,
+        "journal_path": journal_path if journal_fragment is not None else None,
+        "journal_fragment_changed": (
+            fragment_changed if journal_fragment is not None else False
+        ),
     }
 
 
@@ -268,6 +318,8 @@ def _merge_index(
     renderer: ReportTarget,
     content_hash: str,
     refs: dict[str, str],
+    *,
+    project_sections: bool = True,
 ) -> dict[str, Any]:
     value = dict(index)
     value["branches"] = sorted(
@@ -278,6 +330,8 @@ def _merge_index(
         + [_branch_entry(snapshot, renderer, content_hash, refs)],
         key=lambda item: item["branch_id"],
     )
+    if not project_sections:
+        return value
     projected_sections = _project_sections(snapshot)
     projected_refs = {
         item["section_ref"] for item in projected_sections
@@ -429,6 +483,7 @@ def _local_artifact_descriptor(
     content_hash: str,
     branch_id: str,
     index: dict[str, Any],
+    journal_path: Path | None,
 ) -> dict[str, Any]:
     return {
         "artifact_ref": refs["branch_report"],
@@ -437,6 +492,9 @@ def _local_artifact_descriptor(
         "content_hash": content_hash,
         "local_ref": branch_path.resolve().as_uri(),
         "index_ref": index_path.resolve().as_uri(),
+        "journal_ref": (
+            journal_path.resolve().as_uri() if journal_path is not None else ""
+        ),
         "section_refs": [
             dict(link)
             for section in index["sections"]

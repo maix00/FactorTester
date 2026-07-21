@@ -16,6 +16,21 @@ final class LocalProfileController: ObservableObject {
         }
     }
 
+    func refreshUntilCheckpoint(
+        profileID: String,
+        checkpointRef: String,
+        attempts: Int = 3
+    ) async {
+        for attempt in 0..<max(attempts, 1) {
+            await refresh()
+            let synchronized = profiles.first { $0.id == profileID }?
+                .researchRecords.contains { $0.checkpointRef == checkpointRef }
+                ?? false
+            if synchronized || attempt == attempts - 1 { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
     func saveAgent(
         profileID: String,
         agentID: String,

@@ -20,11 +20,15 @@ struct LocalAgentModel: Identifiable {
     let id: String
     let role: String
     let scope: String
+    let instanceID: String
+    let branchID: String
 
     init(json: [String: Any]) {
         id = json["agent_id"] as? String ?? ""
         role = json["role"] as? String ?? ""
         let values = json["scope"] as? [String: Any] ?? [:]
+        instanceID = values["instance_id"] as? String ?? ""
+        branchID = values["branch_id"] as? String ?? ""
         scope = values.keys.sorted().compactMap { key in
             guard let value = values[key] as? String else { return nil }
             return "\(key): \(value)"
@@ -98,5 +102,25 @@ struct LocalProfileModel: Identifiable {
         factorWorkspaceBinding = FactorWorkspaceBindingModel(
             json: json["factor_workspace_binding"] as? [String: Any] ?? [:]
         )
+    }
+
+    func owns(workPackageRef: String) -> Bool {
+        let instanceID = workPackageRef.removingPrefix("work-package:")
+        guard !instanceID.isEmpty else { return false }
+        return researchRecords.contains { record in
+            guard record.graphInstanceRef == workPackageRef,
+                  let agent = agents.first(where: {
+                      $0.id == record.agentID && $0.role == "research"
+                  }),
+                  agent.instanceID == instanceID else { return false }
+            guard !record.graphBranchRef.isEmpty else { return true }
+            return record.graphBranchRef == "graph-branch:\(instanceID):\(agent.branchID)"
+        }
+    }
+}
+
+private extension String {
+    func removingPrefix(_ prefix: String) -> String {
+        hasPrefix(prefix) ? String(dropFirst(prefix.count)) : ""
     }
 }

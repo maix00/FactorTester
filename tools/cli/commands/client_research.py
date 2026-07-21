@@ -12,6 +12,7 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.publisher import (
     MAX_CARRIER_BYTES,
+    MAX_NARRATIVE_BYTES,
     publish_research_checkpoint,
 )
 
@@ -45,6 +46,12 @@ def checkpoint() -> None:
     help="Bounded checkpoint JSON file, or '-' for stdin.",
 )
 @click.option(
+    "--narrative-file",
+    required=True,
+    type=click.File("r", encoding="utf-8"),
+    help="简体中文研究叙事 JSON 文件。",
+)
+@click.option(
     "--release-profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
@@ -54,6 +61,7 @@ def publish_checkpoint(
     profile_id: str,
     agent_id: str,
     checkpoint_file,
+    narrative_file,
     release_profile: Path | None,
     as_json: bool,
 ) -> None:
@@ -67,11 +75,21 @@ def publish_checkpoint(
         carrier = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise ValueError("checkpoint carrier is not valid JSON") from exc
+    narrative_payload = narrative_file.read(MAX_NARRATIVE_BYTES + 1)
+    if len(narrative_payload.encode("utf-8")) > MAX_NARRATIVE_BYTES:
+        raise ValueError(
+            f"local narrative exceeds {MAX_NARRATIVE_BYTES} bytes"
+        )
+    try:
+        narrative = json.loads(narrative_payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError("local narrative is not valid JSON") from exc
     result = publish_research_checkpoint(
         client_root=load_profile_root(release_profile),
         profile_id=profile_id,
         agent_id=agent_id,
         carrier=carrier,
+        narrative=narrative,
     )
     _echo_json(result)
 

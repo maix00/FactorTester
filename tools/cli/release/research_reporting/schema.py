@@ -14,15 +14,22 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
-MAX_SNAPSHOT_BYTES = 64 * 1024
-MAX_REPORT_BYTES = 128 * 1024
+# A checkpoint carrier stays small, while the local human report is cumulative.
+# These bounds cap disk and parsing cost without truncating ordinary long-running
+# research journals.  Nothing at this boundary is sent to an Agent context.
+MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
+MAX_REPORT_BYTES = 4 * 1024 * 1024
+MAX_REPORT_SECTIONS = 4_096
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _LOCAL_PATH_IN_TEXT = re.compile(
     r'''(?:^|[\s"'`(\[=:])(?:~[/\\]|[A-Za-z]:[/\\]|/(?!/))'''
 )
-_LINK_KINDS = {"trial_plan", "obligation", "evidence", "report_section"}
+_LINK_KINDS = {
+    "checkpoint", "trial_plan", "obligation", "claim", "evidence",
+    "job", "run", "delta", "report_section",
+}
 _PROHIBITED_KEYS = {
     "credentials",
     "expression_tree",
@@ -85,8 +92,14 @@ def canonical_report_snapshot(snapshot: Any) -> dict[str, Any]:
 
 
 def _canonical_sections(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or not value or len(value) > 32:
-        raise ValueError("sections must contain between 1 and 32 items")
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(value) > MAX_REPORT_SECTIONS
+    ):
+        raise ValueError(
+            f"sections must contain between 1 and {MAX_REPORT_SECTIONS} items"
+        )
     sections = []
     for item in value:
         if not isinstance(item, dict):

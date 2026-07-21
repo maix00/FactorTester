@@ -40,19 +40,28 @@ struct ClientTabView: View {
             let visibleProfiles = profiles.profiles.filter {
                 item.profileIDs.contains($0.id)
             }
-            if let primaryProfile = visibleProfiles.first {
+            if visibleProfiles.count == 1,
+               let primaryProfile = visibleProfiles.first {
                 WorkPackageResearchView(
                     item: item,
                     profiles: visibleProfiles,
                     primaryProfile: primaryProfile,
-                    isActive: isActive
+                    isActive: isActive,
+                    onCheckpointChange: { checkpointRef in
+                        Task {
+                            await profiles.refreshUntilCheckpoint(
+                                profileID: primaryProfile.id,
+                                checkpointRef: checkpointRef
+                            )
+                        }
+                    }
                 )
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "person.crop.circle.badge.questionmark")
                         .font(.largeTitle)
                     Text("研究 Profile 不可用").font(.headline)
-                    Text("该 Work Package 的本地 Profile 已被移除。")
+                    Text("该 Work Package 没有唯一且可验证的本地 Profile 归属。")
                         .foregroundStyle(.secondary)
                 }
             }

@@ -2,6 +2,8 @@ import Foundation
 
 @MainActor
 final class ProfileLiveProcessController: ObservableObject {
+    typealias ObservationSleep = @MainActor (TimeInterval) async throws -> Void
+    typealias CheckpointChange = @MainActor (String) -> Void
     @Published var selectedWorkspaceID = ""
     @Published var selectedResearchRef = ""
     @Published var selectedBranchID = ""
@@ -18,12 +20,18 @@ final class ProfileLiveProcessController: ObservableObject {
     private var workPackageETag: String?
     private var detailETag: String?
     private var timelineETag: String?
+    private var observedCheckpointRef: String?
+    private let localCheckpointRefs: [String: String]
+    private let observationSleep: ObservationSleep
+    private let onCheckpointChange: CheckpointChange
 
     init(
         profile: LocalProfileModel,
         service: ProfileResearchService? = nil,
         pinnedSummary: ProfileResearchSummary? = nil,
-        initialWorkspaceID: String? = nil
+        initialWorkspaceID: String? = nil,
+        observationSleep: ObservationSleep? = nil,
+        onCheckpointChange: @escaping CheckpointChange = { _ in }
     ) {
         workspaces = profile.workspaces.filter {
             !$0.serverWorkspaceRef.isEmpty
@@ -32,6 +40,20 @@ final class ProfileLiveProcessController: ObservableObject {
             ?? ServerConfig.shared.baseURL
             ?? URL(string: "http://127.0.0.1:8000")!
         self.service = service ?? ProfileResearchService(baseURL: url)
+        self.observationSleep = observationSleep ?? { seconds in
+            let nanoseconds = UInt64(
+                min(max(seconds, 1), Double(UInt64.max) / 1_000_000_000)
+                    * 1_000_000_000
+            )
+            try await Task.sleep(nanoseconds: nanoseconds)
+        }
+        self.onCheckpointChange = onCheckpointChange
+        var checkpointRefs: [String: String] = [:]
+        for record in profile.researchRecords
+        where !record.graphBranchRef.isEmpty && !record.checkpointRef.isEmpty {
+            checkpointRefs[record.graphBranchRef] = record.checkpointRef
+        }
+        localCheckpointRefs = checkpointRefs
         selectedWorkspaceID = initialWorkspaceID ?? workspaces.first?.id ?? ""
         if let pinnedSummary {
             research = [pinnedSummary]
@@ -102,15 +124,25 @@ final class ProfileLiveProcessController: ObservableObject {
             timeline = []
             detailETag = nil
             timelineETag = nil
+            observedCheckpointRef = localCheckpointRefs[branch.branchRef]
             try await refresh(branch: branch, conditional: false)
-            guard let directive = detail?.refresh,
-                  !directive.terminal,
-                  directive.mode == "job_sse",
-                  let href = directive.href else { return }
-            for try await _ in service.events(href: href) {
+            while let directive = detail?.refresh, !directive.terminal {
                 try Task.checkCancellation()
-                try await refresh(branch: branch, conditional: true)
-                if detail?.refresh.terminal == true {
+                switch directive.mode {
+                case "conditional_etag":
+                    try await wait(for: directive)
+                    try await refresh(branch: branch, conditional: true)
+                case "job_sse":
+                    guard let href = directive.href else { return }
+                    for try await _ in service.events(href: href) {
+                        try Task.checkCancellation()
+                        try await refresh(branch: branch, conditional: true)
+                        if detail?.refresh.terminal == true { return }
+                    }
+                    guard detail?.refresh.terminal != true else { return }
+                    try await wait(for: detail?.refresh ?? directive)
+                    try await refresh(branch: branch, conditional: true)
+                default:
                     return
                 }
             }
@@ -176,6 +208,7 @@ final class ProfileLiveProcessController: ObservableObject {
         if case .value(let value, let etag) = detailResult {
             detail = value
             detailETag = etag
+            publishCheckpointChange(value.latestTraceRef)
         }
         guard let href = detail?.timelineHref else { return }
         let timelineResult = try await service.timeline(
@@ -187,6 +220,24 @@ final class ProfileLiveProcessController: ObservableObject {
             nextTimelineCursor = page.nextCursor
             timelineETag = etag
         }
+    }
+
+    private func wait(for directive: ResearchRefreshDirective) async throws {
+        let minimumIntervalSeconds = max(
+            directive.minimumIntervalSeconds ?? 5,
+            1
+        )
+        try await observationSleep(minimumIntervalSeconds)
+        try Task.checkCancellation()
+    }
+
+    private func publishCheckpointChange(_ checkpointRef: String?) {
+        guard let checkpointRef, !checkpointRef.isEmpty else { return }
+        if let observedCheckpointRef,
+           observedCheckpointRef != checkpointRef {
+            onCheckpointChange(checkpointRef)
+        }
+        observedCheckpointRef = checkpointRef
     }
 
     private func normalized(_ ref: String) -> String {

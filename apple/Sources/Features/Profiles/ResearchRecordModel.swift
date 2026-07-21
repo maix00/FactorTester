@@ -20,6 +20,7 @@ struct ResearchArtifactModel: Identifiable {
     let status: String
     let localRef: String
     let indexRef: String
+    let journalRef: String
     let sectionRefs: [ResearchDeepLinkModel]
 
     init(json: [String: Any]) {
@@ -28,6 +29,7 @@ struct ResearchArtifactModel: Identifiable {
         status = json["status"] as? String ?? ""
         localRef = json["local_ref"] as? String ?? ""
         indexRef = json["index_ref"] as? String ?? ""
+        journalRef = json["journal_ref"] as? String ?? ""
         sectionRefs = (json["section_refs"] as? [[String: Any]] ?? [])
             .map(ResearchDeepLinkModel.init)
     }
@@ -39,6 +41,9 @@ struct ResearchRecordModel: Identifiable {
     let status: String
     let agentID: String
     let scope: String
+    let graphInstanceRef: String
+    let graphBranchRef: String
+    let checkpointRef: String
     let timeline: [ResearchDeepLinkModel]
     let artifacts: [ResearchArtifactModel]
 
@@ -48,6 +53,11 @@ struct ResearchRecordModel: Identifiable {
         status = json["status"] as? String ?? ""
         agentID = json["agent_id"] as? String ?? ""
         scope = String(describing: json["scope"] ?? [:])
+        graphInstanceRef = json["graph_instance_ref"] as? String
+            ?? json["work_package_ref"] as? String
+            ?? ""
+        graphBranchRef = json["graph_branch_ref"] as? String ?? ""
+        checkpointRef = json["checkpoint_ref"] as? String ?? ""
         timeline = (json["timeline_refs"] as? [[String: Any]] ?? [])
             .map(ResearchDeepLinkModel.init)
         artifacts = (json["artifacts"] as? [[String: Any]] ?? [])
