@@ -427,6 +427,17 @@ private struct ResearchAuditPopover: View {
             if let status = object.status {
                 LabeledContent("检查点状态", value: status)
             }
+            LabeledContent("对象协议", value: String(object.schemaVersion))
+            if let envelopeID = object.envelopeID {
+                LabeledContent("证据包 ID", value: envelopeID)
+            }
+            if let envelopeHash = object.envelopeHash {
+                LabeledContent("证据包哈希") {
+                    Text(envelopeHash)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+            }
             if let materiality = object.materiality {
                 LabeledContent("重要性", value: materiality)
             }
@@ -445,6 +456,9 @@ private struct ResearchAuditPopover: View {
             }
             if let trialPlanID = object.trialPlanID {
                 LabeledContent("试验计划", value: trialPlanID)
+            }
+            if let trialFamily = object.trialFamily {
+                LabeledContent("试验族", value: trialFamily)
             }
             if let version = object.trialPlanVersion {
                 LabeledContent("计划版本", value: String(version))
@@ -473,6 +487,10 @@ private struct ResearchAuditPopover: View {
             }
             referenceValues("指标引用", object.metricRefs ?? [])
             referenceValues("产物引用", object.artifactRefs ?? [])
+            referenceValues("来源引用", object.sourceRefs ?? [])
+            if let stopCondition = object.stopCondition {
+                LabeledContent("停止条件", value: stopCondition)
+            }
             referenceValues("证据限制", object.limitations ?? [])
             referenceValues("证据冲突", object.conflicts ?? [])
         } else if let error {

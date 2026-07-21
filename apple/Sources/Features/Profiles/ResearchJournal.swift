@@ -171,6 +171,10 @@ struct ResearchJournalLink: Decodable, Identifiable, Hashable {
 enum ResearchJournalLoader {
     static let maximumBytes = 4 * 1024 * 1024
     static let maximumCheckpoints = 4_096
+    private static let linkKinds: Set<String> = [
+        "checkpoint", "trial_plan", "obligation", "claim", "evidence",
+        "job", "run", "delta", "report_section",
+    ]
 
     static func load(
         artifact: ResearchArtifactModel
@@ -292,9 +296,10 @@ enum ResearchJournalLoader {
                       section.links.count <= 16,
                       sectionIDs.insert(
                         "\(checkpoint.checkpointRef)|\(section.sectionID)"
-                      ).inserted else {
+                    ).inserted else {
                     throw ResearchJournalError.invalidContract
                 }
+                try validateLinks(section.links)
                 try validateBlocks(section)
             }
             previousCheckpoint = checkpoint
@@ -308,6 +313,7 @@ enum ResearchJournalLoader {
             throw ResearchJournalError.invalidContract
         }
         let linkIDs = Set(section.links.map(\.linkID))
+        var usedLinkIDs = Set<String>()
         for block in section.blocks {
             switch block.kind {
             case "paragraph":
@@ -327,6 +333,7 @@ enum ResearchJournalLoader {
                           Set(row.linkIDs).isSubset(of: linkIDs) else {
                         throw ResearchJournalError.invalidContract
                     }
+                    usedLinkIDs.formUnion(row.linkIDs)
                 }
             case "table":
                 guard block.text == nil,
@@ -341,11 +348,50 @@ enum ResearchJournalLoader {
                           Set(row.linkIDs).isSubset(of: linkIDs) else {
                         throw ResearchJournalError.invalidContract
                     }
+                    usedLinkIDs.formUnion(row.linkIDs)
                 }
             default:
                 throw ResearchJournalError.invalidContract
             }
         }
+        if !section.blocks.isEmpty && usedLinkIDs != linkIDs {
+            throw ResearchJournalError.invalidContract
+        }
+    }
+
+    private static func validateLinks(
+        _ links: [ResearchJournalLink]
+    ) throws {
+        var identifiers = Set<String>()
+        for link in links {
+            guard !link.linkID.isEmpty,
+                  identifiers.insert(link.linkID).inserted,
+                  linkKinds.contains(link.kind),
+                  isStableReference(link.targetRef) else {
+                throw ResearchJournalError.invalidContract
+            }
+        }
+    }
+
+    private static func isStableReference(_ value: String) -> Bool {
+        guard value.count <= 512,
+              !value.isEmpty,
+              !value.contains("\\"),
+              !value.contains("?"),
+              !value.contains("#"),
+              !value.hasPrefix("/"),
+              !value.hasPrefix("~") else {
+            return false
+        }
+        let parts = value.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2,
+              !parts[0].isEmpty,
+              !parts[1].isEmpty,
+              parts[0].allSatisfy({ $0.isLetter || $0.isNumber || $0 == "+" || $0 == "." || $0 == "-" }),
+              !value.contains("://") else {
+            return false
+        }
+        return !value.contains("/../") && !value.hasSuffix("/..")
     }
 
     private static func sha256(_ data: Data) -> String {
