@@ -221,6 +221,10 @@ def fork_graph_branch(
 ) -> dict[str, Any]:
     acting_profile_ref = optional_profile_ref(acting_profile_ref)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        # Read the ownership projection and create the fork under one write
+        # lock.  Otherwise a concurrent handoff could transfer the branch
+        # after this check but before the fork marker is persisted.
+        conn.execute("BEGIN IMMEDIATE")
         source = load_instance_branch_with_latest_trace(
             conn,
             instance_id=instance_id,
