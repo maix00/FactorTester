@@ -28,7 +28,7 @@ _LOCAL_PATH_IN_TEXT = re.compile(
 )
 _LINK_KINDS = {
     "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-    "job", "run", "delta", "report_section",
+    "job", "run", "delta", "profile_handoff", "report_section",
 }
 _RESULT_KINDS = {"ic", "factor_evaluation", "backtest", "robustness"}
 _PROHIBITED_KEYS = {
@@ -56,6 +56,8 @@ def canonical_report_snapshot(snapshot: Any) -> dict[str, Any]:
     for field in (
         "title",
         "status",
+        "product_group",
+        "current_node",
         "graph_ref",
         "methodology_hash",
         "decision_contract_hash",

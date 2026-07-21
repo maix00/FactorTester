@@ -53,6 +53,8 @@ def test_real_client_and_harness_wheels_materialize_together(
         "branch_id": "branch-one",
         "title": "Installed wheel report contract",
         "status": "active",
+        "product_group": "china_futures",
+        "current_node": "factor_semantics",
         "graph_ref": "factor-research@5:sha256:graph",
         "methodology_hash": "1" * 64,
         "decision_contract_hash": "2" * 64,

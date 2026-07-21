@@ -196,7 +196,20 @@ def test_checkpoint_publish_materializes_report_and_profile_reference(
         / "sgccs-review" / "branches" / "branch-sgccs" / "REPORT.md"
     )
     assert report.is_file()
-    assert "evidence:job-attempt-1" in report.read_text(encoding="utf-8")
+    report_text = report.read_text(encoding="utf-8")
+    assert "evidence:job-attempt-1" not in report_text
+    assert "CNFutures" in report_text
+    assert "job_evidence_ready" in report_text
+    assert "`已定义`" in report_text
+    assert "2" * 64 not in report_text
+    journal = json.loads(report.with_name("JOURNAL.json").read_text())
+    journal_targets = {
+        link["target_ref"]
+        for checkpoint in journal["checkpoints"]
+        for section in checkpoint["sections"]
+        for link in section["links"]
+    }
+    assert "evidence:job-attempt-1" in journal_targets
     record = store.load("maxa")["research_records"][0]
     assert record["record_id"] == "sgccs-review"
     assert record["agent_id"] == "research-maxa"
@@ -1217,8 +1230,14 @@ def test_checkpoint_publish_projects_only_bounded_scope_identity(
         root / "profile-root" / "research" / "sgccs-review"
         / "branches" / "branch-sgccs" / "REPORT.md"
     ).read_text(encoding="utf-8")
-    assert "scope:sha256:" in report
-    assert "scope:sha256:" in report
+    index = json.loads((
+        root / "profile-root" / "research" / "sgccs-review" / "INDEX.json"
+    ).read_text())
+    assert "scope:sha256:" not in report
+    assert any(
+        ref.startswith("scope:sha256:")
+        for ref in index["branches"][0]["evidence_refs"]
+    )
     assert "private-scope-marker" not in report
 
 

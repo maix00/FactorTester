@@ -455,7 +455,7 @@ private struct ResearchAuditPopover: View {
                 LabeledContent("变化对象", value: kind)
             }
             if let fromState = object.fromState, let toState = object.toState {
-                LabeledContent("状态变化", value: "(fromState) → (toState)")
+                LabeledContent("状态变化", value: "\(fromState) → \(toState)")
             }
             if let deltaRef = object.deltaRef {
                 LabeledContent("变化引用") {

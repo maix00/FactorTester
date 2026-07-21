@@ -178,7 +178,7 @@ enum ResearchJournalLoader {
     static let maximumCheckpoints = 4_096
     private static let linkKinds: Set<String> = [
         "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-        "job", "run", "delta", "report_section",
+        "job", "run", "delta", "profile_handoff", "report_section",
     ]
 
     static func load(

@@ -19,11 +19,13 @@ class MarkdownReportTarget:
             f"# {value['title']}",
             "",
             f"- 状态：`{value['status']}`",
-            f"- 研究图：`{value['graph_ref']}`",
-            f"- 内容哈希：`{value['source_hash']}`",
-            f"- 方法规范：`{value['methodology_hash']}`",
-            f"- Decision Contract：`{value['decision_contract_hash']}`",
-            f"- TrialPlan：`{value['trial_plan_hash'] or '尚未定义'}`",
+            f"- 产品范围：`{value['product_group']}`",
+            f"- 当前阶段：`{value['current_node']}`",
+            (
+                "- TrialPlan：`已定义`"
+                if value["trial_plan_hash"]
+                else "- TrialPlan：`尚未定义`"
+            ),
             "- 因子家族版本："
             + ", ".join(
                 f"`{item}`" for item in value["factor_family_versions"]
@@ -39,16 +41,8 @@ class MarkdownReportTarget:
                 lines.extend([section["body"], ""])
             if section.get("blocks"):
                 lines.extend(_block_lines(section["blocks"]))
-            lines.extend(_reference_lines(
-                title="证据引用",
-                refs=section["evidence_refs"],
-            ))
             for asset_ref in section["asset_refs"]:
                 lines.extend(_asset_lines(asset_ref, assets.get(asset_ref)))
-        lines.extend(_reference_lines(
-            title="全部证据引用",
-            refs=value["evidence_refs"],
-        ))
         if value["gaps"]:
             lines.extend(["## 已知缺口", ""])
             lines.extend(

@@ -51,7 +51,7 @@ _SECTION_FIELDS = {
 _LINK_FIELDS = {"link_id", "kind", "target_ref", "section_ref"}
 _LINK_KINDS = {
     "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-    "job", "run", "delta", "report_section",
+    "job", "run", "delta", "profile_handoff", "report_section",
 }
 
 
@@ -91,12 +91,12 @@ def render_branch_report(
 
     with _work_package_lock(package_root):
         fragment_targets = []
+        prefix_targets: list[tuple[str, Path, bytes]] = []
         journal_path = branch_path.parent / "JOURNAL.json"
         if journal_fragment is not None:
             target_sections_path = branch_path.parent / "sections"
             existing_fragments = _load_fragments(target_sections_path)
             prefix_fragments: list[dict[str, Any]] = []
-            prefix_targets: list[tuple[str, Path, bytes]] = []
             if journal_prefix_branch_id and not existing_fragments:
                 source_sections_path = (
                     package_root / "branches" / journal_prefix_branch_id

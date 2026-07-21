@@ -60,7 +60,7 @@ _NARRATIVE_LINK_FIELDS = {"link_id", "kind", "target_ref"}
 _CHINESE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _LINK_KINDS = {
     "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-    "job", "run", "delta", "report_section",
+    "job", "run", "delta", "profile_handoff", "report_section",
 }
 _RESULT_NODES = {
     "job_evidence_ready", "statistical_robustness", "result_audit",
@@ -416,6 +416,8 @@ def _report_snapshot(
         "branch_id": branch_id,
         "title": narrative["title"],
         "status": carrier["status"],
+        "product_group": carrier["product_group"],
+        "current_node": carrier["current_node"],
         "graph_ref": carrier["graph_ref"],
         "methodology_hash": carrier["methodology_hash"],
         "decision_contract_hash": carrier["decision_contract_hash"],
