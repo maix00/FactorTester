@@ -179,6 +179,7 @@ def test_checkpoint_publish_materializes_report_and_profile_reference(
         report.read_bytes()
     ).hexdigest()
     assert record["artifacts"][0]["journal_ref"].endswith("/JOURNAL.json")
+    assert len(record["artifacts"][0]["journal_hash"]) == 64
     assert len(result["carrier_hash"]) == 64
     assert len(result["narrative_hash"]) == 64
     assert len(result["section_hash"]) == 64

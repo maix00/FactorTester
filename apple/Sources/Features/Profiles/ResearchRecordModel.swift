@@ -21,6 +21,7 @@ struct ResearchArtifactModel: Identifiable {
     let localRef: String
     let indexRef: String
     let journalRef: String
+    let journalHash: String
     let sectionRefs: [ResearchDeepLinkModel]
 
     init(json: [String: Any]) {
@@ -30,6 +31,7 @@ struct ResearchArtifactModel: Identifiable {
         localRef = json["local_ref"] as? String ?? ""
         indexRef = json["index_ref"] as? String ?? ""
         journalRef = json["journal_ref"] as? String ?? ""
+        journalHash = json["journal_hash"] as? String ?? ""
         sectionRefs = (json["section_refs"] as? [[String: Any]] ?? [])
             .map(ResearchDeepLinkModel.init)
     }

@@ -149,6 +149,10 @@ def render_branch_report(
         branch_id=canonical["branch_id"],
         index=index,
         journal_path=journal_path if journal_fragment is not None else None,
+        journal_hash=(
+            hashlib.sha256(journal_bytes).hexdigest()
+            if journal_bytes is not None else None
+        ),
     )
     return {
         "path": branch_path,
@@ -484,17 +488,15 @@ def _local_artifact_descriptor(
     branch_id: str,
     index: dict[str, Any],
     journal_path: Path | None,
+    journal_hash: str | None,
 ) -> dict[str, Any]:
-    return {
+    descriptor = {
         "artifact_ref": refs["branch_report"],
         "format": "markdown",
         "status": "ready",
         "content_hash": content_hash,
         "local_ref": branch_path.resolve().as_uri(),
         "index_ref": index_path.resolve().as_uri(),
-        "journal_ref": (
-            journal_path.resolve().as_uri() if journal_path is not None else ""
-        ),
         "section_refs": [
             dict(link)
             for section in index["sections"]
@@ -504,6 +506,12 @@ def _local_artifact_descriptor(
             for link in section["links"]
         ],
     }
+    if journal_path is not None and journal_hash is not None:
+        descriptor.update({
+            "journal_ref": journal_path.resolve().as_uri(),
+            "journal_hash": journal_hash,
+        })
+    return descriptor
 
 
 def _exact_object(value: Any, fields: set[str], label: str) -> None:

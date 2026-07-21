@@ -72,6 +72,8 @@ struct ProfileResearchBranchSummary: Decodable, Identifiable {
     let status: String
     let trialPlanRef: String?
     let latestTraceRef: String?
+    let lineage: ResearchBranchLineage?
+    let createdAt: Double
     let updatedAt: Double
     let detailHref: String
     let reportLookupRef: String?
@@ -88,9 +90,25 @@ struct ProfileResearchBranchSummary: Decodable, Identifiable {
         case status
         case trialPlanRef = "trial_plan_ref"
         case latestTraceRef = "latest_trace_ref"
+        case lineage
+        case createdAt = "created_at"
         case updatedAt = "updated_at"
         case detailHref = "detail_href"
         case reportLookupRef = "report_lookup_ref"
+    }
+}
+
+struct ResearchBranchLineage: Decodable {
+    let relation: String
+    let sourceBranchRef: String?
+    let sourceTraceRef: String?
+    let sourceCheckpointHash: String?
+
+    enum CodingKeys: String, CodingKey {
+        case relation
+        case sourceBranchRef = "source_branch_ref"
+        case sourceTraceRef = "source_trace_ref"
+        case sourceCheckpointHash = "source_checkpoint_hash"
     }
 }
 

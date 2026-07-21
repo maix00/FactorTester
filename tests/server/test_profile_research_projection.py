@@ -115,7 +115,7 @@ def _seed(path, *, branch_count: int = 3, trace_count: int = 5) -> None:
             [
                 (
                     f"branch-{index:04d}",
-                    f"research {index}",
+                    "primary" if index == 0 else f"research {index}",
                     f"resolution-{index}",
                     "c" * 64,
                     orjson.dumps({
@@ -206,6 +206,126 @@ def test_research_projects_one_work_package_with_hypothesis_branches(
         "graph-branch:instance-a:branch-0001",
         "graph-branch:instance-a:branch-0000",
     ]
+    by_ref = {item["branch_ref"]: item for item in detail["branches"]}
+    assert by_ref["graph-branch:instance-a:branch-0000"]["lineage"] == {
+        "relation": "root",
+    }
+    assert by_ref["graph-branch:instance-a:branch-0001"]["lineage"] == {
+        "relation": "unknown",
+    }
+    assert by_ref["graph-branch:instance-a:branch-0002"]["lineage"] == {
+        "relation": "unknown",
+    }
+
+
+def test_work_package_projects_only_authoritative_branch_lineage(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "work-package-lineage.sqlite"
+    _seed(path, branch_count=3)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id,
+                from_node, to_node, evidence_json, telemetry_json,
+                actor, created_at
+            ) VALUES (
+                'trace-fork', 'instance-a', 'branch-0001',
+                '__branch_fork__', 'factor_semantics', 'factor_semantics',
+                ?, '{}', 'alice', 1001
+            )
+            """,
+            (orjson.dumps({
+                "branch_fork": {
+                    "schema_version": 1,
+                    "source_branch_id": "branch-0000",
+                    "source_trace_ref": "trace:trace-000004",
+                    "checkpoint_node": "factor_semantics",
+                },
+            }).decode(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id,
+                from_node, to_node, evidence_json, telemetry_json,
+                actor, created_at
+            ) VALUES (
+                'trace-continuation', 'instance-a', 'branch-0002',
+                '__graph_continuation__',
+                'capability_gap', 'capability_gap', ?, '{}', 'alice', 1002
+            )
+            """,
+            (orjson.dumps({
+                "graph_continuation": {
+                    "schema_version": 1,
+                    "source_instance_id": "legacy-instance",
+                    "source_branch_id": "legacy-branch",
+                    "source_trace_id": "legacy-trace",
+                    "source_checkpoint_hash": "e" * 64,
+                },
+            }).decode(),),
+        )
+    detail = _service(path, monkeypatch).get_research(
+        owner="alice",
+        research_ref="work-package:instance-a",
+    )
+    by_ref = {item["branch_ref"]: item for item in detail["branches"]}
+
+    assert by_ref["graph-branch:instance-a:branch-0000"]["lineage"] == {
+        "relation": "root",
+    }
+    assert by_ref["graph-branch:instance-a:branch-0001"]["lineage"] == {
+        "relation": "fork",
+        "source_branch_ref": "graph-branch:instance-a:branch-0000",
+        "source_trace_ref": "trace:trace-000004",
+    }
+    assert by_ref["graph-branch:instance-a:branch-0002"]["lineage"] == {
+        "relation": "continuation",
+        "source_branch_ref": (
+            "graph-branch:legacy-instance:legacy-branch"
+        ),
+        "source_trace_ref": "trace:legacy-trace",
+        "source_checkpoint_hash": "e" * 64,
+    }
+    fork_detail = _service(path, monkeypatch).get_branch(
+        owner="alice",
+        branch_ref="graph-branch:instance-a:branch-0001",
+    )
+    assert fork_detail["lineage"] == (
+        by_ref["graph-branch:instance-a:branch-0001"]["lineage"]
+    )
+
+
+def test_work_package_fails_closed_for_malformed_lineage(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "work-package-unknown-lineage.sqlite"
+    _seed(path, branch_count=1)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id,
+                from_node, to_node, evidence_json, telemetry_json,
+                actor, created_at
+            ) VALUES (
+                'trace-malformed-fork', 'instance-a', 'branch-0000',
+                '__branch_fork__', 'factor_semantics', 'factor_semantics',
+                '{"branch_fork":{"source_branch_id":"../private"}}',
+                '{}', 'alice', 1000
+            )
+            """
+        )
+    detail = _service(path, monkeypatch).get_research(
+        owner="alice",
+        research_ref="work-package:instance-a",
+    )
+
+    assert detail["branches"][0]["lineage"] == {"relation": "unknown"}
 
 
 def test_work_package_list_keyset_pages_instances_not_branches(
@@ -412,6 +532,10 @@ def test_large_scope_query_plans_use_indexes_and_ignore_global_history(
         workspace_ref="workspace:workspace-a",
         limit=20,
     )
+    work_package = service.get_research(
+        owner="alice",
+        research_ref="work-package:instance-a",
+    )
     timeline = service.list_timeline(
         owner="alice",
         research_ref="graph-branch:instance-a:branch-0000",
@@ -421,6 +545,8 @@ def test_large_scope_query_plans_use_indexes_and_ignore_global_history(
 
     assert len(listed["items"]) == 1
     assert listed["items"][0]["branch_count"] == 1_000
+    assert len(work_package["branches"]) == 50
+    assert work_package["omitted_branch_count"] == 950
     assert len(timeline["items"]) == 50
     assert elapsed < 2.0
     with connect_sqlite(path) as conn:
@@ -432,9 +558,13 @@ def test_large_scope_query_plans_use_indexes_and_ignore_global_history(
             "EXPLAIN QUERY PLAN " + projection.TIMELINE_FIRST_SQL,
             ("branch-0000", "alice", "instance-a", 51),
         ).fetchall()
+        work_package_plan = conn.execute(
+            "EXPLAIN QUERY PLAN " + projection.WORK_PACKAGE_DETAIL_SQL,
+            ("alice", "instance-a", 51),
+        ).fetchall()
     details = [
         str(row["detail"]).upper()
-        for row in [*list_plan, *timeline_plan]
+        for row in [*list_plan, *timeline_plan, *work_package_plan]
     ]
     assert any(
         "IDX_RESEARCH_GRAPH_INSTANCES_OWNER_WORKSPACE" in item

@@ -21,6 +21,7 @@ from server.services.research_graph.report_checkpoint import (
     cycle_projection as _cycle_projection,
     named_refs as _named_refs,
     report_checkpoint_projection,
+    safe_hash as _safe_hash,
     safe_identifier as _safe_identifier,
     safe_refs as _safe_refs,
     transition_step_projection,
@@ -76,10 +77,25 @@ WORK_PACKAGE_DETAIL_SQL = """
            b.branch_id, b.label, b.current_node, b.status,
            b.current_trial_plan_hash, b.latest_trace_id,
            b.created_at, b.updated_at,
+           lineage.edge_id AS lineage_edge_id,
+           lineage.evidence_json AS lineage_evidence_json,
            COUNT(*) OVER () AS total_branch_count
     FROM research_graph_instances AS i
     JOIN research_graph_branches AS b
       ON b.instance_id=i.instance_id
+    LEFT JOIN research_graph_trace AS lineage
+      ON lineage.trace_id=(
+          SELECT candidate.trace_id
+          FROM research_graph_trace AS candidate
+          WHERE candidate.instance_id=b.instance_id
+            AND candidate.branch_id=b.branch_id
+            AND candidate.created_at=b.created_at
+            AND candidate.edge_id IN (
+                '__branch_fork__', '__graph_continuation__'
+            )
+          ORDER BY candidate.trace_id
+          LIMIT 1
+      )
     WHERE i.owner=? AND i.instance_id=?
     ORDER BY b.updated_at DESC, b.branch_id DESC
     LIMIT ?
@@ -96,12 +112,27 @@ BRANCH_DETAIL_SQL = """
            t.edge_id AS latest_trace_edge_id,
            t.from_node AS latest_trace_from_node,
            t.created_at AS latest_trace_created_at,
-           t.evidence_json AS latest_trace_evidence_json
+           t.evidence_json AS latest_trace_evidence_json,
+           lineage.edge_id AS lineage_edge_id,
+           lineage.evidence_json AS lineage_evidence_json
     FROM research_graph_instances AS i
     JOIN research_graph_branches AS b
       ON b.instance_id=i.instance_id
     LEFT JOIN research_graph_trace AS t
       ON t.trace_id=b.latest_trace_id
+    LEFT JOIN research_graph_trace AS lineage
+      ON lineage.trace_id=(
+          SELECT candidate.trace_id
+          FROM research_graph_trace AS candidate
+          WHERE candidate.instance_id=b.instance_id
+            AND candidate.branch_id=b.branch_id
+            AND candidate.created_at=b.created_at
+            AND candidate.edge_id IN (
+                '__branch_fork__', '__graph_continuation__'
+            )
+          ORDER BY candidate.trace_id
+          LIMIT 1
+      )
     WHERE i.owner=? AND i.instance_id=? AND b.branch_id=?
 """
 
@@ -585,7 +616,86 @@ def _branch_summary(row: sqlite3.Row) -> dict[str, Any]:
             f"/api/profile-research/{work_package_ref}/branches/{branch_id}"
         ),
         "report_lookup_ref": branch_ref,
+        "lineage": _branch_lineage(row),
     }
+
+
+def _branch_lineage(row: sqlite3.Row) -> dict[str, Any]:
+    """Project only lineage written atomically by branch creation paths."""
+    try:
+        edge_id = str(row["lineage_edge_id"] or "")
+        evidence = _json_object(row["lineage_evidence_json"])
+    except (IndexError, KeyError):
+        # Any projection path lacking creation evidence fails closed.
+        return {"relation": "unknown"}
+    if not edge_id:
+        if (
+            str(row["label"]) == "primary"
+            and float(row["created_at"])
+            == float(row["instance_created_at"])
+        ):
+            return {"relation": "root"}
+        return {"relation": "unknown"}
+    if edge_id == "__branch_fork__":
+        descriptor = evidence.get("branch_fork")
+        if not isinstance(descriptor, dict):
+            return {"relation": "unknown"}
+        source_branch_id = _safe_identifier(
+            descriptor.get("source_branch_id")
+        )
+        source_trace_ref = _safe_trace_ref(
+            descriptor.get("source_trace_ref")
+        )
+        if not source_branch_id:
+            return {"relation": "unknown"}
+        value = {
+            "relation": "fork",
+            "source_branch_ref": research_ref_for(
+                str(row["instance_id"]), source_branch_id
+            ),
+        }
+        if source_trace_ref:
+            value["source_trace_ref"] = source_trace_ref
+        return value
+    if edge_id == "__graph_continuation__":
+        descriptor = evidence.get("graph_continuation")
+        if not isinstance(descriptor, dict):
+            return {"relation": "unknown"}
+        source_instance_id = _safe_identifier(
+            descriptor.get("source_instance_id")
+        )
+        source_branch_id = _safe_identifier(
+            descriptor.get("source_branch_id")
+        )
+        source_trace_id = _safe_identifier(
+            descriptor.get("source_trace_id")
+        )
+        checkpoint_hash = _safe_hash(
+            descriptor.get("source_checkpoint_hash")
+        )
+        if not all((
+            source_instance_id,
+            source_branch_id,
+            source_trace_id,
+            checkpoint_hash,
+        )):
+            return {"relation": "unknown"}
+        return {
+            "relation": "continuation",
+            "source_branch_ref": research_ref_for(
+                source_instance_id, source_branch_id
+            ),
+            "source_trace_ref": f"trace:{source_trace_id}",
+            "source_checkpoint_hash": checkpoint_hash,
+        }
+    return {"relation": "unknown"}
+
+
+def _safe_trace_ref(value: Any) -> str:
+    if not isinstance(value, str) or not value.startswith("trace:"):
+        return ""
+    identifier = _safe_identifier(value.removeprefix("trace:"))
+    return f"trace:{identifier}" if identifier else ""
 
 
 def _transition_step(

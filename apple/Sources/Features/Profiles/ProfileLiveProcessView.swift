@@ -81,6 +81,15 @@ struct WorkPackageResearchView: View {
                 .lineLimit(1)
             }
             Spacer()
+            if let workPackage = controller.workPackage {
+                Picker("假设分支", selection: $controller.selectedBranchID) {
+                    ForEach(workPackage.branches) { branch in
+                        Text(branch.label).tag(branch.branchID)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 210)
+            }
             if controller.isLoading {
                 ProgressView().controlSize(.small)
             }

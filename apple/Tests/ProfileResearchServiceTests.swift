@@ -24,6 +24,23 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class ProfileResearchServiceTests: XCTestCase {
+    func testWorkPackageDecodesAuthoritativeBranchLineage() throws {
+        let detail = try JSONDecoder().decode(
+            ProfileResearchWorkPackageDetail.self,
+            from: workPackageJSON().data(using: .utf8)!
+        )
+        let lineage = try XCTUnwrap(detail.branches.first?.lineage)
+
+        XCTAssertEqual(lineage.relation, "fork")
+        XCTAssertEqual(
+            lineage.sourceBranchRef,
+            "graph-branch:i:parent"
+        )
+        XCTAssertEqual(lineage.sourceTraceRef, "trace:parent-step")
+        XCTAssertNil(lineage.sourceCheckpointHash)
+        XCTAssertEqual(detail.branches.first?.createdAt, 1)
+    }
+
     @MainActor
     func testResearchDirectoryAssignsSharedWorkspaceResearchToExactProfile() async {
         let profiles = [
@@ -586,6 +603,9 @@ private func workPackageJSON() -> String {
        "product_group":"CNFutures","mode":"live","label":"Primary",
        "current_node":"audit","status":"running",
        "trial_plan_ref":"trial-plan:t","latest_trace_ref":"trace:s",
+       "lineage":{"relation":"fork",
+         "source_branch_ref":"graph-branch:i:parent",
+         "source_trace_ref":"trace:parent-step"},
        "created_at":1,"updated_at":1,
        "detail_href":"/api/profile-research/work-package:i/branches/b",
        "report_lookup_ref":"graph-branch:i:b"}],

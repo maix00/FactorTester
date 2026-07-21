@@ -244,11 +244,12 @@ def _research_artifact(value: Any) -> dict[str, Any]:
     }
     fields = legacy_fields | {"index_ref"}
     journal_fields = fields | {"journal_ref"}
+    hashed_journal_fields = journal_fields | {"journal_hash"}
     if (
         not isinstance(value, dict)
         or set(value) not in {
             frozenset(legacy_fields), frozenset(fields),
-            frozenset(journal_fields),
+            frozenset(journal_fields), frozenset(hashed_journal_fields),
         }
     ):
         raise ValueError("research artifact fields are invalid")
@@ -261,6 +262,7 @@ def _research_artifact(value: Any) -> dict[str, Any]:
     local_ref = str(value.get("local_ref") or "")
     index_ref = str(value.get("index_ref") or "")
     journal_ref = str(value.get("journal_ref") or "")
+    journal_hash = str(value.get("journal_hash") or "")
     section_refs = _array(value.get("section_refs"), "section_refs")
     _reference(
         local_ref,
@@ -290,6 +292,10 @@ def _research_artifact(value: Any) -> dict[str, Any]:
     }
     if "journal_ref" in value:
         result["journal_ref"] = journal_ref
+    if "journal_hash" in value:
+        if not re.fullmatch(r"[0-9a-f]{64}", journal_hash):
+            raise ValueError("artifact.journal_hash must be lowercase sha256")
+        result["journal_hash"] = journal_hash
     return result
 
 

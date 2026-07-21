@@ -6,32 +6,15 @@ struct ProfileLiveResearchDetail: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let workPackage = controller.workPackage {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(workPackage.productGroup).font(.headline)
-                        Text("研究过程 · \(workPackage.branchCount) 个假设分支")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Picker("假设分支", selection: $controller.selectedBranchID) {
-                        ForEach(workPackage.branches) { branch in
-                            Text(branch.label).tag(branch.branchID)
-                        }
-                    }
-                    .frame(maxWidth: 260)
-                }
-                .padding(16)
-                Divider()
-            }
-
-            if let detail = controller.detail {
-                ResearchCheckpointTimeline(
+            if let detail = controller.detail,
+               let workPackage = controller.workPackage {
+                ResearchNarrativeReportView(
                     detail: detail,
+                    workPackage: workPackage,
                     steps: controller.timeline,
                     nextCursor: controller.nextTimelineCursor,
-                    profiles: profiles,
+                    profileName: profiles.first?.displayName ?? "未知 Profile",
+                    artifact: reportArtifact(for: detail),
                     loadEarlier: { await controller.loadEarlierTimeline() }
                 )
             } else {
@@ -44,5 +27,15 @@ struct ProfileLiveResearchDetail: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    private func reportArtifact(
+        for detail: ProfileResearchDetail
+    ) -> ResearchArtifactModel? {
+        profiles.lazy
+            .flatMap(\.researchRecords)
+            .filter { $0.graphBranchRef == detail.branchRef }
+            .flatMap(\.artifacts)
+            .first { !$0.journalRef.isEmpty }
     }
 }
