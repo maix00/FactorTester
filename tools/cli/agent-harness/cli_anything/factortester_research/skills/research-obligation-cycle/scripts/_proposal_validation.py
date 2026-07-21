@@ -45,8 +45,11 @@ def validate_adjudication(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("schema_version must be 1 or 2")
     for field in ("proposal_id", "proposer_invocation_id"):
         _text(value.get(field), field)
-    for field in ("contract_hash", "trial_plan_hash", "methodology_hash"):
+    for field in ("contract_hash", "methodology_hash"):
         _sha(value.get(field), field)
+    value["trial_plan_hash"] = _optional_sha(
+        value.get("trial_plan_hash"), "trial_plan_hash"
+    )
     _refs(value.get("evidence_refs"), "evidence_refs", required=True)
     claim_delta = _object_array(
         value.get("claim_evidence_delta"),
@@ -217,6 +220,12 @@ def _refs(value: Any, field: str, *, required: bool = False) -> list[str]:
     ):
         raise ValueError(f"{field} must be a reference array")
     return value
+
+
+def _optional_sha(value: Any, field: str) -> str:
+    if value in ("", None):
+        return ""
+    return _sha(value, field)
 
 
 def _object_array(value: Any, field: str) -> list[dict[str, Any]]:

@@ -12,6 +12,7 @@ from ..protocol import (
 )
 from .contracts import (
     object_value,
+    optional_sha256,
     required_text,
     sha256,
     string_array,
@@ -88,7 +89,7 @@ def validate_adjudication_proposal(
         value.get("contract_hash"),
         field="contract_hash",
     )
-    value["trial_plan_hash"] = sha256(
+    value["trial_plan_hash"] = optional_sha256(
         value.get("trial_plan_hash"),
         field="trial_plan_hash",
     )
@@ -185,7 +186,7 @@ def validate_adjudication_pair(
             expected_contract_hash,
             field="expected_contract_hash",
         ),
-        "trial_plan_hash": sha256(
+        "trial_plan_hash": optional_sha256(
             expected_trial_plan_hash,
             field="expected_trial_plan_hash",
         ),
