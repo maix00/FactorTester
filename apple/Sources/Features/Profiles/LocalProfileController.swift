@@ -17,6 +17,7 @@ final class LocalProfileController: ObservableObject {
     private let defaults: UserDefaults
     private let profileDirectory: URL
     private let cacheKey = "client.profile.list.cache.v1"
+    private var refreshInFlight = false
 
     init(
         defaults: UserDefaults = .standard,
@@ -39,8 +40,14 @@ final class LocalProfileController: ObservableObject {
     }
 
     func refresh() async {
+        // SwiftUI can re-run a view task when the root scene changes from its
+        // initial configuration screen to Home.  Coalesce that race so the
+        // bundled one-file CLI is not cold-started twice on first launch.
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
         loadState = .loading
         error = nil
+        defer { refreshInFlight = false }
         do {
             try await refreshFromCLI()
         } catch {
