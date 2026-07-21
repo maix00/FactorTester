@@ -70,7 +70,9 @@
     <!-- 顶栏 -->
     <div class="docs-topbar">
         <div>
+            {% if request.args.get('presentation') != 'embedded' %}
             <div class="breadcrumb"><a href="/">← 返回首页</a></div>
+            {% endif %}
             <h1>📖 用户手册</h1>
             <p class="subtitle">量化因子工具箱 — 功能介绍与操作指南</p>
         </div>

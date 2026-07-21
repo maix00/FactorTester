@@ -18,10 +18,12 @@
     <script src="{{ url_for('static', filename='js/modules/shared/price_display.js') }}"></script>
 </head>
 <body>
+    {% if request.args.get('presentation') != 'embedded' %}
     <div id="user-badge" style="position:fixed;top:10px;right:16px;z-index:1000;align-items:center;gap:8px;font-size:13px;color:#444;">
         <span id="user-badge-name" style="background:#f0f4f8;border:1px solid #d0d5dd;border-radius:14px;padding:3px 12px;"></span>
         <button id="user-logout-btn" onclick="doLogout()" style="padding:3px 10px;border:1px solid #d0d5dd;border-radius:14px;background:#fff;cursor:pointer;font-size:13px;color:#555;">退出</button>
     </div>
+    {% endif %}
 
     <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
@@ -82,6 +84,7 @@
     </div>
     {% endif %}
 
+    {% if request.args.get('presentation') != 'embedded' %}
     <script>
         window._viewUuid = '';
         window._pageUuid = '';
@@ -104,5 +107,6 @@
             window.location.href = '/login';
         }
     </script>
+    {% endif %}
 </body>
 </html>

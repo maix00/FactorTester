@@ -1,0 +1,64 @@
+from pathlib import Path
+
+from flask import Flask, render_template, render_template_string
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _app() -> Flask:
+    return Flask(
+        __name__,
+        template_folder=str(ROOT / "templates"),
+        static_folder=str(ROOT / "static"),
+    )
+
+
+def _render(template: str, *, embedded: bool) -> str:
+    app = _app()
+    query = "?presentation=embedded" if embedded else ""
+    with app.test_request_context(f"/test{query}"):
+        return render_template(template)
+
+
+def test_shared_home_link_is_only_hidden_in_embedded_presentation() -> None:
+    assert "返回首页" in _render(
+        "modules/shared/home_back_link.html", embedded=False
+    )
+    assert "返回首页" not in _render(
+        "modules/shared/home_back_link.html", embedded=True
+    )
+
+
+def test_single_factor_account_chrome_is_only_hidden_when_embedded() -> None:
+    standalone = _render("single_factor_test.html", embedded=False)
+    embedded = _render("single_factor_test.html", embedded=True)
+
+    assert 'id="user-badge"' in standalone
+    assert 'id="user-logout-btn"' in standalone
+    assert 'id="user-badge"' not in embedded
+    assert 'id="user-logout-btn"' not in embedded
+    assert "单因子(家族)测试" in embedded
+
+
+def test_docs_keep_internal_breadcrumb_but_drop_home_link_when_embedded() -> None:
+    app = _app()
+    source = """
+    {% from 'docs/_layout.html' import doc_header with context %}
+    {{ doc_header('用户手册', '/docs', '标题', '副标题') }}
+    """
+    with app.test_request_context("/docs/example"):
+        standalone = render_template_string(source)
+    with app.test_request_context("/docs/example?presentation=embedded"):
+        embedded = render_template_string(source)
+
+    assert "返回首页" in standalone
+    assert "返回首页" not in embedded
+    assert "用户手册" in embedded
+    assert 'href="/docs"' in embedded
+
+
+def test_standalone_only_links_on_special_pages_are_hidden_when_embedded() -> None:
+    for template in ("docs/user_manual_home.html", "local_data.html"):
+        assert "返回首页" in _render(template, embedded=False)
+        assert "返回首页" not in _render(template, embedded=True)

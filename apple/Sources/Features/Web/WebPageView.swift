@@ -36,10 +36,12 @@ struct WebPageView: View {
                     }
                 }
                 .padding(30)
-            } else if let url = ServerConfig.shared.url(forPath: path) {
+            } else if let rawURL = ServerConfig.shared.url(forPath: path),
+                      let url = EmbeddedPresentationURL.add(to: rawURL) {
                 WebViewRepresentable(
                     url: url,
                     syncServerCookies: true,
+                    enforceEmbeddedPresentation: true,
                     loadError: $loadError
                 )
                 .id(reloadID)
@@ -59,6 +61,40 @@ struct WebPageView: View {
     }
 }
 
+enum EmbeddedPresentationURL {
+    static func add(to url: URL) -> URL? {
+        guard var components = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: false
+        ) else { return nil }
+        var items = components.queryItems ?? []
+        items.removeAll { $0.name == "presentation" }
+        items.append(URLQueryItem(name: "presentation", value: "embedded"))
+        components.queryItems = items
+        return components.url
+    }
+
+    static func rewrite(_ url: URL, serverOrigin: URL) -> URL? {
+        guard isSameOrigin(url, serverOrigin) else { return nil }
+        return add(to: url)
+    }
+
+    private static func isSameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.scheme?.lowercased() == rhs.scheme?.lowercased()
+            && lhs.host?.lowercased() == rhs.host?.lowercased()
+            && effectivePort(lhs) == effectivePort(rhs)
+    }
+
+    private static func effectivePort(_ url: URL) -> Int? {
+        if let port = url.port { return port }
+        switch url.scheme?.lowercased() {
+        case "http": return 80
+        case "https": return 443
+        default: return nil
+        }
+    }
+}
+
 #if os(iOS)
 import UIKit
 typealias PlatformViewRepresentable = UIViewRepresentable
@@ -70,20 +106,26 @@ typealias PlatformViewRepresentable = NSViewRepresentable
 struct WebViewRepresentable: PlatformViewRepresentable {
     let url: URL
     let syncServerCookies: Bool
+    let enforceEmbeddedPresentation: Bool
     @Binding var loadError: String?
 
     init(
         url: URL,
         syncServerCookies: Bool,
+        enforceEmbeddedPresentation: Bool = false,
         loadError: Binding<String?> = .constant(nil)
     ) {
         self.url = url
         self.syncServerCookies = syncServerCookies
+        self.enforceEmbeddedPresentation = enforceEmbeddedPresentation
         _loadError = loadError
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(loadError: $loadError)
+        Coordinator(
+            loadError: $loadError,
+            enforceEmbeddedPresentation: enforceEmbeddedPresentation
+        )
     }
 
     private func makeWebView(context: Context) -> WKWebView {
@@ -116,9 +158,35 @@ struct WebViewRepresentable: PlatformViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding private var loadError: String?
+        private let enforceEmbeddedPresentation: Bool
 
-        init(loadError: Binding<String?>) {
+        init(
+            loadError: Binding<String?>,
+            enforceEmbeddedPresentation: Bool
+        ) {
             _loadError = loadError
+            self.enforceEmbeddedPresentation = enforceEmbeddedPresentation
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard enforceEmbeddedPresentation,
+                  navigationAction.targetFrame?.isMainFrame != false,
+                  let destination = navigationAction.request.url,
+                  let origin = ServerConfig.shared.baseURL,
+                  let rewritten = EmbeddedPresentationURL.rewrite(
+                      destination,
+                      serverOrigin: origin
+                  ),
+                  rewritten != destination else {
+                decisionHandler(.allow)
+                return
+            }
+            webView.load(URLRequest(url: rewritten))
+            decisionHandler(.cancel)
         }
 
         func webView(
