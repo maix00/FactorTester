@@ -40,26 +40,36 @@ enum ReleaseCommand {
             let output = Pipe()
             let errors = Pipe()
             let launch = resolve(executable: executable, arguments: arguments)
+            let inputData = try stdinJSON.map {
+                try JSONSerialization.data(withJSONObject: $0)
+            }
             process.executableURL = launch.url
             process.arguments = launch.arguments
             process.standardOutput = output
             process.standardError = errors
-            if let stdinJSON {
-                let input = Pipe()
+            let input = inputData.map { _ in Pipe() }
+            if let input {
                 process.standardInput = input
-                try process.run()
-                let data = try JSONSerialization.data(
-                    withJSONObject: stdinJSON
-                )
-                input.fileHandleForWriting.write(data)
+            }
+            try process.run()
+
+            // Drain both pipes while the child is running. Waiting first can
+            // deadlock as soon as a valid JSON response exceeds the kernel
+            // pipe buffer (the Profile history already does).
+            let outputTask = Task.detached {
+                output.fileHandleForReading.readDataToEndOfFile()
+            }
+            let errorTask = Task.detached {
+                errors.fileHandleForReading.readDataToEndOfFile()
+            }
+            if let input, let inputData {
+                input.fileHandleForWriting.write(inputData)
                 try input.fileHandleForWriting.close()
-            } else {
-                try process.run()
             }
             process.waitUntilExit()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
+            let data = await outputTask.value
+            let detail = await errorTask.value
             if process.terminationStatus != 0 {
-                let detail = errors.fileHandleForReading.readDataToEndOfFile()
                 throw ReleaseCommandError.failed(
                     String(data: detail, encoding: .utf8) ?? "unknown error"
                 )
