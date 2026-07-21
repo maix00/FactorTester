@@ -293,3 +293,25 @@ def test_construct_orders_skips_zero_deltas():
     assert orders[0].quantity == orders[0].intent_quantity == 12.5
     assert orders[0].order_id
     assert account.order_flow_store.records_for_order(orders[0].order_id)[0]["step"] == "construct_order"
+
+
+def test_construct_orders_are_stable_across_delta_insertion_order():
+    timestamp = pd.Timestamp("2024-01-01")
+    p1 = Product(name="A.CFE", point_value=1, currency="CNY")
+    p2 = Product(name="B.CFE", point_value=1, currency="CNY")
+
+    def construct(deltas):
+        strategy = Strategy(alias="S")
+        ctx = FlowContext(
+            timestamp=timestamp,
+            event_queue=EventQueue(),
+            active_strategies=frozenset({strategy}),
+        )
+        ctx.set_for(OrderConstructModule.deltas, strategy, deltas)
+        _construct_orders(BacktestRunState(), ctx)
+        return [
+            (order.instrument.name, order.order_id)
+            for order in ctx.get_for(OrderConstructModule.orders, strategy)
+        ]
+
+    assert construct({p1: 1.0, p2: 2.0}) == construct({p2: 2.0, p1: 1.0})

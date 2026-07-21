@@ -213,7 +213,11 @@ def _construct_orders(state, ctx) -> None:
     for strategy in ctx.active_strategies:
         deltas = ctx.get_for(OrderConstructModule.deltas, strategy, {})
         orders = []
-        for product, quantity in deltas.items():
+        for product in sorted(
+            deltas,
+            key=lambda item: str(getattr(item, "name", item)),
+        ):
+            quantity = deltas[product]
             if quantity == 0:
                 continue
             order = Order(
