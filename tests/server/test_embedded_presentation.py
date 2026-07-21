@@ -52,7 +52,10 @@ def test_home_and_technical_docs_drop_standalone_account_chrome_when_embedded(
         assert 'id="user-area"' not in embedded
 
     assert 'id="shutdown-btn"' in _render("home.html", embedded=False)
-    assert 'id="shutdown-btn"' not in _render("home.html", embedded=True)
+    embedded_home = _render("home.html", embedded=True)
+    assert 'id="shutdown-btn"' not in embedded_home
+    assert "function renderShutdownControl()" in embedded_home
+    assert "document.getElementById('shutdown-btn').style" not in embedded_home
 
 
 def test_docs_keep_internal_breadcrumb_but_drop_home_link_when_embedded() -> None:

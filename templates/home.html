@@ -119,9 +119,14 @@
             _currentRole  = data.role || null;
             renderUserArea();
             renderModules();
-            document.getElementById('shutdown-btn').style.display = _isAdmin ? '' : 'none';
+            renderShutdownControl();
             const next = new URLSearchParams(location.search).get('next');
             if (next && !_currentUser) openLoginModal(next);
+        }
+
+        function renderShutdownControl() {
+            const button = document.getElementById('shutdown-btn');
+            if (button) button.style.display = _isAdmin ? '' : 'none';
         }
 
         async function loadModules() {
@@ -214,7 +219,7 @@
                 renderModules();
                 const nextUrl = _pendingUrl;
                 closeLoginModal();
-                document.getElementById('shutdown-btn').style.display = _isAdmin ? '' : 'none';
+                renderShutdownControl();
                 if (nextUrl) location.href = nextUrl;
             } else {
                 document.getElementById('login-error').textContent = data.error || '登录失败';
@@ -239,7 +244,7 @@
                 renderModules();
                 const nextUrl = _pendingUrl;
                 closeLoginModal();
-                document.getElementById('shutdown-btn').style.display = _isAdmin ? '' : 'none';
+                renderShutdownControl();
                 if (nextUrl) location.href = nextUrl;
             } else {
                 document.getElementById('reg-error').textContent = data.error || '注册失败';
