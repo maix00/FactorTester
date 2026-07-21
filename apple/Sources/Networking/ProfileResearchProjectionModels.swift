@@ -116,6 +116,31 @@ struct ResearchVersionTreeNode: Decodable, Identifiable {
         case sequenceRank = "sequence_rank"
         case historyRank = "history_rank"
     }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        checkpointRef = try values.decode(String.self, forKey: .checkpointRef)
+        nodeRef = try values.decodeIfPresent(
+            String.self, forKey: .nodeRef
+        ) ?? checkpointRef
+        traceRef = try values.decodeIfPresent(
+            String.self, forKey: .traceRef
+        ) ?? checkpointRef
+        branchRef = try values.decode(String.self, forKey: .branchRef)
+        edgeRef = try values.decode(String.self, forKey: .edgeRef)
+        fromNode = try values.decode(String.self, forKey: .fromNode)
+        toNode = try values.decode(String.self, forKey: .toNode)
+        createdAt = try values.decode(Double.self, forKey: .createdAt)
+        status = try values.decode(String.self, forKey: .status)
+        isHead = try values.decode(Bool.self, forKey: .isHead)
+        isRoot = try values.decode(Bool.self, forKey: .isRoot)
+        sequenceRank = try values.decodeIfPresent(
+            Int.self, forKey: .sequenceRank
+        ) ?? 0
+        historyRank = try values.decodeIfPresent(
+            Int.self, forKey: .historyRank
+        ) ?? 0
+    }
 }
 
 struct ResearchVersionTreeEdge: Decodable, Identifiable {

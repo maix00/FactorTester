@@ -41,9 +41,9 @@ MAX_PROJECTION_BYTES = 64 * 1024
 # The version tree is a navigation aid, not a second history store.  Keep a
 # small root/head window for every visible branch so a large work package
 # cannot turn one projection into an unbounded trace dump.
-TREE_FIRST_WINDOW = 3
-TREE_LAST_WINDOW = 3
-MAX_TREE_NODES = 300
+TREE_FIRST_WINDOW = 1
+TREE_LAST_WINDOW = 1
+MAX_TREE_NODES = 120
 
 LIST_FIRST_SQL = """
     SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
@@ -142,9 +142,9 @@ WORK_PACKAGE_DETAIL_SQL = """
                              LIMIT 50
                          )
                    ) AS ranked
-                   WHERE ranked.first_rank<=3 OR ranked.last_rank<=3
+                   WHERE ranked.first_rank<=1 OR ranked.last_rank<=1
                    ORDER BY ranked.created_at ASC, ranked.trace_id ASC
-                   LIMIT 300
+                   LIMIT 120
                ) AS selected
            ) ELSE NULL END AS tree_json,
            COUNT(*) OVER () AS total_branch_count
@@ -817,9 +817,7 @@ def _tree_projection(
         )
         trace_ref = f"trace:{trace_id}"
         node = {
-            "node_ref": trace_ref,
             "checkpoint_ref": trace_ref,
-            "trace_ref": trace_ref,
             "branch_ref": branch_ref,
             "edge_ref": edge_id,
             "from_node": str(raw.get("from_node") or ""),
@@ -832,28 +830,34 @@ def _tree_projection(
             ),
             "is_head": trace_id == str(raw.get("latest_trace_id") or ""),
             "is_root": first_rank == 1,
-            "sequence_rank": first_rank,
-            "history_rank": last_rank,
+            # Keep ranks private to the projection builder. The public carrier
+            # uses checkpoint_ref as the node identity.
+            "_sequence_rank": first_rank,
+            "_history_rank": last_rank,
         }
         nodes.append(node)
         by_branch.setdefault(branch_id, []).append(node)
 
-    nodes.sort(key=lambda item: (item["created_at"], item["trace_ref"]))
+    nodes.sort(
+        key=lambda item: (item["created_at"], item["checkpoint_ref"])
+    )
     edges: list[dict[str, Any]] = []
     for branch_id, branch_nodes in by_branch.items():
         branch_nodes.sort(
-            key=lambda item: (item["sequence_rank"], item["trace_ref"])
+            key=lambda item: (
+                item["_sequence_rank"], item["checkpoint_ref"]
+            )
         )
         for previous, current in zip(branch_nodes, branch_nodes[1:]):
-            if current["sequence_rank"] != previous["sequence_rank"] + 1:
+            if current["_sequence_rank"] != previous["_sequence_rank"] + 1:
                 # Root/head window intentionally may contain a gap.  A
                 # connector over an omitted checkpoint would be misleading.
                 continue
             edges.append({
                 "edge_ref": current["edge_ref"],
                 "relation": "transition",
-                "source_node_ref": previous["node_ref"],
-                "target_node_ref": current["node_ref"],
+                "source_node_ref": previous["checkpoint_ref"],
+                "target_node_ref": current["checkpoint_ref"],
                 "source_branch_ref": previous["branch_ref"],
                 "target_branch_ref": current["branch_ref"],
             })
@@ -869,17 +873,21 @@ def _tree_projection(
             if isinstance(source_branch_ref, str):
                 edges.append({
                     "edge_ref": (
-                        f"lineage:{branch_id}:{target['trace_ref']}"
+                        f"lineage:{branch_id}:{target['checkpoint_ref']}"
                     ),
                     "relation": str(lineage["relation"]),
                     "source_node_ref": source_trace_ref or "",
-                    "target_node_ref": target["node_ref"],
+                    "target_node_ref": target["checkpoint_ref"],
                     "source_branch_ref": source_branch_ref,
                     "target_branch_ref": target["branch_ref"],
                 })
+    public_nodes = [
+        {key: value for key, value in node.items() if not key.startswith("_")}
+        for node in nodes
+    ]
     return {
         "schema_version": 1,
-        "nodes": nodes,
+        "nodes": public_nodes,
         "edges": edges,
         "omitted_node_count": max(
             int(payload.get("omitted_node_count") or 0), 0
