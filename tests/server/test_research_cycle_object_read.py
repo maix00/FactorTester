@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import orjson
 import pytest
+from flask import Flask
 
 import settings as Settings
+from server.modules.single_factor_test import sft_bp
 from server.services.research_graph.branch import cycle_objects
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
@@ -134,3 +136,105 @@ def test_cycle_object_read_supports_claim_and_rejects_unknown_id(
             object_type="obligation",
             object_id="missing",
         )
+
+
+def test_cycle_object_read_is_bound_to_requested_historical_trace(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "cycle-history.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _seed(path)
+    historical = _checkpoint()
+    historical.pop("projection_hash")
+    historical["obligations"][0]["status"] = "open"
+    historical["obligations"][0]["epistemic_question"] = (
+        "What was still unknown at preregistration?"
+    )
+    historical = validate_research_cycle_checkpoint(historical)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id,
+                from_node, to_node, evidence_json, telemetry_json,
+                actor, created_at
+            ) VALUES (
+                'trace-history', 'instance-1', 'branch-1', 'older-event',
+                'preregistration', 'factor_semantics', ?, '{}', 'alice', 0
+            )
+            """,
+            (orjson.dumps({
+                "research_cycle_checkpoint": historical,
+            }).decode(),),
+        )
+
+    obligation = cycle_objects.load_research_cycle_object(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        object_type="obligation",
+        object_id="obligation-read",
+        trace_id="trace-history",
+    )
+
+    assert obligation["epistemic_question"] == (
+        "What was still unknown at preregistration?"
+    )
+
+
+def test_cycle_object_route_preserves_checkpoint_and_owner_scope(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "cycle-route.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _seed(path)
+    historical = _checkpoint()
+    historical.pop("projection_hash")
+    historical["obligations"][0]["epistemic_question"] = (
+        "What did Alice know at this checkpoint?"
+    )
+    historical = validate_research_cycle_checkpoint(historical)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id,
+                from_node, to_node, evidence_json, telemetry_json,
+                actor, created_at
+            ) VALUES (
+                'trace-route-history', 'instance-1', 'branch-1',
+                'older-event', 'preregistration', 'factor_semantics',
+                ?, '{}', 'alice', 0
+            )
+            """,
+            (orjson.dumps({
+                "research_cycle_checkpoint": historical,
+            }).decode(),),
+        )
+    app = Flask(__name__)
+    app.secret_key = "cycle-route-test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    href = (
+        "/api/research-graph-instances/instance-1/branches/branch-1/"
+        "cycle-objects/obligation/obligation-read"
+    )
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    response = client.get(
+        href,
+        query_string={"trace_id": "trace-route-history"},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["object"]["epistemic_question"] == (
+        "What did Alice know at this checkpoint?"
+    )
+
+    with client.session_transaction() as session:
+        session["username"] = "bob"
+    assert client.get(
+        href,
+        query_string={"trace_id": "trace-route-history"},
+    ).status_code == 404

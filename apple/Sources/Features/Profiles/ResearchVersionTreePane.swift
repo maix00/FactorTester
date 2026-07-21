@@ -1,5 +1,17 @@
 import SwiftUI
 
+enum ResearchTreeLayout {
+    static let navigatorWidth: CGFloat = 208
+    static let maximumVisibleBranches = 7
+    static let laneSpacing: CGFloat = 13
+    static let laneOriginX: CGFloat = 9
+    static let selectedNodeDiameter: CGFloat = 17
+    static let horizontalPadding: CGFloat = 8
+    static let maximumLaneFootprint = laneOriginX
+        + CGFloat(maximumVisibleBranches - 1) * laneSpacing
+        + selectedNodeDiameter
+}
+
 struct ResearchVersionTreePane: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
@@ -10,7 +22,7 @@ struct ResearchVersionTreePane: View {
     let canLoadEarlier: Bool
 
     private let rowHeight: CGFloat = 46
-    private let laneSpacing: CGFloat = 13
+    private let laneSpacing = ResearchTreeLayout.laneSpacing
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -155,7 +167,7 @@ struct ResearchVersionTreePane: View {
                 Spacer(minLength: 0)
             }
             .frame(height: rowHeight)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, ResearchTreeLayout.horizontalPadding)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -235,7 +247,8 @@ struct ResearchVersionTreePane: View {
     /// present; additional branches remain available through the branch
     /// selector above the report.
     private var visibleBranches: [ProfileResearchBranchSummary] {
-        guard workPackage.branches.count > 7 else {
+        guard workPackage.branches.count
+                > ResearchTreeLayout.maximumVisibleBranches else {
             return workPackage.branches
         }
         let selected = workPackage.branches.first {
@@ -243,11 +256,15 @@ struct ResearchVersionTreePane: View {
         }
         let others = workPackage.branches.filter {
             $0.branchRef != detail.branchRef
-        }.prefix(6)
+        }.prefix(ResearchTreeLayout.maximumVisibleBranches - 1)
         if let selected {
             return [selected] + Array(others)
         }
-        return Array(workPackage.branches.prefix(7))
+        return Array(
+            workPackage.branches.prefix(
+                ResearchTreeLayout.maximumVisibleBranches
+            )
+        )
     }
 
     private var hiddenBranchCount: Int {
@@ -265,7 +282,7 @@ struct ResearchVersionTreePane: View {
     }
 
     private func laneX(_ lane: Int) -> CGFloat {
-        9 + CGFloat(lane) * laneSpacing
+        ResearchTreeLayout.laneOriginX + CGFloat(lane) * laneSpacing
     }
 
     private func laneColor(_ lane: Int) -> Color {

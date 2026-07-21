@@ -9,6 +9,7 @@ struct ResearchNarrativeReportView: View {
     let reportTitle: String
     let artifact: ResearchArtifactModel?
     let loadEarlier: () async -> Void
+    let loadAuditObject: (String) async throws -> ResearchAuditObjectPayload
 
     @State private var sections: [ResearchJournalSection] = []
     @State private var reportError: String?
@@ -26,7 +27,8 @@ struct ResearchNarrativeReportView: View {
                 loadEarlier: loadEarlier,
                 canLoadEarlier: nextCursor != nil
             )
-            .frame(width: 208)
+            .frame(width: ResearchTreeLayout.navigatorWidth)
+            .clipped()
             Divider()
             report
         }
@@ -34,7 +36,8 @@ struct ResearchNarrativeReportView: View {
             ResearchAuditPopover(
                 selection: selection,
                 detail: detail,
-                steps: steps
+                steps: steps,
+                loadObject: loadAuditObject
             )
             .frame(width: 380)
         }
@@ -234,9 +237,20 @@ private struct ResearchAuditPopover: View {
     let selection: ResearchAuditSelection
     let detail: ProfileResearchDetail
     let steps: [ResearchTransitionStep]
+    let loadObject: (String) async throws -> ResearchAuditObjectPayload
+
+    @State private var object: ResearchAuditObjectPayload?
+    @State private var error: String?
 
     private var step: ResearchTransitionStep? {
         steps.first { $0.stepRef == selection.checkpointRef }
+    }
+
+    private var objectHref: String? {
+        step?.objectHref(
+            kind: selection.link.kind,
+            targetRef: selection.link.targetRef
+        )
     }
 
     var body: some View {
@@ -260,23 +274,76 @@ private struct ResearchAuditPopover: View {
                 Divider()
                 LabeledContent("状态转移", value: "\(step.fromNode) → \(step.toNode)")
                 LabeledContent("图边", value: step.edgeRef)
-                if selection.link.kind == "obligation",
-                   let obligation = detail.researchCycle.obligations.first(where: {
-                       $0.obligationRef == selection.link.targetRef
-                   }) {
-                    Text(obligation.questionSummary)
-                        .font(.callout)
-                    Text("当前义务状态：\(obligation.status)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                objectDetail
             } else {
-                Text("完整对象详情将在用户明确展开时按引用读取；正文不会预载整份审计历史。")
+                Text("该报告段落没有可验证的检查点，无法读取历史审计对象。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(18)
+        .task(id: selection.id) {
+            await loadSelectedObject()
+        }
+    }
+
+    @ViewBuilder
+    private var objectDetail: some View {
+        if let object {
+            Divider()
+            if let question = object.epistemicQuestion {
+                Text(question)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let kind = object.obligationKind {
+                LabeledContent("义务类型", value: kind)
+            }
+            if let status = object.status {
+                LabeledContent("检查点状态", value: status)
+            }
+            if let materiality = object.materiality {
+                LabeledContent("重要性", value: materiality)
+            }
+            if let claimType = object.claimType {
+                LabeledContent("主张类型", value: claimType)
+            }
+            if let evidenceState = object.evidenceState {
+                LabeledContent("证据状态", value: evidenceState)
+            }
+            if let createdEventRef = object.createdEventRef {
+                LabeledContent("创建事件") {
+                    Text(createdEventRef)
+                        .font(.caption.monospaced())
+                        .lineLimit(2)
+                }
+            }
+        } else if let error {
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if objectHref != nil {
+            ProgressView("正在读取该检查点的审计对象…")
+                .controlSize(.small)
+        } else {
+            Text("该类对象暂未提供检查点级详情；正文不会预载完整对象或审计历史。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func loadSelectedObject() async {
+        object = nil
+        error = nil
+        guard let objectHref else { return }
+        do {
+            object = try await loadObject(objectHref)
+        } catch is CancellationError {
+            return
+        } catch {
+            self.error = "无法读取该检查点的审计对象：\(error.localizedDescription)"
+        }
     }
 }
 

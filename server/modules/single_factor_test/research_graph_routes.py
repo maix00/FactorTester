@@ -370,6 +370,7 @@ def get_research_cycle_object(
             owner=require_user(),
             object_type=object_type,
             object_id=object_id,
+            trace_id=str(request.args.get("trace_id") or "") or None,
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404

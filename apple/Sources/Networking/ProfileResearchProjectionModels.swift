@@ -230,6 +230,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
     let claimRefs: [String]
     let jobRefs: [String]
     let runRefs: [String]
+    let objectHrefs: [String]?
     let obligationChanges: [ResearchStateChange]
     let claimChanges: [ResearchStateChange]
     var id: String { stepRef }
@@ -246,6 +247,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
         case claimRefs = "claim_refs"
         case jobRefs = "job_refs"
         case runRefs = "run_refs"
+        case objectHrefs = "object_hrefs"
         case obligationChanges = "obligation_changes"
         case claimChanges = "claim_changes"
     }
@@ -255,6 +257,52 @@ struct ResearchTransitionStep: Decodable, Identifiable {
             evidenceRefs + trialPlanRefs + obligationRefs
                 + claimRefs + jobRefs + runRefs
         )
+    }
+
+    func objectHref(kind: String, targetRef: String) -> String? {
+        guard let objectID = targetRef.split(
+            separator: ":",
+            maxSplits: 1
+        ).last.map(String.init) else { return nil }
+        let expectedPath = "/cycle-objects/\(kind)/\(objectID)"
+        return objectHrefs?.first { href in
+            guard let components = URLComponents(string: href) else {
+                return false
+            }
+            return components.path.hasSuffix(expectedPath)
+        }
+    }
+}
+
+struct ResearchAuditObjectEnvelope: Decodable {
+    let object: ResearchAuditObjectPayload
+}
+
+struct ResearchAuditObjectPayload: Decodable {
+    let schemaVersion: Int
+    let obligationID: String?
+    let claimID: String?
+    let claimRef: String?
+    let obligationKind: String?
+    let epistemicQuestion: String?
+    let status: String?
+    let materiality: String?
+    let evidenceState: String?
+    let claimType: String?
+    let createdEventRef: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case obligationID = "obligation_id"
+        case claimID = "claim_id"
+        case claimRef = "claim_ref"
+        case obligationKind = "obligation_kind"
+        case epistemicQuestion = "epistemic_question"
+        case status
+        case materiality
+        case evidenceState = "evidence_state"
+        case claimType = "claim_type"
+        case createdEventRef = "created_event_ref"
     }
 }
 

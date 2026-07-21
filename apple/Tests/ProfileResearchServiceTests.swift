@@ -24,6 +24,67 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class ProfileResearchServiceTests: XCTestCase {
+    func testResearchTreeLanesStayInsideFixedNavigatorWidth() {
+        XCTAssertLessThanOrEqual(
+            ResearchTreeLayout.maximumLaneFootprint,
+            ResearchTreeLayout.navigatorWidth
+                - ResearchTreeLayout.horizontalPadding * 2
+        )
+        XCTAssertEqual(ResearchTreeLayout.maximumVisibleBranches, 7)
+    }
+
+    func testTimelineResolvesCycleObjectAtItsOwnCheckpoint() throws {
+        let page = try JSONDecoder().decode(
+            ProfileResearchTimelinePage.self,
+            from: timelineJSON().data(using: .utf8)!
+        )
+        let step = try XCTUnwrap(page.items.first)
+
+        XCTAssertEqual(
+            step.objectHref(
+                kind: "obligation",
+                targetRef: "obligation:o"
+            ),
+            "/api/research-graph-instances/i/branches/b/"
+                + "cycle-objects/obligation/o?trace_id=s"
+        )
+    }
+
+    func testAuditObjectLoadsOnlyWhenExplicitHrefIsRequested() async throws {
+        let transport = FakeProjectionTransport(responses: [
+            response(
+                """
+                {"success":true,"object":{
+                  "schema_version":1,"obligation_id":"o",
+                  "obligation_kind":"semantic_test",
+                  "epistemic_question":"Does the mechanism survive?",
+                  "scope":{"product_group":"CNFutures"},
+                  "discharge_criterion":{"rule_ref":"semantic:survival"},
+                  "status":"open","materiality":"decision_blocking",
+                  "created_event_ref":"trace:init"}}
+                """,
+                etag: "\"object-v1\""
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        let object = try await service.auditObject(
+            href: "/api/research-graph-instances/i/branches/b/"
+                + "cycle-objects/obligation/o?trace_id=s"
+        )
+
+        XCTAssertEqual(object.obligationID, "o")
+        XCTAssertEqual(
+            object.epistemicQuestion,
+            "Does the mechanism survive?"
+        )
+        XCTAssertEqual(transport.requests.count, 1)
+        XCTAssertEqual(transport.requests[0].url?.query, "trace_id=s")
+    }
+
     func testWorkPackageDecodesAuthoritativeBranchLineage() throws {
         let detail = try JSONDecoder().decode(
             ProfileResearchWorkPackageDetail.self,
@@ -644,6 +705,7 @@ private func timelineJSON() -> String {
       "evidence_refs":["artifact:e"],"trial_plan_refs":["trial-plan:t"],
       "obligation_refs":["obligation:o"],"claim_refs":[],
       "job_refs":["job:j"],"run_refs":["run:r"],
+      "object_hrefs":["/api/research-graph-instances/i/branches/b/cycle-objects/obligation/o?trace_id=s"],
       "obligation_changes":[{"obligation_id":"o","from_state":"open",
       "to_state":"serviced"}],"claim_changes":[]}],
      "next_cursor":"older","etag":"sha256:timeline"}

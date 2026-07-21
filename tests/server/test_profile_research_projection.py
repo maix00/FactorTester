@@ -454,6 +454,12 @@ def test_list_detail_and_timeline_are_bounded_source_free_and_keyset_paged(
     }]
     assert step["claim_changes"][0]["to_state"] == "inconclusive"
     assert step["job_stream_hrefs"][0].startswith("/api/jobs/")
+    assert step["object_hrefs"] == [
+        "/api/research-graph-instances/instance-a/branches/branch-0000/"
+        "cycle-objects/obligation/obligation-1?trace_id=trace-000004",
+        "/api/research-graph-instances/instance-a/branches/branch-0000/"
+        "cycle-objects/claim/claim-1?trace_id=trace-000004",
+    ]
     serialized_step = orjson.dumps(step)
     assert b"evidence_json" not in serialized_step
     assert b"telemetry_json" not in serialized_step

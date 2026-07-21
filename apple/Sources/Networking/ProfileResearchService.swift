@@ -137,6 +137,14 @@ struct ProfileResearchService {
         transport.events(for: request(path: href, etag: nil))
     }
 
+    func auditObject(href: String) async throws -> ResearchAuditObjectPayload {
+        let envelope = try await value(
+            path: href,
+            as: ResearchAuditObjectEnvelope.self
+        )
+        return envelope.object
+    }
+
     private func value<T: Decodable>(
         path: String,
         as type: T.Type

@@ -721,6 +721,7 @@ def _transition_step(
                 f"{parse_research_ref(research_ref)[0]}/branches/"
                 f"{parse_research_ref(research_ref)[1]}/cycle-objects/"
                 f"{ref.split(':', 1)[0]}/{ref.split(':', 1)[1]}"
+                f"?trace_id={str(row['trace_id'])}"
             )
             for ref in [*step["obligation_refs"], *step["claim_refs"]]
         ],
