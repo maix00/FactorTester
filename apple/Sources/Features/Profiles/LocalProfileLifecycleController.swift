@@ -48,12 +48,6 @@ extension LocalProfileController {
         ], action: "deactivate")
     }
 
-    func deleteProfile(_ profileID: String) async {
-        await lifecycle([
-            "client", "profile", "delete", profileID,
-        ], action: "delete")
-    }
-
     func purgeProfile(_ profileID: String) async {
         await lifecycle([
             "client", "profile", "purge", profileID,

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
-from .factor_worktree import rollback_factor_worktree_binding
 from .local_profile import LocalProfileStore, new_local_profile
 from .local_profile_contracts import validate_local_identifier
 from .locations import validate_client_root
@@ -98,23 +96,9 @@ class ProfileLifecycle:
         profile = self.store.load(profile_id)
         if profile["status"] != "inactive":
             raise ValueError("profile must be inactive before delete")
-        binding = profile.get("factor_workspace_binding") or {}
-        if binding:
-            rollback_factor_worktree_binding(
-                self.client_root,
-                profile_id,
-                str(binding["binding_id"]),
-            )
-            profile = self.store.load(profile_id)
-        source = self.store.root / f"{profile_id}.json"
-        tombstone = self._tombstone(profile_id)
-        tombstone.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, tombstone)
-        return self._receipt(
-            "delete",
-            "deleted",
-            profile_id,
-            extra={"profile_tombstone_ref": tombstone.resolve().as_uri()},
+        raise ValueError(
+            "profile delete is disabled until authoritative server reference "
+            "clearance is available; deactivate or unbind the profile instead"
         )
 
     def purge(self, profile_id: str) -> dict[str, Any]:

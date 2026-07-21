@@ -30,10 +30,6 @@ struct ProfileDirectoryCard: View {
                     Button("停用 Profile") { intent = .deactivate }
                     Button("解绑 Worktree") { intent = .unbind }
                         .disabled(profile.factorWorkspaceBinding == nil)
-                    Divider()
-                    Button("解绑并删除本地 Profile", role: .destructive) {
-                        intent = .delete
-                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -64,7 +60,7 @@ struct ProfileDirectoryCard: View {
     }
 
     private var statusText: String {
-        if profile.status == "inactive" { return "已停用 · 可安全解绑或删除" }
+        if profile.status == "inactive" { return "已停用 · 可安全解绑 Worktree" }
         return profile.factorWorkspaceBinding == nil
             ? "尚未绑定独立因子 Worktree"
             : "已绑定 · \(profile.researchRecords.count) 项研究"
@@ -82,19 +78,17 @@ struct ProfileDirectoryCard: View {
         switch selected {
         case .deactivate: await controller.deactivateProfile(profile.id)
         case .unbind: await controller.unbindFactorWorkspace(profile)
-        case .delete: await controller.deleteProfile(profile.id)
         case nil: break
         }
     }
 }
 
 enum ProfileLifecycleIntent {
-    case deactivate, unbind, delete
+    case deactivate, unbind
     var title: String {
         switch self {
         case .deactivate: return "停用 \(label)？"
         case .unbind: return "解绑 \(label) 的 Worktree？"
-        case .delete: return "解绑并删除 \(label)？"
         }
     }
     var label: String { "Profile" }
@@ -102,7 +96,6 @@ enum ProfileLifecycleIntent {
         switch self {
         case .deactivate: return "停用"
         case .unbind: return "解绑"
-        case .delete: return "解绑并删除"
         }
     }
     var role: ButtonRole? { self == .deactivate ? nil : .destructive }
@@ -112,8 +105,6 @@ enum ProfileLifecycleIntent {
             return "停止本地身份继续认领；研究记录、worktree、分支和提交均保留。"
         case .unbind:
             return "仅 clean worktree 可解绑。分支、提交和操作 receipt 永久保留。"
-        case .delete:
-            return "dirty worktree 会被拒绝。删除本地 Profile 元数据，但不删除分支、提交或 receipt。"
         }
     }
 }

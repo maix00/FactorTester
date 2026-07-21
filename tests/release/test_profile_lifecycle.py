@@ -71,7 +71,7 @@ def _canonical(root: Path) -> Path:
     return repo
 
 
-def test_cli_create_and_lifecycle_receipts_are_idempotent(
+def test_cli_create_deactivate_and_legacy_purge_are_idempotent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -113,15 +113,27 @@ def test_cli_create_and_lifecycle_receipts_are_idempotent(
     lifecycle = ProfileLifecycle(client_root)
     inactive = lifecycle.deactivate("maxa")
     assert lifecycle.deactivate("maxa") == inactive
-    deleted = lifecycle.delete("maxa")
-    assert lifecycle.delete("maxa") == deleted
+    with pytest.raises(
+        ValueError,
+        match="authoritative server reference clearance",
+    ):
+        lifecycle.delete("maxa")
+    assert LocalProfileStore(client_root).load("maxa")["status"] == "inactive"
+    assert not (client_root / "profiles/deleted/maxa.json").exists()
+
+    # Tombstones created by an older client remain locally purgeable.  New
+    # deletions stay fail-closed until the server can prove reference safety.
+    source = client_root / "profiles/maxa.json"
+    tombstone = client_root / "profiles/deleted/maxa.json"
+    tombstone.parent.mkdir(parents=True)
+    os.replace(source, tombstone)
     workspace.rmdir()
     purged = lifecycle.purge("maxa")
     assert lifecycle.purge("maxa") == purged
     assert purged["status"] == "purged"
 
 
-def test_delete_refuses_dirty_worktree_and_retains_git_history(
+def test_delete_refuses_bound_profile_without_mutating_worktree_or_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -144,19 +156,42 @@ def test_delete_refuses_dirty_worktree_and_retains_git_history(
         client_root, plan_factor_worktree_binding(client_root, "maxa")
     )
     worktree = Path(receipt["worktree_path"])
-    (worktree / "custom_factors" / "Dirty.py").write_text("value = 1\n")
     lifecycle.deactivate("maxa")
-    with pytest.raises(ValueError, match="uncommitted changes"):
+    with pytest.raises(
+        ValueError,
+        match="authoritative server reference clearance",
+    ):
         lifecycle.delete("maxa")
     assert worktree.is_dir()
     assert LocalProfileStore(client_root).load("maxa")["status"] == "inactive"
     assert not (client_root / "profiles/deleted/maxa.json").exists()
-
-    (worktree / "custom_factors" / "Dirty.py").unlink()
-    deleted = lifecycle.delete("maxa")
-    assert deleted["branch_retained"] is True
-    assert deleted["commits_retained"] is True
-    assert not worktree.exists()
     assert _git(repo, "show-ref", "--verify", "refs/heads/agent/maxa")
-    with pytest.raises(ValueError, match="not empty"):
-        lifecycle.purge("maxa")
+
+
+def test_delete_refuses_unbound_profile_when_server_references_are_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    client_root = tmp_path / "support"
+    lifecycle = ProfileLifecycle(client_root)
+    lifecycle.create(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8000",
+        principal_ref=OWNER,
+    )
+    lifecycle.deactivate("maxa")
+    before = LocalProfileStore(client_root).load("maxa")
+
+    with pytest.raises(
+        ValueError,
+        match="authoritative server reference clearance",
+    ):
+        lifecycle.delete("maxa")
+
+    assert LocalProfileStore(client_root).load("maxa") == before
+    assert not (client_root / "profiles/deleted/maxa.json").exists()
+    assert not (
+        client_root / "profiles/lifecycle-receipts/maxa/delete.json"
+    ).exists()

@@ -141,7 +141,7 @@ def delete_profile(
     profile_id: str,
     release_profile: Path | None,
 ) -> None:
-    """Unbind a clean worktree and delete local Profile metadata."""
+    """Request deletion; currently fail closed pending reference clearance."""
     click.echo(_json(ProfileLifecycle(
         load_profile_root(release_profile)
     ).delete(profile_id)))
