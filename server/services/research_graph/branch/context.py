@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from copy import deepcopy
 from typing import Any
 
@@ -35,7 +36,7 @@ def _build_local_state(
     owner: str,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Build compact current state plus internal candidate edge definitions."""
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+    with closing(connect_sqlite(Settings.CACHE_DB_PATH)) as conn:
         branch_row = load_instance_branch_with_latest_trace(
             conn,
             instance_id=instance_id,

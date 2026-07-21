@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+import sqlite3
 import time
 
 import orjson
+import pytest
 
 import settings as Settings
 from server.services import research_graphs
@@ -137,6 +139,32 @@ def test_context_query_plan_uses_primary_key_lookups(
     assert any("RESEARCH_GRAPH_INSTANCES" in detail for detail in details)
     assert any("RESEARCH_GRAPH_BRANCHES" in detail for detail in details)
     assert any("RESEARCH_GRAPH_TRACE" in detail for detail in details)
+
+
+def test_context_request_closes_its_sqlite_connection(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "connection-lifetime.sqlite"
+    initialize(path)
+    connections: list[sqlite3.Connection] = []
+
+    def tracked_connect(*args, **kwargs):
+        connection = connect_sqlite(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    monkeypatch.setattr(branch_context, "connect_sqlite", tracked_connect)
+    research_graphs.build_graph_branch_context(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+    )
+
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connections[0].execute("SELECT 1")
 
 
 def test_context_cost_receipt_is_content_addressed() -> None:
