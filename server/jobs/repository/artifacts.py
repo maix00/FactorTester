@@ -23,7 +23,7 @@ class JobArtifactImplementation:
         retention_mode: str = "retained",
     ) -> dict[str, Any]:
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             job = conn.execute(
                 "SELECT status FROM research_jobs WHERE job_id=?",
@@ -70,7 +70,7 @@ class JobArtifactImplementation:
         name: str,
         owner: str,
     ) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT artifacts.* FROM research_job_artifacts AS artifacts
@@ -82,7 +82,7 @@ class JobArtifactImplementation:
         return dict(row) if row is not None else None
 
     def require_artifact(self, *, job_id: str, name: str) -> dict[str, Any]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT * FROM research_job_artifacts
@@ -100,7 +100,7 @@ class JobArtifactImplementation:
         job_id: str,
         owner: str,
     ) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT artifacts.* FROM research_job_artifacts AS artifacts
@@ -120,7 +120,7 @@ class JobArtifactImplementation:
     ) -> list[dict[str, Any]]:
         artifacts = self.list_artifacts(job_id=job_id, owner=owner)
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 UPDATE research_job_artifacts SET state='deleted', deleted_at=?
@@ -144,7 +144,7 @@ class JobArtifactImplementation:
             clauses.append("jobs.workspace_id=?")
             args.append(str(workspace_id))
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 f"""
@@ -180,7 +180,7 @@ class JobArtifactImplementation:
         terminal = tuple(status.value for status in TERMINAL_STATUSES)
         placeholders = ",".join("?" for _ in terminal)
         args = [str(owner), str(workspace_id), *terminal]
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             jobs = conn.execute(
                 f"""
@@ -214,7 +214,7 @@ class JobArtifactImplementation:
         return job_ids, [dict(row) for row in artifacts]
 
     def storage_usage(self, *, owner: str) -> int:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT COALESCE(SUM(artifacts.size_bytes), 0) AS size_bytes
@@ -227,7 +227,7 @@ class JobArtifactImplementation:
         return int(row["size_bytes"] or 0)
 
     def storage_quota(self, *, owner: str, default_bytes: int) -> int:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT quota_bytes FROM user_storage_policies WHERE owner=?",
                 (str(owner),),
@@ -239,7 +239,7 @@ class JobArtifactImplementation:
         )
 
     def set_storage_quota(self, *, owner: str, quota_bytes: int) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO user_storage_policies(owner, quota_bytes, updated_at)

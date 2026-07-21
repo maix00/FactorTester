@@ -17,7 +17,7 @@ class JobDetailQueryImplementation:
         *,
         owner: str,
     ) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             try:
                 row = conn.execute(
                     _DETAIL_QUERY,

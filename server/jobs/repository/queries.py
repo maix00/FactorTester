@@ -26,7 +26,7 @@ class JobQueryImplementation:
         if owner is not None:
             clauses.append("owner=?")
             args.append(str(owner))
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 f"SELECT * FROM research_jobs WHERE {' AND '.join(clauses)}",
                 args,
@@ -66,7 +66,7 @@ class JobQueryImplementation:
             clauses.append(f"status IN ({','.join('?' for _ in values)})")
             args.extend(values)
         args.append(min(200, max(1, int(limit))))
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT * FROM research_jobs
@@ -112,7 +112,7 @@ class JobQueryImplementation:
             )
             args.extend(values)
         args.append(min(200, max(1, int(limit))))
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT jobs.*,
@@ -164,7 +164,7 @@ class JobQueryImplementation:
             ))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         args.append(bounded_limit + 1)
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT job_id, run_id, owner, workspace_id, kind, status,
@@ -213,7 +213,7 @@ class JobQueryImplementation:
             return []
         args: list[Any] = [str(deployment_id), *values]
         args.append(min(2000, max(1, int(limit))))
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT jobs.*,
@@ -234,7 +234,7 @@ class JobQueryImplementation:
         ]
 
     def is_pinned(self, job_id: str) -> bool:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT 1 FROM user_job_pins WHERE job_id=?",
                 (str(job_id),),

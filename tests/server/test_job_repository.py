@@ -534,6 +534,54 @@ def test_job_list_metadata_uses_one_bounded_read(
     assert "RESEARCH_JOB_ARTIFACTS" in reads[0].upper()
 
 
+def test_repository_closes_connection_after_successful_read(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.ensure_schema()
+    connections = []
+
+    def traced_connect():
+        connection = connect_sqlite(
+            repository.db_path,
+            foreign_keys=True,
+        )
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(repository, "_connect", traced_connect)
+
+    assert repository.list(owner="alice") == []
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connections[0].execute("SELECT 1")
+
+
+def test_repository_closes_connection_after_failed_read(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository = JobRepository(tmp_path / "missing-schema.sqlite")
+    connections = []
+
+    def traced_connect():
+        connection = connect_sqlite(
+            repository.db_path,
+            foreign_keys=True,
+        )
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(repository, "_connect", traced_connect)
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        repository.list(owner="alice")
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connections[0].execute("SELECT 1")
+
+
 def test_job_detail_uses_one_read_for_pin_and_run_identity(
     tmp_path,
     monkeypatch,
