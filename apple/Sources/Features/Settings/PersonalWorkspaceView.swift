@@ -1,10 +1,9 @@
+import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct PersonalWorkspaceView: View {
     @EnvironmentObject private var session: SessionStore
     @StateObject private var controller = PersonalWorkspaceController()
-    @State private var isSelectingWorkspace = false
     @State private var authorizedRoot =
         PersonalWorkspaceAccessStore.authorizedRootPath
     @State private var accessError: String?
@@ -26,20 +25,6 @@ struct PersonalWorkspaceView: View {
         .overlay { if controller.isWorking { ProgressView() } }
         .task {
             await controller.refresh(principal: session.user?.username ?? "")
-        }
-        .fileImporter(
-            isPresented: $isSelectingWorkspace,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            do {
-                guard let url = try result.get().first else { return }
-                try PersonalWorkspaceAccessStore.authorize(url)
-                authorizedRoot = PersonalWorkspaceAccessStore.authorizedRootPath
-                accessError = nil
-            } catch {
-                accessError = "无法保存个人工作区授权：\(error.localizedDescription)"
-            }
         }
     }
 
@@ -122,11 +107,30 @@ struct PersonalWorkspaceView: View {
                         .foregroundStyle(.red)
                 }
                 Button("选择用户目录…") {
-                    isSelectingWorkspace = true
+                    chooseWorkspace()
                 }
                 .buttonStyle(.borderedProminent)
             }
             .padding(8)
+        }
+    }
+
+    private func chooseWorkspace() {
+        let panel = NSOpenPanel()
+        panel.title = "选择 FactorTester 用户目录"
+        panel.message = "请选择当前用户目录，用于读取本地中文研究报告。"
+        panel.prompt = "授权读取"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: userRoot, isDirectory: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try PersonalWorkspaceAccessStore.authorize(url)
+            authorizedRoot = PersonalWorkspaceAccessStore.authorizedRootPath
+            accessError = nil
+        } catch {
+            accessError = "无法保存个人工作区授权：\(error.localizedDescription)"
         }
     }
 
