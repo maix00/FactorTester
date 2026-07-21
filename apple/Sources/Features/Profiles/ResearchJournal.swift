@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 struct ResearchJournalDocument: Decodable {
@@ -114,14 +115,7 @@ enum ResearchJournalLoader {
         }
         let expectedHash = artifact.journalHash
         return try await Task.detached {
-            let values = try FileManager.default.attributesOfItem(
-                atPath: url.path
-            )
-            let size = (values[.size] as? NSNumber)?.intValue ?? -1
-            guard size >= 0, size <= maximumBytes else {
-                throw ResearchJournalError.invalidSize
-            }
-            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            let data = try readBoundedRegularFile(url)
             guard sha256(data) == expectedHash else {
                 throw ResearchJournalError.hashMismatch
             }
@@ -132,6 +126,48 @@ enum ResearchJournalLoader {
             try validate(decoded)
             return decoded
         }.value
+    }
+
+    private static func readBoundedRegularFile(_ url: URL) throws -> Data {
+        let descriptor: Int32 = url.withUnsafeFileSystemRepresentation {
+            path -> Int32 in
+            guard let path else { return -1 }
+            return Darwin.open(
+                path,
+                O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+            )
+        }
+        guard descriptor >= 0 else {
+            throw ResearchJournalError.missingReference
+        }
+        let handle = FileHandle(
+            fileDescriptor: descriptor,
+            closeOnDealloc: true
+        )
+        defer { try? handle.close() }
+
+        var metadata = Darwin.stat()
+        guard Darwin.fstat(descriptor, &metadata) == 0,
+              metadata.st_size >= 0,
+              metadata.st_size <= maximumBytes,
+              metadata.st_mode & S_IFMT == S_IFREG else {
+            throw ResearchJournalError.invalidSize
+        }
+
+        var data = Data()
+        while data.count <= maximumBytes {
+            let remaining = maximumBytes + 1 - data.count
+            guard remaining > 0,
+                  let chunk = try handle.read(
+                    upToCount: min(remaining, 64 * 1024)
+                  ),
+                  !chunk.isEmpty else { break }
+            data.append(chunk)
+        }
+        guard data.count <= maximumBytes else {
+            throw ResearchJournalError.invalidSize
+        }
+        return data
     }
 
     static func sections(

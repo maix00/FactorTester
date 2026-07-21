@@ -64,6 +64,40 @@ final class ResearchJournalTests: XCTestCase {
         }
     }
 
+    func testRejectsSymlinkInsteadOfFollowingUntrustedJournalPath() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let data = journalData()
+        let target = root.appendingPathComponent("target.json")
+        let link = root.appendingPathComponent("JOURNAL.json")
+        try data.write(to: target)
+        try FileManager.default.createSymbolicLink(
+            at: link,
+            withDestinationURL: target
+        )
+        let artifact = ResearchArtifactModel(json: [
+            "artifact_ref": "artifact:report",
+            "format": "markdown",
+            "status": "ready",
+            "journal_ref": link.absoluteString,
+            "journal_hash": sha256(data),
+        ])
+
+        do {
+            _ = try await ResearchJournalLoader.load(artifact: artifact)
+            XCTFail("journal symlink should not be followed")
+        } catch let error as ResearchJournalError {
+            guard case .missingReference = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+    }
+
     private func journalData() -> Data {
         Data(
             """
