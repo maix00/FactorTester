@@ -15,15 +15,23 @@ final class LocalProfileController: ObservableObject {
     @Published var error: String?
     @Published var lifecycleReceipt: ProfileLifecycleReceipt?
     private let defaults: UserDefaults
+    private let profileDirectory: URL
     private let cacheKey = "client.profile.list.cache.v1"
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        profileDirectory: URL? = nil
+    ) {
         self.defaults = defaults
+        self.profileDirectory = profileDirectory ?? Self.defaultProfileDirectory()
         if let data = defaults.data(forKey: cacheKey),
            let value = try? JSONSerialization.jsonObject(with: data),
            let values = value as? [[String: Any]] {
             profiles = values.map(LocalProfileModel.init)
                 .filter { !$0.id.isEmpty }
+        }
+        if profiles.isEmpty {
+            hydrateFromLocalStore()
         }
     }
     var cliPath: String {
@@ -137,6 +145,46 @@ final class LocalProfileController: ObservableObject {
                   options: []
               ) else { return }
         defaults.set(data, forKey: cacheKey)
+    }
+
+    /// Profile JSON is the same local source the CLI reads.  Hydrating this
+    /// small, source-free descriptor synchronously prevents a first launch
+    /// from rendering an empty directory while the bundled one-file CLI is
+    /// still extracting and starting.  The CLI remains authoritative and
+    /// refreshes the snapshot in the background.
+    private func hydrateFromLocalStore() {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: profileDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let values = urls
+            .filter { $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .compactMap { url -> [String: Any]? in
+                guard let data = try? Data(contentsOf: url),
+                      let value = try? JSONSerialization.jsonObject(with: data),
+                      let object = value as? [String: Any] else { return nil }
+                return object
+            }
+        guard !values.isEmpty else { return }
+        profiles = values.map(LocalProfileModel.init)
+            .filter { !$0.id.isEmpty }
+        cacheProfileValues(values)
+    }
+
+    private static func defaultProfileDirectory() -> URL {
+        #if os(macOS)
+        let root = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support")
+        return root.appendingPathComponent("FactorTester/profiles")
+        #else
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/share/factortester/profiles")
+        #endif
     }
 
     func perform(
