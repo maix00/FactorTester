@@ -50,6 +50,11 @@ def validate_verification_obligation(
         field="contract_hash",
     )
     string_array(value.get("claim_ids"), field="claim_ids")
+    if "requirement_refs" in value:
+        string_array(
+            value.get("requirement_refs"),
+            field="requirement_refs",
+        )
     object_value(value.get("scope"), field="scope")
     object_value(
         value.get("discharge_criterion"),

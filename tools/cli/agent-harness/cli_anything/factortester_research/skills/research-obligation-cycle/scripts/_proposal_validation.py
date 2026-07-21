@@ -141,6 +141,8 @@ def validate_obligation_discovery(
         if obligation.get("methodology_hash") != validated["methodology_hash"]:
             raise ValueError("obligation methodology hash does not match")
         _refs(obligation.get("claim_ids"), "obligation.claim_ids", required=True)
+        if "requirement_refs" in obligation:
+            _refs(obligation.get("requirement_refs"), "obligation.requirement_refs")
         if not isinstance(obligation.get("scope"), dict):
             raise ValueError("obligation scope must be an object")
         if not isinstance(obligation.get("discharge_criterion"), dict):

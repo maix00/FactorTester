@@ -16,7 +16,7 @@ from tools.data.availability.model import profile_document
 from tools.data.sqlite.db import connect_sqlite
 
 
-def checkpoint() -> dict:
+def checkpoint(*, obligation_status: str = "bounded") -> dict:
     return validate_research_cycle_checkpoint({
         "schema_version": 1,
         "contract_hash": "1" * 64,
@@ -38,12 +38,16 @@ def checkpoint() -> dict:
             "contract_hash": "1" * 64,
             "claim_ids": ["claim-data"],
             "obligation_kind": "data_feasibility",
+            "requirement_refs": [
+                "data-availability.scope",
+                "data-provenance.point-in-time",
+            ],
             "epistemic_question": "Is required minute history available?",
             "scope": {"product": "A.DCE", "frequency": "MIN1"},
             "discharge_criterion": {
                 "method_ref": "availability-and-pit-review@1",
             },
-            "status": "open",
+            "status": obligation_status,
             "materiality": "decision_blocking",
             "methodology_hash": "2" * 64,
             "created_event_ref": "trace:data-contract-bootstrap",
@@ -71,26 +75,59 @@ def graph() -> dict:
                 "kind": "research",
                 "required_capabilities": [],
             },
-        ],
-        "edges": [{
-            "edge_id": "data_contract__factor_semantics",
-            "from_node": "data_contract",
-            "to_node": "factor_semantics",
-            "guard": {
-                "data_availability_profile_bound": True,
-                "requested_product_availability_present": True,
-                "point_in_time_contract_valid": True,
-                "material_data_obligations_adjudicated_or_not_triggered": True,
+            {
+                "node_id": "capability_gap",
+                "kind": "capability_gap",
+                "required_capabilities": [],
             },
-            "required_evidence": [],
-            "server_action": "bind_data_availability",
-        }],
+        ],
+        "edges": [
+            {
+                "edge_id": "data_contract__factor_semantics",
+                "from_node": "data_contract",
+                "to_node": "factor_semantics",
+                "guard": {
+                    "data_availability_profile_bound": True,
+                    "requested_product_availability_present": True,
+                    "data_provenance_status_bound": True,
+                    "material_data_obligations_adjudicated_or_not_triggered": True,
+                },
+                "required_evidence": [],
+                "server_action": "bind_data_availability",
+            },
+            {
+                "edge_id": "data_contract__capability_gap",
+                "from_node": "data_contract",
+                "to_node": "capability_gap",
+                "edge_type": "failure",
+                "guard": {
+                    "data_availability_profile_bound": True,
+                    "requested_product_availability_present": False,
+                },
+                "required_evidence": [],
+                "server_action": "bind_data_availability",
+            },
+            {
+                "edge_id": "capability_gap__data_contract",
+                "from_node": "capability_gap",
+                "to_node": "data_contract",
+                "edge_type": "recovery",
+                "guard": {
+                    "data_availability_profile_bound": True,
+                    "requested_product_availability_present": True,
+                },
+                "required_evidence": [],
+                "server_action": "bind_data_availability",
+            },
+        ],
     }
 
 
-def initialize(path) -> None:
+def initialize(path, *, obligation_status: str = "bounded") -> None:
     evidence = {
-        "research_cycle_checkpoint": checkpoint(),
+        "research_cycle_checkpoint": checkpoint(
+            obligation_status=obligation_status,
+        ),
         "evidence_refs": [],
     }
     with connect_sqlite(path) as conn:
@@ -184,6 +221,7 @@ def transition_evidence() -> dict:
         },
         "data_availability_profile_bound": False,
         "requested_product_availability_present": False,
-        "point_in_time_contract_valid": True,
+        "data_provenance_status_bound": False,
+        "data_provenance_integrity_status": "verified",
         "material_data_obligations_adjudicated_or_not_triggered": True,
     }

@@ -81,11 +81,26 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "data_contract",
             "factor_semantics",
             guard={
-                "point_in_time_contract_valid": True,
+                "data_provenance_status_bound": True,
                 "data_availability_profile_bound": True,
                 "requested_product_availability_present": True,
                 "material_data_obligations_adjudicated_or_not_triggered": True,
             },
+            server_action="bind_data_availability",
+        ),
+        edge(
+            "data_contract__capability_gap",
+            "data_contract",
+            "capability_gap",
+            edge_type="failure",
+            guard={
+                "data_availability_profile_bound": True,
+                "requested_product_availability_present": False,
+            },
+            risk_level="L2",
+            required_transition_facts=[
+                "exact unavailable product and source scope",
+            ],
             server_action="bind_data_availability",
         ),
         edge(
@@ -258,6 +273,21 @@ def build_draft_edges() -> list[dict[str, Any]]:
             edge_type="recovery",
             guard={"approved_binding_now_available": True},
             risk_level="L2",
+        ),
+        edge(
+            "capability_gap__data_contract",
+            "capability_gap",
+            "data_contract",
+            edge_type="recovery",
+            guard={
+                "data_availability_profile_bound": True,
+                "requested_product_availability_present": True,
+            },
+            risk_level="L2",
+            required_transition_facts=[
+                "exact available product and source scope",
+            ],
+            server_action="bind_data_availability",
         ),
         edge(
             "capability_gap__job_evidence_ready",

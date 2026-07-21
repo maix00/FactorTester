@@ -38,6 +38,12 @@ Keep routine existence, permission, and exact predeclared coverage checks as
 deterministic constraints or Capability Gaps. Create an obligation only when
 the remaining data question could change the bounded research decision,
 representativeness, transfer boundary, TrialPlan, or permitted use.
+When the obligation bears on a deterministic data gate, attach stable machine
+`requirement_refs` rather than encoding gate meaning in `obligation_kind`:
+use `data-availability.scope` for usable-scope debt and
+`data-provenance.point-in-time` for visibility-time, vintage, membership, or
+look-ahead debt. `obligation_kind` remains open research vocabulary; the
+deterministic runner must never infer authorization from its wording.
 
 The lenses above are prompts, not a universal checklist. Create factor-specific
 obligations when first principles require them, and omit irrelevant lenses.

@@ -103,6 +103,7 @@ def validate_dataset_manifest(path: str) -> dict[str, Any]:
         raise ValueError("dataset manifest rows and symbols must be positive")
     return {
         "kind": "dataset", "path": str(manifest_path), "valid": True,
+        "point_in_time_eligible": False,
         "frequency": payload.get("frequency", "1d"),
         "rows": int(payload["rows"]), "symbols": int(payload["symbols"]),
     }

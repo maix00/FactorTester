@@ -14,6 +14,7 @@ from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
 )
 from server.services.research_graph.research_cycle.data_availability_evidence import (
+    project_data_provenance_evidence,
     project_availability_evidence,
     validate_availability_request,
 )
@@ -25,6 +26,9 @@ SERVER_ACTION = "bind_data_availability"
 REQUEST_FIELD = "data_availability_request"
 _SERVER_GUARDS = (
     "data_availability_profile_bound",
+    "data_provenance_status_bound",
+    "data_provenance_integrity_status",
+    "material_data_obligations_adjudicated_or_not_triggered",
     "requested_product_availability_present",
 )
 
@@ -79,14 +83,27 @@ def prepare_transition(
         request=normalized_request,
         checkpoint=checkpoint,
     )
+    provenance_envelope = project_data_provenance_evidence(
+        profile=profile,
+        request=normalized_request,
+        checkpoint=checkpoint,
+    )
     return {
         "expected": expected,
         "guard_facts": {
             "data_availability_profile_bound": True,
+            "data_provenance_status_bound": True,
             "requested_product_availability_present": present,
+            "data_provenance_integrity_status": (
+                provenance_envelope["facts"]["integrity_status"]
+            ),
         },
         "envelope": envelope,
+        "provenance_envelope": provenance_envelope,
         "evidence_ref": "evidence:" + envelope["envelope_hash"],
+        "provenance_evidence_ref": (
+            "evidence:" + provenance_envelope["envelope_hash"]
+        ),
     }
 
 
@@ -103,6 +120,7 @@ def bind_server_evidence(
         return value
     value["server_evidence"] = {
         "data_availability": deepcopy(prepared["envelope"]),
+        "data_provenance": deepcopy(prepared["provenance_envelope"]),
     }
     raw_refs = value.get("evidence_refs", [])
     if not isinstance(raw_refs, list) or not all(
@@ -112,6 +130,8 @@ def bind_server_evidence(
     refs = list(raw_refs)
     if prepared["evidence_ref"] not in refs:
         refs.append(prepared["evidence_ref"])
+    if prepared["provenance_evidence_ref"] not in refs:
+        refs.append(prepared["provenance_evidence_ref"])
     value["evidence_refs"] = refs
     return value
 

@@ -104,6 +104,105 @@ def project_availability_evidence(
     return validate_agent_evidence_envelope(value), present
 
 
+def project_data_provenance_evidence(
+    *,
+    profile: Any,
+    request: dict[str, Any],
+    checkpoint: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind a compact server-owned status without claiming PIT validity."""
+    normalized = _validate_profile(profile, request=request)
+    present = _requested_products_present(normalized)
+    profile_hash = str(normalized["profile_hash"]).removeprefix("sha256:")
+    profile_ref = "data-availability-profile:sha256:" + profile_hash
+    entries = [
+        item for item in normalized["entries"]
+        if item.get("status") == "available"
+    ]
+    replayable = bool(entries) and all(
+        item.get("replayable") is True for item in entries
+    )
+    # The current provider profile carries file metadata, not a verified
+    # dataset-manifest@2. Keep this false until a content-hash verifier owns
+    # every provenance dimension below.
+    point_in_time_verified = False
+    if not present:
+        integrity_status = "unavailable"
+    elif point_in_time_verified:
+        integrity_status = "verified"
+    else:
+        integrity_status = "bounded_unverified"
+    open_dimensions = [] if point_in_time_verified else [
+        "adjustment_vintage",
+        "availability_time",
+        "calendar",
+        "contract_membership_vintage",
+        "session",
+        "source_content_checksum",
+        "timezone",
+    ]
+    bound_dimensions = (
+        [
+            "adjustment_vintage",
+            "availability_time",
+            "calendar",
+            "contract_membership_vintage",
+            "coverage",
+            "frequency",
+            "product_identity",
+            "session",
+            "source_content_checksum",
+            "snapshot_reference",
+            "timezone",
+        ]
+        if point_in_time_verified
+        else [
+            "coverage",
+            "frequency",
+            "product_identity",
+            "snapshot_reference",
+        ]
+    )
+    value = {
+        "schema_version": 2,
+        "envelope_id": (
+            "data-provenance:"
+            + json_hash({
+                "profile_hash": profile_hash,
+                "contract_hash": checkpoint["contract_hash"],
+                "methodology_hash": checkpoint["methodology_hash"],
+            })
+        ),
+        "evidence_kind": "data_contract",
+        "source_refs": [profile_ref],
+        "identity_refs": {
+            "contract_hash": checkpoint["contract_hash"],
+            "methodology_hash": checkpoint["methodology_hash"],
+        },
+        "facts": {
+            "profile_ref": profile_ref,
+            "integrity_status": integrity_status,
+            "requested_product_availability_present": present,
+            "point_in_time_verified": point_in_time_verified,
+            "replayable": replayable,
+            "bound_dimensions": bound_dimensions,
+            "open_dimensions": open_dimensions,
+        },
+        "metric_refs": [],
+        "artifact_refs": [],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": (
+            []
+            if point_in_time_verified
+            else [
+                "The bound snapshot does not prove every field was available "
+                "at signal time; the point-in-time obligation remains open."
+            ]
+        ),
+        "conflicts": [],
+    }
+    return validate_agent_evidence_envelope(value)
 def _validate_profile(
     profile: Any,
     *,

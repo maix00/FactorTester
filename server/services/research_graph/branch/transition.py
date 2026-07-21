@@ -192,6 +192,9 @@ def advance_graph_branch(
             if isinstance(cycle_update, dict)
             else []
         )
+        prepared_server_guard_facts = server_actions.guard_facts(
+            prepared_server_actions
+        )
         guard_evidence = {
             **prepared_evidence,
             **adjudication_route_guards(route_action),
@@ -203,8 +206,13 @@ def advance_graph_branch(
             **system_transition_guard_facts(
                 branch_row=branch_row,
                 cycle_checkpoint=cycle_checkpoint,
+                provenance_integrity_status=str(
+                    prepared_server_guard_facts.get(
+                        "data_provenance_integrity_status"
+                    ) or ""
+                ),
             ),
-            **server_actions.guard_facts(prepared_server_actions),
+            **prepared_server_guard_facts,
         }
         failed_guards = [
             key

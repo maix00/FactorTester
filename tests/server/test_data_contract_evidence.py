@@ -22,6 +22,13 @@ from tests.server.data_contract_fixtures import (
 )
 from tools.data.availability.model import profile_document
 from tools.data.sqlite.db import connect_sqlite
+from cli_anything.factortester_research.core.draft_graph import (
+    build_draft_graph,
+)
+from cli_anything.factortester_research.core.graph_protocol import (
+    graph_content_hash,
+)
+from cli_anything.factortester_research.core.replay import replay_graph_trace
 
 
 def test_data_contract_edge_projects_server_evidence_outside_write_lock(
@@ -70,6 +77,8 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
         ).fetchone()
     trace = orjson.loads(row["evidence_json"])
     assert "data_availability_request" not in trace
+    assert "data_provenance_status_bound" not in trace
+    assert "data_provenance_integrity_status" not in trace
     envelope = trace["server_evidence"]["data_availability"]
     assert envelope["evidence_kind"] == "data_availability"
     assert envelope["identity_refs"] == {
@@ -92,8 +101,49 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
     assert "profile" not in envelope["facts"]
     assert envelope["facts"]["requested_product_availability_present"] is True
     assert trace["evidence_refs"] == [
-        "evidence:" + envelope["envelope_hash"]
+        "evidence:" + envelope["envelope_hash"],
+        "evidence:"
+        + trace["server_evidence"]["data_provenance"]["envelope_hash"],
     ]
+    provenance = trace["server_evidence"]["data_provenance"]
+    assert provenance["evidence_kind"] == "data_contract"
+    assert provenance["facts"] == {
+        "profile_ref": envelope["facts"]["profile_ref"],
+        "integrity_status": "bounded_unverified",
+        "requested_product_availability_present": True,
+        "point_in_time_verified": False,
+        "replayable": True,
+        "bound_dimensions": [
+            "coverage",
+            "frequency",
+            "product_identity",
+            "snapshot_reference",
+        ],
+        "open_dimensions": [
+            "adjustment_vintage",
+            "availability_time",
+            "calendar",
+            "contract_membership_vintage",
+            "session",
+            "source_content_checksum",
+            "timezone",
+        ],
+    }
+    replay_graph = build_draft_graph()
+    replay_graph["entry_node"] = "data_contract"
+    replay_graph["content_hash"] = graph_content_hash(replay_graph)
+    replay = replay_graph_trace(replay_graph, {
+        "schema_version": 1,
+        "events": [{
+            "type": "transition",
+            "edge_id": "data_contract__factor_semantics",
+            "evidence": trace,
+        }],
+    })
+    assert replay["status"] == "complete"
+    assert replay["branches"]["primary"]["current_node"] == (
+        "factor_semantics"
+    )
 
 
 def test_data_contract_trace_stays_bounded_for_multi_product_profile(
@@ -178,7 +228,35 @@ def test_client_cannot_submit_server_evidence(
         )
 
 
-def test_unavailable_requested_product_cannot_advance(
+def test_client_cannot_forge_data_obligation_adjudication(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    initialize(path, obligation_status="open")
+    monkeypatch.setattr(
+        data_contract_service,
+        "availability_for_scope",
+        lambda **_kwargs: profile(),
+    )
+    payload = transition_evidence()
+    payload["material_data_obligations_adjudicated_or_not_triggered"] = True
+
+    with pytest.raises(
+        ValueError,
+        match="material_data_obligations_adjudicated_or_not_triggered",
+    ):
+        advance_graph_branch(
+            instance_id="instance-1",
+            branch_id="branch-1",
+            owner="alice",
+            edge_id="data_contract__factor_semantics",
+            evidence=payload,
+        )
+
+
+def test_unavailable_scope_routes_to_gap_and_rechecks_on_recovery(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -191,17 +269,16 @@ def test_unavailable_requested_product_cannot_advance(
         lambda **_kwargs: profile(status="unavailable"),
     )
 
-    with pytest.raises(
-        ValueError,
-        match="requested_product_availability_present",
-    ):
-        advance_graph_branch(
-            instance_id="instance-1",
-            branch_id="branch-1",
-            owner="alice",
-            edge_id="data_contract__factor_semantics",
-            evidence=transition_evidence(),
-        )
+    gap = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="data_contract__capability_gap",
+        evidence=transition_evidence(),
+    )
+
+    assert gap["current_node"] == "capability_gap"
+    assert gap["status"] == "paused"
 
     with connect_sqlite(path) as conn:
         row = conn.execute(
@@ -210,7 +287,24 @@ def test_unavailable_requested_product_cannot_advance(
             FROM research_graph_branches WHERE branch_id='branch-1'
             """
         ).fetchone()
-    assert tuple(row) == ("data_contract", "trace-bootstrap")
+    assert row["current_node"] == "capability_gap"
+    assert row["latest_trace_id"] != "trace-bootstrap"
+
+    monkeypatch.setattr(
+        data_contract_service,
+        "availability_for_scope",
+        lambda **_kwargs: profile(status="available"),
+    )
+    recovered = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="capability_gap__data_contract",
+        evidence=transition_evidence(),
+    )
+
+    assert recovered["current_node"] == "data_contract"
+    assert recovered["status"] == "running"
 
 
 def test_preflight_rejects_a_concurrent_branch_change(
