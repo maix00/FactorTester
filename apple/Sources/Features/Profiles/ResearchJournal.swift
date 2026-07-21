@@ -115,7 +115,9 @@ enum ResearchJournalLoader {
         }
         let expectedHash = artifact.journalHash
         return try await Task.detached {
-            let data = try readBoundedRegularFile(url)
+            let data = try PersonalWorkspaceAccessStore.withAccess(to: url) {
+                try readBoundedRegularFile(url)
+            }
             guard sha256(data) == expectedHash else {
                 throw ResearchJournalError.hashMismatch
             }
@@ -225,6 +227,7 @@ enum ResearchJournalLoader {
 
 enum ResearchJournalError: LocalizedError {
     case missingReference
+    case workspaceAccessRequired
     case invalidSize
     case hashMismatch
     case invalidContract
@@ -233,6 +236,8 @@ enum ResearchJournalError: LocalizedError {
         switch self {
         case .missingReference:
             return "该研究记录尚无完整中文报告。"
+        case .workspaceAccessRequired:
+            return "请先在“设置 → 个人工作区”中选择当前用户目录，授权 FTClient 读取中文研究报告。"
         case .invalidSize:
             return "研究报告超出本地安全读取上限。"
         case .hashMismatch:

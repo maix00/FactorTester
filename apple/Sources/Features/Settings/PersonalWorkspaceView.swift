@@ -1,8 +1,13 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PersonalWorkspaceView: View {
     @EnvironmentObject private var session: SessionStore
     @StateObject private var controller = PersonalWorkspaceController()
+    @State private var isSelectingWorkspace = false
+    @State private var authorizedRoot =
+        PersonalWorkspaceAccessStore.authorizedRootPath
+    @State private var accessError: String?
 
     var body: some View {
         ScrollView {
@@ -10,6 +15,7 @@ struct PersonalWorkspaceView: View {
                 header
                 layoutCard
                 canonicalCard
+                accessCard
                 if let error = controller.error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
@@ -20,6 +26,20 @@ struct PersonalWorkspaceView: View {
         .overlay { if controller.isWorking { ProgressView() } }
         .task {
             await controller.refresh(principal: session.user?.username ?? "")
+        }
+        .fileImporter(
+            isPresented: $isSelectingWorkspace,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            do {
+                guard let url = try result.get().first else { return }
+                try PersonalWorkspaceAccessStore.authorize(url)
+                authorizedRoot = PersonalWorkspaceAccessStore.authorizedRootPath
+                accessError = nil
+            } catch {
+                accessError = "无法保存个人工作区授权：\(error.localizedDescription)"
+            }
         }
     }
 
@@ -79,6 +99,32 @@ struct PersonalWorkspaceView: View {
                     Text("尚未初始化当前用户的 canonical 因子库。")
                         .foregroundStyle(.secondary)
                 }
+            }
+            .padding(8)
+        }
+    }
+
+    private var accessCard: some View {
+        GroupBox("研究报告读取权限") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("选择当前用户目录后，FTClient 才会读取其中的中文研究报告；该授权不会上传因子源码。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                if let authorizedRoot {
+                    pathRow("已授权目录", authorizedRoot)
+                } else {
+                    Text("尚未授权个人工作区。")
+                        .foregroundStyle(.secondary)
+                }
+                if let accessError {
+                    Text(accessError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                Button("选择用户目录…") {
+                    isSelectingWorkspace = true
+                }
+                .buttonStyle(.borderedProminent)
             }
             .padding(8)
         }
