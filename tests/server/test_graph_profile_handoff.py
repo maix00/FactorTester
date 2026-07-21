@@ -93,6 +93,14 @@ def test_profile_handoff_is_idempotent_and_rejects_stale_owner(
         handoff_graph_branch(
             **{
                 **kwargs,
+                "expected_checkpoint_hash": "f" * 64,
+            }
+        )
+
+    with pytest.raises(PermissionError):
+        handoff_graph_branch(
+            **{
+                **kwargs,
                 "destination_profile_ref": "profile:maxc",
                 "authorization_ref": "approval:handoff-2",
             }

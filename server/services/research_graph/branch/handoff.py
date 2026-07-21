@@ -78,6 +78,7 @@ def handoff_graph_branch(
                 source_profile_ref=source_profile_ref,
                 destination_profile_ref=destination_profile_ref,
                 expected_checkpoint_ref=expected_checkpoint_ref,
+                expected_checkpoint_hash=expected_checkpoint_hash,
                 authorization_ref=authorization_ref,
             )
             if existing is not None:
@@ -190,6 +191,7 @@ def _idempotent_handoff(
     source_profile_ref: str,
     destination_profile_ref: str,
     expected_checkpoint_ref: str,
+    expected_checkpoint_hash: str,
     authorization_ref: str,
 ) -> dict[str, Any] | None:
     evidence = _loads(branch["latest_trace_evidence_json"])
@@ -200,11 +202,13 @@ def _idempotent_handoff(
         str(handoff.get("source_profile_ref") or ""),
         str(handoff.get("destination_profile_ref") or ""),
         str(handoff.get("checkpoint_ref") or ""),
+        str(handoff.get("checkpoint_hash") or ""),
         str(handoff.get("authorization_ref") or ""),
     } != {
         source_profile_ref,
         destination_profile_ref,
         expected_checkpoint_ref,
+        expected_checkpoint_hash,
         authorization_ref,
     }:
         return None
