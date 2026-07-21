@@ -1,9 +1,17 @@
 import Foundation
 
+enum LocalProfileLoadState: Equatable {
+    case idle
+    case loading
+    case loaded
+    case failed
+}
+
 @MainActor
 final class LocalProfileController: ObservableObject {
     @Published var profiles: [LocalProfileModel] = []
     @Published private(set) var isWorking = false
+    @Published private(set) var loadState: LocalProfileLoadState = .idle
     @Published var error: String?
     @Published var lifecycleReceipt: ProfileLifecycleReceipt?
     var cliPath: String {
@@ -11,8 +19,14 @@ final class LocalProfileController: ObservableObject {
     }
 
     func refresh() async {
-        await perform {
-            self.profiles = try await self.loadProfiles()
+        loadState = .loading
+        error = nil
+        do {
+            profiles = try await loadProfiles()
+            loadState = .loaded
+        } catch {
+            loadState = .failed
+            self.error = error.localizedDescription
         }
     }
 

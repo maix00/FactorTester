@@ -39,9 +39,10 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showLogin) { loginSheet }
         .task {
-            await session.refresh()
-            await registry.reload()
-            await profiles.refresh()
+            async let sessionRefresh: Void = session.refresh()
+            async let moduleReload: Void = registry.reload()
+            async let profileRefresh: Void = profiles.refresh()
+            _ = await (sessionRefresh, moduleReload, profileRefresh)
         }
     }
 

@@ -8,7 +8,11 @@ struct ProfilesDirectoryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                if controller.profiles.isEmpty {
+                if controller.loadState == .loading {
+                    loadingState
+                } else if controller.loadState == .failed {
+                    failedState
+                } else if controller.profiles.isEmpty {
                     emptyState
                 } else {
                     LazyVGrid(
@@ -59,6 +63,34 @@ struct ProfilesDirectoryView: View {
             )
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, minHeight: 100)
+        }
+    }
+
+    private var loadingState: some View {
+        GroupBox {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("正在读取本地 Profile…")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 100)
+        }
+    }
+
+    private var failedState: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(
+                    "本地 Profile 读取失败，尚未确认为空。",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .foregroundStyle(.orange)
+                Button("重新读取") {
+                    Task { await controller.refresh() }
+                }
+                .buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity, minHeight: 100, alignment: .leading)
         }
     }
 
