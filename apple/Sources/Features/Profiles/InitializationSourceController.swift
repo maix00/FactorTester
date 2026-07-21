@@ -19,9 +19,7 @@ final class InitializationSourceController: ObservableObject {
     @Published var error: String?
 
     private var cliPath: String {
-        UserDefaults.standard.string(
-            forKey: "client.release.cliPath"
-        ) ?? "factortester"
+        ClientCLIResolution.executable()
     }
 
     func refresh(profileID: String) async {

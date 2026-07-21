@@ -66,9 +66,9 @@ final class SessionStore: ObservableObject {
                 "client", "profile", "import-ui-session",
                 "--server-url", serverURL,
                 "--principal-ref", principalRef,
-            ], executable: UserDefaults.standard.string(
-                forKey: "client.release.cliPath"
-            ) ?? "factortester", stdinJSON: ["cookies": cookies])
+            ], executable: ClientCLIResolution.executable(), stdinJSON: [
+                "cookies": cookies
+            ])
             return true
         } catch {
             lastError = error.localizedDescription
@@ -100,9 +100,7 @@ final class SessionStore: ObservableObject {
             _ = try? await ReleaseCommand.runObject([
                 "client", "profile", "clear-ui-session",
                 "--server-url", serverURL,
-            ], executable: UserDefaults.standard.string(
-                forKey: "client.release.cliPath"
-            ) ?? "factortester")
+            ], executable: ClientCLIResolution.executable())
         }
         user = nil
     }

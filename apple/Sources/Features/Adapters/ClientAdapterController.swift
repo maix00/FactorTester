@@ -9,9 +9,7 @@ final class ClientAdapterController: ObservableObject {
     @Published var openTarget: ClientAdapterModel?
 
     private var cliPath: String {
-        UserDefaults.standard.string(
-            forKey: "client.release.cliPath"
-        ) ?? "factortester"
+        ClientCLIResolution.executable()
     }
 
     private var releaseProfilePath: String {

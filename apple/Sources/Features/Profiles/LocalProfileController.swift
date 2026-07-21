@@ -7,9 +7,7 @@ final class LocalProfileController: ObservableObject {
     @Published var error: String?
     @Published var lifecycleReceipt: ProfileLifecycleReceipt?
     var cliPath: String {
-        UserDefaults.standard.string(
-            forKey: "client.release.cliPath"
-        ) ?? "factortester"
+        ClientCLIResolution.executable()
     }
 
     func refresh() async {
