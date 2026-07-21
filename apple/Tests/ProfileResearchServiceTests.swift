@@ -24,6 +24,118 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class ProfileResearchServiceTests: XCTestCase {
+    @MainActor
+    func testResearchDirectoryDeduplicatesSharedWorkspaceAcrossProfiles() async {
+        let profiles = [
+            ("maxa", "http://EXAMPLE.test:8141/"),
+            ("maxb", "http://example.test:8141"),
+        ].map { profileID, serverURL in
+            LocalProfileModel(json: [
+                "profile_id": profileID,
+                "display_name": profileID.uppercased(),
+                "server": ["base_url": serverURL],
+                "workspaces": [[
+                    "workspace_id": "w",
+                    "server_workspace_ref": "workspace:w",
+                    "access_mode": "owner",
+                    "owner_ref": "18717974771",
+                ]],
+            ])
+        }
+        var requests: [(URL, String)] = []
+        let controller = ResearchDirectoryController(
+            profiles: profiles,
+            load: { serverURL, workspaceRef in
+                requests.append((serverURL, workspaceRef))
+                return try JSONDecoder().decode(
+                    ProfileResearchListResponse.self,
+                    from: listJSON().data(using: .utf8)!
+                )
+            }
+        )
+
+        await controller.refresh()
+
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.0.absoluteString, "http://example.test:8141")
+        XCTAssertEqual(requests.first?.1, "workspace:w")
+        XCTAssertEqual(controller.items.count, 1)
+        XCTAssertEqual(controller.items[0].profileIDs, ["maxa", "maxb"])
+        XCTAssertEqual(controller.items[0].profileNames, ["MAXA", "MAXB"])
+        XCTAssertEqual(controller.items[0].summary.workPackageRef, "work-package:i")
+    }
+
+    @MainActor
+    func testResearchDirectoryKeepsSameWorkspaceOnDifferentServersSeparate() async {
+        let profiles = [
+            ("maxa", "http://one.example.test:8141"),
+            ("maxb", "http://two.example.test:8141"),
+        ].map { profileID, serverURL in
+            LocalProfileModel(json: [
+                "profile_id": profileID,
+                "display_name": profileID.uppercased(),
+                "server": ["base_url": serverURL],
+                "workspaces": [[
+                    "workspace_id": "w",
+                    "server_workspace_ref": "workspace:w",
+                ]],
+            ])
+        }
+        var requests = 0
+        let controller = ResearchDirectoryController(
+            profiles: profiles,
+            load: { _, _ in
+                requests += 1
+                return try JSONDecoder().decode(
+                    ProfileResearchListResponse.self,
+                    from: listJSON().data(using: .utf8)!
+                )
+            }
+        )
+
+        await controller.refresh()
+
+        XCTAssertEqual(requests, 2)
+        XCTAssertEqual(controller.items.count, 2)
+        XCTAssertEqual(Set(controller.items.map(\.id)).count, 2)
+    }
+
+    @MainActor
+    func testResearchDirectoryKeepsSuccessfulEndpointsOnPartialFailure() async {
+        let profiles = [
+            ("maxa", "http://good.example.test:8141"),
+            ("maxb", "http://bad.example.test:8141"),
+        ].map { profileID, serverURL in
+            LocalProfileModel(json: [
+                "profile_id": profileID,
+                "display_name": profileID.uppercased(),
+                "server": ["base_url": serverURL],
+                "workspaces": [[
+                    "workspace_id": profileID,
+                    "server_workspace_ref": "workspace:\(profileID)",
+                ]],
+            ])
+        }
+        let controller = ResearchDirectoryController(
+            profiles: profiles,
+            load: { serverURL, _ in
+                if serverURL.host == "bad.example.test" {
+                    throw APIError.transport("offline")
+                }
+                return try JSONDecoder().decode(
+                    ProfileResearchListResponse.self,
+                    from: listJSON().data(using: .utf8)!
+                )
+            }
+        )
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.items.count, 1)
+        XCTAssertEqual(controller.items[0].profileIDs, ["maxa"])
+        XCTAssertNotNil(controller.error)
+    }
+
     func testProfileParsesFactorWorkspaceBinding() {
         let profile = LocalProfileModel(json: [
             "profile_id": "maxa",
