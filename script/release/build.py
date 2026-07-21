@@ -52,9 +52,27 @@ def build_release(
         version=f"bundle-b{build}-r{source_revision}",
         source_revision=source_revision,
     )
+    _sign_embedded_app(app)
     dmg = build_installer_dmg(app, output / "FactorTester-Client.dmg")
     shutil.rmtree(output / ".staging")
     return dmg
+
+
+def _sign_embedded_app(app: Path) -> None:
+    """Restore the development signature invalidated by runtime embedding."""
+    subprocess.run(
+        [
+            "codesign", "--force", "--deep", "--sign", "-",
+            "--options", "runtime", str(app),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(app)],
+        check=True,
+        capture_output=True,
+    )
 
 
 def _validate_source_checkout(repo: Path, source_revision: str) -> None:

@@ -106,7 +106,14 @@ def test_release_builder_exposes_only_one_dmg(
         receipt.write_text("{}")
         return receipt
 
+    signed = False
+
+    def fake_sign(app):
+        nonlocal signed
+        signed = True
+
     def fake_dmg(app, output):
+        assert signed is True
         assert (
             app
             / "Contents/Resources/FactorTester/bundle-receipt.json"
@@ -115,6 +122,7 @@ def test_release_builder_exposes_only_one_dmg(
         return output
 
     monkeypatch.setattr(release_build, "embed_client_runtime", fake_embed)
+    monkeypatch.setattr(release_build, "_sign_embedded_app", fake_sign)
     monkeypatch.setattr(release_build, "build_installer_dmg", fake_dmg)
 
     output = tmp_path / "release"
@@ -127,6 +135,30 @@ def test_release_builder_exposes_only_one_dmg(
     assert result == output / "FactorTester-Client.dmg"
     assert [path.name for path in output.iterdir()] == [
         "FactorTester-Client.dmg"
+    ]
+
+
+def test_embedded_app_is_resigned_and_verified_before_packaging(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = tmp_path / "FTClient.app"
+    commands: list[list[str]] = []
+
+    def record(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(release_build.subprocess, "run", record)
+
+    release_build._sign_embedded_app(app)
+
+    assert commands == [
+        [
+            "codesign", "--force", "--deep", "--sign", "-",
+            "--options", "runtime", str(app),
+        ],
+        ["codesign", "--verify", "--deep", "--strict", str(app)],
     ]
 
 
