@@ -30,7 +30,7 @@ struct ResearchVersionTreePane: View {
     let workPackage: ProfileResearchWorkPackageDetail
     let steps: [ResearchTransitionStep]
     @Binding var selectedCheckpointRef: String
-    let select: (String) -> Void
+    let select: (_ checkpointRef: String, _ branchID: String) -> Void
     let loadEarlier: () async -> Void
     let canLoadEarlier: Bool
 
@@ -157,7 +157,7 @@ struct ResearchVersionTreePane: View {
     private func nodeRow(_ node: ResearchTreeNode) -> some View {
         Button {
             guard !node.checkpointRef.isEmpty else { return }
-            select(node.checkpointRef)
+            select(node.checkpointRef, node.branchID)
         } label: {
             HStack(spacing: 8) {
                 ZStack {
@@ -245,7 +245,8 @@ struct ResearchVersionTreePane: View {
                 isRoot: step.stepRef == rootStepRef
                     && selectedLineage?.relation == "root",
                 isLineage: false,
-                sourceLane: nil
+                sourceLane: nil,
+                branchID: detail.branchRef
             )
         }
         for branch in visibleBranches {
@@ -263,7 +264,8 @@ struct ResearchVersionTreePane: View {
                     isCurrentHead: false,
                     isRoot: false,
                     isLineage: false,
-                    sourceLane: nil
+                    sourceLane: nil,
+                    branchID: branch.branchID
                 ))
             }
             if let lineage = branch.lineage,
@@ -287,7 +289,8 @@ struct ResearchVersionTreePane: View {
                     isCurrentHead: false,
                     isRoot: false,
                     isLineage: true,
-                    sourceLane: sourceIndex
+                    sourceLane: sourceIndex,
+                    branchID: branch.branchID
                 ))
             }
         }
@@ -330,7 +333,8 @@ struct ResearchVersionTreePane: View {
                     && node.isHead,
                 isRoot: node.isRoot,
                 isLineage: lineage != nil,
-                sourceLane: sourceLane
+                sourceLane: sourceLane,
+                branchID: node.branchRef
             )
         }
         // A branch may have no checkpoint yet (or may be outside the bounded
@@ -351,7 +355,8 @@ struct ResearchVersionTreePane: View {
                 isCurrentHead: branch.branchRef == detail.branchRef,
                 isRoot: false,
                 isLineage: false,
-                sourceLane: nil
+                sourceLane: nil,
+                branchID: branch.branchID
             ))
         }
         return result.sorted {
@@ -468,6 +473,7 @@ private struct ResearchTreeNode: Identifiable {
     let isRoot: Bool
     let isLineage: Bool
     let sourceLane: Int?
+    let branchID: String
 }
 
 private func compactDate(_ timestamp: Double) -> String {

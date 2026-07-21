@@ -24,6 +24,9 @@ struct ProfileLiveResearchDetail: View {
                     artifact: context?.record.artifacts.first {
                         !$0.journalRef.isEmpty
                     },
+                    selectBranch: { branchID in
+                        controller.selectedBranchID = branchID
+                    },
                     loadEarlier: { await controller.loadEarlierTimeline() },
                     loadAuditObject: { href in
                         guard let url = context.flatMap({

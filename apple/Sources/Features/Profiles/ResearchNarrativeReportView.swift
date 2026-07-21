@@ -9,6 +9,7 @@ struct ResearchNarrativeReportView: View {
     let auditCacheNamespace: String
     let reportTitle: String
     let artifact: ResearchArtifactModel?
+    let selectBranch: (String) -> Void
     let loadEarlier: () async -> Void
     let loadAuditObject: (String) async throws -> ResearchAuditObjectPayload
 
@@ -340,7 +341,10 @@ struct ResearchNarrativeReportView: View {
                     return $0.id < $1.id
                 }
             reportError = nil
-            if selectedCheckpointRef.isEmpty {
+            if selectedCheckpointRef.isEmpty
+                || !sections.contains(where: {
+                    $0.checkpointRef == selectedCheckpointRef
+                }) {
                 selectedCheckpointRef = sections.last?.checkpointRef ?? ""
             }
         } catch {
@@ -356,7 +360,10 @@ struct ResearchNarrativeReportView: View {
         }
     }
 
-    private func selectCheckpoint(_ checkpointRef: String) {
+    private func selectCheckpoint(_ checkpointRef: String, _ branchID: String) {
+        if branchID != detail.branchRef {
+            selectBranch(branchID)
+        }
         selectedCheckpointRef = checkpointRef
     }
 
