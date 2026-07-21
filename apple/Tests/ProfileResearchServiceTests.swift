@@ -192,6 +192,37 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertEqual(detail.branches.first?.createdAt, 1)
     }
 
+    func testWorkPackageDecodesBoundedVersionTreeNodesAndEdges() throws {
+        let tree = #"""
+        "tree":{"schema_version":1,"nodes":[{
+          "node_ref":"trace:s","checkpoint_ref":"trace:s",
+          "trace_ref":"trace:s","branch_ref":"graph-branch:i:b",
+          "edge_ref":"edge:e","from_node":"trial","to_node":"audit",
+          "created_at":1,"status":"running","is_head":true,
+          "is_root":true,"sequence_rank":1,"history_rank":1
+        }],"edges":[{
+          "edge_ref":"lineage:b:trace:s","relation":"fork",
+          "source_node_ref":"trace:parent-step",
+          "target_node_ref":"trace:s",
+          "source_branch_ref":"graph-branch:i:parent",
+          "target_branch_ref":"graph-branch:i:b"
+        }],"omitted_node_count":4},
+        """#
+        let json = workPackageJSON().replacingOccurrences(
+            of: #""""report_lookup_ref":"work-package:i"""#,
+            with: tree + #""""report_lookup_ref":"work-package:i"""#
+        )
+        let detail = try JSONDecoder().decode(
+            ProfileResearchWorkPackageDetail.self,
+            from: json.data(using: .utf8)!
+        )
+        let node = try XCTUnwrap(detail.tree?.nodes.first)
+        XCTAssertEqual(node.checkpointRef, "trace:s")
+        XCTAssertTrue(node.isHead)
+        XCTAssertEqual(detail.tree?.edges.first?.relation, "fork")
+        XCTAssertEqual(detail.tree?.omittedNodeCount, 4)
+    }
+
     @MainActor
     func testResearchDirectoryAssignsSharedWorkspaceResearchToExactProfile() async {
         let profiles = [

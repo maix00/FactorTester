@@ -217,6 +217,57 @@ def test_research_projects_one_work_package_with_hypothesis_branches(
     assert by_ref["graph-branch:instance-a:branch-0002"]["lineage"] == {
         "relation": "unknown",
     }
+    tree = detail["tree"]
+    assert tree["schema_version"] == 1
+    assert {
+        node["branch_ref"] for node in tree["nodes"]
+    } == {"graph-branch:instance-a:branch-0000"}
+    assert tree["nodes"][0]["checkpoint_ref"].startswith("trace:")
+    assert tree["nodes"][0]["is_root"] is True
+    assert sum(node["is_head"] for node in tree["nodes"]) == 1
+
+
+def test_work_package_tree_contains_real_fork_edge_without_fake_merge(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "work-package-tree-lineage.sqlite"
+    _seed(path, branch_count=2, trace_count=2)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id,
+                from_node, to_node, evidence_json, telemetry_json,
+                actor, created_at
+            ) VALUES (
+                'trace-fork', 'instance-a', 'branch-0001',
+                '__branch_fork__', 'factor_semantics', 'factor_semantics',
+                ?, '{}', 'alice', 1001
+            )
+            """,
+            (orjson.dumps({
+                "branch_fork": {
+                    "schema_version": 1,
+                    "source_branch_id": "branch-0000",
+                    "source_trace_ref": "trace:trace-000001",
+                },
+            }).decode(),),
+        )
+    tree = _service(path, monkeypatch).get_research(
+        owner="alice",
+        research_ref="work-package:instance-a",
+    )["tree"]
+    fork_edges = [edge for edge in tree["edges"] if edge["relation"] == "fork"]
+    assert fork_edges == [{
+        "edge_ref": "lineage:branch-0001:trace:trace-fork",
+        "relation": "fork",
+        "source_node_ref": "trace:trace-000001",
+        "target_node_ref": "trace:trace-fork",
+        "source_branch_ref": "graph-branch:instance-a:branch-0000",
+        "target_branch_ref": "graph-branch:instance-a:branch-0001",
+    }]
+    assert not any(edge["relation"] == "merge" for edge in tree["edges"])
 
 
 def test_timeline_advertises_only_checkpoint_resolvable_typed_objects(

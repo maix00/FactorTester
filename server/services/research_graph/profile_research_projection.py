@@ -38,6 +38,12 @@ MAX_LIST_LIMIT = 50
 DEFAULT_TIMELINE_LIMIT = 50
 MAX_TIMELINE_LIMIT = 50
 MAX_PROJECTION_BYTES = 64 * 1024
+# The version tree is a navigation aid, not a second history store.  Keep a
+# small root/head window for every visible branch so a large work package
+# cannot turn one projection into an unbounded trace dump.
+TREE_FIRST_WINDOW = 3
+TREE_LAST_WINDOW = 3
+MAX_TREE_NODES = 300
 
 LIST_FIRST_SQL = """
     SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
@@ -83,6 +89,64 @@ WORK_PACKAGE_DETAIL_SQL = """
            b.created_at, b.updated_at,
            lineage.edge_id AS lineage_edge_id,
            lineage.evidence_json AS lineage_evidence_json,
+           CASE WHEN b.branch_id=(
+               SELECT candidate.branch_id
+               FROM research_graph_branches AS candidate
+               WHERE candidate.instance_id=i.instance_id
+               ORDER BY candidate.updated_at DESC, candidate.branch_id DESC
+               LIMIT 1
+           ) THEN (
+               SELECT json_object(
+                   'nodes', COALESCE(json_group_array(json_object(
+                       'trace_id', selected.trace_id,
+                       'branch_id', selected.branch_id,
+                       'edge_id', selected.edge_id,
+                       'from_node', selected.from_node,
+                       'to_node', selected.to_node,
+                       'created_at', selected.created_at,
+                       'branch_status', selected.branch_status,
+                       'latest_trace_id', selected.latest_trace_id,
+                       'first_rank', selected.first_rank,
+                       'last_rank', selected.last_rank
+                   )), json('[]')),
+                   'omitted_node_count', MAX(selected.total_trace_count)
+                       - COUNT(selected.trace_id)
+               )
+               FROM (
+                   SELECT ranked.*
+                   FROM (
+                       SELECT t.trace_id, t.branch_id, t.edge_id,
+                              t.from_node, t.to_node, t.created_at,
+                              branch.status AS branch_status,
+                              branch.latest_trace_id,
+                              ROW_NUMBER() OVER (
+                                  PARTITION BY t.branch_id
+                                  ORDER BY t.created_at ASC, t.trace_id ASC
+                              ) AS first_rank,
+                              ROW_NUMBER() OVER (
+                                  PARTITION BY t.branch_id
+                                  ORDER BY t.created_at DESC, t.trace_id DESC
+                              ) AS last_rank,
+                              COUNT(*) OVER () AS total_trace_count
+                       FROM research_graph_trace AS t
+                       JOIN research_graph_branches AS branch
+                         ON branch.instance_id=t.instance_id
+                        AND branch.branch_id=t.branch_id
+                       WHERE t.instance_id=i.instance_id
+                         AND t.branch_id IN (
+                             SELECT visible.branch_id
+                             FROM research_graph_branches AS visible
+                             WHERE visible.instance_id=i.instance_id
+                             ORDER BY visible.updated_at DESC,
+                                      visible.branch_id DESC
+                             LIMIT 50
+                         )
+                   ) AS ranked
+                   WHERE ranked.first_rank<=3 OR ranked.last_rank<=3
+                   ORDER BY ranked.created_at ASC, ranked.trace_id ASC
+                   LIMIT 300
+               ) AS selected
+           ) ELSE NULL END AS tree_json,
            COUNT(*) OVER () AS total_branch_count
     FROM research_graph_instances AS i
     JOIN research_graph_branches AS b
@@ -280,6 +344,16 @@ class ProfileResearchProjection:
                 int(first["total_branch_count"]) - len(visible), 0
             ),
             "branches": [_branch_summary(row) for row in visible],
+            "tree": _tree_projection(
+                next(
+                    (
+                        row["tree_json"] for row in visible
+                        if row["tree_json"]
+                    ),
+                    None,
+                ),
+                visible,
+            ),
             "report_lookup_ref": work_package_ref,
         })
 
@@ -695,6 +769,122 @@ def _branch_lineage(row: sqlite3.Row) -> dict[str, Any]:
             "source_checkpoint_hash": checkpoint_hash,
         }
     return {"relation": "unknown"}
+
+
+def _tree_projection(
+    value: Any,
+    branch_rows: list[sqlite3.Row],
+) -> dict[str, Any]:
+    """Decode the bounded tree carrier and add only authoritative edges.
+
+    Trace rows are the only checkpoint nodes.  The projection never invents a
+    merge: ordinary edges connect adjacent loaded checkpoints on one branch;
+    fork/continuation edges are emitted only when their creation evidence was
+    valid enough for ``_branch_lineage``.
+    """
+    if value in (None, ""):
+        return {"schema_version": 1, "nodes": [], "edges": [],
+                "omitted_node_count": 0}
+    payload = _json_object(value)
+    raw_nodes = payload.get("nodes")
+    if not isinstance(raw_nodes, list):
+        raw_nodes = []
+    branch_by_id = {
+        str(row["branch_id"]): row for row in branch_rows
+    }
+    nodes: list[dict[str, Any]] = []
+    by_branch: dict[str, list[dict[str, Any]]] = {}
+    for raw in raw_nodes:
+        if not isinstance(raw, dict):
+            continue
+        trace_id = _safe_identifier(raw.get("trace_id"))
+        branch_id = _safe_identifier(raw.get("branch_id"))
+        edge_id = _safe_identifier(raw.get("edge_id"))
+        if not (trace_id and branch_id and edge_id):
+            continue
+        if branch_id not in branch_by_id:
+            # The SQL limits nodes to visible branches.  Keep this guard in
+            # case an older cache returns a malformed carrier.
+            continue
+        try:
+            created_at = float(raw.get("created_at"))
+            first_rank = int(raw.get("first_rank"))
+            last_rank = int(raw.get("last_rank"))
+        except (TypeError, ValueError):
+            continue
+        branch_ref = research_ref_for(
+            str(branch_by_id[branch_id]["instance_id"]), branch_id
+        )
+        trace_ref = f"trace:{trace_id}"
+        node = {
+            "node_ref": trace_ref,
+            "checkpoint_ref": trace_ref,
+            "trace_ref": trace_ref,
+            "branch_ref": branch_ref,
+            "edge_ref": edge_id,
+            "from_node": str(raw.get("from_node") or ""),
+            "to_node": str(raw.get("to_node") or ""),
+            "created_at": created_at,
+            "status": (
+                str(raw.get("branch_status"))
+                if trace_id == str(raw.get("latest_trace_id") or "")
+                else "historical"
+            ),
+            "is_head": trace_id == str(raw.get("latest_trace_id") or ""),
+            "is_root": first_rank == 1,
+            "sequence_rank": first_rank,
+            "history_rank": last_rank,
+        }
+        nodes.append(node)
+        by_branch.setdefault(branch_id, []).append(node)
+
+    nodes.sort(key=lambda item: (item["created_at"], item["trace_ref"]))
+    edges: list[dict[str, Any]] = []
+    for branch_id, branch_nodes in by_branch.items():
+        branch_nodes.sort(
+            key=lambda item: (item["sequence_rank"], item["trace_ref"])
+        )
+        for previous, current in zip(branch_nodes, branch_nodes[1:]):
+            if current["sequence_rank"] != previous["sequence_rank"] + 1:
+                # Root/head window intentionally may contain a gap.  A
+                # connector over an omitted checkpoint would be misleading.
+                continue
+            edges.append({
+                "edge_ref": current["edge_ref"],
+                "relation": "transition",
+                "source_node_ref": previous["node_ref"],
+                "target_node_ref": current["node_ref"],
+                "source_branch_ref": previous["branch_ref"],
+                "target_branch_ref": current["branch_ref"],
+            })
+        row = branch_by_id[branch_id]
+        lineage = _branch_lineage(row)
+        target = next(
+            (item for item in branch_nodes if item["is_root"]),
+            None,
+        )
+        if target and lineage.get("relation") in {"fork", "continuation"}:
+            source_branch_ref = lineage.get("source_branch_ref")
+            source_trace_ref = lineage.get("source_trace_ref")
+            if isinstance(source_branch_ref, str):
+                edges.append({
+                    "edge_ref": (
+                        f"lineage:{branch_id}:{target['trace_ref']}"
+                    ),
+                    "relation": str(lineage["relation"]),
+                    "source_node_ref": source_trace_ref or "",
+                    "target_node_ref": target["node_ref"],
+                    "source_branch_ref": source_branch_ref,
+                    "target_branch_ref": target["branch_ref"],
+                })
+    return {
+        "schema_version": 1,
+        "nodes": nodes,
+        "edges": edges,
+        "omitted_node_count": max(
+            int(payload.get("omitted_node_count") or 0), 0
+        ),
+    }
 
 
 def _safe_trace_ref(value: Any) -> str:

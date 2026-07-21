@@ -54,6 +54,12 @@ struct ResearchVersionTreePane: View {
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
                     }
+                    if let omittedNodeCount = workPackage.tree?.omittedNodeCount,
+                       omittedNodeCount > 0 {
+                        Text("历史检查点已取样 \(omittedNodeCount) 个未展开")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -208,6 +214,10 @@ struct ResearchVersionTreePane: View {
     }
 
     private var nodes: [ResearchTreeNode] {
+        if let projection = workPackage.tree,
+           !projection.nodes.isEmpty {
+            return projectedNodes(projection)
+        }
         let rootStepRef = steps.min {
             ResearchTreeOrdering.isBefore(
                 timestamp: $0.createdAt,
@@ -282,6 +292,47 @@ struct ResearchVersionTreePane: View {
             }
         }
         return result.sorted {
+            ResearchTreeOrdering.isBefore(
+                timestamp: $0.timestamp,
+                id: $0.id,
+                than: $1.timestamp,
+                id: $1.id
+            )
+        }
+    }
+
+    private func projectedNodes(
+        _ projection: ResearchVersionTreeProjection
+    ) -> [ResearchTreeNode] {
+        let lineageByTarget = Dictionary(
+            projection.edges.filter {
+                $0.relation == "fork" || $0.relation == "continuation"
+            }.map { ($0.targetNodeRef, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return projection.nodes.map { node in
+            let lineage = lineageByTarget[node.nodeRef]
+            let sourceLane = lineage.flatMap { edge in
+                visibleBranches.firstIndex {
+                    $0.branchRef == edge.sourceBranchRef
+                }
+            }
+            return ResearchTreeNode(
+                id: "checkpoint|\(node.nodeRef)",
+                checkpointRef: node.checkpointRef,
+                title: ResearchDisplayText.node(node.toNode),
+                subtitle: compactDate(node.createdAt),
+                timestamp: node.createdAt,
+                lane: lane(for: node.branchRef),
+                status: node.status,
+                isHead: node.isHead,
+                isCurrentHead: node.branchRef == detail.branchRef
+                    && node.isHead,
+                isRoot: node.isRoot,
+                isLineage: lineage != nil,
+                sourceLane: sourceLane
+            )
+        }.sorted {
             ResearchTreeOrdering.isBefore(
                 timestamp: $0.timestamp,
                 id: $0.id,

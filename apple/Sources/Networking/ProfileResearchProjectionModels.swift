@@ -49,6 +49,7 @@ struct ProfileResearchWorkPackageDetail: Decodable {
     let branchCount: Int
     let omittedBranchCount: Int
     let branches: [ProfileResearchBranchSummary]
+    let tree: ResearchVersionTreeProjection?
     let reportLookupRef: String?
     let etag: String
 
@@ -60,8 +61,80 @@ struct ProfileResearchWorkPackageDetail: Decodable {
         case branchCount = "branch_count"
         case omittedBranchCount = "omitted_branch_count"
         case branches
+        case tree
         case reportLookupRef = "report_lookup_ref"
         case etag
+    }
+}
+
+/// A bounded relationship projection for the Git-like navigator.  It carries
+/// checkpoint references and real lineage edges only; report prose remains in
+/// the verified journal loaded by the report view.
+struct ResearchVersionTreeProjection: Decodable {
+    let schemaVersion: Int
+    let nodes: [ResearchVersionTreeNode]
+    let edges: [ResearchVersionTreeEdge]
+    let omittedNodeCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case nodes
+        case edges
+        case omittedNodeCount = "omitted_node_count"
+    }
+}
+
+struct ResearchVersionTreeNode: Decodable, Identifiable {
+    let nodeRef: String
+    let checkpointRef: String
+    let traceRef: String
+    let branchRef: String
+    let edgeRef: String
+    let fromNode: String
+    let toNode: String
+    let createdAt: Double
+    let status: String
+    let isHead: Bool
+    let isRoot: Bool
+    let sequenceRank: Int
+    let historyRank: Int
+
+    var id: String { nodeRef }
+
+    enum CodingKeys: String, CodingKey {
+        case nodeRef = "node_ref"
+        case checkpointRef = "checkpoint_ref"
+        case traceRef = "trace_ref"
+        case branchRef = "branch_ref"
+        case edgeRef = "edge_ref"
+        case fromNode = "from_node"
+        case toNode = "to_node"
+        case createdAt = "created_at"
+        case status
+        case isHead = "is_head"
+        case isRoot = "is_root"
+        case sequenceRank = "sequence_rank"
+        case historyRank = "history_rank"
+    }
+}
+
+struct ResearchVersionTreeEdge: Decodable, Identifiable {
+    let edgeRef: String
+    let relation: String
+    let sourceNodeRef: String
+    let targetNodeRef: String
+    let sourceBranchRef: String
+    let targetBranchRef: String
+
+    var id: String { edgeRef }
+
+    enum CodingKeys: String, CodingKey {
+        case edgeRef = "edge_ref"
+        case relation
+        case sourceNodeRef = "source_node_ref"
+        case targetNodeRef = "target_node_ref"
+        case sourceBranchRef = "source_branch_ref"
+        case targetBranchRef = "target_branch_ref"
     }
 }
 
