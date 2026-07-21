@@ -170,6 +170,92 @@ def list_profiles(release_profile: Path | None) -> None:
     ))
 
 
+@client_profile.group("server")
+def profile_server() -> None:
+    """Configure the server used by one local Profile."""
+
+
+@profile_server.command("set")
+@click.argument("profile_id")
+@click.option("--server-url", required=True)
+@_root_option
+@friendly_errors
+def set_profile_server(
+    profile_id: str,
+    server_url: str,
+    release_profile: Path | None,
+) -> None:
+    store = LocalProfileStore(load_profile_root(release_profile))
+    click.echo(_json(store.set_server_url(profile_id, server_url)))
+
+
+@client_profile.group("workspace")
+def profile_workspace() -> None:
+    """Bind local Profiles to authorized server research workspaces."""
+
+
+@profile_workspace.command("bind")
+@click.argument("profile_id")
+@click.option("--workspace-id", required=True)
+@click.option("--server-workspace-ref", required=True)
+@click.option(
+    "--access-mode",
+    type=click.Choice(["owner", "granted", "read_only"]),
+    required=True,
+)
+@click.option("--owner-ref", required=True)
+@click.option("--path", "workspace_path", type=click.Path(path_type=Path))
+@_root_option
+@friendly_errors
+def bind_profile_workspace(
+    profile_id: str,
+    workspace_id: str,
+    server_workspace_ref: str,
+    access_mode: str,
+    owner_ref: str,
+    workspace_path: Path | None,
+    release_profile: Path | None,
+) -> None:
+    store = LocalProfileStore(load_profile_root(release_profile))
+    profile = store.load(profile_id)
+    path = workspace_path or Path(profile["workspace_root"])
+    click.echo(_json(store.upsert_workspace(profile_id, {
+        "workspace_id": workspace_id,
+        "path": str(path.expanduser().resolve()),
+        "access_mode": access_mode,
+        "owner_ref": owner_ref,
+        "server_workspace_ref": server_workspace_ref,
+    })))
+
+
+@profile_workspace.command("list")
+@click.argument("profile_id")
+@_root_option
+@friendly_errors
+def list_profile_workspaces(
+    profile_id: str,
+    release_profile: Path | None,
+) -> None:
+    profile = LocalProfileStore(
+        load_profile_root(release_profile)
+    ).load(profile_id)
+    click.echo(_json(profile["workspaces"]))
+
+
+@profile_workspace.command("remove")
+@click.argument("profile_id")
+@click.argument("workspace_id")
+@_root_option
+@friendly_errors
+def remove_profile_workspace(
+    profile_id: str,
+    workspace_id: str,
+    release_profile: Path | None,
+) -> None:
+    store = LocalProfileStore(load_profile_root(release_profile))
+    click.echo(_json(store.remove_workspace(profile_id, workspace_id)))
+
+
 @client_profile.group("user-layout")
 def profile_user_layout() -> None:
     """Manage one principal-scoped ownership tree."""

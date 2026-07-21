@@ -85,6 +85,192 @@ def test_client_cli_exposes_generic_profile_and_adapter_commands(
     assert json.loads(adapters.output) == []
 
 
+def test_profile_server_update_uses_public_cli_and_preserves_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "client-support"
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    store = LocalProfileStore(root)
+    original = new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8000",
+        workspace_root=tmp_path / "workspace",
+        principal_ref="18717974771",
+    )
+    store.save(original)
+
+    result = CliRunner().invoke(cli, [
+        "client", "profile", "server", "set", "maxa",
+        "--server-url", "http://127.0.0.1:8141/",
+    ])
+
+    assert result.exit_code == 0, result.output
+    updated = json.loads(result.output)
+    assert updated["server"]["base_url"] == "http://127.0.0.1:8141"
+    assert updated["profile_id"] == original["profile_id"]
+    assert updated["session_binding"] == original["session_binding"]
+    assert updated["workspace_root"] == original["workspace_root"]
+
+
+def test_profile_workspace_bind_and_list_use_compact_local_refs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "client-support"
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    store = LocalProfileStore(root)
+    store.save(new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8141",
+        workspace_root=tmp_path / "workspace",
+        principal_ref="18717974771",
+    ))
+    runner = CliRunner()
+
+    bound = runner.invoke(cli, [
+        "client", "profile", "workspace", "bind", "maxa",
+        "--workspace-id", "sgccs-research",
+        "--server-workspace-ref", "workspace:eb086",
+        "--access-mode", "owner",
+        "--owner-ref", "18717974771",
+    ])
+    listed = runner.invoke(cli, [
+        "client", "profile", "workspace", "list", "maxa",
+    ])
+
+    assert bound.exit_code == 0, bound.output
+    workspace = json.loads(bound.output)["workspaces"][0]
+    assert workspace == {
+        "workspace_id": "sgccs-research",
+        "path": str(tmp_path / "workspace"),
+        "access_mode": "owner",
+        "owner_ref": "18717974771",
+        "server_workspace_ref": "workspace:eb086",
+    }
+    assert listed.exit_code == 0, listed.output
+    assert json.loads(listed.output) == [workspace]
+
+
+def test_profile_agent_set_derives_ready_state_from_bound_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "client-support"
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    store = LocalProfileStore(root)
+    profile = new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8141",
+        workspace_root=tmp_path / "workspace",
+        principal_ref="18717974771",
+    )
+    profile["workspaces"] = [{
+        "workspace_id": "sgccs-research",
+        "path": str(tmp_path / "workspace"),
+        "access_mode": "owner",
+        "owner_ref": "18717974771",
+        "server_workspace_ref": "workspace:eb086",
+    }]
+    store.save(profile)
+
+    result = CliRunner().invoke(cli, [
+        "client", "profile", "agent", "set", "maxa",
+        "--agent-id", "planning-maxa",
+        "--role", "planning",
+        "--workspace-id", "sgccs-research",
+    ])
+
+    assert result.exit_code == 0, result.output
+    agent = json.loads(result.output)["agents"][0]
+    assert agent["scope"] == {"workspace_id": "sgccs-research"}
+    assert agent["status"] == "ready"
+    assert agent["next_action"] == "Resume the authorized research scope."
+
+
+def test_profile_claim_does_not_treat_unknown_workspace_as_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "client-support"
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    store = LocalProfileStore(root)
+    store.save(new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8141",
+        workspace_root=tmp_path / "workspace",
+        principal_ref="18717974771",
+    ))
+    runner = CliRunner()
+    configured = runner.invoke(cli, [
+        "client", "profile", "agent", "set", "maxa",
+        "--agent-id", "planning-maxa",
+        "--role", "planning",
+        "--workspace-id", "unknown-workspace",
+    ])
+
+    claim = runner.invoke(cli, [
+        "client", "profile", "claim", "maxa", "planning-maxa",
+    ])
+
+    assert configured.exit_code == 0, configured.output
+    assert json.loads(configured.output)["agents"][0]["status"] == (
+        "needs_scope"
+    )
+    assert claim.exit_code == 0, claim.output
+    assert json.loads(claim.output)["research_execution_scope_bound"] is False
+
+
+def test_profile_workspace_remove_downgrades_scoped_planning_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "client-support"
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(root))
+    store = LocalProfileStore(root)
+    profile = new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8141",
+        workspace_root=tmp_path / "workspace",
+        principal_ref="18717974771",
+    )
+    profile["workspaces"] = [{
+        "workspace_id": "sgccs-research",
+        "path": str(tmp_path / "workspace"),
+        "access_mode": "owner",
+        "owner_ref": "18717974771",
+        "server_workspace_ref": "workspace:eb086",
+    }]
+    profile["agents"] = [{
+        "agent_id": "planning-maxa",
+        "role": "planning",
+        "scope": {"workspace_id": "sgccs-research"},
+        "status": "ready",
+        "next_action": "Resume the authorized research scope.",
+    }]
+    store.save(profile)
+
+    result = CliRunner().invoke(cli, [
+        "client", "profile", "workspace", "remove", "maxa",
+        "sgccs-research",
+    ])
+
+    assert result.exit_code == 0, result.output
+    updated = json.loads(result.output)
+    assert updated["workspaces"] == []
+    agent = updated["agents"][0]
+    assert agent["scope"] == {"workspace_id": "unbound"}
+    assert agent["status"] == "needs_scope"
+    assert agent["next_action"] == (
+        "Bind an authorized research scope before execution."
+    )
+
+
 def test_version_one_profile_is_upgraded_without_losing_identity(
     tmp_path: Path,
 ) -> None:

@@ -55,11 +55,40 @@ class LocalProfileStore:
         descriptor: dict[str, Any],
     ) -> dict[str, Any]:
         profile = self.load(profile_id)
+        descriptor = dict(descriptor)
+        scope = dict(descriptor.get("scope") or {})
+        if descriptor.get("role") == "planning":
+            workspace_id = str(scope.get("workspace_id") or "")
+            scope_bound = any(
+                item["workspace_id"] == workspace_id
+                and bool(item["server_workspace_ref"])
+                for item in profile["workspaces"]
+            )
+        else:
+            scope_bound = all(
+                str(scope.get(key) or "") not in {"", "all", "unbound"}
+                for key in ("instance_id", "branch_id")
+            )
+        descriptor["status"] = "ready" if scope_bound else "needs_scope"
+        descriptor["next_action"] = (
+            "Resume the authorized research scope."
+            if scope_bound
+            else "Bind an authorized research scope before execution."
+        )
         agents = [
             item for item in profile["agents"]
             if item["agent_id"] != descriptor.get("agent_id")
         ]
         profile["agents"] = [*agents, descriptor]
+        return self.save(profile)
+
+    def set_server_url(
+        self,
+        profile_id: str,
+        server_url: str,
+    ) -> dict[str, Any]:
+        profile = self.load(profile_id)
+        profile["server"] = {"base_url": server_url}
         return self.save(profile)
 
     def upsert_workspace(
@@ -79,6 +108,31 @@ class LocalProfileStore:
             profile["workspace_root"] = str(
                 workspace_root.expanduser().resolve()
             )
+        return self.save(profile)
+
+    def remove_workspace(
+        self,
+        profile_id: str,
+        workspace_id: str,
+    ) -> dict[str, Any]:
+        profile = self.load(profile_id)
+        remaining = [
+            item for item in profile["workspaces"]
+            if item["workspace_id"] != workspace_id
+        ]
+        if len(remaining) == len(profile["workspaces"]):
+            raise ValueError(f"local workspace not found: {workspace_id}")
+        profile["workspaces"] = remaining
+        for agent in profile["agents"]:
+            if (
+                agent["role"] == "planning"
+                and agent["scope"]["workspace_id"] == workspace_id
+            ):
+                agent["scope"] = {"workspace_id": "unbound"}
+                agent["status"] = "needs_scope"
+                agent["next_action"] = (
+                    "Bind an authorized research scope before execution."
+                )
         return self.save(profile)
 
     def upsert_adapter(
@@ -171,7 +225,7 @@ class LocalProfileStore:
         profile, agent = self.load_agent(profile_id, agent_id)
         workspace_root = self.ensure_workspace_root(profile_id)
         scope = dict(agent["scope"])
-        scope_bound = all(
+        scope_bound = agent["status"] == "ready" and all(
             value not in {"", "all", "unbound"}
             for value in scope.values()
         )

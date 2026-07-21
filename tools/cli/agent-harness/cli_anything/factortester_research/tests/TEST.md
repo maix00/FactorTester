@@ -234,6 +234,18 @@ existing Job SSE links only for running jobs. It verifies that terminal
 research does not advertise live polling and that no endpoint replays full
 history or writes progress rows.
 
+### Local Profile binding refinement plan
+
+- `tests/release/test_local_client_profile.py`: update an existing Profile's
+  server URL through the public CLI; bind, list, and remove compact server
+  workspace references; and derive Agent readiness from an actually bound
+  scope.
+- Mutations must reuse the existing atomic Profile JSON store, preserve the
+  principal/session and factor-worktree bindings, and perform no server or
+  database write.
+- Removing a workspace that scopes a planning Agent must deterministically
+  return that Agent to `needs_scope` rather than leave a false-ready claim.
+
 ## Commands
 
 Run the Harness package suite:
@@ -314,3 +326,21 @@ trace rows. List, detail, and timeline remain single-read projections; query
 plans use the owner/workspace and branch/timeline indexes. The HTTP acceptance
 also verifies owner isolation, 64 KiB bounds, opaque keyset cursors, ETag/304,
 and exclusion of raw evidence, stdout, factor source, and report Markdown.
+
+### Local Profile binding refinement
+
+Last run: 2026-07-21
+
+```text
+PYTHONPATH=. conda run -n GTHT pytest -q \
+  tests/release/test_local_client_profile.py \
+  tests/release/test_profile_lifecycle.py \
+  tests/release/test_profile_factor_worktree.py
+
+23 passed
+```
+
+The public CLI updates one local server binding, manages compact workspace
+references, derives truthful Agent readiness, and downgrades a planning Agent
+when its workspace is removed. These operations use the existing atomic local
+Profile JSON store and perform no server/database write.
