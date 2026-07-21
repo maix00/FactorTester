@@ -80,6 +80,9 @@ struct LocalProfilesView: View {
             if controller.isWorking { ProgressView().controlSize(.small) }
         }
         .task {
+            // The local snapshot is available synchronously.  Select it before
+            // waiting for the bundled one-file CLI to finish its cold start.
+            selectedID = selectedID ?? controller.profiles.first?.id
             await controller.refresh()
             selectedID = selectedID ?? controller.profiles.first?.id
         }

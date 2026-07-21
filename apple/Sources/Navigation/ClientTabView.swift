@@ -83,8 +83,17 @@ struct ClientTabView: View {
                 openProfile: { open(.profile(id: $0.id, title: $0.displayName)) }
             )
         case .profile(let id):
-            if profiles.loadState == .loading {
+            if profiles.profiles.isEmpty && profiles.loadState == .loading {
                 ProgressView("正在读取本地 Profile…")
+            } else if profiles.profiles.isEmpty && profiles.loadState == .failed {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                    Text("本地 Profile 读取失败")
+                        .font(.headline)
+                    Text("暂不判断该 Profile 不存在，请稍后重试。")
+                        .foregroundStyle(.secondary)
+                }
             } else if let profile = profiles.profiles.first(where: { $0.id == id }) {
                 ProfileWorkspaceView(profile: profile)
             } else {
