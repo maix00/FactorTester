@@ -154,6 +154,13 @@ def transition_step_projection(
         *(f"claim:{item['claim_id']}" for item in claim_changes),
         *named_refs(evidence, "claim_id", prefix="claim:"),
     ])[:MAX_CARRIER_ITEMS]
+    delta_refs = [
+        f"delta:{trace_id}:obligation:{item['obligation_id']}"
+        for item in obligation_changes
+    ] + [
+        f"delta:{trace_id}:claim:{item['claim_id']}"
+        for item in claim_changes
+    ]
     return {
         "step_ref": f"trace:{trace_id}",
         "edge_ref": f"graph-edge:{edge_id}",
@@ -166,6 +173,7 @@ def transition_step_projection(
         "claim_refs": claim_refs,
         "job_refs": named_refs(evidence, "job_id", prefix="job:"),
         "run_refs": named_refs(evidence, "run_id", prefix="run:"),
+        "delta_refs": delta_refs[:MAX_CARRIER_ITEMS],
         "obligation_changes": obligation_changes,
         "claim_changes": claim_changes,
     }

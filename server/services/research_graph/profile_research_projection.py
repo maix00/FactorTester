@@ -722,7 +722,9 @@ def _transition_step(
         if str(row["trace_id"]) == str(row["latest_trace_id"])
         else "historical"
     )
-    object_refs = [*step["obligation_refs"], *step["claim_refs"]]
+    object_refs = [
+        *step["obligation_refs"], *step["claim_refs"], *step["delta_refs"]
+    ]
     plan = evidence.get("trial_plan")
     if isinstance(plan, dict):
         try:
@@ -787,7 +789,9 @@ def _checkpoint_evidence_envelopes(value: Any):
 
 def _cycle_object_type(reference: str) -> str:
     kind = reference.split(":", 1)[0]
-    return "trial_plan" if kind == "trial-plan" else kind
+    if kind == "trial-plan":
+        return "trial_plan"
+    return kind
 
 
 def _first_named_text(

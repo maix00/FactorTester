@@ -13,6 +13,9 @@ from server.services.research_graph.research_cycle.replay import (
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
+from server.services.research_graph.report_checkpoint import (
+    research_cycle_deltas,
+)
 from server.services.research_graph.trial_plan import (
     canonical_trial_plan,
     trial_plan_hash,
@@ -34,7 +37,9 @@ def load_research_cycle_object(
         "claim": ("claims", "claim_id"),
         "obligation": ("obligations", "obligation_id"),
     }.get(object_type)
-    if cycle_binding is None and object_type not in {"evidence", "trial_plan"}:
+    if cycle_binding is None and object_type not in {
+        "evidence", "trial_plan", "delta",
+    }:
         raise ValueError("research cycle object_type is invalid")
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         if trace_id:
@@ -90,6 +95,39 @@ def load_research_cycle_object(
         if value is None:
             raise KeyError("research cycle object not found")
         return validate_agent_evidence_envelope(value)
+    if object_type == "delta":
+        if not trace_id:
+            raise KeyError("delta object requires a checkpoint trace")
+        trace_prefix = f"{trace_id}:"
+        if not object_id.startswith(trace_prefix):
+            raise KeyError("research cycle object not found")
+        remainder = object_id.removeprefix(trace_prefix)
+        parts = remainder.split(":", 1)
+        if len(parts) != 2 or parts[0] not in {"obligation", "claim"}:
+            raise KeyError("research cycle object not found")
+        object_kind, object_id_value = parts
+        changes = research_cycle_deltas(evidence)
+        candidates = (
+            changes[0] if object_kind == "obligation" else changes[1]
+        )
+        change = next(
+            (
+                item for item in candidates
+                if item.get(f"{object_kind}_id") == object_id_value
+            ),
+            None,
+        )
+        if change is None:
+            raise KeyError("research cycle object not found")
+        return {
+            "schema_version": 1,
+            "delta_ref": f"delta:{object_id}",
+            "trace_ref": f"trace:{trace_id}",
+            "object_kind": object_kind,
+            "object_id": object_id_value,
+            "from_state": change["from_state"],
+            "to_state": change["to_state"],
+        }
     collection, identifier = cycle_binding
     checkpoint = validate_research_cycle_checkpoint(
         evidence.get("research_cycle_checkpoint")

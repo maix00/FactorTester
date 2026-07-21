@@ -61,6 +61,7 @@ def _carrier() -> dict:
             "claim_refs": ["claim:predictive-relation"],
             "job_refs": ["job:job-1"],
             "run_refs": ["run:run-1"],
+            "delta_refs": [],
             "obligation_changes": [],
             "claim_changes": [],
         },
@@ -94,6 +95,9 @@ def _narrative(
     ] + [
         ("claim", ref)
         for ref in carrier["latest_transition"]["claim_refs"]
+    ] + [
+        ("delta", ref)
+        for ref in carrier["latest_transition"]["delta_refs"]
     ]
     return {
         "schema_version": 1,

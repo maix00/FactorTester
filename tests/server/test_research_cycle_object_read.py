@@ -217,6 +217,69 @@ def test_cycle_object_read_supports_typed_trial_plan_and_evidence(
     assert all("ORDER BY" not in item for item in normalized)
 
 
+def test_cycle_object_read_derives_delta_from_requested_trace(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "cycle-delta.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _seed(path)
+    with connect_sqlite(path) as conn:
+        persisted = orjson.loads(conn.execute(
+            "SELECT evidence_json FROM research_graph_trace "
+            "WHERE trace_id='trace-current'"
+        ).fetchone()["evidence_json"])
+        persisted["research_cycle"] = {
+            "events": [{
+                "event_type": "adjudication_proposed",
+                "proposal": {
+                    "obligation_delta": [{
+                        "obligation_id": "obligation-read",
+                        "from_state": "open",
+                        "to_state": "serviced",
+                    }],
+                    "claim_evidence_delta": [{
+                        "claim_id": "claim-read",
+                        "from_state": "unknown",
+                        "to_state": "inconclusive",
+                    }],
+                },
+            }],
+        }
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? "
+            "WHERE trace_id='trace-current'",
+            (orjson.dumps(persisted).decode(),),
+        )
+
+    delta = cycle_objects.load_research_cycle_object(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        object_type="delta",
+        object_id="trace-current:obligation:obligation-read",
+        trace_id="trace-current",
+    )
+    assert delta == {
+        "schema_version": 1,
+        "delta_ref": "delta:trace-current:obligation:obligation-read",
+        "trace_ref": "trace:trace-current",
+        "object_kind": "obligation",
+        "object_id": "obligation-read",
+        "from_state": "open",
+        "to_state": "serviced",
+    }
+    with pytest.raises(KeyError, match="not found"):
+        cycle_objects.load_research_cycle_object(
+            instance_id="instance-1",
+            branch_id="branch-1",
+            owner="alice",
+            object_type="delta",
+            object_id="trace-current:obligation:missing",
+            trace_id="trace-current",
+        )
+
+
 def test_cycle_object_read_is_bound_to_requested_historical_trace(
     tmp_path,
     monkeypatch,

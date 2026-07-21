@@ -41,7 +41,9 @@ _TRANSITION_FIELDS = {
     "step_ref", "edge_ref", "from_node", "to_node", "created_at",
     "evidence_refs", "trial_plan_refs", "obligation_refs", "claim_refs",
     "job_refs", "run_refs", "obligation_changes", "claim_changes",
+    "delta_refs",
 }
+_TRANSITION_OPTIONAL_FIELDS = {"delta_refs"}
 _CLAIM_FIELDS = {"claim_ref", "claim_type", "evidence_state"}
 _OBLIGATION_FIELDS = {
     "obligation_ref", "status", "materiality", "question_summary",
@@ -307,8 +309,15 @@ def _canonical_carrier(carrier: Any) -> dict[str, Any]:
         _reference(closure["proposal_ref"], "closure.proposal_ref")
         _text(closure["disposition"], "closure.disposition")
     transition = value["latest_transition"]
-    if not isinstance(transition, dict) or set(transition) != _TRANSITION_FIELDS:
+    if not isinstance(transition, dict):
         raise ValueError("latest_transition fields are invalid")
+    transition_fields = set(transition)
+    if not (
+        transition_fields == _TRANSITION_FIELDS
+        or transition_fields == _TRANSITION_FIELDS - _TRANSITION_OPTIONAL_FIELDS
+    ):
+        raise ValueError("latest_transition fields are invalid")
+    transition.setdefault("delta_refs", [])
     for field in ("step_ref", "edge_ref"):
         _reference(transition[field], field)
     for field in ("from_node", "to_node"):
@@ -319,7 +328,7 @@ def _canonical_carrier(carrier: Any) -> dict[str, Any]:
     transition["created_at"] = float(timestamp)
     for field in (
         "evidence_refs", "trial_plan_refs", "obligation_refs", "claim_refs",
-        "job_refs", "run_refs",
+        "job_refs", "run_refs", "delta_refs",
     ):
         transition[field] = _references(transition[field], field)
     for field, item_fields, identifier_field in (
@@ -608,6 +617,7 @@ def _carrier_reference_allowlist(carrier: dict[str, Any]) -> set[str]:
         *transition["evidence_refs"], *transition["trial_plan_refs"],
         *transition["obligation_refs"], *transition["claim_refs"],
         *transition["job_refs"], *transition["run_refs"],
+        *transition["delta_refs"],
         *(item["claim_ref"] for item in carrier["claims"]),
         *(item["obligation_ref"] for item in carrier["open_obligations"]),
     }
@@ -639,6 +649,7 @@ def _required_narrative_targets(carrier: dict[str, Any]) -> set[str]:
         + transition["claim_refs"]
         + transition["job_refs"]
         + transition["run_refs"]
+        + transition["delta_refs"]
         + [item["claim_ref"] for item in carrier["claims"]]
         + [item["obligation_ref"] for item in carrier["open_obligations"]]
         + [

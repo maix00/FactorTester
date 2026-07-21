@@ -230,6 +230,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
     let claimRefs: [String]
     let jobRefs: [String]
     let runRefs: [String]
+    let deltaRefs: [String]?
     let status: String?
     let objectHrefs: [String]?
     let obligationChanges: [ResearchStateChange]
@@ -248,6 +249,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
         case claimRefs = "claim_refs"
         case jobRefs = "job_refs"
         case runRefs = "run_refs"
+        case deltaRefs = "delta_refs"
         case status
         case objectHrefs = "object_hrefs"
         case obligationChanges = "obligation_changes"
@@ -257,7 +259,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
     var allRefs: Set<String> {
         Set(
             evidenceRefs + trialPlanRefs + obligationRefs
-                + claimRefs + jobRefs + runRefs
+                + claimRefs + jobRefs + runRefs + (deltaRefs ?? [])
         )
     }
 
@@ -282,6 +284,12 @@ struct ResearchAuditObjectEnvelope: Decodable {
 
 struct ResearchAuditObjectPayload: Decodable {
     let schemaVersion: Int
+    let deltaRef: String?
+    let traceRef: String?
+    let objectKind: String?
+    let objectID: String?
+    let fromState: String?
+    let toState: String?
     let obligationID: String?
     let claimID: String?
     let claimRef: String?
@@ -312,6 +320,12 @@ struct ResearchAuditObjectPayload: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
+        case deltaRef = "delta_ref"
+        case traceRef = "trace_ref"
+        case objectKind = "object_kind"
+        case objectID = "object_id"
+        case fromState = "from_state"
+        case toState = "to_state"
         case obligationID = "obligation_id"
         case claimID = "claim_id"
         case claimRef = "claim_ref"

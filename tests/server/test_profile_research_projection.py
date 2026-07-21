@@ -503,6 +503,12 @@ def test_list_detail_and_timeline_are_bounded_source_free_and_keyset_paged(
         "cycle-objects/obligation/obligation-1?trace_id=trace-000004",
         "/api/research-graph-instances/instance-a/branches/branch-0000/"
         "cycle-objects/claim/claim-1?trace_id=trace-000004",
+        "/api/research-graph-instances/instance-a/branches/branch-0000/"
+        "cycle-objects/delta/trace-000004:obligation:obligation-1?"
+        "trace_id=trace-000004",
+        "/api/research-graph-instances/instance-a/branches/branch-0000/"
+        "cycle-objects/delta/trace-000004:claim:claim-1?"
+        "trace_id=trace-000004",
     ]
     serialized_step = orjson.dumps(step)
     assert b"evidence_json" not in serialized_step

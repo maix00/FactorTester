@@ -424,6 +424,19 @@ private struct ResearchAuditPopover: View {
             if let kind = object.obligationKind {
                 LabeledContent("义务类型", value: kind)
             }
+            if let kind = object.objectKind {
+                LabeledContent("变化对象", value: kind)
+            }
+            if let fromState = object.fromState, let toState = object.toState {
+                LabeledContent("状态变化", value: "(fromState) → (toState)")
+            }
+            if let deltaRef = object.deltaRef {
+                LabeledContent("变化引用") {
+                    Text(deltaRef)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+            }
             if let status = object.status {
                 LabeledContent("检查点状态", value: status)
             }
