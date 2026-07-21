@@ -318,7 +318,6 @@ enum ResearchJournalLoader {
             throw ResearchJournalError.invalidContract
         }
         let linkIDs = Set(section.links.map(\.linkID))
-        var usedLinkIDs = Set<String>()
         for block in section.blocks {
             switch block.kind {
             case "paragraph":
@@ -327,7 +326,6 @@ enum ResearchJournalLoader {
                       Set(block.linkIDs).isSubset(of: linkIDs) else {
                     throw ResearchJournalError.invalidContract
                 }
-                usedLinkIDs.formUnion(block.linkIDs)
             case "list":
                 guard block.text == nil, block.columns.isEmpty,
                       !block.rows.isEmpty, block.rows.count <= 64 else {
@@ -340,7 +338,6 @@ enum ResearchJournalLoader {
                           Set(row.linkIDs).isSubset(of: linkIDs) else {
                         throw ResearchJournalError.invalidContract
                     }
-                    usedLinkIDs.formUnion(row.linkIDs)
                 }
             case "table":
                 guard block.text == nil,
@@ -355,15 +352,15 @@ enum ResearchJournalLoader {
                           Set(row.linkIDs).isSubset(of: linkIDs) else {
                         throw ResearchJournalError.invalidContract
                     }
-                    usedLinkIDs.formUnion(row.linkIDs)
                 }
             default:
                 throw ResearchJournalError.invalidContract
             }
         }
-        if !section.blocks.isEmpty && usedLinkIDs != linkIDs {
-            throw ResearchJournalError.invalidContract
-        }
+        // A link may intentionally remain section-level so the report renders
+        // it as a standalone audit chip below the prose. Every inline
+        // reference must resolve, but a valid checkpoint/evidence link does
+        // not need to be forced into an unrelated sentence or table row.
     }
 
     private static func validateLinks(
