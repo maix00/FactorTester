@@ -17,7 +17,8 @@ final class BundledRuntimeActivatorTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(await probe.starts, 1)
+        let starts = await probe.starts
+        XCTAssertEqual(starts, 1)
     }
 }
 

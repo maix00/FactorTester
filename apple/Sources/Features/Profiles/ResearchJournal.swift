@@ -184,15 +184,15 @@ enum ResearchJournalLoader {
     static func load(
         artifact: ResearchArtifactModel
     ) async throws -> ResearchJournalDocument {
-        guard let url = URL(string: artifact.journalRef), url.isFileURL else {
+        guard let url = URL(string: artifact.journalRef), url.isFileURL,
+              !artifact.journalHash.isEmpty else {
             throw ResearchJournalError.missingReference
         }
-        let expectedHash = artifact.journalHash
         return try await Task.detached {
             let data = try PersonalWorkspaceAccessStore.withAccess(to: url) {
                 try readBoundedRegularFile(url)
             }
-            guard sha256(data) == expectedHash else {
+            guard sha256(data) == artifact.journalHash else {
                 throw ResearchJournalError.hashMismatch
             }
             let decoded = try JSONDecoder().decode(
