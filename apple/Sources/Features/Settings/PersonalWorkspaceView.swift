@@ -24,6 +24,7 @@ struct PersonalWorkspaceView: View {
         }
         .overlay { if controller.isWorking { ProgressView() } }
         .task {
+            guard authorizedRoot != nil else { return }
             await controller.refresh(principal: session.user?.username ?? "")
         }
     }
@@ -129,6 +130,11 @@ struct PersonalWorkspaceView: View {
             try PersonalWorkspaceAccessStore.authorize(url)
             authorizedRoot = PersonalWorkspaceAccessStore.authorizedRootPath
             accessError = nil
+            Task {
+                await controller.refresh(
+                    principal: session.user?.username ?? ""
+                )
+            }
         } catch {
             accessError = "无法保存个人工作区授权：\(error.localizedDescription)"
         }
