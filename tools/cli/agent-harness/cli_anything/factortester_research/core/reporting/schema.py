@@ -5,7 +5,9 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import ntpath
 from pathlib import Path
+import posixpath
 import re
 from typing import Any
 
@@ -14,6 +16,11 @@ MAX_SNAPSHOT_BYTES = 64 * 1024
 MAX_REPORT_BYTES = 128 * 1024
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+_LOCAL_PATH_IN_TEXT = re.compile(
+    r'''(?:^|[\s"'`(\[=:])(?:~[/\\]|[A-Za-z]:[/\\]|/(?!/))'''
+)
+_LINK_KINDS = {"trial_plan", "obligation", "evidence", "report_section"}
 _PROHIBITED_KEYS = {
     "credentials",
     "expression_tree",
@@ -90,6 +97,7 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
                 item.get("asset_refs", []),
                 field="section.asset_refs",
             ),
+            "links": _canonical_links(item.get("links", [])),
         }
         _safe_id(section["section_id"], field="section_id")
         _bounded_text(section["title"], field="section.title")
@@ -101,6 +109,37 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
         )
         sections.append(section)
     return sections
+
+
+def _canonical_links(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list) or len(value) > 50:
+        raise ValueError("section.links must contain at most 50 items")
+    links = []
+    seen_ids = set()
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {
+            "link_id", "kind", "target_ref",
+        }:
+            raise ValueError("section link fields are invalid")
+        link_id = _bounded_text(item["link_id"], field="section.link_id")
+        if link_id in seen_ids:
+            raise ValueError("section.link_id must be unique")
+        seen_ids.add(link_id)
+        kind = item["kind"]
+        if kind not in _LINK_KINDS:
+            raise ValueError("section link kind is invalid")
+        target_ref = _bounded_text(
+            item["target_ref"],
+            field="section.target_ref",
+            reject_local_paths=False,
+        )
+        _stable_reference(target_ref, field="section.target_ref")
+        links.append({
+            "link_id": link_id,
+            "kind": kind,
+            "target_ref": target_ref,
+        })
+    return links
 
 
 def _canonical_assets(value: Any) -> list[dict[str, Any]]:
@@ -132,7 +171,9 @@ def _canonical_assets(value: Any) -> list[dict[str, Any]]:
                     field_value,
                     field=f"asset.{field}",
                     allow_empty=field == "alt_text",
+                    reject_local_paths=field != "asset_ref",
                 )
+        _stable_reference(asset["asset_ref"], field="asset.asset_ref")
         if not _SHA256.fullmatch(asset["content_hash"]):
             raise ValueError("asset.content_hash must be lowercase sha256")
         if Path(asset["filename"]).name != asset["filename"]:
@@ -187,8 +228,24 @@ def _text_refs(
     ):
         raise ValueError(f"{field} must be a bounded string array")
     for item in value:
-        _bounded_text(item, field=field)
+        _bounded_text(item, field=field, reject_local_paths=False)
+        _stable_reference(item, field=field)
     return list(value)
+
+
+def _stable_reference(value: str, *, field: str) -> str:
+    if (
+        value.lower().startswith("file:")
+        or posixpath.isabs(value)
+        or ntpath.isabs(value)
+        or re.match(r"^[A-Za-z]:[\\/]", value)
+        or value.startswith(("~/", "~\\", "./", ".\\", "../", "..\\"))
+        or "\\" in value
+        or re.search(r"(?:^|/)\.\.?($|/)", value)
+        or ("/" in value and not _SCHEME.match(value))
+    ):
+        raise ValueError(f"{field} must be a stable reference")
+    return value
 
 
 def _safe_id(value: Any, *, field: str) -> str:
@@ -203,11 +260,13 @@ def _bounded_text(
     field: str,
     allow_empty: bool = False,
     maximum: int = 512,
+    reject_local_paths: bool = True,
 ) -> str:
     if (
         not isinstance(value, str)
         or (not allow_empty and not value.strip())
         or len(value.encode()) > maximum
+        or (reject_local_paths and _LOCAL_PATH_IN_TEXT.search(value))
     ):
         raise ValueError(f"{field} must be bounded text")
     return value

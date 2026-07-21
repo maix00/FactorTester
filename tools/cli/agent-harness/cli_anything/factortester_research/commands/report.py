@@ -42,7 +42,10 @@ def report_render(
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    payload = {**result, "path": str(result["path"])}
+    payload = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in result.items()
+    }
     if as_json:
         echo_json(payload)
         return

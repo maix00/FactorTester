@@ -29,19 +29,20 @@ reports are disposable and rebuildable. A report records the graph,
 methodology, Decision Contract, factor-family version, TrialPlan, and evidence
 hashes from which it was built; it never replaces those objects.
 
-One monolithic file is rejected. The derived local layout is:
+One monolithic file is rejected. Reports belong to the Profile research root,
+not to its factor-authoring worktree. The derived local layout is:
 
 ```text
-research/
-  README.md
-  work-packages/<work-package-id>/README.md
+research/<work-package-id>/
+  INDEX.json
+  REPORT.md
   branches/<branch-id>/REPORT.md
-  assets/<content-hash>.<extension>
-  notes/
+  assets/
 ```
 
-- The workspace index lists current scopes and work packages.
-- A work-package index summarizes its branches and shared decisions.
+- `INDEX.json` is a bounded deterministic UI projection and commit point, not
+  a canonical record or database object.
+- The Work Package `REPORT.md` is a derived aggregate.
 - A branch report presents one bounded research lineage.
 - Immutable evidence and result artifacts remain in their existing stores and
   are linked by reference rather than copied inline.
@@ -75,8 +76,11 @@ Sync and rendering are separate:
    references.
 2. The renderer reads that bounded local snapshot and performs zero database
    and network reads.
-3. Unchanged source hashes reuse existing files.
-4. A failed render leaves the previous complete report intact.
+3. A per-Work-Package file lock serializes index load, merge, staging, and
+   publication without adding a database transaction or event object.
+4. Unchanged bytes reuse all report files. Changed branch, aggregate, and index
+   files are staged first and published in that order, with `INDEX.json` last.
+5. A failed publication restores the previous complete three-file generation.
 
 Workspace regeneration must preserve `research/`. Reports never contain factor
 source, private formulas, expression trees, credentials, raw stdout/stderr, or
@@ -125,7 +129,7 @@ stable holdout reference and access receipt; routine in-sample navigation must
 not silently load or display holdout content.
 
 `ProfileResearchProjection` reserves bounded `list`, `detail`, and `timeline`
-seams. `ReportDocument` v2 and `REPORT.index.json` reserve bidirectional stable
+seams. `ReportDocument` v2 and `INDEX.json` reserve bidirectional stable
 anchors between report sections and TrialPlan, obligation, and evidence
 references. The UI consumes those projections and anchors rather than reading
 database schema or scanning complete Markdown. A future server implementation

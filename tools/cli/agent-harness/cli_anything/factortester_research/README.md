@@ -233,17 +233,27 @@ Render a reviewed, bounded local snapshot without contacting the server:
 ```bash
 cli-anything-factortester-research report render \
   --snapshot-file report-snapshot.json \
-  --workspace-root <factor-workspace> \
+  --workspace-root <profile-root> \
   --json
 ```
 
-The deterministic target writes
-`research/branches/<branch-id>/REPORT.md` only when content changes. Factor
-workspace regeneration preserves `research/`, including provisional notes.
-Reports link content-addressed evidence and assets; they reject factor source,
-formula/expression trees, credentials, and raw stdout/stderr. Markdown is the
-only implemented target. PDF and chart producers remain optional future
-targets; a chart is an embedded report asset, not a separate report.
+The caller root is the owning Profile root, never its factor-authoring
+worktree. One Work Package owns `research/<work-package-id>/INDEX.json`, its
+derived aggregate `REPORT.md`, branch projections below
+`branches/<branch-id>/REPORT.md`, and an `assets/` boundary. A per-package file
+lock serializes index merge and publication. Changed files are staged before
+the branch, aggregate, and index are atomically published; the index is the
+last UI-visible commit point, and a failed publication restores the complete
+old generation. Unchanged content writes none of those report files.
+
+The JSON result separates stable `artifact:research/...` references from a
+`local_artifact_descriptor`. Only that explicitly local descriptor contains
+`file://` references for FTClient; Graph/server projections must use the stable
+references. Reports reject local paths, factor source, formula/expression
+trees, credentials, and raw stdout/stderr. Markdown is the only implemented
+rendition. The renderer protocol and `assets/` boundary can support later PDF
+or chart components, but the current command neither generates nor coexists
+with a PDF rendition.
 
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its
