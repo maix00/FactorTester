@@ -28,6 +28,7 @@ packages = [
   "tools.cli.modules.products",
   "tools.cli.release",
   "tools.cli.release.adapters",
+  "tools.cli.release.research_reporting",
 ]
 
 [tool.setuptools.package-dir]
@@ -39,6 +40,7 @@ packages = [
 "tools.cli.modules.products" = "modules/products"
 "tools.cli.release" = "release"
 "tools.cli.release.adapters" = "release/adapters"
+"tools.cli.release.research_reporting" = "release/research_reporting"
 
 [tool.setuptools.package-data]
 "tools.cli.release" = [

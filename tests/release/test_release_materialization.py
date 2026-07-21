@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -44,3 +45,47 @@ def test_real_client_and_harness_wheels_materialize_together(
     )
     assert "protocol" in client_help
     assert "cycle" in harness_help
+
+    snapshot = {
+        "schema_version": 1,
+        "workspace_id": "workspace-maxa",
+        "work_package_id": "wheel-contract",
+        "branch_id": "branch-one",
+        "title": "Installed wheel report contract",
+        "status": "active",
+        "graph_ref": "factor-research@5:sha256:graph",
+        "methodology_hash": "1" * 64,
+        "decision_contract_hash": "2" * 64,
+        "trial_plan_hash": "",
+        "factor_family_versions": ["MaxA:SgCCS@7"],
+        "sections": [{
+            "section_id": "checkpoint-one",
+            "title": "Checkpoint one",
+            "body": "The installed harness rendered this checkpoint.",
+            "created_at": 1.0,
+            "links": [],
+            "evidence_refs": [],
+            "asset_refs": [],
+        }],
+        "evidence_refs": [],
+        "assets": [],
+        "gaps": [],
+    }
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    report_root = tmp_path / "reports"
+    rendered = subprocess.check_output(
+        [
+            bin_root / "cli-anything-factortester-research",
+            "report", "render",
+            "--snapshot-file", snapshot_path,
+            "--workspace-root", report_root,
+            "--json",
+        ],
+        text=True,
+    )
+    payload = json.loads(rendered)
+    assert Path(payload["path"]).is_file()
+    assert payload["artifact_refs"]["branch_report"] == (
+        "artifact:research/wheel-contract/branches/branch-one/REPORT.md"
+    )

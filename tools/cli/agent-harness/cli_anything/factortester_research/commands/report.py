@@ -7,7 +7,6 @@ from pathlib import Path
 
 import click
 
-from ..core.reporting import render_branch_report
 from .common import echo_json
 
 
@@ -35,6 +34,8 @@ def report_render(
 ) -> None:
     """Render one content-addressed branch snapshot incrementally."""
     try:
+        from ..core.reporting import render_branch_report
+
         snapshot = json.loads(snapshot_file.read_text())
         result = render_branch_report(
             snapshot,

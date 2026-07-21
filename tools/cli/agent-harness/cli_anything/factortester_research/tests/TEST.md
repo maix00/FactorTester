@@ -234,6 +234,24 @@ existing Job SSE links only for running jobs. It verifies that terminal
 research does not advertise live polling and that no endpoint replays full
 history or writes progress rows.
 
+### Local checkpoint report publisher refinement plan
+
+- `tests/release/test_local_research_report.py`: publish one bounded,
+  source-free Active Graph checkpoint through the public local client API;
+  update the existing Work Package report hierarchy and Profile research
+  reference; prove an identical checkpoint rewrites neither report files nor
+  the Profile JSON; and reject oversized, inconsistent, or source-bearing
+  carriers before mutation. The server projection is exercised without a
+  translation shim: omitted evidence becomes an explicit report gap, an
+  absent TrialPlan remains legal, and the existing local scope contributes
+  only bounded field names plus a canonical hash, never raw scope values.
+- `tests/cli/test_client_research_commands.py`: publish the same carrier from
+  stdin or a file through `factortester client research checkpoint publish
+  --json`, without constructing an HTTP client or reading a database.
+- Existing `test_report_rendering.py` remains the renderer compatibility suite;
+  the CLI-Anything import path must re-export the single public implementation
+  rather than retaining a second writer.
+
 ### Local Profile binding refinement plan
 
 - `tests/release/test_local_client_profile.py`: update an existing Profile's

@@ -11,12 +11,20 @@ import base64
 import hashlib
 import math
 import sqlite3
-from typing import Any, Iterable
+from typing import Any
 
 import orjson
 
 import settings as Settings
 from server.services.research_graph.protocol import loads
+from server.services.research_graph.report_checkpoint import (
+    cycle_projection as _cycle_projection,
+    named_refs as _named_refs,
+    report_checkpoint_projection,
+    safe_identifier as _safe_identifier,
+    safe_refs as _safe_refs,
+    transition_step_projection,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -25,7 +33,6 @@ MAX_LIST_LIMIT = 50
 DEFAULT_TIMELINE_LIMIT = 50
 MAX_TIMELINE_LIMIT = 50
 MAX_PROJECTION_BYTES = 64 * 1024
-MAX_REF_BYTES = 256
 
 LIST_FIRST_SQL = """
     SELECT i.instance_id, i.graph_id, i.graph_version, i.product_group,
@@ -86,6 +93,9 @@ BRANCH_DETAIL_SQL = """
            b.current_trial_plan_hash, b.trial_stage_projection_json,
            b.evidence_refs_json, b.omitted_evidence_count,
            b.latest_trace_id, b.created_at, b.updated_at,
+           t.edge_id AS latest_trace_edge_id,
+           t.from_node AS latest_trace_from_node,
+           t.created_at AS latest_trace_created_at,
            t.evidence_json AS latest_trace_evidence_json
     FROM research_graph_instances AS i
     JOIN research_graph_branches AS b
@@ -297,6 +307,31 @@ class ProfileResearchProjection:
                 f"{branch_id}/timeline"
             ),
             "refresh": refresh,
+            "report_checkpoint": (
+                report_checkpoint_projection(
+                    instance_id=str(row["instance_id"]),
+                    branch_id=str(row["branch_id"]),
+                    workspace_id=str(row["workspace_id"]),
+                    graph_id=str(row["graph_id"]),
+                    graph_version=int(row["graph_version"]),
+                    title=str(row["label"]),
+                    product_group=str(row["product_group"]),
+                    current_node=str(row["current_node"]),
+                    status=str(row["status"]),
+                    trace_id=str(row["latest_trace_id"]),
+                    edge_id=str(row["latest_trace_edge_id"]),
+                    from_node=str(row["latest_trace_from_node"]),
+                    created_at=float(row["latest_trace_created_at"]),
+                    checkpoint=evidence.get("research_cycle_checkpoint"),
+                    trace_evidence=evidence,
+                    evidence_refs=loads(row["evidence_refs_json"]) or [],
+                    omitted_evidence_count=int(
+                        row["omitted_evidence_count"]
+                    ),
+                )
+                if row["latest_trace_id"]
+                else None
+            ),
         }
         return bounded_projection(value)
 
@@ -558,36 +593,18 @@ def _transition_step(
     research_ref: str,
 ) -> dict[str, Any]:
     evidence = _json_object(row["evidence_json"])
-    trial_plan_refs = _trial_plan_refs(evidence)
-    obligation_changes, claim_changes = _research_cycle_deltas(evidence)
-    obligation_refs = _unique([
-        *(
-            f"obligation:{item['obligation_id']}"
-            for item in obligation_changes
-        ),
-        *_named_refs(evidence, "obligation_id", prefix="obligation:"),
-    ])
-    claim_refs = _unique([
-        *(f"claim:{item['claim_id']}" for item in claim_changes),
-        *_named_refs(evidence, "claim_id", prefix="claim:"),
-    ])
-    job_refs = _named_refs(evidence, "job_id", prefix="job:")
+    step = transition_step_projection(
+        trace_id=str(row["trace_id"]),
+        edge_id=str(row["edge_id"]),
+        from_node=str(row["from_node"]),
+        to_node=str(row["to_node"]),
+        created_at=float(row["created_at"]),
+        evidence=evidence,
+    )
     return {
-        "step_ref": f"trace:{str(row['trace_id'])}",
+        **step,
         "research_ref": research_ref,
-        "edge_ref": f"graph-edge:{str(row['edge_id'])}",
-        "from_node": str(row["from_node"]),
-        "to_node": str(row["to_node"]),
         "actor_ref": f"actor:{str(row['actor'])}",
-        "created_at": float(row["created_at"]),
-        "evidence_refs": _safe_refs(evidence.get("evidence_refs") or []),
-        "trial_plan_refs": trial_plan_refs,
-        "obligation_refs": obligation_refs,
-        "claim_refs": claim_refs,
-        "job_refs": job_refs,
-        "run_refs": _named_refs(evidence, "run_id", prefix="run:"),
-        "obligation_changes": obligation_changes,
-        "claim_changes": claim_changes,
         "object_hrefs": [
             (
                 "/api/research-graph-instances/"
@@ -595,172 +612,13 @@ def _transition_step(
                 f"{parse_research_ref(research_ref)[1]}/cycle-objects/"
                 f"{ref.split(':', 1)[0]}/{ref.split(':', 1)[1]}"
             )
-            for ref in [*obligation_refs, *claim_refs]
+            for ref in [*step["obligation_refs"], *step["claim_refs"]]
         ],
         "job_stream_hrefs": [
             f"/api/jobs/{ref.removeprefix('job:')}/stream"
-            for ref in job_refs
+            for ref in step["job_refs"]
         ],
     }
-
-
-def _cycle_projection(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {
-            "protocol_status": "uninitialized",
-            "projection_ref": None,
-            "claims": [],
-            "obligations": [],
-            "closure": None,
-        }
-    claims = []
-    for item in value.get("claims") or []:
-        if not isinstance(item, dict):
-            continue
-        claim_id = _safe_identifier(item.get("claim_id"))
-        if not claim_id:
-            continue
-        claims.append({
-            "claim_ref": f"claim:{claim_id}",
-            "claim_type": _bounded_text(item.get("claim_type"), 80),
-            "evidence_state": _bounded_text(
-                item.get("evidence_state"),
-                48,
-            ),
-        })
-    obligations = []
-    for item in value.get("obligations") or []:
-        if not isinstance(item, dict):
-            continue
-        obligation_id = _safe_identifier(item.get("obligation_id"))
-        if not obligation_id:
-            continue
-        obligations.append({
-            "obligation_ref": f"obligation:{obligation_id}",
-            "status": _bounded_text(item.get("status"), 48),
-            "materiality": _bounded_text(item.get("materiality"), 80),
-            "question_summary": _bounded_text(
-                item.get("epistemic_question"),
-                240,
-            ),
-        })
-    projection_hash = _safe_hash(value.get("projection_hash"))
-    closure = value.get("closure")
-    closure_projection = None
-    if isinstance(closure, dict):
-        closure_projection = {
-            "proposal_ref": (
-                f"proposal:{_safe_identifier(closure.get('proposal_id'))}"
-                if _safe_identifier(closure.get("proposal_id"))
-                else None
-            ),
-            "disposition": _bounded_text(
-                closure.get("disposition"),
-                80,
-            ),
-        }
-    return {
-        "protocol_status": "current",
-        "projection_ref": (
-            f"research-cycle:sha256:{projection_hash}"
-            if projection_hash
-            else None
-        ),
-        "claims": claims,
-        "obligations": obligations,
-        "closure": closure_projection,
-    }
-
-
-def _research_cycle_deltas(
-    evidence: dict[str, Any],
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    cycle = evidence.get("research_cycle")
-    events = cycle.get("events") if isinstance(cycle, dict) else []
-    obligation_changes: list[dict[str, str]] = []
-    claim_changes: list[dict[str, str]] = []
-    for event in events if isinstance(events, list) else []:
-        if not isinstance(event, dict):
-            continue
-        proposal = event.get("proposal")
-        if not isinstance(proposal, dict):
-            continue
-        for item in proposal.get("obligation_delta") or []:
-            if not isinstance(item, dict):
-                continue
-            identifier = _safe_identifier(item.get("obligation_id"))
-            if identifier:
-                obligation_changes.append({
-                    "obligation_id": identifier,
-                    "from_state": _bounded_text(
-                        item.get("from_state"),
-                        48,
-                    ),
-                    "to_state": _bounded_text(item.get("to_state"), 48),
-                })
-        for item in proposal.get("claim_evidence_delta") or []:
-            if not isinstance(item, dict):
-                continue
-            identifier = _safe_identifier(item.get("claim_id"))
-            if identifier:
-                claim_changes.append({
-                    "claim_id": identifier,
-                    "from_state": _bounded_text(
-                        item.get("from_state"),
-                        48,
-                    ),
-                    "to_state": _bounded_text(item.get("to_state"), 48),
-                })
-    return obligation_changes[:50], claim_changes[:50]
-
-
-def _trial_plan_refs(evidence: dict[str, Any]) -> list[str]:
-    values: list[str] = []
-    plan = evidence.get("trial_plan")
-    if isinstance(plan, dict):
-        plan_id = _safe_identifier(plan.get("trial_plan_id"))
-        if plan_id:
-            values.append(f"trial-plan:{plan_id}")
-    for hash_value in _named_texts(evidence, "trial_plan_hash"):
-        normalized = _safe_hash(hash_value)
-        if normalized:
-            values.append(f"trial-plan:sha256:{normalized}")
-    return _unique(values)[:20]
-
-
-def _named_refs(
-    value: Any,
-    key: str,
-    *,
-    prefix: str,
-) -> list[str]:
-    return _unique(
-        f"{prefix}{item}"
-        for item in _named_texts(value, key)
-        if _safe_identifier(item)
-    )[:20]
-
-
-def _named_texts(value: Any, key: str) -> list[str]:
-    found: list[str] = []
-
-    def visit(item: Any) -> None:
-        if len(found) >= 50:
-            return
-        if isinstance(item, dict):
-            for child_key, child in item.items():
-                if child_key == key and isinstance(child, str):
-                    safe = _safe_identifier(child)
-                    if safe:
-                        found.append(safe)
-                elif isinstance(child, (dict, list)):
-                    visit(child)
-        elif isinstance(item, list):
-            for child in item:
-                visit(child)
-
-    visit(value)
-    return found
 
 
 def _first_named_text(
@@ -793,72 +651,11 @@ def _first_named_text(
     return ""
 
 
-def _safe_refs(values: Any) -> list[str]:
-    if not isinstance(values, list):
-        return []
-    return _unique(
-        str(value)
-        for value in values
-        if (
-            isinstance(value, str)
-            and value
-            and len(value.encode()) <= MAX_REF_BYTES
-        )
-    )[:20]
-
-
-def _unique(values: Iterable[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value and value not in seen:
-            seen.add(value)
-            result.append(value)
-    return result
-
-
 def _identifier(value: Any, *, field: str) -> str:
     normalized = _safe_identifier(value)
     if not normalized:
         raise ValueError(f"{field} is invalid")
     return normalized
-
-
-def _safe_identifier(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    normalized = value.strip()
-    if (
-        not normalized
-        or len(normalized.encode()) > 160
-        or any(character not in (
-            "abcdefghijklmnopqrstuvwxyz"
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            "0123456789-_."
-        ) for character in normalized)
-    ):
-        return ""
-    return normalized
-
-
-def _safe_hash(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    normalized = value.removeprefix("sha256:")
-    if len(normalized) != 64 or any(
-        character not in "0123456789abcdef"
-        for character in normalized
-    ):
-        return ""
-    return normalized
-
-
-def _bounded_text(value: Any, max_bytes: int) -> str:
-    text = str(value or "")
-    raw = text.encode()
-    if len(raw) <= max_bytes:
-        return text
-    return raw[: max_bytes - 3].decode(errors="ignore") + "..."
 
 
 def _json_object(value: Any) -> dict[str, Any]:

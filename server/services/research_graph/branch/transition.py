@@ -49,6 +49,9 @@ from server.services.research_graph.protocol import (
     merge_bounded_evidence_refs,
     serialize_bounded_trace_evidence,
 )
+from server.services.research_graph.report_checkpoint import (
+    report_checkpoint_projection,
+)
 from server.services.research_graph.trial_plan.transition import (
     prepare_trial_plan_evidence,
     validate_trial_plan_cycle_binding,
@@ -397,6 +400,25 @@ def advance_graph_branch(
                 now,
             ),
         )
+        report_checkpoint = report_checkpoint_projection(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            workspace_id=str(branch_row["workspace_id"]),
+            graph_id=str(branch_row["graph_id"]),
+            graph_version=int(branch_row["graph_version"]),
+            title=str(branch["label"]),
+            product_group=str(branch_row["product_group"]),
+            current_node=target_id,
+            status=status,
+            trace_id=trace_id,
+            edge_id=edge_id,
+            from_node=str(branch["current_node"]),
+            created_at=now,
+            checkpoint=cycle_checkpoint,
+            trace_evidence=trace_evidence,
+            evidence_refs=bounded_evidence_refs,
+            omitted_evidence_count=omitted_evidence_count,
+        )
     return {
         "branch_id": branch_id,
         "instance_id": instance_id,
@@ -405,4 +427,5 @@ def advance_graph_branch(
         "status": status,
         "created_at": branch["created_at"],
         "updated_at": now,
+        "report_checkpoint": report_checkpoint,
     }

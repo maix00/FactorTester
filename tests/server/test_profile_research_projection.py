@@ -296,6 +296,19 @@ def test_list_detail_and_timeline_are_bounded_source_free_and_keyset_paged(
         "question_summary": "Does the factor survive costs?",
     }]
     assert branch["timeline_href"].endswith("/timeline")
+    carrier = branch["report_checkpoint"]
+    assert carrier["checkpoint_ref"] == "trace:trace-000000"
+    assert carrier["work_package_ref"] == "work-package:instance-a"
+    assert carrier["branch_ref"] == (
+        "graph-branch:instance-a:branch-0000"
+    )
+    assert carrier["decision_contract_hash"] == "b" * 64
+    assert carrier["methodology_hash"] == "d" * 64
+    assert carrier["trial_plan_hash"] == "c" * 64
+    assert carrier["latest_transition"]["step_ref"] == (
+        "trace:trace-000000"
+    )
+    assert carrier["latest_transition"]["job_refs"] == ["job:job-0"]
     serialized_detail = orjson.dumps(branch)
     for forbidden in (
         b"source_code",
@@ -348,6 +361,23 @@ def test_projection_uses_one_read_and_owner_scope_returns_not_found(
     service.get_research(
         owner="alice",
         research_ref="work-package:instance-a",
+    )
+    normalized = [
+        " ".join(statement.upper().split())
+        for statement in statements
+    ]
+    assert sum(item.startswith("SELECT ") for item in normalized) == 1
+    assert not any(item.startswith((
+        "INSERT ",
+        "UPDATE ",
+        "DELETE ",
+        "REPLACE ",
+    )) for item in normalized)
+
+    statements.clear()
+    service.get_branch(
+        owner="alice",
+        branch_ref="graph-branch:instance-a:branch-0000",
     )
     normalized = [
         " ".join(statement.upper().split())

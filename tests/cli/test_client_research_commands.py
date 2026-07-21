@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -117,3 +118,97 @@ def test_client_research_branch_and_timeline_are_public(monkeypatch) -> None:
     assert timeline.exit_code == 0, timeline.output
     assert json.loads(branch.output)["branch_ref"].endswith(":branch-1")
     assert json.loads(timeline.output)["items"][0]["step_ref"] == "trace:1"
+
+
+def test_client_research_checkpoint_publish_accepts_bounded_file(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured = {}
+    carrier_path = tmp_path / "checkpoint.json"
+    carrier_path.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
+    monkeypatch.setattr(
+        client_research,
+        "load_profile_root",
+        lambda path: tmp_path / "client-root",
+    )
+    monkeypatch.setattr(
+        client_research,
+        "publish_research_checkpoint",
+        lambda **kwargs: captured.update(kwargs) or {"changed": True},
+    )
+
+    result = CliRunner().invoke(cli, [
+        "client", "research", "checkpoint", "publish", "maxa",
+        "--agent-id", "research-maxa",
+        "--checkpoint-file", str(carrier_path),
+        "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"changed": True}
+    assert captured == {
+        "client_root": tmp_path / "client-root",
+        "profile_id": "maxa",
+        "agent_id": "research-maxa",
+        "carrier": {"schema_version": 1},
+    }
+
+
+def test_client_research_checkpoint_publish_accepts_stdin(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    captured = {}
+    monkeypatch.setattr(
+        client_research,
+        "load_profile_root",
+        lambda path: tmp_path / "client-root",
+    )
+    monkeypatch.setattr(
+        client_research,
+        "publish_research_checkpoint",
+        lambda **kwargs: captured.update(kwargs) or {"changed": False},
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "client", "research", "checkpoint", "publish", "maxa",
+            "--agent-id", "research-maxa",
+            "--checkpoint-file", "-",
+            "--json",
+        ],
+        input='{"schema_version": 1}',
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"changed": False}
+    assert captured["carrier"] == {"schema_version": 1}
+
+
+def test_client_research_checkpoint_rejects_oversized_input_before_publish(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    called = False
+
+    def publish(**kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(client_research, "publish_research_checkpoint", publish)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "client", "research", "checkpoint", "publish", "maxa",
+            "--agent-id", "research-maxa",
+            "--checkpoint-file", "-",
+        ],
+        input="x" * (96 * 1024 + 1),
+    )
+
+    assert result.exit_code != 0
+    assert "exceeds" in result.output
+    assert called is False

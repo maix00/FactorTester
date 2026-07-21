@@ -9,10 +9,22 @@ import click
 
 from tools.cli.core.context import client_from_config
 from tools.cli.capability_projection import server_capability_resolution
+from tools.cli.client import FactorTesterClient
+from tools.cli.http import HttpSession
+from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.profile import load_profile_root
+from tools.cli.release.research_reporting.publisher import (
+    publish_research_checkpoint,
+)
 
 
 def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def _client_for_profile(client_root: Path, profile_id: str) -> FactorTesterClient:
+    profile = LocalProfileStore(client_root).load(profile_id)
+    return FactorTesterClient(HttpSession(profile["server"]["base_url"]))
 
 
 @click.group("research-graph")
@@ -464,12 +476,21 @@ def continue_graph_branch(
     "--target-capability-resolution-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
+@click.option("--profile-id")
+@click.option("--agent-id")
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 def advance_graph_branch(
     instance_id: str,
     branch_id: str,
     edge_id: str,
     evidence_file: Path,
     target_capability_resolution_file: Path | None,
+    profile_id: str | None,
+    agent_id: str | None,
+    release_profile: Path | None,
 ) -> None:
     """提交证据并沿 Active Graph 的一条已声明边前进。"""
     evidence = json.loads(evidence_file.read_text(encoding="utf-8"))
@@ -491,9 +512,76 @@ def advance_graph_branch(
         evidence["target_capability_resolution"] = (
             server_capability_resolution(resolution)
         )
-    click.echo(_json(client_from_config().advance_research_graph_branch(
+    if bool(profile_id) != bool(agent_id):
+        raise click.ClickException(
+            "--profile-id and --agent-id must be provided together"
+        )
+    client_root = load_profile_root(release_profile) if profile_id else None
+    client = (
+        _client_for_profile(client_root, profile_id)
+        if client_root is not None and profile_id is not None
+        else client_from_config()
+    )
+    branch = client.advance_research_graph_branch(
         instance_id,
         branch_id,
         edge_id=edge_id,
         evidence=evidence,
-    )))
+    )
+    report_checkpoint = branch.get("report_checkpoint")
+    if profile_id and agent_id and report_checkpoint is not None:
+        assert client_root is not None
+        try:
+            report_sync = publish_research_checkpoint(
+                client_root=client_root,
+                profile_id=profile_id,
+                agent_id=agent_id,
+                carrier=report_checkpoint,
+            )
+        except (OSError, ValueError) as exc:
+            error_code = (
+                "local_report_io_error"
+                if isinstance(exc, OSError)
+                else "local_report_validation_error"
+            )
+            click.echo(_json({
+                "branch": branch,
+                "local_report_sync": {
+                    "status": "required",
+                    "error_code": error_code,
+                    "message": (
+                        "Server transition completed; local report sync is "
+                        "required."
+                    ),
+                    "checkpoint_ref": report_checkpoint.get(
+                        "checkpoint_ref"
+                    ),
+                },
+            }))
+            return
+        sync_artifact = report_sync["artifact"]
+        branch = {
+            **{
+                key: value
+                for key, value in branch.items()
+                if key != "report_checkpoint"
+            },
+            "report_checkpoint_ref": report_checkpoint["checkpoint_ref"],
+            "local_report_sync": {
+                "status": "published",
+                "changed": report_sync["changed"],
+                "report_changed": report_sync["report_changed"],
+                "profile_changed": report_sync["profile_changed"],
+                "checkpoint_ref": report_sync["checkpoint_ref"],
+                "artifact_ref": sync_artifact["artifact_ref"],
+            },
+        }
+    elif profile_id and agent_id:
+        branch = {
+            **branch,
+            "local_report_sync": {
+                "status": "not_available",
+                "reason": "checkpoint_carrier_not_available",
+            },
+        }
+    click.echo(_json(branch))

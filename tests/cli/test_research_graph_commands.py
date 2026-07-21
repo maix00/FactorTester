@@ -19,6 +19,8 @@ class FakeClient:
         self.authorization = None
         self.rollback = None
         self.advance = None
+        self.advance_call_count = 0
+        self.advance_response = None
         self.continuation_preview = None
         self.continuation = None
         self.agent_budget_call = None
@@ -109,8 +111,9 @@ class FakeClient:
         edge_id,
         evidence,
     ):
+        self.advance_call_count += 1
         self.advance = (instance_id, branch_id, edge_id, evidence)
-        return {
+        return self.advance_response or {
             "instance_id": instance_id,
             "branch_id": branch_id,
             "current_node": "validation",
@@ -446,6 +449,169 @@ def test_research_graph_advance_projects_target_capability_descriptions(
         "capability_description": "Run validation.",
         "descriptor_hash": "a" * 64,
     }]
+
+
+def test_research_graph_advance_publishes_checkpoint_for_bound_profile(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    carrier = {"schema_version": 1, "checkpoint_ref": "trace:checkpoint-1"}
+    fake.advance_response = {
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+        "current_node": "validation",
+        "report_checkpoint": carrier,
+    }
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    selected_client = {}
+
+    def profile_client(root, profile_id):
+        selected_client.update({"root": root, "profile_id": profile_id})
+        return fake
+
+    monkeypatch.setattr(commands, "_client_for_profile", profile_client)
+    published = {}
+
+    def publish(**kwargs):
+        published.update(kwargs)
+        return {
+            "changed": True,
+            "report_changed": True,
+            "profile_changed": True,
+            "checkpoint_ref": "trace:checkpoint-1",
+            "artifact": {
+                "artifact_ref": "artifact:research/instance-1/REPORT.md",
+                "local_ref": "file:///private/report.md",
+                "index_ref": "file:///private/index.json",
+            },
+        }
+
+    monkeypatch.setattr(commands, "publish_research_checkpoint", publish)
+    monkeypatch.setattr(
+        commands,
+        "load_profile_root",
+        lambda _profile: tmp_path / "client-support",
+    )
+    evidence_file = tmp_path / "evidence.json"
+    evidence_file.write_text(json.dumps({"ready": True}))
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "advance", "instance-1", "branch-1",
+        "--edge-id", "hypothesis__validation",
+        "--evidence-file", str(evidence_file),
+        "--profile-id", "maxa",
+        "--agent-id", "research-maxa",
+    ])
+
+    assert result.exit_code == 0
+    assert published == {
+        "client_root": tmp_path / "client-support",
+        "profile_id": "maxa",
+        "agent_id": "research-maxa",
+        "carrier": carrier,
+    }
+    assert selected_client == {
+        "root": tmp_path / "client-support",
+        "profile_id": "maxa",
+    }
+    payload = json.loads(result.output)
+    assert payload["local_report_sync"]["status"] == "published"
+    assert payload["report_checkpoint_ref"] == "trace:checkpoint-1"
+    assert "report_checkpoint" not in payload
+    assert "file:" not in result.output
+
+
+def test_research_graph_advance_reports_local_sync_failure_after_transition(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    fake.advance_response = {
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+        "current_node": "validation",
+        "report_checkpoint": {
+            "schema_version": 1,
+            "checkpoint_ref": "trace:checkpoint-1",
+        },
+    }
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    monkeypatch.setattr(
+        commands,
+        "_client_for_profile",
+        lambda _root, _profile_id: fake,
+    )
+    monkeypatch.setattr(
+        commands,
+        "load_profile_root",
+        lambda _profile: tmp_path / "client-support",
+    )
+    monkeypatch.setattr(
+        commands,
+        "publish_research_checkpoint",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            OSError("/Users/max/private/report directory is unavailable")
+        ),
+    )
+    evidence_file = tmp_path / "evidence.json"
+    evidence_file.write_text(json.dumps({"ready": True}))
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "advance", "instance-1", "branch-1",
+        "--edge-id", "hypothesis__validation",
+        "--evidence-file", str(evidence_file),
+        "--profile-id", "maxa",
+        "--agent-id", "research-maxa",
+    ])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["branch"]["current_node"] == "validation"
+    assert payload["local_report_sync"] == {
+        "status": "required",
+        "error_code": "local_report_io_error",
+        "message": (
+            "Server transition completed; local report sync is required."
+        ),
+        "checkpoint_ref": "trace:checkpoint-1",
+    }
+    assert "/Users/" not in result.output
+    assert fake.advance_call_count == 1
+
+
+def test_research_graph_advance_marks_uninitialized_cycle_without_local_write(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    monkeypatch.setattr(
+        commands,
+        "_client_for_profile",
+        lambda _root, _profile_id: fake,
+    )
+    monkeypatch.setattr(
+        commands,
+        "load_profile_root",
+        lambda _profile: tmp_path / "client-support",
+    )
+    evidence_file = tmp_path / "evidence.json"
+    evidence_file.write_text(json.dumps({"ready": True}))
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "advance", "instance-1", "branch-1",
+        "--edge-id", "hypothesis__validation",
+        "--evidence-file", str(evidence_file),
+        "--profile-id", "maxa",
+        "--agent-id", "research-maxa",
+    ])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["local_report_sync"] == {
+        "status": "not_available",
+        "reason": "checkpoint_carrier_not_available",
+    }
 
 
 def test_research_graph_continuation_is_previewed_then_exactly_authorized(

@@ -2229,6 +2229,23 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         )
         for statement in transition_statements
     ) == 1
+    carrier = transitioned["report_checkpoint"]
+    assert carrier["checkpoint_ref"].startswith("trace:")
+    assert carrier["work_package_ref"] == (
+        f"work-package:{instance['instance_id']}"
+    )
+    assert carrier["branch_ref"] == (
+        "graph-branch:"
+        f"{instance['instance_id']}:{first['branch_id']}"
+    )
+    assert carrier["decision_contract_hash"] == "1" * 64
+    assert carrier["methodology_hash"] == "2" * 64
+    assert carrier["latest_transition"]["edge_ref"] == (
+        "graph-edge:hypothesis__resolution"
+    )
+    serialized_carrier = orjson.dumps(carrier)
+    assert b"source_code" not in serialized_carrier
+    assert b"stdout" not in serialized_carrier
     with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         trace = conn.execute(
             """

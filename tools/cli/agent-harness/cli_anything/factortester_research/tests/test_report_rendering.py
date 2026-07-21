@@ -176,6 +176,7 @@ def test_index_projects_sections_for_the_current_swift_reader(tmp_path) -> None:
         "section_ref": "report-section:branch-sgccs:current-state",
         "title": "Current evidence state",
         "summary": "The latest bounded decision remains blocked.",
+        "created_at": 0.0,
         "links": [{
             "link_id": "trial-plan-design",
             "kind": "trial_plan",
@@ -203,6 +204,26 @@ def test_index_projects_sections_for_the_current_swift_reader(tmp_path) -> None:
             "section_ref": "report-section:branch-sgccs:current-state",
         }],
     }]
+
+
+def test_checkpoint_section_navigation_retains_latest_bounded_window(
+    tmp_path,
+) -> None:
+    for index in range(writer.MAX_INDEX_SECTIONS + 2):
+        snapshot = _snapshot()
+        snapshot["sections"][0].update({
+            "section_id": f"checkpoint-{index:04d}",
+            "created_at": float(index),
+        })
+        result = render_branch_report(snapshot, workspace_root=tmp_path)
+
+    value = json.loads(result["index_path"].read_text(encoding="utf-8"))
+    assert len(value["sections"]) == writer.MAX_INDEX_SECTIONS
+    assert value["omitted_section_count"] == 2
+    assert value["sections"][0]["created_at"] == 2.0
+    assert value["sections"][-1]["created_at"] == float(
+        writer.MAX_INDEX_SECTIONS + 1
+    )
 
 
 def test_same_branch_id_is_isolated_by_work_package(tmp_path) -> None:
@@ -313,6 +334,9 @@ def test_existing_index_is_size_and_count_bounded_before_merge(tmp_path) -> None
     ("field", "unsafe"),
     [
         ("evidence", "file:///private/result.json"),
+        ("evidence", "artifact:/Users/max/private.json"),
+        ("evidence", "artifact:C:/Users/max/private.json"),
+        ("evidence", "artifact://Users/max/private.json"),
         ("asset", "/private/curve.png"),
         ("asset", r"C:\\research\\curve.png"),
     ],
@@ -535,7 +559,7 @@ def test_report_cli_renders_snapshot_without_server_access(tmp_path) -> None:
     descriptor = payload["local_artifact_descriptor"]
     assert _research_artifact(descriptor) == descriptor
     assert descriptor["artifact_ref"] == (
-        payload["artifact_refs"]["work_package_report"]
+        payload["artifact_refs"]["branch_report"]
     )
     assert descriptor["local_ref"].startswith("file://")
     assert descriptor["index_ref"].startswith("file://")
@@ -543,7 +567,7 @@ def test_report_cli_renders_snapshot_without_server_access(tmp_path) -> None:
     index_url = urlparse(descriptor["index_ref"])
     index = json.loads(Path(unquote(index_url.path)).read_text())
     assert set(index["sections"][0]) == {
-        "section_ref", "title", "summary", "links",
+        "section_ref", "title", "summary", "links", "created_at",
     }
     assert set(index["sections"][0]["links"][0]) == {
         "link_id", "kind", "target_ref", "section_ref",

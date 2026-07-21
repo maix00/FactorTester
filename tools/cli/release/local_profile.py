@@ -188,11 +188,21 @@ class LocalProfileStore:
         descriptor: dict[str, Any],
     ) -> dict[str, Any]:
         profile = self.load(profile_id)
-        records = [
-            item for item in profile["research_records"]
-            if item["record_id"] != descriptor.get("record_id")
-        ]
-        profile["research_records"] = [*records, descriptor]
+        candidate = validate_local_profile({
+            **profile,
+            "research_records": [descriptor],
+        })["research_records"][0]
+        records = list(profile["research_records"])
+        for index, item in enumerate(records):
+            if item["record_id"] != candidate["record_id"]:
+                continue
+            if item == candidate:
+                return profile
+            records[index] = candidate
+            break
+        else:
+            records.append(candidate)
+        profile["research_records"] = records
         return self.save(profile)
 
     def load_agent(
