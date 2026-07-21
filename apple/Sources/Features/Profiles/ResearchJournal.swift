@@ -40,6 +40,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
     let sectionID: String
     let title: String
     let body: String
+    let blocks: [ResearchJournalBlock]
     let links: [ResearchJournalLink]
     let checkpointRef: String
     let createdAt: Double
@@ -48,14 +49,18 @@ struct ResearchJournalSection: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case sectionID = "section_id"
-        case title, body, links
+        case title, body, blocks, links
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         sectionID = try container.decode(String.self, forKey: .sectionID)
         title = try container.decode(String.self, forKey: .title)
-        body = try container.decode(String.self, forKey: .body)
+        body = try container.decodeIfPresent(String.self, forKey: .body) ?? ""
+        blocks = try container.decodeIfPresent(
+            [ResearchJournalBlock].self,
+            forKey: .blocks
+        ) ?? []
         links = try container.decode([ResearchJournalLink].self, forKey: .links)
         checkpointRef = ""
         createdAt = 0
@@ -65,6 +70,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
         sectionID: String,
         title: String,
         body: String,
+        blocks: [ResearchJournalBlock],
         links: [ResearchJournalLink],
         checkpointRef: String,
         createdAt: Double
@@ -72,6 +78,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
         self.sectionID = sectionID
         self.title = title
         self.body = body
+        self.blocks = blocks
         self.links = links
         self.checkpointRef = checkpointRef
         self.createdAt = createdAt
@@ -82,10 +89,60 @@ struct ResearchJournalSection: Decodable, Identifiable {
             sectionID: sectionID,
             title: title,
             body: body,
+            blocks: blocks,
             links: links,
             checkpointRef: checkpoint.checkpointRef,
             createdAt: checkpoint.createdAt
         )
+    }
+}
+
+struct ResearchJournalBlock: Decodable {
+    let kind: String
+    let text: String?
+    let columns: [String]
+    let rows: [ResearchJournalRow]
+
+    enum CodingKeys: String, CodingKey {
+        case kind, text, columns, rows
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(String.self, forKey: .kind)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        columns = try container.decodeIfPresent(
+            [String].self,
+            forKey: .columns
+        ) ?? []
+        rows = try container.decodeIfPresent(
+            [ResearchJournalRow].self,
+            forKey: .rows
+        ) ?? []
+    }
+}
+
+struct ResearchJournalRow: Decodable {
+    let text: String?
+    let cells: [String]
+    let linkIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case text, cells
+        case linkIDs = "link_ids"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        cells = try container.decodeIfPresent(
+            [String].self,
+            forKey: .cells
+        ) ?? []
+        linkIDs = try container.decodeIfPresent(
+            [String].self,
+            forKey: .linkIDs
+        ) ?? []
     }
 }
 
@@ -181,7 +238,7 @@ enum ResearchJournalLoader {
     }
 
     private static func validate(_ value: ResearchJournalDocument) throws {
-        guard value.schemaVersion == 1,
+        guard [1, 2].contains(value.schemaVersion),
               value.language == "zh-Hans",
               !value.branchID.isEmpty,
               value.checkpoints.count <= maximumCheckpoints else {
@@ -203,13 +260,61 @@ enum ResearchJournalLoader {
             for section in checkpoint.sections {
                 guard !section.sectionID.isEmpty,
                       !section.title.isEmpty,
-                      !section.body.isEmpty,
+                      (!section.body.isEmpty || !section.blocks.isEmpty),
                       section.links.count <= 16,
                       sectionIDs.insert(
                         "\(checkpoint.checkpointRef)|\(section.sectionID)"
                       ).inserted else {
                     throw ResearchJournalError.invalidContract
                 }
+                try validateBlocks(section)
+            }
+        }
+    }
+
+    private static func validateBlocks(
+        _ section: ResearchJournalSection
+    ) throws {
+        guard section.blocks.count <= 32 else {
+            throw ResearchJournalError.invalidContract
+        }
+        let linkIDs = Set(section.links.map(\.linkID))
+        for block in section.blocks {
+            switch block.kind {
+            case "paragraph":
+                guard let text = block.text, !text.isEmpty,
+                      block.columns.isEmpty, block.rows.isEmpty else {
+                    throw ResearchJournalError.invalidContract
+                }
+            case "list":
+                guard block.text == nil, block.columns.isEmpty,
+                      !block.rows.isEmpty, block.rows.count <= 64 else {
+                    throw ResearchJournalError.invalidContract
+                }
+                for row in block.rows {
+                    guard let text = row.text, !text.isEmpty,
+                          row.cells.isEmpty,
+                          !row.linkIDs.isEmpty,
+                          Set(row.linkIDs).isSubset(of: linkIDs) else {
+                        throw ResearchJournalError.invalidContract
+                    }
+                }
+            case "table":
+                guard block.text == nil,
+                      !block.columns.isEmpty, block.columns.count <= 12,
+                      !block.rows.isEmpty, block.rows.count <= 64 else {
+                    throw ResearchJournalError.invalidContract
+                }
+                for row in block.rows {
+                    guard row.text == nil,
+                          row.cells.count == block.columns.count,
+                          !row.linkIDs.isEmpty,
+                          Set(row.linkIDs).isSubset(of: linkIDs) else {
+                        throw ResearchJournalError.invalidContract
+                    }
+                }
+            default:
+                throw ResearchJournalError.invalidContract
             }
         }
     }

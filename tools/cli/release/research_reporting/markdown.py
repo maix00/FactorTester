@@ -35,7 +35,9 @@ class MarkdownReportTarget:
         }
         for section in value["sections"]:
             lines.extend([f"## {section['title']}", ""])
-            if section["body"]:
+            if section.get("blocks"):
+                lines.extend(_block_lines(section["blocks"]))
+            elif section["body"]:
                 lines.extend([section["body"], ""])
             lines.extend(_reference_lines(
                 title="证据引用",
@@ -60,6 +62,28 @@ class MarkdownReportTarget:
                 f"rendered report exceeds {MAX_REPORT_BYTES} bytes"
             )
         return payload
+
+
+def _block_lines(blocks: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for block in blocks:
+        if block["kind"] == "paragraph":
+            lines.extend([block["text"], ""])
+        elif block["kind"] == "list":
+            lines.extend(f"- {row['text']}" for row in block["rows"])
+            lines.append("")
+        else:
+            columns = block["columns"]
+            lines.extend([
+                "| " + " | ".join(columns) + " |",
+                "| " + " | ".join("---" for _ in columns) + " |",
+            ])
+            lines.extend(
+                "| " + " | ".join(row["cells"]) + " |"
+                for row in block["rows"]
+            )
+            lines.append("")
+    return lines
 
 
 def _reference_lines(*, title: str, refs: list[str]) -> list[str]:

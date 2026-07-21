@@ -49,7 +49,8 @@ _OBLIGATION_FIELDS = {
 _OBLIGATION_CHANGE_FIELDS = {"obligation_id", "from_state", "to_state"}
 _CLAIM_CHANGE_FIELDS = {"claim_id", "from_state", "to_state"}
 _NARRATIVE_FIELDS = {"schema_version", "language", "title", "sections"}
-_NARRATIVE_SECTION_FIELDS = {"section_id", "title", "body", "links"}
+_NARRATIVE_SECTION_FIELDS_V1 = {"section_id", "title", "body", "links"}
+_NARRATIVE_SECTION_FIELDS_V2 = {"section_id", "title", "blocks", "links"}
 _NARRATIVE_LINK_FIELDS = {"link_id", "kind", "target_ref"}
 _CHINESE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _LINK_KINDS = {
@@ -336,10 +337,9 @@ def _report_snapshot(
             "kind": "checkpoint",
             "target_ref": carrier["checkpoint_ref"],
         })
-        sections.append({
+        projected = {
             "section_id": f"{checkpoint_key}-{section['section_id']}",
             "title": section["title"],
-            "body": section["body"],
             "evidence_refs": [
                 item["target_ref"] for item in links
                 if item["kind"] == "evidence"
@@ -347,7 +347,13 @@ def _report_snapshot(
             "asset_refs": [],
             "links": links,
             "created_at": transition["created_at"],
-        })
+        }
+        if narrative["schema_version"] == 2:
+            projected["body"] = ""
+            projected["blocks"] = deepcopy(section["blocks"])
+        else:
+            projected["body"] = section["body"]
+        sections.append(projected)
     return {
         "schema_version": 1,
         "workspace_id": workspace_id,
@@ -386,7 +392,8 @@ def _canonical_narrative(
         raise ValueError(
             f"local narrative exceeds {MAX_NARRATIVE_BYTES} bytes"
         )
-    if narrative["schema_version"] != 1 or narrative["language"] != "zh-Hans":
+    schema_version = narrative["schema_version"]
+    if schema_version not in {1, 2} or narrative["language"] != "zh-Hans":
         raise ValueError("local narrative language must be zh-Hans")
     title = _zh_text(narrative["title"], "narrative.title", maximum=256)
     sections = narrative["sections"]
@@ -396,7 +403,12 @@ def _canonical_narrative(
     result = []
     seen_ids = set()
     for item in sections:
-        if not isinstance(item, dict) or set(item) != _NARRATIVE_SECTION_FIELDS:
+        expected_fields = (
+            _NARRATIVE_SECTION_FIELDS_V2
+            if schema_version == 2
+            else _NARRATIVE_SECTION_FIELDS_V1
+        )
+        if not isinstance(item, dict) or set(item) != expected_fields:
             raise ValueError("local narrative section fields are invalid")
         section_id = _safe_id(item["section_id"], "narrative.section_id")
         if section_id in seen_ids:
@@ -406,30 +418,145 @@ def _canonical_narrative(
         if not isinstance(links, list) or len(links) > MAX_ITEMS:
             raise ValueError("local narrative links must be a bounded array")
         projected_links = []
+        link_ids = set()
         for link in links:
             if not isinstance(link, dict) or set(link) != _NARRATIVE_LINK_FIELDS:
                 raise ValueError("local narrative link fields are invalid")
             if link["kind"] not in _LINK_KINDS:
                 raise ValueError("local narrative link kind is invalid")
-            _safe_id(link["link_id"], "narrative.link_id")
+            link_id = _safe_id(link["link_id"], "narrative.link_id")
+            if link_id in link_ids:
+                raise ValueError("narrative.link_id must be unique")
+            link_ids.add(link_id)
             _reference(link["target_ref"], "narrative.target_ref")
             if link["target_ref"] not in allowed_refs:
                 raise ValueError(
                     "narrative links must belong to the same checkpoint carrier"
                 )
             projected_links.append(dict(link))
-        result.append({
+        section = {
             "section_id": section_id,
             "title": _zh_text(item["title"], "narrative.section.title"),
-            "body": _zh_body(item["body"]),
             "links": projected_links,
-        })
+        }
+        if schema_version == 2:
+            section["blocks"] = _canonical_narrative_blocks(
+                item["blocks"], declared_link_ids=link_ids,
+            )
+        else:
+            section["body"] = _zh_body(item["body"])
+        result.append(section)
     return {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "language": "zh-Hans",
         "title": title,
         "sections": result,
     }
+
+
+def _canonical_narrative_blocks(
+    value: Any,
+    *,
+    declared_link_ids: set[str],
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value or len(value) > 32:
+        raise ValueError("narrative blocks must be a bounded array")
+    blocks = []
+    used_link_ids: set[str] = set()
+    for block in value:
+        if not isinstance(block, dict):
+            raise ValueError("narrative block must be an object")
+        kind = block.get("kind")
+        if kind == "paragraph" and set(block) == {"kind", "text"}:
+            blocks.append({"kind": kind, "text": _zh_body(block["text"])})
+            continue
+        if kind == "list" and set(block) == {"kind", "rows"}:
+            rows = _canonical_narrative_rows(
+                block["rows"],
+                declared_link_ids=declared_link_ids,
+                used_link_ids=used_link_ids,
+                table_columns=None,
+            )
+            blocks.append({"kind": kind, "rows": rows})
+            continue
+        if kind == "table" and set(block) == {"kind", "columns", "rows"}:
+            columns = block["columns"]
+            if (
+                not isinstance(columns, list)
+                or not 1 <= len(columns) <= 12
+            ):
+                raise ValueError("narrative table columns are invalid")
+            canonical_columns = [
+                _zh_text(item, "narrative.table.column", maximum=128)
+                for item in columns
+            ]
+            rows = _canonical_narrative_rows(
+                block["rows"],
+                declared_link_ids=declared_link_ids,
+                used_link_ids=used_link_ids,
+                table_columns=len(canonical_columns),
+            )
+            blocks.append({
+                "kind": kind,
+                "columns": canonical_columns,
+                "rows": rows,
+            })
+            continue
+        raise ValueError("narrative block fields are invalid")
+    if used_link_ids != declared_link_ids:
+        raise ValueError(
+            "every declared section link must be bound to one list or table row"
+        )
+    return blocks
+
+
+def _canonical_narrative_rows(
+    value: Any,
+    *,
+    declared_link_ids: set[str],
+    used_link_ids: set[str],
+    table_columns: int | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value or len(value) > 64:
+        raise ValueError("narrative block rows must be a bounded array")
+    rows = []
+    for item in value:
+        expected = (
+            {"cells", "link_ids"}
+            if table_columns is not None
+            else {"text", "link_ids"}
+        )
+        if not isinstance(item, dict) or set(item) != expected:
+            raise ValueError("narrative row fields are invalid")
+        link_ids = item["link_ids"]
+        if (
+            not isinstance(link_ids, list)
+            or not link_ids
+            or len(link_ids) > MAX_ITEMS
+        ):
+            raise ValueError("narrative row link_ids are invalid")
+        for link_id in link_ids:
+            _safe_id(link_id, "narrative.row.link_id")
+            if link_id not in declared_link_ids:
+                raise ValueError("row chip must reference a declared section link")
+            used_link_ids.add(link_id)
+        if table_columns is None:
+            rows.append({
+                "text": _zh_body(item["text"]),
+                "link_ids": list(link_ids),
+            })
+            continue
+        cells = item["cells"]
+        if not isinstance(cells, list) or len(cells) != table_columns:
+            raise ValueError("narrative table row width is invalid")
+        rows.append({
+            "cells": [
+                _text(cell, "narrative.table.cell", maximum=512)
+                for cell in cells
+            ],
+            "link_ids": list(link_ids),
+        })
+    return rows
 
 
 def _carrier_reference_allowlist(carrier: dict[str, Any]) -> set[str]:

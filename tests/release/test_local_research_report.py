@@ -228,6 +228,102 @@ def test_checkpoint_publish_accumulates_complete_chinese_narrative(
     assert len(list((branch_root / "sections").glob("*.json"))) == 2
 
 
+def test_checkpoint_publish_preserves_structured_list_and_result_table(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    narrative = {
+        "schema_version": 2,
+        "language": "zh-Hans",
+        "title": "因子研究报告",
+        "sections": [{
+            "section_id": "research-progress",
+            "title": "研究进展",
+            "blocks": [{
+                "kind": "list",
+                "rows": [{
+                    "text": "交易成本义务仍未清除。",
+                    "link_ids": ["cost-obligation"],
+                }],
+            }, {
+                "kind": "table",
+                "columns": ["检验", "指标", "结果"],
+                "rows": [{
+                    "cells": ["成本后回测", "夏普比率", "0.42"],
+                    "link_ids": ["checkpoint-evidence"],
+                }],
+            }],
+            "links": [{
+                "link_id": "cost-obligation",
+                "kind": "obligation",
+                "target_ref": "obligation:cost-survival",
+            }, {
+                "link_id": "checkpoint-evidence",
+                "kind": "evidence",
+                "target_ref": "evidence:job-attempt-1",
+            }],
+        }],
+    }
+
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        narrative=narrative,
+    )
+
+    journal_path = (
+        root / "profile-root" / "research" / "sgccs-review"
+        / "branches" / "branch-sgccs" / "JOURNAL.json"
+    )
+    journal = json.loads(journal_path.read_text())
+    section = journal["checkpoints"][0]["sections"][0]
+    assert journal["schema_version"] == 2
+    assert [block["kind"] for block in section["blocks"]] == [
+        "list", "table",
+    ]
+    assert section["blocks"][1]["rows"][0]["cells"][2] == "0.42"
+    report = journal_path.with_name("REPORT.md").read_text(encoding="utf-8")
+    assert "- 交易成本义务仍未清除。" in report
+    assert "| 检验 | 指标 | 结果 |" in report
+    assert "| 成本后回测 | 夏普比率 | 0.42 |" in report
+
+
+def test_structured_narrative_rejects_unbound_row_chip(tmp_path: Path) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    narrative = {
+        "schema_version": 2,
+        "language": "zh-Hans",
+        "title": "因子研究报告",
+        "sections": [{
+            "section_id": "research-progress",
+            "title": "研究进展",
+            "blocks": [{
+                "kind": "list",
+                "rows": [{
+                    "text": "交易成本义务仍未清除。",
+                    "link_ids": ["missing-link"],
+                }],
+            }],
+            "links": [],
+        }],
+    }
+
+    with pytest.raises(ValueError, match="declared section link"):
+        publish_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=narrative,
+        )
+
+
 def test_checkpoint_publish_rejects_unbound_narrative_link_before_write(
     tmp_path: Path,
 ) -> None:

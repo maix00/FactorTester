@@ -132,16 +132,19 @@ struct ResearchNarrativeReportView: View {
             Text(section.title)
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(.primary)
-            Text(section.body)
-                .font(.body)
-                .lineSpacing(6)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if section.blocks.isEmpty {
+                reportParagraph(section.body)
+            } else {
+                ForEach(Array(section.blocks.enumerated()), id: \.offset) {
+                    _, block in
+                    reportBlock(block, section: section)
+                }
+            }
 
-            if !section.links.isEmpty {
+            if !unboundLinks(in: section).isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 7) {
-                        ForEach(section.links) { link in
+                        ForEach(unboundLinks(in: section)) { link in
                             auditChip(link, checkpointRef: section.checkpointRef)
                         }
                     }
@@ -156,6 +159,121 @@ struct ResearchNarrativeReportView: View {
             selectedCheckpointRef = section.checkpointRef
         }
         .accessibilityIdentifier("research.report.section.\(section.sectionID)")
+    }
+
+    private func reportParagraph(_ text: String) -> some View {
+        Text(text)
+            .font(.body)
+            .lineSpacing(6)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func reportBlock(
+        _ block: ResearchJournalBlock,
+        section: ResearchJournalSection
+    ) -> some View {
+        switch block.kind {
+        case "paragraph":
+            reportParagraph(block.text ?? "")
+        case "list":
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(block.rows.enumerated()), id: \.offset) {
+                    _, row in
+                    HStack(alignment: .top, spacing: 9) {
+                        Text("•")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(row.text ?? "")
+                                .lineSpacing(4)
+                                .textSelection(.enabled)
+                            rowChips(row, section: section)
+                        }
+                    }
+                }
+            }
+        case "table":
+            reportTable(block, section: section)
+        default:
+            EmptyView()
+        }
+    }
+
+    private func reportTable(
+        _ block: ResearchJournalBlock,
+        section: ResearchJournalSection
+    ) -> some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 0) {
+                    ForEach(block.columns, id: \.self) { column in
+                        Text(column)
+                            .font(.caption.weight(.semibold))
+                            .frame(width: 132, alignment: .leading)
+                            .padding(8)
+                    }
+                    Text("依据")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 170, alignment: .leading)
+                        .padding(8)
+                }
+                .background(Color.secondary.opacity(0.08))
+                ForEach(Array(block.rows.enumerated()), id: \.offset) {
+                    index, row in
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(Array(row.cells.enumerated()), id: \.offset) {
+                            _, cell in
+                            Text(cell)
+                                .font(.callout)
+                                .textSelection(.enabled)
+                                .frame(width: 132, alignment: .leading)
+                                .padding(8)
+                        }
+                        rowChips(row, section: section)
+                            .frame(width: 170, alignment: .leading)
+                            .padding(8)
+                    }
+                    .background(
+                        index.isMultiple(of: 2)
+                            ? Color.clear
+                            : Color.secondary.opacity(0.035)
+                    )
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            }
+        }
+    }
+
+    private func rowChips(
+        _ row: ResearchJournalRow,
+        section: ResearchJournalSection
+    ) -> some View {
+        HStack(spacing: 6) {
+            ForEach(links(for: row, in: section)) { link in
+                auditChip(link, checkpointRef: section.checkpointRef)
+            }
+        }
+    }
+
+    private func links(
+        for row: ResearchJournalRow,
+        in section: ResearchJournalSection
+    ) -> [ResearchJournalLink] {
+        let ids = Set(row.linkIDs)
+        return section.links.filter { ids.contains($0.linkID) }
+    }
+
+    private func unboundLinks(
+        in section: ResearchJournalSection
+    ) -> [ResearchJournalLink] {
+        let bound = Set(
+            section.blocks.flatMap(\.rows).flatMap(\.linkIDs)
+        )
+        return section.links.filter { !bound.contains($0.linkID) }
     }
 
     private func auditChip(

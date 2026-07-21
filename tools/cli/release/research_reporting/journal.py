@@ -108,7 +108,15 @@ def journal_payload(
     *, branch_id: str, fragments: list[dict[str, Any]],
 ) -> bytes:
     value = {
-        "schema_version": 1,
+        "schema_version": (
+            2
+            if any(
+                "blocks" in section
+                for fragment in fragments
+                for section in fragment["sections"]
+            )
+            else 1
+        ),
         "language": "zh-Hans",
         "branch_id": branch_id,
         "checkpoints": [

@@ -134,8 +134,92 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
         ):
             raise ValueError("section.created_at must be a non-negative number")
         section["created_at"] = float(section["created_at"])
+        if "blocks" in item:
+            section["blocks"] = _canonical_blocks(
+                item["blocks"],
+                link_ids={link["link_id"] for link in section["links"]},
+            )
         sections.append(section)
     return sections
+
+
+def _canonical_blocks(
+    value: Any,
+    *,
+    link_ids: set[str],
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value or len(value) > 32:
+        raise ValueError("section.blocks must be a bounded array")
+    blocks = []
+    for block in value:
+        if not isinstance(block, dict):
+            raise ValueError("section block must be an object")
+        kind = block.get("kind")
+        if kind == "paragraph" and set(block) == {"kind", "text"}:
+            blocks.append({
+                "kind": kind,
+                "text": _bounded_text(
+                    block["text"], field="section.block.text", maximum=4000,
+                ),
+            })
+            continue
+        expected = (
+            {"kind", "rows"}
+            if kind == "list"
+            else {"kind", "columns", "rows"}
+        )
+        if kind not in {"list", "table"} or set(block) != expected:
+            raise ValueError("section block fields are invalid")
+        columns = None
+        if kind == "table":
+            columns = block["columns"]
+            if not isinstance(columns, list) or not 1 <= len(columns) <= 12:
+                raise ValueError("section table columns are invalid")
+            columns = [
+                _bounded_text(item, field="section.table.column", maximum=128)
+                for item in columns
+            ]
+        rows = block["rows"]
+        if not isinstance(rows, list) or not rows or len(rows) > 64:
+            raise ValueError("section block rows are invalid")
+        projected_rows = []
+        for row in rows:
+            row_fields = (
+                {"cells", "link_ids"}
+                if columns is not None
+                else {"text", "link_ids"}
+            )
+            if not isinstance(row, dict) or set(row) != row_fields:
+                raise ValueError("section block row fields are invalid")
+            refs = row["link_ids"]
+            if (
+                not isinstance(refs, list)
+                or not refs
+                or len(refs) > 16
+                or any(ref not in link_ids for ref in refs)
+            ):
+                raise ValueError("section block row links are invalid")
+            projected = {"link_ids": list(refs)}
+            if columns is None:
+                projected["text"] = _bounded_text(
+                    row["text"], field="section.list.text", maximum=4000,
+                )
+            else:
+                cells = row["cells"]
+                if not isinstance(cells, list) or len(cells) != len(columns):
+                    raise ValueError("section table row width is invalid")
+                projected["cells"] = [
+                    _bounded_text(
+                        cell, field="section.table.cell", maximum=512,
+                    )
+                    for cell in cells
+                ]
+            projected_rows.append(projected)
+        projected_block = {"kind": kind, "rows": projected_rows}
+        if columns is not None:
+            projected_block["columns"] = columns
+        blocks.append(projected_block)
+    return blocks
 
 
 def _canonical_links(value: Any) -> list[dict[str, str]]:
