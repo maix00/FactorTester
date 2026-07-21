@@ -79,11 +79,22 @@ def _narrative(
     *,
     body: str = "本次检验显示信号仍需结合成本证据继续研究。",
 ) -> dict:
-    target_ref = (
-        carrier["evidence_refs"][0]
-        if carrier["evidence_refs"]
-        else carrier["checkpoint_ref"]
-    )
+    targets = [
+        ("evidence", ref) for ref in carrier["evidence_refs"]
+    ] + [
+        ("job", ref) for ref in carrier["job_refs"]
+    ] + [
+        ("run", ref) for ref in carrier["run_refs"]
+    ] + [
+        ("trial_plan", ref)
+        for ref in carrier["latest_transition"]["trial_plan_refs"]
+    ] + [
+        ("obligation", ref)
+        for ref in carrier["latest_transition"]["obligation_refs"]
+    ] + [
+        ("claim", ref)
+        for ref in carrier["latest_transition"]["claim_refs"]
+    ]
     return {
         "schema_version": 1,
         "language": "zh-Hans",
@@ -92,11 +103,14 @@ def _narrative(
             "section_id": "research-progress",
             "title": "研究进展",
             "body": body,
-            "links": [{
-                "link_id": "checkpoint-evidence",
-                "kind": "evidence",
-                "target_ref": target_ref,
-            }],
+            "links": [
+                {
+                    "link_id": f"checkpoint-{index}",
+                    "kind": kind,
+                    "target_ref": target_ref,
+                }
+                for index, (kind, target_ref) in enumerate(targets)
+            ],
         }],
     }
 
@@ -308,7 +322,10 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
                 "kind": "list",
                 "rows": [{
                     "text": "交易成本义务仍未清除。",
-                    "link_ids": ["cost-obligation"],
+                    "link_ids": [
+                        "cost-obligation", "checkpoint-job", "checkpoint-run",
+                        "checkpoint-plan", "checkpoint-claim",
+                    ],
                 }],
             }, {
                 "kind": "table",
@@ -322,6 +339,22 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
                 "link_id": "cost-obligation",
                 "kind": "obligation",
                 "target_ref": "obligation:cost-survival",
+            }, {
+                "link_id": "checkpoint-job",
+                "kind": "job",
+                "target_ref": "job:job-1",
+            }, {
+                "link_id": "checkpoint-run",
+                "kind": "run",
+                "target_ref": "run:run-1",
+            }, {
+                "link_id": "checkpoint-plan",
+                "kind": "trial_plan",
+                "target_ref": "trial-plan:sha256:" + "3" * 64,
+            }, {
+                "link_id": "checkpoint-claim",
+                "kind": "claim",
+                "target_ref": "claim:predictive-relation",
             }, {
                 "link_id": "checkpoint-evidence",
                 "kind": "evidence",
@@ -379,6 +412,28 @@ def test_structured_narrative_rejects_unbound_row_chip(tmp_path: Path) -> None:
     }
 
     with pytest.raises(ValueError, match="declared section link"):
+        publish_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=narrative,
+        )
+
+
+def test_checkpoint_publish_requires_each_research_object_chip(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    narrative = _narrative(carrier)
+    narrative["sections"][0]["links"] = [
+        link for link in narrative["sections"][0]["links"]
+        if link["target_ref"] != "job:job-1"
+    ]
+
+    with pytest.raises(ValueError, match="every checkpoint object"):
         publish_research_checkpoint(
             client_root=root,
             profile_id="maxa",
@@ -838,6 +893,7 @@ def test_checkpoint_publish_records_omitted_evidence_and_allows_no_trial_plan(
     carrier = _carrier()
     carrier["omitted_evidence_count"] = 7
     carrier["trial_plan_hash"] = ""
+    carrier["latest_transition"]["trial_plan_refs"] = []
 
     publish_research_checkpoint(
         client_root=root,

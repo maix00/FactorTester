@@ -429,6 +429,7 @@ def _canonical_narrative(
     allowed_refs = _carrier_reference_allowlist(carrier)
     result = []
     seen_ids = set()
+    declared_target_refs: set[str] = set()
     for item in sections:
         fields = set(item) if isinstance(item, dict) else set()
         if schema_version == 2:
@@ -463,6 +464,7 @@ def _canonical_narrative(
                 raise ValueError(
                     "narrative links must belong to the same checkpoint carrier"
                 )
+            declared_target_refs.add(link["target_ref"])
             projected_links.append(dict(link))
         section = {
             "section_id": section_id,
@@ -478,6 +480,12 @@ def _canonical_narrative(
         else:
             section["body"] = _zh_body(item["body"])
         result.append(section)
+    missing = _required_narrative_targets(carrier) - declared_target_refs
+    if missing:
+        missing_text = ", ".join(sorted(missing))
+        raise ValueError(
+            "narrative must link every checkpoint object: " + missing_text
+        )
     return {
         "schema_version": schema_version,
         "language": "zh-Hans",
@@ -611,6 +619,38 @@ def _carrier_reference_allowlist(carrier: dict[str, Any]) -> set[str]:
         f"claim:{item['claim_id']}" for item in transition["claim_changes"]
     )
     return values
+
+
+def _required_narrative_targets(carrier: dict[str, Any]) -> set[str]:
+    """Return checkpoint objects that must remain inspectable from prose.
+
+    Scope and graph identity are already rendered as report metadata.  The
+    research objects below are the claims, obligations, plans and executions
+    whose evidence must be reachable from the narrative itself.
+    """
+    transition = carrier["latest_transition"]
+    required = set(
+        carrier["evidence_refs"]
+        + carrier["job_refs"]
+        + carrier["run_refs"]
+        + transition["evidence_refs"]
+        + transition["trial_plan_refs"]
+        + transition["obligation_refs"]
+        + transition["claim_refs"]
+        + transition["job_refs"]
+        + transition["run_refs"]
+        + [item["claim_ref"] for item in carrier["claims"]]
+        + [item["obligation_ref"] for item in carrier["open_obligations"]]
+        + [
+            f"obligation:{item['obligation_id']}"
+            for item in transition["obligation_changes"]
+        ]
+        + [
+            f"claim:{item['claim_id']}"
+            for item in transition["claim_changes"]
+        ]
+    )
+    return required
 
 
 def _zh_text(value: Any, field: str, maximum: int = 512) -> str:
