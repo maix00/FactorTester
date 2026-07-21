@@ -39,6 +39,20 @@ def test_single_factor_account_chrome_is_only_hidden_when_embedded() -> None:
     assert 'id="user-badge"' not in embedded
     assert 'id="user-logout-btn"' not in embedded
     assert "单因子(家族)测试" in embedded
+    assert "single_factor_shell.js" in embedded
+
+
+def test_home_and_technical_docs_drop_standalone_account_chrome_when_embedded(
+) -> None:
+    for template in ("home.html", "docs.html"):
+        standalone = _render(template, embedded=False)
+        embedded = _render(template, embedded=True)
+
+        assert 'id="user-area"' in standalone
+        assert 'id="user-area"' not in embedded
+
+    assert 'id="shutdown-btn"' in _render("home.html", embedded=False)
+    assert 'id="shutdown-btn"' not in _render("home.html", embedded=True)
 
 
 def test_docs_keep_internal_breadcrumb_but_drop_home_link_when_embedded() -> None:
@@ -59,6 +73,15 @@ def test_docs_keep_internal_breadcrumb_but_drop_home_link_when_embedded() -> Non
 
 
 def test_standalone_only_links_on_special_pages_are_hidden_when_embedded() -> None:
-    for template in ("docs/user_manual_home.html", "local_data.html"):
+    for template in (
+        "admin_users.html",
+        "custom_factor_editor.html",
+        "docs/user_manual_home.html",
+        "factor_library_client.html",
+        "local_data.html",
+        "price_viewer.html",
+        "products.html",
+        "server_operations.html",
+    ):
         assert "返回首页" in _render(template, embedded=False)
         assert "返回首页" not in _render(template, embedded=True)

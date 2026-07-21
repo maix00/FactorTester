@@ -84,7 +84,6 @@
     </div>
     {% endif %}
 
-    {% if request.args.get('presentation') != 'embedded' %}
     <script>
         window._viewUuid = '';
         window._pageUuid = '';
@@ -92,6 +91,7 @@
     <script src="{{ url_for('static', filename='js/base.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/shared/collapsible_factor_list.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/single_factor_test/single_factor_shell.js') }}"></script>
+    {% if request.args.get('presentation') != 'embedded' %}
     <script>
         (async function() {
             try {

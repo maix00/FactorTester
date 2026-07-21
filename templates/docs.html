@@ -86,7 +86,9 @@
                     <h1>📖 技术文档</h1>
                     <p>量化因子工具箱 &mdash; 前后端架构、API 接口、因子库说明</p>
                 </div>
+                {% if request.args.get('presentation') != 'embedded' %}
                 <div class="user-area" id="user-area"></div>
+                {% endif %}
             </div>
         </div>
 
@@ -620,6 +622,7 @@ python start_server.py --port 54865</pre>
 
     function renderUserArea() {
         const area = document.getElementById('user-area');
+        if (!area) return;
         if (_currentUser) {
             area.innerHTML = '<span class="username-badge">' + _currentUser + '</span>'
                 + '<button onclick="doLogout()">退出登录</button>';

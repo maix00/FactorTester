@@ -56,12 +56,16 @@
     </style>
 </head>
 <body>
+    {% if request.args.get('presentation') != 'embedded' %}
     <button id="shutdown-btn" class="shutdown-btn-topright" onclick="shutdownServer()" style="display:none">关闭服务器</button>
+    {% endif %}
 
     <div class="home-wrapper">
         <div class="home-header">
             <h1>工具箱</h1>
+            {% if request.args.get('presentation') != 'embedded' %}
             <div class="user-area" id="user-area"></div>
+            {% endif %}
         </div>
         <!-- 模块网格由 /static/config/modules.json 动态渲染（跨客户端共享的唯一注册表） -->
         <div class="module-grid" id="module-grid"></div>
@@ -149,6 +153,7 @@
 
         function renderUserArea() {
             const area = document.getElementById('user-area');
+            if (!area) return;
             if (_currentUser) {
                 area.innerHTML = '<span class="username-badge">' + _currentUser + '</span>'
                     + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:#555;cursor:pointer;margin-left:4px;"><input type="checkbox" id="keep-login-cb" onchange="setKeepLogin(this.checked)" style="width:auto;margin:0;">保持登录</label>'
