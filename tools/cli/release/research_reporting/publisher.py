@@ -57,6 +57,9 @@ _NARRATIVE_SECTION_FIELDS_V2_WITH_BODY = {
     "section_id", "title", "body", "blocks", "links",
 }
 _NARRATIVE_LINK_FIELDS = {"link_id", "kind", "target_ref"}
+_NARRATIVE_LINK_FIELDS_WITH_LABEL = {
+    "link_id", "kind", "target_ref", "label",
+}
 _CHINESE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _LINK_KINDS = {
     "checkpoint", "trial_plan", "obligation", "claim", "evidence",
@@ -507,7 +510,10 @@ def _canonical_narrative(
         projected_links = []
         link_ids = set()
         for link in links:
-            if not isinstance(link, dict) or set(link) != _NARRATIVE_LINK_FIELDS:
+            if not isinstance(link, dict) or frozenset(link) not in {
+                frozenset(_NARRATIVE_LINK_FIELDS),
+                frozenset(_NARRATIVE_LINK_FIELDS_WITH_LABEL),
+            }:
                 raise ValueError("local narrative link fields are invalid")
             if link["kind"] not in _LINK_KINDS:
                 raise ValueError("local narrative link kind is invalid")
@@ -521,7 +527,12 @@ def _canonical_narrative(
                     "narrative links must belong to the same checkpoint carrier"
                 )
             declared_target_refs.add(link["target_ref"])
-            projected_links.append(dict(link))
+            projected = dict(link)
+            if "label" in projected:
+                projected["label"] = _zh_text(
+                    projected["label"], "narrative.link.label", maximum=160,
+                )
+            projected_links.append(projected)
         section = {
             "section_id": section_id,
             "title": _zh_text(item["title"], "narrative.section.title"),

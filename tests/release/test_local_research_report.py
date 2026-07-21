@@ -464,6 +464,7 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
                 "link_id": "cost-obligation",
                 "kind": "obligation",
                 "target_ref": "obligation:cost-survival",
+                "label": "交易成本后仍能存活吗？",
             }, {
                 "link_id": "checkpoint-job",
                 "kind": "job",
@@ -509,6 +510,7 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
     assert section["blocks"][0]["link_ids"] == ["checkpoint-plan"]
     assert section["blocks"][2]["rows"][0]["cells"][2] == "0.42"
     assert section["blocks"][2]["result_kind"] == "backtest"
+    assert section["links"][0]["label"] == "交易成本后仍能存活吗？"
     report = journal_path.with_name("REPORT.md").read_text(encoding="utf-8")
     assert "本阶段先说明研究判断，再列出支撑判断的结构化结果。" in report
     assert "- 交易成本义务仍未清除。" in report

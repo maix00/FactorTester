@@ -163,6 +163,7 @@ struct ResearchJournalLink: Decodable, Identifiable, Hashable {
     let linkID: String
     let kind: String
     let targetRef: String
+    let label: String?
 
     var id: String { linkID }
 
@@ -170,6 +171,128 @@ struct ResearchJournalLink: Decodable, Identifiable, Hashable {
         case linkID = "link_id"
         case kind
         case targetRef = "target_ref"
+        case label
+    }
+}
+
+struct ResearchObligationTableRow: Identifiable {
+    let obligationLink: ResearchJournalLink
+    let deltaLink: ResearchJournalLink?
+    let question: String
+    let materiality: String
+    let change: String
+    let currentStatus: String
+
+    var id: String { obligationLink.id }
+}
+
+enum ResearchJournalPresentation {
+    static func chipLabel(
+        _ link: ResearchJournalLink,
+        sectionTitle: String,
+        obligations: [ResearchObligationProjection]
+    ) -> String {
+        let summary = link.label.flatMap(nonEmpty)
+            ?? obligationSummary(for: link, in: obligations)
+            ?? contextualSummary(for: link.kind, sectionTitle: sectionTitle)
+        return "\(ResearchDisplayText.linkKind(link.kind)) · \(summary)"
+    }
+
+    static func obligationRows(
+        links: [ResearchJournalLink],
+        obligations: [ResearchObligationProjection],
+        changes: [ResearchStateChange]
+    ) -> [ResearchObligationTableRow] {
+        links.filter { $0.kind == "obligation" }.map { link in
+            let objectID = stableObjectID(link.targetRef)
+            let obligation = obligations.first {
+                $0.obligationRef == link.targetRef
+                    || stableObjectID($0.obligationRef) == objectID
+            }
+            let change = changes.first {
+                stableObjectID($0.objectID) == objectID
+            }
+            let delta = links.first {
+                $0.kind == "delta"
+                    && ($0.targetRef.hasSuffix(":" + link.targetRef)
+                        || $0.targetRef.hasSuffix(":" + objectID))
+            }
+            return ResearchObligationTableRow(
+                obligationLink: link,
+                deltaLink: delta,
+                question: link.label.flatMap(nonEmpty)
+                    ?? obligation.flatMap { nonEmpty($0.questionSummary) }
+                    ?? "本步骤需要回答的研究问题",
+                materiality: materialityLabel(obligation?.materiality),
+                change: change.map {
+                    "\(statusLabel($0.fromState)) → \(statusLabel($0.toState))"
+                } ?? "本步骤未变化",
+                currentStatus: statusLabel(
+                    obligation?.status ?? change?.toState ?? "unknown"
+                )
+            )
+        }
+    }
+
+    private static func obligationSummary(
+        for link: ResearchJournalLink,
+        in obligations: [ResearchObligationProjection]
+    ) -> String? {
+        guard link.kind == "obligation" else { return nil }
+        return obligations.first {
+            $0.obligationRef == link.targetRef
+        }.flatMap { nonEmpty($0.questionSummary) }
+    }
+
+    private static func contextualSummary(
+        for kind: String,
+        sectionTitle: String
+    ) -> String {
+        let section = nonEmpty(sectionTitle) ?? "本步骤"
+        switch kind {
+        case "checkpoint": return "\(section)检查点"
+        case "trial_plan": return "\(section)试验计划"
+        case "obligation": return "\(section)待回答问题"
+        case "claim": return "\(section)研究主张"
+        case "evidence": return "\(section)研究证据"
+        case "job": return "\(section)计算任务"
+        case "run": return "\(section)试验结果"
+        case "delta": return "\(section)状态变化"
+        case "profile_handoff": return "\(section)研究转接"
+        case "report_section": return "\(section)报告章节"
+        default: return "\(section)审计详情"
+        }
+    }
+
+    static func statusLabel(_ status: String) -> String {
+        switch status.lowercased() {
+        case "open": return "待验证"
+        case "bounded": return "已收敛"
+        case "discharged": return "已清除"
+        case "reopened": return "重新开启"
+        case "blocked": return "受阻"
+        case "unknown": return "未知"
+        default: return "待审查"
+        }
+    }
+
+    static func materialityLabel(_ materiality: String?) -> String {
+        switch materiality?.lowercased() {
+        case "critical": return "关键"
+        case "high": return "重要"
+        case "medium": return "中等"
+        case "low": return "一般"
+        default: return "待评估"
+        }
+    }
+
+    private static func stableObjectID(_ reference: String) -> String {
+        reference.split(separator: ":").last.map(String.init) ?? reference
+    }
+
+    private static func nonEmpty(_ value: String) -> String? {
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 }
 

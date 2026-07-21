@@ -301,18 +301,24 @@ def _research_artifact(value: Any) -> dict[str, Any]:
 
 def _deep_link(value: Any) -> dict[str, str]:
     fields = {"link_id", "kind", "target_ref", "section_ref"}
-    if not isinstance(value, dict) or set(value) != fields:
+    fields_with_label = fields | {"label"}
+    if not isinstance(value, dict) or frozenset(value) not in {
+        frozenset(fields), frozenset(fields_with_label),
+    }:
         raise ValueError("research deep link fields are invalid")
     kind = _text(value.get("kind"), "deep_link.kind")
     if kind not in {
         "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-        "job", "run", "delta", "report_section",
+        "job", "run", "delta", "profile_handoff", "report_section",
     }:
         raise ValueError("research deep link kind is unsupported")
-    return {
+    result = {
         key: _text(value.get(key), f"deep_link.{key}")
         for key in sorted(fields)
     }
+    if "label" in value:
+        result["label"] = _text(value["label"], "deep_link.label")
+    return result
 
 
 def _session_binding(value: Any) -> dict[str, str]:

@@ -49,6 +49,9 @@ _SECTION_FIELDS = {
     "section_ref", "title", "summary", "links", "created_at",
 }
 _LINK_FIELDS = {"link_id", "kind", "target_ref", "section_ref"}
+_LINK_FIELDS_WITH_LABEL = {
+    "link_id", "kind", "target_ref", "section_ref", "label",
+}
 _LINK_KINDS = {
     "checkpoint", "trial_plan", "obligation", "claim", "evidence",
     "job", "run", "delta", "profile_handoff", "report_section",
@@ -329,7 +332,10 @@ def _validate_section(value: Any, branch_ids: set[str]) -> None:
     links = _bounded_array(value["links"], MAX_INDEX_LINKS, "section links")
     link_ids = set()
     for link in links:
-        _exact_object(link, _LINK_FIELDS, "report index link")
+        if not isinstance(link, dict) or frozenset(link) not in {
+            frozenset(_LINK_FIELDS), frozenset(_LINK_FIELDS_WITH_LABEL),
+        }:
+            raise ValueError("report index link fields are invalid")
         link_id = _bounded_text(link["link_id"], "link_id")
         if link_id in link_ids:
             raise ValueError("report index link_id must be unique per section")
@@ -337,6 +343,8 @@ def _validate_section(value: Any, branch_ids: set[str]) -> None:
         if link["kind"] not in _LINK_KINDS:
             raise ValueError("report index link kind is invalid")
         _reference(link["target_ref"], "target_ref")
+        if "label" in link:
+            _bounded_text(link["label"], "link label", maximum=160)
         if link["section_ref"] != section_ref:
             raise ValueError("report index link section_ref is invalid")
 

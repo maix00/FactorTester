@@ -258,9 +258,11 @@ def _canonical_links(value: Any) -> list[dict[str, str]]:
     links = []
     seen_ids = set()
     for item in value:
-        if not isinstance(item, dict) or set(item) != {
-            "link_id", "kind", "target_ref",
-        }:
+        fields = set(item) if isinstance(item, dict) else set()
+        if fields not in (
+            {"link_id", "kind", "target_ref"},
+            {"link_id", "kind", "target_ref", "label"},
+        ):
             raise ValueError("section link fields are invalid")
         link_id = _bounded_text(item["link_id"], field="section.link_id")
         if link_id in seen_ids:
@@ -275,11 +277,16 @@ def _canonical_links(value: Any) -> list[dict[str, str]]:
             reject_local_paths=False,
         )
         _stable_reference(target_ref, field="section.target_ref")
-        links.append({
+        link = {
             "link_id": link_id,
             "kind": kind,
             "target_ref": target_ref,
-        })
+        }
+        if "label" in item:
+            link["label"] = _bounded_text(
+                item["label"], field="section.link.label", maximum=160,
+            )
+        links.append(link)
     return links
 
 

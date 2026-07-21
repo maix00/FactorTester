@@ -38,6 +38,70 @@ final class ResearchJournalTests: XCTestCase {
         )
     }
 
+    func testAuditChipUsesChineseLabelInsteadOfStableReference() throws {
+        let link = try JSONDecoder().decode(
+            ResearchJournalLink.self,
+            from: Data(
+                """
+                {"link_id":"cost","kind":"obligation","target_ref":"obligation:7ce46d1a-6bfd-43cc-a2ba-6b03e4617304","label":"交易成本后仍能存活吗？"}
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            ResearchJournalPresentation.chipLabel(
+                link,
+                sectionTitle: "交易执行审查",
+                obligations: []
+            ),
+            "研究义务 · 交易成本后仍能存活吗？"
+        )
+    }
+
+    func testObligationAndDeltaBecomeOneChineseTableRow() throws {
+        let links = try JSONDecoder().decode(
+            [ResearchJournalLink].self,
+            from: Data(
+                """
+                [
+                  {"link_id":"coverage","kind":"obligation","target_ref":"obligation:data-coverage"},
+                  {"link_id":"coverage-change","kind":"delta","target_ref":"delta:step-1:obligation:data-coverage"}
+                ]
+                """.utf8
+            )
+        )
+        let obligations = try JSONDecoder().decode(
+            [ResearchObligationProjection].self,
+            from: Data(
+                """
+                [{"obligation_ref":"obligation:data-coverage","status":"bounded","materiality":"critical","question_summary":"现有数据是否覆盖计划中的标的和时期？"}]
+                """.utf8
+            )
+        )
+        let changes = try JSONDecoder().decode(
+            [ResearchStateChange].self,
+            from: Data(
+                """
+                [{"obligation_id":"data-coverage","from_state":"open","to_state":"bounded"}]
+                """.utf8
+            )
+        )
+
+        let rows = ResearchJournalPresentation.obligationRows(
+            links: links,
+            obligations: obligations,
+            changes: changes
+        )
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].question, "现有数据是否覆盖计划中的标的和时期？")
+        XCTAssertEqual(rows[0].materiality, "关键")
+        XCTAssertEqual(rows[0].change, "待验证 → 已收敛")
+        XCTAssertEqual(rows[0].currentStatus, "已收敛")
+        XCTAssertEqual(rows[0].obligationLink.linkID, "coverage")
+        XCTAssertEqual(rows[0].deltaLink?.linkID, "coverage-change")
+    }
+
     func testUnknownInternalIdentifierIsNotExposedAsReportProse() {
         XCTAssertEqual(ResearchDisplayText.node("future_internal_node"), "研究进行中")
         XCTAssertEqual(ResearchDisplayText.linkKind("future_internal_link"), "审计对象")

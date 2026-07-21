@@ -147,11 +147,13 @@ struct ResearchNarrativeReportView: View {
                 }
             }
 
+            obligationTable(section)
+
             if !unboundLinks(in: section).isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 7) {
                         ForEach(unboundLinks(in: section)) { link in
-                            auditChip(link, checkpointRef: section.checkpointRef)
+                            auditChip(link, section: section)
                         }
                     }
                     .padding(.vertical, 2)
@@ -180,9 +182,11 @@ struct ResearchNarrativeReportView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             if !linkIDs.isEmpty {
                 HStack(spacing: 6) {
-                    ForEach(section.links.filter { linkIDs.contains($0.linkID) }) {
+                    ForEach(auditLinks(in: section).filter {
+                        linkIDs.contains($0.linkID)
+                    }) {
                         link in
-                        auditChip(link, checkpointRef: section.checkpointRef)
+                        auditChip(link, section: section)
                     }
                 }
             }
@@ -278,7 +282,7 @@ struct ResearchNarrativeReportView: View {
     ) -> some View {
         HStack(spacing: 6) {
             ForEach(links(for: row, in: section)) { link in
-                auditChip(link, checkpointRef: section.checkpointRef)
+                auditChip(link, section: section)
             }
         }
     }
@@ -288,7 +292,7 @@ struct ResearchNarrativeReportView: View {
         in section: ResearchJournalSection
     ) -> [ResearchJournalLink] {
         let ids = Set(row.linkIDs)
-        return section.links.filter { ids.contains($0.linkID) }
+        return auditLinks(in: section).filter { ids.contains($0.linkID) }
     }
 
     private func unboundLinks(
@@ -299,20 +303,33 @@ struct ResearchNarrativeReportView: View {
                 block.linkIDs + block.rows.flatMap(\.linkIDs)
             }
         )
-        return section.links.filter { !bound.contains($0.linkID) }
+        return auditLinks(in: section).filter { !bound.contains($0.linkID) }
+    }
+
+    private func auditLinks(
+        in section: ResearchJournalSection
+    ) -> [ResearchJournalLink] {
+        section.links.filter { !["obligation", "delta"].contains($0.kind) }
     }
 
     private func auditChip(
         _ link: ResearchJournalLink,
-        checkpointRef: String
+        section: ResearchJournalSection,
+        displayLabel: String? = nil
     ) -> some View {
-        Button {
+        let label = displayLabel ?? ResearchJournalPresentation.chipLabel(
+            link,
+            sectionTitle: section.title,
+            obligations: detail.researchCycle.obligations
+        )
+        return Button {
             selectedAudit = ResearchAuditSelection(
                 link: link,
-                checkpointRef: checkpointRef
+                checkpointRef: section.checkpointRef,
+                displayLabel: label
             )
         } label: {
-            Label(chipLabel(link), systemImage: chipIcon(link.kind))
+            Label(label, systemImage: chipIcon(link.kind))
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
         }
@@ -320,6 +337,98 @@ struct ResearchNarrativeReportView: View {
         .controlSize(.mini)
         .accessibilityIdentifier(
             "research.report.chip.\(link.kind).\(link.linkID)"
+        )
+    }
+
+    @ViewBuilder
+    private func obligationTable(
+        _ section: ResearchJournalSection
+    ) -> some View {
+        let rows = obligationRows(in: section)
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("研究义务与本步骤变化")
+                    .font(.headline)
+                    .padding(.bottom, 9)
+                obligationHeader
+                ForEach(Array(rows.enumerated()), id: \.element.id) {
+                    index, row in
+                    obligationRow(row, section: section)
+                        .background(
+                            index.isMultiple(of: 2)
+                                ? Color.clear
+                                : Color.secondary.opacity(0.035)
+                        )
+                }
+            }
+            .padding(.top, 6)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Color.secondary.opacity(0.18)).frame(height: 1)
+            }
+        }
+    }
+
+    private var obligationHeader: some View {
+        HStack(spacing: 10) {
+            Text("研究义务").frame(maxWidth: .infinity, alignment: .leading)
+            Text("重要性").frame(width: 54, alignment: .leading)
+            Text("本步骤变化").frame(width: 112, alignment: .leading)
+            Text("当前").frame(width: 64, alignment: .leading)
+            Text("审计").frame(width: 116, alignment: .leading)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.08))
+    }
+
+    private func obligationRow(
+        _ row: ResearchObligationTableRow,
+        section: ResearchJournalSection
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(row.question)
+                .font(.callout)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(row.materiality)
+                .frame(width: 54, alignment: .leading)
+            Text(row.change)
+                .frame(width: 112, alignment: .leading)
+            Text(row.currentStatus)
+                .frame(width: 64, alignment: .leading)
+            HStack(spacing: 5) {
+                auditChip(
+                    row.obligationLink,
+                    section: section,
+                    displayLabel: "问题详情"
+                )
+                if let delta = row.deltaLink {
+                    auditChip(
+                        delta,
+                        section: section,
+                        displayLabel: "变化依据"
+                    )
+                }
+            }
+            .frame(width: 116, alignment: .leading)
+        }
+        .font(.caption)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+    }
+
+    private func obligationRows(
+        in section: ResearchJournalSection
+    ) -> [ResearchObligationTableRow] {
+        let changes = steps.first {
+            $0.stepRef == section.checkpointRef
+        }?.obligationChanges ?? []
+        return ResearchJournalPresentation.obligationRows(
+            links: section.links,
+            obligations: detail.researchCycle.obligations,
+            changes: changes
         )
     }
 
@@ -380,6 +489,7 @@ struct ResearchNarrativeReportView: View {
 private struct ResearchAuditSelection: Identifiable {
     let link: ResearchJournalLink
     let checkpointRef: String
+    let displayLabel: String
     var id: String { "\(checkpointRef)|\(link.id)" }
 }
 
@@ -408,25 +518,23 @@ private struct ResearchAuditPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label(
-                ResearchDisplayText.linkKind(selection.link.kind),
+                selection.displayLabel,
                 systemImage: chipIcon(selection.link.kind)
             )
             .font(.headline)
-            LabeledContent("稳定引用") {
-                Text(selection.link.targetRef)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-            }
-            LabeledContent("对应检查点") {
-                Text(selection.checkpointRef)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-            }
+            Text(ResearchDisplayText.auditPurpose(selection.link.kind))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if let step {
                 Divider()
-                LabeledContent("状态转移", value: "\(step.fromNode) → \(step.toNode)")
-                LabeledContent("图边", value: step.edgeRef)
+                LabeledContent(
+                    "研究阶段",
+                    value: "\(ResearchDisplayText.node(step.fromNode)) → "
+                        + ResearchDisplayText.node(step.toNode)
+                )
                 objectDetail
+                auditIdentifiers(step)
             } else {
                 Text("该报告段落没有可验证的检查点，无法读取历史审计对象。")
                     .font(.caption)
@@ -542,9 +650,39 @@ private struct ResearchAuditPopover: View {
             ProgressView("正在读取该检查点的审计对象…")
                 .controlSize(.small)
         } else {
-            Text("该类对象暂未提供检查点级详情；正文不会预载完整对象或审计历史。")
+            Text(
+                "此记录的中文摘要已显示在上方；当前检查点未提供更细的对象投影。"
+                    + "技术引用仍保留在下方，供审计和重放使用。"
+            )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func auditIdentifiers(
+        _ step: ResearchTransitionStep
+    ) -> some View {
+        DisclosureGroup("审计标识（高级）") {
+            VStack(alignment: .leading, spacing: 8) {
+                auditReference("稳定引用", selection.link.targetRef)
+                auditReference("对应检查点", selection.checkpointRef)
+                auditReference("图边", step.edgeRef)
+            }
+            .padding(.top, 8)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private func auditReference(
+        _ title: String,
+        _ value: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption.weight(.semibold))
+            Text(value)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
         }
     }
 
@@ -585,10 +723,6 @@ private struct ResearchAuditPopover: View {
     }
 }
 
-private func chipLabel(_ link: ResearchJournalLink) -> String {
-    "\(ResearchDisplayText.linkKind(link.kind)) · \(shortReference(link.targetRef))"
-}
-
 enum ResearchDisplayText {
     static func reportTitle(_ title: String) -> String {
         guard title.range(
@@ -612,6 +746,21 @@ enum ResearchDisplayText {
         case "delta": return "状态变化"
         case "profile_handoff": return "研究转接"
         default: return "审计对象"
+        }
+    }
+
+    static func auditPurpose(_ kind: String) -> String {
+        switch kind {
+        case "checkpoint": return "说明这段研究叙事对应哪一次可信检查点。"
+        case "trial_plan": return "说明本步骤准备回答什么问题，以及样本、范围和停止条件。"
+        case "obligation": return "说明研究仍需回答的问题、重要性和当前收敛程度。"
+        case "claim": return "说明当前研究主张获得了什么程度的证据支持。"
+        case "evidence": return "说明本步骤取得的结果、指标、产物、限制和冲突。"
+        case "job": return "说明后端计算任务的状态、输入规范和可追溯结果。"
+        case "run": return "说明一次试验运行的范围、状态和结果产物。"
+        case "delta": return "说明证据为何使研究义务或主张发生状态变化。"
+        case "profile_handoff": return "说明研究由谁转接、转接了哪些范围与检查点。"
+        default: return "说明本步骤正文所引用的可审计研究对象。"
         }
     }
 
