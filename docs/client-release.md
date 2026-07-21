@@ -23,6 +23,14 @@ The updater supports stable and beta channels. Its launch check is optional,
 throttled to one request per six hours, and runs separately from runtime
 activation so research can start immediately.
 
+Every distributed build must use the same persistent code-signing identity for
+its channel. An ad-hoc signature is intentionally rejected by the release
+builder because its designated requirement is tied to a changing binary hash;
+macOS would otherwise ask for Documents access again after each update. Beta
+may use a persistent trusted development identity. Main uses a Developer ID
+Application identity and notarization. The signing identity is passed explicitly
+with `--signing-identity` and no private key is stored in the repository.
+
 Before mounting a downloaded image, FTClient verifies its signed SHA-256. It
 then mounts the verified image read-only and checks the embedded app's bundle
 ID, version, build, code signature and notarization status. Current development releases without Developer ID and notarization may

@@ -24,6 +24,7 @@ def build_release(
     version: str,
     source_revision: str,
     output: Path,
+    signing_identity: str | None = None,
 ) -> Path:
     if not _REVISION.fullmatch(source_revision):
         raise ValueError("source revision must be a full lowercase Git SHA")
@@ -52,18 +53,28 @@ def build_release(
         version=f"bundle-b{build}-r{source_revision}",
         source_revision=source_revision,
     )
-    _sign_embedded_app(app)
+    _sign_embedded_app(app, signing_identity)
     dmg = build_installer_dmg(app, output / "FactorTester-Client.dmg")
     shutil.rmtree(output / ".staging")
     return dmg
 
 
-def _sign_embedded_app(app: Path) -> None:
-    """Restore the development signature invalidated by runtime embedding."""
+def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
+    """Sign a release with an identity stable across application updates."""
+    if not signing_identity or signing_identity.strip() == "-":
+        raise ValueError(
+            "a stable signing identity is required; ad-hoc signatures "
+            "invalidate persisted macOS privacy grants after updates"
+        )
+    timestamp = (
+        "--timestamp"
+        if signing_identity.startswith("Developer ID Application")
+        else "--timestamp=none"
+    )
     subprocess.run(
         [
-            "codesign", "--force", "--deep", "--sign", "-",
-            "--options", "runtime", str(app),
+            "codesign", "--force", "--deep", "--sign", signing_identity,
+            "--options", "runtime", timestamp, str(app),
         ],
         check=True,
         capture_output=True,
@@ -73,6 +84,17 @@ def _sign_embedded_app(app: Path) -> None:
         check=True,
         capture_output=True,
     )
+    requirement = subprocess.run(
+        ["codesign", "-d", "-r-", str(app)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    requirement_text = (requirement.stdout or "") + (requirement.stderr or "")
+    if "designated => cdhash" in requirement_text:
+        raise ValueError(
+            "release signature does not have a stable designated requirement"
+        )
 
 
 def _validate_source_checkout(repo: Path, source_revision: str) -> None:
@@ -98,6 +120,11 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--source-revision", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--signing-identity",
+        required=True,
+        help="persistent Keychain identity or Developer ID Application identity",
+    )
     args = parser.parse_args()
     try:
         print(build_release(**vars(args)))

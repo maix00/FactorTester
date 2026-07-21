@@ -108,8 +108,9 @@ def test_release_builder_exposes_only_one_dmg(
 
     signed = False
 
-    def fake_sign(app):
+    def fake_sign(app, signing_identity):
         nonlocal signed
+        assert signing_identity == "FTClient Beta Release"
         signed = True
 
     def fake_dmg(app, output):
@@ -130,6 +131,7 @@ def test_release_builder_exposes_only_one_dmg(
         version="0.2.0",
         source_revision="a" * 40,
         output=output,
+        signing_identity="FTClient Beta Release",
     )
 
     assert result == output / "FactorTester-Client.dmg"
@@ -147,19 +149,50 @@ def test_embedded_app_is_resigned_and_verified_before_packaging(
 
     def record(command, **kwargs):
         commands.append(command)
-        return subprocess.CompletedProcess(command, 0)
+        detail = (
+            'designated => identifier "com.gtht.client" and anchor trusted\n'
+            if command[1:3] == ["-d", "-r-"] else ""
+        )
+        return subprocess.CompletedProcess(command, 0, "", detail)
 
     monkeypatch.setattr(release_build.subprocess, "run", record)
 
-    release_build._sign_embedded_app(app)
+    release_build._sign_embedded_app(app, "FTClient Beta Release")
 
     assert commands == [
         [
-            "codesign", "--force", "--deep", "--sign", "-",
-            "--options", "runtime", str(app),
+            "codesign", "--force", "--deep", "--sign",
+            "FTClient Beta Release", "--options", "runtime",
+            "--timestamp=none", str(app),
         ],
         ["codesign", "--verify", "--deep", "--strict", str(app)],
+        ["codesign", "-d", "-r-", str(app)],
     ]
+
+
+def test_release_builder_rejects_ephemeral_adhoc_signature(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="stable signing identity"):
+        release_build._sign_embedded_app(tmp_path / "FTClient.app", "-")
+
+
+def test_release_builder_rejects_cdhash_designated_requirement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def record(command, **kwargs):
+        detail = (
+            'designated => cdhash H"0123456789abcdef"\n'
+            if command[1:3] == ["-d", "-r-"] else ""
+        )
+        return subprocess.CompletedProcess(command, 0, "", detail)
+
+    monkeypatch.setattr(release_build.subprocess, "run", record)
+    with pytest.raises(ValueError, match="stable designated requirement"):
+        release_build._sign_embedded_app(
+            tmp_path / "FTClient.app", "FTClient Beta Release"
+        )
 
 
 def test_release_builder_rejects_app_version_or_revision_reuse_inputs(
