@@ -23,6 +23,11 @@ struct ResearchVersionTreePane: View {
                 HStack(spacing: 10) {
                     treeLegend(filled: true, label: "报告")
                     treeLegend(filled: false, label: "分叉/接续")
+                    if hiddenBranchCount > 0 {
+                        Text("另有 \(hiddenBranchCount) 条分支")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -169,7 +174,7 @@ struct ResearchVersionTreePane: View {
                 sourceLane: nil
             )
         }
-        for branch in workPackage.branches {
+        for branch in visibleBranches {
             let branchLane = lane(for: branch.branchRef)
             if branch.branchRef != detail.branchRef {
                 result.append(ResearchTreeNode(
@@ -189,11 +194,11 @@ struct ResearchVersionTreePane: View {
             if let lineage = branch.lineage,
                ["fork", "continuation"].contains(lineage.relation),
                let sourceBranchRef = lineage.sourceBranchRef {
-                let sourceIndex = workPackage.branches.firstIndex {
+                let sourceIndex = visibleBranches.firstIndex {
                     $0.branchRef == sourceBranchRef
                 }
                 let sourceLabel = sourceIndex.map {
-                    workPackage.branches[$0].label
+                    visibleBranches[$0].label
                 } ?? "上一研究版本"
                 result.append(ResearchTreeNode(
                     id: "lineage|\(branch.branchRef)",
@@ -206,7 +211,7 @@ struct ResearchVersionTreePane: View {
                     isHead: false,
                     isCurrentHead: false,
                     isLineage: true,
-                    sourceLane: sourceIndex.map { min($0, laneCount - 1) }
+                    sourceLane: sourceIndex
                 ))
             }
         }
@@ -217,16 +222,41 @@ struct ResearchVersionTreePane: View {
     }
 
     private var laneCount: Int {
-        max(min(workPackage.branches.count, 7), 1)
+        max(visibleBranches.count, 1)
+    }
+
+    /// Keep the narrow navigator readable without collapsing unrelated
+    /// branches onto the same visual lane. The selected branch is always
+    /// present; additional branches remain available through the branch
+    /// selector above the report.
+    private var visibleBranches: [ProfileResearchBranchSummary] {
+        guard workPackage.branches.count > 7 else {
+            return workPackage.branches
+        }
+        let selected = workPackage.branches.first {
+            $0.branchRef == detail.branchRef
+        }
+        let others = workPackage.branches.filter {
+            $0.branchRef != detail.branchRef
+        }.prefix(6)
+        if let selected {
+            return [selected] + Array(others)
+        }
+        return Array(workPackage.branches.prefix(7))
+    }
+
+    private var hiddenBranchCount: Int {
+        workPackage.omittedBranchCount
+            + max(workPackage.branches.count - visibleBranches.count, 0)
     }
 
     private var selectedLane: Int { lane(for: detail.branchRef) }
 
     private func lane(for branchRef: String) -> Int {
-        let index = workPackage.branches.firstIndex {
+        let index = visibleBranches.firstIndex {
             $0.branchRef == branchRef
         } ?? 0
-        return min(index, laneCount - 1)
+        return index
     }
 
     private func laneX(_ lane: Int) -> CGFloat {

@@ -35,3 +35,12 @@ def test_legacy_fallback_does_not_present_index_summary_as_complete_report() -> 
 
     assert "没有经过校验的中文 journal" in view
     assert "不会用摘要卡片冒充完整报告" in view
+
+
+def test_research_tree_never_collapses_unrelated_branches_onto_one_lane() -> None:
+    tree = (PROFILE_UI / "ResearchVersionTreePane.swift").read_text()
+
+    assert "private var visibleBranches" in tree
+    assert "workPackage.omittedBranchCount" in tree
+    assert 'Text("另有 \\(hiddenBranchCount) 条分支")' in tree
+    assert "return min(index, laneCount - 1)" not in tree
