@@ -30,6 +30,7 @@ _LINK_KINDS = {
     "checkpoint", "trial_plan", "obligation", "claim", "evidence",
     "job", "run", "delta", "report_section",
 }
+_RESULT_KINDS = {"ic", "factor_evaluation", "backtest", "robustness"}
 _PROHIBITED_KEYS = {
     "credentials",
     "expression_tree",
@@ -177,12 +178,23 @@ def _canonical_blocks(
                 used_link_ids.update(refs)
             blocks.append(projected)
             continue
-        expected = (
-            {"kind", "rows"}
-            if kind == "list"
-            else {"kind", "columns", "rows"}
-        )
-        if kind not in {"list", "table"} or set(block) != expected:
+        if kind == "list":
+            expected = {"kind", "rows"}
+        elif kind == "table":
+            expected = {"kind", "columns", "rows"}
+            if set(block) == expected | {"result_kind"}:
+                result_kind = block["result_kind"]
+                if result_kind not in _RESULT_KINDS:
+                    raise ValueError("section table result_kind is invalid")
+            elif set(block) == expected:
+                result_kind = None
+            else:
+                raise ValueError("section block fields are invalid")
+        else:
+            expected = set()
+        if kind not in {"list", "table"} or set(block) != expected and not (
+            kind == "table" and set(block) == expected | {"result_kind"}
+        ):
             raise ValueError("section block fields are invalid")
         columns = None
         if kind == "table":
@@ -232,6 +244,8 @@ def _canonical_blocks(
         projected_block = {"kind": kind, "rows": projected_rows}
         if columns is not None:
             projected_block["columns"] = columns
+        if kind == "table" and result_kind is not None:
+            projected_block["result_kind"] = result_kind
         blocks.append(projected_block)
     return blocks
 

@@ -62,6 +62,11 @@ _LINK_KINDS = {
     "checkpoint", "trial_plan", "obligation", "claim", "evidence",
     "job", "run", "delta", "report_section",
 }
+_RESULT_NODES = {
+    "job_evidence_ready", "statistical_robustness", "result_audit",
+    "ic", "factor_evaluation", "backtest", "robustness",
+}
+_RESULT_KINDS = {"ic", "factor_evaluation", "backtest", "robustness"}
 _PROHIBITED_KEYS = {
     "api_key", "credential", "credentials", "expression_tree",
     "factor_source", "formula", "password", "raw_stderr", "raw_stdout",
@@ -535,12 +540,76 @@ def _canonical_narrative(
         raise ValueError(
             "narrative must link every checkpoint object: " + missing_text
         )
+    if schema_version == 2:
+        _validate_result_table_bindings(carrier, result)
     return {
         "schema_version": schema_version,
         "language": "zh-Hans",
         "title": title,
         "sections": result,
     }
+
+
+def _validate_result_table_bindings(
+    carrier: dict[str, Any], sections: list[dict[str, Any]]
+) -> None:
+    """Require result refs to be reachable from a structured result table.
+
+    The local publisher deliberately does not fetch Job artifacts.  At result
+    nodes, the Agent therefore has to place the already-verified values into a
+    v2 table block and bind each row to the corresponding stable chip ref.
+    Ordinary prose checkpoints and legacy v1 narratives remain unchanged.
+    """
+    transition = carrier["latest_transition"]
+    if not _is_result_checkpoint(carrier, transition):
+        return
+    result_targets = set(carrier["job_refs"] + carrier["run_refs"])
+    result_targets.update(
+        ref for ref in (
+            carrier["evidence_refs"] + transition["evidence_refs"]
+        ) if ref.startswith("evidence:")
+    )
+    if not result_targets:
+        return
+
+    links_by_id = {
+        link["link_id"]: link
+        for section in sections
+        for link in section["links"]
+    }
+    table_link_ids = {
+        link_id
+        for section in sections
+        for block in section.get("blocks", [])
+        if block["kind"] == "table"
+        for row in block["rows"]
+        for link_id in row["link_ids"]
+    }
+    missing = sorted(
+        target for target in result_targets
+        if not any(
+            link_id in table_link_ids
+            and links_by_id.get(link_id, {}).get("target_ref") == target
+            for link_id in links_by_id
+        )
+    )
+    if missing:
+        raise ValueError(
+            "result table must bind every Job/run/result evidence ref: "
+            + ", ".join(missing)
+        )
+
+
+def _is_result_checkpoint(
+    carrier: dict[str, Any], transition: dict[str, Any]
+) -> bool:
+    nodes = {carrier["current_node"], transition["to_node"]}
+    if nodes & _RESULT_NODES:
+        return True
+    edge_ref = transition["edge_ref"]
+    return any(
+        edge_ref.endswith(f"__{node}") for node in _RESULT_NODES
+    )
 
 
 def _canonical_narrative_blocks(
@@ -586,7 +655,10 @@ def _canonical_narrative_blocks(
             )
             blocks.append({"kind": kind, "rows": rows})
             continue
-        if kind == "table" and set(block) == {"kind", "columns", "rows"}:
+        if kind == "table" and set(block) in (
+            {"kind", "columns", "rows"},
+            {"kind", "columns", "rows", "result_kind"},
+        ):
             columns = block["columns"]
             if (
                 not isinstance(columns, list)
@@ -603,11 +675,17 @@ def _canonical_narrative_blocks(
                 used_link_ids=used_link_ids,
                 table_columns=len(canonical_columns),
             )
-            blocks.append({
+            projected = {
                 "kind": kind,
                 "columns": canonical_columns,
                 "rows": rows,
-            })
+            }
+            if "result_kind" in block:
+                result_kind = block["result_kind"]
+                if result_kind not in _RESULT_KINDS:
+                    raise ValueError("narrative table result_kind is invalid")
+                projected["result_kind"] = result_kind
+            blocks.append(projected)
             continue
         raise ValueError("narrative block fields are invalid")
     if used_link_ids != declared_link_ids:

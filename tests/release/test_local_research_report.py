@@ -437,10 +437,14 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
                 }],
             }, {
                 "kind": "table",
+                "result_kind": "backtest",
                 "columns": ["检验", "指标", "结果"],
                 "rows": [{
                     "cells": ["成本后回测", "夏普比率", "0.42"],
-                    "link_ids": ["checkpoint-evidence"],
+                    "link_ids": [
+                        "checkpoint-evidence", "checkpoint-job",
+                        "checkpoint-run",
+                    ],
                 }],
             }],
             "links": [{
@@ -491,6 +495,7 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
     ]
     assert section["blocks"][0]["link_ids"] == ["checkpoint-plan"]
     assert section["blocks"][2]["rows"][0]["cells"][2] == "0.42"
+    assert section["blocks"][2]["result_kind"] == "backtest"
     report = journal_path.with_name("REPORT.md").read_text(encoding="utf-8")
     assert "本阶段先说明研究判断，再列出支撑判断的结构化结果。" in report
     assert "- 交易成本义务仍未清除。" in report
@@ -521,6 +526,47 @@ def test_structured_narrative_rejects_unbound_row_chip(tmp_path: Path) -> None:
     }
 
     with pytest.raises(ValueError, match="declared section link"):
+        publish_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=narrative,
+        )
+
+
+def test_result_checkpoint_requires_job_and_run_in_result_table(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    narrative = _narrative(carrier)
+    section = narrative["sections"][0]
+    links = section["links"]
+    evidence_link = next(
+        link["link_id"]
+        for link in links
+        if link["target_ref"] == "evidence:job-attempt-1"
+    )
+    section["blocks"] = [{
+        "kind": "list",
+        "rows": [{
+            "text": "已记录本次检验对象。",
+            "link_ids": [link["link_id"] for link in links],
+        }],
+    }, {
+        "kind": "table",
+        "result_kind": "backtest",
+        "columns": ["检验", "结果"],
+        "rows": [{
+            "cells": ["成本后回测", "见证据引用"],
+            "link_ids": [evidence_link],
+        }],
+    }]
+    narrative["schema_version"] = 2
+
+    with pytest.raises(ValueError, match="result table must bind"):
         publish_research_checkpoint(
             client_root=root,
             profile_id="maxa",
