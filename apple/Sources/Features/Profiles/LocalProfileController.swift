@@ -140,6 +140,13 @@ final class LocalProfileController: ObservableObject {
     }
 
     private func loadProfileValues() async throws -> [[String: Any]] {
+        #if os(macOS)
+        // The app activates the bundled one-file CLI from the root scene at
+        // the same time that HomeView starts its Profile refresh.  Waiting on
+        // the shared coordinator prevents two cold starts from racing over
+        // the extracted runtime and makes the first refresh deterministic.
+        try await BundledRuntimeActivator.waitUntilReady()
+        #endif
         if let task = Self.sharedProfileListTask {
             return try await task.value
         }

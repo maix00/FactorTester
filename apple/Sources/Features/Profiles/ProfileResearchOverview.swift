@@ -13,6 +13,43 @@ struct ResearchDirectoryItem: Identifiable {
     }
 }
 
+/// Empty states are deliberately separate from a confirmed empty server
+/// result.  In particular, an empty local snapshot while the bundled CLI is
+/// still starting must never be rendered as "no Profile".
+enum ProfileResearchEmptyState: Equatable {
+    case loadingResearch
+    case loadingProfiles
+    case profileLoadFailed
+    case noProfiles
+    case noWorkPackages
+
+    var message: String {
+        switch self {
+        case .loadingResearch:
+            return "正在读取研究目录…"
+        case .loadingProfiles:
+            return "正在读取本地 Profile；暂不判断为空。"
+        case .profileLoadFailed:
+            return "本地 Profile 读取失败；暂不判断为空。"
+        case .noProfiles:
+            return "尚未注册 Profile，因此没有可展示的研究。"
+        case .noWorkPackages:
+            return "已读取本地 Profile，但其绑定的工作区尚无 Work Package。"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .profileLoadFailed:
+            return "exclamationmark.triangle"
+        case .loadingProfiles, .noProfiles:
+            return "person.crop.circle"
+        case .loadingResearch, .noWorkPackages:
+            return "chart.xyaxis.line"
+        }
+    }
+}
+
 @MainActor
 final class ResearchDirectoryController: ObservableObject {
     typealias Loader = @MainActor (
@@ -200,35 +237,20 @@ struct ProfileResearchOverview: View {
                 ForEach(controller.items) { item in
                     workPackageCard(item)
                 }
-                if controller.isLoading && controller.items.isEmpty {
-                    ProgressView("正在读取研究目录…")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 48)
-                } else if controller.items.isEmpty,
-                          profileLoadState == .loading {
-                    Label(
-                        "正在读取本地 Profile；暂不判断为空。",
-                        systemImage: "person.crop.circle"
-                    )
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 40)
-                } else if controller.items.isEmpty,
-                          profileLoadState == .failed {
-                    Label(
-                        "本地 Profile 读取失败；暂不判断为空。",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .foregroundStyle(.orange)
-                    .padding(.vertical, 40)
-                } else if controller.items.isEmpty {
-                    Label(
-                        profiles.isEmpty
-                            ? "尚未注册 Profile，因此没有可展示的研究。"
-                            : "绑定的工作区尚无 Work Package。",
-                        systemImage: "chart.xyaxis.line"
-                    )
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 40)
+                if let emptyState {
+                    if emptyState == .loadingResearch {
+                        ProgressView(emptyState.message)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 48)
+                    } else {
+                        Label(emptyState.message, systemImage: emptyState.systemImage)
+                            .foregroundStyle(
+                                emptyState == .profileLoadFailed
+                                    ? .orange : .secondary
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                    }
                 }
                 if !controller.items.isEmpty {
                     Button("刷新") { Task { await controller.refresh() } }
@@ -320,5 +342,18 @@ struct ProfileResearchOverview: View {
             let refs = profile.workspaces.map(\.serverWorkspaceRef).joined(separator: ",")
             return "\(profile.id)|\(profile.serverURL)|\(refs)"
         }.sorted().joined(separator: ";")
+    }
+
+    private var emptyState: ProfileResearchEmptyState? {
+        guard controller.items.isEmpty else { return nil }
+        if controller.isLoading { return .loadingResearch }
+        switch profileLoadState {
+        case .loading, .idle:
+            return .loadingProfiles
+        case .failed:
+            return .profileLoadFailed
+        case .loaded:
+            return profiles.isEmpty ? .noProfiles : .noWorkPackages
+        }
     }
 }

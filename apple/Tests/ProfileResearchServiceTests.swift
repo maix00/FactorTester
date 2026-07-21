@@ -24,6 +24,21 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class ProfileResearchServiceTests: XCTestCase {
+    func testResearchDirectoryEmptyStatesDoNotConfuseLoadingWithNoProfile() {
+        XCTAssertEqual(
+            ProfileResearchEmptyState.loadingProfiles.message,
+            "正在读取本地 Profile；暂不判断为空。"
+        )
+        XCTAssertEqual(
+            ProfileResearchEmptyState.noWorkPackages.message,
+            "已读取本地 Profile，但其绑定的工作区尚无 Work Package。"
+        )
+        XCTAssertNotEqual(
+            ProfileResearchEmptyState.loadingProfiles,
+            .noProfiles
+        )
+    }
+
     func testResearchTreeLanesStayInsideFixedNavigatorWidth() {
         XCTAssertLessThanOrEqual(
             ResearchTreeLayout.maximumLaneFootprint,
