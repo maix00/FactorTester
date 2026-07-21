@@ -48,6 +48,14 @@ final class ProfileResearchServiceTests: XCTestCase {
             "/api/research-graph-instances/i/branches/b/"
                 + "cycle-objects/obligation/o?trace_id=s"
         )
+        XCTAssertEqual(
+            step.objectHref(
+                kind: "trial_plan",
+                targetRef: "trial-plan:t"
+            ),
+            "/api/research-graph-instances/i/branches/b/"
+                + "cycle-objects/trial_plan/t?trace_id=s"
+        )
     }
 
     func testAuditObjectLoadsOnlyWhenExplicitHrefIsRequested() async throws {
@@ -83,6 +91,69 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
         XCTAssertEqual(transport.requests.count, 1)
         XCTAssertEqual(transport.requests[0].url?.query, "trace_id=s")
+    }
+
+    func testAuditObjectDecodesTrialPlanAndEvidenceDetails() throws {
+        let plan = try JSONDecoder().decode(
+            ResearchAuditObjectEnvelope.self,
+            from: Data(
+                """
+                {"object":{"schema_version":1,"trial_plan_id":"plan-1","version":4,"hypothesis_ref":"hypothesis-1","trial_family":"family-1","protocol_ref":"cross-sectional-ic@1","outcomes":{"primary":["rank-ic"],"secondary":["coverage"]},"sample_roles":[{"sample_ref":"selection-2020-2023","role":"selection"}]}}
+                """.utf8
+            )
+        ).object
+        let evidence = try JSONDecoder().decode(
+            ResearchAuditObjectEnvelope.self,
+            from: Data(
+                """
+                {"object":{"schema_version":2,"envelope_id":"job-attempt:j","evidence_kind":"job_attempt","envelope_hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","source_refs":["research-job:j"],"metric_refs":["result-summary:r"],"artifact_refs":["artifact:a"],"hypotheses_tested":1,"stop_condition":null,"limitations":["Limited window."],"conflicts":[]}}
+                """.utf8
+            )
+        ).object
+
+        XCTAssertEqual(plan.trialPlanID, "plan-1")
+        XCTAssertEqual(plan.outcomes?.primary, ["rank-ic"])
+        XCTAssertEqual(plan.sampleRoles?.first?.role, "selection")
+        XCTAssertEqual(evidence.evidenceKind, "job_attempt")
+        XCTAssertEqual(evidence.metricRefs, ["result-summary:r"])
+        XCTAssertEqual(evidence.limitations, ["Limited window."])
+    }
+
+    @MainActor
+    func testAuditObjectCacheReusesAnExplicitRead() async throws {
+        let cache = ResearchAuditObjectCache()
+        let payload = try JSONDecoder().decode(
+            ResearchAuditObjectEnvelope.self,
+            from: Data(
+                """
+                {"object":{"schema_version":2,"envelope_id":"e","evidence_kind":"factor_semantics","envelope_hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}
+                """.utf8
+            )
+        ).object
+        var reads = 0
+        let loader: (String) async throws -> ResearchAuditObjectPayload = { _ in
+            reads += 1
+            return payload
+        }
+
+        _ = try await cache.load(
+            namespace: "maxa|server-a",
+            href: "/object/e",
+            using: loader
+        )
+        _ = try await cache.load(
+            namespace: "maxa|server-a",
+            href: "/object/e",
+            using: loader
+        )
+        _ = try await cache.load(
+            namespace: "maxa|server-b",
+            href: "/object/e",
+            using: loader
+        )
+
+        XCTAssertEqual(reads, 2)
+        XCTAssertEqual(cache.cachedObjectCount, 2)
     }
 
     func testWorkPackageDecodesAuthoritativeBranchLineage() throws {
@@ -705,7 +776,7 @@ private func timelineJSON() -> String {
       "evidence_refs":["artifact:e"],"trial_plan_refs":["trial-plan:t"],
       "obligation_refs":["obligation:o"],"claim_refs":[],
       "job_refs":["job:j"],"run_refs":["run:r"],
-      "object_hrefs":["/api/research-graph-instances/i/branches/b/cycle-objects/obligation/o?trace_id=s"],
+      "object_hrefs":["/api/research-graph-instances/i/branches/b/cycle-objects/obligation/o?trace_id=s","/api/research-graph-instances/i/branches/b/cycle-objects/trial_plan/t?trace_id=s"],
       "obligation_changes":[{"obligation_id":"o","from_state":"open",
       "to_state":"serviced"}],"claim_changes":[]}],
      "next_cursor":"older","etag":"sha256:timeline"}

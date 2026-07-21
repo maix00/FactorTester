@@ -290,6 +290,23 @@ struct ResearchAuditObjectPayload: Decodable {
     let evidenceState: String?
     let claimType: String?
     let createdEventRef: String?
+    let trialPlanID: String?
+    let trialPlanVersion: Int?
+    let hypothesisRef: String?
+    let trialFamily: String?
+    let protocolRef: String?
+    let outcomes: ResearchAuditTrialOutcomes?
+    let sampleRoles: [ResearchAuditSampleRole]?
+    let evidenceKind: String?
+    let envelopeID: String?
+    let envelopeHash: String?
+    let sourceRefs: [String]?
+    let metricRefs: [String]?
+    let artifactRefs: [String]?
+    let hypothesesTested: Int?
+    let stopCondition: String?
+    let limitations: [String]?
+    let conflicts: [String]?
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -303,6 +320,38 @@ struct ResearchAuditObjectPayload: Decodable {
         case evidenceState = "evidence_state"
         case claimType = "claim_type"
         case createdEventRef = "created_event_ref"
+        case trialPlanID = "trial_plan_id"
+        case trialPlanVersion = "version"
+        case hypothesisRef = "hypothesis_ref"
+        case trialFamily = "trial_family"
+        case protocolRef = "protocol_ref"
+        case outcomes
+        case sampleRoles = "sample_roles"
+        case evidenceKind = "evidence_kind"
+        case envelopeID = "envelope_id"
+        case envelopeHash = "envelope_hash"
+        case sourceRefs = "source_refs"
+        case metricRefs = "metric_refs"
+        case artifactRefs = "artifact_refs"
+        case hypothesesTested = "hypotheses_tested"
+        case stopCondition = "stop_condition"
+        case limitations, conflicts
+    }
+}
+
+struct ResearchAuditTrialOutcomes: Decodable {
+    let primary: [String]
+    let secondary: [String]
+}
+
+struct ResearchAuditSampleRole: Decodable, Identifiable {
+    let sampleRef: String
+    let role: String
+    var id: String { "\(sampleRef)|\(role)" }
+
+    enum CodingKeys: String, CodingKey {
+        case sampleRef = "sample_ref"
+        case role
     }
 }
 

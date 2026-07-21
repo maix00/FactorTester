@@ -12,7 +12,11 @@ from server.services.research_graph.branch import cycle_objects
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
-from tests.server.trial_plan_fixtures import initialize_branch
+from server.services.research_graph.research_cycle.evidence import (
+    validate_agent_evidence_envelope,
+)
+from server.services.research_graph.trial_plan import trial_plan_hash
+from tests.server.trial_plan_fixtures import initialize_branch, trial_plan
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -53,7 +57,31 @@ def _checkpoint() -> dict:
 
 def _seed(path) -> None:
     initialize_branch(path, "2" * 64)
-    evidence = {"research_cycle_checkpoint": _checkpoint()}
+    plan = trial_plan("4" * 64)
+    envelope = validate_agent_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "factor-semantics:read",
+        "evidence_kind": "factor_semantics",
+        "source_refs": ["factor-revision:read"],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "3" * 64,
+        },
+        "facts": {"selected_factor_semantics_resolved": True},
+        "metric_refs": [],
+        "artifact_refs": [],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": ["Timing remains a separate obligation."],
+        "conflicts": [],
+    })
+    evidence = {
+        "research_cycle_checkpoint": _checkpoint(),
+        "trial_plan": plan,
+        "trial_plan_hash": trial_plan_hash(plan),
+        "server_evidence": {"factor_semantics": envelope},
+        "evidence_refs": ["evidence:" + envelope["envelope_hash"]],
+    }
     with connect_sqlite(path) as conn:
         conn.execute(
             """
@@ -136,6 +164,57 @@ def test_cycle_object_read_supports_claim_and_rejects_unknown_id(
             object_type="obligation",
             object_id="missing",
         )
+
+
+def test_cycle_object_read_supports_typed_trial_plan_and_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "cycle-typed.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _seed(path)
+    with connect_sqlite(path) as conn:
+        persisted = orjson.loads(conn.execute(
+            "SELECT evidence_json FROM research_graph_trace "
+            "WHERE trace_id='trace-current'"
+        ).fetchone()["evidence_json"])
+    evidence_hash = persisted["server_evidence"]["factor_semantics"][
+        "envelope_hash"
+    ]
+    statements: list[str] = []
+
+    def traced_connect(*args, **kwargs):
+        conn = connect_sqlite(*args, **kwargs)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(cycle_objects, "connect_sqlite", traced_connect)
+
+    plan = cycle_objects.load_research_cycle_object(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        object_type="trial_plan",
+        object_id="plan-1",
+        trace_id="trace-current",
+    )
+    envelope = cycle_objects.load_research_cycle_object(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        object_type="evidence",
+        object_id=evidence_hash,
+        trace_id="trace-current",
+    )
+
+    assert plan["protocol_ref"] == "cross-sectional-ic@1"
+    assert envelope["evidence_kind"] == "factor_semantics"
+    assert envelope["facts"] == {
+        "selected_factor_semantics_resolved": True,
+    }
+    normalized = [" ".join(item.upper().split()) for item in statements]
+    assert sum(item.startswith("SELECT") for item in normalized) == 2
+    assert all("ORDER BY" not in item for item in normalized)
 
 
 def test_cycle_object_read_is_bound_to_requested_historical_trace(

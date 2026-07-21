@@ -26,6 +26,10 @@ from server.services.research_graph.report_checkpoint import (
     safe_refs as _safe_refs,
     transition_step_projection,
 )
+from server.services.research_graph.trial_plan import (
+    canonical_trial_plan,
+    trial_plan_hash,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -711,6 +715,32 @@ def _transition_step(
         created_at=float(row["created_at"]),
         evidence=evidence,
     )
+    object_refs = [*step["obligation_refs"], *step["claim_refs"]]
+    plan = evidence.get("trial_plan")
+    if isinstance(plan, dict):
+        try:
+            canonical_plan = canonical_trial_plan(plan)
+        except ValueError:
+            canonical_plan = None
+        if canonical_plan is not None:
+            resolvable_plan_refs = {
+                "trial-plan:" + canonical_plan["trial_plan_id"],
+                "trial-plan:sha256:" + trial_plan_hash(canonical_plan),
+            }
+            object_refs.extend(
+                ref for ref in step["trial_plan_refs"]
+                if ref in resolvable_plan_refs
+            )
+    available_evidence = {
+        "evidence:" + str(item.get("envelope_hash"))
+        for item in _checkpoint_evidence_envelopes(
+            evidence.get("server_evidence")
+        )
+    }
+    object_refs.extend(
+        ref for ref in step["evidence_refs"]
+        if ref in available_evidence
+    )
     return {
         **step,
         "research_ref": research_ref,
@@ -720,16 +750,37 @@ def _transition_step(
                 "/api/research-graph-instances/"
                 f"{parse_research_ref(research_ref)[0]}/branches/"
                 f"{parse_research_ref(research_ref)[1]}/cycle-objects/"
-                f"{ref.split(':', 1)[0]}/{ref.split(':', 1)[1]}"
+                f"{_cycle_object_type(ref)}/{ref.split(':', 1)[1]}"
                 f"?trace_id={str(row['trace_id'])}"
             )
-            for ref in [*step["obligation_refs"], *step["claim_refs"]]
+            for ref in object_refs
         ],
         "job_stream_hrefs": [
             f"/api/jobs/{ref.removeprefix('job:')}/stream"
             for ref in step["job_refs"]
         ],
     }
+
+
+def _checkpoint_evidence_envelopes(value: Any):
+    if isinstance(value, dict):
+        if (
+            value.get("schema_version") == 2
+            and isinstance(value.get("envelope_hash"), str)
+            and isinstance(value.get("evidence_kind"), str)
+        ):
+            yield value
+            return
+        for child in value.values():
+            yield from _checkpoint_evidence_envelopes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _checkpoint_evidence_envelopes(child)
+
+
+def _cycle_object_type(reference: str) -> str:
+    kind = reference.split(":", 1)[0]
+    return "trial_plan" if kind == "trial-plan" else kind
 
 
 def _first_named_text(

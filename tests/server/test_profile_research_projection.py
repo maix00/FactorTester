@@ -14,6 +14,7 @@ from server.services.research_graph.branch.schema import (
 from server.services.research_graph import (
     profile_research_projection as projection,
 )
+from tests.server.trial_plan_fixtures import trial_plan
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -216,6 +217,45 @@ def test_research_projects_one_work_package_with_hypothesis_branches(
     assert by_ref["graph-branch:instance-a:branch-0002"]["lineage"] == {
         "relation": "unknown",
     }
+
+
+def test_timeline_advertises_only_checkpoint_resolvable_typed_objects(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "typed-object-hrefs.sqlite"
+    _seed(path, branch_count=1)
+    evidence = _evidence(4)
+    evidence["trial_plan"] = trial_plan("4" * 64)
+    evidence["server_evidence"] = {"factor_semantics": {
+        "schema_version": 2,
+        "evidence_kind": "factor_semantics",
+        "envelope_hash": "e" * 64,
+    }}
+    evidence["evidence_refs"].extend([
+        "evidence:" + "e" * 64,
+        "evidence:" + "f" * 64,
+    ])
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? "
+            "WHERE trace_id='trace-000004'",
+            (orjson.dumps(evidence).decode(),),
+        )
+
+    timeline = _service(path, monkeypatch).list_timeline(
+        owner="alice",
+        research_ref="graph-branch:instance-a:branch-0000",
+        limit=1,
+    )
+
+    hrefs = timeline["items"][0]["object_hrefs"]
+    assert any("/cycle-objects/trial_plan/plan-1?" in item for item in hrefs)
+    assert any(
+        "/cycle-objects/evidence/" + "e" * 64 + "?" in item
+        for item in hrefs
+    )
+    assert all(("f" * 64) not in item for item in hrefs)
 
 
 def test_work_package_projects_only_authoritative_branch_lineage(

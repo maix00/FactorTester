@@ -1,4 +1,4 @@
-"""Explicit O(1) reads for current Claim and obligation bodies."""
+"""Explicit single-row reads for checkpoint-scoped research objects."""
 
 from __future__ import annotations
 
@@ -9,6 +9,13 @@ import settings as Settings
 from server.services.research_graph.protocol import loads
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
+)
+from server.services.research_graph.research_cycle.evidence import (
+    validate_agent_evidence_envelope,
+)
+from server.services.research_graph.trial_plan import (
+    canonical_trial_plan,
+    trial_plan_hash,
 )
 from tools.data.sqlite.db import connect_sqlite
 
@@ -23,11 +30,11 @@ def load_research_cycle_object(
     trace_id: str | None = None,
 ) -> dict[str, Any]:
     """Return one requested body from HEAD or an explicit checkpoint."""
-    collection, identifier = {
+    cycle_binding = {
         "claim": ("claims", "claim_id"),
         "obligation": ("obligations", "obligation_id"),
-    }.get(object_type, (None, None))
-    if collection is None:
+    }.get(object_type)
+    if cycle_binding is None and object_type not in {"evidence", "trial_plan"}:
         raise ValueError("research cycle object_type is invalid")
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         if trace_id:
@@ -58,6 +65,32 @@ def load_research_cycle_object(
     if row is None:
         raise KeyError("research cycle object not found")
     evidence = loads(row["evidence_json"]) or {}
+    if object_type == "trial_plan":
+        plan = evidence.get("trial_plan")
+        if not isinstance(plan, dict):
+            raise KeyError("research cycle object not found")
+        value = canonical_trial_plan(plan)
+        identities = {
+            str(value["trial_plan_id"]),
+            "sha256:" + trial_plan_hash(value),
+        }
+        if object_id not in identities:
+            raise KeyError("research cycle object not found")
+        return deepcopy(value)
+    if object_type == "evidence":
+        value = next(
+            (
+                item for item in _evidence_envelopes(
+                    evidence.get("server_evidence")
+                )
+                if str(item.get("envelope_hash") or "") == object_id
+            ),
+            None,
+        )
+        if value is None:
+            raise KeyError("research cycle object not found")
+        return validate_agent_evidence_envelope(value)
+    collection, identifier = cycle_binding
     checkpoint = validate_research_cycle_checkpoint(
         evidence.get("research_cycle_checkpoint")
     )
@@ -72,3 +105,19 @@ def load_research_cycle_object(
     if value is None:
         raise KeyError("research cycle object not found")
     return deepcopy(value)
+
+
+def _evidence_envelopes(value: Any):
+    if isinstance(value, dict):
+        if (
+            value.get("schema_version") == 2
+            and isinstance(value.get("envelope_hash"), str)
+            and isinstance(value.get("evidence_kind"), str)
+        ):
+            yield value
+            return
+        for child in value.values():
+            yield from _evidence_envelopes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _evidence_envelopes(child)

@@ -15,6 +15,9 @@ struct ProfileLiveResearchDetail: View {
                     steps: controller.timeline,
                     nextCursor: controller.nextTimelineCursor,
                     profileName: context?.profile.displayName ?? "未知 Profile",
+                    auditCacheNamespace: context.map {
+                        "\($0.profile.id)|\($0.profile.serverURL)"
+                    } ?? detail.branchRef,
                     reportTitle: ResearchDisplayText.reportTitle(
                         context?.record.title ?? ""
                     ),

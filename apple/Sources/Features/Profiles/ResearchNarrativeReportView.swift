@@ -6,6 +6,7 @@ struct ResearchNarrativeReportView: View {
     let steps: [ResearchTransitionStep]
     let nextCursor: String?
     let profileName: String
+    let auditCacheNamespace: String
     let reportTitle: String
     let artifact: ResearchArtifactModel?
     let loadEarlier: () async -> Void
@@ -15,6 +16,7 @@ struct ResearchNarrativeReportView: View {
     @State private var reportError: String?
     @State private var selectedCheckpointRef = ""
     @State private var selectedAudit: ResearchAuditSelection?
+    @StateObject private var auditCache = ResearchAuditObjectCache()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -37,6 +39,8 @@ struct ResearchNarrativeReportView: View {
                 selection: selection,
                 detail: detail,
                 steps: steps,
+                cache: auditCache,
+                cacheNamespace: auditCacheNamespace,
                 loadObject: loadAuditObject
             )
             .frame(width: 380)
@@ -355,6 +359,8 @@ private struct ResearchAuditPopover: View {
     let selection: ResearchAuditSelection
     let detail: ProfileResearchDetail
     let steps: [ResearchTransitionStep]
+    let cache: ResearchAuditObjectCache
+    let cacheNamespace: String
     let loadObject: (String) async throws -> ResearchAuditObjectPayload
 
     @State private var object: ResearchAuditObjectPayload?
@@ -436,6 +442,38 @@ private struct ResearchAuditPopover: View {
                         .lineLimit(2)
                 }
             }
+            if let trialPlanID = object.trialPlanID {
+                LabeledContent("试验计划", value: trialPlanID)
+            }
+            if let version = object.trialPlanVersion {
+                LabeledContent("计划版本", value: String(version))
+            }
+            if let hypothesisRef = object.hypothesisRef {
+                LabeledContent("研究假设", value: hypothesisRef)
+            }
+            if let protocolRef = object.protocolRef {
+                LabeledContent("检验协议", value: protocolRef)
+            }
+            if let outcomes = object.outcomes {
+                referenceValues("主要结果", outcomes.primary)
+                referenceValues("次要结果", outcomes.secondary)
+            }
+            if let roles = object.sampleRoles, !roles.isEmpty {
+                referenceValues(
+                    "样本阶段",
+                    roles.map { "\($0.role) · \($0.sampleRef)" }
+                )
+            }
+            if let kind = object.evidenceKind {
+                LabeledContent("证据类型", value: kind)
+            }
+            if let count = object.hypothesesTested {
+                LabeledContent("已检验假设数", value: String(count))
+            }
+            referenceValues("指标引用", object.metricRefs ?? [])
+            referenceValues("产物引用", object.artifactRefs ?? [])
+            referenceValues("证据限制", object.limitations ?? [])
+            referenceValues("证据冲突", object.conflicts ?? [])
         } else if let error {
             Text(error)
                 .font(.caption)
@@ -451,12 +489,35 @@ private struct ResearchAuditPopover: View {
         }
     }
 
+    @ViewBuilder
+    private func referenceValues(
+        _ title: String,
+        _ values: [String]
+    ) -> some View {
+        if !values.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(values, id: \.self) { value in
+                    Text("• \(value)")
+                        .font(.caption)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
     private func loadSelectedObject() async {
         object = nil
         error = nil
         guard let objectHref else { return }
         do {
-            object = try await loadObject(objectHref)
+            object = try await cache.load(
+                namespace: cacheNamespace,
+                href: objectHref,
+                using: loadObject
+            )
         } catch is CancellationError {
             return
         } catch {
