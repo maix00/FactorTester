@@ -4,6 +4,29 @@ import XCTest
 @testable import FTClient
 
 final class ResearchJournalTests: XCTestCase {
+    func testReportFacingIdentifiersAreAlwaysSimplifiedChinese() {
+        XCTAssertEqual(ResearchDisplayText.node("capability_gap"), "能力缺口")
+        XCTAssertEqual(ResearchDisplayText.linkKind("checkpoint"), "检查点")
+        XCTAssertEqual(ResearchDisplayText.linkKind("trial_plan"), "试验计划")
+        XCTAssertEqual(ResearchDisplayText.linkKind("evidence"), "证据")
+        XCTAssertEqual(ResearchDisplayText.linkKind("profile_handoff"), "研究转接")
+        XCTAssertEqual(
+            ResearchDisplayText.productGroup("china_futures"),
+            "中国期货"
+        )
+        XCTAssertEqual(
+            ResearchDisplayText.reportTitle("SgCCS 因子研究报告"),
+            "SgCCS 因子研究报告"
+        )
+    }
+
+    func testUnknownInternalIdentifierIsNotExposedAsReportProse() {
+        XCTAssertEqual(ResearchDisplayText.node("future_internal_node"), "研究进行中")
+        XCTAssertEqual(ResearchDisplayText.linkKind("future_internal_link"), "审计对象")
+        XCTAssertEqual(ResearchDisplayText.reportTitle("continuation-v7"), "因子研究报告")
+        XCTAssertEqual(ResearchDisplayText.productGroup("unknown_group"), "其他产品组")
+    }
+
     func testLoadsVerifiedChineseJournalAndBindsCheckpointIdentity() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

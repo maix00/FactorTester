@@ -68,13 +68,13 @@ struct WorkPackageResearchView: View {
                 .font(.title2)
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.summary.productGroup)
+                Text(ResearchDisplayText.productGroup(item.summary.productGroup))
                     .font(.title2.weight(.semibold))
                 HStack(spacing: 8) {
-                    Text("Work Package")
+                    Text("研究工作包")
                     Text(item.summary.workPackageRef).monospaced()
                     Text("·")
-                    Text("Profile：\(item.profileNames.joined(separator: "、"))")
+                    Text("研究身份：\(item.profileNames.joined(separator: "、"))")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

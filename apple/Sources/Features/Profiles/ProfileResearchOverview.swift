@@ -205,7 +205,12 @@ struct ProfileResearchOverview: View {
                     .frame(width: 34)
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 8) {
-                        Text(item.summary.productGroup).font(.headline)
+                        Text(
+                            ResearchDisplayText.productGroup(
+                                item.summary.productGroup
+                            )
+                        )
+                        .font(.headline)
                         statusBadge(item.summary)
                     }
                     Text(

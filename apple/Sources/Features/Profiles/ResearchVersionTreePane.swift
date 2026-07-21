@@ -57,6 +57,8 @@ struct ResearchVersionTreePane: View {
             }
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
     }
 
     private var laneBackground: some View {
@@ -136,8 +138,9 @@ struct ResearchVersionTreePane: View {
                         Text(node.title)
                             .font(.caption.weight(node.isHead ? .semibold : .regular))
                             .lineLimit(1)
+                            .truncationMode(.middle)
                         if node.isCurrentHead {
-                            Text("HEAD")
+                            Text("当前")
                                 .font(.system(size: 8, weight: .bold))
                                 .foregroundStyle(.tint)
                         }
@@ -147,6 +150,8 @@ struct ResearchVersionTreePane: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .clipped()
                 Spacer(minLength: 0)
             }
             .frame(height: rowHeight)
@@ -163,7 +168,7 @@ struct ResearchVersionTreePane: View {
             ResearchTreeNode(
                 id: "step|\(step.stepRef)",
                 checkpointRef: step.stepRef,
-                title: localizedNode(step.toNode),
+                title: ResearchDisplayText.node(step.toNode),
                 subtitle: compactDate(step.createdAt),
                 timestamp: step.createdAt,
                 lane: selectedLane,
@@ -204,7 +209,7 @@ struct ResearchVersionTreePane: View {
                     id: "lineage|\(branch.branchRef)",
                     checkpointRef: "",
                     title: lineage.relation == "fork" ? "从 \(sourceLabel) 分叉" : "接续 \(sourceLabel)",
-                    subtitle: sourceIndex == nil ? "外部 Work Package" : "已验证来源",
+                    subtitle: sourceIndex == nil ? "外部研究工作包" : "已验证来源",
                     timestamp: branch.createdAt,
                     lane: branchLane,
                     status: branch.status,
@@ -306,18 +311,6 @@ private struct ResearchTreeNode: Identifiable {
     let sourceLane: Int?
 }
 
-private func localizedNode(_ node: String) -> String {
-    switch node {
-    case "hypothesis_preregistration": return "假设预注册"
-    case "factor_semantics": return "因子语义"
-    case "validation_design": return "验证设计"
-    case "capability_gap": return "能力缺口"
-    case "job_evidence_ready": return "回测证据就绪"
-    case "completed": return "研究完成"
-    default: return node.replacingOccurrences(of: "_", with: " ")
-    }
-}
-
 private func compactDate(_ timestamp: Double) -> String {
     Date(timeIntervalSince1970: timestamp).formatted(
         .dateTime.month(.abbreviated).day().hour().minute()
@@ -331,6 +324,6 @@ private func treeStatusLabel(_ status: String) -> String {
     case "completed", "closed": return "已完成"
     case "blocked": return "等待处理"
     case "failed": return "失败"
-    default: return status
+    default: return "状态未知"
     }
 }

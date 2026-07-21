@@ -8,13 +8,19 @@ struct ProfileLiveResearchDetail: View {
         VStack(spacing: 0) {
             if let detail = controller.detail,
                let workPackage = controller.workPackage {
+                let record = reportRecord(for: detail)
                 ResearchNarrativeReportView(
                     detail: detail,
                     workPackage: workPackage,
                     steps: controller.timeline,
                     nextCursor: controller.nextTimelineCursor,
                     profileName: profiles.first?.displayName ?? "未知 Profile",
-                    artifact: reportArtifact(for: detail),
+                    reportTitle: ResearchDisplayText.reportTitle(
+                        record?.title ?? ""
+                    ),
+                    artifact: record?.artifacts.first {
+                        !$0.journalRef.isEmpty
+                    },
                     loadEarlier: { await controller.loadEarlierTimeline() }
                 )
             } else {
@@ -29,13 +35,14 @@ struct ProfileLiveResearchDetail: View {
         }
     }
 
-    private func reportArtifact(
+    private func reportRecord(
         for detail: ProfileResearchDetail
-    ) -> ResearchArtifactModel? {
+    ) -> ResearchRecordModel? {
         profiles.lazy
             .flatMap(\.researchRecords)
             .filter { $0.graphBranchRef == detail.branchRef }
-            .flatMap(\.artifacts)
-            .first { !$0.journalRef.isEmpty }
+            .first { record in
+                record.artifacts.contains { !$0.journalRef.isEmpty }
+            }
     }
 }

@@ -6,6 +6,7 @@ struct ResearchNarrativeReportView: View {
     let steps: [ResearchTransitionStep]
     let nextCursor: String?
     let profileName: String
+    let reportTitle: String
     let artifact: ResearchArtifactModel?
     let loadEarlier: () async -> Void
 
@@ -88,7 +89,7 @@ struct ResearchNarrativeReportView: View {
     private var reportHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(detail.label)
+                Text(reportTitle)
                     .font(.largeTitle.weight(.bold))
                 Text(statusLabel(detail.status))
                     .font(.caption.weight(.semibold))
@@ -98,10 +99,13 @@ struct ResearchNarrativeReportView: View {
                     .foregroundStyle(statusTint)
                 Spacer()
             }
-            Text("由 \(profileName) 负责 · 当前阶段：\(detail.currentNode)")
+            Text(
+                "由 \(profileName) 负责 · 当前阶段："
+                    + ResearchDisplayText.node(detail.currentNode)
+            )
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Text("以下正文由研究 Agent 在各 checkpoint 提交，并与相应证据和义务变化绑定。")
+            Text("以下正文由研究 Agent 在各检查点提交，并与相应证据和义务变化绑定。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -238,7 +242,7 @@ private struct ResearchAuditPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label(
-                localizedKind(selection.link.kind),
+                ResearchDisplayText.linkKind(selection.link.kind),
                 systemImage: chipIcon(selection.link.kind)
             )
             .font(.headline)
@@ -247,7 +251,7 @@ private struct ResearchAuditPopover: View {
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
             }
-            LabeledContent("对应 checkpoint") {
+            LabeledContent("对应检查点") {
                 Text(selection.checkpointRef)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
@@ -277,21 +281,60 @@ private struct ResearchAuditPopover: View {
 }
 
 private func chipLabel(_ link: ResearchJournalLink) -> String {
-    "\(localizedKind(link.kind)) · \(shortReference(link.targetRef))"
+    "\(ResearchDisplayText.linkKind(link.kind)) · \(shortReference(link.targetRef))"
 }
 
-private func localizedKind(_ kind: String) -> String {
-    switch kind {
-    case "checkpoint": return "Checkpoint"
-    case "trial_plan": return "TrialPlan"
-    case "obligation": return "义务"
-    case "claim": return "证据状态"
-    case "evidence": return "Evidence"
-    case "job": return "Job"
-    case "run": return "Run"
-    case "delta": return "变化"
-    case "profile_handoff": return "Profile 转接"
-    default: return kind
+enum ResearchDisplayText {
+    static func reportTitle(_ title: String) -> String {
+        guard title.range(
+            of: "\\p{Han}",
+            options: .regularExpression
+        ) != nil else {
+            return "因子研究报告"
+        }
+        return title
+    }
+
+    static func linkKind(_ kind: String) -> String {
+        switch kind {
+        case "checkpoint": return "检查点"
+        case "trial_plan": return "试验计划"
+        case "obligation": return "研究义务"
+        case "claim": return "证据状态"
+        case "evidence": return "证据"
+        case "job": return "计算任务"
+        case "run": return "试验运行"
+        case "delta": return "状态变化"
+        case "profile_handoff": return "研究转接"
+        default: return "审计对象"
+        }
+    }
+
+    static func node(_ node: String) -> String {
+        switch node {
+        case "candidate_discovery": return "候选发现"
+        case "hypothesis_preregistration": return "假设预注册"
+        case "capability_resolution": return "研究能力确认"
+        case "data_contract": return "数据契约"
+        case "factor_semantics": return "因子语义"
+        case "validation_design": return "验证设计"
+        case "trial_plan": return "试验计划"
+        case "capability_gap": return "能力缺口"
+        case "job_evidence_ready": return "回测证据就绪"
+        case "evidence_assessment": return "证据评估"
+        case "factor_improvement": return "因子改进"
+        case "completed": return "研究完成"
+        default: return "研究进行中"
+        }
+    }
+
+    static func productGroup(_ productGroup: String) -> String {
+        switch productGroup.lowercased() {
+        case "china_futures", "cnfutures": return "中国期货"
+        case "china_equities", "cnequities": return "中国股票"
+        case "japan_futures", "jpfutures": return "日本期货"
+        default: return "其他产品组"
+        }
     }
 }
 
@@ -322,6 +365,6 @@ private func statusLabel(_ status: String) -> String {
     case "completed", "closed": return "已完成"
     case "blocked": return "等待处理"
     case "failed": return "失败"
-    default: return status
+    default: return "状态未知"
     }
 }
