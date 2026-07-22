@@ -475,3 +475,178 @@ def test_step_mode_reports_mutable_event_payload_before_and_after_per_strategy()
         "before": [{"quantity": 2.0}],
         "after": [{"fee_cost": 12.5, "quantity": 2.0}],
     }]
+
+
+def test_step_mode_summarizes_daily_mark_to_market_checkpoint():
+    """A DMTM pause exposes the accounting evidence without inspecting internals."""
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+    from tools.testers.backtest.modules.base import FieldRef
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+
+    strategy = Strategy(alias="A1")
+    ledger = ledger_identity("private:A1")
+    snapshot = FieldRef("current_market_snapshot", owner="MarketDataModule")
+    accounting = FieldRef("accounting_mode", owner="TradingRuleModule")
+    records: list[dict] = []
+
+    flow = Flow(
+        "apply_daily_mark_to_market",
+        inputs=(snapshot, accounting),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.LEDGER,
+        compute=lambda account, ctx: None,
+    )
+    account = _account(
+        [strategy],
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+    )
+    strategy_book_store_for(account).register_strategy_ledgers(
+        strategy, (ledger.name,), default_ledger_id=ledger.name,
+    )
+    account.strategy_configs[strategy].field_values[accounting] = "Auto"
+    queue = EventQueue()
+    queue.push_event(EventDraft(
+        EventKind.LEDGER,
+        pd.Timestamp("2026-01-05 15:00:00.000000001"),
+        payload={
+            "kind": "daily_mark_to_market",
+            "trading_day": "2026-01-05",
+            "ledger_id": ledger.name,
+        },
+        ledger=ledger,
+    ))
+
+    run(account, queue, [flow], step_mode=True, step_callback=records.append)
+
+    assert records[0]["dmtm"] == {
+        "events": [{
+            "ledger": ledger.name,
+            "trading_day": "2026-01-05",
+        }],
+        "accounting_inputs": [{
+            "field": "TradingRuleModule.accounting_mode",
+            "values": [{
+                "scope": "strategy_config",
+                "strategy": "A1",
+                "value": "Auto",
+            }],
+        }],
+        "market_rule_inputs": [{
+            "field": "MarketDataModule.current_market_snapshot",
+            "values": [],
+        }],
+        "cash_changes": [],
+        "position_changes": [],
+        "margin_changes": [],
+    }
+
+
+def test_step_mode_dmtm_summary_contains_real_cash_and_position_changes():
+    from collections import deque
+
+    from tools.data.types.data_money import DataMoney
+    from tools.testers.backtest.engines.native.config import LedgerConfig
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+    from tools.testers.backtest.engines.native.position import Lot, ProductPosition
+    from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+    from tools.testers.backtest.modules.market_data import MarketDataModule
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+    from tools.testers.backtest.modules.trading_rule import (
+        TradingRuleModule,
+        _apply_daily_mark_to_market,
+    )
+
+    strategy = Strategy(alias="A1")
+    product = "DCE|F|LH|2603"
+    ledger_key = ledger_identity("private:A1")
+    records: list[dict] = []
+    account = _account(
+        [strategy],
+        active_flow_names=frozenset({"prepare_dmtm", "apply_daily_mark_to_market"}),
+    )
+    strategy_book_store_for(account).register_strategy_ledgers(
+        strategy, (ledger_key.name,), default_ledger_id=ledger_key.name,
+    )
+    ledger = account.ledger_for_strategy(strategy)
+    ledger.set(LedgerModule.positions, {
+        product: ProductPosition(
+            quantity=2,
+            lots=deque([Lot(quantity=2, entry_price=100.0, multiplier=1.0, is_today=False)]),
+        ),
+    })
+    account.ledger_configs[ledger.ledger] = LedgerConfig(
+        accounting_mode="Auto",
+        fee_mode="auto",
+        margin_mode="auto",
+    )
+    set_cash_for_ledger_pool(
+        account,
+        ledger,
+        DataMoney.from_major(1_000.0, currency="CNY", use_minor_units=False),
+    )
+
+    def prepare(_account, ctx) -> None:
+        ctx.set(MarketDataModule.current_market_snapshot, {
+            "settlement": {product: 110.0},
+            "close": {product: 109.0},
+        })
+        ctx.set(MarketDataModule.current_historical_fields, {
+            product: {
+                "CostBasisMethod": "DailyMarkToMarket",
+                "SettlementPrice": 110.0,
+                "PreSettlementPrice": 100.0,
+                "VolumeMultiple": 1.0,
+            },
+        })
+
+    prepare_flow = Flow(
+        "prepare_dmtm",
+        inputs=(),
+        outputs=(
+            MarketDataModule.current_market_snapshot,
+            MarketDataModule.current_historical_fields,
+        ),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.LEDGER,
+        order=1,
+        compute=prepare,
+    )
+    apply_flow = Flow(
+        "apply_daily_mark_to_market",
+        inputs=TradingRuleModule.apply_daily_mark_to_market.inputs,
+        outputs=TradingRuleModule.apply_daily_mark_to_market.outputs,
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.LEDGER,
+        order=50,
+        compute=_apply_daily_mark_to_market,
+    )
+    queue = EventQueue()
+    queue.push_event(EventDraft(
+        EventKind.LEDGER,
+        pd.Timestamp("2026-01-05 15:00:00.000000001"),
+        payload={
+            "kind": "daily_mark_to_market",
+            "trading_day": "2026-01-05",
+            "ledger_id": ledger.ledger_id,
+        },
+        ledger=ledger.ledger,
+    ))
+
+    run(
+        account,
+        queue,
+        [prepare_flow, apply_flow],
+        step_mode=True,
+        step_callback=records.append,
+    )
+
+    dmtm = records[1]["dmtm"]
+    assert dmtm["events"] == [{
+        "ledger": ledger.ledger_id,
+        "trading_day": "2026-01-05",
+    }]
+    assert dmtm["cash_changes"]
+    assert dmtm["position_changes"]
+    assert dmtm["market_rule_inputs"]
