@@ -11,6 +11,7 @@ import click
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
 from tools.cli.state import load_state, save_state
+from tools.cli.step import field_occurrences, render_step_event
 
 
 def _json(value: Any) -> str:
@@ -365,10 +366,42 @@ def job_result(job_id: str) -> None:
 @job.command("watch")
 @click.argument("job_id")
 @click.option("--after", default=0, type=int)
+@click.option("--json", "as_json", is_flag=True, help="原样输出完整 SSE 事件 JSON。")
 @friendly_errors
-def job_watch(job_id: str, after: int) -> None:
+def job_watch(job_id: str, after: int, as_json: bool) -> None:
     for event in client_from_config().stream_job_id(job_id, after=after):
-        click.echo(_json(event))
+        if as_json or event.get("event") != "step" or not isinstance(event.get("data"), dict):
+            click.echo(_json(event))
+            continue
+        for line in render_step_event(event["data"]):
+            click.echo(line, color=True)
+
+
+@job.command("step-field")
+@click.argument("job_id")
+@click.argument("qualified_field")
+@click.option("--after", default=0, type=int, help="从指定 SSE 序号之后开始读取。")
+@friendly_errors
+def job_step_field(job_id: str, qualified_field: str, after: int) -> None:
+    """打印下一个 step 中指定全限定字段的完整序列化记录。"""
+    for event in client_from_config().stream_job_id(job_id, after=after):
+        if event.get("event") != "step" or not isinstance(event.get("data"), dict):
+            continue
+        occurrences = field_occurrences(event["data"], qualified_field)
+        if not occurrences:
+            continue
+        click.echo(_json({
+            "job_id": job_id,
+            "field": qualified_field,
+            "step": {
+                "timestamp": event["data"].get("timestamp"),
+                "flow_id": event["data"].get("flow_id"),
+                "flow_phase": event["data"].get("flow_phase"),
+            },
+            "occurrences": occurrences,
+        }))
+        return
+    raise click.ClickException(f"流已结束，未找到字段 {qualified_field!r}")
 
 
 @job.command("cancel")
@@ -409,12 +442,21 @@ def job_unpin() -> None:
 @click.argument("job_id")
 @click.option("--until", default="", help="Replay until this timestamp, then pause.")
 @click.option("--end", "run_to_end", is_flag=True, help="Run the remaining backtest without pausing.")
+@click.option("--json", "as_json", is_flag=True, help="输出完整 job 响应。")
 @friendly_errors
-def job_continue(job_id: str, until: str, run_to_end: bool) -> None:
+def job_continue(job_id: str, until: str, run_to_end: bool, as_json: bool) -> None:
     if until and run_to_end:
         raise click.ClickException("--until and --end are mutually exclusive")
     action = "end" if run_to_end else "continue"
-    click.echo(_json(client_from_config().continue_job(job_id, action=action, until=until)))
+    result = client_from_config().continue_job(job_id, action=action, until=until)
+    if as_json:
+        click.echo(_json(result))
+        return
+    click.echo(
+        f"job_id={result.get('job_id') or job_id} "
+        f"status={result.get('status') or '-'} action={action}"
+        + (f" until={until}" if until else "")
+    )
 
 
 @job.command("artifact")

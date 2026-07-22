@@ -6,6 +6,7 @@ from click.testing import CliRunner
 
 from tools.cli.app import cli
 from tools.cli.state import load_state, save_state
+from tools.cli.step.values import render_value
 
 
 class FakeClient:
@@ -82,6 +83,39 @@ class FakeClient:
         }
         return {"job_id": job_id, "status": "running"}
 
+    def stream_job_id(self, job_id, *, after=0):
+        self.stream_args = {"job_id": job_id, "after": after}
+        yield {
+            "event": "step",
+            "data": {
+                "timestamp": "2026-01-05 09:01:00",
+                "flow_id": "apply_fill",
+                "flow_phase": "event",
+                "current_event": {"event_kind": "ORDER", "batch_count": 1, "subjects": []},
+                "strategies": [{"strategy": "A1", "ledgers": ["L1"]}],
+                "inputs": [{
+                    "field": "CashPoolModule.cash",
+                    "values": [{
+                        "scope": "ledger", "ledger": "L1", "cash_pool": "P1",
+                        "value": {"amount": 12345, "currency": "CNY", "use_minor_units": True, "scale": 2},
+                    }],
+                }],
+                "outputs": [],
+                "output_changes": [{
+                    "field": "LedgerModule.positions",
+                    "scope": "ledger", "ledger": "L1", "cash_pool": "P1",
+                    "changes": [{
+                        "instrument": "RB.SHF",
+                        "before": {"quantity": 0},
+                        "after": {"quantity": 2},
+                    }],
+                }],
+                "ledger_changes": [],
+                "event_payload_changes": [],
+                "input_contract_violations": [],
+            },
+        }
+
 
 def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
@@ -137,6 +171,155 @@ def test_job_continue_until_uses_continue_action(tmp_path, monkeypatch) -> None:
         "action": "continue",
         "until": "2026-01-05T15:00:00",
     }
+    assert result.output.strip() == (
+        "job_id=job-step status=running action=continue until=2026-01-05T15:00:00"
+    )
+
+
+def test_job_watch_renders_step_as_human_readable_tables(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, ["job", "watch", "job-step", "--after", "7"])
+
+    assert result.exit_code == 0, result.output
+    assert "STEP 2026-01-05 09:01:00" in result.output
+    assert "CashPoolModule.cash" in result.output
+    assert "12345 CNY (minor, scale=2)" in result.output
+    assert "LedgerModule.positions" in result.output
+    assert "RB.SHF" in result.output
+    assert fake.stream_args == {"job_id": "job-step", "after": 7}
+
+
+def test_job_watch_json_preserves_original_event(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, ["job", "watch", "job-step", "--json"])
+
+    assert result.exit_code == 0, result.output
+    event = json.loads(result.output)
+    assert event["event"] == "step"
+    assert event["data"]["inputs"][0]["field"] == "CashPoolModule.cash"
+
+
+def test_job_step_field_prints_exact_serialized_record(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "job", "step-field", "job-step", "CashPoolModule.cash", "--after", "3",
+    ])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["field"] == "CashPoolModule.cash"
+    record = payload["occurrences"][0]["record"]
+    assert record["values"][0]["value"]["amount"] == 12345
+    assert fake.stream_args == {"job_id": "job-step", "after": 3}
+
+
+def test_step_complex_change_highlight_excludes_indentation() -> None:
+    lines = render_value({"quantity": 2}, indent="    ", highlight=True)
+
+    assert lines[0].startswith("    \x1b[")
+    assert not lines[0].startswith("\x1b[")
+    assert lines[-1].startswith("    \x1b[")
+
+
+def test_step_changed_output_is_not_repeated_as_unchanged() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "resolve_run_window",
+        "inputs": [],
+        "outputs": [{
+            "field": "RunWindowModule.run_window_envelope",
+            "values": [{"scope": "context", "value": [{"ts": "09:00"}, {"ts": "15:00"}]}],
+        }],
+        "output_changes": [{
+            "field": "RunWindowModule.run_window_envelope",
+            "scope": "context", "before": None,
+            "after": [{"ts": "09:00"}, {"ts": "15:00"}],
+        }],
+    })
+
+    output = "\n".join(lines)
+    assert "未变化输出" not in output
+    assert output.count("RunWindowModule.run_window_envelope") == 1
+    assert "boundary" in output
+    assert "09:00" in output and "15:00" in output
+
+
+def test_step_groups_identical_product_selection_without_losing_owners() -> None:
+    from tools.cli.step import render_step_event
+
+    selection = {
+        "product_path_selection_id": "pg-1",
+        "label": "日盘",
+        "source_type": "manual_selection",
+        "selected_paths": ["Product/Futures", "-Product/Futures/_products/BB.DCE"],
+    }
+    lines = render_step_event({
+        "flow_id": "resolve_product_selection",
+        "inputs": [{
+            "field": "ProductSelectionModule.product_path_selection",
+            "values": [
+                {"scope": "strategy_config", "strategy": "A1", "value": selection},
+                {"scope": "strategy_config", "strategy": "A2", "value": selection},
+            ],
+        }],
+        "outputs": [], "output_changes": [],
+    })
+
+    output = "\n".join(lines)
+    assert output.count("pg-1") == 1
+    assert "A1" in output and "A2" in output
+    assert "BB.DCE" in output
+
+
+def test_step_product_string_uses_counted_product_table_without_ellipsis() -> None:
+    from tools.cli.step import render_step_event
+
+    products = "[AP.CZC, CJ.CZC, EC.INE, FB.DCE]"
+    lines = render_step_event({
+        "flow_id": "resolve_product_selection",
+        "inputs": [], "outputs": [],
+        "output_changes": [
+            {"field": "ProductSelectionModule.products", "strategy": strategy, "before": None, "after": products}
+            for strategy in ("A1", "A2")
+        ],
+    })
+
+    output = "\n".join(lines)
+    assert "count" in output and "4" in output
+    assert "AP.CZC, CJ.CZC, EC.INE, FB.DCE" in output
+    assert "…" not in output
+
+
+def test_step_product_input_lists_every_product_without_scalar_truncation() -> None:
+    from tools.cli.step import render_step_event
+
+    products = "[AP.CZC, CJ.CZC, EC.INE, FB.DCE]"
+    lines = render_step_event({
+        "flow_id": "validate_ledger_sessions",
+        "inputs": [{
+            "field": "ProductSelectionModule.products",
+            "values": [
+                {"scope": "strategy_context", "strategy": strategy, "value": products}
+                for strategy in ("A1", "A2")
+            ],
+        }],
+        "outputs": [], "output_changes": [],
+    })
+
+    output = "\n".join(lines)
+    assert "count" in output and "4" in output
+    assert all(product in output for product in ("AP.CZC", "CJ.CZC", "EC.INE", "FB.DCE"))
+    assert "…" not in output
 
 
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
