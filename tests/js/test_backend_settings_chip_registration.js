@@ -639,6 +639,34 @@ return GT.backendSettings.init().then(async () => {
   conditionalStore.set('engine_mode', 'custom');
   assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用自定义品种/合约');
 
+  const marginDefaults = {
+    engine_mode: indexManifest.defaults.engine_mode,
+    margin_mode: {
+      value: 'auto',
+      chip_template: '保证金模式: {value}',
+      options: [
+        { value: 'auto', label: '按市场规则自动' },
+        { value: 'none', label: '关闭' },
+      ],
+      editable_when: { engine_mode: ['auto', 'custom'] },
+      default_when: { engine_mode: { basic: 'none', auto: 'auto', exact: 'exact' } },
+    },
+  };
+  const marginHost = domElement('margin-chip-host');
+  const marginStore = window.FieldStore.create({
+    defaults: marginDefaults,
+    values: { engine_mode: 'auto', margin_mode: 'none' },
+  });
+  window.ChipRenderer.render(marginHost, {
+    manifest: { defaults: marginDefaults },
+    store: marginStore,
+    settingKeys: ['margin_mode'],
+    renderChipHtml: GT.backendSettings.renderChipHtml,
+  });
+  assert.equal(chipPlainText({ html: marginHost.childNodes[0].innerHTML }), '保证金模式关闭');
+  marginStore.replace({ engine_mode: 'auto' });
+  assert.equal(chipPlainText({ html: marginHost.childNodes[0].innerHTML }), '保证金模式按市场规则自动');
+
   const visibleHost = domElement('visible-chip-host');
   const visibleStore = window.FieldStore.create({
     defaults: indexManifest.defaults,

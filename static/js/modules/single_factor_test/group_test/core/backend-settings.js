@@ -1400,7 +1400,10 @@
         if (!row) return;
         if (!state.index) { row.style.display = 'none'; return; }
         var store = ensureGtLocalStore();
-        if (store) store.setMany(state.localValues);
+        if (store) {
+            if (typeof store.replace === 'function') store.replace(state.localValues);
+            else store.setMany(state.localValues);
+        }
         if (gtLocalChipUnbind) { gtLocalChipUnbind(); gtLocalChipUnbind = null; }
         var keys = [];
         orderedMountedTabs(LOCAL).forEach(function(tabKey) {

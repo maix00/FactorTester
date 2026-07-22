@@ -98,6 +98,24 @@
             return store;
         }
 
+        function replace(obj) {
+            var next = obj || {};
+            var changed = {};
+            Object.keys(values).forEach(function(k) {
+                if (!Object.prototype.hasOwnProperty.call(next, k)) {
+                    delete values[k];
+                    changed[k] = true;
+                }
+            });
+            Object.keys(next).forEach(function(k) {
+                if (values[k] !== next[k]) changed[k] = true;
+                if (next[k] === undefined) delete values[k]; else values[k] = next[k];
+            });
+            var seen = {};
+            Object.keys(changed).forEach(function(k) { _notify(k, seen); });
+            return store;
+        }
+
         function subscribe(key, fn) {
             if (typeof fn !== 'function') return function() {};
             (listeners[key] = listeners[key] || []).push(fn);
@@ -143,6 +161,7 @@
             effective: effective,
             set: set,
             setMany: setMany,
+            replace: replace,
             subscribe: subscribe,
             destroy: destroy,
             setParent: setParent,
