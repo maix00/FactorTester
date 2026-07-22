@@ -836,10 +836,7 @@ def _required_narrative_targets(carrier: dict[str, Any]) -> set[str]:
     """
     transition = carrier["latest_transition"]
     required = set(
-        carrier["evidence_refs"]
-        + carrier["job_refs"]
-        + carrier["run_refs"]
-        + transition["evidence_refs"]
+        transition["evidence_refs"]
         + transition["trial_plan_refs"]
         + transition["obligation_refs"]
         + transition["claim_refs"]

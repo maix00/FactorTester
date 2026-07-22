@@ -131,14 +131,21 @@ def test_ordinary_checkpoint_does_not_require_untouched_cycle_snapshot(
     root = tmp_path / "client-support"
     _profile(root)
     carrier = _carrier()
+    carrier["evidence_refs"].append("evidence:earlier-checkpoint")
     carrier["latest_transition"]["obligation_refs"] = []
     carrier["latest_transition"]["claim_refs"] = []
+    narrative = _narrative(carrier)
+    narrative["sections"][0]["links"] = [
+        item for item in narrative["sections"][0]["links"]
+        if item["target_ref"] != "evidence:earlier-checkpoint"
+    ]
 
     publish_research_checkpoint(
         client_root=root,
         profile_id="maxa",
         agent_id="research-maxa",
         carrier=carrier,
+        narrative=narrative,
     )
 
 
