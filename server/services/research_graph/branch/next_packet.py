@@ -46,7 +46,11 @@ def build_graph_branch_next(
         item["readiness"] != "blocked" for item in candidates
     )
     cycle = context["research_cycle"]
-    obligations = deepcopy(cycle.get("open_obligations") or [])
+    obligations = [
+        _compact_obligation(item)
+        for item in cycle.get("open_obligations") or []
+        if isinstance(item, dict)
+    ]
     packet = {
         "graph": context["graph"],
         "branch": deepcopy(context["branch"]),
@@ -68,9 +72,7 @@ def build_graph_branch_next(
             "current_trial_plan_hash": cycle.get("trial_plan_hash"),
             "trial_stage": deepcopy(context.get("trial_stage")),
             "candidate_plan_refs": [],
-            "unassessed_obligation_ids": [
-                item["obligation_id"] for item in obligations
-            ],
+            "unassessed_obligation_count": len(obligations),
         },
         "changed_refs": list(dict.fromkeys([
             *context.get("evidence_refs", []),
@@ -97,6 +99,21 @@ def build_graph_branch_next(
             f"{MAX_AGENT_PACKET_BYTES} bytes: {serialized_bytes}"
         )
     return packet
+
+
+def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep routing semantics; load Claim links and criteria by detail_ref."""
+
+    return {
+        key: deepcopy(item.get(key))
+        for key in (
+            "obligation_id",
+            "materiality",
+            "status",
+            "question_summary",
+            "detail_ref",
+        )
+    }
 
 
 def _capability_ids(value: Any) -> list[str]:

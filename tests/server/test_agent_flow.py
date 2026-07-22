@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import orjson
 import pytest
 from flask import Flask
 
@@ -14,7 +15,7 @@ from server.services.agent_flow import (
 from server.services.agent_flow import authorization
 from server.services.agent_flow import invocations as invocation_module
 from server.services.maintenance_cases import MaintenanceCaseStore
-from tests.server.data_contract_fixtures import initialize
+from tests.server.data_contract_fixtures import checkpoint, initialize
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -177,7 +178,7 @@ def test_role_resume_packets_are_bounded_stable_and_isolated(
     graph_path = tmp_path / "graphs.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", graph_path)
     agent_flow.clear_store_cache()
-    initialize(graph_path)
+    initialize(graph_path, obligation_status="open")
     research_configurations.create_workspace_configuration(
         owner="alice",
         workspace_id="workspace-1",
@@ -309,6 +310,79 @@ def test_role_resume_packets_are_bounded_stable_and_isolated(
     }]
     assert "research" not in maintenance
     assert "planning" not in maintenance
+
+
+def test_research_resume_keeps_many_obligations_lazy_and_bounded(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    graph_path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", graph_path)
+    agent_flow.clear_store_cache()
+    initialize(graph_path, obligation_status="open")
+    cycle = checkpoint(obligation_status="open")
+    template = cycle["obligations"][0]
+    cycle["obligations"] = [
+        {
+            **template,
+            "obligation_id": f"obligation-{index}",
+            "epistemic_question": (
+                f"第 {index} 项研究义务是否能够由当前证据解除，"
+                "还是需要按引用加载完整语义、范围与判定标准？"
+            ),
+            "created_event_ref": f"trace:obligation-{index}",
+        }
+        for index in range(8)
+    ]
+    cycle.pop("projection_hash", None)
+    from server.services.research_graph.research_cycle.replay import (
+        validate_research_cycle_checkpoint,
+    )
+
+    cycle = validate_research_cycle_checkpoint(cycle)
+    with connect_sqlite(graph_path) as connection:
+        evidence = {
+            "research_cycle_checkpoint": cycle,
+            "evidence_refs": [],
+        }
+        connection.execute(
+            """
+            UPDATE research_graph_trace SET evidence_json=?
+            WHERE trace_id='trace-bootstrap'
+            """,
+            (orjson.dumps(evidence).decode(),),
+        )
+
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    response = client.post(
+        "/api/agent-flow/agents/research-agent-1/resume",
+        json={
+            "role": "research",
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+        },
+    )
+
+    assert response.status_code == 200
+    resume = response.get_json()["resume"]
+    assert resume["packet_bytes"] <= 6000
+    obligations = resume["research"]["current_obligations"]
+    assert [item["obligation_id"] for item in obligations] == [
+        f"obligation-{index}" for index in range(8)
+    ]
+    assert all(item["question_summary"] for item in obligations)
+    assert all(item["detail_ref"] for item in obligations)
+    assert all("claim_ids" not in item for item in obligations)
+    assert all("criterion_ref" not in item for item in obligations)
+    frontier = resume["research"]["candidate_trial_frontier"]
+    assert frontier["unassessed_obligation_count"] == 8
+    assert "unassessed_obligation_ids" not in frontier
 
 
 def test_routine_reserve_and_settle_keep_the_sql_floor(

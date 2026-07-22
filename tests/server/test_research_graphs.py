@@ -2119,7 +2119,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "current_trial_plan_hash": None,
         "trial_stage": None,
         "candidate_plan_refs": [],
-        "unassessed_obligation_ids": [],
+        "unassessed_obligation_count": 0,
     }
 
     transition_statements: list[str] = []
@@ -2297,8 +2297,8 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "obligation_id"
     ] == "obligation-roll-window"
     assert cycle_next["candidate_trial_frontier"][
-        "unassessed_obligation_ids"
-    ] == ["obligation-roll-window"]
+        "unassessed_obligation_count"
+    ] == 1
     assert cycle_next["candidate_edges"][0][
         "required_research_evidence"
     ] == []
