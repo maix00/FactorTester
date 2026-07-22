@@ -16,6 +16,11 @@ from .values import is_scalar, render_value, route_label, scalar, scope, table_f
 
 
 def render_step_event(data: Mapping[str, Any]) -> list[str]:
+    dmtm_value = data.get("dmtm") if isinstance(data.get("dmtm"), Mapping) else {}
+    dmtm_input_fields = _dmtm_fields(dmtm_value, "accounting_inputs", "market_rule_inputs")
+    dmtm_change_fields = _dmtm_fields(dmtm_value, "cash_changes", "position_changes", "margin_changes")
+    if dmtm_value.get("resolved"):
+        dmtm_change_fields.add("TradingRuleModule.resolved_daily_mark_to_market")
     lines = [click.style(
         f"STEP {data.get('timestamp') or '-'}  {str(data.get('flow_phase') or '').upper()}  "
         f"{data.get('flow_id') or data.get('flow_name') or '-'}",
@@ -26,7 +31,9 @@ def render_step_event(data: Mapping[str, Any]) -> list[str]:
         lines.append(f"  说明: {description}")
     lines.extend(_render_current_event(data.get("current_event")))
     lines.extend(_render_strategies(data.get("strategies")))
-    lines.extend(_render_field_values("输入", data.get("inputs"), combine_scalars=True))
+    lines.extend(_render_field_values(
+        "输入", data.get("inputs"), combine_scalars=True, omit_fields=dmtm_input_fields,
+    ))
     changed_fields = {
         str(item.get("field") or "")
         for item in data.get("output_changes") or []
@@ -36,14 +43,22 @@ def render_step_event(data: Mapping[str, Any]) -> list[str]:
         "未变化输出", data.get("outputs"),
         omit_represented=True, omit_fields=changed_fields,
     ))
-    lines.extend(render_changes("输出变化", data.get("output_changes")))
-    lines.extend(render_changes("账本旁路变化", data.get("ledger_changes")))
+    lines.extend(render_changes("输出变化", data.get("output_changes"), omit_fields=dmtm_change_fields))
+    lines.extend(render_changes("账本旁路变化", data.get("ledger_changes"), omit_fields=dmtm_change_fields))
     lines.extend(render_changes("事件载荷变化", data.get("event_payload_changes"), field_optional=True))
-    lines.extend(dmtm.render(data.get("dmtm")))
+    lines.extend(dmtm.render(dmtm_value))
     violations = [item for item in data.get("input_contract_violations") or [] if isinstance(item, Mapping)]
     if violations:
         lines.extend([click.style("合约违规", fg="bright_red", bold=True), *table_from_mappings(violations, indent="  ")])
     return lines
+
+
+def _dmtm_fields(value: Mapping[str, Any], *sections: str) -> set[str]:
+    return {
+        str(item.get("field"))
+        for section in sections for item in value.get(section) or []
+        if isinstance(item, Mapping) and item.get("field")
+    }
 
 
 def _section(title: str, body: list[str]) -> list[str]:

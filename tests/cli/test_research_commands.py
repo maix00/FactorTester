@@ -534,6 +534,26 @@ def test_dmtm_renders_data_money_units_and_position_settlement() -> None:
     assert "settlement_after" in output and "AP.CZC" in output
 
 
+def test_dmtm_deduplicates_fields_represented_by_dedicated_audit() -> None:
+    from tools.cli.step import render_step_event
+
+    position_change = {"field": "LedgerModule.positions", "ledger": "L1", "changes": []}
+    lines = render_step_event({
+        "flow_id": "dmtm", "inputs": [{"field": "MarketDataModule.current_market_snapshot", "values": [{"value": {"close": {"AP.CZC": 10}}}]}],
+        "outputs": [], "output_changes": [position_change, {"field": "TradingRuleModule.resolved_daily_mark_to_market", "before": None, "after": {"large": "duplicate"}}],
+        "dmtm": {
+            "events": [], "accounting_inputs": [],
+            "market_rule_inputs": [{"field": "MarketDataModule.current_market_snapshot", "values": [{"value": {"close": {"AP.CZC": 10}}}]}],
+            "resolved": [{"value": {"L1": {"AP.CZC": {"enabled": True}}}}],
+            "cash_changes": [], "position_changes": [position_change], "margin_changes": [],
+        },
+    })
+    output = "\n".join(lines)
+    assert output.count("MarketDataModule.current_market_snapshot") == 1
+    assert output.count("LedgerModule.positions") == 0
+    assert "large" not in output and "DMTM 解析" in output
+
+
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

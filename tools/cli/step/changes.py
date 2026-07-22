@@ -12,12 +12,17 @@ from . import events, market_data, orders, portfolio, positions, products, run_w
 from .values import highlighted, is_scalar, render_value, route_label, scalar, scope, table_from_mappings
 
 
-def render_changes(title: str, changes: Any, *, field_optional: bool = False) -> list[str]:
+def render_changes(
+    title: str, changes: Any, *, field_optional: bool = False,
+    omit_fields: set[str] | None = None,
+) -> list[str]:
     grouped: dict[str, list[Mapping[str, Any]]] = {}
     for change in changes or []:
         if not isinstance(change, Mapping):
             continue
         field = str(change.get("field") or ("payload" if field_optional else ""))
+        if field in (omit_fields or set()):
+            continue
         grouped.setdefault(field, []).append(change)
     body: list[str] = []
     for field, rows in grouped.items():
