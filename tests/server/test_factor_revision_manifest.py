@@ -132,6 +132,26 @@ def test_freeze_and_execution_revalidation_share_one_manifest_path(
         )
 
 
+def test_column_ref_projection_does_not_invalidate_historical_run_spec(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        factor_revisions,
+        "_load_revision_definition",
+        lambda **_kwargs: _definition(),
+    )
+    frozen = factor_revisions.freeze_factor_revisions(
+        _configuration(), owner="alice"
+    )
+    for manifest in frozen["payload"]["shared"]["factor_revision_manifests"]:
+        manifest.pop("column_refs", None)
+
+    factor_revisions.assert_run_spec_factor_revisions_current(
+        {"run_spec_version": 2, "configuration": frozen["payload"]},
+        owner="alice",
+    )
+
+
 def test_run_spec_v2_requires_manifests() -> None:
     with pytest.raises(ValueError, match="factor_revision_manifests"):
         factor_revisions.assert_run_spec_factor_revisions_current(

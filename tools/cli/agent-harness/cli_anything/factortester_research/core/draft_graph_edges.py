@@ -138,7 +138,12 @@ def build_draft_edges() -> list[dict[str, Any]]:
             guard={
                 "selection_and_trial_plan_frozen": True,
                 "actionable_obligations_planned_or_bounded": True,
+                "data_availability_profile_bound": True,
+                "requested_product_availability_present": True,
+                "required_market_fields_available": True,
+                "historical_field_catalog_bound": True,
             },
+            server_action="bind_data_availability",
         ),
         edge(
             "validation_design__factor_improvement",

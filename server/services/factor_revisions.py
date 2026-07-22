@@ -14,6 +14,7 @@ from server.services.factor_registry import (
     get_factor_family_instance,
     resolve_factor_family_source,
 )
+from server.modules.custom_factors.expression_inspection import fixed_column_refs
 from tools.factors.FactorExpr import get_visual_operator_groups
 
 
@@ -101,7 +102,7 @@ def assert_run_spec_factor_revisions_current(
         shared=shared,
         owner=owner,
     )
-    if current != stored:
+    if _execution_identity_manifests(current) != _execution_identity_manifests(stored):
         raise ValueError(
             "factor revision changed after RunSpec freeze; "
             "preview and submit a new RunSpec"
@@ -123,6 +124,7 @@ def _load_revision_definition(
         family.expr.tree_repr()
         if getattr(family, "expr", None) is not None else ""
     )
+    family_columns = fixed_column_refs(getattr(family, "expr", None))
     resolved = []
     for alias in factor_aliases:
         qualified_alias = _qualified_factor_alias(
@@ -135,23 +137,27 @@ def _load_revision_definition(
                 factor.expr.tree_repr()
                 if getattr(factor, "expr", None) is not None else ""
             )
+            column_refs = fixed_column_refs(getattr(factor, "expr", None))
             resolution_status = "resolved"
         except ValueError:
             # Existing configurations may retain superseded parameter aliases.
             # Preserve their exact alias hash and family contract without
             # claiming that factor-level semantics were resolved.
             tree_repr = family_tree
+            column_refs = family_columns
             resolution_status = "family_contract_only"
         resolved.append({
             "factor_alias": alias,
             "tree_repr": tree_repr,
             "resolution_status": resolution_status,
+            "column_refs": sorted(column_refs),
         })
     if not resolved:
         resolved.append({
             "factor_alias": "",
             "tree_repr": family_tree,
             "resolution_status": "family_contract_only",
+            "column_refs": sorted(family_columns),
         })
     return {
         **source,
@@ -200,8 +206,24 @@ def _manifests_from_definition(
             ),
         }
         value["manifest_hash"] = _hash_json(value)
+        # Auditable dependency metadata is deliberately outside the execution
+        # identity hash: resolved_factor_expr_hash already owns semantics, and
+        # adding this projection must not invalidate historical RunSpecs.
+        value["column_refs"] = sorted({
+            str(item) for item in factor.get("column_refs", [])
+        })
         values.append(value)
     return values
+
+
+def _execution_identity_manifests(value: Any) -> Any:
+    if not isinstance(value, list):
+        return value
+    return [
+        {key: item for key, item in manifest.items() if key != "column_refs"}
+        if isinstance(manifest, dict) else manifest
+        for manifest in value
+    ]
 
 
 def _qualified_factor_alias(

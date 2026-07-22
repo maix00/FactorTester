@@ -85,6 +85,7 @@ def _configuration(*, status: str = "resolved") -> dict:
                     "factor_alias_hash": "a" * 64,
                     "manifest_hash": "b" * 64,
                     "resolution_status": status,
+                    "column_refs": ["CLOSE_ADJUSTED", "VOLUME"],
                 }],
             },
             "analyses": {},
@@ -149,6 +150,10 @@ def test_factor_semantics_edge_binds_source_free_server_evidence(
     assert envelope["facts"]["factor_revision_count"] == 1
     assert envelope["facts"]["factor_family_refs"] == ["alice:Alpha"]
     assert envelope["facts"]["factor_revision_set_hash"]
+    assert envelope["facts"]["required_market_fields"] == [
+        "CLOSE_ADJUSTED",
+        "VOLUME",
+    ]
     assert "factor_revision_refs" not in envelope["facts"]
     assert "source_code" not in orjson.dumps(envelope).decode()
 

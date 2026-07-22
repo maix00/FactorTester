@@ -18,6 +18,7 @@ from server.services.research_graph.branch.transition import (
 from server.services.research_graph.protocol import MAX_PERSISTED_TRACE_BYTES
 from server.services.research_graph.research_cycle.data_availability_evidence import (
     project_availability_evidence,
+    project_data_provenance_evidence,
     validate_availability_request,
 )
 from tests.server.data_contract_fixtures import (
@@ -34,6 +35,9 @@ from cli_anything.factortester_research.core.graph_protocol import (
     graph_content_hash,
 )
 from cli_anything.factortester_research.core.replay import replay_graph_trace
+from cli_anything.factortester_research.core.server_guards import (
+    derive_server_guard_facts,
+)
 
 
 def test_field_level_request_projects_compact_status_not_full_catalog() -> None:
@@ -93,6 +97,19 @@ def test_field_level_request_projects_compact_status_not_full_catalog() -> None:
         "coverage_end": "2026-01-01",
     }]
     assert "FIELD-99" not in str(envelope)
+    facts = derive_server_guard_facts(
+        {"server_action": "bind_data_availability"},
+        {"server_evidence": {
+            "data_availability": envelope,
+            "data_provenance": project_data_provenance_evidence(
+                profile=scoped,
+                request=request,
+                checkpoint={"contract_hash": "1" * 64, "methodology_hash": "2" * 64},
+            ),
+        }},
+    )
+    assert facts["required_market_fields_available"] is True
+    assert facts["historical_field_catalog_bound"] is True
 
 
 def test_data_contract_edge_projects_server_evidence_outside_write_lock(

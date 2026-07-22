@@ -95,6 +95,12 @@ def derive_server_guard_facts(
         ):
             raise ValueError("verified provenance facts are inconsistent")
     checkpoint = evidence.get("research_cycle_checkpoint")
+    required_fields_available = _required_market_fields_available(
+        availability_facts
+    )
+    historical_catalog_bound = _historical_field_catalog_bound(
+        availability_facts
+    )
     return {
         "data_availability_profile_bound": True,
         "data_provenance_status_bound": provenance_bound,
@@ -105,7 +111,40 @@ def derive_server_guard_facts(
             )
         ),
         "requested_product_availability_present": present,
+        "required_market_fields_available": required_fields_available,
+        "historical_field_catalog_bound": historical_catalog_bound,
     }
+
+
+def _required_market_fields_available(facts: dict[str, Any]) -> bool:
+    request = facts.get("request")
+    fields = request.get("fields") if isinstance(request, dict) else None
+    statuses = facts.get("required_field_status")
+    if not isinstance(fields, list) or not fields or not isinstance(statuses, list):
+        return False
+    acceptable = {"direct", "derived"}
+    return bool(statuses) and all(
+        isinstance(item, dict)
+        and isinstance(item.get("statuses"), list)
+        and bool(acceptable.intersection(item["statuses"]))
+        for item in statuses
+    )
+
+
+def _historical_field_catalog_bound(facts: dict[str, Any]) -> bool:
+    request = facts.get("request")
+    if not isinstance(request, dict) or request.get("include_historical_fields") is not True:
+        return False
+    products = request.get("products")
+    summary = facts.get("historical_field_summary")
+    if not isinstance(products, list) or not isinstance(summary, list):
+        return False
+    bound = {
+        str(item.get("product") or "")
+        for item in summary
+        if isinstance(item, dict)
+    }
+    return all(isinstance(product, str) and product in bound for product in products)
 
 
 def _data_obligation_gate_satisfied(

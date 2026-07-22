@@ -30,6 +30,8 @@ _SERVER_GUARDS = (
     "data_provenance_integrity_status",
     "material_data_obligations_adjudicated_or_not_triggered",
     "requested_product_availability_present",
+    "required_market_fields_available",
+    "historical_field_catalog_bound",
 )
 
 
@@ -106,6 +108,12 @@ def prepare_transition(
             "data_provenance_integrity_status": (
                 provenance_envelope["facts"]["integrity_status"]
             ),
+            "required_market_fields_available": _required_market_fields_available(
+                envelope
+            ),
+            "historical_field_catalog_bound": _historical_field_catalog_bound(
+                envelope
+            ),
         },
         "envelope": envelope,
         "provenance_envelope": provenance_envelope,
@@ -114,6 +122,34 @@ def prepare_transition(
             "evidence:" + provenance_envelope["envelope_hash"]
         ),
     }
+
+
+def _required_market_fields_available(envelope: dict[str, Any]) -> bool:
+    facts = envelope.get("facts") or {}
+    request = facts.get("request") or {}
+    fields = request.get("fields")
+    statuses = facts.get("required_field_status")
+    if not isinstance(fields, list) or not fields or not isinstance(statuses, list):
+        return False
+    return bool(statuses) and all(
+        isinstance(item, dict)
+        and bool({"direct", "derived"}.intersection(item.get("statuses") or []))
+        for item in statuses
+    )
+
+
+def _historical_field_catalog_bound(envelope: dict[str, Any]) -> bool:
+    facts = envelope.get("facts") or {}
+    request = facts.get("request") or {}
+    summary = facts.get("historical_field_summary")
+    if request.get("include_historical_fields") is not True or not isinstance(summary, list):
+        return False
+    products = request.get("products") or []
+    bound = {
+        str(item.get("product") or "")
+        for item in summary if isinstance(item, dict)
+    }
+    return all(str(product) in bound for product in products)
 
 
 def bind_server_evidence(

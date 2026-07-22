@@ -38,6 +38,11 @@ def project_factor_semantics_evidence(
         }),
         "factor_revision_set_hash": json_hash(refs),
         "selected_factor_semantics_resolved": resolved,
+        "required_market_fields": sorted({
+            field
+            for item in refs
+            for field in item["column_refs"]
+        }),
     }
     value = {
         "schema_version": 2,
@@ -83,6 +88,7 @@ def _manifest_ref(value: Any) -> dict[str, Any]:
             field="manifest_hash",
         ),
         "resolution_status": str(value.get("resolution_status") or ""),
+        "column_refs": _column_refs(value.get("column_refs", [])),
     }
     if not required["factor_family_ref"]:
         raise ValueError("factor_family_ref is required")
@@ -92,6 +98,15 @@ def _manifest_ref(value: Any) -> dict[str, Any]:
     }:
         raise ValueError("invalid factor resolution_status")
     return deepcopy(required)
+
+
+def _column_refs(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("factor revision column_refs must be an array")
+    fields = [str(item).strip() for item in value if str(item).strip()]
+    if len(fields) != len(value) or len(set(fields)) != len(fields):
+        raise ValueError("factor revision column_refs must contain unique text")
+    return sorted(fields)
 
 
 def _sha256(value: Any, *, field: str) -> str:

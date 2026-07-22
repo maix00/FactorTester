@@ -45,6 +45,29 @@ use `data-availability.scope` for usable-scope debt and
 look-ahead debt. `obligation_kind` remains open research vocabulary; the
 deterministic runner must never infer authorization from its wording.
 
+Use a two-stage gate. The initial `data_contract` checks product, source,
+frequency, coverage, and provenance feasibility. After factor semantics and a
+candidate TrialPlan exist, inspect the union of expression `ColumnRef` leaves
+and execution fields before any diagnostic job starts. The deterministic CLI
+form is:
+
+```text
+factortester products availability \
+  --product <product> --source <source> \
+  --field <logical-field> --field-catalog --historical-fields --json
+```
+
+Repeat `--product`, `--source`, and `--field` as needed. Use `--local-runtime`
+only when the current Python environment owns and has registered the user's
+local backend data-source object; otherwise inspect the configured server.
+Read the full catalog only for this gate or through an artifact reference. Do
+not place it in the routine Agent packet. Direct and correctly derived fields
+may satisfy the deterministic field gate. `fallback_unadjusted` and `missing`
+must create or reopen a scoped data obligation. Historical fee, margin,
+multiplier, limit, session, or other accounting fields required by the
+TrialPlan must be explicitly checked; a catalog query is not proof that every
+day in the trial has a valid point-in-time value.
+
 The lenses above are prompts, not a universal checklist. Create factor-specific
 obligations when first principles require them, and omit irrelevant lenses.
 

@@ -47,7 +47,9 @@ def build_draft_nodes() -> list[dict[str, Any]]:
         (
             "validation_design",
             "validation",
-            "Freeze selection, holdout, slice, and multiple-testing design.",
+            "Freeze selection, holdout, slice, and multiple-testing design, "
+            "then bind exact market and historical field availability before "
+            "starting diagnostics.",
             [
                 "research-validation.slice-plan",
                 "multiple-testing.trial-ledger",
