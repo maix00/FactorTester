@@ -500,6 +500,25 @@ def test_orders_render_as_rows_with_rejection_semantics() -> None:
     assert '"reject_reason"' not in output
 
 
+def test_dmtm_renders_data_money_units_and_position_settlement() -> None:
+    from tools.cli.step import render_step_event
+
+    money_before = {"type": "DataMoney", "currency": "CNY", "scale": 100, "minor_units": 1050, "major_units": 10.5}
+    money_after = {"type": "DataMoney", "currency": "CNY", "scale": 100, "minor_units": 1250, "major_units": 12.5}
+    lines = render_step_event({"flow_id": "dmtm", "inputs": [], "outputs": [], "output_changes": [], "dmtm": {
+        "events": [{"ledger": "L1", "trading_day": "2026-01-05"}],
+        "resolved": [], "accounting_inputs": [{"field": "accounting_mode", "values": [{"value": "Auto"}]}],
+        "market_rule_inputs": [],
+        "cash_changes": [{"ledger": "L1", "before": money_before, "after": money_after}],
+        "position_changes": [{"ledger": "L1", "changes": [{"instrument": "AP.CZC", "before": {"quantity": 1, "settlement_price": None, "margin_reserved": money_before}, "after": {"quantity": 1, "settlement_price": 10, "margin_reserved": money_after}}]}],
+        "margin_changes": [],
+    }})
+    output = "\n".join(lines)
+    assert "before_major" in output and "before_minor" in output
+    assert "delta_major" in output and "delta_minor" in output
+    assert "settlement_after" in output and "AP.CZC" in output
+
+
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

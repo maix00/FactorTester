@@ -11,7 +11,7 @@ import click
 from tools.cli.table import render_key_value_rows
 
 from .changes import render_changes
-from . import market_data, orders, portfolio, positions, products, run_window
+from . import dmtm, market_data, orders, portfolio, positions, products, run_window
 from .values import is_scalar, render_value, route_label, scalar, scope, table_from_mappings
 
 
@@ -39,7 +39,7 @@ def render_step_event(data: Mapping[str, Any]) -> list[str]:
     lines.extend(render_changes("输出变化", data.get("output_changes")))
     lines.extend(render_changes("账本旁路变化", data.get("ledger_changes")))
     lines.extend(render_changes("事件载荷变化", data.get("event_payload_changes"), field_optional=True))
-    lines.extend(_render_dmtm(data.get("dmtm")))
+    lines.extend(dmtm.render(data.get("dmtm")))
     violations = [item for item in data.get("input_contract_violations") or [] if isinstance(item, Mapping)]
     if violations:
         lines.extend([click.style("合约违规", fg="bright_red", bold=True), *table_from_mappings(violations, indent="  ")])
@@ -196,19 +196,3 @@ def _owner_summary(item: Mapping[str, Any]) -> str:
     if isinstance(strategies, list) and strategies:
         return ", ".join(str(value) for value in strategies)
     return route_label(item)
-
-
-def _render_dmtm(value: Any) -> list[str]:
-    if not isinstance(value, Mapping):
-        return []
-    events = [item for item in value.get("events") or [] if isinstance(item, Mapping)]
-    counts = [
-        ("resolved", len(value.get("resolved") or [])),
-        ("cash changes", len(value.get("cash_changes") or [])),
-        ("position changes", len(value.get("position_changes") or [])),
-        ("margin changes", len(value.get("margin_changes") or [])),
-    ]
-    return _section("DMTM 审计", [
-        *table_from_mappings(events, indent="  "),
-        *render_key_value_rows(counts, indent="  "),
-    ])

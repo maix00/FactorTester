@@ -167,6 +167,8 @@ def _market_snapshot(value: Any, *, indent: str) -> list[str] | None:
 def _tradable_status(value: Any, *, indent: str) -> list[str] | None:
     if not isinstance(value, Mapping) or not all(isinstance(item, bool) for item in value.values()):
         return None
+    if not value:
+        return [f"{indent}instruments=0"]
     blocked = [instrument for instrument, tradable in value.items() if not tradable]
     lines = [f"{indent}tradable={len(value) - len(blocked)}, blocked={len(blocked)}"]
     if blocked:
