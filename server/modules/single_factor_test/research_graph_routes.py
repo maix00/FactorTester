@@ -401,6 +401,30 @@ def get_research_graph_branch_next(instance_id: str, branch_id: str):
 
 @sft_bp.get(
     "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/requirements/<requirement_id>"
+)
+def get_current_graph_requirement(
+    instance_id: str,
+    branch_id: str,
+    requirement_id: str,
+):
+    """Lazy-load one active requirement contract, never the full catalog."""
+    try:
+        value = research_graphs.load_current_graph_requirement(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+            requirement_id=requirement_id,
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "requirement": value})
+
+
+@sft_bp.get(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
     "/cycle-objects/<object_type>/<object_id>"
 )
 def get_research_cycle_object(

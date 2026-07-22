@@ -51,7 +51,8 @@ def build_graph_branch_next(
         for item in cycle.get("open_obligations") or []
         if isinstance(item, dict)
     ]
-    packet = {
+    entry_requirements = deepcopy(context.get("entry_requirements") or [])
+    packet: dict[str, Any] = {
         "graph": context["graph"],
         "branch": deepcopy(context["branch"]),
         "node": deepcopy(context["node"]),
@@ -85,11 +86,34 @@ def build_graph_branch_next(
             ready_l1 if len(ready_l1) == 1 else []
         ),
         "requires_agent_judgment": bool(
-            undetermined_ids or non_blocked_count > 1
+            entry_requirements
+            or undetermined_ids
+            or non_blocked_count > 1
         ),
         "running_backend_jobs_action": "continue",
         "next_bytes": 0,
     }
+    if "entry_requirements" in context:
+        packet["entry_requirements"] = entry_requirements
+        packet["entry_requirement_policy"] = {
+            "required_dimensions": [
+                "applicability",
+                "coverage",
+                "resolution",
+                "entry_effect",
+            ],
+            "agent_action": (
+                "submit_one_orthogonal_assessment_per_requirement_before_"
+                "leaving_current_node"
+            ),
+            "detail_command": (
+                "factortester research-graph requirement-detail "
+                "<instance> <branch> <requirement-id>"
+            ),
+        }
+        packet["node_report_requirement_refs"] = list(
+            context.get("node_report_requirement_refs") or []
+        )
     for _ in range(3):
         packet["next_bytes"] = len(orjson.dumps(packet))
     serialized_bytes = len(orjson.dumps(packet))
@@ -195,7 +219,7 @@ def _edge_candidate(
         "L3": "one_specialist",
         "L4": "proposer_plus_independent_reviewer",
     }.get(risk_level, "invalid")
-    return {
+    value = {
         "edge_id": str(edge.get("edge_id") or ""),
         "to_node": str(edge.get("to_node") or ""),
         "edge_type": str(edge.get("edge_type") or ""),
@@ -207,3 +231,8 @@ def _edge_candidate(
         "blockers": blockers,
         "review_requirement": review_requirement,
     }
+    if "report_requirement_refs" in edge:
+        value["report_requirement_refs"] = list(
+            edge.get("report_requirement_refs") or []
+        )
+    return value

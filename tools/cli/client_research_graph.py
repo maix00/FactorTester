@@ -391,6 +391,18 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("next") or {})
 
+    def get_current_graph_requirement(
+        self,
+        instance_id: str,
+        branch_id: str,
+        requirement_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/requirements/{requirement_id}"
+        ))
+        return dict(data.get("requirement") or {})
+
     def get_research_cycle_object(
         self,
         instance_id: str,

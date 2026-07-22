@@ -87,6 +87,39 @@ def cycle_inspect(
     click.echo(f"{object_type}: {object_id}")
 
 
+@cycle.command("requirement")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.argument("requirement_id")
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+def cycle_requirement(
+    instance_id: str,
+    branch_id: str,
+    requirement_id: str,
+    as_json: bool,
+) -> None:
+    """Lazy-load one requirement only after ``cycle next`` references it."""
+    result = run_factortester([
+        "research-graph",
+        "requirement-detail",
+        instance_id,
+        branch_id,
+        requirement_id,
+    ], timeout=60)
+    value = _backend_json(
+        result.returncode,
+        result.stdout,
+        result.stderr,
+    )
+    if as_json:
+        echo_json(value)
+        return
+    requirement = value.get("requirement") or {}
+    click.echo(
+        f"requirement: {requirement.get('requirement_id', requirement_id)}"
+    )
+
+
 @cycle.command("continuation-preview")
 @click.argument("instance_id")
 @click.argument("branch_id")

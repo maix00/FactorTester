@@ -242,6 +242,18 @@ class FakeClient:
             "requires_agent_judgment": False,
         }
 
+    def get_current_graph_requirement(
+        self, instance_id, branch_id, requirement_id,
+    ):
+        return {
+            "graph_ref": "factor-research@v9",
+            "node_id": "data_contract",
+            "requirement": {
+                "requirement_id": requirement_id,
+                "title_zh": "产品数据源",
+            },
+        }
+
 
 def test_research_graph_cli_publishes_and_reads_versions(
     tmp_path,
@@ -408,6 +420,26 @@ def test_research_graph_next_and_bounded_review_commands(
         == "auth-conversation:test-cli"
     )
     assert fake.review[1]["scope_drift"] is False
+
+
+def test_research_graph_requirement_detail_reads_only_one_contract(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "research-graph",
+        "requirement-detail",
+        "instance-1",
+        "branch-1",
+        "data.product_source_availability",
+    ])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["requirement"]["title_zh"] == "产品数据源"
+    assert "requirement_catalog" not in payload
 
 
 def test_research_graph_advance_projects_target_capability_descriptions(

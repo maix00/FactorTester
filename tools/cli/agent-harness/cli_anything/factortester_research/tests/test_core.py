@@ -143,6 +143,7 @@ def _schema_v2_graph() -> dict:
                 "requirement_id": "hypothesis_validity.mechanism_chain",
                 "category_id": "hypothesis_validity",
                 "revision": 1,
+                "gate_policy": "plan_before_exit",
                 "title_zh": "机制链",
                 "question_zh": "机制如何从事实传导至价格？",
                 "select_when_zh": "冻结研究假设前。",

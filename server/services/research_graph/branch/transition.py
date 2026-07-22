@@ -24,6 +24,9 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.guards import (
     system_transition_guard_facts,
 )
+from server.services.research_graph.branch.entry_assessments import (
+    validate_entry_requirement_assessments,
+)
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
     prepare_research_cycle_trace,
@@ -199,11 +202,38 @@ def advance_graph_branch(
             )
         if branch["status"] == "paused" and edge.get("edge_type") != "recovery":
             raise ValueError("paused branch only accepts a recovery edge")
+        current_node = next(
+            (
+                item
+                for item in graph.get("nodes") or []
+                if str(item.get("node_id") or "") == branch["current_node"]
+            ),
+            None,
+        )
+        if current_node is None:
+            raise ValueError("current graph node is missing")
+        target_id = str(edge.get("to_node") or "")
         cycle_event, cycle_checkpoint = prepare_research_cycle_trace(
             update=cycle_update,
             previous_checkpoint=previous_cycle_checkpoint,
             latest_trace_id=str(branch_row["latest_trace_id"]),
         )
+        entry_assessments = validate_entry_requirement_assessments(
+            graph=graph,
+            node=current_node,
+            checkpoint=cycle_checkpoint,
+            target_node=target_id,
+            submitted=prepared_evidence.get(
+                "entry_requirement_assessments"
+            ),
+        )
+        if entry_assessments:
+            prepared_evidence["entry_requirement_assessments"] = (
+                entry_assessments
+            )
+            persisted_evidence["entry_requirement_assessments"] = (
+                entry_assessments
+            )
         route_action = accepted_adjudication_action(
             previous_checkpoint=previous_cycle_checkpoint,
             events=(
@@ -254,7 +284,6 @@ def advance_graph_branch(
             not isinstance(evidence_refs, list) or not evidence_refs
         ):
             raise ValueError("transition requires evidence_refs")
-        target_id = str(edge.get("to_node") or "")
         target = next(
             (
                 item

@@ -14,6 +14,9 @@ from server.services.research_graph.branch.repository import (
     load_current_branch_resolution,
     load_instance_branch_with_latest_trace,
 )
+from server.services.research_graph.branch.entry_requirements import (
+    compact_entry_requirements,
+)
 from server.services.research_graph.branch.research_cycle import (
     agent_cycle_summary,
     checkpoint_from_branch_row,
@@ -84,6 +87,7 @@ def _build_local_state(
             graph_id=str(branch_row["graph_id"]),
             version=int(branch_row["graph_version"]),
         ) or {}
+        schema_version = int(graph.get("schema_version") or 1)
         node = next(
             (
                 item
@@ -110,6 +114,11 @@ def _build_local_state(
                 "required_transition_facts": deepcopy(
                     edge.get("required_transition_facts") or []
                 ),
+                **({
+                    "report_requirement_refs": deepcopy(
+                        edge.get("report_requirement_refs") or []
+                    ),
+                } if schema_version >= 2 else {}),
             }
             for edge in graph.get("edges") or []
             if str(edge.get("from_node") or "") in {
@@ -160,9 +169,19 @@ def _build_local_state(
         trial_stage = agent_trial_stage_summary(
             loads(branch_row["trial_stage_projection_json"]) or {}
         )
-        research_cycle = _compact_research_cycle(agent_cycle_summary(
-            checkpoint_from_branch_row(branch_row)
-        ))
+        cycle_checkpoint = checkpoint_from_branch_row(branch_row)
+        research_cycle = _compact_research_cycle(
+            agent_cycle_summary(cycle_checkpoint)
+        )
+        entry_requirements = (
+            compact_entry_requirements(
+                graph=graph,
+                node=node,
+                checkpoint=cycle_checkpoint,
+            )
+            if schema_version >= 2
+            else []
+        )
     triggered_gap_ids = {
         str(item.get("capability_id") or "")
         for item in resolution.get("triggered_conditional_gaps") or []
@@ -239,6 +258,12 @@ def _build_local_state(
             "grill": "change_diff_only",
         },
     }
+    if schema_version >= 2:
+        context["entry_requirements"] = entry_requirements
+        context["node_report_requirement_refs"] = [
+            *node.get("entry_report_refs", []),
+            *node.get("node_report_refs", []),
+        ]
     context["context_bytes"] = 0
     for _ in range(3):
         context["context_bytes"] = len(orjson.dumps(context))

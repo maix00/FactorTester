@@ -22,6 +22,9 @@ from server.services.research_graph.branch.cycle_objects import (
 from server.services.research_graph.branch.next_packet import (
     build_graph_branch_next,
 )
+from server.services.research_graph.branch.requirement_read import (
+    load_current_graph_requirement,
+)
 from server.services.research_graph.branch.repository import (
     store_current_branch_resolution as _store_current_branch_resolution,
 )
@@ -73,6 +76,7 @@ __all__ = [
     "load_active_graph",
     "load_graph",
     "load_graph_branch",
+    "load_current_graph_requirement",
     "load_research_cycle_object",
     "preview_graph_continuation",
     "record_audit",

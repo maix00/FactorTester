@@ -399,6 +399,23 @@ def show_research_cycle_object(
     )))
 
 
+@research_graph.command("requirement-detail")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.argument("requirement_id")
+def show_current_graph_requirement(
+    instance_id: str,
+    branch_id: str,
+    requirement_id: str,
+) -> None:
+    """按需读取当前节点的一项义务要求合同。"""
+    click.echo(_json(client_from_config().get_current_graph_requirement(
+        instance_id,
+        branch_id,
+        requirement_id,
+    )))
+
+
 @research_graph.command("fork")
 @click.argument("instance_id")
 @click.argument("branch_id")

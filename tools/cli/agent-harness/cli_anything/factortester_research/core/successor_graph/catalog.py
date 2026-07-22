@@ -146,6 +146,7 @@ def build_requirement_catalog() -> dict[str, Any]:
                 "requirement_id": requirement_id,
                 "category_id": category_id,
                 "revision": 1,
+                "gate_policy": _gate_policy(category_id, short_id),
                 "title_zh": question.rstrip("？"),
                 "question_zh": question,
                 "select_when_zh": "当前研究范围、目标节点或候选试验涉及该问题时。",
@@ -194,6 +195,18 @@ def resolver_capability_descriptors() -> dict[str, dict[str, str]]:
         }
         for category_id in CATEGORY_SPECS
     }
+
+
+def _gate_policy(category_id: str, short_id: str) -> str:
+    if category_id in {
+        "trial_design_validity",
+        "statistical_validity",
+        "market_execution_accounting",
+    }:
+        return "resolve_before_exit"
+    if category_id == "other":
+        return "discover_before_exit"
+    return "plan_before_exit"
 
 
 def _basis_refs(category_id: str) -> list[str]:

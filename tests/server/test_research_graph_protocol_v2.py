@@ -58,6 +58,7 @@ def _minimal_graph_v2() -> dict:
                 "requirement_id": requirement_id,
                 "category_id": "data",
                 "revision": 1,
+                "gate_policy": "plan_before_exit",
                 "title_zh": "产品数据源",
                 "question_zh": "目标产品是否有可用数据源？",
                 "select_when_zh": "进入数据契约时。",

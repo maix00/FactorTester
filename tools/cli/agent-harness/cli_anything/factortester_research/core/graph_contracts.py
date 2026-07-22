@@ -14,6 +14,11 @@ _ANCHOR_KINDS = {
 }
 _CONTENT_KINDS = {"sentence", "list", "table", "figure"}
 _POLICY_KINDS = {"continuation_reentry", "node_reentry", "evidence_admission"}
+_ENTRY_GATE_POLICIES = {
+    "discover_before_exit",
+    "plan_before_exit",
+    "resolve_before_exit",
+}
 
 
 def _text(value: Any) -> bool:
@@ -85,6 +90,8 @@ def _validate_catalog(
             raise ValueError(f"unknown category for entry requirement: {requirement_id}")
         if int(item.get("revision") or 0) < 1:
             raise ValueError(f"entry requirement revision is required: {requirement_id}")
+        if str(item.get("gate_policy") or "") not in _ENTRY_GATE_POLICIES:
+            raise ValueError(f"invalid entry requirement gate_policy: {requirement_id}")
         for field in (
             "title_zh",
             "question_zh",
