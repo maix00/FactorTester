@@ -30,6 +30,7 @@ from server.services.research_graph.branch.entry_assessments import (
 from server.services.research_graph.branch.entry_resolution_frame import (
     active_entry_requirement_ids,
     advance_entry_resolution_frame,
+    entry_resolution_trace_delta,
 )
 from server.services.research_graph.branch.entry_assessment_receipts import (
     project_node_entry_resolution,
@@ -95,9 +96,12 @@ def advance_graph_branch(
     if not isinstance(evidence, dict):
         raise ValueError("transition evidence must be an object")
     acting_profile_ref = optional_profile_ref(acting_profile_ref)
-    if "server_evidence" in evidence or "report_lineage" in evidence:
+    if any(key in evidence for key in (
+        "server_evidence", "report_lineage", "entry_resolution_delta",
+    )):
         raise ValueError(
-            "server_evidence and report_lineage are server-owned"
+            "server_evidence, report_lineage, and entry_resolution_delta "
+            "are server-owned"
         )
     evidence = validate_agent_evidence_payload(evidence)
     submitted_resolution = evidence.get("target_capability_resolution")
@@ -445,6 +449,15 @@ def advance_graph_branch(
                 assessment_trace_ref=f"trace:{trace_id}",
             )
         trace_evidence = deepcopy(persisted_evidence)
+        trace_evidence["entry_resolution_delta"] = (
+            entry_resolution_trace_delta(
+                current_frame=current_entry_resolution_frame,
+                projected_frame=projected_entry_resolution_frame,
+                current_node=branch["current_node"],
+                target_node=target_id,
+                assessments=entry_assessments,
+            )
+        )
         trace_evidence.pop("research_cycle", None)
         if cycle_event is not None and cycle_checkpoint is not None:
             trace_evidence["research_cycle"] = cycle_event

@@ -201,7 +201,8 @@ def transition_step_projection(
         f"delta:{trace_id}:claim:{item['claim_id']}"
         for item in claim_changes
     ]
-    return {
+    entry_resolution = evidence.get("entry_resolution_delta")
+    value = {
         "step_ref": f"trace:{trace_id}",
         "edge_ref": f"graph-edge:{edge_id}",
         "from_node": bounded_text(from_node, 128),
@@ -217,6 +218,19 @@ def transition_step_projection(
         "obligation_changes": obligation_changes,
         "claim_changes": claim_changes,
     }
+    if isinstance(entry_resolution, dict):
+        value["entry_resolution"] = {
+            key: entry_resolution.get(key)
+            for key in (
+                "reason",
+                "assessed_requirement_ids",
+                "reused_requirement_ids",
+                "reference_only_requirement_ids",
+                "unresolved_requirement_ids",
+                "resume_node",
+            )
+        }
+    return value
 
 
 def cycle_projection(value: Any) -> dict[str, Any]:

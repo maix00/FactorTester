@@ -132,6 +132,37 @@ def compact_entry_resolution_frame(
     return value
 
 
+def entry_resolution_trace_delta(
+    *, current_frame: dict[str, Any], projected_frame: dict[str, Any],
+    current_node: str, target_node: str,
+    assessments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Persist only reportable change IDs; detailed bodies stay lazy."""
+    return {
+        "schema_version": 1,
+        "reason": str(
+            current_frame.get("reason") or "node_entry"
+        ),
+        "from_node": current_node,
+        "to_node": target_node,
+        "assessed_requirement_ids": sorted({
+            str(item.get("requirement_id") or "")
+            for item in assessments
+            if isinstance(item, dict) and item.get("requirement_id")
+        }),
+        "reused_requirement_ids": _text_ids(
+            projected_frame.get("reused_requirement_ids")
+        ),
+        "reference_only_requirement_ids": _text_ids(
+            projected_frame.get("reference_only_requirement_ids")
+        ),
+        "unresolved_requirement_ids": _text_ids(
+            projected_frame.get("unresolved_requirement_ids")
+        ),
+        "resume_node": str(projected_frame.get("resume_node") or ""),
+    }
+
+
 def _text_ids(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []

@@ -341,6 +341,12 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
     assessment = trace["entry_requirement_assessments"][0]
     assert assessment["coverage"]["decision"] == "map_existing"
     assert assessment["resolution"]["route"] == "cli_evidence"
+    assert trace["entry_resolution_delta"]["assessed_requirement_ids"] == [
+        "data-availability.scope"
+    ]
+    assert trace["entry_resolution_delta"]["reused_requirement_ids"] == [
+        "data-availability.scope"
+    ]
     packet = research_graphs.build_graph_branch_next(
         instance_id="instance-1",
         branch_id="branch-1",
@@ -362,3 +368,12 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
     )
     assert returned["entry_requirements"] == []
     assert returned["entry_resolution"]["reused_requirement_count"] == 1
+    with connect_sqlite(path) as conn:
+        latest = orjson.loads(conn.execute(
+            "SELECT evidence_json FROM research_graph_trace "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()["evidence_json"])
+    assert latest["entry_resolution_delta"]["assessed_requirement_ids"] == []
+    assert latest["entry_resolution_delta"]["reused_requirement_ids"] == [
+        "data-availability.scope"
+    ]
