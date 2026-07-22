@@ -263,8 +263,17 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
     graph["nodes"][0]["entry_requirement_refs"] = [
         "data-availability.scope"
     ]
-    for node in graph["nodes"][1:]:
-        node["entry_requirement_refs"] = []
+    graph["nodes"][1]["entry_requirement_refs"] = [
+        "data-availability.scope"
+    ]
+    graph["nodes"][2]["entry_requirement_refs"] = []
+    graph["edges"].append({
+        "edge_id": "factor_semantics__data_contract",
+        "from_node": "factor_semantics",
+        "to_node": "data_contract",
+        "guard": {},
+        "required_evidence": [],
+    })
     graph["requirement_catalog"] = {
         "requirements": [{
             "requirement_id": "data-availability.scope",
@@ -332,3 +341,24 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
     assessment = trace["entry_requirement_assessments"][0]
     assert assessment["coverage"]["decision"] == "map_existing"
     assert assessment["resolution"]["route"] == "cli_evidence"
+    packet = research_graphs.build_graph_branch_next(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+    )
+    assert packet["entry_requirements"] == []
+    assert packet["entry_resolution"]["reused_requirement_count"] == 1
+    advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="factor_semantics__data_contract",
+        evidence={},
+    )
+    returned = research_graphs.build_graph_branch_next(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+    )
+    assert returned["entry_requirements"] == []
+    assert returned["entry_resolution"]["reused_requirement_count"] == 1

@@ -387,7 +387,14 @@ def _prepare(
             source["trial_stage_projection_json"]
         ),
         "entry_resolution_frame_json": orjson.dumps(
-            initial_entry_resolution_frame(descriptor)
+            initial_entry_resolution_frame(
+                descriptor,
+                inherited_frame=(
+                    orjson.loads(source["entry_resolution_frame_json"])
+                    if source["entry_resolution_frame_json"]
+                    else {}
+                ),
+            )
         ).decode(),
     }
 

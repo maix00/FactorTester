@@ -8,6 +8,8 @@ from typing import Any
 
 def initial_entry_resolution_frame(
     descriptor: dict[str, Any],
+    *,
+    inherited_frame: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create an attached frame; it is not a business-state Graph node."""
     if descriptor.get("continuation_mode") != "same_node_reentry":
@@ -16,7 +18,7 @@ def initial_entry_resolution_frame(
     if not isinstance(preflight, dict):
         return {}
     unresolved = _text_ids(preflight.get("assessment_required_ids"))
-    return {
+    value = {
         "schema_version": 1,
         "reason": "graph_continuation",
         "status": "pending" if unresolved else "resolved",
@@ -37,6 +39,14 @@ def initial_entry_resolution_frame(
             preflight.get("entry_metadata_changed_ids")
         ),
     }
+    receipts = (
+        inherited_frame.get("assessment_receipts")
+        if isinstance(inherited_frame, dict)
+        else None
+    )
+    if isinstance(receipts, list) and receipts:
+        value["assessment_receipts"] = deepcopy(receipts)
+    return value
 
 
 def active_entry_requirement_ids(
@@ -45,7 +55,6 @@ def active_entry_requirement_ids(
     """Return the upgrade delta at its resume node; None means normal entry."""
     if (
         frame.get("schema_version") == 1
-        and frame.get("status") == "pending"
         and str(frame.get("resume_node") or "") == current_node
     ):
         return _text_ids(frame.get("unresolved_requirement_ids"))
@@ -97,7 +106,7 @@ def compact_entry_resolution_frame(
 ) -> dict[str, Any] | None:
     if frame.get("schema_version") != 1:
         return None
-    return {
+    value = {
         key: deepcopy(frame.get(key))
         for key in (
             "reason",
@@ -109,10 +118,18 @@ def compact_entry_resolution_frame(
             "unresolved_requirement_ids",
             "removed_requirement_ids",
             "metadata_changed_requirement_ids",
+            "reference_only_requirement_ids",
             "detour_node",
         )
         if key in frame
     }
+    value["reused_requirement_count"] = len(
+        _text_ids(frame.get("reused_requirement_ids"))
+    )
+    value["cached_receipt_count"] = len(
+        frame.get("assessment_receipts") or []
+    )
+    return value
 
 
 def _text_ids(value: Any) -> list[str]:

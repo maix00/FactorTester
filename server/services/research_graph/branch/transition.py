@@ -31,6 +31,10 @@ from server.services.research_graph.branch.entry_resolution_frame import (
     active_entry_requirement_ids,
     advance_entry_resolution_frame,
 )
+from server.services.research_graph.branch.entry_assessment_receipts import (
+    project_node_entry_resolution,
+    record_assessment_receipts,
+)
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
     prepare_research_cycle_trace,
@@ -247,7 +251,7 @@ def advance_graph_branch(
             persisted_evidence["entry_requirement_assessments"] = (
                 entry_assessments
             )
-        projected_entry_resolution_frame = advance_entry_resolution_frame(
+        advanced_entry_resolution_frame = advance_entry_resolution_frame(
             frame=current_entry_resolution_frame,
             current_node=branch["current_node"],
             target_node=target_id,
@@ -415,6 +419,31 @@ def advance_graph_branch(
             projected_stage = advance_trial_stage(
                 current_stage_projection
             )
+        trace_id = uuid.uuid4().hex
+        entry_scope = {
+            "product_group": str(branch_row["product_group"]),
+            "workspace_id": str(branch_row["workspace_id"]),
+        }
+        receipt_frame = record_assessment_receipts(
+            previous_frame=advanced_entry_resolution_frame,
+            graph=graph,
+            checkpoint=cycle_checkpoint,
+            scope=entry_scope,
+            accepted_assessments=entry_assessments,
+            assessment_trace_ref=f"trace:{trace_id}",
+        )
+        if receipt_frame.get("status") == "pending":
+            projected_entry_resolution_frame = receipt_frame
+        else:
+            projected_entry_resolution_frame = project_node_entry_resolution(
+                previous_frame=receipt_frame,
+                graph=graph,
+                target_node=target_id,
+                checkpoint=cycle_checkpoint,
+                scope=entry_scope,
+                accepted_assessments=[],
+                assessment_trace_ref=f"trace:{trace_id}",
+            )
         trace_evidence = deepcopy(persisted_evidence)
         trace_evidence.pop("research_cycle", None)
         if cycle_event is not None and cycle_checkpoint is not None:
@@ -470,7 +499,6 @@ def advance_graph_branch(
                 trace_evidence.get("evidence_refs"),
             )
         )
-        trace_id = uuid.uuid4().hex
         now = time.time()
         conn.execute(
             """
