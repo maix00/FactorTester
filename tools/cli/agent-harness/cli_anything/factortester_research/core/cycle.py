@@ -43,8 +43,13 @@ def validate_transition_evidence(
     """Validate Agent-authored proposals before any backend mutation."""
     if not isinstance(evidence, dict):
         raise ValueError("transition evidence must be an object")
-    if "server_evidence" in evidence:
-        raise ValueError("server_evidence is server-owned")
+    for field in (
+        "server_evidence",
+        "report_lineage",
+        "entry_resolution_delta",
+    ):
+        if field in evidence:
+            raise ValueError(f"{field} is server-owned")
     assert_no_legacy_evidence_payload(evidence)
     _reject_fields(evidence, _FORBIDDEN_SKILL_FIELDS, "Skill identity")
     cycle = evidence.get("research_cycle")

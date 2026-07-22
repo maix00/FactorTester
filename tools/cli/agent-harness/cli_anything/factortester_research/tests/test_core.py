@@ -1562,6 +1562,15 @@ def test_transition_validation_rejects_client_server_evidence() -> None:
         })
 
 
+def test_transition_validation_rejects_client_entry_resolution_delta() -> None:
+    with pytest.raises(ValueError, match="entry_resolution_delta is server-owned"):
+        validate_transition_evidence({
+            "entry_resolution_delta": {
+                "reused_requirement_ids": ["data.required_fields"],
+            },
+        })
+
+
 def test_replay_derives_factor_semantics_guards_from_server_evidence() -> None:
     envelope = validate_evidence_envelope({
         "schema_version": 2,
