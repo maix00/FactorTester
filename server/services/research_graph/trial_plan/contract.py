@@ -28,11 +28,18 @@ from .stage_policy import (
     canonical_stage_policy,
     validate_stage_samples,
 )
+from .v5_design import (
+    canonical_v5_comparisons,
+    canonical_v5_samples,
+    canonical_v5_stage_policy,
+)
+from .v5_contract import canonical_v5_metadata
 
 
-TRIAL_PLAN_SCHEMA_VERSION = 4
-SUPPORTED_TRIAL_PLAN_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
+TRIAL_PLAN_SCHEMA_VERSION = 5
+SUPPORTED_TRIAL_PLAN_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5})
 MAX_TRIAL_PLAN_BYTES = 4096
+MAX_TRIAL_PLAN_V5_BYTES = 8192
 MAX_OBLIGATION_REFS = 32
 _ROOT_FIELDS = {
     "schema_version",
@@ -64,6 +71,31 @@ _ROOT_FIELDS_BY_VERSION = {
         "obligation_refs",
         "parent_trial_plan_hash",
         "stage_policy",
+    }),
+    5: frozenset({
+        "schema_version",
+        "trial_plan_id",
+        "version",
+        "hypothesis_ref",
+        "trial_family",
+        "protocol_ref",
+        "outcomes",
+        "samples",
+        "comparisons",
+        "stopping",
+        "multiplicity",
+        "criteria",
+        "decision_contract_hash",
+        "methodology_hash",
+        "parent_trial_plan_hash",
+        "stage_policy",
+        "primary_obligation_ref",
+        "secondary_obligation_refs",
+        "design_evidence_refs",
+        "trial_ledger_ref",
+        "holdout_access_ledger_ref",
+        "reopen_predicate_refs",
+        "evidence_actions",
     }),
 }
 
@@ -109,17 +141,28 @@ def canonical_trial_plan(value: Any) -> dict[str, Any]:
         ),
     }
     outcomes, outcome_ids = canonical_outcomes(plan.get("outcomes"))
-    sample_roles, planned_samples = canonical_sample_roles(
-        plan.get("sample_roles")
-    )
-    comparisons = canonical_comparisons(
-        plan.get("comparisons"),
-        planned_samples=planned_samples,
-        enforce_sample_role=schema_version < 4,
-    )
+    if schema_version == 5:
+        stage_policy = canonical_v5_stage_policy(plan.get("stage_policy"))
+        sample_roles, planned_samples = canonical_v5_samples(
+            plan.get("samples"),
+            stage_ids=set(stage_policy["ordered_stage_ids"]),
+        )
+        comparisons = canonical_v5_comparisons(
+            plan.get("comparisons"),
+            run_bindings=planned_samples,
+        )
+    else:
+        sample_roles, planned_samples = canonical_sample_roles(
+            plan.get("sample_roles")
+        )
+        comparisons = canonical_comparisons(
+            plan.get("comparisons"),
+            planned_samples=planned_samples,
+            enforce_sample_role=schema_version < 4,
+        )
     normalized.update({
         "outcomes": outcomes,
-        "sample_roles": sample_roles,
+        ("samples" if schema_version == 5 else "sample_roles"): sample_roles,
         "comparisons": comparisons,
         "stopping": canonical_stopping(
             plan.get("stopping"),
@@ -128,7 +171,7 @@ def canonical_trial_plan(value: Any) -> dict[str, Any]:
         "multiplicity": canonical_multiplicity(plan.get("multiplicity")),
         "criteria": canonical_criteria(plan.get("criteria")),
     })
-    if schema_version >= 3:
+    if 3 <= schema_version <= 4:
         normalized["decision_contract_hash"] = sha256_field(
             plan.get("decision_contract_hash"),
             "trial_plan.decision_contract_hash",
@@ -148,7 +191,7 @@ def canonical_trial_plan(value: Any) -> dict[str, Any]:
                 f"{MAX_OBLIGATION_REFS} items"
             )
         normalized["obligation_refs"] = obligation_refs
-    if schema_version >= 4:
+    if schema_version == 4:
         parent_hash = plan.get("parent_trial_plan_hash")
         normalized["parent_trial_plan_hash"] = (
             None
@@ -164,10 +207,20 @@ def canonical_trial_plan(value: Any) -> dict[str, Any]:
             sample_roles=sample_roles,
         )
         normalized["stage_policy"] = stage_policy
+    if schema_version == 5:
+        normalized.update(canonical_v5_metadata(
+            plan,
+            stage_policy=stage_policy,
+        ))
     encoded = _encode(normalized)
-    if len(encoded) > MAX_TRIAL_PLAN_BYTES:
+    maximum = (
+        MAX_TRIAL_PLAN_V5_BYTES
+        if schema_version == 5
+        else MAX_TRIAL_PLAN_BYTES
+    )
+    if len(encoded) > maximum:
         raise ValueError(
-            f"TrialPlan exceeds {MAX_TRIAL_PLAN_BYTES} bytes"
+            f"TrialPlan exceeds {maximum} bytes"
         )
     return normalized
 
