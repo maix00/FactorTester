@@ -228,6 +228,21 @@ def _audit_value(
         return value if math.isfinite(value) else str(value)
     if isinstance(value, (pd.Timestamp, pd.Timedelta)):
         return str(value)
+    from tools.data.types.data_money import DataMoney
+    if isinstance(value, DataMoney):
+        stored_amount = _audit_value(value.amount, key_labels=key_labels, _seen=_seen)
+        major_amount = _audit_value(value.to_major(), key_labels=key_labels, _seen=_seen)
+        return {
+            "type": "DataMoney",
+            "currency": value.currency,
+            "use_minor_units": bool(value.use_minor_units),
+            "scale": int(value.scale),
+            "amount": stored_amount,
+            "amount_unit": "minor" if value.use_minor_units else "major",
+            "minor_units": stored_amount if value.use_minor_units else None,
+            "major_units": major_amount,
+            "display": str(value),
+        }
     if isinstance(value, EventDraft):
         return _audit_event_draft_value(value, key_labels=key_labels)
     if type(value).__name__ == "TimestampTradingDayResolver":

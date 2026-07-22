@@ -477,6 +477,73 @@ def test_step_mode_reports_mutable_event_payload_before_and_after_per_strategy()
     }]
 
 
+def test_step_mode_preserves_data_money_storage_units_in_flow_outputs():
+    import orjson
+
+    from tools.data.types.data_money import DataMoney
+    from tools.testers.backtest.modules.base import FieldRef
+
+    strategy = Strategy(alias="S-money")
+    money_output = FieldRef("money_output", owner="Audit")
+    major_money_output = FieldRef("major_money_output", owner="Audit")
+    records: list[dict] = []
+
+    def emit_money(account, ctx) -> None:
+        ctx.set(
+            money_output,
+            DataMoney.from_major(
+                1234.567,
+                currency="CNY",
+                use_minor_units=True,
+            ),
+        )
+        ctx.set(
+            major_money_output,
+            DataMoney.from_major(
+                12.345,
+                currency="CNY",
+                use_minor_units=False,
+            ),
+        )
+
+    flow = Flow(
+        "emit_money",
+        inputs=(),
+        outputs=(money_output, major_money_output),
+        phase=Phase.PRE_REPLAY,
+        compute=emit_money,
+    )
+    account = _account([strategy], active_flow_names=frozenset({"emit_money"}))
+
+    run(account, EventQueue(), [flow], step_mode=True, step_callback=records.append)
+
+    value = records[0]["outputs"][0]["values"][0]["value"]
+    assert value == {
+        "type": "DataMoney",
+        "currency": "CNY",
+        "use_minor_units": True,
+        "scale": 100,
+        "amount": 123457,
+        "amount_unit": "minor",
+        "minor_units": 123457,
+        "major_units": 1234.57,
+        "display": "DataMoney(1,234,57 CNY)",
+    }
+    assert orjson.loads(orjson.dumps(records[0]))["outputs"][0]["values"][0]["value"] == value
+    major_value = records[0]["outputs"][1]["values"][0]["value"]
+    assert major_value == {
+        "type": "DataMoney",
+        "currency": "CNY",
+        "use_minor_units": False,
+        "scale": 100,
+        "amount": 12.345,
+        "amount_unit": "major",
+        "minor_units": None,
+        "major_units": 12.345,
+        "display": "DataMoney(12.35 CNY)",
+    }
+
+
 def test_step_mode_summarizes_daily_mark_to_market_checkpoint():
     """A DMTM pause exposes the accounting evidence without inspecting internals."""
     from tools.testers.backtest.engines.native.ledger import ledger_identity
@@ -588,7 +655,7 @@ def test_step_mode_dmtm_summary_contains_real_cash_and_position_changes():
     set_cash_for_ledger_pool(
         account,
         ledger,
-        DataMoney.from_major(1_000.0, currency="CNY", use_minor_units=False),
+        DataMoney.from_major(1_000.0, currency="CNY", use_minor_units=True),
     )
 
     def prepare(_account, ctx) -> None:
@@ -652,6 +719,13 @@ def test_step_mode_dmtm_summary_contains_real_cash_and_position_changes():
         "trading_day": "2026-01-05",
     }]
     assert dmtm["cash_changes"]
+    cash_change = dmtm["cash_changes"][0]
+    assert cash_change["before"]["type"] == "DataMoney"
+    assert cash_change["before"]["use_minor_units"] is True
+    assert cash_change["before"]["minor_units"] == 100_000
+    assert cash_change["after"]["type"] == "DataMoney"
+    assert cash_change["after"]["use_minor_units"] is True
+    assert cash_change["after"]["minor_units"] == 102_000
     assert dmtm["position_changes"]
     assert dmtm["market_rule_inputs"]
     resolved = next(
