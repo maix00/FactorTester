@@ -99,6 +99,27 @@ def test_xcode_macos_target_uses_the_same_stable_signing_identity() -> None:
 
     assert "CODE_SIGN_STYLE: Manual" in macos
     assert "CODE_SIGN_IDENTITY: FTClient Beta Release" in macos
+    assert "ENABLE_DEBUG_DYLIB: NO" in macos
+    assert "Debug:\n          # XCTest is injected" in macos
+    assert "ENABLE_HARDENED_RUNTIME: NO" in macos
+    assert "Release:\n          ENABLE_HARDENED_RUNTIME: YES" in macos
+
+    unit_tests = project.split("FactorTester-ClientTests:", 1)[1].split(
+        "FactorTester-ClientUITests:", 1
+    )[0]
+    ui_tests = project.split("FactorTester-ClientUITests:", 1)[1].split(
+        "schemes:", 1
+    )[0]
+    for test_target in (unit_tests, ui_tests):
+        assert "CODE_SIGN_STYLE: Manual" in test_target
+        assert "CODE_SIGN_IDENTITY: FTClient Beta Release" in test_target
+        assert 'CODE_SIGN_IDENTITY: "-"' not in test_target
+    schemes = project.split("schemes:", 1)[1]
+    unit_scheme = schemes.split("FactorTester-Client-UI:", 1)[0]
+    ui_scheme = schemes.split("FactorTester-Client-UI:", 1)[1]
+    assert "- FactorTester-ClientTests" in unit_scheme
+    assert "- FactorTester-ClientUITests" not in unit_scheme
+    assert "- FactorTester-ClientUITests" in ui_scheme
 
 
 def test_in_app_update_refuses_a_different_designated_requirement() -> None:

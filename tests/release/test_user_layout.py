@@ -98,10 +98,17 @@ def test_profile_cli_has_no_legacy_layout_commands(tmp_path, monkeypatch):
 
     help_result = runner.invoke(cli, ["client", "profile", "--help"])
     assert help_result.exit_code == 0, help_result.output
-    for obsolete in ("personal-workspace", "workspace", "init"):
+    for obsolete in ("personal-workspace", "init"):
         result = runner.invoke(cli, ["client", "profile", obsolete])
         assert result.exit_code == 2
         assert f"No such command '{obsolete}'" in result.output
+
+    workspace_help = runner.invoke(
+        cli, ["client", "profile", "workspace", "--help"]
+    )
+    assert workspace_help.exit_code == 0, workspace_help.output
+    for command in ("bind", "list", "remove"):
+        assert command in workspace_help.output
 
     layout_help = runner.invoke(
         cli, ["client", "profile", "user-layout", "--help"]

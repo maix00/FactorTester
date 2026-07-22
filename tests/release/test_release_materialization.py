@@ -65,6 +65,8 @@ def test_real_client_and_harness_wheels_materialize_together(
             "title": "Checkpoint one",
             "body": "The installed harness rendered this checkpoint.",
             "created_at": 1.0,
+            "checkpoint_ref": "trace:checkpoint-one",
+            "branch_ref": "graph-branch:instance-one:branch-one",
             "links": [],
             "evidence_refs": [],
             "asset_refs": [],

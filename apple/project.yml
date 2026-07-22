@@ -60,9 +60,20 @@ targets:
         # signing and makes macOS ask for Documents access after every swap.
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: FTClient Beta Release
+        # Avoid Xcode's trampoline executable race during hosted XCTest.
+        # The complete debug image remains directly debuggable in the app.
+        ENABLE_DEBUG_DYLIB: NO
         CODE_SIGN_ENTITLEMENTS: Resources/macOS/FactorTester-Client.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          # XCTest is injected into the app process. A local self-signed
+          # certificate has no Apple Team ID, so Release-style library
+          # validation would reject even a bundle signed by the same cert.
+          ENABLE_HARDENED_RUNTIME: NO
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
     info:
       path: Resources/macOS/Info.plist
       properties:
@@ -84,7 +95,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client.tests
-        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: FTClient Beta Release
+        GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/FTClient.app/Contents/MacOS/FTClient"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
@@ -100,7 +113,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client.uitests
         CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_IDENTITY: FTClient Beta Release
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
@@ -112,3 +125,11 @@ schemes:
     test:
       targets:
         - FactorTester-ClientTests
+  FactorTester-Client-UI:
+    build:
+      targets:
+        FactorTester-Client-macOS: all
+        FactorTester-ClientUITests: [test]
+    test:
+      targets:
+        - FactorTester-ClientUITests
