@@ -108,12 +108,14 @@ struct ResearchJournalSection: Decodable, Identifiable {
 struct ResearchJournalBlock: Decodable {
     let kind: String
     let text: String?
+    let latex: String?
+    let fallback: String?
     let linkIDs: [String]
     let columns: [String]
     let rows: [ResearchJournalRow]
 
     enum CodingKeys: String, CodingKey {
-        case kind, text, columns, rows
+        case kind, text, latex, fallback, columns, rows
         case linkIDs = "link_ids"
     }
 
@@ -121,6 +123,8 @@ struct ResearchJournalBlock: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         kind = try container.decode(String.self, forKey: .kind)
         text = try container.decodeIfPresent(String.self, forKey: .text)
+        latex = try container.decodeIfPresent(String.self, forKey: .latex)
+        fallback = try container.decodeIfPresent(String.self, forKey: .fallback)
         linkIDs = try container.decodeIfPresent(
             [String].self, forKey: .linkIDs
         ) ?? []
@@ -181,7 +185,7 @@ enum ResearchJournalPresentation {
         sectionTitle: String,
         obligations: [ResearchObligationProjection]
     ) -> String {
-        let summary = link.label.flatMap(nonEmpty)
+        let summary = link.label.flatMap(displayAlias)
             ?? obligationSummary(for: link, in: obligations)
             ?? contextualSummary(for: link.kind, sectionTitle: sectionTitle)
         return "\(ResearchDisplayText.linkKind(link.kind)) · \(summary)"
@@ -215,6 +219,15 @@ enum ResearchJournalPresentation {
         case "report_section": return "\(section)报告章节"
         default: return "\(section)审计详情"
         }
+    }
+
+    private static func displayAlias(_ value: String) -> String? {
+        guard let text = nonEmpty(value) else { return nil }
+        let opaque = text.range(
+            of: #"^(?:[0-9a-f]{32,64}|[0-9a-f]{8}-[0-9a-f-]{27,})$"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+        return opaque ? nil : text
     }
 
     static func statusLabel(_ status: String) -> String {
@@ -392,6 +405,15 @@ enum ResearchJournalLoader {
         let linkIDs = Set(section.links.map(\.linkID))
         for block in section.blocks {
             switch block.kind {
+            case "math":
+                guard block.text == nil,
+                      let latex = block.latex, !latex.isEmpty,
+                      let fallback = block.fallback, !fallback.isEmpty,
+                      block.columns.isEmpty, block.rows.isEmpty,
+                      !block.linkIDs.isEmpty,
+                      Set(block.linkIDs).isSubset(of: linkIDs) else {
+                    throw ResearchJournalError.invalidContract
+                }
             case "paragraph":
                 guard let text = block.text, !text.isEmpty,
                       block.columns.isEmpty, block.rows.isEmpty,

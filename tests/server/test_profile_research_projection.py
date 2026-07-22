@@ -232,7 +232,7 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
     monkeypatch,
 ) -> None:
     path = tmp_path / "work-package-continuation.sqlite"
-    _seed(path, branch_count=1, trace_count=2)
+    _seed(path, branch_count=1, trace_count=3)
     with connect_sqlite(path) as conn:
         conn.execute(
             "UPDATE research_graph_instances SET work_package_id=instance_id "
@@ -242,7 +242,7 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
             """
             UPDATE research_graph_branches
             SET hypothesis_branch_id=branch_id, is_current_incarnation=0,
-                latest_trace_id='trace-000001'
+                latest_trace_id='trace-000002'
             WHERE branch_id='branch-0000'
             """
         )
@@ -270,7 +270,7 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
             ) VALUES (
                 'branch-v7', 'branch-0000', 1, 'instance-v7', 'primary',
                 'statistical_robustness', 'running', '{}', 'resolution-v7',
-                ?, '{}', '[]', 0, 'trace-v7', 2000, 2000
+                ?, '{}', '[]', 0, 'trace-v7-4', 2000, 2004
             )
             """,
             ("c" * 64,),
@@ -292,12 +292,33 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
                     "schema_version": 2,
                     "source_instance_id": "instance-a",
                     "source_branch_id": "branch-0000",
-                    "source_trace_id": "trace-000001",
+                    "source_trace_id": "trace-000002",
                     "source_checkpoint_hash": "a" * 64,
                     "work_package_id": "instance-a",
                     "hypothesis_branch_id": "branch-0000",
                 },
             }).decode(),),
+        )
+        conn.executemany(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id, from_node, to_node,
+                evidence_json, telemetry_json, actor, created_at
+            ) VALUES (
+                ?, 'instance-v7', 'branch-v7', ?, ?, ?,
+                '{}', '{}', 'research-agent', ?
+            )
+            """,
+            [
+                (
+                    f"trace-v7-{index}",
+                    f"edge-v7-{index}",
+                    f"node-{index - 1}",
+                    f"node-{index}",
+                    2000 + index,
+                )
+                for index in range(1, 5)
+            ],
         )
     service = _service(path, monkeypatch)
 
@@ -319,16 +340,22 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
         "graph-branch:instance-v7:branch-v7",
     ]
     assert detail["created_at"] == 1000
+    tree = detail["tree"]
+    assert len(tree["nodes"]) == 8
+    assert sum(node["is_head"] for node in tree["nodes"]) == 1
+    assert next(node for node in tree["nodes"] if node["is_head"])[
+        "checkpoint_ref"
+    ] == "trace:trace-v7-4"
     assert {
-        node["checkpoint_ref"] for node in detail["tree"]["nodes"]
-    } == {
-        "trace:trace-000000",
-        "trace:trace-000001",
-        "trace:trace-v7",
-    }
-    assert {
-        node["branch_ref"] for node in detail["tree"]["nodes"]
+        node["branch_ref"] for node in tree["nodes"]
     } == {"graph-branch:instance-v7:branch-v7"}
+    assert tree["omitted_node_count"] == 0
+    assert len(tree["edges"]) == 7
+    continuation = next(
+        edge for edge in tree["edges"] if edge["relation"] == "continuation"
+    )
+    assert continuation["source_node_ref"] == "trace:trace-000002"
+    assert continuation["target_node_ref"] == "trace:trace-v7"
 
     timeline = service.list_work_package_timeline(
         owner="alice",
@@ -336,7 +363,12 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
         branch_id="branch-v7",
     )
     assert [item["step_ref"] for item in timeline["items"]] == [
+        "trace:trace-v7-4",
+        "trace:trace-v7-3",
+        "trace:trace-v7-2",
+        "trace:trace-v7-1",
         "trace:trace-v7",
+        "trace:trace-000002",
         "trace:trace-000001",
         "trace:trace-000000",
     ]

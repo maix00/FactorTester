@@ -61,7 +61,11 @@ class MarkdownReportTarget:
 def _block_lines(blocks: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
     for block in blocks:
-        if block["kind"] == "paragraph":
+        if block["kind"] == "math":
+            lines.extend([
+                "$$", block["latex"], "$$", "", block["fallback"], "",
+            ])
+        elif block["kind"] == "paragraph":
             lines.extend([block["text"], ""])
         elif block["kind"] == "list":
             lines.extend(f"- {row['text']}" for row in block["rows"])

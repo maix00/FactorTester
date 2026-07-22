@@ -144,7 +144,7 @@ LIST_AFTER_SQL = """
     LIMIT ?
 """
 
-WORK_PACKAGE_DETAIL_SQL = """
+WORK_PACKAGE_DETAIL_SQL = f"""
     SELECT i.instance_id,
            COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
                AS work_package_id,
@@ -275,10 +275,15 @@ WORK_PACKAGE_DETAIL_SQL = """
                              LIMIT 50
                          )
                    ) AS ranked
-                   WHERE ranked.first_rank<=1 OR ranked.last_rank<=1
+                   WHERE ranked.total_trace_count<={MAX_TREE_NODES}
+                      OR ranked.first_rank<={TREE_FIRST_WINDOW}
+                      OR ranked.last_rank<={TREE_LAST_WINDOW}
                       OR ranked.trace_id=ranked.incarnation_latest_trace_id
+                      OR ranked.edge_id IN (
+                          '__branch_fork__', '__graph_continuation__'
+                      )
                    ORDER BY ranked.created_at ASC, ranked.trace_id ASC
-                   LIMIT 120
+                   LIMIT {MAX_TREE_NODES}
                ) AS selected
            ) ELSE NULL END AS tree_json,
            COUNT(*) OVER () AS total_branch_count
@@ -1132,6 +1137,8 @@ def _tree_projection(
             # uses checkpoint_ref as the node identity.
             "_sequence_rank": first_rank,
             "_history_rank": last_rank,
+            "_instance_id": str(raw.get("instance_id") or ""),
+            "_physical_branch_id": branch_id,
         }
         nodes.append(node)
         by_branch.setdefault(hypothesis_branch_id, []).append(node)
@@ -1151,6 +1158,12 @@ def _tree_projection(
                 # Root/head window intentionally may contain a gap.  A
                 # connector over an omitted checkpoint would be misleading.
                 continue
+            if current["edge_ref"] in {
+                "__branch_fork__", "__graph_continuation__",
+            }:
+                # The authoritative lineage edge below is the connection for
+                # this checkpoint; emitting a transition as well duplicates it.
+                continue
             edges.append({
                 "edge_ref": current["edge_ref"],
                 "relation": "transition",
@@ -1161,10 +1174,13 @@ def _tree_projection(
             })
         row = branch_by_hypothesis[hypothesis_branch_id]
         lineage = _branch_lineage(row)
-        target = next(
-            (item for item in branch_nodes if item["is_root"]),
-            None,
-        )
+        target = next((item for item in branch_nodes if (
+            item["_instance_id"] == str(row["instance_id"])
+            and item["_physical_branch_id"] == str(row["branch_id"])
+            and item["edge_ref"] in {
+                "__branch_fork__", "__graph_continuation__",
+            }
+        )), None)
         if target and lineage.get("relation") in {"fork", "continuation"}:
             source_branch_ref = lineage.get("source_branch_ref")
             source_trace_ref = lineage.get("source_trace_ref")

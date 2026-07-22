@@ -640,6 +640,26 @@ def _canonical_narrative_blocks(
         if not isinstance(block, dict):
             raise ValueError("narrative block must be an object")
         kind = block.get("kind")
+        if kind == "math" and set(block) == {
+            "kind", "latex", "fallback", "link_ids",
+        }:
+            refs = block["link_ids"]
+            if not isinstance(refs, list) or not refs or len(refs) > MAX_ITEMS:
+                raise ValueError("narrative math link_ids are invalid")
+            for link_id in refs:
+                _safe_id(link_id, "narrative.math.link_id")
+                if link_id not in declared_link_ids:
+                    raise ValueError(
+                        "math chip must reference a declared section link"
+                    )
+                used_link_ids.add(link_id)
+            blocks.append({
+                "kind": kind,
+                "latex": _text(block["latex"], "narrative.math.latex", 2000),
+                "fallback": _zh_body(block["fallback"]),
+                "link_ids": list(refs),
+            })
+            continue
         if kind == "paragraph" and set(block) in (
             {"kind", "text"}, {"kind", "text", "link_ids"}
         ):

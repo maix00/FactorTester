@@ -127,6 +127,12 @@ struct ResearchNarrativeReportView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
+                Text(stageLabel(for: section))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.1), in: Capsule())
                 Text(Date(timeIntervalSince1970: section.createdAt), style: .date)
                 Text("·")
                 Text(shortReference(section.checkpointRef))
@@ -200,6 +206,27 @@ struct ResearchNarrativeReportView: View {
         section: ResearchJournalSection
     ) -> some View {
         switch block.kind {
+        case "math":
+            VStack(alignment: .leading, spacing: 8) {
+                Label("因子公式", systemImage: "function")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text(block.fallback ?? "因子公式")
+                    .font(.callout)
+                Text(block.latex ?? "")
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+                HStack(spacing: 6) {
+                    ForEach(auditLinks(in: section).filter {
+                        block.linkIDs.contains($0.linkID)
+                    }) { link in
+                        auditChip(link, section: section)
+                    }
+                }
+            }
         case "paragraph":
             reportParagraph(
                 block.text ?? "",
@@ -345,27 +372,51 @@ struct ResearchNarrativeReportView: View {
     private func obligationTable(
         _ section: ResearchJournalSection
     ) -> some View {
-        let rows = obligationRows(in: section)
-        if !rows.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("研究义务与本步骤变化")
+        let groups = stageObligationRows(in: section)
+        if !groups.active.isEmpty || !groups.inherited.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("本阶段新增或变化的研究义务")
                     .font(.headline)
-                    .padding(.bottom, 9)
-                obligationHeader
-                ForEach(Array(rows.enumerated()), id: \.element.id) {
-                    index, row in
-                    obligationRow(row, section: section)
-                        .background(
-                            index.isMultiple(of: 2)
-                                ? Color.clear
-                                : Color.secondary.opacity(0.035)
+                if groups.active.isEmpty {
+                    Text("本阶段没有新增义务，也没有义务状态发生变化。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    obligationRowsTable(groups.active, section: section)
+                }
+                if !groups.inherited.isEmpty {
+                    DisclosureGroup("沿用义务（\(groups.inherited.count)）") {
+                        obligationRowsTable(
+                            groups.inherited,
+                            section: section
                         )
+                        .padding(.top, 8)
+                    }
+                    .font(.callout.weight(.medium))
                 }
             }
             .padding(.top, 6)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(Color.secondary.opacity(0.18)).frame(height: 1)
+        }
+    }
+
+    private func obligationRowsTable(
+        _ rows: [ResearchObligationTableRow],
+        section: ResearchJournalSection
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            obligationHeader
+            ForEach(Array(rows.enumerated()), id: \.element.id) {
+                index, row in
+                obligationRow(row, section: section)
+                    .background(
+                        index.isMultiple(of: 2)
+                            ? Color.clear
+                            : Color.secondary.opacity(0.035)
+                    )
             }
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.secondary.opacity(0.18)).frame(height: 1)
         }
     }
 
@@ -438,6 +489,32 @@ struct ResearchNarrativeReportView: View {
                 currentObligations: detail.researchCycle.obligations
             )
         )
+    }
+
+    private func stageObligationRows(
+        in section: ResearchJournalSection
+    ) -> ResearchStageObligationRows {
+        guard let index = orderedSteps.firstIndex(where: {
+            $0.stepRef == section.checkpointRef
+        }) else {
+            return ResearchStageObligationRows(
+                active: obligationRows(in: section), inherited: []
+            )
+        }
+        let step = orderedSteps[index]
+        let previousRefs = index > 0
+            ? orderedSteps[index - 1].obligationRefs : nil
+        return ResearchJournalPresentation.stageObligationRows(
+            rows: obligationRows(in: section),
+            currentRefs: step.obligationRefs,
+            previousRefs: previousRefs,
+            changes: step.obligationChanges
+        )
+    }
+
+    private func stageLabel(for section: ResearchJournalSection) -> String {
+        let step = steps.first { $0.stepRef == section.checkpointRef }
+        return ResearchDisplayText.node(step?.toNode ?? detail.currentNode)
     }
 
     private func loadReport() async {

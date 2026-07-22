@@ -201,11 +201,16 @@ final class ProfileLiveProcessController: ObservableObject {
         branch: ProfileResearchBranchSummary,
         conditional: Bool
     ) async throws {
+        let previousTraceRef = detail?.latestTraceRef
         let detailResult = try await service.branchDetail(
             href: branch.detailHref,
             etag: conditional ? detailETag : nil
         )
         if case .value(let value, let etag) = detailResult {
+            if let previousTraceRef,
+               previousTraceRef != value.latestTraceRef {
+                try await refreshWorkPackage()
+            }
             detail = value
             detailETag = etag
             publishCheckpointChange(value.latestTraceRef)
@@ -219,6 +224,18 @@ final class ProfileLiveProcessController: ObservableObject {
             timeline = page.items
             nextTimelineCursor = page.nextCursor
             timelineETag = etag
+        }
+    }
+
+    private func refreshWorkPackage() async throws {
+        guard let href = selectedSummary?.detailHref else { return }
+        let result = try await service.workPackageDetail(
+            href: href,
+            etag: workPackageETag
+        )
+        if case .value(let value, let etag) = result {
+            workPackage = value
+            workPackageETag = etag
         }
     }
 

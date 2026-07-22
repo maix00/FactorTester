@@ -96,6 +96,48 @@ enum ResearchTreeConnector {
     }
 }
 
+enum ResearchTreeHeadResolver {
+    static func isHead(
+        projectedIsHead: Bool,
+        nodeBranchRef: String,
+        selectedBranchRef: String,
+        checkpointRef: String,
+        selectedLatestTraceRef: String?
+    ) -> Bool {
+        guard nodeBranchRef == selectedBranchRef else {
+            return projectedIsHead
+        }
+        return checkpointRef == selectedLatestTraceRef
+    }
+}
+
+struct ResearchTreeResolvedEdge: Equatable {
+    let relation: String
+    let sourceRow: Int?
+    let targetRow: Int
+}
+
+enum ResearchTreeEdgeResolver {
+    static func resolve(
+        _ edges: [ResearchVersionTreeEdge],
+        checkpointRefs: [String]
+    ) -> [ResearchTreeResolvedEdge] {
+        let rows = Dictionary(
+            uniqueKeysWithValues: checkpointRefs.enumerated().map {
+                ($0.element, $0.offset)
+            }
+        )
+        return edges.compactMap { edge in
+            guard let target = rows[edge.targetNodeRef] else { return nil }
+            return ResearchTreeResolvedEdge(
+                relation: edge.relation,
+                sourceRow: rows[edge.sourceNodeRef],
+                targetRow: target
+            )
+        }
+    }
+}
+
 struct ResearchVersionTreePane: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
@@ -193,66 +235,60 @@ struct ResearchVersionTreePane: View {
 
     private var laneBackground: some View {
         Canvas { context, size in
-            for lane in 0..<laneCount {
-                let indices = nodes.indices.filter { nodes[$0].lane == lane }
-                guard let first = indices.first, let last = indices.last else {
-                    continue
-                }
-                let x = ResearchTreeLayout.canvasLaneCenterX(lane)
-                var path = Path()
-                path.move(to: CGPoint(
-                    x: x,
-                    y: max(CGFloat(first) * rowHeight, 0)
-                ))
-                path.addLine(to: CGPoint(
-                    x: x,
-                    y: min((CGFloat(last) + 1) * rowHeight, size.height)
-                ))
-                context.stroke(
-                    path,
-                    with: .color(laneColor(lane).opacity(0.28)),
-                    lineWidth: 1.5
-                )
-            }
-            for (index, node) in nodes.enumerated()
-            where node.isLineage {
+            let visibleNodes = nodes
+            for edge in resolvedEdges(for: visibleNodes) {
+                let index = edge.targetRow
+                let node = visibleNodes[index]
                 let target = CGPoint(
                     x: ResearchTreeLayout.canvasLaneCenterX(node.lane),
                     y: (CGFloat(index) + 0.5) * rowHeight
                 )
-                let sourceX = node.sourceLane.map(
-                    ResearchTreeLayout.canvasLaneCenterX
-                ) ?? ResearchTreeLayout.canvasLaneCenterX(node.lane)
-                let sourceRow = ResearchTreeConnector.sourceRowIndex(
-                    sourceCheckpointRef: node.sourceCheckpointRef,
-                    nodeCheckpointRefs: nodes.map(\.checkpointRef)
-                )
-                let sourceY = sourceRow.map {
+                let sourceLane = edge.sourceRow.map {
+                    visibleNodes[$0].lane
+                } ?? node.sourceLane ?? node.lane
+                let sourceX = ResearchTreeLayout.canvasLaneCenterX(sourceLane)
+                let sourceY = edge.sourceRow.map {
                     (CGFloat($0) + 0.5) * rowHeight
                 } ?? target.y - 13
                 let source = CGPoint(x: sourceX, y: sourceY)
                 var connector = Path()
                 connector.move(to: source)
-                connector.addCurve(
-                    to: target,
-                    control1: CGPoint(
-                        x: sourceX,
-                        y: sourceY + (target.y - sourceY) * 0.55
-                    ),
-                    control2: CGPoint(
-                        x: target.x,
-                        y: sourceY + (target.y - sourceY) * 0.55
+                if edge.relation == "transition" && sourceX == target.x {
+                    connector.addLine(to: target)
+                } else {
+                    connector.addCurve(
+                        to: target,
+                        control1: CGPoint(
+                            x: sourceX,
+                            y: sourceY + (target.y - sourceY) * 0.55
+                        ),
+                        control2: CGPoint(
+                            x: target.x,
+                            y: sourceY + (target.y - sourceY) * 0.55
+                        )
                     )
-                )
+                }
                 context.stroke(
                     connector,
-                    with: .color(laneColor(node.lane).opacity(0.75)),
-                    lineWidth: 1.8
+                    with: .color(laneColor(node.lane).opacity(
+                        edge.relation == "transition" ? 0.35 : 0.75
+                    )),
+                    lineWidth: edge.relation == "transition" ? 1.5 : 1.8
                 )
             }
         }
         .frame(height: CGFloat(nodes.count) * rowHeight)
         .allowsHitTesting(false)
+    }
+
+    private func resolvedEdges(
+        for visibleNodes: [ResearchTreeNode]
+    ) -> [ResearchTreeResolvedEdge] {
+        guard let projection = workPackage.tree else { return [] }
+        return ResearchTreeEdgeResolver.resolve(
+            projection.edges,
+            checkpointRefs: visibleNodes.map(\.checkpointRef)
+        )
     }
 
     private func nodeRow(_ node: ResearchTreeNode) -> some View {
@@ -453,6 +489,13 @@ struct ResearchVersionTreePane: View {
                     $0.branchRef == edge.sourceBranchRef
                 }
             }
+            let isHead = ResearchTreeHeadResolver.isHead(
+                projectedIsHead: node.isHead,
+                nodeBranchRef: node.branchRef,
+                selectedBranchRef: detail.branchRef,
+                checkpointRef: node.checkpointRef,
+                selectedLatestTraceRef: detail.latestTraceRef
+            )
             return ResearchTreeNode(
                 id: "checkpoint|\(node.nodeRef)",
                 checkpointRef: node.checkpointRef,
@@ -461,9 +504,9 @@ struct ResearchVersionTreePane: View {
                 timestamp: node.createdAt,
                 lane: lane(for: node.branchRef),
                 status: node.status,
-                isHead: node.isHead,
+                isHead: isHead,
                 isCurrentHead: node.branchRef == detail.branchRef
-                    && node.isHead,
+                    && isHead,
                 isRoot: node.isRoot,
                 isLineage: lineage != nil,
                 sourceLane: sourceLane,

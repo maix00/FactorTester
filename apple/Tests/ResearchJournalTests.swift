@@ -22,6 +22,19 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(section.blocks[2].rows[0].cells.last, "0.42")
     }
 
+    func testDecodesGenericFactorSemanticsMathBlock() throws {
+        let block = try JSONDecoder().decode(
+            ResearchJournalBlock.self,
+            from: Data(
+                #"{"kind":"math","latex":"S=(2P-H-L)/(H-L+\\epsilon)","fallback":"中心价格相对窗口高低点的位置强度。","link_ids":["paired-obligation"]}"#.utf8
+            )
+        )
+
+        XCTAssertEqual(block.kind, "math")
+        XCTAssertEqual(block.fallback, "中心价格相对窗口高低点的位置强度。")
+        XCTAssertEqual(block.linkIDs, ["paired-obligation"])
+    }
+
     func testReportFacingIdentifiersAreAlwaysSimplifiedChinese() {
         XCTAssertEqual(ResearchDisplayText.node("capability_gap"), "能力缺口")
         XCTAssertEqual(ResearchDisplayText.linkKind("checkpoint"), "检查点")
@@ -56,6 +69,71 @@ final class ResearchJournalTests: XCTestCase {
             ),
             "研究义务 · 交易成本后仍能存活吗？"
         )
+    }
+
+    func testAuditChipHidesOpaqueLabelUntilPopover() throws {
+        let link = try JSONDecoder().decode(
+            ResearchJournalLink.self,
+            from: Data(
+                """
+                {"link_id":"run","kind":"run","target_ref":"run:7ce46d1a-6bfd-43cc-a2ba-6b03e4617304","label":"7ce46d1a-6bfd-43cc-a2ba-6b03e4617304"}
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            ResearchJournalPresentation.chipLabel(
+                link,
+                sectionTitle: "回测结果",
+                obligations: []
+            ),
+            "试验运行 · 回测结果试验结果"
+        )
+    }
+
+    func testStageObligationsSeparateChangesFromInheritedQuestions() throws {
+        let obligations = try decodeObligations(
+            """
+            [
+              {"obligation_ref":"obligation:timing","status":"open","materiality":"high","question_summary":"信号时点是否满足因果约束？"},
+              {"obligation_ref":"obligation:cost","status":"bounded","materiality":"critical","question_summary":"交易成本后是否仍然有效？"},
+              {"obligation_ref":"obligation:parameter","status":"open","materiality":"high","question_summary":"固定价格列是否应参数化？"}
+            ]
+            """
+        )
+        let changes = try JSONDecoder().decode(
+            [ResearchStateChange].self,
+            from: Data(
+                """
+                [{"obligation_id":"cost","from_state":"open","to_state":"bounded"}]
+                """.utf8
+            )
+        )
+        let rows = ResearchJournalPresentation.obligationRows(
+            links: [],
+            checkpointObligationRefs: [
+                "obligation:timing", "obligation:cost", "obligation:parameter",
+            ],
+            aliases: [:],
+            obligations: obligations,
+            changes: changes
+        )
+
+        let stage = ResearchJournalPresentation.stageObligationRows(
+            rows: rows,
+            currentRefs: [
+                "obligation:timing", "obligation:cost", "obligation:parameter",
+            ],
+            previousRefs: ["obligation:timing", "obligation:cost"],
+            changes: changes
+        )
+
+        XCTAssertEqual(stage.active.map(\.question), [
+            "交易成本后是否仍然有效？", "固定价格列是否应参数化？",
+        ])
+        XCTAssertEqual(stage.inherited.map(\.question), [
+            "信号时点是否满足因果约束？",
+        ])
     }
 
     func testObligationAndDeltaBecomeOneChineseTableRow() throws {

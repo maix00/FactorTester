@@ -11,7 +11,42 @@ struct ResearchObligationTableRow: Identifiable {
     var id: String { obligationLink.id }
 }
 
+struct ResearchStageObligationRows {
+    let active: [ResearchObligationTableRow]
+    let inherited: [ResearchObligationTableRow]
+}
+
 extension ResearchJournalPresentation {
+    static func stageObligationRows(
+        rows: [ResearchObligationTableRow],
+        currentRefs: [String],
+        previousRefs: [String]?,
+        changes: [ResearchStateChange]
+    ) -> ResearchStageObligationRows {
+        guard let previousRefs else {
+            return ResearchStageObligationRows(active: rows, inherited: [])
+        }
+        let previous = Set(previousRefs.map(obligationObjectID))
+        let changed = Set(changes.map { obligationObjectID($0.objectID) })
+        let activeIDs = Set(currentRefs.map(obligationObjectID).filter {
+            !previous.contains($0)
+        }).union(changed)
+        var active: [ResearchObligationTableRow] = []
+        var inherited: [ResearchObligationTableRow] = []
+        for row in rows {
+            let objectID = obligationObjectID(row.obligationLink.targetRef)
+            if activeIDs.contains(objectID) {
+                active.append(row)
+            } else {
+                inherited.append(row)
+            }
+        }
+        return ResearchStageObligationRows(
+            active: active,
+            inherited: inherited
+        )
+    }
+
     static func obligationRows(
         links: [ResearchJournalLink],
         checkpointObligationRefs: [String]? = nil,

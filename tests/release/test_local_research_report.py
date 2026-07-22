@@ -506,6 +506,11 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
             "title": "研究进展",
             "body": "本阶段先说明研究判断，再列出支撑判断的结构化结果。",
             "blocks": [{
+                "kind": "math",
+                "latex": r"S=(2P-H-L)/(H-L+\\epsilon)",
+                "fallback": "中心价格相对窗口高低点的位置强度。",
+                "link_ids": ["cost-obligation"],
+            }, {
                 "kind": "paragraph",
                 "text": "本段结论由试验计划约束。",
                 "link_ids": ["checkpoint-plan"],
@@ -575,14 +580,16 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
     section = journal["checkpoints"][0]["sections"][0]
     assert journal["schema_version"] == 3
     assert [block["kind"] for block in section["blocks"]] == [
-        "paragraph", "list", "table",
+        "math", "paragraph", "list", "table",
     ]
-    assert section["blocks"][0]["link_ids"] == ["checkpoint-plan"]
-    assert section["blocks"][2]["rows"][0]["cells"][2] == "0.42"
-    assert section["blocks"][2]["result_kind"] == "backtest"
+    assert section["blocks"][0]["fallback"] == "中心价格相对窗口高低点的位置强度。"
+    assert section["blocks"][1]["link_ids"] == ["checkpoint-plan"]
+    assert section["blocks"][3]["rows"][0]["cells"][2] == "0.42"
+    assert section["blocks"][3]["result_kind"] == "backtest"
     assert section["links"][0]["label"] == "交易成本后仍能存活吗？"
     report = journal_path.with_name("REPORT.md").read_text(encoding="utf-8")
     assert "本阶段先说明研究判断，再列出支撑判断的结构化结果。" in report
+    assert "$$\nS=(2P-H-L)/(H-L+\\\\epsilon)\n$$" in report
     assert "- 交易成本义务仍未清除。" in report
     assert "| 检验 | 指标 | 结果 |" in report
     assert "| 成本后回测 | 夏普比率 | 0.42 |" in report

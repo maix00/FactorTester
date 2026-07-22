@@ -171,6 +171,59 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
     }
 
+    func testSelectedBranchUsesDetailAsItsSingleHeadAuthority() {
+        XCTAssertFalse(ResearchTreeHeadResolver.isHead(
+            projectedIsHead: true,
+            nodeBranchRef: "graph-branch:i:b",
+            selectedBranchRef: "graph-branch:i:b",
+            checkpointRef: "trace:old",
+            selectedLatestTraceRef: "trace:new"
+        ))
+        XCTAssertTrue(ResearchTreeHeadResolver.isHead(
+            projectedIsHead: false,
+            nodeBranchRef: "graph-branch:i:b",
+            selectedBranchRef: "graph-branch:i:b",
+            checkpointRef: "trace:new",
+            selectedLatestTraceRef: "trace:new"
+        ))
+    }
+
+    func testResearchTreeConsumesAuthoritativeTransitionAndContinuationEdges() {
+        let edges = [
+            ResearchVersionTreeEdge(
+                edgeRef: "edge:transition",
+                relation: "transition",
+                sourceNodeRef: "trace:a",
+                targetNodeRef: "trace:b",
+                sourceBranchRef: "graph-branch:i:old",
+                targetBranchRef: "graph-branch:i:old"
+            ),
+            ResearchVersionTreeEdge(
+                edgeRef: "edge:continuation",
+                relation: "continuation",
+                sourceNodeRef: "trace:b",
+                targetNodeRef: "trace:c",
+                sourceBranchRef: "graph-branch:i:old",
+                targetBranchRef: "graph-branch:j:new"
+            ),
+        ]
+
+        XCTAssertEqual(
+            ResearchTreeEdgeResolver.resolve(
+                edges,
+                checkpointRefs: ["trace:a", "trace:b", "trace:c"]
+            ),
+            [
+                ResearchTreeResolvedEdge(
+                    relation: "transition", sourceRow: 0, targetRow: 1
+                ),
+                ResearchTreeResolvedEdge(
+                    relation: "continuation", sourceRow: 1, targetRow: 2
+                ),
+            ]
+        )
+    }
+
     func testTimelineResolvesCycleObjectAtItsOwnCheckpoint() throws {
         let page = try JSONDecoder().decode(
             ProfileResearchTimelinePage.self,
@@ -800,11 +853,14 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         let notModified = ResearchHTTPResponse(
             data: Data(), statusCode: 304, etag: "\"timeline-v1\""
         )
+        let refreshedWorkPackage = response(
+            workPackageJSON(), etag: "\"work-package-v2\""
+        )
         let transport = FakeProjectionTransport(
             responses: fixtureResponses(
                 detailRefresh:
                     #"{"mode":"conditional_etag","minimum_interval_seconds":7,"only_while_visible":true,"terminal":false}"#
-            ) + [changedDetail, notModified]
+            ) + [changedDetail, refreshedWorkPackage, notModified]
         )
         var slept: [TimeInterval] = []
         var checkpoints: [String] = []
@@ -816,7 +872,17 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         await controller.loadSelectedWorkspace()
         await controller.observeSelectedResearch()
         XCTAssertEqual(slept, [7])
-        XCTAssertEqual(transport.requests.count, 6)
+        XCTAssertEqual(transport.requests.count, 7)
+        XCTAssertEqual(
+            transport.requests.filter {
+                $0.url?.path == "/api/profile-research/work-package:i"
+            }.count,
+            2
+        )
+        XCTAssertEqual(
+            transport.requests[5].value(forHTTPHeaderField: "If-None-Match"),
+            "\"work-package-v1\""
+        )
         XCTAssertEqual(checkpoints, ["trace:changed"])
     }
 

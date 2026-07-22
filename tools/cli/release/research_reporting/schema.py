@@ -159,6 +159,29 @@ def _canonical_blocks(
         if not isinstance(block, dict):
             raise ValueError("section block must be an object")
         kind = block.get("kind")
+        if kind == "math" and set(block) == {
+            "kind", "latex", "fallback", "link_ids",
+        }:
+            refs = block["link_ids"]
+            if (
+                not isinstance(refs, list) or not refs or len(refs) > 16
+                or any(ref not in link_ids for ref in refs)
+            ):
+                raise ValueError("section math links are invalid")
+            blocks.append({
+                "kind": kind,
+                "latex": _bounded_text(
+                    block["latex"], field="section.math.latex", maximum=2000,
+                ),
+                "fallback": _bounded_text(
+                    block["fallback"],
+                    field="section.math.fallback",
+                    maximum=4000,
+                ),
+                "link_ids": list(refs),
+            })
+            used_link_ids.update(refs)
+            continue
         if kind == "paragraph" and set(block) in (
             {"kind", "text"}, {"kind", "text", "link_ids"}
         ):
