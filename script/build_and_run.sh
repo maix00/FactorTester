@@ -4,6 +4,7 @@ set -euo pipefail
 MODE="${1:-run}"
 APP_NAME="FTClient"
 BUNDLE_ID="com.gtht.client"
+SIGNING_IDENTITY="${FTCLIENT_SIGNING_IDENTITY:-FTClient Beta Release}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPLE_DIR="$ROOT_DIR/apple"
@@ -25,6 +26,20 @@ xcodebuild \
   -derivedDataPath "$DERIVED_DATA" \
   CODE_SIGNING_ALLOWED=NO \
   build
+
+sign_app() {
+  if ! /usr/bin/security find-identity -v -p codesigning |
+      /usr/bin/grep -Fq "\"$SIGNING_IDENTITY\""; then
+    echo "missing stable code-signing identity: $SIGNING_IDENTITY" >&2
+    echo "refusing an ad-hoc build because it invalidates macOS privacy grants after updates" >&2
+    exit 1
+  fi
+  /usr/bin/codesign --force --deep --sign "$SIGNING_IDENTITY" \
+    --options runtime --timestamp=none "$APP_BUNDLE"
+  /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+}
+
+sign_app
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"

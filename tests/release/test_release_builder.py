@@ -74,6 +74,18 @@ def test_local_build_script_uses_installed_app_identity() -> None:
     assert "--install|install" in source
 
 
+def test_local_build_script_requires_stable_signature_for_privacy_grants() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "script/build_and_run.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'SIGNING_IDENTITY="${FTCLIENT_SIGNING_IDENTITY:-FTClient Beta Release}"' in source
+    assert 'codesign --force --deep --sign "$SIGNING_IDENTITY"' in source
+    assert 'codesign --verify --deep --strict "$APP_BUNDLE"' in source
+    assert "privacy grants" in source
+
+
 def test_manifest_accepts_current_and_legacy_app_archive_names() -> None:
     assert _kind("FTClient.zip") == "macos-app"
     assert _kind("FactorTester-Client.zip") == "macos-app"
