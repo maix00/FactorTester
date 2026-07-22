@@ -448,6 +448,25 @@ def test_current_market_snapshot_and_constraints_render_semantically() -> None:
     assert '"can_buy"' not in output
 
 
+def test_current_historical_fields_preserve_accounting_semantics() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "historical_fields", "inputs": [], "outputs": [],
+        "output_changes": [{
+            "field": "MarketDataModule.current_historical_fields", "before": None,
+            "after": {"AP.CZC": {
+                "CostBasisMethod": "DailyMarkToMarket", "MoneyCalculationPolicy": "aggregate",
+                "VolumeMultiple": 10, "OpenRatioByVolume": 5,
+            }},
+        }],
+    })
+    output = "\n".join(lines)
+    assert "会计语义" in output and "DailyMarkToMarket" in output and "aggregate" in output
+    assert "合约与保证金" in output and "按手数费率" in output
+    assert '"CostBasisMethod"' not in output
+
+
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

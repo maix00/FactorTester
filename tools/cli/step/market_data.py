@@ -29,6 +29,8 @@ def render_change(field: str, value: Any, *, indent: str) -> list[str] | None:
         return _price_tables(value, indent=indent)
     if field.endswith(".field_state_baseline"):
         return _field_state(value, indent=indent)
+    if field.endswith(".current_historical_fields"):
+        return _field_state(value, indent=indent)
     if field.endswith((".current_prices", ".volume")):
         return _scalar_map(value, field.rsplit(".", 1)[-1], indent=indent)
     if field.endswith(".current_market_snapshot"):
@@ -116,12 +118,15 @@ def _field_state(value: Any, *, indent: str) -> list[str] | None:
     if not isinstance(value, Mapping) or not value or not all(isinstance(item, Mapping) for item in value.values()):
         return None
     groups = (
+        ("会计语义", ("CostBasisMethod", "MoneyCalculationPolicy")),
         ("合约与保证金", ("VolumeMultiple", "LongMarginRatioByMoney", "ShortMarginRatioByMoney", "LongMarginRatioByVolume", "ShortMarginRatioByVolume")),
         ("按金额费率", ("OpenRatioByMoney", "CloseRatioByMoney", "CloseTodayRatioByMoney")),
         ("按手数费率", ("OpenRatioByVolume", "CloseRatioByVolume", "CloseTodayRatioByVolume")),
     )
     lines: list[str] = []
     for title, fields in groups:
+        if not any(field in item for item in value.values() for field in fields):
+            continue
         lines.append(f"{indent}{title}:")
         rows = [
             {"product": product, **{field: scalar(item.get(field)) for field in fields}}
