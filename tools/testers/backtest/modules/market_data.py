@@ -42,6 +42,7 @@ from tools.products.AdjustableTermStructure import TERM_RANK_COL
 from tools.data.field_history import (
     HistoricalFieldLookupError,
     HistoricalFieldFallbackPolicy,
+    MissingHistoricalField,
     FieldHistoryProvider,
     TradingDayResolver,
     TimestampTradingDayResolver,
@@ -1534,6 +1535,70 @@ def _build_trading_day_resolver(state, ctx) -> None:
     store.trading_day_resolver = resolver
 
 
+def _initial_historical_fields_frame_for_products(
+    products: list[Any],
+    timestamps: pd.DatetimeIndex,
+    *,
+    provider: FieldHistoryProvider,
+    trading_day_resolver: TradingDayResolver,
+    field_names: tuple[object, ...],
+    fallback: HistoricalFieldFallbackPolicy | str,
+    strict_field_names: tuple[object, ...] = (),
+) -> dict[str, pd.DataFrame]:
+    """Resolve causal product history over exchange clearing baselines."""
+    resolved: dict[str, pd.DataFrame] = {}
+    strict_names = {str(name) for name in strict_field_names}
+    for raw_field_name in field_names:
+        field_name = str(raw_field_name)
+        has_exchange_baseline = all(
+            field_name in exchange_rule_defaults_for_product(product, (field_name,))
+            for product in products
+        )
+        field_fallback: HistoricalFieldFallbackPolicy | str = (
+            HistoricalFieldFallbackPolicy.STRICT_HISTORICAL
+            if field_name in strict_names or has_exchange_baseline
+            else fallback
+        )
+        try:
+            batch = historical_fields_frame_for_products(
+                products,
+                timestamps,
+                provider=provider,
+                trading_day_resolver=trading_day_resolver,
+                field_names=(field_name,),
+                fallback=field_fallback,
+            )
+            resolved[field_name] = batch[field_name]
+            continue
+        except MissingHistoricalField:
+            pass
+
+        columns: dict[str, pd.Series] = {}
+        for product in products:
+            product_name = str(getattr(product, "name", product) or "")
+            try:
+                single = historical_fields_frame_for_products(
+                    [product],
+                    timestamps,
+                    provider=provider,
+                    trading_day_resolver=trading_day_resolver,
+                    field_names=(field_name,),
+                    fallback=field_fallback,
+                )[field_name]
+                columns[product_name] = single.iloc[:, 0].set_axis(timestamps)
+            except MissingHistoricalField:
+                defaults = exchange_rule_defaults_for_product(product, (field_name,))
+                if field_name not in defaults:
+                    raise
+                columns[product_name] = pd.Series(
+                    [defaults[field_name]] * len(timestamps),
+                    index=timestamps,
+                    dtype=object,
+                )
+        resolved[field_name] = pd.DataFrame(columns, index=timestamps)
+    return resolved
+
+
 def _initialize_field_state(state, ctx) -> None:
     """Populate field_state_store with baseline values at run_window start.
     Uses batch FieldHistory frame query (single timestamp) instead of per-product queries."""
@@ -1548,6 +1613,18 @@ def _initialize_field_state(state, ctx) -> None:
     ctx.set(MarketDataModule.historical_field_policy, policy)
     store.publish_historical_field_policy(policy)
     field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
+    strict_field_names: tuple[object, ...] = ()
+    if policy != HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value:
+        from tools.testers.backtest.modules.fee import _resolve_fee_mode
+
+        if any(
+            _resolve_fee_mode(
+                config,
+                state.ledger_config_for(state.ledger_for_strategy(strategy)),
+            ) == "exact"
+            for strategy, config in getattr(state, "strategy_configs", {}).items()
+        ):
+            strict_field_names = tuple(TRANSACTION_FEE_FIELD_NAMES)
     instruments = list(raw_prices.columns)
     all_timestamps = signal_timestamps(raw_prices)
     if len(all_timestamps) == 0:
@@ -1590,13 +1667,14 @@ def _initialize_field_state(state, ctx) -> None:
             parents_by_timestamp.setdefault(ts, []).append(pname)
     for timestamp, parent_names in parents_by_timestamp.items():
         products_for_timestamp = [parent_objects[pname] for pname in parent_names]
-        frame_result = historical_fields_frame_for_products(
+        frame_result = _initial_historical_fields_frame_for_products(
             products_for_timestamp,
             pd.DatetimeIndex([timestamp]),
             provider=provider,
             trading_day_resolver=resolver,
             field_names=field_names,
             fallback=policy,
+            strict_field_names=strict_field_names,
         )
         for pname in parent_names:
             for fname in field_names:
@@ -2006,12 +2084,6 @@ def _historical_field_policy_for_engine(state, raw_policy: object | None) -> str
         mode = engine_mode_for(next(iter(configs.values())))
     if mode == "exact":
         return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
-    for strategy, config in getattr(state, "strategy_configs", {}).items():
-        from tools.testers.backtest.modules.fee import _resolve_fee_mode
-
-        ledger = state.ledger_for_strategy(strategy)
-        if _resolve_fee_mode(config, state.ledger_config_for(ledger)) == "exact":
-            return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
     if mode in {"auto", "custom"}:
         return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
     return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
