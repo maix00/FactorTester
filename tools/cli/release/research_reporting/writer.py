@@ -145,14 +145,22 @@ def render_branch_report(
             journal_bytes = None
         branch_payload = renderer.render(rendered_snapshot)
         content_hash = hashlib.sha256(branch_payload).hexdigest()
+        existing_index = _load_index(index_path, canonical)
+        branch_section_prefix = (
+            f"report-section:{canonical['branch_id']}:"
+        )
         index = _merge_index(
-            _load_index(index_path, canonical),
+            existing_index,
             rendered_snapshot,
             renderer,
             content_hash,
             refs,
             project_sections=(
                 journal_fragment is None or fragment_changed
+                or not any(
+                    item["section_ref"].startswith(branch_section_prefix)
+                    for item in existing_index["sections"]
+                )
             ),
         )
         index_payload = _encode_index(index)

@@ -264,6 +264,40 @@ def test_checkpoint_publish_keeps_stable_work_package_across_incarnations(
     ).is_file()
 
 
+def test_idempotent_publish_repairs_missing_report_index_sections(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+    )
+    index_path = (
+        root / "profile-root" / "research" / "sgccs-review"
+        / "INDEX.json"
+    )
+    index = json.loads(index_path.read_text())
+    assert index["sections"]
+    index["sections"] = []
+    index_path.write_text(json.dumps(index))
+
+    result = publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+    )
+
+    repaired = json.loads(index_path.read_text())
+    assert result["report_changed"] is True
+    assert repaired["sections"]
+    assert repaired["sections"][0]["links"]
+
+
 def test_checkpoint_publish_accumulates_complete_chinese_narrative(
     tmp_path: Path,
 ) -> None:
