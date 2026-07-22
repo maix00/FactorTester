@@ -19,6 +19,7 @@ from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _build_trading_day_resolver, _causal_valuation, _check_market_data_coverage,
     _apply_exchange_rule_defaults, _desired_factor_frequencies,
+    _initial_historical_fields_frame_for_products,
     _historical_fields_at_from_frames, _load_raw_market_data,
     _publish_raw_market_data, _resolve_market_data_request, _set_current_market_snapshot,
     _settlement_series_on_last_event,
@@ -38,6 +39,7 @@ from tools.products.AdjustableTermStructure import (
 from tools.data.field_history import (
     FieldHistoryProvider,
     HistoricalFieldFallbackPolicy,
+    MissingHistoricalField,
     TimestampTradingDayResolver,
 )
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
@@ -1540,6 +1542,72 @@ def test_exchange_rule_defaults_fill_missing_historical_fields_without_overwrite
     assert result["SM.CZC"]["CostBasisMethod"] == "DailyMarkToMarket"
     rows = [row for row in state.runtime_info_rows if row.get("code") == "historical_field_default_fallback"]
     assert rows == []
+
+
+def test_initial_field_frame_uses_exchange_clearing_baseline_when_product_history_is_absent():
+    from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
+
+    register_local_cnfutures_exchange_rules()
+    timestamp = pd.Timestamp("2025-01-02 09:01:00", tz="Asia/Shanghai")
+    provider = FieldHistoryProvider.from_records([])
+    resolver = TimestampTradingDayResolver({timestamp: pd.Timestamp("2025-01-02")})
+
+    frames = _initial_historical_fields_frame_for_products(
+        ["AP.CZC"],
+        pd.DatetimeIndex([timestamp]),
+        provider=provider,
+        trading_day_resolver=resolver,
+        field_names=("CostBasisMethod", "MoneyCalculationPolicy"),
+        fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+    )
+
+    assert frames["CostBasisMethod"].iloc[0]["AP.CZC"] == "DailyMarkToMarket"
+    assert frames["MoneyCalculationPolicy"].iloc[0]["AP.CZC"] == "aggregate"
+
+
+def test_initial_field_frame_keeps_exact_fee_history_strict():
+    timestamp = pd.Timestamp("2025-01-02 09:01:00", tz="Asia/Shanghai")
+    provider = FieldHistoryProvider.from_records([])
+    resolver = TimestampTradingDayResolver({timestamp: pd.Timestamp("2025-01-02")})
+
+    with pytest.raises(MissingHistoricalField):
+        _initial_historical_fields_frame_for_products(
+            ["AP.CZC"],
+            pd.DatetimeIndex([timestamp]),
+            provider=provider,
+            trading_day_resolver=resolver,
+            field_names=("OpenRatioByMoney",),
+            fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+        )
+
+
+def test_initial_field_frame_product_history_causally_overrides_exchange_baseline():
+    from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
+
+    register_local_cnfutures_exchange_rules()
+    timestamp = pd.Timestamp("2025-01-02 09:01:00", tz="Asia/Shanghai")
+    provider = FieldHistoryProvider.from_records([{
+        "provider": "test",
+        "source_key": "ap-cost-basis",
+        "instrument": "AP",
+        "instrument_type": "future",
+        "exchange": "CZC",
+        "field_name": "CostBasisMethod",
+        "effective_trading_day": "2024-01-01",
+        "value": "FIFO",
+    }])
+    resolver = TimestampTradingDayResolver({timestamp: pd.Timestamp("2025-01-02")})
+
+    frames = _initial_historical_fields_frame_for_products(
+        ["AP.CZC"],
+        pd.DatetimeIndex([timestamp]),
+        provider=provider,
+        trading_day_resolver=resolver,
+        field_names=("CostBasisMethod",),
+        fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+    )
+
+    assert frames["CostBasisMethod"].iloc[0]["AP.CZC"] == "FIFO"
 
 
 def test_contract_multiplier_default_fallback_records_runtime_info_interval():
