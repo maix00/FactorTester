@@ -26,6 +26,22 @@ artifact contracts produced by the workflow.
 - Keep diagnostic rejection, bounded revision, capability-gap recovery, and
   result-audit routes semantically distinct.
 
+#### Successor Graph contract refinement
+
+- Keep schema-v1 Graphs byte-compatible and readable while schema v2 requires
+  an immutable change manifest, Requirement Catalog, Report Method descriptors,
+  Report Requirements, and system-transition policies.
+- Reject unknown category/requirement/method/report/anchor references, duplicate
+  IDs, missing CLI resolver contracts, and Report Requirements that bind neither
+  a real Verification Obligation requirement nor an explicit coordination fact.
+- Require every schema-v2 node entry/action and explicit edge to expose bounded
+  report requirement references; system gates use their own policy anchors and
+  do not become permanent nodes.
+- Prove the server validator consumes the same provider-neutral protocol and
+  content hash without a second schema implementation.
+- Keep contract validation deterministic, source-free, and free of database or
+  Agent calls.
+
 ### Node-local capability resolution
 
 - Resolve the current node by default and the full graph only when `--all` is

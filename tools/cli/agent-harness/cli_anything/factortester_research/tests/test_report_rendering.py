@@ -33,6 +33,8 @@ def _snapshot() -> dict:
         "branch_id": "branch-sgccs",
         "title": "SgCCS bounded research report",
         "status": "blocked",
+        "product_group": "china_futures",
+        "current_node": "capability_gap",
         "graph_ref": "factor-research@5:sha256:graph",
         "methodology_hash": "1" * 64,
         "decision_contract_hash": "2" * 64,
@@ -40,6 +42,8 @@ def _snapshot() -> dict:
         "factor_family_versions": ["MaxA:SgCCS@7"],
         "sections": [{
             "section_id": "current-state",
+            "checkpoint_ref": "trace:checkpoint-current-state",
+            "branch_ref": "graph-branch:instance-sgccs:branch-sgccs",
             "title": "Current evidence state",
             "body": "The latest bounded decision remains blocked.",
             "links": [{
@@ -90,8 +94,8 @@ def test_markdown_is_byte_stable_and_contains_only_bounded_refs() -> None:
 
     assert first == second
     text = first.decode()
-    assert snapshot["source_hash"] in text
-    assert "evidence:job-attempt-1" in text
+    assert snapshot["source_hash"] not in text
+    assert "evidence:job-attempt-1" not in text
     assert "MaxA:SgCCS@7" in text
     assert (
         "![Equity curve over the declared sample]"
@@ -146,6 +150,9 @@ def test_branch_change_updates_only_that_branch_and_package_aggregates(
         "branch_id": "branch-trend",
         "title": "Trend hypothesis",
     })
+    second_branch["sections"][0]["branch_ref"] = (
+        "graph-branch:instance-trend:branch-trend"
+    )
     first = render_branch_report(first_branch, workspace_root=tmp_path)
     second = render_branch_report(second_branch, workspace_root=tmp_path)
     stable_branch_stat = first["path"].stat()
@@ -174,6 +181,9 @@ def test_index_projects_sections_for_the_current_swift_reader(tmp_path) -> None:
     index = json.loads(result["index_path"].read_text(encoding="utf-8"))
     assert index["sections"] == [{
         "section_ref": "report-section:branch-sgccs:current-state",
+        "section_id": "current-state",
+        "checkpoint_ref": "trace:checkpoint-current-state",
+        "branch_ref": "graph-branch:instance-sgccs:branch-sgccs",
         "title": "Current evidence state",
         "summary": "The latest bounded decision remains blocked.",
         "created_at": 0.0,
@@ -266,6 +276,9 @@ def test_concurrent_branches_merge_under_one_work_package_lock(
     first = _snapshot()
     second = deepcopy(first)
     second.update({"branch_id": "branch-trend", "title": "Trend"})
+    second["sections"][0]["branch_ref"] = (
+        "graph-branch:instance-trend:branch-trend"
+    )
     original_load = writer._load_index
     state = {"active": 0, "maximum": 0}
     state_lock = threading.Lock()
@@ -567,7 +580,8 @@ def test_report_cli_renders_snapshot_without_server_access(tmp_path) -> None:
     index_url = urlparse(descriptor["index_ref"])
     index = json.loads(Path(unquote(index_url.path)).read_text())
     assert set(index["sections"][0]) == {
-        "section_ref", "title", "summary", "links", "created_at",
+        "section_ref", "section_id", "checkpoint_ref", "branch_ref",
+        "title", "summary", "links", "created_at",
     }
     assert set(index["sections"][0]["links"][0]) == {
         "link_id", "kind", "target_ref", "section_ref",

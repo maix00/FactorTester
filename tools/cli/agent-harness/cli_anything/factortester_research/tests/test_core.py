@@ -58,6 +58,134 @@ HARNESS_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
+def _schema_v2_graph() -> dict:
+    graph = build_draft_graph()
+    graph.pop("content_hash", None)
+    graph["schema_version"] = 2
+    capability_id = sorted(graph["capability_descriptors"])[0]
+    report_requirements = []
+    for node in graph["nodes"]:
+        node_id = node["node_id"]
+        entry_id = f"report.node.{node_id}.entry"
+        action_id = f"report.node.{node_id}.action"
+        report_requirements.extend([
+            {
+                "report_requirement_id": entry_id,
+                "anchor_kind": "node_entry",
+                "anchor_ref": node_id,
+                "method_ref": "inventory",
+                "title_zh": f"进入 {node_id}",
+                "subject_selector": {"kind": "current_branch"},
+                "requirement_ref": "hypothesis_validity.mechanism_chain",
+            },
+            {
+                "report_requirement_id": action_id,
+                "anchor_kind": "node_action",
+                "anchor_ref": node_id,
+                "method_ref": "explain",
+                "title_zh": f"处理 {node_id}",
+                "subject_selector": {"kind": "current_branch"},
+                "requirement_ref": "hypothesis_validity.mechanism_chain",
+            },
+        ])
+        node["entry_requirement_refs"] = [
+            "hypothesis_validity.mechanism_chain"
+        ]
+        node["entry_report_refs"] = [entry_id]
+        node["node_report_refs"] = [action_id]
+    for edge in graph["edges"]:
+        edge_id = edge["edge_id"]
+        report_id = f"report.edge.{edge_id}"
+        edge["report_requirement_refs"] = [report_id]
+        report_requirements.append({
+            "report_requirement_id": report_id,
+            "anchor_kind": "edge",
+            "anchor_ref": edge_id,
+            "method_ref": "explain_transition",
+            "title_zh": f"经过 {edge_id}",
+            "subject_selector": {"kind": "transition"},
+            "requirement_ref": "hypothesis_validity.mechanism_chain",
+        })
+    gate_report_id = "report.gate.evidence_admission"
+    report_requirements.append({
+        "report_requirement_id": gate_report_id,
+        "anchor_kind": "system_gate",
+        "anchor_ref": "evidence_admission",
+        "method_ref": "inventory",
+        "title_zh": "证据准入",
+        "subject_selector": {"kind": "evidence_envelope"},
+        "coordination_ref": "evidence_qualification",
+    })
+    all_requirement_reports = [
+        item["report_requirement_id"]
+        for item in report_requirements
+        if item.get("requirement_ref")
+    ]
+    graph.update({
+        "change_manifest": {
+            "parent_version": graph["parent_version"],
+            "summary_zh": "验证后继图定义协议",
+            "changes": [{
+                "change_id": "change.contracts",
+                "change_kind": "schema",
+                "subject_ref": "graph:factor-research",
+                "impact_zh": "增加义务与报告合同",
+            }],
+        },
+        "requirement_catalog": {
+            "catalog_revision": 1,
+            "categories": [{
+                "category_id": "hypothesis_validity",
+                "title_zh": "假设有效性",
+                "description_zh": "判断机制、代理和预测是否可证伪。",
+            }],
+            "requirements": [{
+                "requirement_id": "hypothesis_validity.mechanism_chain",
+                "category_id": "hypothesis_validity",
+                "revision": 1,
+                "title_zh": "机制链",
+                "question_zh": "机制如何从事实传导至价格？",
+                "select_when_zh": "冻结研究假设前。",
+                "evidence_expected_zh": ["可追溯事实"],
+                "not_sufficient_zh": ["仅有回测表现"],
+                "industry_principle_zh": "机制与可证伪预测应分开陈述。",
+                "industry_basis_refs": ["S-FIRST-PRINCIPLES"],
+                "resolver_capability_ids": [capability_id],
+                "cli_invocation_templates": [
+                    "factortester research requirements resolve --json"
+                ],
+                "resolver_output_schema": {"type": "object"},
+                "fallback_route": "capability_gap",
+                "report_requirement_refs": all_requirement_reports,
+            }],
+        },
+        "report_method_descriptors": {
+            "inventory": {
+                "description_zh": "逐项列出事实和引用。",
+                "allowed_content": ["list", "table"],
+                "descriptor_hash": "a" * 64,
+            },
+            "explain": {
+                "description_zh": "解释机制和限制。",
+                "allowed_content": ["sentence", "list"],
+                "descriptor_hash": "b" * 64,
+            },
+            "explain_transition": {
+                "description_zh": "解释转移理由。",
+                "allowed_content": ["sentence", "list", "table"],
+                "descriptor_hash": "c" * 64,
+            },
+        },
+        "report_requirements": report_requirements,
+        "system_transition_policies": [{
+            "policy_id": "policy.evidence_admission",
+            "policy_kind": "evidence_admission",
+            "report_requirement_refs": [gate_report_id],
+        }],
+    })
+    return graph
+
+
 def _research_cycle_discovery_proposal() -> dict:
     return {
         "schema_version": 1,
@@ -157,6 +285,43 @@ def test_graph_validation_rejects_an_unknown_server_action() -> None:
     graph["edges"][0]["server_action"] = "client_defined_mutation"
 
     with pytest.raises(ValueError, match="invalid server_action"):
+        validate_graph(graph)
+
+
+def test_schema_v2_graph_validates_catalog_reports_and_system_gates() -> None:
+    graph = _schema_v2_graph()
+
+    validated = validate_graph(graph)
+
+    assert validated["schema_version"] == 2
+    assert validated["system_transition_policies"][0]["policy_kind"] == (
+        "evidence_admission"
+    )
+
+
+def test_schema_v2_graph_rejects_an_unknown_report_reference() -> None:
+    graph = _schema_v2_graph()
+    graph["nodes"][0]["entry_report_refs"] = ["report.missing"]
+
+    with pytest.raises(ValueError, match="references unknown ids"):
+        validate_graph(graph)
+
+
+def test_schema_v2_graph_rejects_a_requirement_without_resolver() -> None:
+    graph = _schema_v2_graph()
+    requirement = graph["requirement_catalog"]["requirements"][0]
+    requirement["resolver_capability_ids"] = []
+
+    with pytest.raises(ValueError, match="resolver capability is required"):
+        validate_graph(graph)
+
+
+def test_schema_v2_graph_requires_a_real_or_coordination_report_binding() -> None:
+    graph = _schema_v2_graph()
+    gate_report = graph["report_requirements"][-1]
+    gate_report.pop("coordination_ref")
+
+    with pytest.raises(ValueError, match="exactly one semantic binding"):
         validate_graph(graph)
 
 
@@ -1774,7 +1939,7 @@ def test_packaging_and_docs_record_durable_remote_contract() -> None:
     packaging = (HARNESS_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     readme = (HARNESS_ROOT / "cli_anything/factortester_research/README.md").read_text(encoding="utf-8")
     skill = (HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md").read_text(encoding="utf-8")
-    assert 'requires-python = ">=3.10"' in packaging
+    assert 'requires-python = ">=3.11"' in packaging
     for text in (readme, skill):
         assert "workspace" in text
         assert "RunSpec" in text
