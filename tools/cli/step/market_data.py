@@ -29,6 +29,14 @@ def render_change(field: str, value: Any, *, indent: str) -> list[str] | None:
         return _price_tables(value, indent=indent)
     if field.endswith(".field_state_baseline"):
         return _field_state(value, indent=indent)
+    if field.endswith((".current_prices", ".volume")):
+        return _scalar_map(value, field.rsplit(".", 1)[-1], indent=indent)
+    if field.endswith(".current_market_snapshot"):
+        return _market_snapshot(value, indent=indent)
+    if field.endswith(".current_tradable_status"):
+        return _tradable_status(value, indent=indent)
+    if field.endswith(".current_order_constraints"):
+        return _order_constraints(value, indent=indent)
     return None
 
 
@@ -121,3 +129,53 @@ def _field_state(value: Any, *, indent: str) -> list[str] | None:
         ]
         lines.extend(table_from_mappings(rows, indent=indent + "  "))
     return lines
+
+
+def _scalar_map(value: Any, label: str, *, indent: str) -> list[str] | None:
+    if not isinstance(value, Mapping) or not value or not all(not isinstance(item, Mapping) for item in value.values()):
+        return None
+    return table_from_mappings(
+        ({"instrument": instrument, label: scalar(item)} for instrument, item in value.items()),
+        indent=indent,
+    )
+
+
+def _market_snapshot(value: Any, *, indent: str) -> list[str] | None:
+    if not isinstance(value, Mapping) or not value or not all(isinstance(item, Mapping) for item in value.values()):
+        return None
+    instruments = list(dict.fromkeys(
+        instrument for basis in value.values() for instrument in basis
+    ))
+    rows = [
+        {"instrument": instrument, **{basis: scalar(values.get(instrument)) for basis, values in value.items()}}
+        for instrument in instruments
+    ]
+    return table_from_mappings(rows, indent=indent)
+
+
+def _tradable_status(value: Any, *, indent: str) -> list[str] | None:
+    if not isinstance(value, Mapping) or not all(isinstance(item, bool) for item in value.values()):
+        return None
+    blocked = [instrument for instrument, tradable in value.items() if not tradable]
+    lines = [f"{indent}tradable={len(value) - len(blocked)}, blocked={len(blocked)}"]
+    if blocked:
+        lines.extend(table_from_mappings(({"instrument": item, "tradable": False} for item in blocked), indent=indent))
+    return lines
+
+
+def _order_constraints(value: Any, *, indent: str) -> list[str] | None:
+    if not isinstance(value, Mapping) or not all(isinstance(item, Mapping) for item in value.values()):
+        return None
+    exceptions = [
+        {"instrument": instrument, **constraint}
+        for instrument, constraint in value.items()
+        if not constraint.get("tradable") or not constraint.get("can_buy")
+        or not constraint.get("can_sell") or constraint.get("reason")
+        or constraint.get("limit_up_price") or constraint.get("limit_down_price")
+    ]
+    normal = len(value) - len(exceptions)
+    return [
+        f"{indent}normal={normal}, constrained={len(exceptions)}",
+        *table_from_mappings(exceptions, indent=indent),
+        click.style(f"{indent}正常约束未逐品种重复；job step-field 可查看完整约束映射。", dim=True),
+    ]

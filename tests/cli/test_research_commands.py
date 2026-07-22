@@ -425,6 +425,29 @@ def test_sampled_signal_events_render_count_and_rows() -> None:
     assert '"index_key"' not in output
 
 
+def test_current_market_snapshot_and_constraints_render_semantically() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "lookup_prices", "inputs": [], "outputs": [],
+        "output_changes": [
+            {"field": "MarketDataModule.current_market_snapshot", "before": None, "after": {
+                "close": {"AP.CZC": 10}, "volume": {"AP.CZC": 20},
+                "upper_limit": {"AP.CZC": 12}, "lower_limit": {"AP.CZC": 8},
+            }},
+            {"field": "MarketDataModule.current_tradable_status", "before": None, "after": {"AP.CZC": True}},
+            {"field": "MarketDataModule.current_order_constraints", "before": None, "after": {
+                "AP.CZC": {"tradable": True, "can_buy": True, "can_sell": True, "reason": "", "limit_up_price": 0, "limit_down_price": 0},
+            }},
+        ],
+    })
+    output = "\n".join(lines)
+    assert "instrument" in output and "close" in output and "volume" in output
+    assert "tradable=1, blocked=0" in output
+    assert "normal=1, constrained=0" in output
+    assert '"can_buy"' not in output
+
+
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
