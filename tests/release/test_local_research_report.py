@@ -468,7 +468,7 @@ def test_graph_continuation_replaces_physical_branch_in_work_package_index(
         for item in index["sections"]
     )
     aggregate = (package_root / "REPORT.md").read_text(encoding="utf-8")
-    assert "Hypothesis branches: 1" in aggregate
+    assert "研究分支：1" in aggregate
     continued_report = (
         package_root / "branches" / "branch-v8" / "REPORT.md"
     ).read_text(encoding="utf-8")

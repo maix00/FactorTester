@@ -18,11 +18,11 @@ def test_research_history_uses_verified_chinese_journal_as_primary_reading_view(
     assert "artifact.journalHash" in journal
     assert "ResearchNarrativeReportView" in view
     assert "ScrollViewReader" in view
-    assert "reportParagraph(section.body)" in view
+    assert "reportParagraph(section.body, linkIDs: [], section: section)" in view
     assert "auditChip" in view
     assert ".popover(item:" in view
     assert "ResearchVersionTreePane" in view
-    assert "DisclosureGroup" not in view
+    assert 'DisclosureGroup("沿用义务' in view
     assert "ResearchCheckpointCard" not in view
     assert "journalRef" in model
     assert "journalHash" in model
@@ -34,7 +34,7 @@ def test_legacy_fallback_does_not_present_index_summary_as_complete_report() -> 
     view = (PROFILE_UI / "ResearchNarrativeReportView.swift").read_text()
 
     assert "没有经过校验的中文 journal" in view
-    assert "不会用摘要卡片冒充完整报告" in view
+    assert "不会用旧 REPORT.md 或 INDEX.json 冒充完整报告" in view
 
 
 def test_research_tree_never_collapses_unrelated_branches_onto_one_lane() -> None:
