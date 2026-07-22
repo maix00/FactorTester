@@ -95,6 +95,10 @@ def build_graph_branch_next(
     }
     if "entry_requirements" in context:
         packet["entry_requirements"] = entry_requirements
+        if "entry_resolution" in context:
+            packet["entry_resolution"] = deepcopy(
+                context["entry_resolution"]
+            )
         packet["entry_requirement_policy"] = {
             "required_dimensions": [
                 "applicability",
@@ -103,8 +107,8 @@ def build_graph_branch_next(
                 "entry_effect",
             ],
             "agent_action": (
-                "submit_one_orthogonal_assessment_per_requirement_before_"
-                "leaving_current_node"
+                "submit_one_orthogonal_assessment_per_unresolved_"
+                "requirement_before_leaving_current_node"
             ),
             "detail_command": (
                 "factortester research-graph requirement-detail "

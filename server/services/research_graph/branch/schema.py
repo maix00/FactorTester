@@ -46,6 +46,7 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
             current_capability_resolution_hash TEXT NOT NULL,
             current_trial_plan_hash TEXT NOT NULL DEFAULT '',
             trial_stage_projection_json TEXT NOT NULL DEFAULT '{}',
+            entry_resolution_frame_json TEXT NOT NULL DEFAULT '{}',
             evidence_refs_json TEXT NOT NULL DEFAULT '[]',
             omitted_evidence_count INTEGER NOT NULL DEFAULT 0,
             latest_trace_id TEXT NOT NULL DEFAULT '',
@@ -114,6 +115,12 @@ def ensure_instance_branch_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE research_graph_branches "
             "ADD COLUMN trial_stage_projection_json "
+            "TEXT NOT NULL DEFAULT '{}'"
+        )
+    if "entry_resolution_frame_json" not in columns:
+        conn.execute(
+            "ALTER TABLE research_graph_branches "
+            "ADD COLUMN entry_resolution_frame_json "
             "TEXT NOT NULL DEFAULT '{}'"
         )
     if "work_package_id" not in instance_columns:

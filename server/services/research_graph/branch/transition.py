@@ -27,6 +27,10 @@ from server.services.research_graph.branch.guards import (
 from server.services.research_graph.branch.entry_assessments import (
     validate_entry_requirement_assessments,
 )
+from server.services.research_graph.branch.entry_resolution_frame import (
+    active_entry_requirement_ids,
+    advance_entry_resolution_frame,
+)
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
     prepare_research_cycle_trace,
@@ -160,6 +164,9 @@ def advance_graph_branch(
         current_stage_projection = (
             loads(branch_row["trial_stage_projection_json"]) or {}
         )
+        current_entry_resolution_frame = (
+            loads(branch_row["entry_resolution_frame_json"]) or {}
+        )
         previous_cycle_checkpoint = checkpoint_from_branch_row(branch_row)
         cycle_update = prepared_evidence.get("research_cycle")
         if isinstance(cycle_update, dict):
@@ -228,6 +235,10 @@ def advance_graph_branch(
             submitted=prepared_evidence.get(
                 "entry_requirement_assessments"
             ),
+            required_requirement_ids=active_entry_requirement_ids(
+                frame=current_entry_resolution_frame,
+                current_node=branch["current_node"],
+            ),
         )
         if entry_assessments:
             prepared_evidence["entry_requirement_assessments"] = (
@@ -236,6 +247,12 @@ def advance_graph_branch(
             persisted_evidence["entry_requirement_assessments"] = (
                 entry_assessments
             )
+        projected_entry_resolution_frame = advance_entry_resolution_frame(
+            frame=current_entry_resolution_frame,
+            current_node=branch["current_node"],
+            target_node=target_id,
+            assessments=entry_assessments,
+        )
         route_action = accepted_adjudication_action(
             previous_checkpoint=previous_cycle_checkpoint,
             events=(
@@ -463,6 +480,7 @@ def advance_graph_branch(
                 current_capability_resolution_hash=?,
                 current_trial_plan_hash=?,
                 trial_stage_projection_json=?,
+                entry_resolution_frame_json=?,
                 evidence_refs_json=?, omitted_evidence_count=?,
                 latest_trace_id=?, updated_at=?
             WHERE branch_id=? AND instance_id=?
@@ -474,6 +492,7 @@ def advance_graph_branch(
                 resolution_hash,
                 projected_trial_plan_hash,
                 orjson.dumps(projected_stage).decode(),
+                orjson.dumps(projected_entry_resolution_frame).decode(),
                 orjson.dumps(bounded_evidence_refs).decode(),
                 omitted_evidence_count,
                 trace_id,

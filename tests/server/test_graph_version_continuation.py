@@ -643,6 +643,29 @@ def test_schema_v2_continuation_previews_only_material_requirement_changes(
     assert delta["entry_removed_ids"] == []
     assert delta["assessment_required_ids"] == delta["entry_added_ids"]
     assert len(delta["delta_hash"]) == 64
+    case_id = _approve(path, target_hash=preview["target_hash"])
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+        expected_target_hash=preview["target_hash"],
+        human_authorization_id=case_id,
+    )
+    branch = continued["branches"][0]
+    context = build_graph_branch_context(
+        instance_id=continued["instance_id"],
+        branch_id=branch["branch_id"],
+        owner="alice",
+    )
+    assert context["entry_resolution"]["status"] == "pending"
+    assert context["entry_resolution"]["resume_node"] == (
+        "authoritative_backtest"
+    )
+    assert [
+        item["requirement_id"] for item in context["entry_requirements"]
+    ] == delta["assessment_required_ids"]
 
 
 def test_schema_v2_continuation_shadow_replay_rejects_tampered_preflight(

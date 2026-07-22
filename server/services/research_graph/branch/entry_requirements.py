@@ -11,12 +11,24 @@ def compact_entry_requirements(
     graph: dict[str, Any],
     node: dict[str, Any],
     checkpoint: dict[str, Any] | None,
+    active_requirement_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Project aliases and existing obligation mappings without full bodies."""
     catalog = requirement_map(graph)
     obligations = checkpoint_obligations(checkpoint)
     rows = []
-    for requirement_id in node.get("entry_requirement_refs") or []:
+    declared_ids = [
+        str(item) for item in node.get("entry_requirement_refs") or []
+    ]
+    if active_requirement_ids is None:
+        selected_ids = declared_ids
+    else:
+        active_ids = set(active_requirement_ids)
+        selected_ids = [
+            requirement_id for requirement_id in declared_ids
+            if requirement_id in active_ids
+        ]
+    for requirement_id in selected_ids:
         requirement = catalog.get(str(requirement_id))
         if requirement is None:
             raise ValueError(f"unknown node entry requirement: {requirement_id}")

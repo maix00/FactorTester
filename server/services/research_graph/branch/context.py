@@ -17,6 +17,10 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.entry_requirements import (
     compact_entry_requirements,
 )
+from server.services.research_graph.branch.entry_resolution_frame import (
+    active_entry_requirement_ids,
+    compact_entry_resolution_frame,
+)
 from server.services.research_graph.branch.research_cycle import (
     agent_cycle_summary,
     checkpoint_from_branch_row,
@@ -173,11 +177,19 @@ def _build_local_state(
         research_cycle = _compact_research_cycle(
             agent_cycle_summary(cycle_checkpoint)
         )
+        entry_resolution_frame = loads(
+            branch_row["entry_resolution_frame_json"]
+        ) or {}
+        active_entry_ids = active_entry_requirement_ids(
+            frame=entry_resolution_frame,
+            current_node=branch["current_node"],
+        )
         entry_requirements = (
             compact_entry_requirements(
                 graph=graph,
                 node=node,
                 checkpoint=cycle_checkpoint,
+                active_requirement_ids=active_entry_ids,
             )
             if schema_version >= 2
             else []
@@ -260,6 +272,11 @@ def _build_local_state(
     }
     if schema_version >= 2:
         context["entry_requirements"] = entry_requirements
+        compact_frame = compact_entry_resolution_frame(
+            entry_resolution_frame
+        )
+        if compact_frame is not None:
+            context["entry_resolution"] = compact_frame
         context["node_report_requirement_refs"] = [
             *node.get("entry_report_refs", []),
             *node.get("node_report_refs", []),

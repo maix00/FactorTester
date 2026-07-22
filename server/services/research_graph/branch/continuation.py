@@ -32,6 +32,9 @@ from server.services.research_graph.branch.research_cycle import (
 from server.services.research_graph.branch.requirement_preflight import (
     assess_requirement_continuation,
 )
+from server.services.research_graph.branch.entry_resolution_frame import (
+    initial_entry_resolution_frame,
+)
 from server.services.research_graph.branch.topology_preflight import (
     assess_topology_continuation,
     load_work_package_trace_footprint,
@@ -383,6 +386,9 @@ def _prepare(
         "trial_stage_projection_json": str(
             source["trial_stage_projection_json"]
         ),
+        "entry_resolution_frame_json": orjson.dumps(
+            initial_entry_resolution_frame(descriptor)
+        ).decode(),
     }
 
 

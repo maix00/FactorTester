@@ -41,11 +41,26 @@ def validate_entry_requirement_assessments(
     checkpoint: dict[str, Any] | None,
     target_node: str,
     submitted: Any,
+    required_requirement_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Require one four-dimensional decision per current requirement."""
-    required_ids = [
+    declared_ids = [
         str(item) for item in node.get("entry_requirement_refs") or []
     ]
+    if required_requirement_ids is None:
+        required_ids = declared_ids
+    else:
+        requested_ids = set(required_requirement_ids)
+        unknown = sorted(requested_ids - set(declared_ids))
+        if unknown:
+            raise ValueError(
+                "entry resolution references undeclared requirements: "
+                + ", ".join(unknown)
+            )
+        required_ids = [
+            requirement_id for requirement_id in declared_ids
+            if requirement_id in requested_ids
+        ]
     if int(graph.get("schema_version") or 1) < 2:
         if submitted not in (None, []):
             raise ValueError(

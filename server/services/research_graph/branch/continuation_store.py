@@ -95,9 +95,10 @@ def insert_continuation(
             current_capability_resolution_json,
             current_capability_resolution_hash,
             current_trial_plan_hash, trial_stage_projection_json,
+            entry_resolution_frame_json,
             evidence_refs_json, omitted_evidence_count, latest_trace_id,
             created_at, updated_at
-        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             branch_id,
@@ -110,6 +111,7 @@ def insert_continuation(
             resolution_hash,
             prepared["current_trial_plan_hash"],
             prepared["trial_stage_projection_json"],
+            prepared["entry_resolution_frame_json"],
             orjson.dumps(prepared["evidence_refs"]).decode(),
             int(prepared["omitted_evidence_count"]),
             trace_id,
