@@ -20,6 +20,8 @@ def test_reentry_frame_keeps_only_unresolved_requirement_changes() -> None:
         "requirement_preflight": {
             "delta_hash": "a" * 64,
             "assessment_required_ids": ["factor_semantics.expression_identity"],
+            "entry_added_ids": [],
+            "entry_revised_ids": ["factor_semantics.expression_identity"],
             "entry_removed_ids": ["factor_semantics.legacy_prompt"],
             "entry_metadata_changed_ids": [],
         },
@@ -30,6 +32,9 @@ def test_reentry_frame_keeps_only_unresolved_requirement_changes() -> None:
     assert frame["status"] == "pending"
     assert frame["resume_node"] == "factor_semantics"
     assert frame["unresolved_requirement_ids"] == [
+        "factor_semantics.expression_identity"
+    ]
+    assert frame["revised_requirement_ids"] == [
         "factor_semantics.expression_identity"
     ]
     resolved = advance_entry_resolution_frame(

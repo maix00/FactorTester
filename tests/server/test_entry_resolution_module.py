@@ -23,7 +23,7 @@ def test_public_module_resolves_departure_and_reuses_same_node_arrival() -> None
         graph=graph,
         node=node,
         checkpoint=_checkpoint(),
-        current_frame={},
+        current_frame={"revised_requirement_ids": [REQUIREMENT_ID]},
         current_node="data_contract",
         target_node="data_contract",
         submitted=[_mapped_assessment()],
@@ -47,5 +47,6 @@ def test_public_module_resolves_departure_and_reuses_same_node_arrival() -> None
         "requirement_id": REQUIREMENT_ID,
         "title_zh": "是否有数据源覆盖目标产品、合约和市场",
         "assessed": True,
-        "arrival_status": "reused",
+        "change_kind": "revised",
+        "resolution_status": "reused",
     }]

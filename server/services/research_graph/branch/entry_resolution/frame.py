@@ -30,6 +30,10 @@ def initial_entry_resolution_frame(
         ),
         "resume_node": str(descriptor.get("target_node") or ""),
         "requirement_delta_hash": str(preflight.get("delta_hash") or ""),
+        "added_requirement_ids": _text_ids(preflight.get("entry_added_ids")),
+        "revised_requirement_ids": _text_ids(
+            preflight.get("entry_revised_ids")
+        ),
         "unresolved_requirement_ids": unresolved,
         "resolved_requirement_ids": [],
         "removed_requirement_ids": _text_ids(
@@ -152,6 +156,18 @@ def entry_resolution_trace_delta(
         projected_frame.get("unresolved_requirement_ids")
     )
     titles = requirement_titles or {}
+    added = set(_text_ids(current_frame.get("added_requirement_ids")))
+    revised = set(_text_ids(current_frame.get("revised_requirement_ids")))
+    metadata_changed = set(_text_ids(
+        current_frame.get("metadata_changed_requirement_ids")
+    ))
+    assessment_effects = {
+        str(item.get("requirement_id") or ""): str(
+            (item.get("entry_effect") or {}).get("status") or ""
+        )
+        for item in assessments
+        if isinstance(item, dict) and item.get("requirement_id")
+    }
     item_ids = sorted(set(
         assessed + reused + reference_only + unresolved
     ))
@@ -170,10 +186,22 @@ def entry_resolution_trace_delta(
             "requirement_id": requirement_id,
             "title_zh": str(titles.get(requirement_id) or requirement_id),
             "assessed": requirement_id in assessed,
-            "arrival_status": (
+            "change_kind": (
+                "added" if requirement_id in added
+                else "revised" if requirement_id in revised
+                else "metadata_only" if requirement_id in metadata_changed
+                else "unchanged"
+            ),
+            "resolution_status": (
                 "reused" if requirement_id in reused
                 else "reference_only" if requirement_id in reference_only
                 else "unresolved" if requirement_id in unresolved
+                else "assessed_limited" if assessment_effects.get(
+                    requirement_id
+                ) == "pass_limited"
+                else "assessed_pass" if assessment_effects.get(
+                    requirement_id
+                ) == "pass"
                 else "not_applicable"
             ),
         } for requirement_id in item_ids],

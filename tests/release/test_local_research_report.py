@@ -158,7 +158,8 @@ def test_checkpoint_accepts_bounded_entry_resolution_projection(
             "requirement_id": "data.source_availability",
             "title_zh": "是否有数据源覆盖目标产品、合约和市场",
             "assessed": True,
-            "arrival_status": "reused",
+            "change_kind": "revised",
+            "resolution_status": "reused",
         }],
         "resume_node": "job_evidence_ready",
     }

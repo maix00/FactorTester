@@ -50,10 +50,15 @@ _ENTRY_RESOLUTION_FIELDS = {
     "resume_node",
 }
 _ENTRY_RESOLUTION_ITEM_FIELDS = {
-    "requirement_id", "title_zh", "assessed", "arrival_status",
+    "requirement_id", "title_zh", "assessed", "change_kind",
+    "resolution_status",
 }
 _ENTRY_RESOLUTION_STATUSES = {
-    "reused", "reference_only", "unresolved", "not_applicable",
+    "assessed_pass", "assessed_limited", "reused", "reference_only",
+    "unresolved", "not_applicable",
+}
+_ENTRY_RESOLUTION_CHANGE_KINDS = {
+    "added", "revised", "metadata_only", "unchanged",
 }
 _CLAIM_FIELDS = {"claim_ref", "claim_type", "evidence_state"}
 _OBLIGATION_FIELDS = {
@@ -892,8 +897,10 @@ def _entry_resolution(value: Any) -> dict[str, Any]:
         )
         if type(item["assessed"]) is not bool:
             raise ValueError("entry_resolution.item.assessed must be boolean")
-        if item["arrival_status"] not in _ENTRY_RESOLUTION_STATUSES:
-            raise ValueError("entry_resolution.item.arrival_status is invalid")
+        if item["change_kind"] not in _ENTRY_RESOLUTION_CHANGE_KINDS:
+            raise ValueError("entry_resolution.item.change_kind is invalid")
+        if item["resolution_status"] not in _ENTRY_RESOLUTION_STATUSES:
+            raise ValueError("entry_resolution.item.resolution_status is invalid")
     if len(set(item_ids)) != len(item_ids) or set(item_ids) != all_ids:
         raise ValueError("entry_resolution.items must cover changed requirements")
     return result
