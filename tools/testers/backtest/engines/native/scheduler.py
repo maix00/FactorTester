@@ -222,6 +222,8 @@ def _audit_value(
     """
     if value is None or isinstance(value, (str, bool, int)):
         return value
+    if type(value).__module__.startswith("numpy") and hasattr(value, "item"):
+        return _audit_value(value.item(), key_labels=key_labels, _seen=_seen)
     if isinstance(value, float):
         return value if math.isfinite(value) else str(value)
     if isinstance(value, (pd.Timestamp, pd.Timedelta)):

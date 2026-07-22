@@ -545,6 +545,9 @@ def test_step_mode_summarizes_daily_mark_to_market_checkpoint():
 def test_step_mode_dmtm_summary_contains_real_cash_and_position_changes():
     from collections import deque
 
+    import numpy as np
+    import orjson
+
     from tools.data.types.data_money import DataMoney
     from tools.testers.backtest.engines.native.config import LedgerConfig
     from tools.testers.backtest.engines.native.ledger import ledger_identity
@@ -589,7 +592,7 @@ def test_step_mode_dmtm_summary_contains_real_cash_and_position_changes():
 
     def prepare(_account, ctx) -> None:
         ctx.set(MarketDataModule.current_market_snapshot, {
-            "settlement": {product: 110.0},
+            "settlement": {product: np.float64(110.0)},
             "close": {product: 109.0},
         })
         ctx.set(MarketDataModule.current_historical_fields, {
@@ -650,3 +653,4 @@ def test_step_mode_dmtm_summary_contains_real_cash_and_position_changes():
     assert dmtm["cash_changes"]
     assert dmtm["position_changes"]
     assert dmtm["market_rule_inputs"]
+    assert orjson.loads(orjson.dumps(records[1]))["dmtm"]["market_rule_inputs"]
