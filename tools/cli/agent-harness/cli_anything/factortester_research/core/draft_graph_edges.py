@@ -116,6 +116,22 @@ def build_draft_edges() -> list[dict[str, Any]]:
             server_action="bind_factor_semantics",
         ),
         edge(
+            "factor_semantics__factor_improvement",
+            "factor_semantics",
+            "factor_improvement_required",
+            edge_type="recovery",
+            guard={
+                "adjudication_route_bound": True,
+                "factor_revision_authorized": True,
+                "next_trial_stage_required": False,
+            },
+            risk_level="L2",
+            required_transition_facts=[
+                "accepted factor-revision adjudication and material semantic "
+                "obligation",
+            ],
+        ),
+        edge(
             "validation_design__cheap_diagnostics",
             "validation_design",
             "cheap_factor_diagnostics",
@@ -123,6 +139,22 @@ def build_draft_edges() -> list[dict[str, Any]]:
                 "selection_and_trial_plan_frozen": True,
                 "actionable_obligations_planned_or_bounded": True,
             },
+        ),
+        edge(
+            "validation_design__factor_improvement",
+            "validation_design",
+            "factor_improvement_required",
+            edge_type="recovery",
+            guard={
+                "adjudication_route_bound": True,
+                "factor_revision_authorized": True,
+                "next_trial_stage_required": False,
+            },
+            risk_level="L2",
+            required_transition_facts=[
+                "accepted factor-revision adjudication for a late semantic "
+                "obligation",
+            ],
         ),
         edge(
             "cheap_diagnostics__backtest",

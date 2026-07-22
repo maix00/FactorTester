@@ -22,9 +22,9 @@ def build_draft_graph() -> dict[str, Any]:
     graph = {
         "schema_version": 1,
         "graph_id": "factor-research",
-        "version": 7,
+        "version": 8,
         "lifecycle": "draft",
-        "parent_version": 6,
+        "parent_version": 7,
         "research_semantics": "product_neutral",
         "entry_node": "hypothesis_preregistration",
         "nodes": nodes,

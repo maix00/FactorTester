@@ -264,13 +264,13 @@ def test_builtin_registry_distinguishes_backend_guidance_and_product_gaps() -> N
 def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> None:
     graph = build_draft_graph()
     edges = {item["edge_id"]: item for item in graph["edges"]}
-    assert graph["version"] == 7
-    assert graph["parent_version"] == 6
+    assert graph["version"] == 8
+    assert graph["parent_version"] == 7
     nodes = {item["node_id"]: item for item in graph["nodes"]}
 
     assert graph["lifecycle"] == "draft"
-    assert graph["version"] == 7
-    assert graph["parent_version"] == 6
+    assert graph["version"] == 8
+    assert graph["parent_version"] == 7
     assert {
         item["capability_id"]
         for item in graph["research_cycle_operations"]
@@ -466,6 +466,50 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     assert edges["factor_semantics__validation_design"]["server_action"] == (
         "bind_factor_semantics"
     )
+    assert edges["factor_semantics__factor_improvement"] == {
+        "edge_id": "factor_semantics__factor_improvement",
+        "from_node": "factor_semantics",
+        "to_node": "factor_improvement_required",
+        "edge_type": "recovery",
+        "guard": {
+            "adjudication_route_bound": True,
+            "factor_revision_authorized": True,
+            "next_trial_stage_required": False,
+        },
+        "required_evidence": [
+            "accepted factor-revision adjudication and material semantic "
+            "obligation",
+        ],
+        "required_research_evidence": [],
+        "required_transition_facts": [
+            "accepted factor-revision adjudication and material semantic "
+            "obligation",
+        ],
+        "counterexamples": [],
+        "risk_level": "L2",
+    }
+    assert edges["validation_design__factor_improvement"] == {
+        "edge_id": "validation_design__factor_improvement",
+        "from_node": "validation_design",
+        "to_node": "factor_improvement_required",
+        "edge_type": "recovery",
+        "guard": {
+            "adjudication_route_bound": True,
+            "factor_revision_authorized": True,
+            "next_trial_stage_required": False,
+        },
+        "required_evidence": [
+            "accepted factor-revision adjudication for a late semantic "
+            "obligation",
+        ],
+        "required_research_evidence": [],
+        "required_transition_facts": [
+            "accepted factor-revision adjudication for a late semantic "
+            "obligation",
+        ],
+        "counterexamples": [],
+        "risk_level": "L2",
+    }
     assert edges["validation_design__cheap_diagnostics"]["guard"][
         "actionable_obligations_planned_or_bounded"
     ] is True
