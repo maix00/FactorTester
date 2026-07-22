@@ -157,9 +157,12 @@ def render_branch_report(
             refs,
             project_sections=(
                 journal_fragment is None or fragment_changed
-                or not any(
-                    item["section_ref"].startswith(branch_section_prefix)
-                    for item in existing_index["sections"]
+                or (
+                    not any(
+                        item["section_ref"].startswith(branch_section_prefix)
+                        for item in existing_index["sections"]
+                    )
+                    and existing_index["omitted_section_count"] == 0
                 )
             ),
         )
