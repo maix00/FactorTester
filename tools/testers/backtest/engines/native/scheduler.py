@@ -1297,7 +1297,6 @@ def _audit_event_queue_head(state: "BacktestRunState", event_queue: EventQueue, 
                 or ""
             ),
             "order_id": _audit_value(payload.get("order_id") if isinstance(payload, dict) else ""),
-            "payload": _audit_value(payload),
         })
     return {
         "pending_count": event_queue.pending_count(),
@@ -1421,6 +1420,33 @@ def _audit_record_changes(before: list[dict[str, Any]], after: list[dict[str, An
     return changes
 
 
+def _audit_position_book_change(change: dict[str, Any]) -> dict[str, Any]:
+    """Replace whole-book before/after copies with lossless changed instruments."""
+    before = change.get("before")
+    after = change.get("after")
+    if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+        return change
+    instruments = []
+    for instrument in sorted(set(before) | set(after), key=str):
+        old = before.get(instrument, _AUDIT_MISSING)
+        new = after.get(instrument, _AUDIT_MISSING)
+        if old == new:
+            continue
+        instruments.append({
+            "instrument": str(instrument),
+            "before": None if old is _AUDIT_MISSING else old,
+            "after": None if new is _AUDIT_MISSING else new,
+        })
+    return {
+        key: value for key, value in change.items()
+        if key not in {"before", "after"}
+    } | {
+        "before_count": len(before),
+        "after_count": len(after),
+        "changes": instruments,
+    }
+
+
 def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> list[dict[str, Any]]:
     before_by_ledger = {entry["ledger"]: entry for entry in before}
     after_by_ledger = {entry["ledger"]: entry for entry in after}
@@ -1443,7 +1469,7 @@ def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, An
             old_value = old.get("fields", {}).get(field_name)
             new_value = new.get("fields", {}).get(field_name)
             if old_value != new_value:
-                changes.append({
+                change = {
                     "scope": "ledger",
                     "ledger": ledger_name,
                     "cash_pool": metadata.get("cash_pool"),
@@ -1451,7 +1477,12 @@ def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, An
                     "field": field_name,
                     "before": old_value,
                     "after": new_value,
-                })
+                }
+                changes.append(
+                    _audit_position_book_change(change)
+                    if field_name == "LedgerModule.positions"
+                    else change
+                )
     return changes
 
 
@@ -1485,7 +1516,7 @@ def _audit_dmtm_step(
                 "ledger": str(payload.get("ledger_id") or entry.get("ledger") or ""),
                 "trading_day": str(payload.get("trading_day") or ""),
             })
-    if flow.name != "apply_daily_mark_to_market" and not events:
+    if not events:
         return None
 
     inputs = before.get("inputs", [])
@@ -1562,7 +1593,12 @@ def _step_after_flow(f, state, ctx, step_callback, before):
     output_changes = []
     for output in outputs_after:
         for change in _audit_record_changes(outputs_before.get(output["field"], []), output["values"]):
-            output_changes.append({"field": output["field"], **change})
+            item = {"field": output["field"], **change}
+            output_changes.append(
+                _audit_position_book_change(item)
+                if output["field"] == "LedgerModule.positions"
+                else item
+            )
     ledger_changes = _audit_ledger_changes(before.get("ledgers_before", []), ledgers_after)
     declared_outputs = {ref.qualified_name for ref in f.outputs}
     direct_contract_violations = list(ctx.contract_violations())[before.get("contract_violation_count", 0):]
@@ -1604,6 +1640,21 @@ def _step_after_flow(f, state, ctx, step_callback, before):
     event_payload_changes = _audit_event_payload_changes(
         before.get("event_payloads", []), event_payloads_after,
     )
+    displayed_ledger_changes = [
+        change for change in ledger_changes
+        if change.get("field") not in declared_outputs
+    ]
+    displayed_outputs = [
+        {
+            "field": output["field"],
+            "values": [],
+            "represented_by": "output_changes",
+        }
+        if output["field"] == "LedgerModule.positions"
+        and any(change.get("field") == output["field"] for change in output_changes)
+        else output
+        for output in outputs_after
+    ]
     record = {
         "phase": "step",
         "timestamp": before.get("timestamp", ""),
@@ -1614,14 +1665,18 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         "flow_phase": f.phase.value,
         "description": getattr(f, "description", "") or "",
         "inputs": before.get("inputs", []),
-        "outputs": outputs_after,
+        "outputs": displayed_outputs,
         "output_changes": output_changes,
         "strategies": before.get("strategies", []),
         "ledgers_before": _audit_ledger_topology(before.get("ledgers_before", [])),
         "ledgers_after": _audit_ledger_topology(ledgers_after),
-        "ledger_changes": ledger_changes,
-        "event_payloads": before.get("event_payloads", []),
-        "event_payloads_after": event_payloads_after,
+        "ledger_changes": displayed_ledger_changes,
+        "event_payloads": (
+            []
+            if event_payload_changes or not f.event_payload_inputs
+            else before.get("event_payloads", [])
+        ),
+        "event_payloads_after": [],
         "event_payload_changes": event_payload_changes,
         "event_queue": _audit_event_queue_head(state, ctx._event_queue),
         "input_contract_violations": [

@@ -458,15 +458,8 @@ def test_step_mode_reports_mutable_event_payload_before_and_after_per_strategy()
 
     run(account, queue, [flow], step_mode=True, step_callback=records.append)
 
-    assert records[0]["event_payloads"] == [{
-        "scope": "strategy",
-        "strategy": "S-payload",
-        "payloads": [{"quantity": 2.0}],
-    }]
-    assert records[0]["event_payloads_after"][0]["payloads"] == [{
-        "fee_cost": 12.5,
-        "quantity": 2.0,
-    }]
+    assert records[0]["event_payloads"] == []
+    assert records[0]["event_payloads_after"] == []
     assert records[0]["event_payload_changes"] == [{
         "scope": "strategy",
         "strategy": "S-payload",
@@ -475,6 +468,31 @@ def test_step_mode_reports_mutable_event_payload_before_and_after_per_strategy()
         "before": [{"quantity": 2.0}],
         "after": [{"fee_cost": 12.5, "quantity": 2.0}],
     }]
+
+
+def test_step_mode_does_not_label_unrelated_ledger_event_as_dmtm():
+    strategy = Strategy(alias="S-ledger")
+    records: list[dict] = []
+    flow = Flow(
+        "apply_daily_mark_to_market",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.LEDGER,
+        compute=lambda account, ctx: None,
+    )
+    account = _account([strategy], active_flow_names=frozenset({"apply_daily_mark_to_market"}))
+    queue = EventQueue()
+    queue.push_event(EventDraft(
+        EventKind.LEDGER,
+        pd.Timestamp("2026-01-05 10:00"),
+        strategy=strategy,
+        payload={"kind": "margin_requirement_change"},
+    ))
+
+    run(account, queue, [flow], step_mode=True, step_callback=records.append)
+
+    assert "dmtm" not in records[0]
 
 
 def test_step_mode_preserves_data_money_storage_units_in_flow_outputs():
@@ -727,6 +745,22 @@ def test_step_mode_dmtm_summary_contains_real_cash_and_position_changes():
     assert cash_change["after"]["use_minor_units"] is True
     assert cash_change["after"]["minor_units"] == 102_000
     assert dmtm["position_changes"]
+    position_change = dmtm["position_changes"][0]
+    assert position_change["before_count"] == 1
+    assert position_change["after_count"] == 1
+    assert position_change["changes"][0]["instrument"] == product
+    assert "before" not in position_change
+    assert "after" not in position_change
+    assert records[1]["ledger_changes"] == []
+    positions_output = next(
+        item for item in records[1]["outputs"]
+        if item["field"] == "LedgerModule.positions"
+    )
+    assert positions_output == {
+        "field": "LedgerModule.positions",
+        "values": [],
+        "represented_by": "output_changes",
+    }
     assert dmtm["market_rule_inputs"]
     resolved = next(
         item for item in records[1]["outputs"]
