@@ -7,11 +7,29 @@ enum ResearchTreeLayout {
     static let laneOriginX: CGFloat = 9
     static let selectedNodeDiameter: CGFloat = 17
     static let horizontalPadding: CGFloat = 8
+    static let rowSpacing: CGFloat = 8
     static let maximumLaneFootprint = laneOriginX
         + CGFloat(maximumVisibleBranches - 1) * laneSpacing
         + selectedNodeDiameter
+    static let graphColumnWidth = maximumLaneFootprint
     static let minimumLabelWidth = navigatorWidth
-        - horizontalPadding * 2 - maximumLaneFootprint
+        - horizontalPadding * 2 - graphColumnWidth - rowSpacing
+
+    static func laneCenterX(_ lane: Int) -> CGFloat {
+        laneOriginX + CGFloat(lane) * laneSpacing
+    }
+
+    static func canvasLaneCenterX(_ lane: Int) -> CGFloat {
+        horizontalPadding + laneCenterX(lane)
+    }
+
+    static func markerBounds(
+        lane: Int,
+        diameter: CGFloat
+    ) -> ClosedRange<CGFloat> {
+        let center = laneCenterX(lane)
+        return (center - diameter / 2)...(center + diameter / 2)
+    }
 }
 
 enum ResearchTreeOrdering {
@@ -167,7 +185,7 @@ struct ResearchVersionTreePane: View {
                 guard let first = indices.first, let last = indices.last else {
                     continue
                 }
-                let x = laneX(lane)
+                let x = ResearchTreeLayout.canvasLaneCenterX(lane)
                 var path = Path()
                 path.move(to: CGPoint(
                     x: x,
@@ -186,10 +204,12 @@ struct ResearchVersionTreePane: View {
             for (index, node) in nodes.enumerated()
             where node.isLineage {
                 let target = CGPoint(
-                    x: laneX(node.lane),
+                    x: ResearchTreeLayout.canvasLaneCenterX(node.lane),
                     y: (CGFloat(index) + 0.5) * rowHeight
                 )
-                let sourceX = node.sourceLane.map(laneX) ?? 0
+                let sourceX = node.sourceLane.map(
+                    ResearchTreeLayout.canvasLaneCenterX
+                ) ?? ResearchTreeLayout.canvasLaneCenterX(node.lane)
                 let sourceRow = ResearchTreeConnector.sourceRowIndex(
                     sourceCheckpointRef: node.sourceCheckpointRef,
                     nodeCheckpointRefs: nodes.map(\.checkpointRef)
@@ -227,7 +247,7 @@ struct ResearchVersionTreePane: View {
             guard !node.checkpointRef.isEmpty else { return }
             select(node.checkpointRef, node.branchID)
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: ResearchTreeLayout.rowSpacing) {
                 ZStack {
                     Circle()
                         .fill(node.isLineage ? Color(nsColor: .windowBackgroundColor) : nodeColor(node))
@@ -236,15 +256,31 @@ struct ResearchVersionTreePane: View {
                             if node.isLineage {
                                 Circle().stroke(nodeColor(node), lineWidth: 2)
                             }
-                            if selectedCheckpointRef == node.checkpointRef {
-                                Circle()
-                                    .stroke(Color.accentColor, lineWidth: 2)
-                                    .frame(width: 17, height: 17)
-                            }
                         }
-                        .offset(x: laneX(node.lane) - 26)
+                    if selectedCheckpointRef == node.checkpointRef {
+                        Circle()
+                            .stroke(Color.accentColor, lineWidth: 2)
+                            .frame(
+                                width: ResearchTreeLayout.selectedNodeDiameter,
+                                height: ResearchTreeLayout.selectedNodeDiameter
+                            )
+                    }
                 }
-                .frame(width: CGFloat(laneCount) * laneSpacing + 8)
+                .frame(
+                    width: ResearchTreeLayout.selectedNodeDiameter,
+                    height: ResearchTreeLayout.selectedNodeDiameter
+                )
+                .offset(
+                    x: ResearchTreeLayout.markerBounds(
+                        lane: node.lane,
+                        diameter: ResearchTreeLayout.selectedNodeDiameter
+                    ).lowerBound
+                )
+                .frame(
+                    width: ResearchTreeLayout.graphColumnWidth,
+                    height: rowHeight,
+                    alignment: .leading
+                )
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
@@ -549,7 +585,7 @@ struct ResearchVersionTreePane: View {
     }
 
     private func laneX(_ lane: Int) -> CGFloat {
-        ResearchTreeLayout.laneOriginX + CGFloat(lane) * laneSpacing
+        ResearchTreeLayout.laneCenterX(lane)
     }
 
     private func laneColor(_ lane: Int) -> Color {

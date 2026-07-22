@@ -94,6 +94,29 @@ final class ProfileResearchServiceTests: XCTestCase {
             ResearchTreeLayout.minimumLabelWidth,
             80
         )
+        XCTAssertLessThanOrEqual(
+            ResearchTreeLayout.horizontalPadding * 2
+                + ResearchTreeLayout.graphColumnWidth
+                + ResearchTreeLayout.rowSpacing
+                + ResearchTreeLayout.minimumLabelWidth,
+            ResearchTreeLayout.navigatorWidth
+        )
+        for lane in 0..<ResearchTreeLayout.maximumVisibleBranches {
+            let bounds = ResearchTreeLayout.markerBounds(
+                lane: lane,
+                diameter: ResearchTreeLayout.selectedNodeDiameter
+            )
+            XCTAssertGreaterThanOrEqual(bounds.lowerBound, 0)
+            XCTAssertLessThanOrEqual(
+                bounds.upperBound,
+                ResearchTreeLayout.graphColumnWidth
+            )
+            XCTAssertEqual(
+                ResearchTreeLayout.canvasLaneCenterX(lane),
+                ResearchTreeLayout.horizontalPadding
+                    + (bounds.lowerBound + bounds.upperBound) / 2
+            )
+        }
     }
 
     func testResearchTreeOrdersTrustedRootTowardHeadDownward() {

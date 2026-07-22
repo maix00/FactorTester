@@ -27,14 +27,13 @@ final class LocalProfileController: ObservableObject {
     ) {
         self.defaults = defaults
         self.profileDirectory = profileDirectory ?? Self.defaultProfileDirectory()
-        if let data = defaults.data(forKey: cacheKey),
+        hydrateFromLocalStore()
+        if profiles.isEmpty,
+           let data = defaults.data(forKey: cacheKey),
            let value = try? JSONSerialization.jsonObject(with: data),
            let values = value as? [[String: Any]] {
             profiles = values.map(LocalProfileModel.init)
                 .filter { !$0.id.isEmpty }
-        }
-        if profiles.isEmpty {
-            hydrateFromLocalStore()
         }
     }
     var cliPath: String {
