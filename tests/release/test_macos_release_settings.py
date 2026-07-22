@@ -57,10 +57,11 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     )
     for label in ("当前版本", "可用版本", "运行状态"):
         assert label in status
-    for label in ("更新来源", "客户端更新", "验证、下载并打开 DMG"):
+    for label in ("更新来源", "客户端更新", "下载并准备更新"):
         assert label in view
     for label in (
-        "Main · GitHub", "Beta · 服务器", "最后检查", "启动时自动检查",
+        "Main · GitHub", "Beta · 服务器", "最后检查",
+        "自动下载当前渠道更新",
     ):
         assert label in view
     assert "不会回退到 GitHub" in view
@@ -183,8 +184,13 @@ def test_macos_embeds_signed_local_adapter_web_ui() -> None:
 
 def test_macos_manages_provider_neutral_local_profiles() -> None:
     profile_root = SOURCES / "Features" / "Profiles"
-    controller = (profile_root / "LocalProfileController.swift").read_text(
-        encoding="utf-8"
+    local_profile_files = [
+        profile_root / "LocalProfileController.swift",
+        profile_root / "LocalProfileCommands.swift",
+        profile_root / "LocalProfileSnapshotStore.swift",
+    ]
+    controller = "\n".join(
+        path.read_text(encoding="utf-8") for path in local_profile_files
     )
     settings = (
         SOURCES / "Features" / "Settings" / "ClientReleaseSettingsView.swift"
@@ -200,8 +206,9 @@ def test_macos_manages_provider_neutral_local_profiles() -> None:
     assert "审批" not in combined
     for forbidden in ("Codex", "model_id", "runtime_id", "password", "token"):
         assert forbidden not in combined
-    for path in sorted(profile_root.glob("*.swift")):
+    for path in local_profile_files:
         assert len(path.read_text(encoding="utf-8").splitlines()) <= 130
+    for path in sorted(profile_root.glob("*.swift")):
         subprocess.run(
             ["swiftc", "-frontend", "-parse", str(path)],
             check=True,
@@ -215,8 +222,11 @@ def test_macos_adapter_secrets_go_to_keychain_not_cli_arguments() -> None:
     form = (profile_root / "LocalAdapterProfileForm.swift").read_text(
         encoding="utf-8"
     )
-    controller = (profile_root / "LocalProfileController.swift").read_text(
-        encoding="utf-8"
+    controller = "\n".join(
+        (profile_root / filename).read_text(encoding="utf-8")
+        for filename in (
+            "LocalProfileController.swift", "LocalProfileCommands.swift",
+        )
     )
     keychain = (SOURCES / "Services" / "KeychainStore.swift").read_text(
         encoding="utf-8"
@@ -364,8 +374,9 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
     assert "LocalProfileController()" in home
     assert "ForEach(controller.profiles)" in directory
     assert "MaxA" not in directory and "MaxB" not in directory
-    for label in ("实时过程", "Trial Plans", "义务", "Evidence", "报告"):
-        assert label in workspace
+    assert "所有进行中和已完成的研究统一从 Research" in workspace
+    for label in ("实时过程", "Trial Plans", "Evidence"):
+        assert label not in workspace
     assert "不轮询完整 trace" in sections + live
     for label in ("研究进度", "Profiles", "个人中心"):
         assert label in dashboard
@@ -446,7 +457,8 @@ def test_live_profile_ui_is_bounded_refreshable_and_source_free() -> None:
     assert "nextTimelineCursor" in controller
     assert "loadEarlierTimeline" in combined
     assert "ResearchReportIndex.load" in combined
-    assert "selectedWorkspaceID" in combined
+    assert "initialWorkspaceID: item.workspaceID" in combined
+    assert "selectedBranchID" in combined
     for forbidden in ("stdout", "full trace", "markdown"):
         assert forbidden not in service.lower() + controller.lower()
     for identifier in (
