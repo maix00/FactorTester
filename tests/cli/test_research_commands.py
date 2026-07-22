@@ -483,6 +483,21 @@ def test_portfolio_maps_render_owner_instrument_rows() -> None:
     assert '"AP.CZC"' not in output
 
 
+def test_delta_maps_omit_only_zero_entries_with_explicit_note() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "size", "inputs": [], "outputs": [],
+        "output_changes": [{
+            "field": "OrderConstructModule.raw_deltas", "strategy": "A1", "before": None,
+            "after": {"AP.CZC": 2, "CJ.CZC": 0},
+        }],
+    })
+    output = "\n".join(lines)
+    assert "AP.CZC" in output and "CJ.CZC" not in output
+    assert "已省略 1 个零 delta" in output and "step-field" in output
+
+
 def test_orders_render_as_rows_with_rejection_semantics() -> None:
     from tools.cli.step import render_step_event
 
