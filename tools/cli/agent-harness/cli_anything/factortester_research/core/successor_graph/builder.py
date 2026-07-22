@@ -1,0 +1,93 @@
+"""Assemble the immutable schema-v2 successor Graph candidate."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from ..graph_protocol import graph_content_hash, validate_graph
+from .catalog import (
+    build_requirement_catalog,
+    resolver_capability_descriptors,
+)
+from .reporting import (
+    build_report_method_descriptors,
+    build_report_requirements,
+    system_transition_policies,
+)
+from .topology import build_edges, build_nodes
+
+
+def build_successor_graph() -> dict[str, Any]:
+    """Return the validated v9 candidate without activating it."""
+    catalog = build_requirement_catalog()
+    graph = {
+        "schema_version": 2,
+        "graph_id": "factor-research",
+        "version": 9,
+        "parent_version": 8,
+        "lifecycle": "draft",
+        "research_semantics": "product_neutral",
+        "entry_node": "hypothesis_preregistration",
+        "nodes": build_nodes(),
+        "edges": build_edges(),
+        "research_cycle_operations": [],
+        "maintenance_operations": [],
+        "review_policy": {
+            "routine": "deterministic gates and one primary Research Agent",
+            "semantic_change": "one domain reviewer when evidence conflicts",
+            "graph_or_skill_change": "grill-with-docs and human audit",
+        },
+        "capability_descriptors": resolver_capability_descriptors(),
+        "change_manifest": _change_manifest(),
+        "requirement_catalog": catalog,
+        "report_method_descriptors": build_report_method_descriptors(),
+        "report_requirements": build_report_requirements(catalog),
+        "system_transition_policies": system_transition_policies(),
+        "provenance": {
+            "source": "grill-179-canonical-handoff",
+            "description": (
+                "Methods are TrialPlan Evidence Actions; Evidence admission "
+                "and re-entry are deterministic system gates."
+            ),
+        },
+    }
+    graph = validate_graph(graph)
+    graph["content_hash"] = graph_content_hash(graph)
+    return graph
+
+
+def _change_manifest() -> dict[str, Any]:
+    return {
+        "parent_version": 8,
+        "summary_zh": (
+            "按研究生命周期重编主路径，并加入版本化义务、逐项报告和系统门合同。"
+        ),
+        "changes": [
+            {
+                "change_id": "change.remove-method-nodes",
+                "change_kind": "topology",
+                "subject_ref": "graph:factor-research@9",
+                "impact_zh": (
+                    "删除固定 IC、bootstrap 和 Job 方法节点，改由 TrialPlan actions 选择。"
+                ),
+            },
+            {
+                "change_id": "change.trial-execution",
+                "change_kind": "topology",
+                "subject_ref": "node:trial_execution",
+                "impact_zh": "统一同步测量、异步回测和外部观察的单项 Evidence Action。",
+            },
+            {
+                "change_id": "change.requirement-catalog",
+                "change_kind": "contract",
+                "subject_ref": "requirement-catalog:1",
+                "impact_zh": "加入八类可版本化研究义务指南及 provider-neutral resolver。",
+            },
+            {
+                "change_id": "change.report-contract",
+                "change_kind": "contract",
+                "subject_ref": "report-contract:1",
+                "impact_zh": "每个节点、边和系统门必须逐项提交中文报告。",
+            },
+        ],
+    }
