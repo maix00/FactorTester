@@ -108,7 +108,6 @@ def product_info(name: str, fields: tuple[str, ...], notes: bool) -> None:
 @click.option("--field", "fields", multiple=True, help="因子或 TrialPlan 依赖的数据字段，可重复传入。")
 @click.option("--field-catalog", is_flag=True, help="列出数据源实际提供和可派生的全部行情字段。")
 @click.option("--historical-fields", is_flag=True, help="汇总保证金、手续费、乘数等历史字段覆盖。")
-@click.option("--local-runtime", is_flag=True, help="在当前 Python 环境检查已注册的本地后端数据源对象。")
 @click.option("--json", "json_output", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
 def product_availability(
@@ -119,33 +118,18 @@ def product_availability(
     fields: tuple[str, ...],
     field_catalog: bool,
     historical_fields: bool,
-    local_runtime: bool,
     json_output: bool,
 ) -> None:
     """检查明确产品范围内的历史、延迟、仿真或实时数据可用性。"""
-    if local_runtime:
-        from server.services.data_availability import availability_for_scope
-
-        profile = availability_for_scope(
-            product_names=list(product_names),
-            source_names=list(source_names),
-            probe=probe,
-            expanded=expanded,
-            required_fields=list(fields),
-            include_field_catalog=field_catalog,
-            include_historical_fields=historical_fields,
-            inspection_runtime="local",
-        )
-    else:
-        profile = client_from_config().data_availability(
-            products=product_names,
-            sources=source_names,
-            probe=probe,
-            expanded=expanded,
-            fields=fields,
-            include_field_catalog=field_catalog,
-            include_historical_fields=historical_fields,
-        )
+    profile = client_from_config().data_availability(
+        products=product_names,
+        sources=source_names,
+        probe=probe,
+        expanded=expanded,
+        fields=fields,
+        include_field_catalog=field_catalog,
+        include_historical_fields=historical_fields,
+    )
     if json_output:
         click.echo(json.dumps(profile, ensure_ascii=False, sort_keys=True))
         return

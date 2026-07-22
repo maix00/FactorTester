@@ -19,12 +19,18 @@ class _AvailabilityClient:
         sources,
         probe,
         expanded,
+        fields,
+        include_field_catalog,
+        include_historical_fields,
     ):
         self.request = {
             "products": list(products),
             "sources": list(sources),
             "probe": probe,
             "expanded": expanded,
+            "fields": list(fields),
+            "include_field_catalog": include_field_catalog,
+            "include_historical_fields": include_historical_fields,
         }
         return {
             "schema_version": 1,
@@ -69,4 +75,14 @@ def test_products_availability_emits_compact_json_for_explicit_scope(
         "sources": ["Local"],
         "probe": False,
         "expanded": False,
+        "fields": [],
+        "include_field_catalog": False,
+        "include_historical_fields": False,
     }
+
+
+def test_products_availability_does_not_import_server_runtime() -> None:
+    result = CliRunner().invoke(cli, ["products", "availability", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "--local-runtime" not in result.output

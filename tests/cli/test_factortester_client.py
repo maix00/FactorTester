@@ -222,6 +222,9 @@ def fake_server() -> Iterator[str]:
             "sources": ["Local"],
             "probe": False,
             "expanded": False,
+            "fields": [],
+            "include_field_catalog": False,
+            "include_historical_fields": False,
         }
         return jsonify(
             success=True,
