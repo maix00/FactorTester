@@ -1,11 +1,11 @@
 """Graph reentry resolves only changed requirement contracts."""
 
-from server.services.research_graph.branch.entry_resolution_frame import (
+from server.services.research_graph.branch.entry_resolution.frame import (
     active_entry_requirement_ids,
     advance_entry_resolution_frame,
     initial_entry_resolution_frame,
 )
-from server.services.research_graph.branch.entry_assessment_receipts import (
+from server.services.research_graph.branch.entry_resolution.receipts import (
     project_node_entry_resolution,
     record_assessment_receipts,
 )

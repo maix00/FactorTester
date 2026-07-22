@@ -17,7 +17,7 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.entry_requirements import (
     compact_entry_requirements,
 )
-from server.services.research_graph.branch.entry_resolution_frame import (
+from server.services.research_graph.branch.entry_resolution import (
     active_entry_requirement_ids,
     compact_entry_resolution_frame,
 )

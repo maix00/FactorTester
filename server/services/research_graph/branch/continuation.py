@@ -32,7 +32,7 @@ from server.services.research_graph.branch.research_cycle import (
 from server.services.research_graph.branch.requirement_preflight import (
     assess_requirement_continuation,
 )
-from server.services.research_graph.branch.entry_resolution_frame import (
+from server.services.research_graph.branch.entry_resolution import (
     initial_entry_resolution_frame,
 )
 from server.services.research_graph.branch.topology_preflight import (

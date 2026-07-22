@@ -24,17 +24,9 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.guards import (
     system_transition_guard_facts,
 )
-from server.services.research_graph.branch.entry_assessments import (
-    validate_entry_requirement_assessments,
-)
-from server.services.research_graph.branch.entry_resolution_frame import (
-    active_entry_requirement_ids,
-    advance_entry_resolution_frame,
-    entry_resolution_trace_delta,
-)
-from server.services.research_graph.branch.entry_assessment_receipts import (
-    project_node_entry_resolution,
-    record_assessment_receipts,
+from server.services.research_graph.branch.entry_resolution import (
+    assess_departure,
+    project_arrival,
 )
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
@@ -235,19 +227,18 @@ def advance_graph_branch(
             previous_checkpoint=previous_cycle_checkpoint,
             latest_trace_id=str(branch_row["latest_trace_id"]),
         )
-        entry_assessments = validate_entry_requirement_assessments(
+        entry_attempt = assess_departure(
             graph=graph,
             node=current_node,
             checkpoint=cycle_checkpoint,
+            current_frame=current_entry_resolution_frame,
+            current_node=branch["current_node"],
             target_node=target_id,
             submitted=prepared_evidence.get(
                 "entry_requirement_assessments"
             ),
-            required_requirement_ids=active_entry_requirement_ids(
-                frame=current_entry_resolution_frame,
-                current_node=branch["current_node"],
-            ),
         )
+        entry_assessments = entry_attempt["assessments"]
         if entry_assessments:
             prepared_evidence["entry_requirement_assessments"] = (
                 entry_assessments
@@ -255,12 +246,6 @@ def advance_graph_branch(
             persisted_evidence["entry_requirement_assessments"] = (
                 entry_assessments
             )
-        advanced_entry_resolution_frame = advance_entry_resolution_frame(
-            frame=current_entry_resolution_frame,
-            current_node=branch["current_node"],
-            target_node=target_id,
-            assessments=entry_assessments,
-        )
         route_action = accepted_adjudication_action(
             previous_checkpoint=previous_cycle_checkpoint,
             events=(
@@ -428,35 +413,18 @@ def advance_graph_branch(
             "product_group": str(branch_row["product_group"]),
             "workspace_id": str(branch_row["workspace_id"]),
         }
-        receipt_frame = record_assessment_receipts(
-            previous_frame=advanced_entry_resolution_frame,
+        entry_outcome = project_arrival(
+            attempt=entry_attempt,
             graph=graph,
             checkpoint=cycle_checkpoint,
             scope=entry_scope,
-            entry_node=branch["current_node"],
-            accepted_assessments=entry_assessments,
-            assessment_trace_ref=f"trace:{trace_id}",
+            trace_ref=f"trace:{trace_id}",
         )
-        if receipt_frame.get("status") == "pending":
-            projected_entry_resolution_frame = receipt_frame
-        else:
-            projected_entry_resolution_frame = project_node_entry_resolution(
-                previous_frame=receipt_frame,
-                graph=graph,
-                target_node=target_id,
-                checkpoint=cycle_checkpoint,
-                scope=entry_scope,
-            )
+        projected_entry_resolution_frame = entry_outcome["frame"]
         trace_evidence = deepcopy(persisted_evidence)
-        trace_evidence["entry_resolution_delta"] = (
-            entry_resolution_trace_delta(
-                current_frame=current_entry_resolution_frame,
-                projected_frame=projected_entry_resolution_frame,
-                current_node=branch["current_node"],
-                target_node=target_id,
-                assessments=entry_assessments,
-            )
-        )
+        trace_evidence["entry_resolution_delta"] = entry_outcome[
+            "trace_delta"
+        ]
         trace_evidence.pop("research_cycle", None)
         if cycle_event is not None and cycle_checkpoint is not None:
             trace_evidence["research_cycle"] = cycle_event

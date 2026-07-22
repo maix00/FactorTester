@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .entry_requirements import (
+from ..entry_requirements import (
     bare_requirement_ref,
     checkpoint_obligations,
     requirement_map,

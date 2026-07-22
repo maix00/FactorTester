@@ -18,7 +18,7 @@ from server.services.research_graph.branch import (
 from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
-from server.services.research_graph.branch.entry_assessments import (
+from server.services.research_graph.branch.entry_resolution.assessments import (
     validate_entry_requirement_assessments,
 )
 from server.services.research_graph.branch.entry_requirements import (

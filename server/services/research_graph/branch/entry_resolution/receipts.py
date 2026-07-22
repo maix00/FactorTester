@@ -8,7 +8,7 @@ from typing import Any
 
 import orjson
 
-from .entry_requirements import checkpoint_obligations, requirement_map
+from ..entry_requirements import checkpoint_obligations, requirement_map
 
 
 def project_node_entry_resolution(
