@@ -9,6 +9,7 @@ import orjson
 from server.jobs.models import JobRecord, SchedulingEntitlement
 from server.jobs.repository import JobRepository
 from server.jobs.scheduling import ResearchJobScheduler
+from server.jobs.scheduling.worker_pool import _bounded_summary
 from server.jobs.states import JobStatus
 
 
@@ -281,6 +282,31 @@ def test_full_result_uses_files_and_over_quota_cancels_waiting_not_running(tmp_p
     artifacts = repository.list_artifacts(job_id="full", owner="alice")
     assert {item["name"] for item in artifacts} == {"details", "result"}
     assert all((artifact_dir / item["relative_path"]).is_file() for item in artifacts)
+
+
+def test_bounded_summary_preserves_web_equity_curve_contract() -> None:
+    points = 20_000
+    result = _bounded_summary({
+        "success": True,
+        "metrics": {"A1": {"Total Return": 1.0}},
+        "groups": [{
+            "key": "A1",
+            "timestamps": list(range(points)),
+            "total_equity": [100_000_000 + value for value in range(points)],
+            "gross_returns": [0.001] * points,
+            "strategy_diagnostics": {"large": "x" * 600_000},
+        }],
+        "engine_result": {"large": "y" * 600_000},
+    }, max_bytes=64 * 1024)
+
+    assert result["summary_truncated"] is True
+    assert result["metrics"]["A1"]["Total Return"] == 1.0
+    assert result["groups"][0]["key"] == "A1"
+    assert result["groups"][0]["timestamps"][0] == 0
+    assert result["groups"][0]["timestamps"][-1] == points - 1
+    assert len(result["groups"][0]["timestamps"]) < points
+    assert result["equity_curve_downsampled"] is True
+    assert len(orjson.dumps(result)) <= 64 * 1024
 
 
 def test_step_job_pauses_and_continues_in_same_worker_process(tmp_path) -> None:

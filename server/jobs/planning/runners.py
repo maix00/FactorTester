@@ -21,7 +21,8 @@ def plan_job(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     )
 
     owner = str(spec.get("_owner") or payload.get("_owner") or "").strip()
-    register_factor_param_resolver_for_user(owner)
+    if owner:
+        register_factor_param_resolver_for_user(owner)
     from server.modules.single_factor_test.planning import build_execution_plan
 
     plan = build_execution_plan(str(payload.get("kind") or ""), spec)

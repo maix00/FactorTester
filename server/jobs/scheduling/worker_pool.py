@@ -199,13 +199,64 @@ def _bounded_summary(data: dict[str, Any], *, max_bytes: int = 512 * 1024) -> di
         "summary_truncated": True,
         "full_result_bytes": len(raw),
     }
+    groups = data.get("groups")
+    group_reserve = min(128 * 1024, max_bytes // 2) if isinstance(groups, list) else 0
+    non_group_limit = max_bytes - group_reserve
     for key, value in data.items():
         if key in {"success", "groups", "equity_curve", "curves", "details", "engine_result"}:
             continue
         candidate = {**summary, key: value}
-        if len(_json_bytes(candidate)) <= max_bytes:
+        if len(_json_bytes(candidate)) <= non_group_limit:
             summary[key] = value
+    if isinstance(groups, list):
+        candidate = {**summary, "groups": groups}
+        if len(_json_bytes(candidate)) <= max_bytes:
+            summary["groups"] = groups
+        else:
+            chart_groups, downsampled = _bounded_chart_groups(
+                groups,
+                byte_budget=max_bytes - len(_json_bytes(summary)),
+            )
+            summary["groups"] = chart_groups
+            summary["groups_chart_only"] = True
+            summary["equity_curve_downsampled"] = downsampled
     return summary
+
+
+def _bounded_chart_groups(
+    groups: list[Any],
+    *,
+    byte_budget: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Keep the Web chart contract even when the full job result is truncated."""
+    scalar_keys = (
+        "key", "name", "group_id", "group_index", "product_path_selection_id",
+        "factor_alias", "engine", "allocation_policy", "rebalance_trigger",
+        "position_policy", "target_trace_available", "snapshot_available",
+        "is_ls", "ls_info",
+    )
+    stride = 1
+    while True:
+        result = []
+        for value in groups:
+            group = value if isinstance(value, dict) else {}
+            compact = {key: group[key] for key in scalar_keys if key in group}
+            timestamps = list(group.get("timestamps") or [])
+            equity = list(group.get("total_equity") or [])
+            gross_returns = list(group.get("gross_returns") or [])
+            point_count = min(len(timestamps), len(equity))
+            indices = list(range(0, point_count, stride))
+            if point_count and (not indices or indices[-1] != point_count - 1):
+                indices.append(point_count - 1)
+            compact["timestamps"] = [timestamps[index] for index in indices]
+            compact["total_equity"] = [equity[index] for index in indices]
+            if len(gross_returns) >= point_count:
+                compact["gross_returns"] = [gross_returns[index] for index in indices]
+            compact["equity_curve_original_points"] = point_count
+            result.append(compact)
+        if len(_json_bytes(result)) <= max(0, byte_budget) or stride >= 1024:
+            return result, stride > 1
+        stride *= 2
 
 
 def _json_bytes(value: Any) -> bytes:
