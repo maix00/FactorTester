@@ -8,6 +8,7 @@ from tools.testers.backtest.engines.native.strategy_config_builder import (
 )
 from tools.testers.backtest.modules.cash_pool import cash_pool_store_for
 from tools.testers.backtest.modules.fee import FeeModule
+from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.backtest.modules.engine import EngineModule
@@ -396,6 +397,13 @@ def test_ordinary_field_missing_value_materializes_real_default():
     configs = build_strategy_configs({"A1": _GROUP_FIELDS})
     config = next(iter(configs.values()))
     assert config.get(FeeModule.fixed_fee_rate) is None
+
+
+def test_end_session_skip_defaults_to_false():
+    configs = build_strategy_configs({"A1": _GROUP_FIELDS})
+    config = next(iter(configs.values()))
+
+    assert config.get(FactorSignalModule.end_session_skip) is False
 
 
 def test_use_minor_units_defaults_to_true_outside_basic_engine_mode():

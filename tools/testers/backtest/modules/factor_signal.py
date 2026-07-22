@@ -129,7 +129,7 @@ class FactorSignalModule(ExecutableModule):
             chip_template="日内点: {value}", tab_label="数据频率", tab_order=36,
         ),
         "end_session_skip": FieldDefinition(
-            public=True, label="尾盘跳过", control_template="boolean", default=True, tab="frequency",
+            public=True, label="尾盘跳过", control_template="boolean", default=False, tab="frequency",
             chip_template="尾盘跳过: {value}", tab_label="数据频率", tab_order=36,
         ),
         "end_session_gap": FieldDefinition(
@@ -290,7 +290,7 @@ def _group_strategies_by_signal_align_params(state):
             _effective_signal_frequency(config),
             config.get(FactorSignalModule.basepoint, "last"),
             config.get(FactorSignalModule.daily_basepoint),
-            config.get(FactorSignalModule.end_session_skip, True),
+            config.get(FactorSignalModule.end_session_skip, False),
             config.get(FactorSignalModule.end_session_gap, "3h"),
             _strategy_run_window_key(config),
         )
@@ -472,7 +472,7 @@ def _precomputed_schedule_key(calculation_key: tuple, config) -> tuple:
         str(calendar_frequency),
         config.get(FactorSignalModule.basepoint, "last"),
         config.get(FactorSignalModule.daily_basepoint),
-        config.get(FactorSignalModule.end_session_skip, True),
+        config.get(FactorSignalModule.end_session_skip, False),
         config.get(FactorSignalModule.end_session_gap, "3h"),
     )
 
@@ -603,7 +603,7 @@ def _schedule_table_for_strategy(
             config.get(FactorSignalModule.signal_freq, "1d"),
             basepoint=config.get(FactorSignalModule.basepoint, "last"),
             daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
-            end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
+            end_session_skip=config.get(FactorSignalModule.end_session_skip, False),
             end_session_gap=cast(
                 pd.Timedelta,
                 pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h")),
@@ -623,7 +623,7 @@ def _schedule_table_for_strategy(
             calendar_frequency,
             basepoint=config.get(FactorSignalModule.basepoint, "last"),
             daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
-            end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
+            end_session_skip=config.get(FactorSignalModule.end_session_skip, False),
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h"))),
         )
     clipped = _clip_scheduled_table_to_strategy_window(scheduled, config)

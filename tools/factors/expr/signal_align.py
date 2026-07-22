@@ -118,7 +118,7 @@ def signal_align(
     freq: Any,
     basepoint: 'str|Callable' = 'last',
     daily_basepoint: 'str|None' = None,
-    end_session_skip: bool = True,
+    end_session_skip: bool = False,
     end_session_gap: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta('3hours')),
 ) -> pd.DataFrame:
     """
@@ -263,7 +263,7 @@ class SignalAlign(CompositeExpr):
         signal_freq     : 目标信号频率（如 '1d', '1h'，可以是 $F 参数的值）
         basepoint       : 基准点选择策略 'last'/'first'/callable，默认 'last'
         daily_basepoint : 日倍频时的具体时间基准点，None 则用 basepoint
-        end_session_skip: 是否跳过盘间间隔（仅子日频生效），默认 True
+        end_session_skip: 是否跳过盘间间隔（仅子日频生效），默认 False
         end_session_gap : 盘间间隔阈值，默认 3hours
     """
 
@@ -273,7 +273,7 @@ class SignalAlign(CompositeExpr):
     def __init__(self, operand: FactorExpr, signal_freq: Any,
                  basepoint: 'str|Callable' = 'last',
                  daily_basepoint: 'str|None' = None,
-                 end_session_skip: bool = True,
+                 end_session_skip: bool = False,
                  end_session_gap: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta('3hours'))):
         super().__init__('SIGNAL_ALIGN', operand)
         self.signal_freq = signal_freq

@@ -498,7 +498,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                 func_expr = self.resolve(self._expr, param_values=param_values, caller=self).as_intermediate()
                 bp = getattr(self, 'basepoint', 'last')
                 dbp = getattr(self, 'daily_basepoint', None)
-                ess = getattr(self, 'end_session_skip', True)
+                ess = getattr(self, 'end_session_skip', False)
                 esg = getattr(self, 'end_session_gap', pd.Timedelta('3hours'))
                 resolved_expr = SignalAlign(
                     operand=func_expr,
