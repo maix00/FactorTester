@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+
+from click.testing import CliRunner
+
+from cli_anything.factortester_research.factortester_research_cli import cli
 from cli_anything.factortester_research.core.successor_graph import (
     build_successor_graph,
 )
@@ -103,3 +108,41 @@ def test_successor_allows_early_reentry_but_rejects_deleted_method_history() -> 
     assert early["eligible"] is True, early
     assert method_history["eligible"] is False
     assert method_history["missing_nodes"] == ["cheap_factor_diagnostics"]
+
+
+def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
+    result = CliRunner().invoke(
+        cli,
+        [
+            "graph",
+            "requirements",
+            "--node",
+            "validation_design",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["anchor_ref"] == "validation_design"
+    assert len(payload["requirements"]) == 7
+    assert len(result.output.encode()) < 6000
+    assert "industry_basis_refs" not in payload["requirements"][0]
+
+
+def test_successor_requirement_cli_rejects_ambiguous_anchor() -> None:
+    result = CliRunner().invoke(
+        cli,
+        [
+            "graph",
+            "requirements",
+            "--node",
+            "data_contract",
+            "--edge",
+            "data_contract__factor_semantics",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "exactly one" in result.output
