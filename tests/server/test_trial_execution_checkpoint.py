@@ -16,6 +16,9 @@ from server.services.research_graph.trial_plan import (
 from server.services.research_graph.research_cycle.adjudication import (
     validate_adjudication_proposal,
 )
+from server.services.research_graph.trial_plan.stage_projection import (
+    agent_trial_stage_summary,
+)
 from tests.server.test_trial_plan_contract_v5 import trial_plan_v5
 
 
@@ -86,6 +89,20 @@ def test_checkpoint_exposes_only_current_action_summary() -> None:
     }
     assert checkpoint["current_action_index"] == 0
     assert "action:backtest" not in str(agent_action_summary(checkpoint))
+
+
+def test_stage_summary_dispatches_v5_to_the_current_action_only() -> None:
+    plan, checkpoint = _initial()
+
+    summary = agent_trial_stage_summary(checkpoint)
+
+    assert summary == {
+        "plan_version": 1,
+        "current_stage": "validation-1",
+        "next_stage": plan["stage_policy"]["ordered_stage_ids"][1],
+        "current_action": agent_action_summary(checkpoint),
+        "checkpoint_hash": checkpoint["projection_hash"],
+    }
 
 
 def test_action_must_be_admitted_and_audited_before_advance() -> None:
