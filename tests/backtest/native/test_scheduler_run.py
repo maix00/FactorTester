@@ -524,6 +524,7 @@ def test_step_mode_summarizes_daily_mark_to_market_checkpoint():
             "ledger": ledger.name,
             "trading_day": "2026-01-05",
         }],
+        "resolved": [],
         "accounting_inputs": [{
             "field": "TradingRuleModule.accounting_mode",
             "values": [{
@@ -653,4 +654,21 @@ def test_step_mode_dmtm_summary_contains_real_cash_and_position_changes():
     assert dmtm["cash_changes"]
     assert dmtm["position_changes"]
     assert dmtm["market_rule_inputs"]
+    resolved = next(
+        item for item in records[1]["outputs"]
+        if item["field"] == "TradingRuleModule.resolved_daily_mark_to_market"
+    )
+    assert resolved["values"] == [{
+        "scope": "context",
+        "value": {
+            ledger.ledger_id: {
+                product: {
+                    "enabled": True,
+                    "source": "historical.CostBasisMethod",
+                    "cost_basis_method": "FIFO",
+                },
+            },
+        },
+    }]
+    assert dmtm["resolved"] == resolved["values"]
     assert orjson.loads(orjson.dumps(records[1]))["dmtm"]["market_rule_inputs"]

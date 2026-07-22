@@ -1457,6 +1457,7 @@ def _audit_dmtm_step(
     flow: ResolvedFlow,
     before: dict[str, Any],
     ledger_changes: list[dict[str, Any]],
+    outputs_after: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Project the generic step audit into a compact DMTM evidence block."""
     payload_entries = before.get("event_payloads", [])
@@ -1487,6 +1488,10 @@ def _audit_dmtm_step(
     }
     return {
         "events": events,
+        "resolved": next((
+            item.get("values", []) for item in outputs_after
+            if item.get("field") == "TradingRuleModule.resolved_daily_mark_to_market"
+        ), []),
         "accounting_inputs": [
             item for item in inputs if item.get("field") in accounting_field_names
         ],
@@ -1609,7 +1614,7 @@ def _step_after_flow(f, state, ctx, step_callback, before):
             *ledger_contract_violations,
         ],
     }
-    dmtm = _audit_dmtm_step(f, before, ledger_changes)
+    dmtm = _audit_dmtm_step(f, before, ledger_changes, outputs_after)
     if dmtm is not None:
         record["dmtm"] = dmtm
     step_callback(record)
