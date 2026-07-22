@@ -27,7 +27,9 @@ def _hash(value: Any) -> str:
 
 
 def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    from server.modules.single_factor_test.group import prepare_group_run_spec
+    from tools.factors.tester_calc.single_factor_test.group.research_run import (
+        prepare_group_run_spec,
+    )
     from tools.testers.backtest.modules.engine import engine_mode_for
     from tools.testers.backtest.modules.market_data import (
         _MISSING_DATA_SOURCE,

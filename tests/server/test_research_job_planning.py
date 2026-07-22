@@ -29,7 +29,10 @@ def test_backtest_planner_freezes_term_structure_and_market_data(monkeypatch) ->
         },
     }
     monkeypatch.setattr(
-        "server.modules.single_factor_test.group.prepare_group_run_spec",
+        (
+            "tools.factors.tester_calc.single_factor_test.group.research_run."
+            "prepare_group_run_spec"
+        ),
         lambda data: prepared,
     )
     monkeypatch.setattr(

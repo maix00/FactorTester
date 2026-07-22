@@ -7,7 +7,9 @@ from typing import Any
 
 def run_group(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     from server.modules.single_factor_test.planning import verify_execution_plan
-    from server.modules.single_factor_test.group import execute_group_run_spec
+    from tools.factors.tester_calc.single_factor_test.group.research_run import (
+        execute_group_run_spec,
+    )
 
     verify_execution_plan("backtest", payload)
     execute_group_run_spec(payload, sink=sink, cancel_event=cancel_event)
