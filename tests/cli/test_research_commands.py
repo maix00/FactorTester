@@ -74,6 +74,14 @@ class FakeClient:
         self.cleared_history_workspace_id = workspace_id
         return {"deleted_jobs": 4, "workspace_id": workspace_id}
 
+    def continue_job(self, job_id, *, action="continue", until=""):
+        self.continue_args = {
+            "job_id": job_id,
+            "action": action,
+            "until": until,
+        }
+        return {"job_id": job_id, "status": "running"}
+
 
 def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
@@ -112,6 +120,23 @@ def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypat
     assert fake.payload == payload
     assert fake.trial_binding is None
     assert load_state().configuration_revision == 2
+
+
+def test_job_continue_until_uses_continue_action(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "job", "continue", "job-step", "--until", "2026-01-05T15:00:00",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.continue_args == {
+        "job_id": "job-step",
+        "action": "continue",
+        "until": "2026-01-05T15:00:00",
+    }
 
 
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:

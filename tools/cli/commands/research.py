@@ -413,7 +413,7 @@ def job_unpin() -> None:
 def job_continue(job_id: str, until: str, run_to_end: bool) -> None:
     if until and run_to_end:
         raise click.ClickException("--until and --end are mutually exclusive")
-    action = "end" if run_to_end else "until" if until else "continue"
+    action = "end" if run_to_end else "continue"
     click.echo(_json(client_from_config().continue_job(job_id, action=action, until=until)))
 
 
