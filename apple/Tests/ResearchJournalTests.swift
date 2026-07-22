@@ -225,6 +225,7 @@ final class ResearchJournalTests: XCTestCase {
     func testAliasesPreferChineseAcrossWholeJournal() throws {
         let english = ResearchJournalSection(
             sectionID: "early",
+            sectionRef: "report-section:b:early",
             title: "起点",
             body: "",
             blocks: [],
@@ -238,6 +239,7 @@ final class ResearchJournalTests: XCTestCase {
         )
         let chinese = ResearchJournalSection(
             sectionID: "later",
+            sectionRef: "report-section:b:later",
             title: "数据审查",
             body: "",
             blocks: [],
@@ -256,6 +258,27 @@ final class ResearchJournalTests: XCTestCase {
             )["data-coverage"],
             "数据是否覆盖试验计划？"
         )
+    }
+
+    func testDuplicateIndexJoinCannotCrashOrAmbiguouslyBindJournal() throws {
+        let document = try JSONDecoder().decode(
+            ResearchJournalDocument.self,
+            from: journalData()
+        )
+        let section = ResearchReportSection(
+            id: "report-section:b:progress",
+            sectionID: "progress",
+            checkpointRef: "trace:checkpoint-1",
+            branchRef: "graph-branch:i:b",
+            title: "研究进展",
+            summary: "摘要",
+            links: []
+        )
+
+        XCTAssertThrowsError(try ResearchJournalLoader.sections(
+            in: document,
+            indexedBy: [section, section]
+        ))
     }
 
     func testCheckpointStatusRewindsOnlyLaterObligationChanges() throws {
@@ -387,7 +410,18 @@ final class ResearchJournalTests: XCTestCase {
 
         let document = try await ResearchJournalLoader.load(artifact: artifact)
         let section = try XCTUnwrap(
-            ResearchJournalLoader.sections(in: document).first
+            ResearchJournalLoader.sections(
+                in: document,
+                indexedBy: [ResearchReportSection(
+                    id: "report-section:b:progress",
+                    sectionID: "progress",
+                    checkpointRef: "trace:checkpoint-1",
+                    branchRef: "graph-branch:i:b",
+                    title: "研究进展",
+                    summary: "摘要",
+                    links: []
+                )]
+            ).first
         )
 
         XCTAssertEqual(document.language, "zh-Hans")

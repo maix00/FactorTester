@@ -247,6 +247,10 @@ struct ProfileResearchDetail: Decodable {
     let currentOwnerProfileRef: String?
     let latestActingProfileRef: String?
 
+    var branchID: String {
+        branchRef.split(separator: ":").last.map(String.init) ?? branchRef
+    }
+
     enum CodingKeys: String, CodingKey {
         case researchRef = "research_ref"
         case workPackageRef = "work_package_ref"

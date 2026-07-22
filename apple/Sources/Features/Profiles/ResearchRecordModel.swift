@@ -1,6 +1,6 @@
 import Foundation
 
-struct ResearchDeepLinkModel: Identifiable {
+struct ResearchDeepLinkModel: Identifiable, Decodable {
     let id: String
     let kind: String
     let targetRef: String
@@ -11,6 +11,13 @@ struct ResearchDeepLinkModel: Identifiable {
         kind = json["kind"] as? String ?? ""
         targetRef = json["target_ref"] as? String ?? ""
         sectionRef = json["section_ref"] as? String ?? ""
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id = "link_id"
+        case kind
+        case targetRef = "target_ref"
+        case sectionRef = "section_ref"
     }
 }
 

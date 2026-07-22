@@ -1,10 +1,49 @@
 import Foundation
 
-struct ResearchReportSection: Identifiable {
+struct ResearchReportIndexDocument: Decodable {
+    let schemaVersion: Int
+    let sections: [ResearchReportSection]
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case sections
+    }
+}
+
+struct ResearchReportSection: Identifiable, Decodable {
     let id: String
+    let sectionID: String
+    let checkpointRef: String
+    let branchRef: String
     let title: String
     let summary: String
     let links: [ResearchDeepLinkModel]
+
+    enum CodingKeys: String, CodingKey {
+        case id = "section_ref"
+        case sectionID = "section_id"
+        case checkpointRef = "checkpoint_ref"
+        case branchRef = "branch_ref"
+        case title, summary, links
+    }
+
+    init(
+        id: String,
+        sectionID: String = "",
+        checkpointRef: String = "",
+        branchRef: String = "",
+        title: String,
+        summary: String,
+        links: [ResearchDeepLinkModel]
+    ) {
+        self.id = id
+        self.sectionID = sectionID
+        self.checkpointRef = checkpointRef
+        self.branchRef = branchRef
+        self.title = title
+        self.summary = summary
+        self.links = links
+    }
 }
 
 enum ResearchReportIndex {
@@ -15,39 +54,43 @@ enum ResearchReportIndex {
     static func load(
         artifact: ResearchArtifactModel
     ) async -> [ResearchReportSection] {
+        (try? await loadVerified(artifact: artifact))
+            ?? fallback(artifact: artifact)
+    }
+
+    static func loadVerified(
+        artifact: ResearchArtifactModel
+    ) async throws -> [ResearchReportSection] {
         guard let url = URL(string: artifact.indexRef),
               url.isFileURL else {
-            return fallback(artifact: artifact)
+            throw ResearchReportIndexError.missingReference
         }
-        return await Task.detached {
-            guard let attributes = try? FileManager.default.attributesOfItem(
+        return try await Task.detached {
+            guard let attributes = try FileManager.default.attributesOfItem(
                 atPath: url.path
-            ),
+            ) as [FileAttributeKey: Any]?,
             let size = attributes[.size] as? NSNumber,
-            size.intValue <= maximumBytes,
-            let data = try? Data(contentsOf: url),
-            let root = try? JSONSerialization.jsonObject(with: data)
-                as? [String: Any],
-            root["schema_version"] as? Int == 1,
-            let values = root["sections"] as? [[String: Any]] else {
-                return fallback(artifact: artifact)
+            size.intValue <= maximumBytes else {
+                throw ResearchReportIndexError.invalidContract
             }
-            return values.prefix(maximumSections).compactMap { value in
-                guard let reference = value["section_ref"] as? String,
-                      !reference.isEmpty else { return nil }
-                let rawSummary = value["summary"] as? String ?? ""
-                let links = (value["links"] as? [[String: Any]] ?? [])
-                    .prefix(50)
-                    .map(ResearchDeepLinkModel.init)
-                return ResearchReportSection(
-                    id: reference,
-                    title: value["title"] as? String ?? reference,
-                    summary: String(
-                        rawSummary.prefix(maximumSummaryCharacters)
-                    ),
-                    links: links
-                )
+            let data = try Data(contentsOf: url)
+            let document = try JSONDecoder().decode(
+                ResearchReportIndexDocument.self,
+                from: data
+            )
+            guard document.schemaVersion == 2,
+                  document.sections.count <= maximumSections,
+                  document.sections.allSatisfy({ section in
+                      section.id.hasPrefix("report-section:")
+                          && !section.sectionID.isEmpty
+                          && section.checkpointRef.hasPrefix("trace:")
+                          && section.branchRef.hasPrefix("graph-branch:")
+                          && section.summary.count <= maximumSummaryCharacters
+                          && section.links.count <= 50
+                  }) else {
+                throw ResearchReportIndexError.invalidContract
             }
+            return document.sections
         }.value
     }
 
@@ -67,5 +110,17 @@ enum ResearchReportIndex {
                     links: Array(links.prefix(50))
                 )
             }
+    }
+}
+
+enum ResearchReportIndexError: LocalizedError {
+    case missingReference
+    case invalidContract
+
+    var errorDescription: String? {
+        switch self {
+        case .missingReference: return "研究报告索引不存在。"
+        case .invalidContract: return "研究报告索引缺少章节与检查点的稳定映射。"
+        }
     }
 }

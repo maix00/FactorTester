@@ -47,6 +47,10 @@ _BRANCH_FIELDS = {
     "asset_refs", "decision_contract_hash", "trial_plan_hash",
 }
 _SECTION_FIELDS = {
+    "section_ref", "section_id", "checkpoint_ref", "branch_ref", "title",
+    "summary", "links", "created_at",
+}
+_LEGACY_SECTION_FIELDS = {
     "section_ref", "title", "summary", "links", "created_at",
 }
 _LINK_FIELDS = {"link_id", "kind", "target_ref", "section_ref"}
@@ -257,7 +261,7 @@ def _load_index(
 ) -> dict[str, Any]:
     if not path.exists():
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "workspace_id": snapshot["workspace_id"],
             "work_package_id": snapshot["work_package_id"],
             "branches": [],
@@ -275,15 +279,30 @@ def _load_index(
         value = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError("Work Package report index is unreadable") from exc
+    if value.get("schema_version") == 1:
+        _validate_index(value, snapshot, legacy=True)
+        # The index is a derived projection. Rebuild its legacy section rows
+        # from physical fragments so missing identities are never guessed from
+        # titles, timestamps, or display order.
+        value = dict(value)
+        value["schema_version"] = 2
+        value["sections"] = []
+        value["omitted_section_count"] = 0
+        return value
     _validate_index(value, snapshot)
     return value
 
 
-def _validate_index(value: Any, snapshot: dict[str, Any]) -> None:
+def _validate_index(
+    value: Any,
+    snapshot: dict[str, Any],
+    *,
+    legacy: bool = False,
+) -> None:
     _exact_object(value, _TOP_LEVEL_FIELDS, "report index")
     if (
         type(value["schema_version"]) is not int
-        or value["schema_version"] != 1
+        or value["schema_version"] != (1 if legacy else 2)
         or value["workspace_id"] != snapshot["workspace_id"]
         or value["work_package_id"] != snapshot["work_package_id"]
     ):
@@ -312,7 +331,7 @@ def _validate_index(value: Any, snapshot: dict[str, Any]) -> None:
     )
     section_refs = set()
     for section in sections:
-        _validate_section(section, branch_ids)
+        _validate_section(section, branch_ids, legacy=legacy)
         if section["section_ref"] in section_refs:
             raise ValueError("report index section_ref must be unique")
         section_refs.add(section["section_ref"])
@@ -346,14 +365,37 @@ def _validate_branch(value: Any, work_package_id: str) -> None:
     _reference_array(value["asset_refs"], 32, "asset refs")
 
 
-def _validate_section(value: Any, branch_ids: set[str]) -> None:
-    _exact_object(value, _SECTION_FIELDS, "report index section")
+def _validate_section(
+    value: Any,
+    branch_ids: set[str],
+    *,
+    legacy: bool = False,
+) -> None:
+    _exact_object(
+        value,
+        _LEGACY_SECTION_FIELDS if legacy else _SECTION_FIELDS,
+        "report index section",
+    )
     section_ref = _bounded_text(value["section_ref"], "section_ref")
-    if not any(
-        section_ref.startswith(f"report-section:{branch_id}:")
-        for branch_id in branch_ids
-    ):
-        raise ValueError("report index section_ref has no owning branch")
+    if legacy:
+        if not any(
+            section_ref.startswith(f"report-section:{branch_id}:")
+            for branch_id in branch_ids
+        ):
+            raise ValueError("report index section_ref has no owning branch")
+    else:
+        section_id = _safe_id(value["section_id"], "section_id")
+        checkpoint_ref = _reference(value["checkpoint_ref"], "checkpoint_ref")
+        branch_ref = _reference(value["branch_ref"], "branch_ref")
+        branch_parts = branch_ref.split(":")
+        if (
+            not checkpoint_ref.startswith("trace:")
+            or len(branch_parts) != 3
+            or branch_parts[0] != "graph-branch"
+            or section_ref
+                != f"report-section:{branch_parts[2]}:{section_id}"
+        ):
+            raise ValueError("report index section identity is invalid")
     _bounded_text(value["title"], "section title")
     _bounded_text(value["summary"], "section summary", allow_empty=True, maximum=4000)
     created_at = value["created_at"]
@@ -480,8 +522,20 @@ def _project_sections(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     seen = set()
     for section in snapshot["sections"]:
+        checkpoint_ref = section.get("checkpoint_ref")
+        branch_ref = section.get("branch_ref")
+        if (
+            not isinstance(checkpoint_ref, str)
+            or not checkpoint_ref.startswith("trace:")
+            or not isinstance(branch_ref, str)
+            or not branch_ref.startswith("graph-branch:")
+        ):
+            raise ValueError(
+                "report section projection requires checkpoint and branch refs"
+            )
+        branch_id = branch_ref.split(":")[-1]
         section_ref = (
-            f"report-section:{snapshot['branch_id']}:{section['section_id']}"
+            f"report-section:{branch_id}:{section['section_id']}"
         )
         if section_ref in seen:
             raise ValueError("report section_id must be unique per branch")
@@ -528,6 +582,9 @@ def _project_sections(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             links.append(link)
         result.append({
             "section_ref": section_ref,
+            "section_id": section["section_id"],
+            "checkpoint_ref": checkpoint_ref,
+            "branch_ref": branch_ref,
             "title": section["title"],
             "summary": section["body"][:1000],
             "links": links[:MAX_INDEX_LINKS],
@@ -594,9 +651,6 @@ def _local_artifact_descriptor(
         "section_refs": [
             dict(link)
             for section in index["sections"]
-            if section["section_ref"].startswith(
-                f"report-section:{branch_id}:"
-            )
             for link in section["links"]
         ],
     }

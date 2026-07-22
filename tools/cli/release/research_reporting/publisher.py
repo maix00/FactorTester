@@ -189,6 +189,7 @@ def publish_research_checkpoint(
     if (
         previous_checkpoint == value["checkpoint_ref"]
         and not report["journal_fragment_changed"]
+        and not report["changed"]
     ):
         existing_artifact = _existing_branch_artifact(
             record,
@@ -208,12 +209,6 @@ def publish_research_checkpoint(
                 "section_hash": fragment["section_hash"],
             }
     descriptor = deepcopy(report["local_artifact_descriptor"])
-    descriptor["section_refs"] = [
-        item for item in descriptor["section_refs"]
-        if item["section_ref"].startswith(
-            f"report-section:{branch_id}:"
-        )
-    ]
     updated = deepcopy(record)
     updated.update({
         "title": value["title"],

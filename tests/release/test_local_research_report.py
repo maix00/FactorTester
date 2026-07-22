@@ -476,11 +476,16 @@ def test_graph_continuation_replaces_physical_branch_in_work_package_index(
 
     package_root = root / "profile-root" / "research" / "sgccs-review"
     index = json.loads((package_root / "INDEX.json").read_text())
+    assert index["schema_version"] == 2
     assert [item["branch_id"] for item in index["branches"]] == ["branch-v8"]
-    assert all(
-        item["section_ref"].startswith("report-section:branch-v8:")
-        for item in index["sections"]
-    )
+    assert [item["checkpoint_ref"] for item in index["sections"]] == [
+        "trace:checkpoint-1", "trace:checkpoint-v8",
+    ]
+    assert [item["branch_ref"] for item in index["sections"]] == [
+        "graph-branch:sgccs-review:branch-sgccs",
+        "graph-branch:sgccs-v8:branch-v8",
+    ]
+    assert len({item["section_ref"] for item in index["sections"]}) == 2
     aggregate = (package_root / "REPORT.md").read_text(encoding="utf-8")
     assert "研究分支：1" in aggregate
     continued_report = (

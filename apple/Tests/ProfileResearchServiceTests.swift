@@ -224,6 +224,65 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
     }
 
+    func testResearchTreeDeduplicatesEquivalentContinuationEdges() {
+        let edges = [
+            ResearchVersionTreeEdge(
+                edgeRef: "graph-edge:__graph_continuation__",
+                relation: "continuation",
+                sourceNodeRef: "trace:v7",
+                targetNodeRef: "trace:v8",
+                sourceBranchRef: "graph-branch:v7:b",
+                targetBranchRef: "graph-branch:v8:b"
+            ),
+            ResearchVersionTreeEdge(
+                edgeRef: "lineage:b:trace:v8",
+                relation: "continuation",
+                sourceNodeRef: "trace:v7",
+                targetNodeRef: "trace:v8",
+                sourceBranchRef: "graph-branch:v7:b",
+                targetBranchRef: "graph-branch:v8:b"
+            ),
+        ]
+
+        XCTAssertEqual(
+            ResearchTreeEdgeResolver.resolve(
+                edges,
+                checkpointRefs: ["trace:v7", "trace:v8"]
+            ),
+            [ResearchTreeResolvedEdge(
+                relation: "continuation", sourceRow: 0, targetRow: 1
+            )]
+        )
+    }
+
+    func testReportIndexCarriesStableCheckpointToSectionJoin() throws {
+        let section = try JSONDecoder().decode(
+            ResearchReportIndexDocument.self,
+            from: Data("""
+            {"schema_version":2,"sections":[{
+              "section_ref":"report-section:branch-v8:abc-semantics",
+              "section_id":"abc-semantics",
+              "checkpoint_ref":"trace:v8",
+              "branch_ref":"graph-branch:instance-v8:branch-v8",
+              "title":"因子语义","summary":"正文","links":[],"created_at":2
+            }]}
+            """.utf8)
+        ).sections[0]
+
+        XCTAssertEqual(section.id, "report-section:branch-v8:abc-semantics")
+        XCTAssertEqual(section.sectionID, "abc-semantics")
+        XCTAssertEqual(section.checkpointRef, "trace:v8")
+        XCTAssertEqual(section.branchRef, "graph-branch:instance-v8:branch-v8")
+    }
+
+    func testReportScrollResolverMapsVisibleSectionBackToCheckpoint() {
+        let active = ResearchReportScrollResolver.activeSectionRef(
+            positions: ["section:one": -40, "section:two": 18, "section:three": 420],
+            viewportTop: 24
+        )
+        XCTAssertEqual(active, "section:two")
+    }
+
     func testTimelineResolvesCycleObjectAtItsOwnCheckpoint() throws {
         let page = try JSONDecoder().decode(
             ProfileResearchTimelinePage.self,

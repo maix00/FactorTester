@@ -17,6 +17,7 @@ struct ResearchNarrativeReportView: View {
     @State private var obligationAliases: [String: String] = [:]
     @State private var reportError: String?
     @State private var selectedCheckpointRef = ""
+    @State private var sectionRefsByCheckpoint: [String: String] = [:]
     @State private var selectedAudit: ResearchAuditSelection?
     @StateObject private var auditCache = ResearchAuditObjectCache()
 
@@ -26,6 +27,7 @@ struct ResearchNarrativeReportView: View {
                 detail: detail,
                 workPackage: workPackage,
                 steps: orderedSteps,
+                sectionRefsByCheckpoint: sectionRefsByCheckpoint,
                 selectedCheckpointRef: $selectedCheckpointRef,
                 select: selectCheckpoint,
                 loadEarlier: loadEarlier,
@@ -76,6 +78,16 @@ struct ResearchNarrativeReportView: View {
                         ForEach(sections) { section in
                             narrativeSection(section)
                                 .id(section.id)
+                                .background {
+                                    GeometryReader { geometry in
+                                        Color.clear.preference(
+                                            key: ResearchReportSectionPositionKey.self,
+                                            value: [section.id: geometry.frame(
+                                                in: .named("research-report-scroll")
+                                            ).minY]
+                                        )
+                                    }
+                                }
                         }
                     }
                 }
@@ -84,12 +96,23 @@ struct ResearchNarrativeReportView: View {
                 .padding(.bottom, 56)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
+            .coordinateSpace(name: "research-report-scroll")
+            .onPreferenceChange(ResearchReportSectionPositionKey.self) {
+                positions in
+                guard let sectionRef = ResearchReportScrollResolver
+                    .activeSectionRef(positions: positions, viewportTop: 24),
+                    let section = sections.first(where: {
+                        $0.sectionRef == sectionRef
+                    }), selectedCheckpointRef != section.checkpointRef else {
+                    return
+                }
+                selectedCheckpointRef = section.checkpointRef
+            }
             .onChange(of: selectedCheckpointRef) { checkpointRef in
-                guard let section = sections.first(where: {
-                    $0.checkpointRef == checkpointRef
-                }) else { return }
+                guard let sectionRef = sectionRefsByCheckpoint[checkpointRef]
+                else { return }
                 withAnimation(.easeInOut(duration: 0.22)) {
-                    proxy.scrollTo(section.id, anchor: .top)
+                    proxy.scrollTo(sectionRef, anchor: .top)
                 }
             }
         }
@@ -530,10 +553,19 @@ struct ResearchNarrativeReportView: View {
             return
         }
         do {
-            let document = try await ResearchJournalLoader.load(
+            async let documentTask = ResearchJournalLoader.load(
                 artifact: artifact
             )
-            let loadedSections = ResearchJournalLoader.sections(in: document)
+            async let indexTask = ResearchReportIndex.loadVerified(
+                artifact: artifact
+            )
+            let (document, indexSections) = try await (
+                documentTask, indexTask
+            )
+            let loadedSections = try ResearchJournalLoader.sections(
+                in: document,
+                indexedBy: indexSections
+            )
                 .sorted {
                     if $0.createdAt != $1.createdAt {
                         return $0.createdAt < $1.createdAt
@@ -541,6 +573,10 @@ struct ResearchNarrativeReportView: View {
                     return $0.id < $1.id
                 }
             sections = loadedSections
+            sectionRefsByCheckpoint = Dictionary(
+                loadedSections.map { ($0.checkpointRef, $0.sectionRef) },
+                uniquingKeysWith: { first, _ in first }
+            )
             obligationAliases = ResearchJournalPresentation.obligationAliases(
                 sections: loadedSections
             )
@@ -553,6 +589,7 @@ struct ResearchNarrativeReportView: View {
             }
         } catch {
             sections = []
+            sectionRefsByCheckpoint = [:]
             obligationAliases = [:]
             reportError = error.localizedDescription
         }
@@ -566,7 +603,7 @@ struct ResearchNarrativeReportView: View {
     }
 
     private func selectCheckpoint(_ checkpointRef: String, _ branchID: String) {
-        if branchID != detail.branchRef {
+        if branchID != detail.branchID {
             selectBranch(branchID)
         }
         selectedCheckpointRef = checkpointRef
@@ -579,6 +616,31 @@ struct ResearchNarrativeReportView: View {
         case "failed": return .red
         default: return .blue
         }
+    }
+}
+
+struct ResearchReportSectionPositionKey: PreferenceKey {
+    static var defaultValue: [String: CGFloat] = [:]
+
+    static func reduce(
+        value: inout [String: CGFloat],
+        nextValue: () -> [String: CGFloat]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+enum ResearchReportScrollResolver {
+    static func activeSectionRef(
+        positions: [String: CGFloat],
+        viewportTop: CGFloat
+    ) -> String? {
+        guard !positions.isEmpty else { return nil }
+        let atOrAbove = positions.filter { $0.value <= viewportTop }
+        if let nearest = atOrAbove.max(by: { $0.value < $1.value }) {
+            return nearest.key
+        }
+        return positions.min(by: { $0.value < $1.value })?.key
     }
 }
 

@@ -120,11 +120,16 @@ def assemble_snapshot(
     fragments: list[dict[str, Any]],
 ) -> dict[str, Any]:
     value = deepcopy(base)
-    value["sections"] = [
-        deepcopy(section)
-        for fragment in fragments
-        for section in fragment["sections"]
-    ]
+    value["sections"] = []
+    for fragment in fragments:
+        for section in fragment["sections"]:
+            projected = deepcopy(section)
+            # Keep immutable prose in its physical fragment. The logical
+            # projection receives explicit physical identity solely for the
+            # checkpoint-to-chapter navigation join.
+            projected["checkpoint_ref"] = fragment["checkpoint_ref"]
+            projected["branch_ref"] = fragment["branch_ref"]
+            value["sections"].append(projected)
     value["evidence_refs"] = list(dict.fromkeys(
         ref for fragment in fragments for ref in fragment["evidence_refs"]
     ))[:64]

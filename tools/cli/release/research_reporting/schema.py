@@ -122,6 +122,20 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
             "links": _canonical_links(item.get("links", [])),
             "created_at": item.get("created_at", 0.0),
         }
+        if "checkpoint_ref" in item or "branch_ref" in item:
+            checkpoint_ref = item.get("checkpoint_ref")
+            branch_ref = item.get("branch_ref")
+            if (
+                not isinstance(checkpoint_ref, str)
+                or not checkpoint_ref.startswith("trace:")
+                or not isinstance(branch_ref, str)
+                or not branch_ref.startswith("graph-branch:")
+            ):
+                raise ValueError(
+                    "section checkpoint_ref and branch_ref must be stable refs"
+                )
+            section["checkpoint_ref"] = checkpoint_ref
+            section["branch_ref"] = branch_ref
         _safe_id(section["section_id"], field="section_id")
         _bounded_text(section["title"], field="section.title")
         _bounded_text(

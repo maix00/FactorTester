@@ -59,6 +59,7 @@ struct ResearchJournalCheckpoint: Decodable, Identifiable {
 }
 
 struct ResearchJournalSection: Decodable, Identifiable {
+    let sectionRef: String
     let sectionID: String
     let title: String
     let body: String
@@ -69,7 +70,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
     let graphRef: String
     let branchRef: String
 
-    var id: String { "\(checkpointRef)|\(sectionID)" }
+    var id: String { sectionRef }
 
     enum CodingKeys: String, CodingKey {
         case sectionID = "section_id"
@@ -86,6 +87,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
             forKey: .blocks
         ) ?? []
         links = try container.decode([ResearchJournalLink].self, forKey: .links)
+        sectionRef = ""
         checkpointRef = ""
         createdAt = 0
         graphRef = ""
@@ -94,6 +96,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
 
     init(
         sectionID: String,
+        sectionRef: String,
         title: String,
         body: String,
         blocks: [ResearchJournalBlock],
@@ -104,6 +107,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
         branchRef: String = ""
     ) {
         self.sectionID = sectionID
+        self.sectionRef = sectionRef
         self.title = title
         self.body = body
         self.blocks = blocks
@@ -114,9 +118,13 @@ struct ResearchJournalSection: Decodable, Identifiable {
         self.branchRef = branchRef
     }
 
-    func bound(to checkpoint: ResearchJournalCheckpoint) -> Self {
+    func bound(
+        to checkpoint: ResearchJournalCheckpoint,
+        sectionRef: String
+    ) -> Self {
         Self(
             sectionID: sectionID,
+            sectionRef: sectionRef,
             title: title,
             body: body,
             blocks: blocks,
@@ -356,11 +364,34 @@ enum ResearchJournalLoader {
     }
 
     static func sections(
-        in document: ResearchJournalDocument
-    ) -> [ResearchJournalSection] {
-        document.checkpoints.flatMap { checkpoint in
-            checkpoint.sections.map { $0.bound(to: checkpoint) }
+        in document: ResearchJournalDocument,
+        indexedBy indexSections: [ResearchReportSection]
+    ) throws -> [ResearchJournalSection] {
+        var refs: [String: ResearchReportSection] = [:]
+        for section in indexSections {
+            let key = "\(section.checkpointRef)|\(section.sectionID)"
+            guard refs.updateValue(section, forKey: key) == nil else {
+                throw ResearchJournalError.historyIncomplete
+            }
         }
+        var result: [ResearchJournalSection] = []
+        for checkpoint in document.checkpoints {
+            for section in checkpoint.sections {
+                let key = "\(checkpoint.checkpointRef)|\(section.sectionID)"
+                guard let indexed = refs[key],
+                      indexed.branchRef == checkpoint.branchRef else {
+                    throw ResearchJournalError.historyIncomplete
+                }
+                result.append(section.bound(
+                    to: checkpoint,
+                    sectionRef: indexed.id
+                ))
+            }
+        }
+        guard result.count == indexSections.count else {
+            throw ResearchJournalError.historyIncomplete
+        }
+        return result
     }
 
     private static func validate(_ value: ResearchJournalDocument) throws {

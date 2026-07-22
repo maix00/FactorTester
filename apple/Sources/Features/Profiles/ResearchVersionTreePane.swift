@@ -127,8 +127,13 @@ enum ResearchTreeEdgeResolver {
                 ($0.element, $0.offset)
             }
         )
+        var identities = Set<String>()
         return edges.compactMap { edge in
             guard let target = rows[edge.targetNodeRef] else { return nil }
+            let identity = [
+                edge.relation, edge.sourceNodeRef, edge.targetNodeRef,
+            ].joined(separator: "|")
+            guard identities.insert(identity).inserted else { return nil }
             return ResearchTreeResolvedEdge(
                 relation: edge.relation,
                 sourceRow: rows[edge.sourceNodeRef],
@@ -142,6 +147,7 @@ struct ResearchVersionTreePane: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
     let steps: [ResearchTransitionStep]
+    let sectionRefsByCheckpoint: [String: String]
     @Binding var selectedCheckpointRef: String
     let select: (_ checkpointRef: String, _ branchID: String) -> Void
     let loadEarlier: () async -> Void
@@ -293,7 +299,8 @@ struct ResearchVersionTreePane: View {
 
     private func nodeRow(_ node: ResearchTreeNode) -> some View {
         Button {
-            guard !node.checkpointRef.isEmpty else { return }
+            guard !node.checkpointRef.isEmpty,
+                  !node.sectionRef.isEmpty else { return }
             select(node.checkpointRef, node.branchID)
         } label: {
             HStack(spacing: ResearchTreeLayout.rowSpacing) {
@@ -367,6 +374,7 @@ struct ResearchVersionTreePane: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(node.sectionRef.isEmpty)
         .accessibilityLabel("\(node.title)，\(node.subtitle)")
         .accessibilityIdentifier("research.tree.node.\(node.id)")
     }
@@ -391,6 +399,7 @@ struct ResearchVersionTreePane: View {
             ResearchTreeNode(
                 id: "step|\(step.stepRef)",
                 checkpointRef: step.stepRef,
+                sectionRef: sectionRefsByCheckpoint[step.stepRef] ?? "",
                 title: ResearchDisplayText.node(step.toNode),
                 subtitle: compactDate(step.createdAt),
                 timestamp: step.createdAt,
@@ -414,6 +423,9 @@ struct ResearchVersionTreePane: View {
                 result.append(ResearchTreeNode(
                     id: "branch|\(branch.branchRef)",
                     checkpointRef: branch.latestTraceRef ?? "",
+                    sectionRef: branch.latestTraceRef.flatMap {
+                        sectionRefsByCheckpoint[$0]
+                    } ?? "",
                     title: ResearchDisplayText.branchLabel(
                         branch.label,
                         currentNode: branch.currentNode
@@ -446,6 +458,7 @@ struct ResearchVersionTreePane: View {
                 result.append(ResearchTreeNode(
                     id: "lineage|\(branch.branchRef)",
                     checkpointRef: "",
+                    sectionRef: "",
                     title: lineage.relation == "fork"
                         ? "从 \(sourceLabel) 分叉"
                         : "沿用 \(sourceLabel) 的研究证据",
@@ -496,10 +509,25 @@ struct ResearchVersionTreePane: View {
                 checkpointRef: node.checkpointRef,
                 selectedLatestTraceRef: detail.latestTraceRef
             )
+            let isContinuation = node.edgeRef.contains(
+                "__graph_continuation__"
+            ) || lineage?.relation == "continuation"
+            let sourceGraphRef = lineage.flatMap { edge in
+                projection.nodes.first {
+                    $0.nodeRef == edge.sourceNodeRef
+                        || $0.checkpointRef == edge.sourceNodeRef
+                }?.graphRef
+            }
             return ResearchTreeNode(
                 id: "checkpoint|\(node.nodeRef)",
                 checkpointRef: node.checkpointRef,
-                title: ResearchDisplayText.node(node.toNode),
+                sectionRef: sectionRefsByCheckpoint[node.checkpointRef] ?? "",
+                title: isContinuation
+                    ? continuationTitle(
+                        from: sourceGraphRef,
+                        to: node.graphRef
+                    )
+                    : ResearchDisplayText.node(node.toNode),
                 subtitle: [node.graphRef, compactDate(node.createdAt)]
                     .filter { !$0.isEmpty }
                     .joined(separator: " · "),
@@ -524,6 +552,7 @@ struct ResearchVersionTreePane: View {
             ResearchTreeNode(
                 id: "step|\(step.stepRef)",
                 checkpointRef: step.stepRef,
+                sectionRef: sectionRefsByCheckpoint[step.stepRef] ?? "",
                 title: ResearchDisplayText.node(step.toNode),
                 subtitle: compactDate(step.createdAt),
                 timestamp: step.createdAt,
@@ -547,6 +576,9 @@ struct ResearchVersionTreePane: View {
             result.append(ResearchTreeNode(
                 id: "branch|\(branch.branchRef)",
                 checkpointRef: branch.latestTraceRef ?? "",
+                sectionRef: branch.latestTraceRef.flatMap {
+                    sectionRefsByCheckpoint[$0]
+                } ?? "",
                 title: ResearchDisplayText.branchLabel(
                     branch.label,
                     currentNode: branch.currentNode
@@ -691,6 +723,7 @@ struct ResearchVersionTreePane: View {
 private struct ResearchTreeNode: Identifiable {
     let id: String
     let checkpointRef: String
+    let sectionRef: String
     let title: String
     let subtitle: String
     let timestamp: Double
@@ -703,6 +736,16 @@ private struct ResearchTreeNode: Identifiable {
     let sourceLane: Int?
     let sourceCheckpointRef: String?
     let branchID: String
+}
+
+private func continuationTitle(from source: String?, to target: String) -> String {
+    let refs = [source, target].compactMap { value -> String? in
+        guard let value, !value.isEmpty else { return nil }
+        return value.split(separator: "@").last.map(String.init) ?? value
+    }
+    return refs.count == 2
+        ? "图版本承接 \(refs[0]) → \(refs[1])"
+        : "图版本承接"
 }
 
 private func compactDate(_ timestamp: Double) -> String {
