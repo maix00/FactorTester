@@ -320,6 +320,75 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
                 for index in range(1, 5)
             ],
         )
+        conn.execute(
+            "UPDATE research_graph_branches SET is_current_incarnation=0 "
+            "WHERE instance_id='instance-v7' AND branch_id='branch-v7'"
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner, graph_id, graph_version,
+                product_group, workspace_id, mode, shadow_run_id, created_at
+            ) VALUES (
+                'instance-v8', 'instance-a', 'alice', 'factor-research', 8,
+                'CNFutures', 'workspace-a', 'live', '', 3000
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_branches (
+                branch_id, hypothesis_branch_id, is_current_incarnation,
+                instance_id, label, current_node, status,
+                current_capability_resolution_json,
+                current_capability_resolution_hash,
+                current_trial_plan_hash, trial_stage_projection_json,
+                evidence_refs_json, omitted_evidence_count,
+                latest_trace_id, created_at, updated_at
+            ) VALUES (
+                'branch-v8', 'branch-0000', 1, 'instance-v8', 'primary',
+                'factor_semantics', 'running', '{}', 'resolution-v8',
+                ?, '{}', '[]', 0, 'trace-v8-1', 3000, 3001
+            )
+            """,
+            ("c" * 64,),
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id, from_node, to_node,
+                evidence_json, telemetry_json, actor, created_at
+            ) VALUES (
+                'trace-v8', 'instance-v8', 'branch-v8',
+                '__graph_continuation__', 'statistical_robustness',
+                'statistical_robustness', ?, '{}', 'research-agent', 3000
+            )
+            """,
+            (orjson.dumps({
+                **_evidence(8),
+                "graph_continuation": {
+                    "schema_version": 2,
+                    "source_instance_id": "instance-v7",
+                    "source_branch_id": "branch-v7",
+                    "source_trace_id": "trace-v7-4",
+                    "source_checkpoint_hash": "b" * 64,
+                    "work_package_id": "instance-a",
+                    "hypothesis_branch_id": "branch-0000",
+                },
+            }).decode(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id, from_node, to_node,
+                evidence_json, telemetry_json, actor, created_at
+            ) VALUES (
+                'trace-v8-1', 'instance-v8', 'branch-v8',
+                'edge-v8-1', 'statistical_robustness', 'factor_semantics',
+                '{}', '{}', 'research-agent', 3001
+            )
+            """
+        )
     service = _service(path, monkeypatch)
 
     listing = service.list_research(
@@ -337,32 +406,39 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
         research_ref="work-package:instance-a",
     )
     assert [item["branch_ref"] for item in detail["branches"]] == [
-        "graph-branch:instance-v7:branch-v7",
+        "graph-branch:instance-v8:branch-v8",
     ]
     assert detail["created_at"] == 1000
     tree = detail["tree"]
-    assert len(tree["nodes"]) == 8
+    assert len(tree["nodes"]) == 10
     assert sum(node["is_head"] for node in tree["nodes"]) == 1
     assert next(node for node in tree["nodes"] if node["is_head"])[
         "checkpoint_ref"
-    ] == "trace:trace-v7-4"
+    ] == "trace:trace-v8-1"
     assert {
         node["branch_ref"] for node in tree["nodes"]
-    } == {"graph-branch:instance-v7:branch-v7"}
+    } == {"graph-branch:instance-v8:branch-v8"}
     assert tree["omitted_node_count"] == 0
-    assert len(tree["edges"]) == 7
-    continuation = next(
+    assert len(tree["edges"]) == 9
+    continuations = [
         edge for edge in tree["edges"] if edge["relation"] == "continuation"
-    )
-    assert continuation["source_node_ref"] == "trace:trace-000002"
-    assert continuation["target_node_ref"] == "trace:trace-v7"
+    ]
+    assert [
+        (edge["source_node_ref"], edge["target_node_ref"])
+        for edge in continuations
+    ] == [
+        ("trace:trace-000002", "trace:trace-v7"),
+        ("trace:trace-v7-4", "trace:trace-v8"),
+    ]
 
     timeline = service.list_work_package_timeline(
         owner="alice",
         work_package_ref="work-package:instance-a",
-        branch_id="branch-v7",
+        branch_id="branch-v8",
     )
     assert [item["step_ref"] for item in timeline["items"]] == [
+        "trace:trace-v8-1",
+        "trace:trace-v8",
         "trace:trace-v7-4",
         "trace:trace-v7-3",
         "trace:trace-v7-2",

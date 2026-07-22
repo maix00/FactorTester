@@ -1153,26 +1153,43 @@ def _tree_projection(
                 item["_sequence_rank"], item["checkpoint_ref"]
             )
         )
+        current_row = branch_by_hypothesis[hypothesis_branch_id]
         for previous, current in zip(branch_nodes, branch_nodes[1:]):
             if current["_sequence_rank"] != previous["_sequence_rank"] + 1:
                 # Root/head window intentionally may contain a gap.  A
                 # connector over an omitted checkpoint would be misleading.
                 continue
+            relation = "transition"
             if current["edge_ref"] in {
                 "__branch_fork__", "__graph_continuation__",
             }:
-                # The authoritative lineage edge below is the connection for
-                # this checkpoint; emitting a transition as well duplicates it.
-                continue
+                is_current_lineage = (
+                    current["_instance_id"] == str(current_row["instance_id"])
+                    and current["_physical_branch_id"]
+                    == str(current_row["branch_id"])
+                )
+                if is_current_lineage:
+                    # The authoritative lineage edge below is the connection
+                    # for the current incarnation; emitting it here as well
+                    # would duplicate the same connector.
+                    continue
+                # Older physical incarnations remain part of the same logical
+                # history. Their creation edge must not disappear merely
+                # because a newer continuation is now current.
+                relation = (
+                    "fork"
+                    if current["edge_ref"] == "__branch_fork__"
+                    else "continuation"
+                )
             edges.append({
                 "edge_ref": current["edge_ref"],
-                "relation": "transition",
+                "relation": relation,
                 "source_node_ref": previous["checkpoint_ref"],
                 "target_node_ref": current["checkpoint_ref"],
                 "source_branch_ref": previous["branch_ref"],
                 "target_branch_ref": current["branch_ref"],
             })
-        row = branch_by_hypothesis[hypothesis_branch_id]
+        row = current_row
         lineage = _branch_lineage(row)
         target = next((item for item in branch_nodes if (
             item["_instance_id"] == str(row["instance_id"])
