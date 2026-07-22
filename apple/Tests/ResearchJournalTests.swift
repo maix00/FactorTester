@@ -4,6 +4,13 @@ import XCTest
 @testable import FTClient
 
 final class ResearchJournalTests: XCTestCase {
+    func testUnitTestHostDoesNotLoadRealUserState() {
+        XCTAssertFalse(AppRuntimePolicy.shouldLoadUserState(environment: [
+            "XCTestConfigurationFilePath": "/tmp/session.xctestconfiguration",
+        ]))
+        XCTAssertTrue(AppRuntimePolicy.shouldLoadUserState(environment: [:]))
+    }
+
     func testResearchRecordSelectsJournalCoveringCurrentCheckpoint() {
         let record = ResearchRecordModel(json: [
             "record_id": "work-package",
@@ -486,6 +493,48 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(section.body, "本次检验尚未清除交易成本义务。")
         XCTAssertEqual(section.checkpointRef, "trace:checkpoint-1")
         XCTAssertEqual(section.links.first?.targetRef, "evidence:cost-1")
+    }
+
+    func testAcceptsProducerMaximumOfFiftyAuditLinks() async throws {
+        var value = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: journalData())
+                as? [String: Any]
+        )
+        var checkpoints = try XCTUnwrap(
+            value["checkpoints"] as? [[String: Any]]
+        )
+        var sections = try XCTUnwrap(
+            checkpoints[0]["sections"] as? [[String: Any]]
+        )
+        sections[0]["links"] = (0..<50).map { index in
+            [
+                "link_id": "evidence-\(index)",
+                "kind": "evidence",
+                "target_ref": "evidence:item-\(index)",
+            ]
+        }
+        sections[0]["blocks"] = []
+        checkpoints[0]["sections"] = sections
+        value["checkpoints"] = checkpoints
+        let data = try JSONSerialization.data(withJSONObject: value)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("LOGICAL_JOURNAL.json")
+        try data.write(to: url)
+        let artifact = ResearchArtifactModel(json: [
+            "artifact_ref": "artifact:report",
+            "journal_ref": url.absoluteString,
+            "journal_hash": sha256(data),
+        ])
+
+        let document = try await ResearchJournalLoader.load(artifact: artifact)
+
+        XCTAssertEqual(document.checkpoints[0].sections[0].links.count, 50)
     }
 
     func testRejectsJournalWhoseProfileHashDoesNotMatch() async throws {

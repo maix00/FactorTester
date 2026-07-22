@@ -293,6 +293,7 @@ enum ResearchJournalPresentation {
 enum ResearchJournalLoader {
     static let maximumBytes = 4 * 1024 * 1024
     static let maximumCheckpoints = 4_096
+    static let maximumLinksPerSection = 50
     private static let linkKinds: Set<String> = [
         "checkpoint", "trial_plan", "obligation", "claim", "evidence",
         "job", "run", "delta", "profile_handoff", "report_section",
@@ -461,7 +462,7 @@ enum ResearchJournalLoader {
                 guard !section.sectionID.isEmpty,
                       !section.title.isEmpty,
                       (!section.body.isEmpty || !section.blocks.isEmpty),
-                      section.links.count <= 16,
+                      section.links.count <= maximumLinksPerSection,
                       sectionIDs.insert(
                         "\(checkpoint.checkpointRef)|\(section.sectionID)"
                     ).inserted else {
