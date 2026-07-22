@@ -75,19 +75,12 @@ struct ResearchNarrativeReportView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 64)
                     } else {
-                        ForEach(sections) { section in
-                            narrativeSection(section)
-                                .id(section.id)
-                                .background {
-                                    GeometryReader { geometry in
-                                        Color.clear.preference(
-                                            key: ResearchReportSectionPositionKey.self,
-                                            value: [section.id: geometry.frame(
-                                                in: .named("research-report-scroll")
-                                            ).minY]
-                                        )
-                                    }
-                                }
+                        ForEach(reportGroups) { group in
+                            if group.isRecoveryContext {
+                                recoveryReportGroup(group)
+                            } else if let section = group.sections.first {
+                                positionedSection(section)
+                            }
                         }
                     }
                 }
@@ -146,31 +139,34 @@ struct ResearchNarrativeReportView: View {
     }
 
     private func narrativeSection(
-        _ section: ResearchJournalSection
+        _ section: ResearchJournalSection,
+        compact: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Text(stageLabel(for: section))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.accentColor.opacity(0.1), in: Capsule())
-                Text(section.graphRef)
-                    .font(.caption2.weight(.medium))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.08), in: Capsule())
-                Text(Date(timeIntervalSince1970: section.createdAt), style: .date)
-                Text("·")
-                Text(shortReference(section.checkpointRef))
-                    .monospaced()
+            if !compact {
+                HStack(spacing: 8) {
+                    Text(stageLabel(for: section))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.accentColor.opacity(0.1), in: Capsule())
+                    Text(section.graphRef)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.08), in: Capsule())
+                    Text(Date(timeIntervalSince1970: section.createdAt), style: .date)
+                    Text("·")
+                    Text(shortReference(section.checkpointRef))
+                        .monospaced()
+                }
+                .font(.caption)
+                .foregroundStyle(.tertiary)
             }
-            .font(.caption)
-            .foregroundStyle(.tertiary)
 
             Text(section.title)
-                .font(.title2.weight(.semibold))
+                .font(compact ? .headline : .title2.weight(.semibold))
                 .foregroundStyle(.primary)
             if !section.body.isEmpty {
                 reportParagraph(section.body, linkIDs: [], section: section)
@@ -194,14 +190,122 @@ struct ResearchNarrativeReportView: View {
                     .padding(.vertical, 2)
                 }
             }
-            Divider().padding(.top, 18)
+            Divider().padding(.top, compact ? 8 : 18)
         }
-        .padding(.bottom, 24)
+        .padding(.bottom, compact ? 12 : 24)
         .contentShape(Rectangle())
         .onTapGesture {
             selectedCheckpointRef = section.checkpointRef
         }
         .accessibilityIdentifier("research.report.section.\(section.sectionID)")
+    }
+
+    private func positionedSection(
+        _ section: ResearchJournalSection,
+        compact: Bool = false
+    ) -> some View {
+        narrativeSection(section, compact: compact)
+            .id(section.id)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ResearchReportSectionPositionKey.self,
+                        value: [section.id: geometry.frame(
+                            in: .named("research-report-scroll")
+                        ).minY]
+                    )
+                }
+            }
+    }
+
+    private func recoveryReportGroup(
+        _ group: ResearchReportDisplayGroup
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Text("图版本承接")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.1), in: Capsule())
+                Text(group.sections.first?.graphRef ?? "")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            Text("v8 迁移审计（含冗余路径说明）")
+                .font(.title2.weight(.semibold))
+            Text("这是一段连续的版本迁移审计，而不是三个新的实质研究阶段。底层 trace 全部保留，便于检查迁移运行器为何采取了冗余路径。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            migrationAuditFacts(for: group)
+            ForEach(group.sections) { section in
+                positionedSection(section, compact: true)
+            }
+        }
+        .padding(.bottom, 12)
+    }
+
+    private func migrationAuditFacts(
+        for group: ResearchReportDisplayGroup
+    ) -> some View {
+        let graphRef = group.sections.first?.graphRef ?? ""
+        let facts: [String]
+        if graphRef == "factor-research@v8" {
+            facts = [
+                "v7 → v8 的精确图差异只新增 factor_semantics__factor_improvement 与 validation_design__factor_improvement 两条边；节点和 capability 描述没有改变。",
+                "旧 capability_gap 被迁移载荷沿用，运行器因而机械经过 capability_resolution → data_contract；这属于冗余恢复路径，不表示完整研究阶段必须重跑。",
+                "research-obligation.discover 的方法指纹发生变化，需要重新绑定已批准能力；这是方法身份确认，不是重新发现一个能力缺口。",
+                "VOLUME 只为派生增量因子增加字段可用性检查，不表示原数据合同整体失效。",
+                "因子语义被重新开启，是为了按新义务检查表达式、ColumnRef 参数化与派生比较；既有 job 和证据继续保留。",
+            ]
+        } else {
+            facts = [
+                "迁移步骤仅恢复图版本、能力绑定和必要数据上下文；既有证据与研究结论不会因版本切换自动失效。",
+            ]
+        }
+        return VStack(alignment: .leading, spacing: 8) {
+            if graphRef == "factor-research@v8" {
+                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 7) {
+                    GridRow {
+                        Text("图对象")
+                        Text("v7")
+                        Text("v8")
+                        Text("精确变化")
+                    }
+                    .font(.caption.weight(.semibold))
+                    Divider().gridCellColumns(4)
+                    GridRow {
+                        Text("节点")
+                        Text("15")
+                        Text("15")
+                        Text("无变化")
+                    }
+                    GridRow {
+                        Text("Capabilities")
+                        Text("38")
+                        Text("38")
+                        Text("无变化")
+                    }
+                    GridRow {
+                        Text("边")
+                        Text("27")
+                        Text("29")
+                        Text("新增 2 条")
+                    }
+                }
+                .font(.caption)
+                .padding(.bottom, 4)
+            }
+            ForEach(facts, id: \.self) { fact in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("•").foregroundStyle(.secondary)
+                    Text(fact).font(.callout).lineSpacing(3)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func reportParagraph(
@@ -602,8 +706,53 @@ struct ResearchNarrativeReportView: View {
         }
     }
 
+    private var reportGroups: [ResearchReportDisplayGroup] {
+        let descriptors = sections.compactMap {
+            section -> ResearchRecoveryDescriptor? in
+            guard let step = orderedSteps.first(where: {
+                $0.stepRef == section.checkpointRef
+            }) else { return nil }
+            return ResearchRecoveryDescriptor(
+                checkpointRef: section.checkpointRef,
+                graphRef: section.graphRef,
+                branchRef: section.branchRef,
+                edgeRef: step.edgeRef,
+                toNode: step.toNode
+            )
+        }
+        let groups = ResearchRecoveryGrouping.groups(in: descriptors)
+        let membersByAnchor = Dictionary(uniqueKeysWithValues: groups.compactMap {
+            refs -> (String, [String])? in
+            guard let anchor = refs.first else { return nil }
+            return (anchor, refs)
+        })
+        let hidden = Set(groups.flatMap { $0.dropFirst() })
+        let byCheckpoint = Dictionary(
+            sections.map { ($0.checkpointRef, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return sections.compactMap { section in
+            if hidden.contains(section.checkpointRef) { return nil }
+            if let refs = membersByAnchor[section.checkpointRef] {
+                return ResearchReportDisplayGroup(
+                    id: "recovery|\(section.graphRef)|\(section.checkpointRef)",
+                    isRecoveryContext: true,
+                    sections: refs.compactMap { byCheckpoint[$0] }
+                )
+            }
+            return ResearchReportDisplayGroup(
+                id: section.id,
+                isRecoveryContext: false,
+                sections: [section]
+            )
+        }
+    }
+
     private func selectCheckpoint(_ checkpointRef: String, _ branchID: String) {
-        if branchID != detail.branchID {
+        if ResearchBranchNavigation.requiresReload(
+            currentBranchRef: detail.branchRef,
+            targetBranchID: branchID
+        ) {
             selectBranch(branchID)
         }
         selectedCheckpointRef = checkpointRef
@@ -616,6 +765,17 @@ struct ResearchNarrativeReportView: View {
         case "failed": return .red
         default: return .blue
         }
+    }
+}
+
+enum ResearchBranchNavigation {
+    static func requiresReload(
+        currentBranchRef: String,
+        targetBranchID: String
+    ) -> Bool {
+        let currentBranchID = currentBranchRef.split(separator: ":")
+            .last.map(String.init) ?? currentBranchRef
+        return !targetBranchID.isEmpty && targetBranchID != currentBranchID
     }
 }
 
@@ -642,6 +802,12 @@ enum ResearchReportScrollResolver {
         }
         return positions.min(by: { $0.value < $1.value })?.key
     }
+}
+
+private struct ResearchReportDisplayGroup: Identifiable {
+    let id: String
+    let isRecoveryContext: Bool
+    let sections: [ResearchJournalSection]
 }
 
 private struct ResearchAuditSelection: Identifiable {

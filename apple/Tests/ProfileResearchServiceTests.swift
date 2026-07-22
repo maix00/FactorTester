@@ -255,6 +255,37 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
     }
 
+    func testCollapsedRecoveryGroupKeepsOutgoingConnectorAndExpandedAnchorIsSafe() {
+        let edge = ResearchVersionTreeEdge(
+            edgeRef: "data-to-semantics",
+            relation: "transition",
+            sourceNodeRef: "trace:data",
+            targetNodeRef: "trace:semantics",
+            sourceBranchRef: "graph-branch:v8:b",
+            targetBranchRef: "graph-branch:v8:b"
+        )
+        XCTAssertEqual(
+            ResearchTreeEdgeResolver.resolve(
+                [edge],
+                checkpointRefs: ["trace:continuation", "trace:semantics"],
+                aliases: ["trace:data": "trace:continuation"]
+            ),
+            [ResearchTreeResolvedEdge(
+                relation: "transition", sourceRow: 0, targetRow: 1
+            )]
+        )
+        XCTAssertEqual(
+            ResearchTreeEdgeResolver.resolve(
+                [edge],
+                checkpointRefs: [
+                    "trace:continuation", "trace:continuation",
+                    "trace:data", "trace:semantics",
+                ]
+            ).first?.sourceRow,
+            2
+        )
+    }
+
     func testReportIndexCarriesStableCheckpointToSectionJoin() throws {
         let section = try JSONDecoder().decode(
             ResearchReportIndexDocument.self,
@@ -281,6 +312,71 @@ final class ProfileResearchServiceTests: XCTestCase {
             viewportTop: 24
         )
         XCTAssertEqual(active, "section:two")
+    }
+
+    func testV8RecoveryTraceGroupingStopsBeforeSubstantiveFactorSemantics() {
+        let descriptors = [
+            ResearchRecoveryDescriptor(
+                checkpointRef: "trace:continuation",
+                graphRef: "factor-research@v8",
+                branchRef: "graph-branch:v8:b",
+                edgeRef: "__graph_continuation__",
+                toNode: "capability_gap"
+            ),
+            ResearchRecoveryDescriptor(
+                checkpointRef: "trace:capability",
+                graphRef: "factor-research@v8",
+                branchRef: "graph-branch:v8:b",
+                edgeRef: "capability_gap__capability_resolution",
+                toNode: "capability_resolution"
+            ),
+            ResearchRecoveryDescriptor(
+                checkpointRef: "trace:data",
+                graphRef: "factor-research@v8",
+                branchRef: "graph-branch:v8:b",
+                edgeRef: "capability_resolution__data_contract",
+                toNode: "data_contract"
+            ),
+            ResearchRecoveryDescriptor(
+                checkpointRef: "trace:semantics",
+                graphRef: "factor-research@v8",
+                branchRef: "graph-branch:v8:b",
+                edgeRef: "data_contract__factor_semantics",
+                toNode: "factor_semantics"
+            ),
+        ]
+
+        XCTAssertEqual(ResearchRecoveryGrouping.groups(in: descriptors), [[
+            "trace:continuation", "trace:capability", "trace:data",
+        ]])
+    }
+
+    func testRecoveryTraceGroupCanExpandAndCollapseWithoutChangingIdentity() {
+        var expanded = Set<String>()
+        ResearchRecoveryExpansion.toggle("recovery|v8", in: &expanded)
+        XCTAssertEqual(expanded, ["recovery|v8"])
+        ResearchRecoveryExpansion.toggle("recovery|v8", in: &expanded)
+        XCTAssertTrue(expanded.isEmpty)
+    }
+
+    func testV8CheckpointDeepLinkDoesNotReloadAlreadyLoadedBranch() {
+        XCTAssertFalse(ResearchBranchNavigation.requiresReload(
+            currentBranchRef: "graph-branch:v8-instance:v8-branch",
+            targetBranchID: "v8-branch"
+        ))
+        XCTAssertTrue(ResearchBranchNavigation.requiresReload(
+            currentBranchRef: "graph-branch:v8-instance:v8-branch",
+            targetBranchID: "other-branch"
+        ))
+    }
+
+    func testTreeTimestampRemainsCompactBesideGraphVersionBadge() {
+        let text = ResearchTreeTimestamp.text(1_784_700_100)
+        XCTAssertEqual(text.count, 11)
+        XCTAssertGreaterThanOrEqual(
+            ResearchTreeLayout.minimumTimestampWidth,
+            68
+        )
     }
 
     func testTimelineResolvesCycleObjectAtItsOwnCheckpoint() throws {
