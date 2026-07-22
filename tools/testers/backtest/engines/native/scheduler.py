@@ -1451,6 +1451,58 @@ def _audit_ledger_topology(snapshots: list[dict[str, Any]]) -> list[dict[str, An
     ]
 
 
+def _audit_dmtm_step(
+    flow: ResolvedFlow,
+    before: dict[str, Any],
+    ledger_changes: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Project the generic step audit into a compact DMTM evidence block."""
+    payload_entries = before.get("event_payloads", [])
+    events: list[dict[str, Any]] = []
+    for entry in payload_entries:
+        for payload in entry.get("payloads", []):
+            if not isinstance(payload, dict) or payload.get("kind") != "daily_mark_to_market":
+                continue
+            events.append({
+                "ledger": str(payload.get("ledger_id") or entry.get("ledger") or ""),
+                "trading_day": str(payload.get("trading_day") or ""),
+            })
+    if flow.name != "apply_daily_mark_to_market" and not events:
+        return None
+
+    inputs = before.get("inputs", [])
+    accounting_field_names = {
+        "TradingRuleModule.accounting_mode",
+        "TradingRuleModule.daily_mark_to_market_enabled",
+        "TradingRuleModule.cost_basis_method",
+        "FeeModule.fee_mode",
+        "MarginModule.margin_mode",
+        "MarginModule.margin_call_mode",
+    }
+    market_rule_field_names = {
+        "MarketDataModule.current_market_snapshot",
+        "MarketDataModule.current_historical_fields",
+    }
+    return {
+        "events": events,
+        "accounting_inputs": [
+            item for item in inputs if item.get("field") in accounting_field_names
+        ],
+        "market_rule_inputs": [
+            item for item in inputs if item.get("field") in market_rule_field_names
+        ],
+        "cash_changes": [
+            item for item in ledger_changes if item.get("field") == "CashPoolModule.cash"
+        ],
+        "position_changes": [
+            item for item in ledger_changes if str(item.get("field") or "").endswith(".positions")
+        ],
+        "margin_changes": [
+            item for item in ledger_changes if "margin" in str(item.get("field") or "").lower()
+        ],
+    }
+
+
 def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_active_ledgers):
     """Capture a complete pre-compute snapshot; emission happens after compute."""
     if not _step_mode_globals.get("enabled", False) or step_callback is None:
@@ -1530,7 +1582,7 @@ def _step_after_flow(f, state, ctx, step_callback, before):
     event_payload_changes = _audit_event_payload_changes(
         before.get("event_payloads", []), event_payloads_after,
     )
-    step_callback({
+    record = {
         "phase": "step",
         "timestamp": before.get("timestamp", ""),
         "event_kind": f.event_kind.name if f.event_kind is not None else "",
@@ -1554,7 +1606,11 @@ def _step_after_flow(f, state, ctx, step_callback, before):
             *direct_contract_violations,
             *ledger_contract_violations,
         ],
-    })
+    }
+    dmtm = _audit_dmtm_step(f, before, ledger_changes)
+    if dmtm is not None:
+        record["dmtm"] = dmtm
+    step_callback(record)
 
 
 
