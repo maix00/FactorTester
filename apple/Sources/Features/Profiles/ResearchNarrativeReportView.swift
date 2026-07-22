@@ -75,12 +75,8 @@ struct ResearchNarrativeReportView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 64)
                     } else {
-                        ForEach(reportGroups) { group in
-                            if group.isRecoveryContext {
-                                recoveryReportGroup(group)
-                            } else if let section = group.sections.first {
-                                positionedSection(section)
-                            }
+                        ForEach(sections) { section in
+                            positionedSection(section)
                         }
                     }
                 }
@@ -226,111 +222,6 @@ struct ResearchNarrativeReportView: View {
                     )
                 }
             }
-    }
-
-    private func recoveryReportGroup(
-        _ group: ResearchReportDisplayGroup
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Text("图版本承接")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.accentColor.opacity(0.1), in: Capsule())
-                Text(group.sections.first?.graphRef ?? "")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            Text("v8 迁移审计（含冗余路径说明）")
-                .font(.title2.weight(.semibold))
-            Text("这是一段连续的版本迁移审计，而不是三个新的实质研究阶段。底层 trace 全部保留，便于检查迁移运行器为何采取了冗余路径。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            migrationAuditFacts(for: group)
-            ForEach(group.sections) { section in
-                positionedSection(
-                    section,
-                    compact: true,
-                    titleOverride: recoveryTitle(for: section)
-                )
-            }
-        }
-        .padding(.bottom, 12)
-    }
-
-    private func recoveryTitle(
-        for section: ResearchJournalSection
-    ) -> String? {
-        guard let step = orderedSteps.first(where: {
-            $0.stepRef == section.checkpointRef
-        }) else { return nil }
-        return ResearchRecoveryPresentation.title(toNode: step.toNode)
-    }
-
-    private func migrationAuditFacts(
-        for group: ResearchReportDisplayGroup
-    ) -> some View {
-        let graphRef = group.sections.first?.graphRef ?? ""
-        let facts: [String]
-        if graphRef == "factor-research@v8" {
-            facts = [
-                "v7 → v8 的精确图差异只新增 factor_semantics__factor_improvement 与 validation_design__factor_improvement 两条边；节点和 capability 描述没有改变。",
-                "旧 capability_gap 被迁移载荷沿用，运行器因而机械经过 capability_resolution → data_contract；这属于冗余恢复路径，不表示完整研究阶段必须重跑。",
-                "research-obligation.discover 的方法指纹发生变化，需要重新绑定已批准能力；这是方法身份确认，不是重新发现一个能力缺口。",
-                "前置数据目录回答数据源有什么；因子语义回答表达式需要什么；精确字段覆盖再对两者做确定性交集，判断能否支持 TrialPlan。三者不能互相替代，也不应重复执行。",
-                "迁移器误入 data_contract，但当时尚未由因子语义确认新增字段依赖，因此这条 trace 不构成 VOLUME 覆盖检查，也不构成新的研究阶段。",
-                "VOLUME 的增量检查应在恢复研究后发生：表达式审查先确认该依赖，再由具体 TrialPlan 触发产品、频率、时间范围及点时可得性的精确覆盖验证。",
-                "因子语义被重新开启，是为了按新义务检查表达式、ColumnRef 参数化与派生比较；既有 job 和证据继续保留。",
-            ]
-        } else {
-            facts = [
-                "迁移步骤仅恢复图版本、能力绑定和必要数据上下文；既有证据与研究结论不会因版本切换自动失效。",
-            ]
-        }
-        return VStack(alignment: .leading, spacing: 8) {
-            if graphRef == "factor-research@v8" {
-                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 7) {
-                    GridRow {
-                        Text("图对象")
-                        Text("v7")
-                        Text("v8")
-                        Text("精确变化")
-                    }
-                    .font(.caption.weight(.semibold))
-                    Divider().gridCellColumns(4)
-                    GridRow {
-                        Text("节点")
-                        Text("15")
-                        Text("15")
-                        Text("无变化")
-                    }
-                    GridRow {
-                        Text("Capabilities")
-                        Text("38")
-                        Text("38")
-                        Text("无变化")
-                    }
-                    GridRow {
-                        Text("边")
-                        Text("27")
-                        Text("29")
-                        Text("新增 2 条")
-                    }
-                }
-                .font(.caption)
-                .padding(.bottom, 4)
-            }
-            ForEach(facts, id: \.self) { fact in
-                HStack(alignment: .top, spacing: 8) {
-                    Text("•").foregroundStyle(.secondary)
-                    Text(fact).font(.callout).lineSpacing(3)
-                }
-            }
-        }
-        .padding(12)
-        .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func reportParagraph(
@@ -737,48 +628,6 @@ struct ResearchNarrativeReportView: View {
         }
     }
 
-    private var reportGroups: [ResearchReportDisplayGroup] {
-        let descriptors = sections.compactMap {
-            section -> ResearchRecoveryDescriptor? in
-            guard let step = orderedSteps.first(where: {
-                $0.stepRef == section.checkpointRef
-            }) else { return nil }
-            return ResearchRecoveryDescriptor(
-                checkpointRef: section.checkpointRef,
-                graphRef: section.graphRef,
-                branchRef: section.branchRef,
-                edgeRef: step.edgeRef,
-                toNode: step.toNode
-            )
-        }
-        let groups = ResearchRecoveryGrouping.groups(in: descriptors)
-        let membersByAnchor = Dictionary(uniqueKeysWithValues: groups.compactMap {
-            refs -> (String, [String])? in
-            guard let anchor = refs.first else { return nil }
-            return (anchor, refs)
-        })
-        let hidden = Set(groups.flatMap { $0.dropFirst() })
-        let byCheckpoint = Dictionary(
-            sections.map { ($0.checkpointRef, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        return sections.compactMap { section in
-            if hidden.contains(section.checkpointRef) { return nil }
-            if let refs = membersByAnchor[section.checkpointRef] {
-                return ResearchReportDisplayGroup(
-                    id: "recovery|\(section.graphRef)|\(section.checkpointRef)",
-                    isRecoveryContext: true,
-                    sections: refs.compactMap { byCheckpoint[$0] }
-                )
-            }
-            return ResearchReportDisplayGroup(
-                id: section.id,
-                isRecoveryContext: false,
-                sections: [section]
-            )
-        }
-    }
-
     private func selectCheckpoint(_ checkpointRef: String, _ branchID: String) {
         if ResearchBranchNavigation.requiresReload(
             currentBranchRef: detail.branchRef,
@@ -810,21 +659,6 @@ enum ResearchBranchNavigation {
     }
 }
 
-enum ResearchRecoveryPresentation {
-    static func title(toNode: String) -> String? {
-        switch toNode {
-        case "capability_gap":
-            return "评估 v8 迁移影响"
-        case "capability_resolution":
-            return "重新绑定已变更的方法能力"
-        case "data_contract":
-            return "误入数据契约（未执行增量字段检查）"
-        default:
-            return nil
-        }
-    }
-}
-
 struct ResearchReportSectionPositionKey: PreferenceKey {
     static var defaultValue: [String: CGFloat] = [:]
 
@@ -848,12 +682,6 @@ enum ResearchReportScrollResolver {
         }
         return positions.min(by: { $0.value < $1.value })?.key
     }
-}
-
-private struct ResearchReportDisplayGroup: Identifiable {
-    let id: String
-    let isRecoveryContext: Bool
-    let sections: [ResearchJournalSection]
 }
 
 private struct ResearchAuditSelection: Identifiable {

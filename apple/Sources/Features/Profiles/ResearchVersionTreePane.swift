@@ -57,59 +57,6 @@ enum ResearchTreeOrdering {
     }
 }
 
-struct ResearchRecoveryDescriptor {
-    let checkpointRef: String
-    let graphRef: String
-    let branchRef: String
-    let edgeRef: String
-    let toNode: String
-}
-
-enum ResearchRecoveryGrouping {
-    private static let recoveryNodes: Set<String> = [
-        "capability_resolution", "data_contract",
-    ]
-
-    static func groups(
-        in descriptors: [ResearchRecoveryDescriptor]
-    ) -> [[String]] {
-        var result: [[String]] = []
-        var index = 0
-        while index < descriptors.count {
-            let start = descriptors[index]
-            guard start.edgeRef.contains("__graph_continuation__") else {
-                index += 1
-                continue
-            }
-            var members = [start.checkpointRef]
-            var cursor = index + 1
-            while cursor < descriptors.count {
-                let candidate = descriptors[cursor]
-                guard candidate.graphRef == start.graphRef,
-                      candidate.branchRef == start.branchRef,
-                      recoveryNodes.contains(candidate.toNode) else {
-                    break
-                }
-                members.append(candidate.checkpointRef)
-                cursor += 1
-            }
-            result.append(members)
-            index = cursor
-        }
-        return result
-    }
-}
-
-enum ResearchRecoveryExpansion {
-    static func toggle(_ groupID: String, in expanded: inout Set<String>) {
-        if expanded.contains(groupID) {
-            expanded.remove(groupID)
-        } else {
-            expanded.insert(groupID)
-        }
-    }
-}
-
 struct ResearchTreeHistoryMerge {
     let supplementalSteps: [ResearchTransitionStep]
     let remainingOmittedNodeCount: Int
@@ -219,7 +166,6 @@ struct ResearchVersionTreePane: View {
     private let rowHeight: CGFloat = 46
     private let laneSpacing = ResearchTreeLayout.laneSpacing
     @State private var isLoadingEarlier = false
-    @State private var expandedRecoveryGroups: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -355,18 +301,9 @@ struct ResearchVersionTreePane: View {
         for visibleNodes: [ResearchTreeNode]
     ) -> [ResearchTreeResolvedEdge] {
         guard let projection = workPackage.tree else { return [] }
-        var aliases: [String: String] = [:]
-        for node in visibleNodes
-        where node.isRecoveryGroup
-            && !expandedRecoveryGroups.contains(node.id) {
-            for child in node.recoveryChildren {
-                aliases[child.checkpointRef] = node.checkpointRef
-            }
-        }
         return ResearchTreeEdgeResolver.resolve(
             projection.edges,
-            checkpointRefs: visibleNodes.map(\.checkpointRef),
-            aliases: aliases
+            checkpointRefs: visibleNodes.map(\.checkpointRef)
         )
     }
 
@@ -374,12 +311,6 @@ struct ResearchVersionTreePane: View {
         Button {
             guard !node.checkpointRef.isEmpty,
                   !node.sectionRef.isEmpty else { return }
-            if node.isRecoveryGroup {
-                ResearchRecoveryExpansion.toggle(
-                    node.id,
-                    in: &expandedRecoveryGroups
-                )
-            }
             select(node.checkpointRef, node.branchID)
         } label: {
             HStack(spacing: ResearchTreeLayout.rowSpacing) {
@@ -421,11 +352,6 @@ struct ResearchVersionTreePane: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
-                        if node.isRecoveryChild {
-                            Image(systemName: "arrow.turn.down.right")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.tertiary)
-                        }
                         Text(node.title)
                             .font(.caption.weight(node.isHead ? .semibold : .regular))
                             .lineLimit(1)
@@ -442,12 +368,6 @@ struct ResearchVersionTreePane: View {
                                     in: Capsule()
                                 )
                                 .fixedSize()
-                        }
-                        if node.isRecoveryGroup {
-                            Image(systemName: expandedRecoveryGroups.contains(node.id)
-                                  ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(.secondary)
                         }
                         if node.isHead {
                             Text("HEAD")
@@ -713,52 +633,7 @@ struct ResearchVersionTreePane: View {
                 id: $1.id
             )
         }
-        return foldRecoveryContext(in: ordered)
-    }
-
-    private func foldRecoveryContext(
-        in ordered: [ResearchTreeNode]
-    ) -> [ResearchTreeNode] {
-        let descriptors = ordered.compactMap { node -> ResearchRecoveryDescriptor? in
-            guard !node.graphRef.isEmpty, !node.edgeRef.isEmpty else {
-                return nil
-            }
-            return ResearchRecoveryDescriptor(
-                checkpointRef: node.checkpointRef,
-                graphRef: node.graphRef,
-                branchRef: node.physicalBranchRef,
-                edgeRef: node.edgeRef,
-                toNode: node.toNode
-            )
-        }
-        let groups = ResearchRecoveryGrouping.groups(in: descriptors)
-        let membersByAnchor = Dictionary(uniqueKeysWithValues: groups.compactMap {
-            refs -> (String, [String])? in
-            guard let anchor = refs.first else { return nil }
-            return (anchor, refs)
-        })
-        let hiddenMembers = Set(groups.flatMap { $0.dropFirst() })
-        let byCheckpoint = Dictionary(
-            ordered.filter { !$0.checkpointRef.isEmpty }.map {
-                ($0.checkpointRef, $0)
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        var result: [ResearchTreeNode] = []
-        for node in ordered {
-            if hiddenMembers.contains(node.checkpointRef) { continue }
-            guard let memberRefs = membersByAnchor[node.checkpointRef] else {
-                result.append(node)
-                continue
-            }
-            let children = memberRefs.compactMap { byCheckpoint[$0] }
-            let group = node.recoveryGroup(children: children)
-            result.append(group)
-            if expandedRecoveryGroups.contains(group.id) {
-                result.append(contentsOf: children.map { $0.recoveryChild() })
-            }
-        }
-        return result
+        return ordered
     }
 
     private func loadEarlierPreservingAnchor(
@@ -853,12 +728,7 @@ struct ResearchVersionTreePane: View {
         _ node: ResearchTreeNode,
         checkpointRef: String
     ) -> Bool {
-        if node.checkpointRef == checkpointRef { return true }
-        return node.isRecoveryGroup
-            && !expandedRecoveryGroups.contains(node.id)
-            && node.recoveryChildren.contains {
-                $0.checkpointRef == checkpointRef
-            }
+        node.checkpointRef == checkpointRef
     }
 
     private func treeLegend(filled: Bool, label: String) -> some View {
@@ -907,9 +777,6 @@ private struct ResearchTreeNode: Identifiable {
     let edgeRef: String
     let toNode: String
     let physicalBranchRef: String
-    let isRecoveryGroup: Bool
-    let isRecoveryChild: Bool
-    let recoveryChildren: [ResearchTreeNode]
 
     init(
         id: String,
@@ -930,10 +797,7 @@ private struct ResearchTreeNode: Identifiable {
         graphRef: String = "",
         edgeRef: String = "",
         toNode: String = "",
-        physicalBranchRef: String = "",
-        isRecoveryGroup: Bool = false,
-        isRecoveryChild: Bool = false,
-        recoveryChildren: [ResearchTreeNode] = []
+        physicalBranchRef: String = ""
     ) {
         self.id = id
         self.checkpointRef = checkpointRef
@@ -954,60 +818,6 @@ private struct ResearchTreeNode: Identifiable {
         self.edgeRef = edgeRef
         self.toNode = toNode
         self.physicalBranchRef = physicalBranchRef
-        self.isRecoveryGroup = isRecoveryGroup
-        self.isRecoveryChild = isRecoveryChild
-        self.recoveryChildren = recoveryChildren
-    }
-
-    func recoveryGroup(children: [ResearchTreeNode]) -> Self {
-        Self(
-            id: "recovery|\(checkpointRef)",
-            checkpointRef: checkpointRef,
-            sectionRef: sectionRef,
-            title: "迁移审计（含冗余路径）",
-            subtitle: subtitle,
-            timestamp: timestamp,
-            lane: lane,
-            status: status,
-            isHead: false,
-            isCurrentHead: false,
-            isRoot: isRoot,
-            isLineage: true,
-            sourceLane: sourceLane,
-            sourceCheckpointRef: sourceCheckpointRef,
-            branchID: branchID,
-            graphRef: graphRef,
-            edgeRef: edgeRef,
-            toNode: toNode,
-            physicalBranchRef: physicalBranchRef,
-            isRecoveryGroup: true,
-            recoveryChildren: children
-        )
-    }
-
-    func recoveryChild() -> Self {
-        Self(
-            id: "recovery-child|\(id)",
-            checkpointRef: checkpointRef,
-            sectionRef: sectionRef,
-            title: title,
-            subtitle: subtitle,
-            timestamp: timestamp,
-            lane: lane,
-            status: status,
-            isHead: isHead,
-            isCurrentHead: isCurrentHead,
-            isRoot: false,
-            isLineage: isLineage,
-            sourceLane: sourceLane,
-            sourceCheckpointRef: sourceCheckpointRef,
-            branchID: branchID,
-            graphRef: graphRef,
-            edgeRef: edgeRef,
-            toNode: toNode,
-            physicalBranchRef: physicalBranchRef,
-            isRecoveryChild: true
-        )
     }
 }
 

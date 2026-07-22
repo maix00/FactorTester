@@ -255,37 +255,6 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
     }
 
-    func testCollapsedRecoveryGroupKeepsOutgoingConnectorAndExpandedAnchorIsSafe() {
-        let edge = ResearchVersionTreeEdge(
-            edgeRef: "data-to-semantics",
-            relation: "transition",
-            sourceNodeRef: "trace:data",
-            targetNodeRef: "trace:semantics",
-            sourceBranchRef: "graph-branch:v8:b",
-            targetBranchRef: "graph-branch:v8:b"
-        )
-        XCTAssertEqual(
-            ResearchTreeEdgeResolver.resolve(
-                [edge],
-                checkpointRefs: ["trace:continuation", "trace:semantics"],
-                aliases: ["trace:data": "trace:continuation"]
-            ),
-            [ResearchTreeResolvedEdge(
-                relation: "transition", sourceRow: 0, targetRow: 1
-            )]
-        )
-        XCTAssertEqual(
-            ResearchTreeEdgeResolver.resolve(
-                [edge],
-                checkpointRefs: [
-                    "trace:continuation", "trace:continuation",
-                    "trace:data", "trace:semantics",
-                ]
-            ).first?.sourceRow,
-            2
-        )
-    }
-
     func testReportIndexCarriesStableCheckpointToSectionJoin() throws {
         let section = try JSONDecoder().decode(
             ResearchReportIndexDocument.self,
@@ -312,71 +281,6 @@ final class ProfileResearchServiceTests: XCTestCase {
             viewportTop: 24
         )
         XCTAssertEqual(active, "section:two")
-    }
-
-    func testV8RecoveryTraceGroupingStopsBeforeSubstantiveFactorSemantics() {
-        let descriptors = [
-            ResearchRecoveryDescriptor(
-                checkpointRef: "trace:continuation",
-                graphRef: "factor-research@v8",
-                branchRef: "graph-branch:v8:b",
-                edgeRef: "__graph_continuation__",
-                toNode: "capability_gap"
-            ),
-            ResearchRecoveryDescriptor(
-                checkpointRef: "trace:capability",
-                graphRef: "factor-research@v8",
-                branchRef: "graph-branch:v8:b",
-                edgeRef: "capability_gap__capability_resolution",
-                toNode: "capability_resolution"
-            ),
-            ResearchRecoveryDescriptor(
-                checkpointRef: "trace:data",
-                graphRef: "factor-research@v8",
-                branchRef: "graph-branch:v8:b",
-                edgeRef: "capability_resolution__data_contract",
-                toNode: "data_contract"
-            ),
-            ResearchRecoveryDescriptor(
-                checkpointRef: "trace:semantics",
-                graphRef: "factor-research@v8",
-                branchRef: "graph-branch:v8:b",
-                edgeRef: "data_contract__factor_semantics",
-                toNode: "factor_semantics"
-            ),
-        ]
-
-        XCTAssertEqual(ResearchRecoveryGrouping.groups(in: descriptors), [[
-            "trace:continuation", "trace:capability", "trace:data",
-        ]])
-    }
-
-    func testRecoveryPresentationDoesNotClaimIncrementalDataCoverage() {
-        XCTAssertEqual(
-            ResearchRecoveryPresentation.title(toNode: "capability_gap"),
-            "评估 v8 迁移影响"
-        )
-        XCTAssertEqual(
-            ResearchRecoveryPresentation.title(
-                toNode: "capability_resolution"
-            ),
-            "重新绑定已变更的方法能力"
-        )
-        XCTAssertEqual(
-            ResearchRecoveryPresentation.title(toNode: "data_contract"),
-            "误入数据契约（未执行增量字段检查）"
-        )
-        XCTAssertNil(
-            ResearchRecoveryPresentation.title(toNode: "factor_semantics")
-        )
-    }
-
-    func testRecoveryTraceGroupCanExpandAndCollapseWithoutChangingIdentity() {
-        var expanded = Set<String>()
-        ResearchRecoveryExpansion.toggle("recovery|v8", in: &expanded)
-        XCTAssertEqual(expanded, ["recovery|v8"])
-        ResearchRecoveryExpansion.toggle("recovery|v8", in: &expanded)
-        XCTAssertTrue(expanded.isEmpty)
     }
 
     func testV8CheckpointDeepLinkDoesNotReloadAlreadyLoadedBranch() {
