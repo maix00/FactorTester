@@ -24,8 +24,19 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
     assert first["schema_version"] == 2
     assert first["version"] == 9
     assert len(first["content_hash"]) == 64
-    assert len(first["requirement_catalog"]["categories"]) == 8
-    assert len(first["requirement_catalog"]["requirements"]) == 58
+    assert len(first["requirement_catalog"]["categories"]) == 7
+    assert len(first["requirement_catalog"]["requirements"]) == 50
+    source_refs = {
+        item["source_ref"] for item in first["industry_basis_catalog"]
+    }
+    assert {
+        "S-NIST-DOE", "S-W3C-PROV", "S-ASA-PVALUE",
+        "S-BAILEY-BACKTEST-OVERFITTING", "S-MARKET-RULES-PIT",
+    } <= source_refs
+    assert all(
+        set(item["industry_basis_refs"]) <= source_refs
+        for item in first["requirement_catalog"]["requirements"]
+    )
 
 
 def test_successor_graph_removes_fixed_method_states() -> None:
@@ -69,6 +80,11 @@ def test_successor_graph_keeps_only_semantic_obligation_categories() -> None:
     assert "evidence_integrity" not in category_ids
     assert "research_decision" not in category_ids
     assert "report_coverage" not in category_ids
+    assert "factor_semantics" in category_ids
+    assert "trading_strategy" in category_ids
+    assert "market_rules_accounting" in category_ids
+    assert "hypothesis_validity" not in category_ids
+    assert "market_execution_accounting" not in category_ids
 
 
 def test_successor_allows_early_reentry_but_rejects_deleted_method_history() -> None:
@@ -125,9 +141,25 @@ def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["anchor_ref"] == "validation_design"
-    assert len(payload["requirements"]) == 7
+    assert len(payload["requirements"]) == 8
     assert len(result.output.encode()) < 6000
-    assert "industry_basis_refs" not in payload["requirements"][0]
+    assert payload["requirements"][0]["industry_basis_refs"]
+    assert payload["requirements"][0]["industry_principle_zh"]
+
+
+def test_successor_source_cli_lazy_loads_one_auditable_reference() -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["graph", "source", "S-NIST-DOE", "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["source_ref"] == "S-NIST-DOE"
+    assert payload["locators"] == [
+        "https://www.itl.nist.gov/div898/handbook/pri/section3/pri332.htm"
+    ]
+    assert len(result.output.encode()) < 1200
 
 
 def test_successor_requirement_cli_rejects_ambiguous_anchor() -> None:

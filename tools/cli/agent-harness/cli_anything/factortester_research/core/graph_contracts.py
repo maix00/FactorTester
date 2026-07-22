@@ -83,6 +83,7 @@ def _validate_catalog(
     requirements = _unique_ids(
         catalog.get("requirements"), "requirement_id", "entry requirements"
     )
+    basis = _validate_industry_basis_catalog(graph)
     descriptors = set(graph.get("capability_descriptors") or {})
     for requirement_id, item in requirements.items():
         category_id = str(item.get("category_id") or "")
@@ -111,6 +112,13 @@ def _validate_catalog(
         ):
             if not _text_list(item.get(field)):
                 raise ValueError(f"{field} must contain text: {requirement_id}")
+        if basis:
+            missing_basis = sorted(set(item["industry_basis_refs"]) - basis)
+            if missing_basis:
+                raise ValueError(
+                    "entry requirement industry sources missing: "
+                    + ", ".join(missing_basis)
+                )
         if not item["resolver_capability_ids"]:
             raise ValueError(f"resolver capability is required: {requirement_id}")
         missing = sorted(set(item["resolver_capability_ids"]) - descriptors)
@@ -121,6 +129,20 @@ def _validate_catalog(
         if not isinstance(item.get("resolver_output_schema"), dict):
             raise ValueError(f"resolver_output_schema is required: {requirement_id}")
     return categories, requirements
+
+
+def _validate_industry_basis_catalog(graph: dict[str, Any]) -> set[str]:
+    raw = graph.get("industry_basis_catalog")
+    if raw is None:
+        return set()
+    sources = _unique_ids(raw, "source_ref", "industry basis sources")
+    for source_ref, item in sources.items():
+        if not all(
+            _text(item.get(field))
+            for field in ("title", "source_kind", "principle_zh")
+        ) or not _text_list(item.get("locators")):
+            raise ValueError(f"invalid industry basis source: {source_ref}")
+    return set(sources)
 
 
 def _validate_methods(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:

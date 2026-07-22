@@ -12,7 +12,7 @@ from ..core.graph import build_draft_graph, build_observed_graph, graph_content_
 from ..core.replay import replay_graph_trace
 from ..core.session import load_session
 from .common import echo_json
-from .graph_successor import graph_requirements, graph_successor
+from .graph_successor import graph_requirements, graph_source, graph_successor
 
 @click.group("graph")
 def graph() -> None:
@@ -202,3 +202,4 @@ def graph_replay(trace_file: Path, as_json: bool) -> None:
 
 graph.add_command(graph_successor)
 graph.add_command(graph_requirements)
+graph.add_command(graph_source)

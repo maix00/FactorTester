@@ -84,7 +84,10 @@ def graph_requirements(
         "anchor_kind": anchor_kind,
         "anchor_ref": anchor_ref,
         "requirements": compact,
-        "report_requirements": [report_by_id[item] for item in report_ids],
+        "report_requirements": [
+            _report_projection(report_by_id[item], include_contracts)
+            for item in report_ids
+        ],
     }
     if as_json:
         echo_json(payload)
@@ -99,11 +102,46 @@ def _requirement_projection(item: dict[str, Any], include: bool) -> dict[str, An
         return item
     return {
         "requirement_id": item["requirement_id"],
-        "title_zh": item["title_zh"],
         "question_zh": item["question_zh"],
+        "industry_principle_zh": item["industry_principle_zh"],
+        "industry_basis_refs": item["industry_basis_refs"],
         "resolver_capability_ids": item["resolver_capability_ids"],
         "report_requirement_refs": item["report_requirement_refs"],
     }
+
+
+def _report_projection(item: dict[str, Any], include: bool) -> dict[str, Any]:
+    if include:
+        return item
+    return {
+        "report_requirement_id": item["report_requirement_id"],
+        "method_ref": item["method_ref"],
+        "title_zh": item["title_zh"],
+    }
+
+
+@click.command("source")
+@click.argument("source_ref")
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+def graph_source(source_ref: str, as_json: bool) -> None:
+    """Lazy-load one industry source referenced by an obligation prompt."""
+    graph_value = build_successor_graph()
+    source = next(
+        (
+            item for item in graph_value["industry_basis_catalog"]
+            if item["source_ref"] == source_ref
+        ),
+        None,
+    )
+    if source is None:
+        raise click.ClickException(f"unknown industry source: {source_ref}")
+    if as_json:
+        echo_json(source)
+        return
+    click.echo(f"{source['source_ref']}: {source['title']}")
+    click.echo(source["principle_zh"])
+    for locator in source["locators"]:
+        click.echo(f"- {locator}")
 
 
 def _anchor_requirements(

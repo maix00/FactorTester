@@ -36,7 +36,7 @@ from tests.server.data_contract_fixtures import (
 from tools.data.sqlite.db import connect_sqlite
 
 
-REQUIREMENT_ID = "data.product_source_availability"
+REQUIREMENT_ID = "data.source_availability"
 
 
 def _node(graph: dict, node_id: str = "data_contract") -> dict:

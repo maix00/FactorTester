@@ -15,6 +15,7 @@ from .reporting import (
     system_transition_policies,
 )
 from .topology import build_edges, build_nodes
+from .sources import build_industry_basis_catalog
 
 
 def build_successor_graph() -> dict[str, Any]:
@@ -40,6 +41,7 @@ def build_successor_graph() -> dict[str, Any]:
         "capability_descriptors": resolver_capability_descriptors(),
         "change_manifest": _change_manifest(),
         "requirement_catalog": catalog,
+        "industry_basis_catalog": build_industry_basis_catalog(),
         "report_method_descriptors": build_report_method_descriptors(),
         "report_requirements": build_report_requirements(catalog),
         "system_transition_policies": system_transition_policies(),
@@ -81,7 +83,7 @@ def _change_manifest() -> dict[str, Any]:
                 "change_id": "change.requirement-catalog",
                 "change_kind": "contract",
                 "subject_ref": "requirement-catalog:1",
-                "impact_zh": "加入八类可版本化研究义务指南及 provider-neutral resolver。",
+                "impact_zh": "加入六类研究义务、一类兜底义务及 provider-neutral resolver。",
             },
             {
                 "change_id": "change.report-contract",
