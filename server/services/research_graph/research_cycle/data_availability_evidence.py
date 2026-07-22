@@ -12,7 +12,10 @@ from server.services.research_graph.research_cycle.evidence import (
 from tools.data.availability.model import canonical_hash
 
 
-REQUEST_FIELDS = {"products", "sources", "probe", "expanded"}
+REQUEST_FIELDS = {
+    "products", "sources", "probe", "expanded", "fields",
+    "include_field_catalog", "include_historical_fields",
+}
 _SECRET_FIELDS = {
     "access_token",
     "credential",
@@ -43,12 +46,21 @@ def validate_availability_request(value: Any) -> dict[str, Any]:
     probe = value.get("probe", False)
     if not isinstance(probe, bool):
         raise ValueError("data_availability_request.probe must be boolean")
-    return {
+    result = {
         "products": products,
         "sources": sources,
         "probe": probe,
         "expanded": False,
     }
+    if "fields" in value:
+        result["fields"] = _scope(value.get("fields"), field="fields")
+    for field in ("include_field_catalog", "include_historical_fields"):
+        if field not in value:
+            continue
+        if not isinstance(value[field], bool):
+            raise ValueError(f"data_availability_request.{field} must be boolean")
+        result[field] = value[field]
+    return result
 
 
 def project_availability_evidence(
@@ -90,6 +102,14 @@ def project_availability_evidence(
                 for product in request["products"]
             ],
             "requested_product_availability_present": present,
+            **(
+                {"required_field_status": _required_field_status(normalized, request)}
+                if "fields" in request else {}
+            ),
+            **(
+                {"historical_field_summary": _historical_field_summary(normalized, request)}
+                if request.get("include_historical_fields") else {}
+            ),
         },
         "metric_refs": [],
         "artifact_refs": [],
@@ -219,6 +239,16 @@ def _validate_profile(
         raise ValueError("availability probe scope mismatch")
     if value.get("expanded") is not False:
         raise ValueError("availability expanded scope mismatch")
+    if "fields" in request and value.get("required_fields") != request["fields"]:
+        raise ValueError("availability field scope mismatch")
+    if "include_field_catalog" in request and (
+        value.get("include_field_catalog") is not request["include_field_catalog"]
+    ):
+        raise ValueError("availability field catalog scope mismatch")
+    if "include_historical_fields" in request and (
+        value.get("include_historical_fields") is not request["include_historical_fields"]
+    ):
+        raise ValueError("availability historical field scope mismatch")
     entries = value.get("entries")
     if not isinstance(entries, list) or not all(
         isinstance(item, dict) for item in entries
@@ -238,6 +268,51 @@ def _requested_products_present(profile: dict[str, Any]) -> bool:
         product in _available_products(profile)
         for product in profile["product_scope"]
     )
+
+
+def _required_field_status(
+    profile: dict[str, Any],
+    request: dict[str, Any],
+) -> list[dict[str, Any]]:
+    result = []
+    for product in request["products"]:
+        product_entries = [
+            entry for entry in profile["entries"]
+            if entry.get("product") == product
+        ]
+        for field in request["fields"]:
+            statuses = sorted({
+                str(item.get("status") or "missing")
+                for entry in product_entries
+                for item in entry.get("required_fields") or []
+                if item.get("field") == field
+            }) or ["missing"]
+            result.append({
+                "product": product,
+                "field": field,
+                "statuses": statuses,
+            })
+    return result
+
+
+def _historical_field_summary(
+    profile: dict[str, Any],
+    request: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows = profile.get("historical_fields") or []
+    result = []
+    for product in request["products"]:
+        scoped = [row for row in rows if row.get("product") == product]
+        starts = [str(row.get("coverage_start")) for row in scoped if row.get("coverage_start")]
+        ends = [str(row.get("coverage_end")) for row in scoped if row.get("coverage_end")]
+        result.append({
+            "product": product,
+            "field_count": len({str(row.get("field")) for row in scoped}),
+            "record_count": sum(int(row.get("record_count") or 0) for row in scoped),
+            "coverage_start": min(starts) if starts else "",
+            "coverage_end": max(ends) if ends else "",
+        })
+    return result
 
 
 def _available_products(profile: dict[str, Any]) -> set[str]:

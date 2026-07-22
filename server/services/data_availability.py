@@ -9,6 +9,7 @@ from server.modules.shared.price_services import cached_products
 from tools.data.availability import build_availability_profile
 from tools.data.availability.model import profile_document
 from tools.data.availability.registry import availability_connector
+from tools.data.field_history import summarize_historical_field_coverage
 from tools.data.providers import DataProviderProductTS
 from tools.data.providers.DataProviderProductTSBundle import (
     DataProviderProductTSBundle,
@@ -21,6 +22,10 @@ def availability_for_scope(
     source_names: list[str],
     probe: bool = False,
     expanded: bool = False,
+    required_fields: list[str] | None = None,
+    include_field_catalog: bool = False,
+    include_historical_fields: bool = False,
+    inspection_runtime: str = "server",
 ) -> dict[str, Any]:
     """Inspect exactly the requested scope without widening it through fallback."""
     _ensure_sources_registered()
@@ -35,6 +40,8 @@ def availability_for_scope(
             products=products,
             sources=sources,
             as_of=as_of,
+            required_fields=required_fields,
+            include_field_catalog=include_field_catalog,
         )["entries"])
     for connector in connectors:
         entries.extend(connector.inspect(
@@ -42,11 +49,21 @@ def availability_for_scope(
             probe=probe,
             expanded=expanded,
         ))
+    history = (
+        summarize_historical_field_coverage(product_names)
+        if include_historical_fields
+        else None
+    )
     return profile_document(
         product_scope=list(product_names),
         source_scope=list(source_names),
         probe=probe,
         expanded=expanded,
+        required_fields=list(required_fields or []),
+        include_field_catalog=include_field_catalog,
+        include_historical_fields=include_historical_fields,
+        historical_fields=history,
+        inspection_runtime=inspection_runtime,
         entries=entries,
         as_of=as_of,
     )

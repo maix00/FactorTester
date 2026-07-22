@@ -9,6 +9,8 @@ from typing import Any
 import pandas as pd
 import pyarrow.parquet as pq
 
+from tools.data.types import DataColumn
+
 from .model import canonical_hash, utc_iso
 
 
@@ -16,6 +18,10 @@ def inspect_parquet(
     path_value: str | Path,
     *,
     time_columns: tuple[str, ...],
+    data_columns: dict[str, str] | None = None,
+    required_fields: tuple[str, ...] = (),
+    include_field_catalog: bool = False,
+    time_columns_mapping: dict[str, str] | None = None,
     source_key: str,
     product_name: str,
     frequency: str,
@@ -48,11 +54,145 @@ def inspect_parquet(
             else "unknown_without_data_scan"
         ),
     }
-    return {
+    value = {
         "status": "available",
         "coverage": coverage,
         "updated_at": updated_at,
         "snapshot_ref": f"filemeta:{canonical_hash(identity)}",
+    }
+    if required_fields:
+        value["required_fields"] = _required_field_availability(
+            parquet,
+            data_columns=data_columns or {},
+            required_fields=required_fields,
+        )
+    if include_field_catalog:
+        value["field_catalog"] = _field_catalog(
+            parquet,
+            data_columns=data_columns or {},
+        )
+        schema = {field.name: str(field.type) for field in parquet.schema_arrow}
+        value["time_fields"] = [
+            {
+                "physical_field": physical,
+                "frequency": frequency,
+                "data_type": schema[physical],
+            }
+            for physical, frequency in (time_columns_mapping or {}).items()
+            if physical in schema
+        ]
+    return value
+
+
+def _field_catalog(
+    parquet: pq.ParquetFile,
+    *,
+    data_columns: dict[str, str],
+) -> list[dict[str, Any]]:
+    schema = {field.name: str(field.type) for field in parquet.schema_arrow}
+    physical_by_logical = {
+        str(logical): str(physical)
+        for physical, logical in data_columns.items()
+        if str(physical) in schema
+    }
+    catalog = [
+        {
+            "field": logical,
+            "status": "direct",
+            "physical_fields": [physical],
+            "data_type": schema[physical],
+        }
+        for logical, physical in physical_by_logical.items()
+    ]
+    mul = physical_by_logical.get(DataColumn.ADJUSTMENT_MUL.name)
+    add = physical_by_logical.get(DataColumn.ADJUSTMENT_ADD.name)
+    for raw_field in ("OPEN", "HIGH", "LOW", "CLOSE"):
+        raw = physical_by_logical.get(raw_field)
+        if raw is None:
+            continue
+        adjusted = f"{raw_field}_ADJUSTED"
+        if adjusted in physical_by_logical:
+            continue
+        if mul is not None and add is not None:
+            catalog.append({
+                "field": adjusted,
+                "status": "derived",
+                "physical_fields": [raw, mul, add],
+                "data_type": schema[raw],
+                "derivation": "price_mul_adjustment_plus_addition",
+            })
+        else:
+            catalog.append({
+                "field": adjusted,
+                "status": "fallback_unadjusted",
+                "physical_fields": [raw],
+                "data_type": schema[raw],
+                "limitation": "adjustment_fields_missing",
+            })
+    return sorted(catalog, key=lambda item: str(item["field"]))
+
+
+def _required_field_availability(
+    parquet: pq.ParquetFile,
+    *,
+    data_columns: dict[str, str],
+    required_fields: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    schema = {field.name: str(field.type) for field in parquet.schema_arrow}
+    physical_by_logical = {
+        str(logical): str(physical)
+        for physical, logical in data_columns.items()
+    }
+    return [
+        _required_field(
+            value,
+            schema=schema,
+            physical_by_logical=physical_by_logical,
+        )
+        for value in required_fields
+    ]
+
+
+def _required_field(
+    value: str,
+    *,
+    schema: dict[str, str],
+    physical_by_logical: dict[str, str],
+) -> dict[str, Any]:
+    field = DataColumn(value).name
+    direct = physical_by_logical.get(field)
+    if direct in schema:
+        return {
+            "field": field,
+            "status": "direct",
+            "physical_fields": [direct],
+            "data_type": schema[direct],
+        }
+    if field.endswith("_ADJUSTED"):
+        raw_field = field.removesuffix("_ADJUSTED")
+        raw = physical_by_logical.get(raw_field)
+        mul = physical_by_logical.get(DataColumn.ADJUSTMENT_MUL.name)
+        add = physical_by_logical.get(DataColumn.ADJUSTMENT_ADD.name)
+        if raw in schema and mul in schema and add in schema:
+            return {
+                "field": field,
+                "status": "derived",
+                "physical_fields": [raw, mul, add],
+                "data_type": schema[raw],
+                "derivation": "price_mul_adjustment_plus_addition",
+            }
+        if raw in schema:
+            return {
+                "field": field,
+                "status": "fallback_unadjusted",
+                "physical_fields": [raw],
+                "data_type": schema[raw],
+                "limitation": "adjustment_fields_missing",
+            }
+    return {
+        "field": field,
+        "status": "missing",
+        "physical_fields": [],
     }
 
 

@@ -14,6 +14,7 @@ from sources.Tiger.connector import TigerConnectorConfig
 from tools.data.availability import build_availability_profile
 from tools.data.availability.model import profile_document
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
+from tools.data.types import DataColumn
 from tools.products.Product import Product
 
 
@@ -81,6 +82,119 @@ def test_local_parquet_profile_reports_footer_coverage_without_loading_frame(
     assert profile["profile_hash"].startswith("sha256:")
 
 
+def test_local_profile_reports_direct_and_derived_required_fields(
+    tmp_path,
+) -> None:
+    path = tmp_path / "prices.parquet"
+    pd.DataFrame({
+        "trade_time": pd.to_datetime(["2026-01-02 09:00:00"]),
+        "close_price": [100.0],
+        "volume": [12.0],
+        "adjustment_mul": [1.01],
+        "adjustment_add": [0.0],
+    }).to_parquet(path)
+    product = Product("FIELD-CATALOG.LOCAL", timezone="Asia/Shanghai")
+    source = DataProviderProductTS(
+        key="FieldCatalogLocalMIN1",
+        data_freq="1min",
+        get_object_path=lambda _product: str(path),
+        timezone="Asia/Shanghai",
+        time_cols_mapping={"trade_time": "1min"},
+        data_cols_mapping={
+            "close_price": DataColumn.CLOSE,
+            "volume": DataColumn.VOLUME,
+            "adjustment_mul": DataColumn.ADJUSTMENT_MUL,
+            "adjustment_add": DataColumn.ADJUSTMENT_ADD,
+        },
+    )
+
+    try:
+        profile = build_availability_profile(
+            products=[product],
+            sources=[source],
+            required_fields=["CLOSE_ADJUSTED", "VOLUME"],
+        )
+    finally:
+        source.delete()
+
+    assert profile["entries"][0]["required_fields"] == [
+        {
+            "field": "CLOSE_ADJUSTED",
+            "status": "derived",
+            "physical_fields": [
+                "close_price",
+                "adjustment_mul",
+                "adjustment_add",
+            ],
+            "data_type": "double",
+            "derivation": "price_mul_adjustment_plus_addition",
+        },
+        {
+            "field": "VOLUME",
+            "status": "direct",
+            "physical_fields": ["volume"],
+            "data_type": "double",
+        },
+    ]
+
+
+def test_local_profile_catalogs_all_mapped_fields_from_footer_only(
+    tmp_path,
+) -> None:
+    path = tmp_path / "catalog.parquet"
+    pd.DataFrame({
+        "trade_time": pd.to_datetime(["2026-01-02 09:00:00"]),
+        "close_price": [100.0],
+        "volume": [12.0],
+        "adjustment_mul": [1.01],
+        "adjustment_add": [0.0],
+    }).to_parquet(path)
+    product = Product("ALL-FIELDS.LOCAL", timezone="Asia/Shanghai")
+    source = DataProviderProductTS(
+        key="AllFieldsLocalMIN1",
+        data_freq="1min",
+        get_object_path=lambda _product: str(path),
+        timezone="Asia/Shanghai",
+        time_cols_mapping={"trade_time": "1min"},
+        data_cols_mapping={
+            "close_price": DataColumn.CLOSE,
+            "volume": DataColumn.VOLUME,
+            "adjustment_mul": DataColumn.ADJUSTMENT_MUL,
+            "adjustment_add": DataColumn.ADJUSTMENT_ADD,
+        },
+    )
+
+    try:
+        profile = build_availability_profile(
+            products=[product],
+            sources=[source],
+            include_field_catalog=True,
+        )
+    finally:
+        source.delete()
+
+    catalog = profile["entries"][0]["field_catalog"]
+    assert {item["field"] for item in catalog} == {
+        "ADJUSTMENT_ADD",
+        "ADJUSTMENT_MUL",
+        "CLOSE",
+        "CLOSE_ADJUSTED",
+        "VOLUME",
+    }
+    assert next(item for item in catalog if item["field"] == "CLOSE_ADJUSTED") == {
+        "field": "CLOSE_ADJUSTED",
+        "status": "derived",
+        "physical_fields": ["close_price", "adjustment_mul", "adjustment_add"],
+        "data_type": "double",
+        "derivation": "price_mul_adjustment_plus_addition",
+    }
+    assert profile["entries"][0]["time_fields"] == [{
+        "physical_field": "trade_time",
+        "frequency": "MIN1",
+        "data_type": "timestamp[us]",
+    }]
+
+
 def test_data_availability_endpoint_requires_and_preserves_explicit_scope(
     monkeypatch,
 ):
@@ -119,6 +233,9 @@ def test_data_availability_endpoint_requires_and_preserves_explicit_scope(
         "source_names": ["Local"],
         "probe": False,
         "expanded": False,
+        "required_fields": [],
+        "include_field_catalog": False,
+        "include_historical_fields": False,
     }
 
 

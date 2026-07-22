@@ -16,6 +16,10 @@ from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
 from server.services.research_graph.protocol import MAX_PERSISTED_TRACE_BYTES
+from server.services.research_graph.research_cycle.data_availability_evidence import (
+    project_availability_evidence,
+    validate_availability_request,
+)
 from tests.server.data_contract_fixtures import (
     initialize,
     profile,
@@ -30,6 +34,65 @@ from cli_anything.factortester_research.core.graph_protocol import (
     graph_content_hash,
 )
 from cli_anything.factortester_research.core.replay import replay_graph_trace
+
+
+def test_field_level_request_projects_compact_status_not_full_catalog() -> None:
+    request = validate_availability_request({
+        "products": ["A.DCE"],
+        "sources": ["Local"],
+        "fields": ["CLOSE_ADJUSTED", "VOLUME"],
+        "include_field_catalog": True,
+        "include_historical_fields": True,
+    })
+    scoped = profile_document(
+        product_scope=["A.DCE"],
+        source_scope=["Local"],
+        probe=False,
+        expanded=False,
+        required_fields=["CLOSE_ADJUSTED", "VOLUME"],
+        include_field_catalog=True,
+        include_historical_fields=True,
+        entries=[{
+            "product": "A.DCE",
+            "source": "LocalCNFuturesMIN1",
+            "status": "available",
+            "required_fields": [
+                {"field": "CLOSE_ADJUSTED", "status": "derived"},
+                {"field": "VOLUME", "status": "direct"},
+            ],
+            "field_catalog": [{"field": f"FIELD-{i}", "status": "direct"} for i in range(100)],
+        }],
+        historical_fields=[{
+            "product": "A.DCE",
+            "field": "LongMarginRatioByMoney",
+            "record_count": 3,
+            "coverage_start": "2024-01-01",
+            "coverage_end": "2026-01-01",
+            "providers": ["Agent:DCE"],
+            "source_count": 3,
+        }],
+        as_of=datetime(2026, 7, 20, tzinfo=timezone.utc),
+    )
+
+    envelope, present = project_availability_evidence(
+        profile=scoped,
+        request=request,
+        checkpoint={"contract_hash": "1" * 64, "methodology_hash": "2" * 64},
+    )
+
+    assert present is True
+    assert envelope["facts"]["required_field_status"] == [
+        {"product": "A.DCE", "field": "CLOSE_ADJUSTED", "statuses": ["derived"]},
+        {"product": "A.DCE", "field": "VOLUME", "statuses": ["direct"]},
+    ]
+    assert envelope["facts"]["historical_field_summary"] == [{
+        "product": "A.DCE",
+        "field_count": 1,
+        "record_count": 3,
+        "coverage_start": "2024-01-01",
+        "coverage_end": "2026-01-01",
+    }]
+    assert "FIELD-99" not in str(envelope)
 
 
 def test_data_contract_edge_projects_server_evidence_outside_write_lock(

@@ -24,6 +24,9 @@ def data_availability():
             source_names=sources,
             probe=bool(payload.get("probe", False)),
             expanded=bool(payload.get("expanded", False)),
+            required_fields=_string_list(payload.get("fields")),
+            include_field_catalog=bool(payload.get("include_field_catalog", False)),
+            include_historical_fields=bool(payload.get("include_historical_fields", False)),
         )
     except LookupError as exc:
         return jsonify(success=False, error=str(exc)), 404

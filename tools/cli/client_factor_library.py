@@ -205,6 +205,9 @@ class FactorLibraryClientMixin(ClientMixinBase):
         sources: list[str] | tuple[str, ...],
         probe: bool = False,
         expanded: bool = False,
+        fields: list[str] | tuple[str, ...] = (),
+        include_field_catalog: bool = False,
+        include_historical_fields: bool = False,
     ) -> dict[str, Any]:
         """Inspect only the explicitly requested market-data scope."""
         return self._expect_success(self.session.post(
@@ -214,6 +217,9 @@ class FactorLibraryClientMixin(ClientMixinBase):
                 "sources": list(sources),
                 "probe": bool(probe),
                 "expanded": bool(expanded),
+                "fields": list(fields),
+                "include_field_catalog": bool(include_field_catalog),
+                "include_historical_fields": bool(include_historical_fields),
             },
         ))
 

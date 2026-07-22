@@ -72,11 +72,20 @@ def prepare_transition(
             "graph_id": str(row["graph_id"]),
             "graph_version": int(row["graph_version"]),
         }
+    availability_kwargs: dict[str, Any] = {
+        "product_names": normalized_request["products"],
+        "source_names": normalized_request["sources"],
+        "probe": normalized_request["probe"],
+        "expanded": False,
+    }
+    if "fields" in normalized_request:
+        availability_kwargs["required_fields"] = normalized_request["fields"]
+    if "include_field_catalog" in normalized_request:
+        availability_kwargs["include_field_catalog"] = normalized_request["include_field_catalog"]
+    if "include_historical_fields" in normalized_request:
+        availability_kwargs["include_historical_fields"] = normalized_request["include_historical_fields"]
     profile = availability_for_scope(
-        product_names=normalized_request["products"],
-        source_names=normalized_request["sources"],
-        probe=normalized_request["probe"],
-        expanded=False,
+        **availability_kwargs,
     )
     envelope, present = project_availability_evidence(
         profile=profile,

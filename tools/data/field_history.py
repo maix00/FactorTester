@@ -716,6 +716,63 @@ def load_historical_field_frame(*, store_key: str = "openctp") -> pd.DataFrame:
         return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
 
 
+def summarize_historical_field_coverage(
+    product_names: Sequence[str],
+    *,
+    store_key: str = "openctp",
+) -> list[dict[str, Any]]:
+    """Summarize scoped FieldHistory coverage with one aggregate SQL query.
+
+    This intentionally returns audit-safe identities and coverage only. Values,
+    database paths, raw notes, and source URLs remain in the evidence store.
+    """
+    names = [str(name).strip() for name in product_names if str(name).strip()]
+    if not names:
+        return []
+    products_by_code: dict[str, list[str]] = {}
+    for name in names:
+        code = name.split(".", 1)[0].split("|", 1)[0].upper()
+        products_by_code.setdefault(code, []).append(name)
+    codes = sorted(products_by_code)
+    hub = DataHub.get_instance()
+    _ensure_store_registered(hub, store_key)
+    placeholders = ",".join("?" for _ in codes)
+    sql = f"""
+        SELECT
+            UPPER(instrument) AS product_code,
+            field_name,
+            COUNT(*) AS record_count,
+            MIN(effective_trading_day) AS coverage_start,
+            MAX(effective_trading_day) AS coverage_end,
+            GROUP_CONCAT(DISTINCT provider) AS providers,
+            COUNT(DISTINCT source_key) AS source_count
+        FROM {HISTORICAL_FIELD_TABLE}
+        WHERE UPPER(instrument) IN ({placeholders})
+        GROUP BY UPPER(instrument), field_name
+        ORDER BY UPPER(instrument), field_name
+    """
+    try:
+        with hub.connect_store(store_key) as conn:
+            _ensure_schema(conn)
+            rows = conn.execute(sql, codes).fetchall()
+    except sqlite3.Error:
+        return []
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        code = str(row["product_code"])
+        for product in products_by_code.get(code, []):
+            result.append({
+                "product": product,
+                "field": str(row["field_name"]),
+                "record_count": int(row["record_count"]),
+                "coverage_start": str(row["coverage_start"] or ""),
+                "coverage_end": str(row["coverage_end"] or ""),
+                "providers": sorted(filter(None, str(row["providers"] or "").split(","))),
+                "source_count": int(row["source_count"]),
+            })
+    return result
+
+
 def load_historical_field_provider(*, store_key: str = "openctp") -> FieldHistoryProvider:
     return FieldHistoryProvider(load_historical_field_frame(store_key=store_key))
 

@@ -17,11 +17,19 @@ def build_availability_profile(
     products: Iterable[Any],
     sources: Iterable[Any],
     as_of: datetime | None = None,
+    required_fields: Iterable[str] | None = None,
+    include_field_catalog: bool = False,
 ) -> dict[str, Any]:
     product_list = list(products)
     source_list = list(sources)
+    field_list = list(required_fields or [])
     entries = [
-        _inspect_source(product, source)
+        _inspect_source(
+            product,
+            source,
+            required_fields=field_list,
+            include_field_catalog=include_field_catalog,
+        )
         for product in product_list
         for source in source_list
     ]
@@ -32,7 +40,13 @@ def build_availability_profile(
     )
 
 
-def _inspect_source(product: Any, source: Any) -> dict[str, Any]:
+def _inspect_source(
+    product: Any,
+    source: Any,
+    *,
+    required_fields: list[str],
+    include_field_catalog: bool,
+) -> dict[str, Any]:
     product_name = _product_name(product)
     source_key = str(getattr(source, "key", source))
     frequency = _frequency_name(getattr(source, "freq", None))
@@ -67,13 +81,17 @@ def _inspect_source(product: Any, source: Any) -> dict[str, Any]:
     details = inspect_parquet(
         path,
         time_columns=tuple(getattr(source, "time_cols_mapping", {}).keys()),
+        data_columns=dict(getattr(source, "data_cols_mapping", {})),
+        required_fields=tuple(required_fields),
+        include_field_catalog=include_field_catalog,
+        time_columns_mapping=dict(getattr(source, "time_cols_mapping", {})),
         source_key=source_key,
         product_name=product_name,
         frequency=frequency,
     )
     if details.get("status") != "available":
         return {**base, "frequency": frequency, **details}
-    return {
+    result = {
         **base,
         "status": "available",
         "frequency": frequency,
@@ -83,6 +101,12 @@ def _inspect_source(product: Any, source: Any) -> dict[str, Any]:
         "point_in_time": False,
         "snapshot_ref": details["snapshot_ref"],
     }
+    if "required_fields" in details:
+        result["required_fields"] = details["required_fields"]
+    if "field_catalog" in details:
+        result["field_catalog"] = details["field_catalog"]
+        result["time_fields"] = details["time_fields"]
+    return result
 
 
 def _product_name(product: Any) -> str:

@@ -105,6 +105,10 @@ def product_info(name: str, fields: tuple[str, ...], notes: bool) -> None:
     is_flag=True,
     help="返回逐产品详细信息；默认输出紧凑结果。",
 )
+@click.option("--field", "fields", multiple=True, help="因子或 TrialPlan 依赖的数据字段，可重复传入。")
+@click.option("--field-catalog", is_flag=True, help="列出数据源实际提供和可派生的全部行情字段。")
+@click.option("--historical-fields", is_flag=True, help="汇总保证金、手续费、乘数等历史字段覆盖。")
+@click.option("--local-runtime", is_flag=True, help="在当前 Python 环境检查已注册的本地后端数据源对象。")
 @click.option("--json", "json_output", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
 def product_availability(
@@ -112,19 +116,43 @@ def product_availability(
     source_names: tuple[str, ...],
     probe: bool,
     expanded: bool,
+    fields: tuple[str, ...],
+    field_catalog: bool,
+    historical_fields: bool,
+    local_runtime: bool,
     json_output: bool,
 ) -> None:
     """检查明确产品范围内的历史、延迟、仿真或实时数据可用性。"""
-    profile = client_from_config().data_availability(
-        products=product_names,
-        sources=source_names,
-        probe=probe,
-        expanded=expanded,
-    )
+    if local_runtime:
+        from server.services.data_availability import availability_for_scope
+
+        profile = availability_for_scope(
+            product_names=list(product_names),
+            source_names=list(source_names),
+            probe=probe,
+            expanded=expanded,
+            required_fields=list(fields),
+            include_field_catalog=field_catalog,
+            include_historical_fields=historical_fields,
+            inspection_runtime="local",
+        )
+    else:
+        profile = client_from_config().data_availability(
+            products=product_names,
+            sources=source_names,
+            probe=probe,
+            expanded=expanded,
+            fields=fields,
+            include_field_catalog=field_catalog,
+            include_historical_fields=historical_fields,
+        )
     if json_output:
         click.echo(json.dumps(profile, ensure_ascii=False, sort_keys=True))
         return
-    click.echo(f"数据可用性: {profile.get('profile_hash', '')}")
+    click.echo(
+        f"数据可用性 ({profile.get('inspection_runtime', 'server')}): "
+        f"{profile.get('profile_hash', '')}"
+    )
     rows = []
     for entry in profile.get("entries") or []:
         coverage = entry.get("coverage") or {}
@@ -144,6 +172,57 @@ def product_availability(
         max_widths=(20, 28, 20, 10, 14, 22, 22, 18),
     ):
         click.echo(line)
+    required_rows = []
+    for entry in profile.get("entries") or []:
+        for field in entry.get("required_fields") or []:
+            required_rows.append((
+                entry.get("product", ""), entry.get("source", ""),
+                field.get("field", ""), field.get("status", ""),
+                ", ".join(field.get("physical_fields") or []),
+                field.get("limitation", ""),
+            ))
+    if required_rows:
+        click.echo("\n依赖字段")
+        for line in render_table(
+            ("产品", "数据源", "逻辑字段", "状态", "物理字段", "限制"),
+            required_rows,
+            max_widths=(18, 24, 22, 20, 42, None),
+        ):
+            click.echo(line)
+    catalog_rows = []
+    for entry in profile.get("entries") or []:
+        for field in entry.get("field_catalog") or []:
+            catalog_rows.append((
+                entry.get("product", ""), entry.get("source", ""),
+                field.get("field", ""), field.get("status", ""),
+                ", ".join(field.get("physical_fields") or []),
+                field.get("data_type", ""),
+            ))
+    if catalog_rows:
+        click.echo("\n行情字段目录")
+        for line in render_table(
+            ("产品", "数据源", "逻辑字段", "状态", "物理字段", "类型"),
+            catalog_rows,
+            max_widths=(18, 24, 22, 20, 42, 18),
+        ):
+            click.echo(line)
+    history_rows = [
+        (
+            item.get("product", ""), item.get("field", ""),
+            item.get("coverage_start", ""), item.get("coverage_end", ""),
+            item.get("record_count", 0),
+            f"{', '.join(item.get('providers') or [])} ({item.get('source_count', 0)} sources)",
+        )
+        for item in profile.get("historical_fields") or []
+    ]
+    if history_rows:
+        click.echo("\n历史交易规则字段")
+        for line in render_table(
+            ("产品", "字段", "最早", "最晚", "记录数", "提供者"),
+            history_rows,
+            max_widths=(18, 30, 12, 12, 8, None),
+        ):
+            click.echo(line)
 
 
 @products.group("product-groups", invoke_without_command=True)
