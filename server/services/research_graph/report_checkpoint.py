@@ -105,8 +105,9 @@ def report_checkpoint_projection(
             if item["status"] in {"open", "reopened"}
         ][:MAX_CARRIER_ITEMS],
         "closure": cycle["closure"],
-        "report_lineage": report_lineage_projection(
-            trace_evidence.get("report_lineage")
+        "report_lineage": report_lineage_from_trace(
+            trace_evidence=trace_evidence,
+            edge_id=edge_id,
         ),
         "latest_transition": step,
     }
@@ -114,6 +115,36 @@ def report_checkpoint_projection(
     if len(encoded) > MAX_REPORT_CHECKPOINT_BYTES:
         raise ValueError("report checkpoint exceeds bounded carrier size")
     return value
+
+
+def report_lineage_from_trace(
+    *, trace_evidence: dict[str, Any], edge_id: str,
+) -> dict[str, str]:
+    explicit = trace_evidence.get("report_lineage")
+    if isinstance(explicit, dict):
+        return report_lineage_projection(explicit)
+    if edge_id == "__graph_continuation__":
+        continuation = trace_evidence.get("graph_continuation")
+        if isinstance(continuation, dict):
+            source_trace_id = str(continuation.get("source_trace_id") or "")
+            source_instance_id = str(
+                continuation.get("source_instance_id") or ""
+            )
+            source_branch_id = str(
+                continuation.get("source_branch_id") or ""
+            )
+            if all(safe_identifier(item) for item in (
+                source_trace_id, source_instance_id, source_branch_id,
+            )):
+                return {
+                    "status": "linked",
+                    "predecessor_checkpoint_ref": f"trace:{source_trace_id}",
+                    "source_branch_ref": (
+                        "graph-branch:"
+                        f"{source_instance_id}:{source_branch_id}"
+                    ),
+                }
+    return report_lineage_projection(explicit)
 
 
 def report_lineage_projection(value: Any) -> dict[str, str]:

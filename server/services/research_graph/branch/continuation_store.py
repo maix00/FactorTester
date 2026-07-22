@@ -117,9 +117,11 @@ def insert_continuation(
         ),
     )
     checkpoint = prepared["checkpoint"]
+    descriptor = prepared["descriptor"]
+    source_trace_ref = f"trace:{descriptor['source_trace_id']}"
     evidence: dict[str, Any] = {
         "graph_continuation": {
-            **prepared["descriptor"],
+            **descriptor,
             "authorization_ref": (
                 f"maintenance-case:{authorization_id}"
             ),
@@ -127,12 +129,20 @@ def insert_continuation(
         "evidence_refs": prepared["evidence_refs"],
         "research_cycle": {
             "schema_version": 1,
-            "parent_trace_ref": "",
+            "parent_trace_ref": source_trace_ref,
             "checkpoint_before_hash": checkpoint["projection_hash"],
             "events": [],
-            "bootstrap_checkpoint": True,
         },
         "research_cycle_checkpoint": checkpoint,
+        "report_lineage": {
+            "status": "linked",
+            "predecessor_checkpoint_ref": source_trace_ref,
+            "source_branch_ref": (
+                "graph-branch:"
+                f"{descriptor['source_instance_id']}:"
+                f"{descriptor['source_branch_id']}"
+            ),
+        },
     }
     if prepared["continuation_mode"] == JOB_EVIDENCE_MODE:
         evidence["server_evidence"] = {

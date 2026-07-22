@@ -33,6 +33,9 @@ from server.services.research_graph.branch.repository import (
     load_instance_branch_row,
 )
 from server.services.research_graph.shadow_trace import replay_shadow_trace
+from server.services.research_graph.report_checkpoint import (
+    report_checkpoint_projection,
+)
 from tests.server.test_job_graph_evidence import (
     _graph,
     _prepare,
@@ -333,6 +336,48 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
     evidence = orjson.loads(trace["evidence_json"])
     assert evidence["graph_continuation"]["schema_version"] == 2
     assert evidence["graph_continuation"]["source_branch_id"] == "branch-1"
+    source_trace_ref = (
+        "trace:" + evidence["graph_continuation"]["source_trace_id"]
+    )
+    assert evidence["research_cycle"]["parent_trace_ref"] == source_trace_ref
+    assert evidence["report_lineage"] == {
+        "status": "linked",
+        "predecessor_checkpoint_ref": source_trace_ref,
+        "source_branch_ref": "graph-branch:instance-1:branch-1",
+    }
+    legacy_evidence = deepcopy(evidence)
+    legacy_evidence.pop("report_lineage")
+    legacy_evidence["research_cycle"]["parent_trace_ref"] = ""
+    reportable_checkpoint = {
+        "projection_hash": "a" * 64,
+        "contract_hash": "1" * 64,
+        "methodology_hash": "2" * 64,
+        "trial_plan_hash": "",
+        "claims": [],
+        "obligations": [],
+        "closure": None,
+    }
+    legacy_carrier = report_checkpoint_projection(
+        instance_id=continued["instance_id"],
+        work_package_id="instance-1",
+        branch_id=branch["branch_id"],
+        workspace_id="workspace-1",
+        graph_id="factor-research",
+        graph_version=2,
+        title="因子研究报告",
+        product_group="CNFutures",
+        current_node=branch["current_node"],
+        status=branch["status"],
+        trace_id=trace["edge_id"].removeprefix("__") + "-fixture",
+        edge_id="__graph_continuation__",
+        from_node=branch["current_node"],
+        created_at=1.0,
+        checkpoint=reportable_checkpoint,
+        trace_evidence=legacy_evidence,
+        evidence_refs=legacy_evidence["evidence_refs"],
+    )
+    assert legacy_carrier is not None
+    assert legacy_carrier["report_lineage"] == evidence["report_lineage"]
     assert (
         evidence["server_evidence"]["job_attempt"]["facts"]["job_id"]
         == "job-1"
@@ -419,6 +464,15 @@ def test_pretrial_continuation_preserves_paused_gap_without_job_evidence(
         )
     evidence = orjson.loads(trace["evidence_json"])
     assert "server_evidence" not in evidence
+    source_trace_ref = (
+        "trace:" + evidence["graph_continuation"]["source_trace_id"]
+    )
+    assert evidence["research_cycle"]["parent_trace_ref"] == source_trace_ref
+    assert evidence["report_lineage"] == {
+        "status": "linked",
+        "predecessor_checkpoint_ref": source_trace_ref,
+        "source_branch_ref": "graph-branch:instance-1:branch-1",
+    }
     assert (
         evidence["research_cycle_checkpoint"]["trial_plan_hash"] == ""
     )

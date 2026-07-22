@@ -21,6 +21,9 @@ from server.services.research_graph.research_cycle.evidence import (
 from server.services.research_graph.research_cycle.trace_replay import (
     verify_research_cycle_trace,
 )
+from server.services.research_graph.research_cycle.replay import (
+    validate_research_cycle_checkpoint,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -351,6 +354,30 @@ def _cycle_from_evidence(
     previous_checkpoint: dict[str, Any] | None,
     previous_trace_id: str,
 ) -> dict[str, Any] | None:
+    continuation = evidence.get("graph_continuation")
+    if previous_checkpoint is None and isinstance(continuation, dict):
+        event = evidence.get("research_cycle")
+        checkpoint = evidence.get("research_cycle_checkpoint")
+        try:
+            projected = validate_research_cycle_checkpoint(checkpoint)
+        except ValueError:
+            return None
+        source_trace_ref = (
+            f"trace:{continuation.get('source_trace_id') or ''}"
+        )
+        if (
+            not isinstance(event, dict)
+            or event.get("schema_version") != 1
+            or event.get("parent_trace_ref") != source_trace_ref
+            or event.get("checkpoint_before_hash")
+                != projected["projection_hash"]
+            or event.get("events") != []
+            or "bootstrap_checkpoint" in event
+            or continuation.get("source_checkpoint_hash")
+                != projected["projection_hash"]
+        ):
+            return None
+        return projected
     try:
         return verify_research_cycle_trace(
             previous_checkpoint=previous_checkpoint,
