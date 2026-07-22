@@ -29,6 +29,39 @@ from server.services.research_graph.trial_plan.stage_projection import (
 from tools.data.sqlite.db import connect_sqlite
 
 
+MAX_CONTEXT_EVIDENCE_REFS = 6
+MAX_CONTEXT_OBLIGATION_SUMMARY_BYTES = 72
+
+
+def _bounded_text(value: Any, *, max_bytes: int) -> str:
+    encoded = str(value or "").encode()
+    if len(encoded) <= max_bytes:
+        return str(value or "")
+    return encoded[: max_bytes - 3].decode(errors="ignore") + "..."
+
+
+def _compact_research_cycle(value: dict[str, Any]) -> dict[str, Any]:
+    """Keep routable aliases in-context; full bodies remain detail-ref reads."""
+    result = deepcopy(value)
+    obligations = [
+        {
+            "obligation_id": str(item.get("obligation_id") or ""),
+            "materiality": str(item.get("materiality") or ""),
+            "status": str(item.get("status") or ""),
+            "question_summary": _bounded_text(
+                item.get("question_summary"),
+                max_bytes=MAX_CONTEXT_OBLIGATION_SUMMARY_BYTES,
+            ),
+            "detail_ref": str(item.get("detail_ref") or ""),
+        }
+        for item in value.get("open_obligations") or []
+        if isinstance(item, dict)
+    ]
+    result["open_obligations"] = obligations
+    result["open_obligation_count"] = len(obligations)
+    return result
+
+
 def _build_local_state(
     *,
     instance_id: str,
@@ -109,9 +142,11 @@ def _build_local_state(
             }
             for capability_id in node.get("required_capabilities") or []
         ]
-        evidence_refs = loads(branch_row["evidence_refs_json"]) or []
-        omitted_evidence_count = int(
-            branch_row["omitted_evidence_count"]
+        stored_evidence_refs = loads(branch_row["evidence_refs_json"]) or []
+        evidence_refs = stored_evidence_refs[-MAX_CONTEXT_EVIDENCE_REFS:]
+        omitted_evidence_count = (
+            int(branch_row["omitted_evidence_count"])
+            + max(0, len(stored_evidence_refs) - len(evidence_refs))
         )
         latest_trace_id = str(branch_row["latest_trace_id"])
         product_group = str(branch_row["product_group"])
@@ -125,9 +160,9 @@ def _build_local_state(
         trial_stage = agent_trial_stage_summary(
             loads(branch_row["trial_stage_projection_json"]) or {}
         )
-        research_cycle = agent_cycle_summary(
+        research_cycle = _compact_research_cycle(agent_cycle_summary(
             checkpoint_from_branch_row(branch_row)
-        )
+        ))
     triggered_gap_ids = {
         str(item.get("capability_id") or "")
         for item in resolution.get("triggered_conditional_gaps") or []
@@ -188,24 +223,20 @@ def _build_local_state(
         "trial_stage": trial_stage,
         "open_gaps": open_gaps,
         "skill_policy": {
+            "policy_ref": "agent-skill-loading@1",
             "match_on": "capability_description",
             "agent_action": (
                 "reuse_matching_runtime_skill_else_load_after_trigger_"
                 "and_approval"
             ),
-            "persist": "description_and_descriptor_hash_only",
         },
         "review_policy": {
+            "policy_ref": "risk-tiered-review@1",
             "L1": "deterministic_only",
-            "L2": (
-                "zero_by_default; one_reviewer_only_for_conflict_"
-                "semantic_uncertainty_or_low_confidence"
-            ),
-            "L3": "exactly_one_relevant_specialist_reviewer",
-            "L4": (
-                "one_proposer_plus_one_independent_reviewer; "
-                "third_only_on_disagreement; grill_only_change_diff"
-            ),
+            "L2": "conditional_one",
+            "L3": "one_specialist",
+            "L4": "two_plus_third_on_conflict",
+            "grill": "change_diff_only",
         },
     }
     context["context_bytes"] = 0

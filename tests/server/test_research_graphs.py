@@ -2519,9 +2519,9 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert context["review_policy"]["L1"] == "deterministic_only"
     assert context["evidence_refs"] == [
         f"artifact:capability-gap:{index}"
-        for index in range(2, 10)
+        for index in range(4, 10)
     ]
-    assert context["omitted_evidence_count"] == 2
+    assert context["omitted_evidence_count"] == 4
     assert context["history_cursor"].startswith("trace:")
     assert context["research_cycle"]["protocol_status"] == "current"
     assert context["research_cycle"]["claim_states"] == [{

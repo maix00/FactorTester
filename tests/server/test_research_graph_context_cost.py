@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 from pathlib import Path
 import sqlite3
@@ -26,6 +27,10 @@ from server.services.research_graph.protocol import (
     serialize_bounded_trace_evidence,
 )
 from tests.server.data_contract_fixtures import initialize
+from tests.server.data_contract_fixtures import checkpoint as data_checkpoint
+from server.services.research_graph.research_cycle.replay import (
+    validate_research_cycle_checkpoint,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -128,6 +133,59 @@ def test_context_cost_is_constant_for_empty_and_large_history(
         assert measurement["context"]["context_bytes"] <= 6000
     assert small["selects"] == large["selects"]
     assert small["context"] == large["context"]
+
+
+def test_context_keeps_many_obligation_aliases_inside_agent_budget(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A legitimate obligation set must not turn a context read into HTTP 500."""
+    path = tmp_path / "many-obligations.sqlite"
+    initialize(path, obligation_status="open")
+    raw = deepcopy(data_checkpoint(obligation_status="open"))
+    raw.pop("projection_hash", None)
+    template = raw["obligations"][0]
+    raw["obligations"] = []
+    for index in range(16):
+        obligation = deepcopy(template)
+        obligation["obligation_id"] = f"obligation-data-{index}"
+        obligation["epistemic_question"] = (
+            f"义务 {index}：核验数据、因果时序、市场环境、执行成本与"
+            "样本外边界是否足以支持当前研究决策。"
+        )
+        raw["obligations"].append(obligation)
+    evidence = {
+        "research_cycle_checkpoint": validate_research_cycle_checkpoint(raw),
+        "evidence_refs": [],
+    }
+    refs = [f"evidence:{index}:" + "a" * 48 for index in range(8)]
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? "
+            "WHERE trace_id='trace-bootstrap'",
+            (orjson.dumps(evidence).decode(),),
+        )
+        conn.execute(
+            "UPDATE research_graph_branches SET evidence_refs_json=? "
+            "WHERE branch_id='branch-1'",
+            (orjson.dumps(refs).decode(),),
+        )
+
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    context = research_graphs.build_graph_branch_context(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+    )
+
+    assert context["context_bytes"] <= MAX_AGENT_PACKET_BYTES
+    aliases = context["research_cycle"]["open_obligations"]
+    assert len(aliases) == 16
+    assert [item["obligation_id"] for item in aliases] == [
+        f"obligation-data-{index}" for index in range(16)
+    ]
+    assert all(item["question_summary"] for item in aliases)
+    assert all(item["detail_ref"] for item in aliases)
 
 
 def test_context_transition_and_persisted_trace_have_distinct_budgets() -> None:
