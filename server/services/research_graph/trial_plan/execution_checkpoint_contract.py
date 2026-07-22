@@ -32,7 +32,14 @@ CHECKPOINT_FIELDS = frozenset({
     "partition_commitment_hash", "frozen_design_hash", "execution_node",
     "current_action_index", "current_action_id", "current_action_status",
     "current_action_input_hash", "current_action_output_evidence_refs",
-    "current_action_qualification", "projection_hash",
+    "current_action_qualification", "current_action_audit_ref",
+    "current_action_audit_disposition", "current_action_audit_route",
+    "projection_hash",
+})
+AUDIT_DISPOSITIONS = frozenset({"accepted", "rejected", "revision_requested"})
+AUDIT_ROUTES = frozenset({
+    "advance_trial_stage", "continue_execution", "research_decision",
+    "revise_factor",
 })
 
 
@@ -62,6 +69,9 @@ def validate_execution_checkpoint(value: Any) -> dict[str, Any]:
     qualification = item.get("current_action_qualification")
     if qualification is not None and qualification not in QUALIFICATIONS:
         raise ValueError("unsupported Evidence qualification")
+    audit_ref = item.get("current_action_audit_ref")
+    audit_disposition = item.get("current_action_audit_disposition")
+    audit_route = item.get("current_action_audit_route")
     refs = identifier_list(
         item.get("current_action_output_evidence_refs"),
         "checkpoint.current_action_output_evidence_refs",
@@ -102,6 +112,13 @@ def validate_execution_checkpoint(value: Any) -> dict[str, Any]:
         ),
         "current_action_output_evidence_refs": refs,
         "current_action_qualification": qualification,
+        "current_action_audit_ref": (
+            None
+            if audit_ref is None
+            else identifier_field(audit_ref, "checkpoint.action_audit_ref")
+        ),
+        "current_action_audit_disposition": audit_disposition,
+        "current_action_audit_route": audit_route,
     }
     if normalized["completed_stage_mask"] < 0:
         raise ValueError("completed_stage_mask must be non-negative")
@@ -113,6 +130,16 @@ def validate_execution_checkpoint(value: Any) -> dict[str, Any]:
         raise ValueError(f"{status} checkpoint requires qualification")
     if status not in {"admitted", "audited"} and qualification is not None:
         raise ValueError("qualification exists before Evidence admission")
+    audit_values = (audit_ref, audit_disposition, audit_route)
+    if status == "audited":
+        if audit_ref is None:
+            raise ValueError("audited checkpoint requires an audit reference")
+        if audit_disposition not in AUDIT_DISPOSITIONS:
+            raise ValueError("audited checkpoint has invalid disposition")
+        if audit_route not in AUDIT_ROUTES:
+            raise ValueError("audited checkpoint has invalid route")
+    elif any(value is not None for value in audit_values):
+        raise ValueError("action audit fields exist before result audit")
     observed_hash = sha256_field(
         item.get("projection_hash"), "checkpoint.projection_hash"
     )

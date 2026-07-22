@@ -34,7 +34,6 @@ _ALLOWED_STATUS_TRANSITIONS = {
     ("running", "failed"),
     ("blocked", "released"),
     ("evidence_ready", "admitted"),
-    ("admitted", "audited"),
 }
 
 
@@ -77,6 +76,9 @@ def initial_execution_checkpoint(
         "current_action_input_hash": action["input_hash"],
         "current_action_output_evidence_refs": [],
         "current_action_qualification": None,
+        "current_action_audit_ref": None,
+        "current_action_audit_disposition": None,
+        "current_action_audit_route": None,
     }
     return seal_checkpoint(value)
 
@@ -128,6 +130,14 @@ def advance_after_audit(
     plan = validate_checkpoint_plan_identity(current, trial_plan)
     if current["current_action_status"] != "audited":
         raise ValueError("next Evidence Action requires an audited predecessor")
+    if current["current_action_qualification"] not in {"eligible", "limited"}:
+        raise ValueError("next Evidence Action requires usable admitted Evidence")
+    if current["current_action_audit_disposition"] != "accepted":
+        raise ValueError("next Evidence Action requires an accepted result audit")
+    if current["current_action_audit_route"] not in {
+        "continue_execution", "advance_trial_stage",
+    }:
+        raise ValueError("result audit does not authorize the next Evidence Action")
     next_index = current["current_action_index"] + 1
     actions = plan["evidence_actions"]
     if next_index >= len(actions):
@@ -149,6 +159,9 @@ def advance_after_audit(
         "current_action_input_hash": action["input_hash"],
         "current_action_output_evidence_refs": [],
         "current_action_qualification": None,
+        "current_action_audit_ref": None,
+        "current_action_audit_disposition": None,
+        "current_action_audit_route": None,
     })
     return seal_checkpoint(value)
 
