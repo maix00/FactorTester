@@ -614,38 +614,6 @@ def test_step_mode_bounds_deeply_nested_outputs_for_readability():
     assert value == {"type": "dict", "truncated": True, "reason": "max_depth"}
 
 
-def test_step_mode_enforces_total_checkpoint_byte_budget():
-    import orjson
-
-    from tools.testers.backtest.modules.base import FieldRef
-
-    strategy = Strategy(alias="S-budget")
-    outputs = tuple(FieldRef(f"output_{index}", owner="Audit") for index in range(80))
-    records: list[dict] = []
-    payload = {f"key-{index:02d}": "x" * 240 for index in range(20)}
-
-    def emit_many_outputs(account, ctx) -> None:
-        for output in outputs:
-            ctx.set(output, payload)
-
-    flow = Flow(
-        "emit_many_outputs",
-        inputs=(),
-        outputs=outputs,
-        phase=Phase.PRE_REPLAY,
-        compute=emit_many_outputs,
-    )
-    account = _account([strategy], active_flow_names=frozenset({"emit_many_outputs"}))
-
-    run(account, EventQueue(), [flow], step_mode=True, step_callback=records.append)
-
-    encoded = orjson.dumps(records[0])
-    assert len(encoded) <= 64 * 1024
-    assert records[0]["readability"]["compacted"] is True
-    assert records[0]["readability"]["original_bytes"] > len(encoded)
-    assert records[0]["summary"]["output_fields"] == 80
-
-
 def test_step_mode_summarizes_daily_mark_to_market_checkpoint():
     """A DMTM pause exposes the accounting evidence without inspecting internals."""
     from tools.testers.backtest.engines.native.ledger import ledger_identity

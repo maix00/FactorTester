@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import heapq
 import itertools
-import json
 import math
 import time
 import warnings
@@ -30,7 +29,6 @@ _AUDIT_MAX_FULL_FRAME_COLUMNS = 20
 _AUDIT_MAX_STRING_LENGTH = 240
 _AUDIT_MAX_FULL_MAPPING_ITEMS = 20
 _AUDIT_MAX_NESTING_DEPTH = 8
-_AUDIT_MAX_STEP_BYTES = 64 * 1024
 _AUDIT_MAX_FULL_MAPPING_SEQUENCE_ITEMS = 6
 _AUDIT_MAX_FULL_SEQUENCE_ITEMS = 20
 _AUDIT_EDGE_SAMPLE_ROWS = 3
@@ -1565,91 +1563,6 @@ def _audit_dmtm_step(
     }
 
 
-def _compact_step_value(value: Any, *, depth: int = 0) -> Any:
-    """Apply a stricter second pass when a complete checkpoint exceeds its budget."""
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    if isinstance(value, str):
-        return value if len(value) <= 120 else {
-            "type": "str", "length": len(value), "preview": value[:120], "truncated": True,
-        }
-    if depth >= 6:
-        return {"type": type(value).__name__, "truncated": True, "reason": "step_byte_budget"}
-    if isinstance(value, Mapping):
-        items = list(value.items())
-        if len(items) > 8:
-            sampled = [*items[:2], *items[-2:]]
-            return {
-                "type": "Mapping",
-                "length": len(items),
-                "sample": {
-                    str(key): _compact_step_value(item, depth=depth + 1)
-                    for key, item in sampled
-                },
-                "truncated": True,
-            }
-        return {
-            str(key): _compact_step_value(item, depth=depth + 1)
-            for key, item in items
-        }
-    if isinstance(value, list):
-        if len(value) > 6:
-            return {
-                "type": "Sequence",
-                "length": len(value),
-                "sample": {
-                    "head": [_compact_step_value(item, depth=depth + 1) for item in value[:2]],
-                    "tail": [_compact_step_value(item, depth=depth + 1) for item in value[-2:]],
-                },
-                "truncated": True,
-            }
-        return [_compact_step_value(item, depth=depth + 1) for item in value]
-    return str(value)
-
-
-def _bound_step_record_size(record: dict[str, Any]) -> dict[str, Any]:
-    encoded_size = len(json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-    if encoded_size <= _AUDIT_MAX_STEP_BYTES - 256:
-        record["readability"] = {
-            "serialized_bytes": encoded_size,
-            "max_bytes": _AUDIT_MAX_STEP_BYTES,
-            "compacted": False,
-        }
-        return record
-
-    compacted = {
-        key: (_compact_step_value(value) if key not in {"phase", "timestamp", "event_kind", "flow_name", "flow_id", "flow_phase", "description", "summary"} else value)
-        for key, value in record.items()
-    }
-    compacted_size = len(json.dumps(compacted, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-    compacted["readability"] = {
-        "serialized_bytes": compacted_size,
-        "original_bytes": encoded_size,
-        "max_bytes": _AUDIT_MAX_STEP_BYTES,
-        "compacted": True,
-    }
-    if len(json.dumps(compacted, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= _AUDIT_MAX_STEP_BYTES:
-        return compacted
-
-    return {
-        "phase": record.get("phase"),
-        "timestamp": record.get("timestamp"),
-        "event_kind": record.get("event_kind"),
-        "flow_name": record.get("flow_name"),
-        "flow_id": record.get("flow_id"),
-        "flow_phase": record.get("flow_phase"),
-        "description": record.get("description"),
-        "summary": record.get("summary"),
-        "dmtm": _compact_step_value(record.get("dmtm")) if "dmtm" in record else None,
-        "readability": {
-            "original_bytes": encoded_size,
-            "max_bytes": _AUDIT_MAX_STEP_BYTES,
-            "compacted": True,
-            "details_omitted": True,
-        },
-    }
-
-
 def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_active_ledgers):
     """Capture a complete pre-compute snapshot; emission happens after compute."""
     if not _step_mode_globals.get("enabled", False) or step_callback is None:
@@ -1769,7 +1682,7 @@ def _step_after_flow(f, state, ctx, step_callback, before):
     dmtm = _audit_dmtm_step(f, before, ledger_changes, outputs_after)
     if dmtm is not None:
         record["dmtm"] = dmtm
-    step_callback(_bound_step_record_size(record))
+    step_callback(record)
 
 
 
