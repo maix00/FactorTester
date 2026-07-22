@@ -125,6 +125,52 @@ def publish_research_checkpoint(**kwargs):
     return _publish_checkpoint(**kwargs)
 
 
+def test_ordinary_checkpoint_does_not_require_untouched_cycle_snapshot(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    carrier["latest_transition"]["obligation_refs"] = []
+    carrier["latest_transition"]["claim_refs"] = []
+
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+    )
+
+
+def test_checkpoint_accepts_bounded_entry_resolution_projection(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    carrier["latest_transition"]["entry_resolution"] = {
+        "reason": "graph_continuation",
+        "assessed_requirement_ids": ["data.source_availability"],
+        "reused_requirement_ids": ["data.source_availability"],
+        "reference_only_requirement_ids": [],
+        "unresolved_requirement_ids": [],
+        "items": [{
+            "requirement_id": "data.source_availability",
+            "title_zh": "是否有数据源覆盖目标产品、合约和市场",
+            "assessed": True,
+            "arrival_status": "reused",
+        }],
+        "resume_node": "job_evidence_ready",
+    }
+
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+    )
+
+
 def _profile(root: Path) -> LocalProfileStore:
     store = LocalProfileStore(root)
     profile = new_local_profile(

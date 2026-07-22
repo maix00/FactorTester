@@ -41,9 +41,20 @@ _TRANSITION_FIELDS = {
     "step_ref", "edge_ref", "from_node", "to_node", "created_at",
     "evidence_refs", "trial_plan_refs", "obligation_refs", "claim_refs",
     "job_refs", "run_refs", "obligation_changes", "claim_changes",
-    "delta_refs",
+    "delta_refs", "entry_resolution",
 }
-_TRANSITION_OPTIONAL_FIELDS = {"delta_refs"}
+_TRANSITION_OPTIONAL_FIELDS = {"delta_refs", "entry_resolution"}
+_ENTRY_RESOLUTION_FIELDS = {
+    "reason", "assessed_requirement_ids", "reused_requirement_ids",
+    "reference_only_requirement_ids", "unresolved_requirement_ids", "items",
+    "resume_node",
+}
+_ENTRY_RESOLUTION_ITEM_FIELDS = {
+    "requirement_id", "title_zh", "assessed", "arrival_status",
+}
+_ENTRY_RESOLUTION_STATUSES = {
+    "reused", "reference_only", "unresolved", "not_applicable",
+}
 _CLAIM_FIELDS = {"claim_ref", "claim_type", "evidence_state"}
 _OBLIGATION_FIELDS = {
     "obligation_ref", "status", "materiality", "question_summary",
@@ -336,9 +347,11 @@ def _canonical_carrier(carrier: Any) -> dict[str, Any]:
     if not isinstance(transition, dict):
         raise ValueError("latest_transition fields are invalid")
     transition_fields = set(transition)
+    required_transition_fields = (
+        _TRANSITION_FIELDS - _TRANSITION_OPTIONAL_FIELDS
+    )
     if not (
-        transition_fields == _TRANSITION_FIELDS
-        or transition_fields == _TRANSITION_FIELDS - _TRANSITION_OPTIONAL_FIELDS
+        required_transition_fields <= transition_fields <= _TRANSITION_FIELDS
     ):
         raise ValueError("latest_transition fields are invalid")
     transition.setdefault("delta_refs", [])
@@ -366,6 +379,10 @@ def _canonical_carrier(carrier: Any) -> dict[str, Any]:
             _safe_id(item[identifier_field], identifier_field)
             _text(item["from_state"], "from_state")
             _text(item["to_state"], "to_state")
+    if "entry_resolution" in transition:
+        transition["entry_resolution"] = _entry_resolution(
+            transition["entry_resolution"]
+        )
     return value
 
 
@@ -824,8 +841,6 @@ def _required_narrative_targets(carrier: dict[str, Any]) -> set[str]:
         + transition["job_refs"]
         + transition["run_refs"]
         + transition["delta_refs"]
-        + [item["claim_ref"] for item in carrier["claims"]]
-        + [item["obligation_ref"] for item in carrier["open_obligations"]]
         + [
             f"obligation:{item['obligation_id']}"
             for item in transition["obligation_changes"]
@@ -836,6 +851,52 @@ def _required_narrative_targets(carrier: dict[str, Any]) -> set[str]:
         ]
     )
     return required
+
+
+def _entry_resolution(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != _ENTRY_RESOLUTION_FIELDS:
+        raise ValueError("entry_resolution fields are invalid")
+    result = deepcopy(value)
+    for field in ("reason", "resume_node"):
+        text = result[field]
+        if not isinstance(text, str) or len(text.encode()) > 128:
+            raise ValueError(f"entry_resolution.{field} must be bounded text")
+        if text:
+            _safe_id(text, f"entry_resolution.{field}")
+    id_fields = (
+        "assessed_requirement_ids", "reused_requirement_ids",
+        "reference_only_requirement_ids", "unresolved_requirement_ids",
+    )
+    all_ids: set[str] = set()
+    for field in id_fields:
+        identifiers = result[field]
+        if not isinstance(identifiers, list) or len(identifiers) > MAX_ITEMS:
+            raise ValueError(f"entry_resolution.{field} must be bounded")
+        for identifier in identifiers:
+            _safe_id(identifier, f"entry_resolution.{field}")
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError(f"entry_resolution.{field} must be unique")
+        all_ids.update(identifiers)
+    result["items"] = _objects(
+        result["items"], _ENTRY_RESOLUTION_ITEM_FIELDS,
+        "entry_resolution.items",
+    )
+    item_ids = []
+    for item in result["items"]:
+        item_ids.append(_safe_id(
+            item["requirement_id"],
+            "entry_resolution.item.requirement_id",
+        ))
+        _zh_text(
+            item["title_zh"], "entry_resolution.item.title_zh", maximum=256,
+        )
+        if type(item["assessed"]) is not bool:
+            raise ValueError("entry_resolution.item.assessed must be boolean")
+        if item["arrival_status"] not in _ENTRY_RESOLUTION_STATUSES:
+            raise ValueError("entry_resolution.item.arrival_status is invalid")
+    if len(set(item_ids)) != len(item_ids) or set(item_ids) != all_ids:
+        raise ValueError("entry_resolution.items must cover changed requirements")
+    return result
 
 
 def _zh_text(value: Any, field: str, maximum: int = 512) -> str:
