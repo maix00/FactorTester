@@ -31,6 +31,7 @@ from server.services.research_graph.branch.repository import (
     load_instance_branch_row,
 )
 from server.services.research_graph.shadow_trace import replay_shadow_trace
+from server.services.research_graph.protocol import MAX_AGENT_TRANSITION_BYTES
 
 
 def _initialize_graph_db(tmp_path, monkeypatch) -> None:
@@ -2382,7 +2383,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     )
     with pytest.raises(
         ValueError,
-        match="transition evidence exceeds 6000 bytes",
+        match=(
+            "agent transition evidence exceeds "
+            f"{MAX_AGENT_TRANSITION_BYTES} bytes"
+        ),
     ):
         research_graphs.advance_graph_branch(
             instance_id=instance["instance_id"],
@@ -2392,7 +2396,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             evidence={
                 "mandatory_binding_missing": True,
                 "evidence_refs": ["artifact:oversized"],
-                "research_note": "x" * 6000,
+                "research_note": "x" * MAX_AGENT_TRANSITION_BYTES,
             },
         )
     monkeypatch.setattr(

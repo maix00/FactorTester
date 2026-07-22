@@ -17,6 +17,7 @@ from server.services.research_graph.branch.repository import (
     CURRENT_BRANCH_CONTEXT_SQL,
 )
 from server.services.research_graph.protocol import (
+    MAX_AGENT_PACKET_BYTES,
     MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES,
     MAX_AGENT_TRANSITION_BYTES,
     MAX_PERSISTED_TRACE_BYTES,
@@ -129,18 +130,25 @@ def test_context_cost_is_constant_for_empty_and_large_history(
     assert small["context"] == large["context"]
 
 
-def test_agent_and_persisted_trace_budgets_are_distinct() -> None:
-    payload = {"research_note": "x" * 8_500}
+def test_context_transition_and_persisted_trace_have_distinct_budgets() -> None:
+    legitimate_delta = {"research_note": "x" * 8_500}
 
+    assert MAX_AGENT_PACKET_BYTES < MAX_AGENT_TRANSITION_BYTES
+    assert MAX_AGENT_TRANSITION_BYTES < MAX_PERSISTED_TRACE_BYTES
+    serialized_delta = serialize_agent_transition_evidence(legitimate_delta)
+    assert len(serialized_delta.encode()) > MAX_AGENT_PACKET_BYTES
+
+    oversized_delta = {"research_note": "x" * MAX_AGENT_TRANSITION_BYTES}
     with pytest.raises(
         ValueError,
         match=f"agent transition evidence exceeds {MAX_AGENT_TRANSITION_BYTES}",
     ):
-        serialize_agent_transition_evidence(payload)
+        serialize_agent_transition_evidence(oversized_delta)
 
-    serialized = serialize_bounded_trace_evidence(payload)
-    assert len(serialized.encode()) == len(payload["research_note"].encode()) + 20
-    assert len(serialized.encode()) < MAX_PERSISTED_TRACE_BYTES
+    audit_payload = {"research_note": "x" * 20_000}
+    serialized_trace = serialize_bounded_trace_evidence(audit_payload)
+    assert len(serialized_trace.encode()) > MAX_AGENT_TRANSITION_BYTES
+    assert len(serialized_trace.encode()) < MAX_PERSISTED_TRACE_BYTES
 
 
 def test_target_resolution_does_not_consume_agent_delta_budget() -> None:

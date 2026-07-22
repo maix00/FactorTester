@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 
-MAX_BYTES = 6000
+# A proposal is a one-time structured delta, not the repeatedly loaded Agent
+# context packet.  It may contain one complete obligation body and still stay
+# compact; long reports and raw artifacts remain references.
+MAX_BYTES = 12 * 1024
 FORBIDDEN_SKILL_FIELDS = {
     "implementation_id",
     "loaded_skill_ids",

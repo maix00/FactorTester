@@ -15,13 +15,13 @@ from cli_anything.factortester_research.core.graph import (
 
 
 MAX_AGENT_PACKET_BYTES = 6000
-# Agent-facing packets and submitted transition deltas are model-context
-# budgets.  A persisted trace is an audit/replay record and must retain the
-# server-bound evidence plus the current Research Cycle projection; it has a
-# separate storage budget rather than inheriting the context budget.
-MAX_AGENT_TRANSITION_BYTES = MAX_AGENT_PACKET_BYTES
+# A repeated Agent packet is a model-context budget.  A submitted transition
+# is a one-time structured delta and can legitimately contain one complete
+# obligation plus a TrialPlan; it must not inherit the repeated-context cap.
+# The persisted trace additionally retains server-created audit projections.
+MAX_AGENT_TRANSITION_BYTES = 12 * 1024
 MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES = 4096
-MAX_PERSISTED_TRACE_BYTES = 16_384
+MAX_PERSISTED_TRACE_BYTES = 32 * 1024
 MAX_TRACE_EVIDENCE_BYTES = MAX_PERSISTED_TRACE_BYTES
 MAX_CONTEXT_EVIDENCE_REFS = 8
 MAX_EVIDENCE_REF_BYTES = 256

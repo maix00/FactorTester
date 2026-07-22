@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -878,7 +880,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "ae4edd2517d1dcf8232292e58c5f40f4117d0efe98a6dc959a617da3c522fd8f"
+        "336546b68a014df6046bb8e750ba311c6e75b3f06b0b4df22388ab473285d4ac"
     )
 
 
@@ -1052,6 +1054,46 @@ def test_cycle_evidence_rejects_non_object_reentry_predicates() -> None:
         match="reentry_predicates must be an object array",
     ):
         validate_transition_evidence(evidence)
+
+
+def test_obligation_proposal_budget_is_independent_of_context_packet(
+    tmp_path: Path,
+) -> None:
+    proposal = _research_cycle_discovery_proposal()
+    proposal["obligation_delta"][0]["obligation"][
+        "discharge_criterion"
+    ] = {
+        "method": "semantic and deterministic equivalence review",
+        "checks": [
+            f"check-{index:02d}:" + "x" * 180
+            for index in range(35)
+        ],
+    }
+    proposal_path = tmp_path / "proposal.json"
+    proposal_path.write_text(
+        json.dumps(proposal, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    assert proposal_path.stat().st_size > 6000
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "skills"
+        / "research-obligation-cycle"
+        / "scripts"
+        / "validate-obligation-proposal.py"
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--input", str(proposal_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    validated = json.loads(result.stdout)
+    assert validated["valid"] is True
+    assert validated["bytes"] > 6000
 
 
 def test_cycle_next_packet_rejects_full_graph_and_raw_output() -> None:

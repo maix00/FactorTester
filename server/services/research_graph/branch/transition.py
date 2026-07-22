@@ -92,7 +92,8 @@ def advance_graph_branch(
     if submitted_resolution is not None:
         serialize_capability_resolution_submission(submitted_resolution)
     # Capability resolution is deterministic and independently bounded.  The
-    # 6000-byte budget applies only to the Agent-authored transition delta.
+    # one-time Agent-authored delta has its own budget; it does not inherit the
+    # smaller repeated-context packet budget.
     serialize_agent_transition_evidence(evidence)
     prepared_evidence, proposed_trial_plan_hash, has_trial_plan_body = (
         prepare_trial_plan_evidence(evidence)
