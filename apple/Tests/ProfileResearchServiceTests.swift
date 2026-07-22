@@ -351,6 +351,26 @@ final class ProfileResearchServiceTests: XCTestCase {
         ]])
     }
 
+    func testRecoveryPresentationDoesNotClaimIncrementalDataCoverage() {
+        XCTAssertEqual(
+            ResearchRecoveryPresentation.title(toNode: "capability_gap"),
+            "评估 v8 迁移影响"
+        )
+        XCTAssertEqual(
+            ResearchRecoveryPresentation.title(
+                toNode: "capability_resolution"
+            ),
+            "重新绑定已变更的方法能力"
+        )
+        XCTAssertEqual(
+            ResearchRecoveryPresentation.title(toNode: "data_contract"),
+            "误入数据契约（未执行增量字段检查）"
+        )
+        XCTAssertNil(
+            ResearchRecoveryPresentation.title(toNode: "factor_semantics")
+        )
+    }
+
     func testRecoveryTraceGroupCanExpandAndCollapseWithoutChangingIdentity() {
         var expanded = Set<String>()
         ResearchRecoveryExpansion.toggle("recovery|v8", in: &expanded)

@@ -140,7 +140,8 @@ struct ResearchNarrativeReportView: View {
 
     private func narrativeSection(
         _ section: ResearchJournalSection,
-        compact: Bool = false
+        compact: Bool = false,
+        titleOverride: String? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if !compact {
@@ -165,7 +166,7 @@ struct ResearchNarrativeReportView: View {
                 .foregroundStyle(.tertiary)
             }
 
-            Text(section.title)
+            Text(titleOverride ?? section.title)
                 .font(compact ? .headline : .title2.weight(.semibold))
                 .foregroundStyle(.primary)
             if !section.body.isEmpty {
@@ -202,9 +203,14 @@ struct ResearchNarrativeReportView: View {
 
     private func positionedSection(
         _ section: ResearchJournalSection,
-        compact: Bool = false
+        compact: Bool = false,
+        titleOverride: String? = nil
     ) -> some View {
-        narrativeSection(section, compact: compact)
+        narrativeSection(
+            section,
+            compact: compact,
+            titleOverride: titleOverride
+        )
             .id(section.id)
             .background {
                 GeometryReader { geometry in
@@ -240,10 +246,23 @@ struct ResearchNarrativeReportView: View {
                 .foregroundStyle(.secondary)
             migrationAuditFacts(for: group)
             ForEach(group.sections) { section in
-                positionedSection(section, compact: true)
+                positionedSection(
+                    section,
+                    compact: true,
+                    titleOverride: recoveryTitle(for: section)
+                )
             }
         }
         .padding(.bottom, 12)
+    }
+
+    private func recoveryTitle(
+        for section: ResearchJournalSection
+    ) -> String? {
+        guard let step = orderedSteps.first(where: {
+            $0.stepRef == section.checkpointRef
+        }) else { return nil }
+        return ResearchRecoveryPresentation.title(toNode: step.toNode)
     }
 
     private func migrationAuditFacts(
@@ -256,7 +275,9 @@ struct ResearchNarrativeReportView: View {
                 "v7 → v8 的精确图差异只新增 factor_semantics__factor_improvement 与 validation_design__factor_improvement 两条边；节点和 capability 描述没有改变。",
                 "旧 capability_gap 被迁移载荷沿用，运行器因而机械经过 capability_resolution → data_contract；这属于冗余恢复路径，不表示完整研究阶段必须重跑。",
                 "research-obligation.discover 的方法指纹发生变化，需要重新绑定已批准能力；这是方法身份确认，不是重新发现一个能力缺口。",
-                "VOLUME 只为派生增量因子增加字段可用性检查，不表示原数据合同整体失效。",
+                "前置数据目录回答数据源有什么；因子语义回答表达式需要什么；精确字段覆盖再对两者做确定性交集，判断能否支持 TrialPlan。三者不能互相替代，也不应重复执行。",
+                "迁移器误入 data_contract，但当时尚未由因子语义确认新增字段依赖，因此这条 trace 不构成 VOLUME 覆盖检查，也不构成新的研究阶段。",
+                "VOLUME 的增量检查应在恢复研究后发生：表达式审查先确认该依赖，再由具体 TrialPlan 触发产品、频率、时间范围及点时可得性的精确覆盖验证。",
                 "因子语义被重新开启，是为了按新义务检查表达式、ColumnRef 参数化与派生比较；既有 job 和证据继续保留。",
             ]
         } else {
@@ -776,6 +797,21 @@ enum ResearchBranchNavigation {
         let currentBranchID = currentBranchRef.split(separator: ":")
             .last.map(String.init) ?? currentBranchRef
         return !targetBranchID.isEmpty && targetBranchID != currentBranchID
+    }
+}
+
+enum ResearchRecoveryPresentation {
+    static func title(toNode: String) -> String? {
+        switch toNode {
+        case "capability_gap":
+            return "评估 v8 迁移影响"
+        case "capability_resolution":
+            return "重新绑定已变更的方法能力"
+        case "data_contract":
+            return "误入数据契约（未执行增量字段检查）"
+        default:
+            return nil
+        }
     }
 }
 
