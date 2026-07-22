@@ -17,12 +17,15 @@ import settings as Settings
 from server.services.research_run_schema import (
     ensure_schema as ensure_research_run_schema,
 )
-from server.services.research_graph.trial_plan.binding import (
-    normalize_run_binding,
-    validate_branch_binding,
+from server.services.research_graph.trial_plan.binding import validate_branch_binding
+from server.services.research_run_inputs import (
+    derive_sample_identity_or_none,
+    normalize_trial_binding,
+    persisted_sample_identity,
 )
-from server.services.research_graph.trial_plan.sample_identity import (
-    derive_sample_identity,
+from server.services.research_run_projections import (
+    project_job_evidence,
+    project_run,
 )
 from tools.data.sqlite.db import connect_sqlite
 
@@ -32,11 +35,7 @@ _SCHEMA_READY_PATHS: set[str] = set()
 _SCHEMA_LOCK = threading.Lock()
 
 
-def _loads(value: str | None) -> Any:
-    return orjson.loads(value) if value else None
-
-
-def _ensure_schema(conn: sqlite3.Connection) -> None:
+def _ensure_schema(conn) -> None:
     ensure_research_run_schema(conn)
 
 
@@ -74,21 +73,22 @@ def create_run(
     run_id = uuid.uuid4().hex
     raw = orjson.dumps(run_spec, option=orjson.OPT_SORT_KEYS)
     run_spec_hash = hash_run_spec(run_spec)
-    sample_identity = _derive_sample_identity_or_none(run_spec)
-    binding = _normalize_trial_binding(
+    sample_identity = derive_sample_identity_or_none(run_spec)
+    binding = normalize_trial_binding(
         trial_binding,
         run_spec_hash=run_spec_hash,
         sample_identity=sample_identity,
     )
-    persisted_binding = dict(binding or {})
-    persisted_sample = _persisted_sample_identity(
+    persisted_sample = persisted_sample_identity(
         binding=binding,
         sample_identity=sample_identity,
     )
     created_at = time.time()
     with _connect() as conn:
         if binding is not None:
-            validate_branch_binding(
+            if int(binding["trial_plan_schema_version"]) == 5:
+                conn.execute("BEGIN IMMEDIATE")
+            action_snapshot = validate_branch_binding(
                 conn,
                 owner=owner,
                 workspace_id=workspace_id,
@@ -110,7 +110,19 @@ def create_run(
                     binding["sample_universe_hash"]
                 ),
                 run_spec_hash=run_spec_hash,
+                evidence_action_id=str(
+                    binding.get("evidence_action_id") or ""
+                ),
+                action_input_hash=str(binding.get("action_input_hash") or ""),
+                expected_checkpoint_hash=str(
+                    binding.get("expected_checkpoint_hash") or ""
+                ),
+                expected_latest_trace_id=str(
+                    binding.get("expected_latest_trace_id") or ""
+                ),
+                trial_plan=binding.get("trial_plan"),
             )
+            binding.update(action_snapshot)
         conn.execute(
             """
             INSERT INTO research_runs (
@@ -118,16 +130,20 @@ def create_run(
                 configuration_revision, kind, run_spec_version,
                 run_spec_hash, run_spec_json, decision_contract_hash,
                 methodology_hash, trial_plan_id, trial_plan_hash,
-                trial_plan_version, trial_role, trial_stage, comparison_id,
+                trial_plan_schema_version, trial_plan_version,
+                trial_role, trial_stage, trial_stage_id, comparison_id,
                 graph_instance_id, graph_branch_id, sample_ref, sample_hash,
                 sample_identity_hash, sample_start, sample_end,
                 sample_universe_hash, sample_design_context_hash,
                 sample_identity_assurance,
+                evidence_action_id, evidence_action_binding_hash,
+                evidence_action_binding_json,
                 created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, 'factor_research',
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?
             )
             """,
             (
@@ -140,9 +156,11 @@ def create_run(
                 str((binding or {}).get("methodology_hash") or ""),
                 str((binding or {}).get("trial_plan_id") or ""),
                 str((binding or {}).get("trial_plan_hash") or ""),
+                int((binding or {}).get("trial_plan_schema_version") or 0),
                 int((binding or {}).get("trial_plan_version") or 0),
                 str((binding or {}).get("trial_role") or ""),
                 str((binding or {}).get("trial_stage") or ""),
+                str((binding or {}).get("action_stage_id") or ""),
                 str((binding or {}).get("comparison_id") or ""),
                 str((binding or {}).get("instance_id") or ""),
                 str((binding or {}).get("branch_id") or ""),
@@ -154,9 +172,17 @@ def create_run(
                 persisted_sample["sample_universe_hash"],
                 persisted_sample["sample_design_context_hash"],
                 persisted_sample["sample_identity_assurance"],
+                str((binding or {}).get("evidence_action_id") or ""),
+                str(
+                    (binding or {}).get("evidence_action_binding_hash") or ""
+                ),
+                str(
+                    (binding or {}).get("evidence_action_binding_json") or "{}"
+                ),
                 created_at,
             ),
         )
+    persisted_binding = dict(binding or {})
     return {
         "run_id": run_id,
         "owner": owner,
@@ -179,11 +205,17 @@ def create_run(
         "trial_plan_hash": str(
             persisted_binding.get("trial_plan_hash") or ""
         ),
+        "trial_plan_schema_version": int(
+            persisted_binding.get("trial_plan_schema_version") or 0
+        ),
         "trial_plan_version": int(
             persisted_binding.get("trial_plan_version") or 0
         ),
         "trial_role": str(persisted_binding.get("trial_role") or ""),
         "trial_stage": str(persisted_binding.get("trial_stage") or ""),
+        "trial_stage_id": str(
+            persisted_binding.get("action_stage_id") or ""
+        ),
         "comparison_id": str(
             persisted_binding.get("comparison_id") or ""
         ),
@@ -195,6 +227,21 @@ def create_run(
         ),
         "sample_ref": str(persisted_binding.get("sample_ref") or ""),
         "sample_hash": str(persisted_binding.get("sample_hash") or ""),
+        "evidence_action_id": str(
+            persisted_binding.get("evidence_action_id") or ""
+        ),
+        "evidence_action_binding_hash": str(
+            persisted_binding.get("evidence_action_binding_hash") or ""
+        ),
+        "evidence_action_binding": (
+            orjson.loads(
+                str(
+                    persisted_binding.get("evidence_action_binding_json")
+                    or "{}"
+                )
+            )
+            or None
+        ),
         **persisted_sample,
         "created_at": created_at,
     }
@@ -214,40 +261,7 @@ def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:
         ).fetchone()
     if row is None:
         return None
-    return {
-        "run_id": str(row["run_id"]),
-        "owner": str(row["owner"]),
-        "workspace_id": str(row["workspace_id"]),
-        "configuration_id": str(row["configuration_id"]),
-        "configuration_revision": int(row["configuration_revision"]),
-        "kind": str(row["kind"]),
-        "run_spec_version": int(row["run_spec_version"]),
-        "run_spec_hash": str(row["run_spec_hash"]),
-        "run_spec": _loads(row["run_spec_json"]) or {},
-        "decision_contract_hash": str(row["decision_contract_hash"]),
-        "methodology_hash": str(row["methodology_hash"]),
-        "trial_plan_id": str(row["trial_plan_id"]),
-        "trial_plan_hash": str(row["trial_plan_hash"]),
-        "trial_plan_version": int(row["trial_plan_version"]),
-        "trial_role": str(row["trial_role"]),
-        "trial_stage": str(row["trial_stage"]),
-        "comparison_id": str(row["comparison_id"]),
-        "graph_instance_id": str(row["graph_instance_id"]),
-        "graph_branch_id": str(row["graph_branch_id"]),
-        "sample_ref": str(row["sample_ref"]),
-        "sample_hash": str(row["sample_hash"]),
-        "sample_identity_hash": str(row["sample_identity_hash"]),
-        "sample_start": str(row["sample_start"]),
-        "sample_end": str(row["sample_end"]),
-        "sample_universe_hash": str(row["sample_universe_hash"]),
-        "sample_design_context_hash": str(
-            row["sample_design_context_hash"]
-        ),
-        "sample_identity_assurance": str(
-            row["sample_identity_assurance"]
-        ),
-        "created_at": float(row["created_at"]),
-    }
+    return project_run(row)
 
 
 def load_job_trial_binding(
@@ -270,138 +284,5 @@ def load_job_evidence_projection(
     owner: str,
 ) -> dict[str, Any] | None:
     """Load one JobAttempt's trial binding and immutable evidence identity."""
-    try:
-        with _connect() as conn:
-            row = conn.execute(
-                """
-                SELECT runs.trial_plan_id, runs.trial_plan_hash,
-                       runs.trial_plan_version, runs.trial_role,
-                       runs.trial_stage,
-                       runs.comparison_id, runs.sample_ref, runs.sample_hash
-                       , runs.sample_identity_hash,
-                       runs.sample_identity_assurance,
-                       runs.decision_contract_hash,
-                       runs.methodology_hash,
-                       runs.run_spec_hash
-                FROM research_jobs AS jobs
-                JOIN research_runs AS runs ON runs.run_id=jobs.run_id
-                WHERE jobs.job_id=? AND jobs.owner=? AND runs.owner=?
-                """,
-                (job_id, owner, owner),
-            ).fetchone()
-    except sqlite3.OperationalError as exc:
-        if "no such table: research_jobs" not in str(exc):
-            raise
-        return None
-    if row is None:
-        return None
-    if not str(row["trial_plan_hash"]):
-        return None
-    trial_binding = {
-        "trial_plan_id": str(row["trial_plan_id"]),
-        "trial_plan_hash": str(row["trial_plan_hash"]),
-        "trial_plan_version": int(row["trial_plan_version"]),
-        "trial_role": str(row["trial_role"]),
-        "trial_stage": str(row["trial_stage"]),
-        "comparison_id": str(row["comparison_id"]),
-        "sample_ref": str(row["sample_ref"]),
-        "sample_hash": str(row["sample_hash"]),
-        "sample_identity_hash": str(row["sample_identity_hash"]),
-        "sample_identity_assurance": str(
-            row["sample_identity_assurance"]
-        ),
-    }
-    identity = {
-        "contract_hash": str(row["decision_contract_hash"]),
-        "methodology_hash": str(row["methodology_hash"]),
-        "trial_plan_hash": str(row["trial_plan_hash"]),
-        "run_spec_hash": str(row["run_spec_hash"]),
-    }
-    return {
-        "trial_binding": trial_binding,
-        "identity_refs": identity if all(identity.values()) else None,
-    }
-
-
-def _normalize_trial_binding(
-    value: dict[str, Any] | None,
-    *,
-    run_spec_hash: str,
-    sample_identity: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise ValueError("trial_binding must be an object")
-    required = {
-        "instance_id",
-        "branch_id",
-        "trial_plan",
-        "trial_plan_hash",
-        "trial_plan_version",
-        "trial_role",
-        "comparison_id",
-    }
-    missing = sorted(required - set(value))
-    extra = sorted(set(value) - required)
-    if missing:
-        raise ValueError(
-            "trial_binding missing fields: " + ", ".join(missing)
-        )
-    if extra:
-        raise ValueError(
-            "trial_binding has unsupported fields: " + ", ".join(extra)
-        )
-    instance_id = str(value["instance_id"] or "").strip()
-    branch_id = str(value["branch_id"] or "").strip()
-    if not instance_id or not branch_id:
-        raise ValueError("trial_binding requires instance_id and branch_id")
-    binding = normalize_run_binding(
-        trial_plan=value["trial_plan"],
-        expected_hash=str(value["trial_plan_hash"]),
-        expected_version=value["trial_plan_version"],
-        run_spec_hash=run_spec_hash,
-        trial_role=str(value["trial_role"]),
-        comparison_id=str(value["comparison_id"]),
-        sample_identity=sample_identity,
-    )
-    return {
-        "instance_id": instance_id,
-        "branch_id": branch_id,
-        **binding,
-    }
-
-
-def _derive_sample_identity_or_none(
-    run_spec: dict[str, Any],
-) -> dict[str, Any] | None:
-    try:
-        return derive_sample_identity(run_spec)
-    except ValueError:
-        return None
-
-
-def _persisted_sample_identity(
-    *,
-    binding: dict[str, Any] | None,
-    sample_identity: dict[str, Any] | None,
-) -> dict[str, str]:
-    identity = sample_identity or {}
-    assurance = str(
-        (binding or {}).get("sample_identity_assurance")
-        or (
-            "server_derived_unbound"
-            if sample_identity is not None
-            else "unavailable"
-        )
-    )
-    return {
-        "sample_identity_hash": str(identity.get("sample_hash") or ""),
-        "sample_start": str(identity.get("sample_start") or ""),
-        "sample_end": str(identity.get("sample_end") or ""),
-        "sample_universe_hash": str(identity.get("universe_hash") or ""),
-        "sample_design_context_hash": str(
-            identity.get("design_context_hash") or ""
-        ),
-        "sample_identity_assurance": assurance,
-    }
+    with _connect() as conn:
+        return project_job_evidence(conn, job_id=job_id, owner=owner)

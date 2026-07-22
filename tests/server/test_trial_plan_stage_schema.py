@@ -259,8 +259,27 @@ def test_existing_research_run_gains_server_derived_stage_without_row_loss(
             ).fetchall()
         }
         row = conn.execute(
-            "SELECT run_id, trial_stage FROM research_runs"
+            """
+            SELECT run_id, trial_stage, trial_plan_schema_version,
+                   trial_stage_id, evidence_action_id,
+                   evidence_action_binding_json
+            FROM research_runs
+            """
         ).fetchone()
 
     assert "trial_stage" in columns
-    assert dict(row) == {"run_id": "run-1", "trial_stage": ""}
+    assert {
+        "trial_plan_schema_version",
+        "trial_stage_id",
+        "evidence_action_id",
+        "evidence_action_binding_hash",
+        "evidence_action_binding_json",
+    }.issubset(columns)
+    assert dict(row) == {
+        "run_id": "run-1",
+        "trial_stage": "",
+        "trial_plan_schema_version": 0,
+        "trial_stage_id": "",
+        "evidence_action_id": "",
+        "evidence_action_binding_json": "{}",
+    }
