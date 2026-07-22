@@ -8,7 +8,7 @@ from typing import Any
 
 import click
 
-from . import products, run_window
+from . import market_data, positions, products, run_window
 from .values import highlighted, is_scalar, render_value, route_label, scalar, scope, table_from_mappings
 
 
@@ -22,10 +22,13 @@ def render_changes(title: str, changes: Any, *, field_optional: bool = False) ->
     body: list[str] = []
     for field, rows in grouped.items():
         body.append(click.style(field, bold=True))
-        rows = _group_identical_changes(rows)
-        if field.endswith(".positions") and all(isinstance(row.get("changes"), list) for row in rows):
-            body.extend(render_position_changes(rows, indent="  "))
+        if field.endswith(".positions"):
+            body.extend(
+                positions.render_initialization(rows, indent="  ")
+                or render_position_changes(rows, indent="  ")
+            )
         else:
+            rows = _group_identical_changes(rows)
             body.extend(products.render_products_change(field, rows, indent="  ") or render_change_rows(rows, indent="  "))
     return [click.style(title, bold=True), *body] if body else []
 
@@ -39,7 +42,10 @@ def render_change_rows(rows: list[Mapping[str, Any]], *, indent: str) -> list[st
             table_rows.append({**scope(row), "before": scalar(before), "after": highlighted(after)})
             continue
         field = str(row.get("field") or "")
-        special_after = run_window.render(field, after, indent=indent + "    ")
+        special_after = (
+            market_data.render_change(field, after, indent=indent + "    ")
+            or run_window.render(field, after, indent=indent + "    ")
+        )
         if before is None and special_after is not None:
             details.extend([
                 f"{indent}{route_label(row)}",

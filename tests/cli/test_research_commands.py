@@ -322,6 +322,69 @@ def test_step_product_input_lists_every_product_without_scalar_truncation() -> N
     assert "…" not in output
 
 
+def test_market_data_load_plan_and_exclusions_render_as_tables() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "check_market_data_coverage", "inputs": [], "outputs": [],
+        "output_changes": [
+            {"field": "MarketDataModule.market_data_load_plan", "before": None, "after": {
+                "type": "MarketDataLoadPlan", "count": 2, "items": {
+                    "AP.CZC": {"data_source": "LocalMIN1", "frequency": "MIN1"},
+                    "CZCE|F|AP|2605": {"data_source": "ContractMIN1", "frequency": "MIN1"},
+                },
+            }},
+            {"field": "MarketDataModule.excluded_out_of_range_products", "before": None, "after": {
+                "type": "MarketDataExcludedProducts", "count": 1, "rows": [{"product": "TC.CZC"}],
+            }},
+        ],
+    })
+    output = "\n".join(lines)
+    assert "AP.CZC" in output and "LocalMIN1" in output
+    assert "TC.CZC" in output
+    assert '"items"' not in output
+
+
+def test_empty_position_book_initialization_is_summarized_per_ledger() -> None:
+    from tools.cli.step import render_step_event
+
+    empty_book = {"AP.CZC": {"quantity": 0}, "CJ.CZC": {"quantity": 0}}
+    lines = render_step_event({
+        "flow_id": "initialize_ledgers", "inputs": [], "outputs": [],
+        "output_changes": [
+            {
+                "field": "LedgerModule.positions", "ledger": ledger, "cash_pool": "P1",
+                "before": None, "after": empty_book,
+            }
+            for ledger in ("L1", "L2")
+        ],
+    })
+    output = "\n".join(lines)
+    assert "instruments" in output and "nonzero" in output
+    assert "empty" in output
+    assert "L1" in output and "L2" in output
+    assert '"quantity"' not in output
+
+
+def test_shadowed_empty_defaults_are_reported_not_repeated() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "coverage", "outputs": [], "output_changes": [],
+        "inputs": [{
+            "field": "MarketDataModule.required_data_source",
+            "values": [
+                {"scope": "strategy_config", "strategy": "A1", "value": None},
+                {"scope": "context", "value": []},
+            ],
+        }],
+    })
+    output = "\n".join(lines)
+    assert "[]" in output
+    assert "已省略 1 条" in output
+    assert "strategy_config" not in output
+
+
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

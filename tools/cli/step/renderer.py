@@ -11,7 +11,7 @@ import click
 from tools.cli.table import render_key_value_rows
 
 from .changes import render_changes
-from . import products, run_window
+from . import market_data, products, run_window
 from .values import is_scalar, render_value, route_label, scalar, scope, table_from_mappings
 
 
@@ -97,9 +97,10 @@ def _render_field_values(
 
 
 def _render_scoped_values(field: str, values: list[Any]) -> list[str]:
+    values, omitted_empty = _drop_shadowed_empty_values(values)
     product_lines = products.render_values(field, values, indent="  ")
     if product_lines is not None:
-        return product_lines
+        return [*product_lines, *_omitted_empty_note(omitted_empty)]
     scalar_rows: list[dict[str, Any]] = []
     details: list[str] = []
     for entry in _group_identical_complex_values(values):
@@ -110,9 +111,30 @@ def _render_scoped_values(field: str, values: list[Any]) -> list[str]:
         if is_scalar(value):
             scalar_rows.append({**scope(entry), "value": scalar(value)})
         else:
-            special = products.render(field, value, indent="    ") or run_window.render(field, value, indent="    ")
+            special = (
+                products.render(field, value, indent="    ")
+                or market_data.render_input(field, value, indent="    ")
+                or run_window.render(field, value, indent="    ")
+            )
             details.extend([f"  {route_label(entry)}", *(special or render_value(value, indent="    "))])
-    return [*table_from_mappings(scalar_rows, indent="  "), *details]
+    return [*table_from_mappings(scalar_rows, indent="  "), *details, *_omitted_empty_note(omitted_empty)]
+
+
+def _drop_shadowed_empty_values(values: list[Any]) -> tuple[list[Any], int]:
+    mappings = [entry for entry in values if isinstance(entry, Mapping)]
+    if not any(entry.get("value") is not None for entry in mappings):
+        return values, 0
+    retained = [
+        entry for entry in values
+        if not isinstance(entry, Mapping) or entry.get("value") is not None
+    ]
+    return retained, len(values) - len(retained)
+
+
+def _omitted_empty_note(count: int) -> list[str]:
+    if not count:
+        return []
+    return [click.style(f"  已省略 {count} 条同字段空默认；step-field 可查看原记录。", dim=True)]
 
 
 def _group_identical_complex_values(values: list[Any]) -> list[Any]:
@@ -149,16 +171,25 @@ def _combined_scalar_fields(records: list[Mapping[str, Any]]) -> tuple[list[str]
         grouped: dict[str, list[str]] = {}
         for item in values:
             grouped.setdefault(scalar(item.get("value")), []).append(
-                str(item.get("strategy") or route_label(item))
+                _owner_summary(item)
             )
         short = qualified.rsplit(".", 1)[-1]
         field = f"{short} [{qualified}]"
-        all_strategy_scoped = len(values) > 1 and all(item.get("strategy") for item in values)
+        all_strategy_scoped = len(values) > 1 and all(_owner_summary(item) != "shared" for item in values)
         for value, owners in grouped.items():
             owner = "all strategies" if all_strategy_scoped and len(owners) == len(values) else ", ".join(owners)
             rows.append({"field": field, "owners": owner, "value": value})
         consumed.add(index)
     return (table_from_mappings(rows, indent="  ") if rows else []), consumed
+
+
+def _owner_summary(item: Mapping[str, Any]) -> str:
+    if item.get("strategy"):
+        return str(item["strategy"])
+    strategies = item.get("strategies")
+    if isinstance(strategies, list) and strategies:
+        return ", ".join(str(value) for value in strategies)
+    return route_label(item)
 
 
 def _render_dmtm(value: Any) -> list[str]:
