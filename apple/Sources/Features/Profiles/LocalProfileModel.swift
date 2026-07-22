@@ -105,16 +105,17 @@ struct LocalProfileModel: Identifiable {
     }
 
     func owns(workPackageRef: String) -> Bool {
-        let instanceID = workPackageRef.removingPrefix("work-package:")
-        guard !instanceID.isEmpty else { return false }
+        let workPackageID = workPackageRef.removingPrefix("work-package:")
+        guard !workPackageID.isEmpty else { return false }
         return researchRecords.contains { record in
             guard record.graphInstanceRef == workPackageRef,
                   let agent = agents.first(where: {
                       $0.id == record.agentID && $0.role == "research"
-                  }),
-                  agent.instanceID == instanceID else { return false }
+                  }) else { return false }
             guard !record.graphBranchRef.isEmpty else { return true }
-            return record.graphBranchRef == "graph-branch:\(instanceID):\(agent.branchID)"
+            return record.graphBranchRef == (
+                "graph-branch:\(agent.instanceID):\(agent.branchID)"
+            )
         }
     }
 }

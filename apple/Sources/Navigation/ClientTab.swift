@@ -68,7 +68,7 @@ struct ClientTab: Identifiable {
     static func workPackage(_ item: ResearchDirectoryItem) -> ClientTab {
         ClientTab(
             id: "work-package:\(item.id)",
-            title: item.summary.productGroup,
+            title: item.displayTitle,
             systemImage: "point.3.connected.trianglepath.dotted",
             content: .workPackage(item)
         )

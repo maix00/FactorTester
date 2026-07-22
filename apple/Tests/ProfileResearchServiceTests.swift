@@ -24,6 +24,50 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class ProfileResearchServiceTests: XCTestCase {
+    func testStableWorkPackageOwnershipUsesCurrentPhysicalAgentScope() {
+        let profile = LocalProfileModel(json: [
+            "profile_id": "maxa",
+            "display_name": "MaxA",
+            "server": ["base_url": "http://example.test"],
+            "agents": [[
+                "agent_id": "research-maxa",
+                "role": "research",
+                "scope": [
+                    "instance_id": "physical-v7",
+                    "branch_id": "branch-v7",
+                ],
+            ]],
+            "research_records": [[
+                "record_id": "stable-work-package",
+                "agent_id": "research-maxa",
+                "graph_instance_ref": "work-package:stable-work-package",
+                "graph_branch_ref": "graph-branch:physical-v7:branch-v7",
+            ]],
+        ])
+
+        XCTAssertTrue(
+            profile.owns(workPackageRef: "work-package:stable-work-package")
+        )
+    }
+
+    func testResearchRecordUsesFactorScopeInsteadOfBroadProductGroupAsTitle() {
+        let record = ResearchRecordModel(json: [
+            "record_id": "stable-work-package",
+            "title": "primary",
+            "scope": [
+                "factor_families": ["SgCCS"],
+                "product_group": "china_futures",
+                "research_role": "auxiliary_or_conditional_signal",
+            ],
+        ])
+
+        XCTAssertEqual(record.preferredResearchTitle, "SgCCS · 辅助与条件信号研究")
+        XCTAssertNotEqual(
+            record.preferredResearchTitle,
+            ResearchDisplayText.productGroup(record.productGroup)
+        )
+    }
+
     func testResearchDirectoryEmptyStatesDoNotConfuseLoadingWithNoProfile() {
         XCTAssertEqual(
             ProfileResearchEmptyState.loadingProfiles.message,
@@ -459,6 +503,8 @@ final class ProfileResearchServiceTests: XCTestCase {
             workspaceRef: "workspace:w",
             profileIDs: ["maxa"],
             profileNames: ["MaxA"],
+            displayTitle: "SgCCS · 辅助与条件信号研究",
+            scopeSummary: "SgCCS · 辅助与条件信号研究",
             summary: summary
         )
         let second = ResearchDirectoryItem(
@@ -467,6 +513,8 @@ final class ProfileResearchServiceTests: XCTestCase {
             workspaceRef: "workspace:w",
             profileIDs: ["maxa"],
             profileNames: ["MaxA"],
+            displayTitle: "SgCCS · 辅助与条件信号研究",
+            scopeSummary: "SgCCS · 辅助与条件信号研究",
             summary: summary
         )
 

@@ -46,6 +46,101 @@ def test_local_profile_is_strict_private_and_version_independent(
         validate_local_profile({**stored, "token": "must-not-be-stored"})
 
 
+def test_graph_upgrade_retargets_one_stable_work_package_record(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = LocalProfileStore(root)
+    profile = new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8141",
+        workspace_root=tmp_path / "workspace",
+        principal_ref="18717974771",
+    )
+    profile["agents"] = [{
+        "agent_id": "research-maxa",
+        "role": "research",
+        "scope": {"instance_id": "physical-v6", "branch_id": "branch-v6"},
+        "status": "ready",
+        "next_action": "Resume the authorized research scope.",
+    }]
+    stable = {
+        "record_id": "sgccs-work-package",
+        "title": "SgCCS research",
+        "status": "ready",
+        "scope": {"factor_families": ["SgCCS"]},
+        "factor_family_versions": ["SgCCS@6"],
+        "agent_id": "research-maxa",
+        "created_at": 1.0,
+        "updated_at": 2.0,
+        "workspace_ref": "workspace:sgccs",
+        "run_ref": "run:v6",
+        "graph_instance_ref": "work-package:sgccs-work-package",
+        "graph_branch_ref": "graph-branch:physical-v6:branch-v6",
+        "checkpoint_ref": "trace:v6",
+        "evidence_refs": ["evidence:v6"],
+        "timeline_refs": [],
+        "artifacts": [],
+        "provenance": {"kind": "owned_research"},
+    }
+    duplicate = {
+        **stable,
+        "record_id": "physical-v7",
+        "title": "SgCCS auxiliary-signal research",
+        "factor_family_versions": ["SgCCS@7"],
+        "updated_at": 3.0,
+        "run_ref": "",
+        "graph_instance_ref": "work-package:physical-v7",
+        "graph_branch_ref": "graph-branch:physical-v7:branch-v7",
+        "checkpoint_ref": "trace:v7",
+        "evidence_refs": ["evidence:v7"],
+        "provenance": {"kind": "active_graph_research"},
+    }
+    profile["research_records"] = [stable, duplicate]
+    store.save(profile)
+
+    saved = store.retarget_research_incarnation(
+        "maxa",
+        agent_id="research-maxa",
+        work_package_id="sgccs-work-package",
+        source_instance_id="physical-v6",
+        source_branch_id="branch-v6",
+        target_instance_id="physical-v7",
+        target_branch_id="branch-v7",
+    )
+
+    assert saved["agents"][0]["scope"] == {
+        "instance_id": "physical-v7",
+        "branch_id": "branch-v7",
+    }
+    assert len(saved["research_records"]) == 1
+    record = saved["research_records"][0]
+    assert record["record_id"] == "sgccs-work-package"
+    assert record["graph_instance_ref"] == (
+        "work-package:sgccs-work-package"
+    )
+    assert record["graph_branch_ref"] == (
+        "graph-branch:physical-v7:branch-v7"
+    )
+    assert record["factor_family_versions"] == ["SgCCS@6", "SgCCS@7"]
+    assert record["created_at"] == 1.0
+    assert record["updated_at"] == 3.0
+    assert record["checkpoint_ref"] == "trace:v7"
+    assert record["evidence_refs"] == ["evidence:v6", "evidence:v7"]
+
+    repeated = store.retarget_research_incarnation(
+        "maxa",
+        agent_id="research-maxa",
+        work_package_id="sgccs-work-package",
+        source_instance_id="physical-v6",
+        source_branch_id="branch-v6",
+        target_instance_id="physical-v7",
+        target_branch_id="branch-v7",
+    )
+    assert repeated == saved
+
+
 def test_client_cli_exposes_generic_profile_and_adapter_commands(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -491,6 +491,12 @@ def preview_graph_continuation(
 )
 @click.option("--expected-target-hash", required=True)
 @click.option("--human-authorization-id", required=True)
+@click.option("--profile-id")
+@click.option("--agent-id")
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 def continue_graph_branch(
     instance_id: str,
     branch_id: str,
@@ -498,10 +504,22 @@ def continue_graph_branch(
     job_id: str,
     expected_target_hash: str,
     human_authorization_id: str,
+    profile_id: str | None,
+    agent_id: str | None,
+    release_profile: Path | None,
 ) -> None:
-    """消费精确审批并创建不可变的新版本 continuation。"""
-    click.echo(_json(
-        client_from_config().continue_research_graph_branch(
+    """消费精确审批，在同一 Work Package 内创建新物理版本。"""
+    if bool(profile_id) != bool(agent_id):
+        raise click.ClickException(
+            "--profile-id and --agent-id must be provided together"
+        )
+    client_root = load_profile_root(release_profile) if profile_id else None
+    client = (
+        _client_for_profile(client_root, profile_id)
+        if client_root is not None and profile_id is not None
+        else client_from_config()
+    )
+    continuation = client.continue_research_graph_branch(
             instance_id,
             branch_id,
             target_graph_version=target_version,
@@ -509,7 +527,59 @@ def continue_graph_branch(
             expected_target_hash=expected_target_hash,
             human_authorization_id=human_authorization_id,
         )
-    ))
+    if profile_id and agent_id:
+        assert client_root is not None
+        branches = continuation.get("branches") or []
+        work_package_id = str(continuation.get("work_package_id") or "")
+        target_instance_id = str(continuation.get("instance_id") or "")
+        target_branch_id = (
+            str(branches[0].get("branch_id") or "")
+            if len(branches) == 1 and isinstance(branches[0], dict)
+            else ""
+        )
+        try:
+            if not all(
+                (work_package_id, target_instance_id, target_branch_id)
+            ):
+                raise ValueError(
+                    "continuation response lacks stable logical identity"
+                )
+            LocalProfileStore(client_root).retarget_research_incarnation(
+                profile_id,
+                agent_id=agent_id,
+                work_package_id=work_package_id,
+                source_instance_id=instance_id,
+                source_branch_id=branch_id,
+                target_instance_id=target_instance_id,
+                target_branch_id=target_branch_id,
+            )
+        except (OSError, ValueError) as exc:
+            continuation = {
+                **continuation,
+                "local_profile_sync": {
+                    "status": "required",
+                    "error_code": (
+                        "local_profile_io_error"
+                        if isinstance(exc, OSError)
+                        else "local_profile_validation_error"
+                    ),
+                    "message": (
+                        "Server continuation completed; local Profile "
+                        "retargeting is required."
+                    ),
+                },
+            }
+        else:
+            continuation = {
+                **continuation,
+                "local_profile_sync": {
+                    "status": "retargeted",
+                    "work_package_id": work_package_id,
+                    "target_instance_id": target_instance_id,
+                    "target_branch_id": target_branch_id,
+                },
+            }
+    click.echo(_json(continuation))
 
 
 @research_graph.command("advance")

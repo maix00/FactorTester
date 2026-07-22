@@ -23,6 +23,7 @@ class FakeClient:
         self.advance_response = None
         self.continuation_preview = None
         self.continuation = None
+        self.continuation_response = None
         self.agent_budget_call = None
         self.agent_invocation_call = None
 
@@ -157,8 +158,9 @@ class FakeClient:
             expected_target_hash,
             human_authorization_id,
         )
-        return {
+        return self.continuation_response or {
             "instance_id": "instance-v6",
+            "work_package_id": "instance-v5",
             "graph_version": target_graph_version,
             "branches": [{"branch_id": "branch-v6"}],
         }
@@ -698,6 +700,65 @@ def test_research_graph_continuation_is_previewed_then_exactly_authorized(
     assert fake.continuation == (
         "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "gate-146",
     )
+
+
+def test_research_graph_continuation_retargets_local_profile_without_new_record(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    fake.continuation_response = {
+        "instance_id": "physical-v7",
+        "work_package_id": "sgccs-work-package",
+        "graph_version": 7,
+        "branches": [{"branch_id": "branch-v7"}],
+    }
+    calls = []
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    monkeypatch.setattr(
+        commands,
+        "_client_for_profile",
+        lambda _root, _profile_id: fake,
+    )
+    monkeypatch.setattr(
+        commands,
+        "load_profile_root",
+        lambda _profile: tmp_path / "client-support",
+    )
+    monkeypatch.setattr(
+        commands.LocalProfileStore,
+        "retarget_research_incarnation",
+        lambda self, profile_id, **kwargs: calls.append(
+            (profile_id, kwargs)
+        ) or {"research_records": [{"record_id": "sgccs-work-package"}]},
+    )
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "continue",
+        "physical-v6", "branch-v6",
+        "--target-version", "7",
+        "--expected-target-hash", "c" * 64,
+        "--human-authorization-id", "gate-pretrial",
+        "--profile-id", "maxa",
+        "--agent-id", "research-maxa",
+    ])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["local_profile_sync"] == {
+        "status": "retargeted",
+        "work_package_id": "sgccs-work-package",
+        "target_instance_id": "physical-v7",
+        "target_branch_id": "branch-v7",
+    }
+    assert calls == [("maxa", {
+        "agent_id": "research-maxa",
+        "work_package_id": "sgccs-work-package",
+        "source_instance_id": "physical-v6",
+        "source_branch_id": "branch-v6",
+        "target_instance_id": "physical-v7",
+        "target_branch_id": "branch-v7",
+    })]
 
 
 def test_research_graph_pretrial_continuation_omits_job_id(

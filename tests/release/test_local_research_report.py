@@ -228,6 +228,42 @@ def test_checkpoint_publish_materializes_report_and_profile_reference(
     assert "本次检验显示信号" in report.read_text(encoding="utf-8")
 
 
+def test_checkpoint_publish_keeps_stable_work_package_across_incarnations(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    profile = store.load("maxa")
+    profile["agents"][0]["scope"] = {
+        "instance_id": "physical-v7",
+        "branch_id": "branch-v7",
+    }
+    profile["research_records"][0]["graph_branch_ref"] = (
+        "graph-branch:physical-v7:branch-v7"
+    )
+    store.save(profile)
+    carrier = _carrier()
+    carrier["branch_ref"] = "graph-branch:physical-v7:branch-v7"
+
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+    )
+
+    profile = store.load("maxa")
+    assert len(profile["research_records"]) == 1
+    assert profile["research_records"][0]["record_id"] == "sgccs-review"
+    assert profile["research_records"][0]["graph_instance_ref"] == (
+        "work-package:sgccs-review"
+    )
+    assert (
+        root / "profile-root" / "research" / "sgccs-review"
+        / "branches" / "branch-v7" / "JOURNAL.json"
+    ).is_file()
+
+
 def test_checkpoint_publish_accumulates_complete_chinese_narrative(
     tmp_path: Path,
 ) -> None:

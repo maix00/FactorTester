@@ -43,6 +43,9 @@ struct ResearchRecordModel: Identifiable {
     let status: String
     let agentID: String
     let scope: String
+    let factorFamilies: [String]
+    let productGroup: String
+    let researchRole: String
     let graphInstanceRef: String
     let graphBranchRef: String
     let checkpointRef: String
@@ -54,7 +57,11 @@ struct ResearchRecordModel: Identifiable {
         title = json["title"] as? String ?? id
         status = json["status"] as? String ?? ""
         agentID = json["agent_id"] as? String ?? ""
-        scope = String(describing: json["scope"] ?? [:])
+        let scopeValues = json["scope"] as? [String: Any] ?? [:]
+        scope = String(describing: scopeValues)
+        factorFamilies = scopeValues["factor_families"] as? [String] ?? []
+        productGroup = scopeValues["product_group"] as? String ?? ""
+        researchRole = scopeValues["research_role"] as? String ?? ""
         graphInstanceRef = json["graph_instance_ref"] as? String
             ?? json["work_package_ref"] as? String
             ?? ""
@@ -64,5 +71,26 @@ struct ResearchRecordModel: Identifiable {
             .map(ResearchDeepLinkModel.init)
         artifacts = (json["artifacts"] as? [[String: Any]] ?? [])
             .map(ResearchArtifactModel.init)
+    }
+
+    var researchScopeTitle: String {
+        let family = factorFamilies.joined(separator: "、")
+        let role: String
+        switch researchRole {
+        case "auxiliary_or_conditional_signal": role = "辅助与条件信号"
+        case "new_main_factor_candidate": role = "新主因子候选"
+        case "main_factor": role = "主因子"
+        case "auxiliary_factor": role = "辅助因子"
+        default: role = "因子"
+        }
+        if !family.isEmpty { return "\(family) · \(role)研究" }
+        return title
+    }
+
+    var preferredResearchTitle: String {
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let generic = normalized.lowercased() == "primary"
+            || normalized.lowercased().hasPrefix("continuation-v")
+        return normalized.isEmpty || generic ? researchScopeTitle : normalized
     }
 }

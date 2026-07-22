@@ -6,6 +6,8 @@ struct ResearchDirectoryItem: Identifiable {
     let workspaceRef: String
     let profileIDs: [String]
     let profileNames: [String]
+    let displayTitle: String
+    let scopeSummary: String
     let summary: ProfileResearchSummary
 
     var id: String {
@@ -94,12 +96,20 @@ final class ResearchDirectoryController: ObservableObject {
                         for: summary,
                         in: binding.profiles
                     )
+                    let record = owners
+                        .flatMap(\.researchRecords)
+                        .first { $0.graphInstanceRef == summary.workPackageRef }
                     return ResearchDirectoryItem(
                         serverURL: binding.serverURL,
                         workspaceID: binding.workspaceID,
                         workspaceRef: binding.workspaceRef,
                         profileIDs: owners.map(\.id),
                         profileNames: owners.map(\.displayName),
+                        displayTitle: record?.preferredResearchTitle
+                            ?? ResearchDisplayText.productGroup(
+                                summary.productGroup
+                            ),
+                        scopeSummary: record?.researchScopeTitle ?? "",
                         summary: summary
                     )
                 }
@@ -132,7 +142,11 @@ final class ResearchDirectoryController: ObservableObject {
                 $0.owns(workPackageRef: summary.workPackageRef)
             }
         }
-        return profiles.filter { $0.id == profileID }
+        let authoritative = profiles.filter { $0.id == profileID }
+        if !authoritative.isEmpty { return authoritative }
+        return profiles.filter {
+            $0.owns(workPackageRef: summary.workPackageRef)
+        }
     }
 
     private func profileID(from reference: String) -> String? {
@@ -274,16 +288,19 @@ struct ProfileResearchOverview: View {
                     .frame(width: 34)
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 8) {
-                        Text(
-                            ResearchDisplayText.productGroup(
-                                item.summary.productGroup
-                            )
-                        )
+                        Text(item.displayTitle)
                         .font(.headline)
                         statusBadge(item.summary)
                     }
+                    if !item.scopeSummary.isEmpty,
+                       item.scopeSummary != item.displayTitle {
+                        Text(item.scopeSummary)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
                     Text(
-                        "\(item.summary.branchCount) 个分支 · "
+                        "\(ResearchDisplayText.productGroup(item.summary.productGroup)) · "
+                            + "\(item.summary.branchCount) 个分支 · "
                             + "\(item.summary.runningBranchCount) 个进行中"
                     )
                     .font(.callout)

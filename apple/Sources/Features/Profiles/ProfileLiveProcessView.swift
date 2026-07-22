@@ -68,7 +68,7 @@ struct WorkPackageResearchView: View {
                 .font(.title2)
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 4) {
-                Text(ResearchDisplayText.productGroup(item.summary.productGroup))
+                Text(item.displayTitle)
                     .font(.title2.weight(.semibold))
                 HStack(spacing: 8) {
                     Text("研究工作包")

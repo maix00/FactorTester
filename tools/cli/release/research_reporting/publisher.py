@@ -102,15 +102,17 @@ def publish_research_checkpoint(
     if (
         len(branch_parts) != 3
         or branch_parts[0] != "graph-branch"
-        or branch_parts[1] != work_package_id
     ):
-        raise ValueError("branch_ref does not belong to the Work Package")
+        raise ValueError("branch_ref must identify a physical Graph branch")
+    branch_instance_id = _safe_id(
+        branch_parts[1], "branch_instance_id"
+    )
     branch_id = _safe_id(branch_parts[2], "branch_id")
     if value["checkpoint_ref"] != value["latest_transition"]["step_ref"]:
         raise ValueError("checkpoint_ref must equal latest transition step_ref")
 
     if agent["scope"] != {
-        "instance_id": work_package_id,
+        "instance_id": branch_instance_id,
         "branch_id": branch_id,
     }:
         raise ValueError("research Agent scope does not match checkpoint branch")
@@ -444,10 +446,10 @@ def _journal_prefix_branch_id(
 ) -> str | None:
     """Return a trusted source branch for a forked report continuation.
 
-    The source is deliberately encoded as a logical graph reference rather
-    than a local path.  The writer resolves it inside this Work Package and
-    rejects self/cross-package references, keeping the carrier portable and
-    preventing a report from importing arbitrary local files.
+    The source is encoded as a physical graph reference, never a local path.
+    Its instance may differ after a Graph upgrade.  The writer resolves only
+    the bounded branch identifier underneath the already-selected stable Work
+    Package root, so it cannot import files from another local package.
     """
     source = lineage.get("source_branch_ref")
     if not source:
@@ -456,9 +458,9 @@ def _journal_prefix_branch_id(
     if (
         len(parts) != 3
         or parts[0] != "graph-branch"
-        or parts[1] != work_package_id
     ):
-        raise ValueError("report lineage source branch is outside Work Package")
+        raise ValueError("report lineage source branch is invalid")
+    _safe_id(parts[1], "report_lineage.source_instance_id")
     source_branch_id = _safe_id(parts[2], "report_lineage.source_branch_id")
     if source_branch_id == branch_id:
         raise ValueError("report lineage source branch cannot equal target")
