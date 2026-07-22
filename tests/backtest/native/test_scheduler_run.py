@@ -544,6 +544,76 @@ def test_step_mode_preserves_data_money_storage_units_in_flow_outputs():
     }
 
 
+def test_step_mode_bounds_large_mapping_outputs_for_readability():
+    import orjson
+
+    from tools.testers.backtest.modules.base import FieldRef
+
+    strategy = Strategy(alias="S-large")
+    output = FieldRef("large_output", owner="Audit")
+    records: list[dict] = []
+    payload = {
+        f"field-{index:03d}": f"value-{index:03d}-" + "x" * 1_000
+        for index in range(250)
+    }
+    flow = Flow(
+        "emit_large_mapping",
+        inputs=(),
+        outputs=(output,),
+        phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: ctx.set(output, payload),
+    )
+    account = _account([strategy], active_flow_names=frozenset({"emit_large_mapping"}))
+
+    run(account, EventQueue(), [flow], step_mode=True, step_callback=records.append)
+
+    value = records[0]["outputs"][0]["values"][0]["value"]
+    assert value["type"] == "Mapping"
+    assert value["length"] == 250
+    assert value["truncated"] is True
+    assert list(value["sample"]["head"]) == ["field-000", "field-001", "field-002"]
+    assert list(value["sample"]["tail"]) == ["field-247", "field-248", "field-249"]
+    assert len(orjson.dumps(records[0])) < 20_000
+    assert records[0]["summary"] == {
+        "flow": "emit_large_mapping",
+        "scope": "pre_replay",
+        "event": "once",
+        "input_fields": 0,
+        "output_fields": 1,
+        "output_changes": 1,
+        "ledger_changes": 0,
+        "event_payload_changes": 0,
+        "pending_events": 0,
+        "contract_violations": 0,
+    }
+
+
+def test_step_mode_bounds_deeply_nested_outputs_for_readability():
+    from tools.testers.backtest.modules.base import FieldRef
+
+    strategy = Strategy(alias="S-deep")
+    output = FieldRef("deep_output", owner="Audit")
+    records: list[dict] = []
+    payload: dict = {"leaf": "visible"}
+    for level in range(20):
+        payload = {f"level-{level}": payload}
+    flow = Flow(
+        "emit_deep_mapping",
+        inputs=(),
+        outputs=(output,),
+        phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: ctx.set(output, payload),
+    )
+    account = _account([strategy], active_flow_names=frozenset({"emit_deep_mapping"}))
+
+    run(account, EventQueue(), [flow], step_mode=True, step_callback=records.append)
+
+    value = records[0]["outputs"][0]["values"][0]["value"]
+    for _ in range(8):
+        value = next(iter(value.values()))
+    assert value == {"type": "dict", "truncated": True, "reason": "max_depth"}
+
+
 def test_step_mode_summarizes_daily_mark_to_market_checkpoint():
     """A DMTM pause exposes the accounting evidence without inspecting internals."""
     from tools.testers.backtest.engines.native.ledger import ledger_identity

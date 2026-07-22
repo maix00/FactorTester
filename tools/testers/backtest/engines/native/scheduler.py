@@ -26,8 +26,11 @@ _AUDIT_MAX_FULL_SERIES_LENGTH = 20
 _AUDIT_MAX_FULL_FRAME_ROWS = 20
 _AUDIT_MAX_FULL_FRAME_CELLS = 200
 _AUDIT_MAX_FULL_FRAME_COLUMNS = 20
+_AUDIT_MAX_STRING_LENGTH = 240
+_AUDIT_MAX_FULL_MAPPING_ITEMS = 20
+_AUDIT_MAX_NESTING_DEPTH = 8
 _AUDIT_MAX_FULL_MAPPING_SEQUENCE_ITEMS = 6
-_AUDIT_MAX_FULL_SEQUENCE_ITEMS = 100
+_AUDIT_MAX_FULL_SEQUENCE_ITEMS = 20
 _AUDIT_EDGE_SAMPLE_ROWS = 3
 _AUDIT_EDGE_SAMPLE_COLUMNS = 5
 _AUDIT_EDGE_SAMPLE_ITEMS = 3
@@ -220,8 +223,17 @@ def _audit_value(
     products, while step-mode audit only needs enough shape/range/sample
     evidence for a human to verify which data window was used.
     """
-    if value is None or isinstance(value, (str, bool, int)):
+    if value is None or isinstance(value, (bool, int)):
         return value
+    if isinstance(value, str):
+        if len(value) <= _AUDIT_MAX_STRING_LENGTH:
+            return value
+        return {
+            "type": "str",
+            "length": len(value),
+            "preview": value[:_AUDIT_MAX_STRING_LENGTH],
+            "truncated": True,
+        }
     if type(value).__module__.startswith("numpy") and hasattr(value, "item"):
         return _audit_value(value.item(), key_labels=key_labels, _seen=_seen)
     if isinstance(value, float):
@@ -288,9 +300,35 @@ def _audit_value(
         return {"type": type(value).__name__, "cycle": True}
     seen.add(object_id)
     try:
+        if len(seen) > _AUDIT_MAX_NESTING_DEPTH:
+            return {
+                "type": type(value).__name__,
+                "truncated": True,
+                "reason": "max_depth",
+            }
         if isinstance(value, Enum):
             return value.value
         if isinstance(value, Mapping):
+            if len(value) > _AUDIT_MAX_FULL_MAPPING_ITEMS:
+                items = list(value.items())
+
+                def sample(entries: list[tuple[Any, Any]]) -> dict[str, Any]:
+                    return {
+                        key_labels.get(str(key), str(key)) if key_labels is not None else str(key): _audit_value(
+                            item, key_labels=key_labels, _seen=seen,
+                        )
+                        for key, item in entries
+                    }
+
+                return {
+                    "type": "Mapping",
+                    "length": len(items),
+                    "sample": {
+                        "head": sample(items[:_AUDIT_EDGE_SAMPLE_ITEMS]),
+                        "tail": sample(items[-_AUDIT_EDGE_SAMPLE_ITEMS:]),
+                    },
+                    "truncated": True,
+                }
             return {
                 key_labels.get(str(key), str(key)) if key_labels is not None else str(key): _audit_value(
                     item, key_labels=key_labels, _seen=seen,
@@ -1270,7 +1308,7 @@ def _audit_current_event_batch(
     }
 
 
-def _audit_event_queue_head(state: "BacktestRunState", event_queue: EventQueue, *, limit: int = 50) -> dict[str, Any]:
+def _audit_event_queue_head(state: "BacktestRunState", event_queue: EventQueue, *, limit: int = 10) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for index, draft in enumerate(event_queue.snapshot_head(limit), start=1):
         payload = _audit_event_subject_payload(draft.payload)
@@ -1628,6 +1666,18 @@ def _step_after_flow(f, state, ctx, step_callback, before):
             *direct_contract_violations,
             *ledger_contract_violations,
         ],
+    }
+    record["summary"] = {
+        "flow": f.effective_description or f.name or "",
+        "scope": f.phase.value,
+        "event": f.event_kind.name if f.event_kind is not None else "once",
+        "input_fields": len(record["inputs"]),
+        "output_fields": len(record["outputs"]),
+        "output_changes": len(output_changes),
+        "ledger_changes": len(ledger_changes),
+        "event_payload_changes": len(event_payload_changes),
+        "pending_events": record["event_queue"]["pending_count"],
+        "contract_violations": len(record["input_contract_violations"]),
     }
     dmtm = _audit_dmtm_step(f, before, ledger_changes, outputs_after)
     if dmtm is not None:
