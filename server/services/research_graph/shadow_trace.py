@@ -19,6 +19,9 @@ from server.services.research_graph.branch.topology_preflight import (
     assess_topology_continuation,
     load_work_package_trace_footprint,
 )
+from server.services.research_graph.branch.requirement_preflight import (
+    assess_requirement_continuation,
+)
 from server.services.research_graph.protocol import json_hash
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
@@ -367,9 +370,16 @@ def _continuation_bootstrap_valid(
             "footprint_edge_count": preflight["footprint_edge_count"],
             "reason": preflight["reason"],
         }
+        expected_requirement_preflight = assess_requirement_continuation(
+            source_graph=source_graph,
+            target_graph=graph,
+            target_node=str(source["current_node"]),
+        )
         if (
             not preflight["eligible"]
             or declared_preflight != expected_preflight
+            or descriptor.get("requirement_preflight")
+            != expected_requirement_preflight
         ):
             return False
     expected_effect = (

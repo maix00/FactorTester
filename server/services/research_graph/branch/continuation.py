@@ -29,6 +29,9 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
 )
+from server.services.research_graph.branch.requirement_preflight import (
+    assess_requirement_continuation,
+)
 from server.services.research_graph.branch.topology_preflight import (
     assess_topology_continuation,
     load_work_package_trace_footprint,
@@ -339,6 +342,13 @@ def _prepare(
             "footprint_edge_count": preflight["footprint_edge_count"],
             "reason": preflight["reason"],
         }
+        descriptor["requirement_preflight"] = (
+            assess_requirement_continuation(
+                source_graph=source_graph,
+                target_graph=target_graph,
+                target_node=target_node,
+            )
+        )
     return {
         "target_hash": _hash(descriptor),
         "descriptor": descriptor,

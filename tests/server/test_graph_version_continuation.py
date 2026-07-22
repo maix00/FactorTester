@@ -578,6 +578,73 @@ def test_schema_v2_continuation_reenters_the_same_current_node(
     assert replay["passed"] is True, replay
 
 
+def test_schema_v2_continuation_previews_only_material_requirement_changes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    target = _upgrade_active_target_to_schema_v2(path)
+    current = next(
+        node for node in target["nodes"]
+        if node["node_id"] == "authoritative_backtest"
+    )
+    current["entry_requirement_refs"] = [
+        "data.required_fields",
+        "trial_design.strategy_freeze",
+    ]
+    target["requirement_catalog"] = {
+        "catalog_revision": 2,
+        "categories": [],
+        "requirements": [
+            {
+                "requirement_id": "data.required_fields",
+                "revision": 1,
+                "question_zh": "必需字段是否覆盖当前试验？",
+            },
+            {
+                "requirement_id": "trial_design.strategy_freeze",
+                "revision": 1,
+                "question_zh": "策略变量是否已冻结？",
+            },
+        ],
+    }
+    target["content_hash"] = "8" * 64
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            UPDATE research_graph_versions SET content_hash=?, graph_json=?
+            WHERE graph_id='factor-research' AND version=2
+            """,
+            (target["content_hash"], orjson.dumps(target).decode()),
+        )
+
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+    )
+
+    delta = preview["descriptor"]["requirement_preflight"]
+    assert delta["target_node"] == "authoritative_backtest"
+    assert delta["catalog_added_count"] == 2
+    assert delta["catalog_changed_count"] == 0
+    assert delta["catalog_removed_count"] == 0
+    assert len(delta["catalog_delta_hash"]) == 64
+    assert delta["entry_added_ids"] == [
+        "data.required_fields",
+        "trial_design.strategy_freeze",
+    ]
+    assert delta["entry_revised_ids"] == []
+    assert delta["entry_metadata_changed_ids"] == []
+    assert delta["entry_removed_ids"] == []
+    assert delta["assessment_required_ids"] == delta["entry_added_ids"]
+    assert len(delta["delta_hash"]) == 64
+
+
 def test_schema_v2_continuation_shadow_replay_rejects_tampered_preflight(
     tmp_path,
     monkeypatch,
