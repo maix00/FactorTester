@@ -480,7 +480,7 @@ struct ProfileResearchOverview: View {
         case "deleted": .orange
         default: summary.runningBranchCount > 0 ? .blue : .secondary
         }
-        Text(label)
+        return Text(label)
             .font(.caption.weight(.semibold))
             .foregroundStyle(color)
             .padding(.horizontal, 8)
