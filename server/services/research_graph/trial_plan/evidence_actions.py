@@ -12,6 +12,7 @@ from .fields import (
     identifier_list,
     object_field,
     sha256_field,
+    sha256_list,
 )
 
 
@@ -27,6 +28,8 @@ def canonical_evidence_actions(
     *,
     obligation_refs: set[str],
     stage_ids: set[str],
+    stage_run_hashes: dict[str, set[str]],
+    comparison_run_hashes: dict[str, set[str]],
 ) -> list[dict[str, Any]]:
     items = array_field(
         value,
@@ -46,6 +49,8 @@ def canonical_evidence_actions(
             index=index,
             obligation_refs=obligation_refs,
             stage_ids=stage_ids,
+            stage_run_hashes=stage_run_hashes,
+            comparison_run_hashes=comparison_run_hashes,
             earlier_action_ids=seen,
         )
         action_id = action["action_id"]
@@ -67,6 +72,8 @@ def _canonical_action(
     index: int,
     obligation_refs: set[str],
     stage_ids: set[str],
+    stage_run_hashes: dict[str, set[str]],
+    comparison_run_hashes: dict[str, set[str]],
     earlier_action_ids: set[str],
 ) -> dict[str, Any]:
     path = f"trial_plan.evidence_actions[{index}]"
@@ -85,6 +92,8 @@ def _canonical_action(
             "prerequisite_action_ids",
             "cost_ref",
             "stop_predicate_refs",
+            "run_spec_hashes",
+            "comparison_ids",
         }),
     )
     action_id = identifier_field(item.get("action_id"), f"{path}.action_id")
@@ -122,6 +131,39 @@ def _canonical_action(
     )
     if mode not in EXECUTION_MODES:
         raise ValueError(f"{path}.execution_mode is unsupported: {mode}")
+    run_hashes = _action_run_hashes(
+        item.get("run_spec_hashes"),
+        path=path,
+        execution_mode=mode,
+    )
+    comparison_ids = identifier_list(
+        item.get("comparison_ids"),
+        f"{path}.comparison_ids",
+        allow_empty=mode != "job",
+    )
+    if mode != "job" and comparison_ids:
+        raise ValueError(
+            f"{path} may declare comparisons only for job execution"
+        )
+    if not set(run_hashes).issubset(stage_run_hashes[stage_id]):
+        raise ValueError(
+            f"{path}.run_spec_hashes must belong to the Action stage"
+        )
+    unknown_comparisons = sorted(
+        set(comparison_ids) - set(comparison_run_hashes)
+    )
+    if unknown_comparisons:
+        raise ValueError(
+            f"{path}.comparison_ids are not declared by TrialPlan: "
+            + ", ".join(unknown_comparisons)
+        )
+    covered_runs = set().union(
+        *(comparison_run_hashes[item] for item in comparison_ids)
+    ) if comparison_ids else set()
+    if not set(run_hashes).issubset(covered_runs):
+        raise ValueError(
+            f"{path}.run_spec_hashes must belong to a declared comparison"
+        )
     return {
         "action_id": action_id,
         "stage_id": stage_id,
@@ -143,9 +185,31 @@ def _canonical_action(
         "prerequisite_action_ids": prerequisites,
         "cost_ref": identifier_field(item.get("cost_ref"), f"{path}.cost_ref"),
         "stop_predicate_refs": stop_refs,
+        "run_spec_hashes": run_hashes,
+        "comparison_ids": comparison_ids,
     }
 
 
 def _bounded(values: list[str], maximum: int, path: str) -> None:
     if len(values) > maximum:
         raise ValueError(f"{path} must contain at most {maximum} items")
+
+
+def _action_run_hashes(
+    value: Any,
+    *,
+    path: str,
+    execution_mode: str,
+) -> list[str]:
+    if execution_mode == "job":
+        return sha256_list(value, f"{path}.run_spec_hashes")
+    items = array_field(
+        value,
+        f"{path}.run_spec_hashes",
+        allow_empty=True,
+    )
+    if items:
+        raise ValueError(
+            f"{path} may declare RunSpecs only for job execution"
+        )
+    return []

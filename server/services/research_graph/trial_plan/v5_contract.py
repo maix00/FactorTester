@@ -16,6 +16,8 @@ def canonical_v5_metadata(
     plan: dict[str, Any],
     *,
     stage_policy: dict[str, Any],
+    samples: list[dict[str, Any]],
+    comparisons: list[dict[str, Any]],
 ) -> dict[str, Any]:
     primary = identifier_field(
         plan.get("primary_obligation_ref"),
@@ -74,6 +76,21 @@ def canonical_v5_metadata(
             plan.get("evidence_actions"),
             obligation_refs=obligation_refs,
             stage_ids=set(stage_policy["ordered_stage_ids"]),
+            stage_run_hashes={
+                stage_id: {
+                    run_hash
+                    for sample in samples
+                    if sample["stage_id"] == stage_id
+                    for run_hash in sample["run_spec_hashes"]
+                }
+                for stage_id in stage_policy["ordered_stage_ids"]
+            },
+            comparison_run_hashes={
+                item["comparison_id"]: {
+                    member["run_spec_hash"] for member in item["members"]
+                }
+                for item in comparisons
+            },
         ),
     }
 

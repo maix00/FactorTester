@@ -17,6 +17,7 @@ def _action(
     input_hash: str,
     *,
     prerequisites: list[str] | None = None,
+    run_spec_hashes: list[str] | None = None,
 ) -> dict:
     return {
         "action_id": action_id,
@@ -30,6 +31,8 @@ def _action(
         "prerequisite_action_ids": prerequisites or [],
         "cost_ref": "cost:medium",
         "stop_predicate_refs": ["stop:material-failure"],
+        "run_spec_hashes": run_spec_hashes or ["a" * 64],
+        "comparison_ids": ["comparison:parent-child"],
     }
 
 
@@ -107,6 +110,7 @@ def trial_plan_v5() -> dict:
                 "validation-2",
                 "6" * 64,
                 prerequisites=["action:ic"],
+                run_spec_hashes=["b" * 64],
             ),
         ],
     }
@@ -191,6 +195,7 @@ def test_eight_action_plan_has_its_own_persistence_budget() -> None:
             "validation-1",
             f"{index + 1:x}" * 64,
             prerequisites=([f"action:{index - 1}"] if index else []),
+            run_spec_hashes=["a" * 64],
         )
         for index in range(8)
     ]
@@ -198,3 +203,30 @@ def test_eight_action_plan_has_its_own_persistence_budget() -> None:
     encoded = orjson.dumps(canonical_trial_plan(plan))
 
     assert 4096 < len(encoded) <= 8192
+
+
+def test_job_action_is_explicitly_scoped_to_stage_and_comparison() -> None:
+    plan = trial_plan_v5()
+    plan["evidence_actions"][0]["run_spec_hashes"] = ["b" * 64]
+    with pytest.raises(ValueError, match="belong to the Action stage"):
+        canonical_trial_plan(plan)
+
+    plan = trial_plan_v5()
+    plan["evidence_actions"][0]["comparison_ids"] = ["comparison:missing"]
+    with pytest.raises(ValueError, match="not declared by TrialPlan"):
+        canonical_trial_plan(plan)
+
+
+def test_non_job_action_cannot_claim_research_runs() -> None:
+    plan = trial_plan_v5()
+    plan["evidence_actions"][0].update({
+        "execution_mode": "sync_cli",
+        "run_spec_hashes": [],
+        "comparison_ids": [],
+    })
+    canonical = canonical_trial_plan(plan)
+    assert canonical["evidence_actions"][0]["run_spec_hashes"] == []
+
+    plan["evidence_actions"][0]["run_spec_hashes"] = ["a" * 64]
+    with pytest.raises(ValueError, match="only for job execution"):
+        canonical_trial_plan(plan)

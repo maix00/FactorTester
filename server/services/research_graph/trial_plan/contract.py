@@ -211,6 +211,8 @@ def canonical_trial_plan(value: Any) -> dict[str, Any]:
         normalized.update(canonical_v5_metadata(
             plan,
             stage_policy=stage_policy,
+            samples=sample_roles,
+            comparisons=comparisons,
         ))
     encoded = _encode(normalized)
     maximum = (
