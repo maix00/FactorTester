@@ -220,7 +220,9 @@ def test_checkpoint_publish_materializes_report_and_profile_reference(
     assert record["artifacts"][0]["content_hash"] == hashlib.sha256(
         report.read_bytes()
     ).hexdigest()
-    assert record["artifacts"][0]["journal_ref"].endswith("/JOURNAL.json")
+    assert record["artifacts"][0]["journal_ref"].endswith(
+        "/LOGICAL_JOURNAL.json"
+    )
     assert len(record["artifacts"][0]["journal_hash"]) == 64
     assert len(result["carrier_hash"]) == 64
     assert len(result["narrative_hash"]) == 64
@@ -341,7 +343,7 @@ def test_checkpoint_publish_accumulates_complete_chinese_narrative(
     assert len(list((branch_root / "sections").glob("*.json"))) == 2
 
 
-def test_checkpoint_publish_materializes_source_prefix_for_fork(
+def test_checkpoint_publish_keeps_fork_fragments_in_physical_branches(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "client-support"
@@ -404,14 +406,24 @@ def test_checkpoint_publish_materializes_source_prefix_for_fork(
     )
     journal = json.loads((branch_root / "JOURNAL.json").read_text())
     assert [item["checkpoint_ref"] for item in journal["checkpoints"]] == [
-        "trace:checkpoint-1",
         "trace:checkpoint-fork-1",
     ]
-    assert journal["checkpoints"][0]["lineage_status"] == "root"
-    assert journal["checkpoints"][1]["lineage_status"] == "linked"
+    assert journal["journal_kind"] == "physical_branch"
+    assert journal["checkpoints"][0]["lineage_relation"] == "branch_fork"
+    assert journal["checkpoints"][0]["source_branch_ref"] == (
+        "graph-branch:sgccs-review:branch-sgccs"
+    )
+    logical = json.loads((branch_root / "LOGICAL_JOURNAL.json").read_text())
+    assert logical["journal_kind"] == "work_package"
+    assert [item["checkpoint_ref"] for item in logical["checkpoints"]] == [
+        "trace:checkpoint-1", "trace:checkpoint-fork-1",
+    ]
     report = (branch_root / "REPORT.md").read_text(encoding="utf-8")
     assert report.index("源分支首先") < report.index("分支随后")
-    assert len(list((branch_root / "sections").glob("*.json"))) == 2
+    assert len(list((branch_root / "sections").glob("*.json"))) == 1
+    assert len(list((
+        branch_root.parent / "branch-sgccs" / "sections"
+    ).glob("*.json"))) == 1
 
 
 def test_graph_continuation_replaces_physical_branch_in_work_package_index(
@@ -420,6 +432,7 @@ def test_graph_continuation_replaces_physical_branch_in_work_package_index(
     root = tmp_path / "client-support"
     store = _profile(root)
     source = _carrier()
+    source["graph_ref"] = "factor-research@v7"
     publish_research_checkpoint(
         client_root=root,
         profile_id="maxa",
@@ -440,6 +453,7 @@ def test_graph_continuation_replaces_physical_branch_in_work_package_index(
     continued = deepcopy(source)
     continued.update({
         "branch_ref": "graph-branch:sgccs-v8:branch-v8",
+        "graph_ref": "factor-research@v8",
         "checkpoint_ref": "trace:checkpoint-v8",
     })
     continued["latest_transition"].update({
@@ -473,6 +487,37 @@ def test_graph_continuation_replaces_physical_branch_in_work_package_index(
         package_root / "branches" / "branch-v8" / "REPORT.md"
     ).read_text(encoding="utf-8")
     assert "旧图版本已完成可信研究检查点" in continued_report
+    source_journal = json.loads((
+        package_root / "branches" / "branch-sgccs" / "JOURNAL.json"
+    ).read_text())
+    continued_journal = json.loads((
+        package_root / "branches" / "branch-v8" / "JOURNAL.json"
+    ).read_text())
+    logical_journal = json.loads((
+        package_root / "branches" / "branch-v8" / "LOGICAL_JOURNAL.json"
+    ).read_text())
+    assert [item["checkpoint_ref"] for item in source_journal["checkpoints"]] == [
+        "trace:checkpoint-1",
+    ]
+    assert [item["checkpoint_ref"] for item in continued_journal["checkpoints"]] == [
+        "trace:checkpoint-v8",
+    ]
+    assert logical_journal["branch_refs"] == [
+        "graph-branch:sgccs-review:branch-sgccs",
+        "graph-branch:sgccs-v8:branch-v8",
+    ]
+    assert logical_journal["checkpoints"][0]["graph_ref"] == (
+        "factor-research@v7"
+    )
+    assert logical_journal["checkpoints"][1]["graph_ref"] == (
+        "factor-research@v8"
+    )
+    assert logical_journal["checkpoints"][1]["lineage_relation"] == (
+        "graph_continuation"
+    )
+    assert logical_journal["checkpoints"][1]["source_branch_ref"] == (
+        "graph-branch:sgccs-review:branch-sgccs"
+    )
 
 
 def test_checkpoint_publish_rejects_fork_without_source_journal(
@@ -493,7 +538,7 @@ def test_checkpoint_publish_rejects_fork_without_source_journal(
         "predecessor_checkpoint_ref": "trace:checkpoint-1",
         "source_branch_ref": "graph-branch:sgccs-review:branch-sgccs",
     }
-    with pytest.raises(ValueError, match="trusted source journal"):
+    with pytest.raises(ValueError, match="lineage contains a cycle"):
         publish_research_checkpoint(
             client_root=root,
             profile_id="maxa",
@@ -547,8 +592,8 @@ def test_checkpoint_publish_requires_trusted_root_and_unbroken_lineage(
         root / "profile-root" / "research" / "sgccs-review"
         / "branches" / "branch-sgccs" / "JOURNAL.json"
     ).read_text())
-    assert journal["schema_version"] == 3
-    assert journal["history_status"] == "complete"
+    assert journal["schema_version"] == 4
+    assert journal["history_status"] == "segment"
     assert journal["root_checkpoint_ref"] == "trace:checkpoint-1"
 
 
@@ -639,7 +684,7 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
     )
     journal = json.loads(journal_path.read_text())
     section = journal["checkpoints"][0]["sections"][0]
-    assert journal["schema_version"] == 3
+    assert journal["schema_version"] == 4
     assert [block["kind"] for block in section["blocks"]] == [
         "math", "paragraph", "list", "table",
     ]
@@ -941,6 +986,8 @@ def test_checkpoint_publish_locates_distinct_records_for_work_package_branches(
     )
     carrier = deepcopy(_carrier())
     carrier["branch_ref"] = "graph-branch:sgccs-review:branch-trend"
+    carrier["checkpoint_ref"] = "trace:checkpoint-trend-1"
+    carrier["latest_transition"]["step_ref"] = "trace:checkpoint-trend-1"
 
     publish_research_checkpoint(
         client_root=root,

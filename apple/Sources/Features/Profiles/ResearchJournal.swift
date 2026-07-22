@@ -5,7 +5,9 @@ import Foundation
 struct ResearchJournalDocument: Decodable {
     let schemaVersion: Int
     let language: String
-    let branchID: String
+    let journalKind: String
+    let workPackageID: String
+    let branchRefs: [String]
     let historyStatus: String?
     let rootCheckpointRef: String?
     let checkpoints: [ResearchJournalCheckpoint]
@@ -13,7 +15,9 @@ struct ResearchJournalDocument: Decodable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case language
-        case branchID = "branch_id"
+        case journalKind = "journal_kind"
+        case workPackageID = "work_package_id"
+        case branchRefs = "branch_refs"
         case historyStatus = "history_status"
         case rootCheckpointRef = "root_checkpoint_ref"
         case checkpoints
@@ -26,8 +30,13 @@ struct ResearchJournalCheckpoint: Decodable, Identifiable {
     let carrierHash: String
     let narrativeHash: String
     let sectionHash: String
+    let graphRef: String
+    let instanceRef: String
+    let branchRef: String
     let lineageStatus: String?
+    let lineageRelation: String
     let predecessorCheckpointRef: String?
+    let sourceBranchRef: String
     let sections: [ResearchJournalSection]
 
     var id: String { checkpointRef }
@@ -38,8 +47,13 @@ struct ResearchJournalCheckpoint: Decodable, Identifiable {
         case carrierHash = "carrier_hash"
         case narrativeHash = "narrative_hash"
         case sectionHash = "section_hash"
+        case graphRef = "graph_ref"
+        case instanceRef = "instance_ref"
+        case branchRef = "branch_ref"
         case lineageStatus = "lineage_status"
+        case lineageRelation = "lineage_relation"
         case predecessorCheckpointRef = "predecessor_checkpoint_ref"
+        case sourceBranchRef = "source_branch_ref"
         case sections
     }
 }
@@ -52,6 +66,8 @@ struct ResearchJournalSection: Decodable, Identifiable {
     let links: [ResearchJournalLink]
     let checkpointRef: String
     let createdAt: Double
+    let graphRef: String
+    let branchRef: String
 
     var id: String { "\(checkpointRef)|\(sectionID)" }
 
@@ -72,6 +88,8 @@ struct ResearchJournalSection: Decodable, Identifiable {
         links = try container.decode([ResearchJournalLink].self, forKey: .links)
         checkpointRef = ""
         createdAt = 0
+        graphRef = ""
+        branchRef = ""
     }
 
     init(
@@ -81,7 +99,9 @@ struct ResearchJournalSection: Decodable, Identifiable {
         blocks: [ResearchJournalBlock],
         links: [ResearchJournalLink],
         checkpointRef: String,
-        createdAt: Double
+        createdAt: Double,
+        graphRef: String = "",
+        branchRef: String = ""
     ) {
         self.sectionID = sectionID
         self.title = title
@@ -90,6 +110,8 @@ struct ResearchJournalSection: Decodable, Identifiable {
         self.links = links
         self.checkpointRef = checkpointRef
         self.createdAt = createdAt
+        self.graphRef = graphRef
+        self.branchRef = branchRef
     }
 
     func bound(to checkpoint: ResearchJournalCheckpoint) -> Self {
@@ -100,7 +122,9 @@ struct ResearchJournalSection: Decodable, Identifiable {
             blocks: blocks,
             links: links,
             checkpointRef: checkpoint.checkpointRef,
-            createdAt: checkpoint.createdAt
+            createdAt: checkpoint.createdAt,
+            graphRef: checkpoint.graphRef,
+            branchRef: checkpoint.branchRef
         )
     }
 }
@@ -340,7 +364,8 @@ enum ResearchJournalLoader {
     }
 
     private static func validate(_ value: ResearchJournalDocument) throws {
-        guard value.schemaVersion == 3,
+        guard value.schemaVersion == 4,
+              value.journalKind == "work_package",
               value.historyStatus == "complete",
               !value.checkpoints.isEmpty,
               value.rootCheckpointRef
@@ -348,7 +373,8 @@ enum ResearchJournalLoader {
             throw ResearchJournalError.historyIncomplete
         }
         guard value.language == "zh-Hans",
-              !value.branchID.isEmpty,
+              !value.workPackageID.isEmpty,
+              !value.branchRefs.isEmpty,
               value.checkpoints.count <= maximumCheckpoints else {
             throw ResearchJournalError.invalidContract
         }
@@ -362,6 +388,10 @@ enum ResearchJournalLoader {
                   isSHA256(checkpoint.carrierHash),
                   isSHA256(checkpoint.narrativeHash),
                   isSHA256(checkpoint.sectionHash),
+                  checkpoint.graphRef.contains("@v"),
+                  checkpoint.instanceRef.hasPrefix("graph-instance:"),
+                  checkpoint.branchRef.hasPrefix("graph-branch:"),
+                  value.branchRefs.contains(checkpoint.branchRef),
                   !checkpoint.sections.isEmpty,
                   checkpoint.sections.count <= 8 else {
                 throw ResearchJournalError.invalidContract
@@ -373,9 +403,26 @@ enum ResearchJournalLoader {
                       checkpoint.createdAt >= previousCheckpoint.createdAt else {
                     throw ResearchJournalError.historyIncomplete
                 }
+                let crossedBranch = checkpoint.branchRef
+                    != previousCheckpoint.branchRef
+                if crossedBranch {
+                    guard ["branch_fork", "graph_continuation"].contains(
+                        checkpoint.lineageRelation
+                    ), checkpoint.sourceBranchRef
+                        == previousCheckpoint.branchRef else {
+                        throw ResearchJournalError.historyIncomplete
+                    }
+                } else {
+                    guard checkpoint.lineageRelation == "transition",
+                          checkpoint.sourceBranchRef.isEmpty else {
+                        throw ResearchJournalError.historyIncomplete
+                    }
+                }
             } else {
                 guard checkpoint.lineageStatus == "root",
-                      checkpoint.predecessorCheckpointRef == "" else {
+                      checkpoint.lineageRelation == "root",
+                      checkpoint.predecessorCheckpointRef == "",
+                      checkpoint.sourceBranchRef.isEmpty else {
                     throw ResearchJournalError.historyIncomplete
                 }
             }

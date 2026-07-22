@@ -417,18 +417,38 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
     ] == "trace:trace-v8-1"
     assert {
         node["branch_ref"] for node in tree["nodes"]
-    } == {"graph-branch:instance-v8:branch-v8"}
+    } == {
+        "graph-branch:instance-a:branch-0000",
+        "graph-branch:instance-v7:branch-v7",
+        "graph-branch:instance-v8:branch-v8",
+    }
+    assert {node["graph_ref"] for node in tree["nodes"]} == {
+        "factor-research@v6",
+        "factor-research@v7",
+        "factor-research@v8",
+    }
     assert tree["omitted_node_count"] == 0
     assert len(tree["edges"]) == 9
     continuations = [
         edge for edge in tree["edges"] if edge["relation"] == "continuation"
     ]
     assert [
-        (edge["source_node_ref"], edge["target_node_ref"])
+        (
+            edge["source_node_ref"], edge["target_node_ref"],
+            edge["source_branch_ref"], edge["target_branch_ref"],
+        )
         for edge in continuations
     ] == [
-        ("trace:trace-000002", "trace:trace-v7"),
-        ("trace:trace-v7-4", "trace:trace-v8"),
+        (
+            "trace:trace-000002", "trace:trace-v7",
+            "graph-branch:instance-a:branch-0000",
+            "graph-branch:instance-v7:branch-v7",
+        ),
+        (
+            "trace:trace-v7-4", "trace:trace-v8",
+            "graph-branch:instance-v7:branch-v7",
+            "graph-branch:instance-v8:branch-v8",
+        ),
     ]
 
     timeline = service.list_work_package_timeline(

@@ -169,14 +169,14 @@ def publish_research_checkpoint(
         evidence_refs=snapshot["evidence_refs"],
         gaps=snapshot["gaps"],
         lineage=value["report_lineage"],
-    )
-    journal_prefix_branch_id = _journal_prefix_branch_id(
-        value["report_lineage"],
-        work_package_id=work_package_id,
-        branch_id=branch_id,
+        graph_ref=value["graph_ref"],
+        branch_ref=value["branch_ref"],
+        edge_ref=value["latest_transition"]["edge_ref"],
     )
     journal_replaced_branch_id = (
-        journal_prefix_branch_id
+        _journal_source_branch_id(
+            value["report_lineage"], branch_id=branch_id,
+        )
         if _is_graph_continuation(value["latest_transition"])
         else None
     )
@@ -184,7 +184,6 @@ def publish_research_checkpoint(
         snapshot,
         workspace_root=Path(profile["workspace_root"]),
         journal_fragment=fragment,
-        journal_prefix_branch_id=journal_prefix_branch_id,
         journal_replaced_branch_id=journal_replaced_branch_id,
     )
     if (
@@ -447,15 +446,13 @@ def _report_snapshot(
     }
 
 
-def _journal_prefix_branch_id(
-    lineage: dict[str, Any], *, work_package_id: str, branch_id: str,
+def _journal_source_branch_id(
+    lineage: dict[str, Any], *, branch_id: str,
 ) -> str | None:
-    """Return a trusted source branch for a forked report continuation.
+    """Return the physical source branch named by a lineage edge.
 
-    The source is encoded as a physical graph reference, never a local path.
-    Its instance may differ after a Graph upgrade.  The writer resolves only
-    the bounded branch identifier underneath the already-selected stable Work
-    Package root, so it cannot import files from another local package.
+    This identity is used only to retire the old current entry in the logical
+    Work Package index.  Physical fragments remain under their source branch.
     """
     source = lineage.get("source_branch_ref")
     if not source:

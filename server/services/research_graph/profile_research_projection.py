@@ -183,6 +183,8 @@ WORK_PACKAGE_DETAIL_SQL = f"""
                    'nodes', COALESCE(json_group_array(json_object(
                        'trace_id', selected.trace_id,
                        'instance_id', selected.instance_id,
+                       'graph_id', selected.graph_id,
+                       'graph_version', selected.graph_version,
                        'branch_id', selected.branch_id,
                        'hypothesis_branch_id', selected.hypothesis_branch_id,
                        'edge_id', selected.edge_id,
@@ -200,7 +202,10 @@ WORK_PACKAGE_DETAIL_SQL = f"""
                FROM (
                    SELECT ranked.*
                    FROM (
-                       SELECT t.trace_id, t.instance_id, t.branch_id,
+                       SELECT t.trace_id, t.instance_id,
+                              trace_instance.graph_id,
+                              trace_instance.graph_version,
+                              t.branch_id,
                               COALESCE(
                                   NULLIF(branch.hypothesis_branch_id, ''),
                                   branch.branch_id
@@ -1114,14 +1119,21 @@ def _tree_projection(
             last_rank = int(raw.get("last_rank"))
         except (TypeError, ValueError):
             continue
-        head = branch_by_hypothesis[hypothesis_branch_id]
         branch_ref = research_ref_for(
-            str(head["instance_id"]), str(head["branch_id"])
+            str(raw.get("instance_id") or ""), branch_id
         )
+        graph_id = _safe_identifier(raw.get("graph_id"))
+        try:
+            graph_version = int(raw.get("graph_version"))
+        except (TypeError, ValueError):
+            continue
+        if not graph_id or graph_version < 1:
+            continue
         trace_ref = f"trace:{trace_id}"
         node = {
             "checkpoint_ref": trace_ref,
             "branch_ref": branch_ref,
+            "graph_ref": f"{graph_id}@v{graph_version}",
             "edge_ref": edge_id,
             "from_node": str(raw.get("from_node") or ""),
             "to_node": str(raw.get("to_node") or ""),

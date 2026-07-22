@@ -20,6 +20,7 @@ from .journal import (
     fragment_payload as _fragment_payload,
     journal_payload as _journal_payload,
     load_fragments as _load_fragments,
+    logical_lineage as _logical_lineage,
     merge_fragment as _merge_fragment,
 )
 from .markdown import MarkdownReportTarget
@@ -75,7 +76,6 @@ def render_branch_report(
     workspace_root: Path,
     target: ReportTarget | None = None,
     journal_fragment: dict[str, Any] | None = None,
-    journal_prefix_branch_id: str | None = None,
     journal_replaced_branch_id: str | None = None,
 ) -> dict[str, Any]:
     """Update one branch and its Work Package generation under one lock."""
@@ -95,37 +95,26 @@ def render_branch_report(
 
     with _work_package_lock(package_root):
         fragment_targets = []
-        prefix_targets: list[tuple[str, Path, bytes]] = []
-        journal_path = branch_path.parent / "JOURNAL.json"
+        physical_journal_path = branch_path.parent / "JOURNAL.json"
+        logical_journal_path = branch_path.parent / "LOGICAL_JOURNAL.json"
         if journal_fragment is not None:
             target_sections_path = branch_path.parent / "sections"
             existing_fragments = _load_fragments(target_sections_path)
-            prefix_fragments: list[dict[str, Any]] = []
-            if journal_prefix_branch_id and not existing_fragments:
-                source_sections_path = (
-                    package_root / "branches" / journal_prefix_branch_id
-                    / "sections"
-                )
-                prefix_fragments = _load_fragments(source_sections_path)
-                if not prefix_fragments:
-                    raise ValueError(
-                        "fork report continuation requires a trusted source journal"
-                    )
-                target_sections_path.mkdir(parents=True, exist_ok=True)
-                prefix_targets = [
-                    (
-                        "journal_prefix_fragment",
-                        target_sections_path / f"{item['section_hash']}.json",
-                        _fragment_payload(item),
-                    )
-                    for item in prefix_fragments
-                ]
             fragments, fragment_changed = _merge_fragment(
-                [*prefix_fragments, *existing_fragments],
+                existing_fragments,
                 journal_fragment,
             )
+            all_fragments = _work_package_fragments(
+                package_root,
+                current_branch_id=canonical["branch_id"],
+                current_fragments=fragments,
+            )
+            logical_fragments = _logical_lineage(
+                all_fragments,
+                checkpoint_ref=journal_fragment["checkpoint_ref"],
+            )
             rendered_snapshot = canonical_report_snapshot(
-                _assemble_snapshot(canonical, fragments)
+                _assemble_snapshot(canonical, logical_fragments)
             )
             fragment_path = (
                 branch_path.parent / "sections"
@@ -137,13 +126,21 @@ def render_branch_report(
                     fragment_path,
                     _fragment_payload(journal_fragment),
                 ))
-            journal_bytes = _journal_payload(
-                branch_id=canonical["branch_id"], fragments=fragments,
+            physical_journal_bytes = _journal_payload(
+                work_package_id=canonical["work_package_id"],
+                journal_kind="physical_branch",
+                fragments=fragments,
+            )
+            logical_journal_bytes = _journal_payload(
+                work_package_id=canonical["work_package_id"],
+                journal_kind="work_package",
+                fragments=logical_fragments,
             )
         else:
             fragments = []
             rendered_snapshot = canonical
-            journal_bytes = None
+            physical_journal_bytes = None
+            logical_journal_bytes = None
         branch_payload = renderer.render(rendered_snapshot)
         content_hash = hashlib.sha256(branch_payload).hexdigest()
         existing_index = _load_index(index_path, canonical)
@@ -176,9 +173,13 @@ def render_branch_report(
             ("work_package_report", aggregate_path, aggregate_payload),
             ("index", index_path, index_payload),
         ]
-        if journal_bytes is not None:
-            targets.append(("journal", journal_path, journal_bytes))
-        targets.extend(prefix_targets)
+        if physical_journal_bytes is not None:
+            targets.extend([
+                ("physical_journal", physical_journal_path,
+                 physical_journal_bytes),
+                ("logical_journal", logical_journal_path,
+                 logical_journal_bytes),
+            ])
         targets.extend(fragment_targets)
         changed = _publish_generation(targets)
 
@@ -189,10 +190,12 @@ def render_branch_report(
         content_hash=content_hash,
         branch_id=canonical["branch_id"],
         index=index,
-        journal_path=journal_path if journal_fragment is not None else None,
+        journal_path=(
+            logical_journal_path if journal_fragment is not None else None
+        ),
         journal_hash=(
-            hashlib.sha256(journal_bytes).hexdigest()
-            if journal_bytes is not None else None
+            hashlib.sha256(logical_journal_bytes).hexdigest()
+            if logical_journal_bytes is not None else None
         ),
     )
     return {
@@ -208,11 +211,29 @@ def render_branch_report(
         "assets_path": assets_path,
         "artifact_refs": refs,
         "local_artifact_descriptor": descriptor,
-        "journal_path": journal_path if journal_fragment is not None else None,
+        "journal_path": (
+            logical_journal_path if journal_fragment is not None else None
+        ),
         "journal_fragment_changed": (
             fragment_changed if journal_fragment is not None else False
         ),
     }
+
+
+def _work_package_fragments(
+    package_root: Path, *, current_branch_id: str,
+    current_fragments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Load immutable physical fragments without copying them across branches."""
+    result = list(current_fragments)
+    branches_root = package_root / "branches"
+    if not branches_root.exists():
+        return result
+    for branch_root in sorted(branches_root.iterdir()):
+        if not branch_root.is_dir() or branch_root.name == current_branch_id:
+            continue
+        result.extend(_load_fragments(branch_root / "sections"))
+    return result
 
 
 def _artifact_refs(

@@ -500,7 +500,9 @@ struct ResearchVersionTreePane: View {
                 id: "checkpoint|\(node.nodeRef)",
                 checkpointRef: node.checkpointRef,
                 title: ResearchDisplayText.node(node.toNode),
-                subtitle: compactDate(node.createdAt),
+                subtitle: [node.graphRef, compactDate(node.createdAt)]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " · "),
                 timestamp: node.createdAt,
                 lane: lane(for: node.branchRef),
                 status: node.status,
