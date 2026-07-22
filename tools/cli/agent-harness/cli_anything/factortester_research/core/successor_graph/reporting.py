@@ -52,7 +52,6 @@ def build_report_requirements(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             subject_kind="verification_obligation",
         ))
     for node_id in NODE_SPECS:
-        binding = NODE_REQUIREMENTS[node_id][0]
         reports.extend([
             _report(
                 f"report.node.{node_id}.entry",
@@ -60,7 +59,7 @@ def build_report_requirements(catalog: dict[str, Any]) -> list[dict[str, Any]]:
                 node_id,
                 "inventory",
                 f"进入「{node_id}」时逐项检查适用义务与复用证据",
-                requirement_ref=binding,
+                coordination_ref="entry_requirement_assessment",
                 subject_kind="entry_resolution_frame",
             ),
             _report(
@@ -69,7 +68,7 @@ def build_report_requirements(catalog: dict[str, Any]) -> list[dict[str, Any]]:
                 node_id,
                 _node_method(node_id),
                 f"报告「{node_id}」本阶段实际完成的研究事项",
-                requirement_ref=binding,
+                coordination_ref="node_research_outcome",
                 subject_kind="current_research_scope",
             ),
         ])

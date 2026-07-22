@@ -82,6 +82,17 @@ def test_successor_graph_reports_every_node_edge_and_system_gate() -> None:
         "report.system.node_reentry",
         "report.system.evidence_admission",
     } <= report_ids
+    node_reports = [
+        item for item in graph["report_requirements"]
+        if item["report_requirement_id"].startswith("report.node.")
+    ]
+    assert all("requirement_ref" not in item for item in node_reports)
+    assert all(item.get("coordination_ref") for item in node_reports)
+    requirement_reports = [
+        item for item in graph["report_requirements"]
+        if item["report_requirement_id"].startswith("report.requirement.")
+    ]
+    assert all(item.get("requirement_ref") for item in requirement_reports)
 
 
 def test_successor_graph_keeps_only_semantic_obligation_categories() -> None:
