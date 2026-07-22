@@ -65,6 +65,26 @@ economically coherent parameterized alternative. Do not create an obligation
 for every fixed column. Create one only when the alternative is material,
 falsifiable, and could change construction, TrialPlan, scope, or permitted use.
 
+Before leaving `factor_semantics`, produce a compact Chinese semantics report
+fragment. Include the exact authorized expression as LaTeX, explain each
+material term and its economic and timing meaning, and state the semantic gap
+that motivated any parameterization, revision, or derived family. For every
+new expression, include its LaTeX, the structural change, expected mechanism,
+and the parts that remain hypotheses rather than evidence. Link each material
+change to the new or changed comparison obligation that can test whether the
+observed effect matches the expectation. Prefer short lists and a comparison
+table over long prose. This fragment is a narrative projection, not an
+`EvidenceEnvelope`; retain source, expression-tree, and hash details behind
+references. If exact LaTeX is unavailable, record a visibility gap instead of
+reconstructing the formula from a name or result.
+
+Code may be implemented before its mechanism or effectiveness is established.
+Treat that implementation only as a versioned candidate artifact. A derived
+interaction that is not a strict parameter-point generalization remains a
+separate comparator: keep the parent as the research focus unless an accepted
+decision transfers focus, and open a paired incremental-comparison obligation
+under matched sample, timing, cost, and trial-ledger semantics.
+
 When a derived family strictly generalizes its parent, create a migration
 obligation that tests structural and numerical equivalence at the parent
 parameter point under identical data, timing, cost, and product scope. Preserve
