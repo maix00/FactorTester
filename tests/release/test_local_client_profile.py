@@ -152,10 +152,10 @@ def test_graph_upgrade_retargets_one_stable_work_package_record(
     assert record["evidence_refs"] == ["evidence:v6", "evidence:v7"]
     artifact = record["artifacts"][0]
     assert artifact["artifact_ref"].startswith(
-        "artifact:research/sgccs-work-package/"
+        "artifact:research/physical-v7/"
     )
-    assert "/research/sgccs-work-package/" in artifact["local_ref"]
-    assert "/research/physical-v7/" not in artifact["journal_ref"]
+    assert "/research/physical-v7/" in artifact["local_ref"]
+    assert "/research/physical-v7/" in artifact["journal_ref"]
 
     repeated = store.retarget_research_incarnation(
         "maxa",
