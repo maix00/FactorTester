@@ -23,6 +23,8 @@ def render_rows(field: str, rows: list[Mapping[str, Any]], *, indent: str) -> li
                and "type" in row.get("after", row.get("value")) for row in rows):
             return None
         return _signal_summary(rows, indent=indent)
+    if field.endswith(".target_weights") and _map_item_count(rows) > 20:
+        return _weight_summary(rows, indent=indent)
     if field.endswith((".raw_deltas", ".sized_deltas", ".deltas")):
         return _delta_summary(rows, indent=indent)
     result = []
@@ -45,6 +47,31 @@ def render_rows(field: str, rows: list[Mapping[str, Any]], *, indent: str) -> li
             dim=True,
         ))
     return lines
+
+
+def _map_item_count(rows: list[Mapping[str, Any]]) -> int:
+    return sum(len(value) for row in rows if isinstance((value := row.get("after", row.get("value"))), Mapping))
+
+
+def _weight_summary(rows: list[Mapping[str, Any]], *, indent: str) -> list[str] | None:
+    result = []
+    for row in rows:
+        value = row.get("after", row.get("value"))
+        if not isinstance(value, Mapping) or not all(isinstance(item, (int, float)) for item in value.values()):
+            return None
+        long = [str(key) for key, item in value.items() if item > 0]
+        short = [str(key) for key, item in value.items() if item < 0]
+        result.append({
+            "owner": str(row.get("strategy") or route_label(row)),
+            "long": len(long), "short": len(short),
+            "gross": sum(abs(float(item)) for item in value.values()),
+            "net": sum(float(item) for item in value.values()),
+            "sample_long": long[:2], "sample_short": short[:2],
+        })
+    return [
+        *table_from_mappings(result, indent=indent),
+        click.style(f"{indent}逐品种目标权重请使用 job step-field 查看。", dim=True),
+    ]
 
 
 def _delta_summary(rows: list[Mapping[str, Any]], *, indent: str) -> list[str] | None:

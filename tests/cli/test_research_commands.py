@@ -531,6 +531,25 @@ def test_trade_intent_summarizes_weights_without_repeating_map() -> None:
     assert "AP.CZC" not in output and "target_weights" in output
 
 
+def test_large_target_weight_map_keeps_directional_summary_and_samples() -> None:
+    from tools.cli.step import render_step_event
+
+    changes = []
+    for strategy in ("A1", "A2"):
+        weights = {f"L{i}.{strategy}": 0.05 for i in range(6)}
+        weights.update({f"S{i}.{strategy}": -0.05 for i in range(6)})
+        changes.append({
+            "field": "TargetStrategyModule.target_weights", "strategy": strategy,
+            "before": None, "after": weights,
+        })
+    output = "\n".join(render_step_event({
+        "flow_id": "targets", "inputs": [], "outputs": [], "output_changes": changes,
+    }))
+    assert "long" in output and "short" in output and "gross" in output and "net" in output
+    assert "L0.A1" in output and "S0.A2" in output
+    assert "L5.A1" not in output and "逐品种目标权重" in output
+
+
 def test_empty_dmtm_payload_is_not_rendered() -> None:
     from tools.cli.step import render_step_event
 
