@@ -18,23 +18,18 @@ def project_node_entry_resolution(
     target_node: str,
     checkpoint: dict[str, Any] | None,
     scope: dict[str, str],
-    accepted_assessments: list[dict[str, Any]],
-    assessment_trace_ref: str,
 ) -> dict[str, Any]:
     """Build the next node frame, reusing only unchanged accepted inputs."""
-    value = record_assessment_receipts(
-        previous_frame=previous_frame,
-        graph=graph,
-        checkpoint=checkpoint,
-        scope=scope,
-        accepted_assessments=accepted_assessments,
-        assessment_trace_ref=assessment_trace_ref,
-    )
+    value = previous_frame
     catalog = requirement_map(graph)
     receipts = {
-        str(item.get("requirement_id") or ""): item
+        (
+            str(item.get("entry_node") or ""),
+            str(item.get("requirement_id") or ""),
+        ): item
         for item in value.get("assessment_receipts") or []
-        if isinstance(item, dict) and item.get("requirement_id")
+        if isinstance(item, dict)
+        and item.get("entry_node") and item.get("requirement_id")
     }
 
     target = next(
@@ -52,7 +47,7 @@ def project_node_entry_resolution(
     reused = [
         requirement_id for requirement_id in declared
         if _receipt_matches(
-            receipt=receipts.get(requirement_id),
+            receipt=receipts.get((target_node, requirement_id)),
             requirement=catalog.get(requirement_id),
             checkpoint=checkpoint,
             scope=scope,
@@ -64,7 +59,7 @@ def project_node_entry_resolution(
     ]
     reference_only = [
         requirement_id for requirement_id in unresolved
-        if requirement_id in receipts
+        if (target_node, requirement_id) in receipts
     ]
     return {
         "schema_version": 1,
@@ -76,7 +71,8 @@ def project_node_entry_resolution(
         "reused_requirement_ids": reused,
         "reference_only_requirement_ids": reference_only,
         "assessment_receipts": sorted(
-            receipts.values(), key=lambda item: item["requirement_id"]
+            receipts.values(),
+            key=lambda item: (item["entry_node"], item["requirement_id"]),
         ),
     }
 
@@ -84,15 +80,20 @@ def project_node_entry_resolution(
 def record_assessment_receipts(
     *, previous_frame: dict[str, Any], graph: dict[str, Any],
     checkpoint: dict[str, Any] | None, scope: dict[str, str],
+    entry_node: str,
     accepted_assessments: list[dict[str, Any]], assessment_trace_ref: str,
 ) -> dict[str, Any]:
     """Attach compact accepted decisions without changing the resume node."""
     value = deepcopy(previous_frame)
     catalog = requirement_map(graph)
     receipts = {
-        str(item.get("requirement_id") or ""): item
+        (
+            str(item.get("entry_node") or ""),
+            str(item.get("requirement_id") or ""),
+        ): item
         for item in value.get("assessment_receipts") or []
-        if isinstance(item, dict) and item.get("requirement_id")
+        if isinstance(item, dict)
+        and item.get("entry_node") and item.get("requirement_id")
     }
     for assessment in accepted_assessments:
         receipt = _receipt_from_assessment(
@@ -103,11 +104,13 @@ def record_assessment_receipts(
             checkpoint=checkpoint,
             scope=scope,
             trace_ref=assessment_trace_ref,
+            entry_node=entry_node,
         )
         if receipt is not None:
-            receipts[receipt["requirement_id"]] = receipt
+            receipts[(entry_node, receipt["requirement_id"])] = receipt
     value["assessment_receipts"] = sorted(
-        receipts.values(), key=lambda item: item["requirement_id"]
+        receipts.values(),
+        key=lambda item: (item["entry_node"], item["requirement_id"]),
     )
     return value
 
@@ -115,6 +118,7 @@ def record_assessment_receipts(
 def _receipt_from_assessment(
     *, assessment: dict[str, Any], requirement: dict[str, Any] | None,
     checkpoint: dict[str, Any] | None, scope: dict[str, str], trace_ref: str,
+    entry_node: str,
 ) -> dict[str, Any] | None:
     effect = assessment.get("entry_effect") or {}
     status = str(effect.get("status") or "")
@@ -125,6 +129,7 @@ def _receipt_from_assessment(
     applicability = assessment.get("applicability") or {}
     resolution = assessment.get("resolution") or {}
     receipt = {
+        "entry_node": entry_node,
         "requirement_id": requirement_id,
         "requirement_revision": int(requirement.get("revision") or 0),
         "semantic_hash": str(requirement.get("semantic_hash") or ""),
@@ -179,6 +184,7 @@ def _input_hash(
     ]
     return _hash({
         "requirement_id": receipt.get("requirement_id"),
+        "entry_node": receipt.get("entry_node"),
         "requirement_revision": receipt.get("requirement_revision"),
         "semantic_hash": receipt.get("semantic_hash"),
         "scope": scope,

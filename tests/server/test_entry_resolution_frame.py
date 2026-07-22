@@ -7,6 +7,7 @@ from server.services.research_graph.branch.entry_resolution_frame import (
 )
 from server.services.research_graph.branch.entry_assessment_receipts import (
     project_node_entry_resolution,
+    record_assessment_receipts,
 )
 
 
@@ -91,19 +92,32 @@ def test_exact_receipt_avoids_repeating_an_unchanged_requirement() -> None:
     }
     scope = {"product_group": "CNFutures", "workspace_id": "workspace-1"}
 
-    frame = project_node_entry_resolution(
+    receipts = record_assessment_receipts(
         previous_frame={},
+        graph=graph,
+        checkpoint=checkpoint,
+        scope=scope,
+        entry_node="a",
+        accepted_assessments=[assessment],
+        assessment_trace_ref="trace:1",
+    )
+    first_b_entry = project_node_entry_resolution(
+        previous_frame=receipts,
         graph=graph,
         target_node="b",
         checkpoint=checkpoint,
         scope=scope,
-        accepted_assessments=[assessment],
-        assessment_trace_ref="trace:1",
     )
-
+    assert first_b_entry["unresolved_requirement_ids"] == [requirement_id]
+    frame = project_node_entry_resolution(
+        previous_frame=receipts,
+        graph=graph,
+        target_node="a",
+        checkpoint=checkpoint,
+        scope=scope,
+    )
     assert frame["status"] == "resolved"
     assert frame["reused_requirement_ids"] == [requirement_id]
-    assert frame["unresolved_requirement_ids"] == []
     changed_checkpoint = {**checkpoint, "obligations": [{
         **obligation,
         "status": "reopened",
@@ -111,11 +125,9 @@ def test_exact_receipt_avoids_repeating_an_unchanged_requirement() -> None:
     reopened = project_node_entry_resolution(
         previous_frame=frame,
         graph=graph,
-        target_node="b",
+        target_node="a",
         checkpoint=changed_checkpoint,
         scope=scope,
-        accepted_assessments=[],
-        assessment_trace_ref="trace:2",
     )
     assert reopened["unresolved_requirement_ids"] == [requirement_id]
     assert reopened["reference_only_requirement_ids"] == [requirement_id]

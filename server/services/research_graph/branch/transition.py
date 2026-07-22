@@ -433,6 +433,7 @@ def advance_graph_branch(
             graph=graph,
             checkpoint=cycle_checkpoint,
             scope=entry_scope,
+            entry_node=branch["current_node"],
             accepted_assessments=entry_assessments,
             assessment_trace_ref=f"trace:{trace_id}",
         )
@@ -445,8 +446,6 @@ def advance_graph_branch(
                 target_node=target_id,
                 checkpoint=cycle_checkpoint,
                 scope=entry_scope,
-                accepted_assessments=[],
-                assessment_trace_ref=f"trace:{trace_id}",
             )
         trace_evidence = deepcopy(persisted_evidence)
         trace_evidence["entry_resolution_delta"] = (

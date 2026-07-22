@@ -263,9 +263,7 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
     graph["nodes"][0]["entry_requirement_refs"] = [
         "data-availability.scope"
     ]
-    graph["nodes"][1]["entry_requirement_refs"] = [
-        "data-availability.scope"
-    ]
+    graph["nodes"][1]["entry_requirement_refs"] = []
     graph["nodes"][2]["entry_requirement_refs"] = []
     graph["edges"].append({
         "edge_id": "factor_semantics__data_contract",
@@ -344,16 +342,14 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
     assert trace["entry_resolution_delta"]["assessed_requirement_ids"] == [
         "data-availability.scope"
     ]
-    assert trace["entry_resolution_delta"]["reused_requirement_ids"] == [
-        "data-availability.scope"
-    ]
+    assert trace["entry_resolution_delta"]["reused_requirement_ids"] == []
     packet = research_graphs.build_graph_branch_next(
         instance_id="instance-1",
         branch_id="branch-1",
         owner="alice",
     )
     assert packet["entry_requirements"] == []
-    assert packet["entry_resolution"]["reused_requirement_count"] == 1
+    assert packet["entry_resolution"]["reused_requirement_count"] == 0
     advance_graph_branch(
         instance_id="instance-1",
         branch_id="branch-1",
