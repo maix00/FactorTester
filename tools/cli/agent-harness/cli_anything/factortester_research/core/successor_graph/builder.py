@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..capabilities import capability_descriptor, load_builtin_capability_registry
+from ..draft_graph_cycle import maintenance_operations, research_cycle_operations
 from ..graph_protocol import graph_content_hash, validate_graph
 from .catalog import (
     build_requirement_catalog,
@@ -21,6 +23,18 @@ from .sources import build_industry_basis_catalog
 def build_successor_graph() -> dict[str, Any]:
     """Return the validated v9 candidate without activating it."""
     catalog = build_requirement_catalog()
+    cycle_operations = research_cycle_operations()
+    maintenance = maintenance_operations()
+    capability_descriptors = resolver_capability_descriptors()
+    registry = {
+        str(item["capability_id"]): item
+        for item in load_builtin_capability_registry()["capabilities"]
+    }
+    for item in [*cycle_operations, *maintenance]:
+        capability_id = str(item["capability_id"])
+        capability_descriptors[capability_id] = capability_descriptor(
+            registry[capability_id]
+        )
     graph = {
         "schema_version": 2,
         "graph_id": "factor-research",
@@ -31,14 +45,14 @@ def build_successor_graph() -> dict[str, Any]:
         "entry_node": "hypothesis_preregistration",
         "nodes": build_nodes(),
         "edges": build_edges(),
-        "research_cycle_operations": [],
-        "maintenance_operations": [],
+        "research_cycle_operations": cycle_operations,
+        "maintenance_operations": maintenance,
         "review_policy": {
             "routine": "deterministic gates and one primary Research Agent",
             "semantic_change": "one domain reviewer when evidence conflicts",
             "graph_or_skill_change": "grill-with-docs and human audit",
         },
-        "capability_descriptors": resolver_capability_descriptors(),
+        "capability_descriptors": capability_descriptors,
         "change_manifest": _change_manifest(),
         "requirement_catalog": catalog,
         "industry_basis_catalog": build_industry_basis_catalog(),

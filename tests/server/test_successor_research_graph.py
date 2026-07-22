@@ -37,6 +37,21 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
         set(item["industry_basis_refs"]) <= source_refs
         for item in first["requirement_catalog"]["requirements"]
     )
+    operations = {
+        item["capability_id"]
+        for item in [
+            *first["research_cycle_operations"],
+            *first["maintenance_operations"],
+        ]
+    }
+    assert {
+        "research-obligation.discover",
+        "research-trial.synthesize",
+        "research-evidence.adjudicate",
+        "research-exhaustion.assess",
+        "research-methodology.impact",
+    } == operations
+    assert operations <= set(first["capability_descriptors"])
 
 
 def test_successor_graph_removes_fixed_method_states() -> None:

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..draft_graph_cycle import (
+    node_conditional_operations,
+    node_required_operations,
+)
+
 
 NODE_SPECS = {
     "hypothesis_preregistration": (
@@ -157,13 +162,15 @@ EDGE_TYPES = {
 
 
 def build_nodes() -> list[dict[str, Any]]:
+    required_operations = node_required_operations()
+    conditional_operations = node_conditional_operations()
     return [
         {
             "node_id": node_id,
             "purpose": purpose,
             "enforcement": "deterministic",
-            "required_capabilities": [],
-            "conditional_capabilities": [],
+            "required_capabilities": required_operations.get(node_id, []),
+            "conditional_capabilities": conditional_operations.get(node_id, []),
             "entry_requirement_refs": NODE_REQUIREMENTS[node_id],
             "entry_report_refs": [f"report.node.{node_id}.entry"],
             "node_report_refs": [f"report.node.{node_id}.action"],
