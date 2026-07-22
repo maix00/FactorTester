@@ -32,6 +32,7 @@ from flask import session
 from tools.factors.FactorFamily import FactorFamily
 from tools.data.account_manage import can_view_user_scope
 from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source, public_factor_path
+from tools.data.sqlite.db import connect_sqlite
 
 if TYPE_CHECKING:
     from tools.factors.Factors import Factor
@@ -167,7 +168,7 @@ def _is_registered_shared_factor(
 ) -> bool:
     """Return whether an owner explicitly registered a factor for research."""
     try:
-        with sqlite3.connect(Settings.CACHE_DB_PATH, timeout=5.0) as conn:
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
             row = conn.execute(
                 """
                 SELECT 1 FROM account_factor_param_configs
@@ -389,13 +390,11 @@ def _load_chinese_names_from_sqlite() -> dict[str, str]:
     if not os.path.isfile(db_path):
         return result
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT factor_id, chinese_name FROM factor_family_catalog "
-            "WHERE source_kind='public' AND load_error=0"
-        ).fetchall()
-        conn.close()
+        with connect_sqlite(db_path) as conn:
+            rows = conn.execute(
+                "SELECT factor_id, chinese_name FROM factor_family_catalog "
+                "WHERE source_kind='public' AND load_error=0"
+            ).fetchall()
         for row in rows:
             name = row["factor_id"] or ""
             cn = row["chinese_name"] or ""

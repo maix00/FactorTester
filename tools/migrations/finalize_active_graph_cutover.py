@@ -347,12 +347,12 @@ def _needs_backend_assurance_cutover(
 
 def _backup_database(source: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(source) as src, sqlite3.connect(target) as dst:
+    with connect_sqlite(source) as src, connect_sqlite(target) as dst:
         src.backup(dst)
 
 
 def _restore_database(source: Path, target: Path) -> None:
-    with sqlite3.connect(source) as src, sqlite3.connect(target) as dst:
+    with connect_sqlite(source) as src, connect_sqlite(target) as dst:
         src.backup(dst)
 
 

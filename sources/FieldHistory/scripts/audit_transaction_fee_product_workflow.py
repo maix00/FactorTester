@@ -26,6 +26,7 @@ from tools.data.field_history import _ensure_store_registered
 from tools.data.field_history_agent_ingest import AGENT_EVENT_TABLE
 from tools.data.field_history_agent_ingest import audit_agent_event_previous_values
 from tools.data.hub import DataHub
+from tools.data.sqlite.db import connect_sqlite
 
 from sources.FieldHistory.scripts.audit_transaction_fee_announcement_alignment import (
     FEE_FIELDS,
@@ -92,8 +93,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _load_history(db: Path, *, instrument: str) -> list[dict[str, Any]]:
-    with sqlite3.connect(db) as conn:
-        conn.row_factory = sqlite3.Row
+    with connect_sqlite(db) as conn:
         return [
             dict(row)
             for row in conn.execute(
@@ -128,8 +128,7 @@ def _normalise_exchange(value: str) -> str:
 
 
 def _load_related_history(db: Path, *, instrument: str, exchange: str) -> list[dict[str, Any]]:
-    with sqlite3.connect(db) as conn:
-        conn.row_factory = sqlite3.Row
+    with connect_sqlite(db) as conn:
         return [
             dict(row)
             for row in conn.execute(
@@ -157,8 +156,7 @@ def _load_related_history(db: Path, *, instrument: str, exchange: str) -> list[d
 
 
 def _load_events(db: Path, *, instrument: str, data_source: str) -> list[dict[str, Any]]:
-    with sqlite3.connect(db) as conn:
-        conn.row_factory = sqlite3.Row
+    with connect_sqlite(db) as conn:
         rows = conn.execute(
             """
             SELECT *

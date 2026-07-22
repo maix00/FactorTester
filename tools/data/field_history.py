@@ -30,6 +30,7 @@ from typing import Any, Protocol, cast
 import pandas as pd
 
 from tools.data.hub import DataHub
+from tools.data.sqlite.db import connect_sqlite
 from tools.data.types.time_index import DataIndex
 
 
@@ -2026,7 +2027,7 @@ def _decode_value(value: Any, value_type: Any) -> Any:
 
 
 def _load_provider_from_sqlite_path(db_path: str) -> FieldHistoryProvider:
-    with sqlite3.connect(db_path) as conn:
+    with connect_sqlite(db_path) as conn:
         try:
             frame = pd.read_sql_query(f'SELECT * FROM "{HISTORICAL_FIELD_TABLE}"', conn)
         except sqlite3.Error as exc:

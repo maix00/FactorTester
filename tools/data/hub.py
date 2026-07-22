@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from .providers.DataProvider import DataProvider, DataProviderSync
 
 from tools.data.cache.IdleResourceManager import IdleResourceManager
+from tools.data.sqlite.db import connect_sqlite
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +119,7 @@ class DataHub:
         store = self._get_sqlite_store(store_key)
         path = Path(store.path())
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(path))
-        conn.row_factory = sqlite3.Row
-        return conn
+        return connect_sqlite(path)
 
     # ── SQLite Web 接口（供 sqlite_web_mount.py 和 core.py 使用）─
 

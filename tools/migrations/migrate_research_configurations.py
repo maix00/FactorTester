@@ -9,6 +9,7 @@ from pathlib import Path
 import sqlite3
 
 import settings as Settings
+from tools.data.sqlite.db import connect_sqlite
 
 from server.services.research_configurations import (
     migrate_legacy_templates,
@@ -22,7 +23,7 @@ def backup_database(target: Path | None = None) -> Path:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         target = source_path.with_name(f"{source_path.name}.research-config-{stamp}.bak")
     target.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(source_path) as source, sqlite3.connect(target) as destination:
+    with connect_sqlite(source_path) as source, connect_sqlite(target) as destination:
         source.backup(destination)
     return target
 

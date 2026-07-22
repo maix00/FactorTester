@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.data.hub import DataHub
+from tools.data.sqlite.db import connect_sqlite
 
 
 FEE_LEGS = {
@@ -53,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     db_deleted: dict[str, int] = {}
     if args.prune_db:
         if args.sqlite_path:
-            with sqlite3.connect(Path(args.sqlite_path).expanduser()) as conn:
+            with connect_sqlite(Path(args.sqlite_path).expanduser()) as conn:
                 db_deleted = _delete_from_db(conn, removable)
                 if args.prune_stale_db:
                     _add_deleted_counts(db_deleted, _delete_stale_db_events(conn, _current_event_ids(file_rows)))
