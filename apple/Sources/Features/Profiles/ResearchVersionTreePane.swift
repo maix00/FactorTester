@@ -8,12 +8,25 @@ enum ResearchTreeLayout {
     static let selectedNodeDiameter: CGFloat = 17
     static let horizontalPadding: CGFloat = 8
     static let rowSpacing: CGFloat = 8
-    static let maximumLaneFootprint = laneOriginX
-        + CGFloat(maximumVisibleBranches - 1) * laneSpacing
-        + selectedNodeDiameter
-    static let graphColumnWidth = maximumLaneFootprint
-    static let minimumLabelWidth = navigatorWidth
-        - horizontalPadding * 2 - graphColumnWidth - rowSpacing
+    static let maximumLaneFootprint = graphColumnWidth(
+        laneCount: maximumVisibleBranches
+    )
+
+    static func graphColumnWidth(laneCount: Int) -> CGFloat {
+        let boundedCount = min(max(laneCount, 1), maximumVisibleBranches)
+        let lastLane = boundedCount - 1
+        return ceil(
+            markerBounds(
+                lane: lastLane,
+                diameter: selectedNodeDiameter
+            ).upperBound
+        )
+    }
+
+    static func minimumLabelWidth(laneCount: Int) -> CGFloat {
+        navigatorWidth - horizontalPadding * 2
+            - graphColumnWidth(laneCount: laneCount) - rowSpacing
+    }
 
     static func laneCenterX(_ lane: Int) -> CGFloat {
         laneOriginX + CGFloat(lane) * laneSpacing
@@ -277,7 +290,9 @@ struct ResearchVersionTreePane: View {
                     ).lowerBound
                 )
                 .frame(
-                    width: ResearchTreeLayout.graphColumnWidth,
+                    width: ResearchTreeLayout.graphColumnWidth(
+                        laneCount: laneCount
+                    ),
                     height: rowHeight,
                     alignment: .leading
                 )

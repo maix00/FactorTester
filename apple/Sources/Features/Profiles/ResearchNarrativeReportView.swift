@@ -14,6 +14,7 @@ struct ResearchNarrativeReportView: View {
     let loadAuditObject: (String) async throws -> ResearchAuditObjectPayload
 
     @State private var sections: [ResearchJournalSection] = []
+    @State private var obligationAliases: [String: String] = [:]
     @State private var reportError: String?
     @State private var selectedCheckpointRef = ""
     @State private var selectedAudit: ResearchAuditSelection?
@@ -422,19 +423,27 @@ struct ResearchNarrativeReportView: View {
     private func obligationRows(
         in section: ResearchJournalSection
     ) -> [ResearchObligationTableRow] {
-        let changes = steps.first {
+        let step = steps.first {
             $0.stepRef == section.checkpointRef
-        }?.obligationChanges ?? []
+        }
         return ResearchJournalPresentation.obligationRows(
             links: section.links,
+            checkpointObligationRefs: step?.obligationRefs,
+            aliases: obligationAliases,
             obligations: detail.researchCycle.obligations,
-            changes: changes
+            changes: step?.obligationChanges ?? [],
+            statusOverrides: ResearchJournalPresentation.obligationStatuses(
+                at: section.checkpointRef,
+                steps: orderedSteps,
+                currentObligations: detail.researchCycle.obligations
+            )
         )
     }
 
     private func loadReport() async {
         guard let artifact, !artifact.journalRef.isEmpty else {
             sections = []
+            obligationAliases = [:]
             reportError = "报告未按新协议完成，需重做：本地记录缺少 JOURNAL.json，没有经过校验的中文 journal。请让对应 research Agent 从可信 root 重新提交该分支的 checkpoint；客户端不会用旧 REPORT.md 或 INDEX.json 冒充完整报告。"
             return
         }
@@ -442,13 +451,17 @@ struct ResearchNarrativeReportView: View {
             let document = try await ResearchJournalLoader.load(
                 artifact: artifact
             )
-            sections = ResearchJournalLoader.sections(in: document)
+            let loadedSections = ResearchJournalLoader.sections(in: document)
                 .sorted {
                     if $0.createdAt != $1.createdAt {
                         return $0.createdAt < $1.createdAt
                     }
                     return $0.id < $1.id
                 }
+            sections = loadedSections
+            obligationAliases = ResearchJournalPresentation.obligationAliases(
+                sections: loadedSections
+            )
             reportError = nil
             if selectedCheckpointRef.isEmpty
                 || !sections.contains(where: {
@@ -458,6 +471,7 @@ struct ResearchNarrativeReportView: View {
             }
         } catch {
             sections = []
+            obligationAliases = [:]
             reportError = error.localizedDescription
         }
     }

@@ -102,6 +102,145 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(rows[0].deltaLink?.linkID, "coverage-change")
     }
 
+    func testCheckpointRowsUseAllRefsAndLaterChineseAliases() throws {
+        let links = try decodeLinks(
+            """
+            [{"link_id":"coverage","kind":"obligation","target_ref":"obligation:data-coverage","label":"Does data cover the plan?"}]
+            """
+        )
+        let obligations = try decodeObligations(
+            """
+            [
+              {"obligation_ref":"obligation:data-coverage","status":"bounded","materiality":"critical","question_summary":"Does data cover the plan?"},
+              {"obligation_ref":"obligation:timing","status":"open","materiality":"high","question_summary":"Is timing causal?"}
+            ]
+            """
+        )
+
+        let rows = ResearchJournalPresentation.obligationRows(
+            links: links,
+            checkpointObligationRefs: [
+                "obligation:data-coverage",
+                "obligation:timing",
+            ],
+            aliases: [
+                "data-coverage": "数据是否覆盖试验计划？",
+                "timing": "信号与成交时点是否满足因果约束？",
+            ],
+            obligations: obligations,
+            changes: [],
+            statusOverrides: [
+                "data-coverage": "open",
+                "timing": "open",
+            ]
+        )
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.map(\.question), [
+            "数据是否覆盖试验计划？",
+            "信号与成交时点是否满足因果约束？",
+        ])
+        XCTAssertEqual(rows.map(\.currentStatus), ["待验证", "待验证"])
+        XCTAssertTrue(rows.allSatisfy { !$0.obligationLink.linkID.isEmpty })
+    }
+
+    func testAliasesPreferChineseAcrossWholeJournal() throws {
+        let english = ResearchJournalSection(
+            sectionID: "early",
+            title: "起点",
+            body: "",
+            blocks: [],
+            links: try decodeLinks(
+                """
+                [{"link_id":"early","kind":"obligation","target_ref":"obligation:data-coverage","label":"Does data cover the plan?"}]
+                """
+            ),
+            checkpointRef: "trace:early",
+            createdAt: 1
+        )
+        let chinese = ResearchJournalSection(
+            sectionID: "later",
+            title: "数据审查",
+            body: "",
+            blocks: [],
+            links: try decodeLinks(
+                """
+                [{"link_id":"later","kind":"obligation","target_ref":"obligation:data-coverage","label":"数据是否覆盖试验计划？"}]
+                """
+            ),
+            checkpointRef: "trace:later",
+            createdAt: 2
+        )
+
+        XCTAssertEqual(
+            ResearchJournalPresentation.obligationAliases(
+                sections: [english, chinese]
+            )["data-coverage"],
+            "数据是否覆盖试验计划？"
+        )
+    }
+
+    func testCheckpointStatusRewindsOnlyLaterObligationChanges() throws {
+        let obligations = try decodeObligations(
+            """
+            [{"obligation_ref":"obligation:data-coverage","status":"bounded","materiality":"critical","question_summary":"数据是否覆盖试验计划？"}]
+            """
+        )
+        let steps = try JSONDecoder().decode(
+            [ResearchTransitionStep].self,
+            from: Data(
+                """
+                [
+                  {"step_ref":"trace:early","edge_ref":"edge:1","from_node":"start","to_node":"plan","created_at":1,"evidence_refs":[],"trial_plan_refs":[],"obligation_refs":["obligation:data-coverage"],"claim_refs":[],"job_refs":[],"run_refs":[],"obligation_changes":[],"claim_changes":[]},
+                  {"step_ref":"trace:later","edge_ref":"edge:2","from_node":"plan","to_node":"data","created_at":2,"evidence_refs":[],"trial_plan_refs":[],"obligation_refs":["obligation:data-coverage"],"claim_refs":[],"job_refs":[],"run_refs":[],"obligation_changes":[{"obligation_id":"data-coverage","from_state":"open","to_state":"bounded"}],"claim_changes":[]}
+                ]
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            ResearchJournalPresentation.obligationStatuses(
+                at: "trace:early",
+                steps: steps,
+                currentObligations: obligations
+            )["data-coverage"],
+            "open"
+        )
+        XCTAssertEqual(
+            ResearchJournalPresentation.obligationStatuses(
+                at: "trace:later",
+                steps: steps,
+                currentObligations: obligations
+            )["data-coverage"],
+            "bounded"
+        )
+    }
+
+    func testEarlierCheckpointDoesNotShowFutureCreatedObligation() throws {
+        let obligations = try decodeObligations(
+            """
+            [
+              {"obligation_ref":"obligation:known","status":"open","materiality":"high","question_summary":"已知义务"},
+              {"obligation_ref":"obligation:future","status":"open","materiality":"high","question_summary":"未来新增义务"}
+            ]
+            """
+        )
+
+        let rows = ResearchJournalPresentation.obligationRows(
+            links: [],
+            checkpointObligationRefs: ["obligation:known"],
+            aliases: [
+                "known": "已知义务",
+                "future": "未来新增义务",
+            ],
+            obligations: obligations,
+            changes: [],
+            statusOverrides: ["known": "open", "future": "open"]
+        )
+
+        XCTAssertEqual(rows.map(\.question), ["已知义务"])
+    }
+
     func testUnknownInternalIdentifierIsNotExposedAsReportProse() {
         XCTAssertEqual(ResearchDisplayText.node("future_internal_node"), "研究进行中")
         XCTAssertEqual(ResearchDisplayText.linkKind("future_internal_link"), "审计对象")
@@ -323,6 +462,22 @@ final class ResearchJournalTests: XCTestCase {
             """
             {"schema_version":3,"language":"zh-Hans","branch_id":"b","history_status":"complete","root_checkpoint_ref":"trace:checkpoint-1","checkpoints":[{"checkpoint_ref":"trace:checkpoint-1","created_at":1,"carrier_hash":"\(String(repeating: "a", count: 64))","narrative_hash":"\(String(repeating: "b", count: 64))","section_hash":"\(String(repeating: "c", count: 64))","lineage_status":"root","predecessor_checkpoint_ref":"","sections":[{"section_id":"progress","title":"研究进展","body":"本次检验尚未清除交易成本义务。","blocks":[{"kind":"paragraph","text":"成本证据仍然有限。","link_ids":["cost"]}],"links":[{"link_id":"cost","kind":"evidence","target_ref":"evidence:cost-1"},{"link_id":"handoff","kind":"profile_handoff","target_ref":"profile-handoff:transfer-1"}]}]}]}
             """.utf8
+        )
+    }
+
+    private func decodeLinks(_ json: String) throws -> [ResearchJournalLink] {
+        try JSONDecoder().decode(
+            [ResearchJournalLink].self,
+            from: Data(json.utf8)
+        )
+    }
+
+    private func decodeObligations(
+        _ json: String
+    ) throws -> [ResearchObligationProjection] {
+        try JSONDecoder().decode(
+            [ResearchObligationProjection].self,
+            from: Data(json.utf8)
         )
     }
 

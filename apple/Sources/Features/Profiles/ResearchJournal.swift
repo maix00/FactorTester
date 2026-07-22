@@ -175,17 +175,6 @@ struct ResearchJournalLink: Decodable, Identifiable, Hashable {
     }
 }
 
-struct ResearchObligationTableRow: Identifiable {
-    let obligationLink: ResearchJournalLink
-    let deltaLink: ResearchJournalLink?
-    let question: String
-    let materiality: String
-    let change: String
-    let currentStatus: String
-
-    var id: String { obligationLink.id }
-}
-
 enum ResearchJournalPresentation {
     static func chipLabel(
         _ link: ResearchJournalLink,
@@ -196,42 +185,6 @@ enum ResearchJournalPresentation {
             ?? obligationSummary(for: link, in: obligations)
             ?? contextualSummary(for: link.kind, sectionTitle: sectionTitle)
         return "\(ResearchDisplayText.linkKind(link.kind)) · \(summary)"
-    }
-
-    static func obligationRows(
-        links: [ResearchJournalLink],
-        obligations: [ResearchObligationProjection],
-        changes: [ResearchStateChange]
-    ) -> [ResearchObligationTableRow] {
-        links.filter { $0.kind == "obligation" }.map { link in
-            let objectID = stableObjectID(link.targetRef)
-            let obligation = obligations.first {
-                $0.obligationRef == link.targetRef
-                    || stableObjectID($0.obligationRef) == objectID
-            }
-            let change = changes.first {
-                stableObjectID($0.objectID) == objectID
-            }
-            let delta = links.first {
-                $0.kind == "delta"
-                    && ($0.targetRef.hasSuffix(":" + link.targetRef)
-                        || $0.targetRef.hasSuffix(":" + objectID))
-            }
-            return ResearchObligationTableRow(
-                obligationLink: link,
-                deltaLink: delta,
-                question: link.label.flatMap(nonEmpty)
-                    ?? obligation.flatMap { nonEmpty($0.questionSummary) }
-                    ?? "本步骤需要回答的研究问题",
-                materiality: materialityLabel(obligation?.materiality),
-                change: change.map {
-                    "\(statusLabel($0.fromState)) → \(statusLabel($0.toState))"
-                } ?? "本步骤未变化",
-                currentStatus: statusLabel(
-                    obligation?.status ?? change?.toState ?? "unknown"
-                )
-            )
-        }
     }
 
     private static func obligationSummary(
@@ -284,10 +237,6 @@ enum ResearchJournalPresentation {
         case "low": return "一般"
         default: return "待评估"
         }
-    }
-
-    private static func stableObjectID(_ reference: String) -> String {
-        reference.split(separator: ":").last.map(String.init) ?? reference
     }
 
     private static func nonEmpty(_ value: String) -> String? {

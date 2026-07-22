@@ -84,6 +84,9 @@ final class ProfileResearchServiceTests: XCTestCase {
     }
 
     func testResearchTreeLanesStayInsideFixedNavigatorWidth() {
+        let maximumGraphWidth = ResearchTreeLayout.graphColumnWidth(
+            laneCount: ResearchTreeLayout.maximumVisibleBranches
+        )
         XCTAssertLessThanOrEqual(
             ResearchTreeLayout.maximumLaneFootprint,
             ResearchTreeLayout.navigatorWidth
@@ -91,14 +94,18 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
         XCTAssertEqual(ResearchTreeLayout.maximumVisibleBranches, 7)
         XCTAssertGreaterThanOrEqual(
-            ResearchTreeLayout.minimumLabelWidth,
+            ResearchTreeLayout.minimumLabelWidth(
+                laneCount: ResearchTreeLayout.maximumVisibleBranches
+            ),
             80
         )
         XCTAssertLessThanOrEqual(
             ResearchTreeLayout.horizontalPadding * 2
-                + ResearchTreeLayout.graphColumnWidth
+                + maximumGraphWidth
                 + ResearchTreeLayout.rowSpacing
-                + ResearchTreeLayout.minimumLabelWidth,
+                + ResearchTreeLayout.minimumLabelWidth(
+                    laneCount: ResearchTreeLayout.maximumVisibleBranches
+                ),
             ResearchTreeLayout.navigatorWidth
         )
         for lane in 0..<ResearchTreeLayout.maximumVisibleBranches {
@@ -109,7 +116,7 @@ final class ProfileResearchServiceTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(bounds.lowerBound, 0)
             XCTAssertLessThanOrEqual(
                 bounds.upperBound,
-                ResearchTreeLayout.graphColumnWidth
+                maximumGraphWidth
             )
             XCTAssertEqual(
                 ResearchTreeLayout.canvasLaneCenterX(lane),
@@ -117,6 +124,18 @@ final class ProfileResearchServiceTests: XCTestCase {
                     + (bounds.lowerBound + bounds.upperBound) / 2
             )
         }
+    }
+
+    func testResearchTreeGraphColumnShrinksToVisibleBranchCount() {
+        let singleBranch = ResearchTreeLayout.graphColumnWidth(laneCount: 1)
+        let sevenBranches = ResearchTreeLayout.graphColumnWidth(laneCount: 7)
+
+        XCTAssertLessThan(singleBranch, sevenBranches)
+        XCTAssertLessThanOrEqual(singleBranch, 20)
+        XCTAssertGreaterThanOrEqual(
+            ResearchTreeLayout.minimumLabelWidth(laneCount: 1),
+            160
+        )
     }
 
     func testResearchTreeOrdersTrustedRootTowardHeadDownward() {
