@@ -4,6 +4,39 @@ import XCTest
 @testable import FTClient
 
 final class ResearchJournalTests: XCTestCase {
+    func testResearchRecordSelectsJournalCoveringCurrentCheckpoint() {
+        let record = ResearchRecordModel(json: [
+            "record_id": "work-package",
+            "checkpoint_ref": "trace:latest",
+            "artifacts": [
+                [
+                    "artifact_ref": "artifact:older",
+                    "journal_ref": "file:///older/LOGICAL_JOURNAL.json",
+                    "journal_hash": String(repeating: "a", count: 64),
+                    "section_refs": [[
+                        "link_id": "checkpoint-old",
+                        "kind": "checkpoint",
+                        "target_ref": "trace:older",
+                        "section_ref": "report-section:old",
+                    ]],
+                ],
+                [
+                    "artifact_ref": "artifact:latest",
+                    "journal_ref": "file:///latest/LOGICAL_JOURNAL.json",
+                    "journal_hash": String(repeating: "b", count: 64),
+                    "section_refs": [[
+                        "link_id": "checkpoint-latest",
+                        "kind": "checkpoint",
+                        "target_ref": "trace:latest",
+                        "section_ref": "report-section:latest",
+                    ]],
+                ],
+            ],
+        ])
+
+        XCTAssertEqual(record.currentJournalArtifact?.id, "artifact:latest")
+    }
+
     func testDecodesAndPartitionsEntryResolutionWithoutRawIDsInLabels() throws {
         let step = try JSONDecoder().decode(
             ResearchTransitionStep.self,

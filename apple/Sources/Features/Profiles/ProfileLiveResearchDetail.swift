@@ -9,9 +9,7 @@ struct ProfileLiveResearchDetail: View {
             if let detail = controller.detail,
                let workPackage = controller.workPackage {
                 let context = reportContext(for: detail)
-                let artifact = context?.record.artifacts.first {
-                    !$0.journalRef.isEmpty
-                }
+                let artifact = context?.record.currentJournalArtifact
                 ResearchNarrativeReportView(
                     detail: detail,
                     workPackage: workPackage,

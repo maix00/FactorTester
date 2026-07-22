@@ -80,6 +80,14 @@ struct ResearchRecordModel: Identifiable {
             .map(ResearchArtifactModel.init)
     }
 
+    var currentJournalArtifact: ResearchArtifactModel? {
+        artifacts.last {
+            !$0.journalRef.isEmpty && $0.sectionRefs.contains {
+                $0.kind == "checkpoint" && $0.targetRef == checkpointRef
+            }
+        } ?? artifacts.last { !$0.journalRef.isEmpty }
+    }
+
     var researchScopeTitle: String {
         let family = factorFamilies.joined(separator: "、")
         let role: String
