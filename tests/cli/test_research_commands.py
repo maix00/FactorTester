@@ -483,6 +483,23 @@ def test_portfolio_maps_render_owner_instrument_rows() -> None:
     assert '"AP.CZC"' not in output
 
 
+def test_orders_render_as_rows_with_rejection_semantics() -> None:
+    from tools.cli.step import render_step_event
+
+    order = {
+        "instrument": "AP.CZC", "quantity": 2, "intent_quantity": 3,
+        "status": "rejected", "reject_reason": "cash", "order_id": "o1", "fields": {},
+    }
+    lines = render_step_event({
+        "flow_id": "orders", "inputs": [], "outputs": [],
+        "output_changes": [{"field": "OrderConstructModule.orders", "strategy": "A1", "before": None, "after": [order]}],
+    })
+    output = "\n".join(lines)
+    assert "quantity" in output and "intent" in output
+    assert "rejected" in output and "cash" in output and "o1" in output
+    assert '"reject_reason"' not in output
+
+
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
