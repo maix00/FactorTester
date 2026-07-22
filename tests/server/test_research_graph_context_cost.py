@@ -17,9 +17,11 @@ from server.services.research_graph.branch.repository import (
     CURRENT_BRANCH_CONTEXT_SQL,
 )
 from server.services.research_graph.protocol import (
+    MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES,
     MAX_AGENT_TRANSITION_BYTES,
     MAX_PERSISTED_TRACE_BYTES,
     serialize_agent_transition_evidence,
+    serialize_capability_resolution_submission,
     serialize_bounded_trace_evidence,
 )
 from tests.server.data_contract_fixtures import initialize
@@ -139,6 +141,34 @@ def test_agent_and_persisted_trace_budgets_are_distinct() -> None:
     serialized = serialize_bounded_trace_evidence(payload)
     assert len(serialized.encode()) == len(payload["research_note"].encode()) + 20
     assert len(serialized.encode()) < MAX_PERSISTED_TRACE_BYTES
+
+
+def test_target_resolution_does_not_consume_agent_delta_budget() -> None:
+    payload = {
+        "research_note": "x" * 5_900,
+        "target_capability_resolution": {
+            "node_id": "validation_design",
+            "bindings": [{"capability_description": "y" * 1_000}],
+        },
+    }
+
+    serialized = serialize_agent_transition_evidence(payload)
+
+    assert len(serialized.encode()) <= MAX_AGENT_TRANSITION_BYTES
+    assert "target_capability_resolution" not in orjson.loads(serialized)
+
+
+def test_target_resolution_has_an_independent_hard_budget() -> None:
+    payload = {"bindings": [{"capability_description": "x" * 4_096}]}
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "capability resolution submission exceeds "
+            f"{MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES}"
+        ),
+    ):
+        serialize_capability_resolution_submission(payload)
 
 
 def test_context_query_plan_uses_primary_key_lookups(

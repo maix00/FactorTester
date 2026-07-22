@@ -2645,6 +2645,9 @@ def test_transition_stores_only_target_node_resolution(
         edge_id="hypothesis__validation",
         evidence={
             "hypothesis_frozen": True,
+            # The Agent delta remains below 6000 bytes.  The independently
+            # bounded deterministic resolution must not make it fail.
+            "research_note": "x" * 5_300,
             "target_capability_resolution": target_resolution,
             "token_telemetry": {
                 "input_tokens": 10,

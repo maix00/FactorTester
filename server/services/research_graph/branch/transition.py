@@ -51,6 +51,7 @@ from server.services.research_graph.protocol import (
     loads,
     merge_bounded_evidence_refs,
     serialize_agent_transition_evidence,
+    serialize_capability_resolution_submission,
     serialize_bounded_trace_evidence,
 )
 from server.services.research_graph.report_checkpoint import (
@@ -87,9 +88,11 @@ def advance_graph_branch(
             "server_evidence and report_lineage are server-owned"
         )
     evidence = validate_agent_evidence_payload(evidence)
-    # Enforce the Agent-facing budget before removing server-only fields or
-    # binding server evidence.  Otherwise a large capability payload could be
-    # silently excluded from the size check.
+    submitted_resolution = evidence.get("target_capability_resolution")
+    if submitted_resolution is not None:
+        serialize_capability_resolution_submission(submitted_resolution)
+    # Capability resolution is deterministic and independently bounded.  The
+    # 6000-byte budget applies only to the Agent-authored transition delta.
     serialize_agent_transition_evidence(evidence)
     prepared_evidence, proposed_trial_plan_hash, has_trial_plan_body = (
         prepare_trial_plan_evidence(evidence)

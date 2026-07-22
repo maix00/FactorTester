@@ -20,6 +20,7 @@ MAX_AGENT_PACKET_BYTES = 6000
 # server-bound evidence plus the current Research Cycle projection; it has a
 # separate storage budget rather than inheriting the context budget.
 MAX_AGENT_TRANSITION_BYTES = MAX_AGENT_PACKET_BYTES
+MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES = 4096
 MAX_PERSISTED_TRACE_BYTES = 16_384
 MAX_TRACE_EVIDENCE_BYTES = MAX_PERSISTED_TRACE_BYTES
 MAX_CONTEXT_EVIDENCE_REFS = 8
@@ -141,9 +142,16 @@ def serialize_bounded_trace_evidence(
 def serialize_agent_transition_evidence(
     evidence: dict[str, Any],
 ) -> str:
-    """Serialize the complete Agent-submitted delta under the context budget."""
+    """Serialize only the Agent-authored delta under the context budget.
+
+    Node-local capability resolution is produced by deterministic code and
+    has its own structural/storage bound.  Counting it here would make the
+    same semantic proposal pass or fail according to descriptor length.
+    """
+    agent_delta = deepcopy(evidence)
+    agent_delta.pop("target_capability_resolution", None)
     serialized = orjson.dumps(
-        evidence,
+        agent_delta,
         option=orjson.OPT_SORT_KEYS,
     )
     size = len(serialized)
@@ -151,5 +159,19 @@ def serialize_agent_transition_evidence(
         raise ValueError(
             "agent transition evidence exceeds "
             f"{MAX_AGENT_TRANSITION_BYTES} bytes: {size}"
+        )
+    return serialized.decode()
+
+
+def serialize_capability_resolution_submission(value: Any) -> str:
+    """Bound the deterministic attachment before any database access."""
+    if not isinstance(value, dict):
+        raise ValueError("capability resolution submission must be an object")
+    serialized = orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
+    size = len(serialized)
+    if size > MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES:
+        raise ValueError(
+            "capability resolution submission exceeds "
+            f"{MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES} bytes: {size}"
         )
     return serialized.decode()
