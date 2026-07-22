@@ -37,6 +37,7 @@ from server.services.research_graph.report_checkpoint import (
     report_checkpoint_projection,
 )
 from tests.server.test_job_graph_evidence import (
+    PLAN_HASH,
     _graph,
     _prepare,
     _request,
@@ -95,6 +96,31 @@ def _install_active_target(
                 activated_by=excluded.activated_by,
                 activated_at=excluded.activated_at
             """
+        )
+    return target
+
+
+def _upgrade_active_target_to_schema_v2(path) -> dict:
+    target = _install_active_target(path)
+    target["schema_version"] = 2
+    target["content_hash"] = "9" * 64
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            UPDATE research_graph_trace
+            SET edge_id='__legacy_bootstrap__',
+                from_node='authoritative_backtest',
+                to_node='authoritative_backtest'
+            WHERE trace_id='trace-bootstrap'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE research_graph_versions
+            SET content_hash=?, graph_json=?
+            WHERE graph_id='factor-research' AND version=2
+            """,
+            (target["content_hash"], orjson.dumps(target).decode()),
         )
     return target
 
@@ -488,6 +514,120 @@ def test_pretrial_continuation_preserves_paused_gap_without_job_evidence(
         "binding": None,
         "gap": None,
     }]
+
+
+def test_schema_v2_continuation_reenters_the_same_current_node(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    target = _upgrade_active_target_to_schema_v2(path)
+
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+    )
+
+    assert preview["descriptor"]["continuation_mode"] == (
+        "same_node_reentry"
+    )
+    assert preview["descriptor"]["target_node"] == (
+        "authoritative_backtest"
+    )
+    assert preview["descriptor"]["topology_preflight"]["reason"] == (
+        "compatible_reentry"
+    )
+    case_id = _approve(path, target_hash=preview["target_hash"])
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+        expected_target_hash=preview["target_hash"],
+        human_authorization_id=case_id,
+    )
+
+    branch = continued["branches"][0]
+    assert branch["current_node"] == "authoritative_backtest"
+    assert branch["status"] == "running"
+    with connect_sqlite(path) as conn:
+        row = conn.execute(
+            """
+            SELECT current_trial_plan_hash, evidence_refs_json
+            FROM research_graph_branches WHERE branch_id=?
+            """,
+            (branch["branch_id"],),
+        ).fetchone()
+    assert row["current_trial_plan_hash"] == PLAN_HASH
+    assert orjson.loads(row["evidence_refs_json"]) == []
+    with connect_sqlite(path) as conn:
+        runtime = load_instance_branch_row(
+            conn,
+            instance_id=continued["instance_id"],
+            branch_id=branch["branch_id"],
+            owner="alice",
+        )
+    assert runtime is not None
+    replay = replay_shadow_trace(graph=target, runtime=runtime)
+    assert replay["passed"] is True, replay
+
+
+def test_schema_v2_continuation_shadow_replay_rejects_tampered_preflight(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    target = _upgrade_active_target_to_schema_v2(path)
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+    )
+    case_id = _approve(path, target_hash=preview["target_hash"])
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+        expected_target_hash=preview["target_hash"],
+        human_authorization_id=case_id,
+    )
+    branch = continued["branches"][0]
+    with connect_sqlite(path) as conn:
+        trace = conn.execute(
+            """
+            SELECT trace_id, evidence_json FROM research_graph_trace
+            WHERE instance_id=? AND branch_id=?
+            """,
+            (continued["instance_id"], branch["branch_id"]),
+        ).fetchone()
+        evidence = orjson.loads(trace["evidence_json"])
+        evidence["graph_continuation"]["topology_preflight"][
+            "footprint_node_count"
+        ] += 1
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? WHERE trace_id=?",
+            (orjson.dumps(evidence).decode(), trace["trace_id"]),
+        )
+        runtime = load_instance_branch_row(
+            conn,
+            instance_id=continued["instance_id"],
+            branch_id=branch["branch_id"],
+            owner="alice",
+        )
+    assert runtime is not None
+    assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is False
 
 
 def test_pretrial_continuation_rejects_source_with_trial_plan(

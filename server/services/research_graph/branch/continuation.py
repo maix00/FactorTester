@@ -20,6 +20,7 @@ from server.services.research_graph.branch.continuation_store import (
     JOB_EVIDENCE_TARGET_NODE,
     PRE_TRIAL_CHECKPOINT_MODE,
     PRE_TRIAL_TARGET_NODE,
+    SAME_NODE_REENTRY_MODE,
     insert_continuation as _insert_continuation,
 )
 from server.services.research_graph.branch.repository import (
@@ -27,6 +28,11 @@ from server.services.research_graph.branch.repository import (
 )
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
+)
+from server.services.research_graph.branch.topology_preflight import (
+    assess_topology_continuation,
+    load_work_package_trace_footprint,
+    require_topology_continuation,
 )
 from server.services.research_graph.continuation_gate import (
     consume_continuation_gate,
@@ -194,6 +200,18 @@ def _prepare(
             "SELECT version FROM active_research_graphs WHERE graph_id=?",
             (str(source["graph_id"]),),
         ).fetchone()
+        work_package_id = str(
+            source["work_package_id"] or source_instance_id
+        )
+        footprint = (
+            load_work_package_trace_footprint(
+                conn,
+                owner=owner,
+                work_package_id=work_package_id,
+            )
+            if int((target_graph or {}).get("schema_version") or 1) >= 2
+            else None
+        )
     if source_graph is None or target_graph is None:
         raise KeyError("source or target Graph version not found")
     if (
@@ -209,16 +227,35 @@ def _prepare(
         str(node.get("node_id") or ""): node
         for node in target_graph.get("nodes") or []
     }
-    if (
-        str(source["current_node"]) != "capability_gap"
-        or str(source["status"]) != "paused"
-    ):
-        raise ValueError("Graph continuation source must be a paused gap")
     checkpoint = checkpoint_from_branch_row(source)
     if checkpoint is None:
         raise ValueError("Graph continuation requires a Research Cycle")
     source_identity = branch_identity(source)
-    if job_id:
+    if int(target_graph.get("schema_version") or 1) >= 2:
+        assert footprint is not None
+        if job_id:
+            raise ValueError(
+                "same-node Graph continuation does not rebind Job evidence"
+            )
+        preflight = assess_topology_continuation(
+            source_graph=source_graph,
+            target_graph=target_graph,
+            current_node=str(source["current_node"]),
+            footprint=footprint,
+        )
+        require_topology_continuation(preflight)
+        continuation_mode = SAME_NODE_REENTRY_MODE
+        target_node = str(source["current_node"])
+        target_status = str(source["status"])
+        envelope = None
+        evidence_refs, omitted_evidence_count = _source_evidence_refs(source)
+    elif (
+        str(source["current_node"]) != "capability_gap"
+        or str(source["status"]) != "paused"
+    ):
+        raise ValueError("Graph continuation source must be a paused gap")
+    elif job_id:
+        preflight = None
         continuation_mode = JOB_EVIDENCE_MODE
         target_node = JOB_EVIDENCE_TARGET_NODE
         target_status = "running"
@@ -234,6 +271,7 @@ def _prepare(
         evidence_refs = ["evidence:" + envelope["envelope_hash"]]
         omitted_evidence_count = 0
     else:
+        preflight = None
         continuation_mode = PRE_TRIAL_CHECKPOINT_MODE
         target_node = PRE_TRIAL_TARGET_NODE
         target_status = "paused"
@@ -245,20 +283,7 @@ def _prepare(
                 "pre-trial Graph continuation requires an empty TrialPlan"
             )
         envelope = None
-        try:
-            source_refs = orjson.loads(
-                str(source["evidence_refs_json"] or "[]")
-            )
-        except orjson.JSONDecodeError as exc:
-            raise ValueError("source evidence refs are invalid") from exc
-        if not isinstance(source_refs, list) or not all(
-            isinstance(reference, str) for reference in source_refs
-        ):
-            raise ValueError("source evidence refs are invalid")
-        evidence_refs = source_refs
-        omitted_evidence_count = int(
-            source["omitted_evidence_count"] or 0
-        )
+        evidence_refs, omitted_evidence_count = _source_evidence_refs(source)
     target = target_nodes.get(target_node)
     if target is None:
         raise ValueError(f"target Graph lacks {target_node} node")
@@ -303,6 +328,14 @@ def _prepare(
             "job_id": job_id,
             "job_evidence_hash": str(envelope["envelope_hash"]),
         })
+    elif continuation_mode == SAME_NODE_REENTRY_MODE:
+        assert preflight is not None
+        descriptor["topology_preflight"] = {
+            "preflight_hash": preflight["preflight_hash"],
+            "footprint_node_count": preflight["footprint_node_count"],
+            "footprint_edge_count": preflight["footprint_edge_count"],
+            "reason": preflight["reason"],
+        }
     return {
         "target_hash": _hash(descriptor),
         "descriptor": descriptor,
@@ -351,6 +384,20 @@ def _continuation_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
         ),
     ]
     return validate_agent_evidence_envelope(value)
+
+
+def _source_evidence_refs(source: Any) -> tuple[list[str], int]:
+    try:
+        source_refs = orjson.loads(
+            str(source["evidence_refs_json"] or "[]")
+        )
+    except orjson.JSONDecodeError as exc:
+        raise ValueError("source evidence refs are invalid") from exc
+    if not isinstance(source_refs, list) or not all(
+        isinstance(reference, str) for reference in source_refs
+    ):
+        raise ValueError("source evidence refs are invalid")
+    return source_refs, int(source["omitted_evidence_count"] or 0)
 
 
 def _hash(value: dict[str, Any]) -> str:

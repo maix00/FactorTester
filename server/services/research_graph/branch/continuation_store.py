@@ -17,6 +17,7 @@ from server.services.research_graph.protocol import (
 
 JOB_EVIDENCE_MODE = "job_evidence"
 PRE_TRIAL_CHECKPOINT_MODE = "pre_trial_checkpoint"
+SAME_NODE_REENTRY_MODE = "same_node_reentry"
 JOB_EVIDENCE_TARGET_NODE = "job_evidence_ready"
 PRE_TRIAL_TARGET_NODE = "capability_gap"
 

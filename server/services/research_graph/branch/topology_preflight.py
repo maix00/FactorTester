@@ -21,7 +21,8 @@ def load_work_package_trace_footprint(
         SELECT DISTINCT t.edge_id, t.from_node, t.to_node
         FROM research_graph_trace t
         JOIN research_graph_instances i ON i.instance_id=t.instance_id
-        WHERE i.owner=? AND i.work_package_id=?
+        WHERE i.owner=?
+          AND COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)=?
         """,
         (owner, work_package_id),
     ).fetchall()
@@ -48,7 +49,11 @@ def assess_topology_continuation(
     source_edges = _items_by_id(source_graph.get("edges"), "edge_id")
     target_edges = _items_by_id(target_graph.get("edges"), "edge_id")
     visited_nodes = set(footprint.get("node_ids") or []) | {current_node}
-    visited_edges = set(footprint.get("edge_ids") or [])
+    visited_edges = {
+        edge_id
+        for edge_id in footprint.get("edge_ids") or []
+        if not edge_id.startswith("__")
+    }
     missing_nodes = sorted(visited_nodes - set(target_nodes))
     missing_edges = sorted(visited_edges - set(target_edges))
     unknown_source_nodes = sorted(visited_nodes - set(source_nodes))

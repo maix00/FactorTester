@@ -13,6 +13,11 @@ from server.services.research_graph.branch.continuation_store import (
     JOB_EVIDENCE_TARGET_NODE,
     PRE_TRIAL_CHECKPOINT_MODE,
     PRE_TRIAL_TARGET_NODE,
+    SAME_NODE_REENTRY_MODE,
+)
+from server.services.research_graph.branch.topology_preflight import (
+    assess_topology_continuation,
+    load_work_package_trace_footprint,
 )
 from server.services.research_graph.protocol import json_hash
 from server.services.research_graph.research_cycle.evidence import (
@@ -281,13 +286,22 @@ def _continuation_bootstrap_valid(
             or str(checkpoint.get("trial_plan_hash") or "")
         ):
             return False
+    elif mode == SAME_NODE_REENTRY_MODE:
+        if (
+            int(graph.get("schema_version") or 1) < 2
+            or server_evidence is not None
+            or "job_id" in descriptor
+            or "job_evidence_hash" in descriptor
+        ):
+            return False
     else:
         return False
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         source = conn.execute(
             """
             SELECT i.graph_id, i.graph_version, i.workspace_id,
-                   v.graph_json, b.latest_trace_id,
+                   i.work_package_id, v.graph_json, b.latest_trace_id,
+                   b.current_node,
                    t.evidence_json,
                    g.status AS gate_status,
                    g.affected_refs_json AS gate_affected_refs_json,
@@ -321,6 +335,43 @@ def _continuation_bootstrap_valid(
         change_refs = orjson.loads(source["gate_change_refs_json"])
     except (KeyError, TypeError, orjson.JSONDecodeError):
         return False
+    if mode == SAME_NODE_REENTRY_MODE:
+        if (
+            int(graph.get("schema_version") or 1) < 2
+            or bootstrap_node != str(source["current_node"])
+            or server_evidence is not None
+            or "job_id" in descriptor
+            or "job_evidence_hash" in descriptor
+        ):
+            return False
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            footprint = load_work_package_trace_footprint(
+                conn,
+                owner=str(runtime["owner"]),
+                work_package_id=str(
+                    source["work_package_id"]
+                    or descriptor.get("source_instance_id")
+                    or ""
+                ),
+            )
+        preflight = assess_topology_continuation(
+            source_graph=source_graph,
+            target_graph=graph,
+            current_node=str(source["current_node"]),
+            footprint=footprint,
+        )
+        declared_preflight = descriptor.get("topology_preflight")
+        expected_preflight = {
+            "preflight_hash": preflight["preflight_hash"],
+            "footprint_node_count": preflight["footprint_node_count"],
+            "footprint_edge_count": preflight["footprint_edge_count"],
+            "reason": preflight["reason"],
+        }
+        if (
+            not preflight["eligible"]
+            or declared_preflight != expected_preflight
+        ):
+            return False
     expected_effect = (
         f"graph-continuation:{runtime['instance_id']}:"
         f"{runtime['branch_id']}:{target_hash}"
