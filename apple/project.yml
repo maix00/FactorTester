@@ -55,6 +55,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client
         PRODUCT_NAME: FTClient
+        # Xcode Run must use the same persistent identity as local/release
+        # scripts. Automatic signing with an empty Team falls back to ad-hoc
+        # signing and makes macOS ask for Documents access after every swap.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: FTClient Beta Release
         CODE_SIGN_ENTITLEMENTS: Resources/macOS/FactorTester-Client.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

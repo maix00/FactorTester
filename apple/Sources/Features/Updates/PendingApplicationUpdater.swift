@@ -24,6 +24,10 @@ enum PendingApplicationUpdater {
         while kill -0 "$parent" 2>/dev/null; do sleep 0.25; done
         /usr/bin/ditto --rsrc --preserveHFSCompression "$staged" "$temporary" || exit 1
         /usr/bin/codesign --verify --deep --strict "$temporary" || exit 1
+        new_requirement=$(/usr/bin/codesign -dr - "$temporary" 2>&1 | /usr/bin/sed -n 's/^designated => //p')
+        old_requirement=$(/usr/bin/codesign -dr - "$target" 2>&1 | /usr/bin/sed -n 's/^designated => //p')
+        test -n "$new_requirement" || exit 1
+        test "$new_requirement" = "$old_requirement" || exit 1
         if [ -e "$backup" ]; then /bin/rm -rf "$backup"; fi
         /bin/mv "$target" "$backup" || exit 1
         /bin/mv "$temporary" "$target" || { /bin/mv "$backup" "$target"; exit 1; }

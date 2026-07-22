@@ -16,6 +16,14 @@ INSTALLED_APP="/Applications/$APP_NAME.app"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 
+STAGING_PATH=""
+cleanup_staging() {
+  if test -n "${STAGING_PATH:-}"; then
+    rm -rf "$STAGING_PATH"
+  fi
+}
+trap cleanup_staging EXIT
+
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 xcodegen generate --spec "$APPLE_DIR/project.yml" --project "$APPLE_DIR"
@@ -37,12 +45,39 @@ sign_app() {
   /usr/bin/codesign --force --deep --sign "$SIGNING_IDENTITY" \
     --options runtime --timestamp=none "$APP_BUNDLE"
   /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+  local requirement
+  requirement="$(designated_requirement "$APP_BUNDLE")"
+  if test -z "$requirement" || [[ "$requirement" == *"cdhash"* ]]; then
+    echo "stable designated requirement was not produced" >&2
+    exit 1
+  fi
+}
+
+designated_requirement() {
+  /usr/bin/codesign -dr - "$1" 2>&1 |
+    /usr/bin/sed -n 's/^designated => /designated => /p'
+}
+
+require_same_identity() {
+  local candidate="$1"
+  local current="$2"
+  test -d "$current" || return 0
+  local candidate_requirement current_requirement
+  candidate_requirement="$(designated_requirement "$candidate")"
+  current_requirement="$(designated_requirement "$current")"
+  if test -z "$candidate_requirement" ||
+      test "$candidate_requirement" != "$current_requirement"; then
+    echo "signature identity changed; refusing to replace $current" >&2
+    echo "candidate: $candidate_requirement" >&2
+    echo "current:   $current_requirement" >&2
+    exit 1
+  fi
 }
 
 sign_app
 
 open_app() {
-  /usr/bin/open -n "$APP_BUNDLE"
+  /usr/bin/open -n "$INSTALLED_APP"
 }
 
 bundle_hash() {
@@ -80,40 +115,50 @@ receipt = json.loads((root / "bundle-receipt.json").read_text())
 cli = root / "bin/factortester"
 assert hashlib.sha256(cli.read_bytes()).hexdigest() == receipt["files"]["bin/factortester"]
 PY
+  require_same_identity "$source" "$installed"
+}
+
+install_app() {
+  STAGING_PATH="/Applications/.$APP_NAME.staging.$$"
+  test -f "$APP_BUNDLE/Contents/Resources/FactorTester/bundle-receipt.json"
+  require_same_identity "$APP_BUNDLE" "$INSTALLED_APP"
+  rm -rf "$STAGING_PATH"
+  ditto "$APP_BUNDLE" "$STAGING_PATH"
+  verify_install "$APP_BUNDLE" "$STAGING_PATH"
+  rm -rf "$INSTALLED_APP"
+  mv "$STAGING_PATH" "$INSTALLED_APP"
+  STAGING_PATH=""
+  verify_install "$APP_BUNDLE" "$INSTALLED_APP"
 }
 
 case "$MODE" in
   run)
+    install_app
     open_app
     ;;
   --debug|debug)
     lldb -- "$APP_BINARY"
     ;;
   --logs|logs)
+    install_app
     open_app
     /usr/bin/log stream --info --style compact \
       --predicate "process == \"$APP_NAME\""
     ;;
   --telemetry|telemetry)
+    install_app
     open_app
     /usr/bin/log stream --info --style compact \
       --predicate "subsystem == \"$BUNDLE_ID\""
     ;;
   --verify|verify)
+    install_app
     open_app
     sleep 2
     pgrep -x "$APP_NAME" >/dev/null
     ;;
   --install|install)
-    staging="/Applications/.$APP_NAME.staging.$$"
-    trap 'rm -rf "$staging"' EXIT
-    test -f "$APP_BUNDLE/Contents/Resources/FactorTester/bundle-receipt.json"
-    rm -rf "$staging"
-    ditto "$APP_BUNDLE" "$staging"
-    verify_install "$APP_BUNDLE" "$staging"
-    rm -rf "$INSTALLED_APP"
-    mv "$staging" "$INSTALLED_APP"
-    verify_install "$APP_BUNDLE" "$INSTALLED_APP"
+    install_app
     ;;
   *)
     echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--install]" >&2
