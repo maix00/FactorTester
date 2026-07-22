@@ -383,7 +383,7 @@ def test_lifecycle_route_is_owner_scoped_and_uses_revision_cas(
         "expected_revision": 1,
         "reason": "stale revision",
     })
-    assert conflict.status_code == 400
+    assert conflict.status_code == 409
 
 
 def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(

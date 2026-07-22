@@ -33,6 +33,10 @@ NON_TERMINAL_JOBS = {
 MAX_LIFECYCLE_HISTORY = 32
 
 
+class WorkPackageConflictError(ValueError):
+    """The request is valid, but conflicts with canonical current state."""
+
+
 def create_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -127,13 +131,15 @@ def transition_lifecycle(
             raise KeyError("work package not found")
         source = str(row["lifecycle"])
         if (source, target) not in ALLOWED_TRANSITIONS:
-            raise ValueError(f"invalid lifecycle transition: {source} -> {target}")
+            raise WorkPackageConflictError(
+                f"invalid lifecycle transition: {source} -> {target}"
+            )
         if int(row["revision"]) != int(expected_revision):
-            raise ValueError("work package revision conflict")
+            raise WorkPackageConflictError("work package revision conflict")
         if target in {"archived", "deleted"}:
             live_job = _first_live_job(conn, owner, work_package_id)
             if live_job:
-                raise ValueError(
+                raise WorkPackageConflictError(
                     f"work package has non-terminal job: {live_job}"
                 )
         now = time.time()

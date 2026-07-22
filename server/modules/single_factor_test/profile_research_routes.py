@@ -11,6 +11,7 @@ from server.services.research_graph.profile_research_projection import (
 )
 from server.services.session_runtime import require_user
 from server.services.research_graph.work_packages import (
+    WorkPackageConflictError,
     transition_lifecycle,
 )
 
@@ -38,7 +39,12 @@ def _response(payload: dict) -> Response:
 
 
 def _error(exc: Exception):
-    status = 404 if isinstance(exc, KeyError) else 400
+    if isinstance(exc, KeyError):
+        status = 404
+    elif isinstance(exc, WorkPackageConflictError):
+        status = 409
+    else:
+        status = 400
     return jsonify({"success": False, "error": str(exc)}), status
 
 
