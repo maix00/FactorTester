@@ -5,12 +5,21 @@ from __future__ import annotations
 from typing import Any
 
 
+def _register_factor_param_resolver(payload: dict[str, Any]) -> None:
+    from server.modules.shared.factor_param_resolver import (
+        register_factor_param_resolver_for_user,
+    )
+
+    register_factor_param_resolver_for_user(str(payload.get("_owner") or ""))
+
+
 def run_group(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     from server.modules.single_factor_test.planning import verify_execution_plan
     from tools.factors.tester_calc.single_factor_test.group.research_run import (
         execute_group_run_spec,
     )
 
+    _register_factor_param_resolver(payload)
     verify_execution_plan("backtest", payload)
     execute_group_run_spec(payload, sink=sink, cancel_event=cancel_event)
 
@@ -18,6 +27,7 @@ def run_group(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
 def _run_analysis(payload: dict[str, Any], sink: Any, cancel_event: Any, *, kind: str) -> None:
     from server.modules.single_factor_test.planning import verify_execution_plan
 
+    _register_factor_param_resolver(payload)
     verify_execution_plan(kind, payload)
     if cancel_event.is_set():
         sink.emit_error(f"{kind} job cancelled before start", cancelled=True)
@@ -52,5 +62,6 @@ def run_ic(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     from server.modules.single_factor_test.planning import verify_execution_plan
     from server.modules.single_factor_test.ic import execute_ic_run_spec
 
+    _register_factor_param_resolver(payload)
     verify_execution_plan("ic", payload)
     execute_ic_run_spec(payload, sink=sink, cancel_event=cancel_event)

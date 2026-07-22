@@ -16,6 +16,12 @@ def plan_job(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     runner_path = str(payload.get("runner_path") or "").strip()
     if not runner_path:
         raise ValueError("runner_path is required")
+    from server.modules.shared.factor_param_resolver import (
+        register_factor_param_resolver_for_user,
+    )
+
+    owner = str(spec.get("_owner") or payload.get("_owner") or "").strip()
+    register_factor_param_resolver_for_user(owner)
     from server.modules.single_factor_test.planning import build_execution_plan
 
     plan = build_execution_plan(str(payload.get("kind") or ""), spec)
