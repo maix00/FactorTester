@@ -30,6 +30,7 @@ def render_changes(
         if field.endswith(".positions"):
             body.extend(
                 positions.render_initialization(rows, indent="  ")
+                or positions.render_margin_changes(rows, indent="  ")
                 or render_position_changes(rows, indent="  ")
             )
         else:

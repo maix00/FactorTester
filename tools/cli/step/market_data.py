@@ -11,7 +11,7 @@ from .values import scalar, table_from_mappings
 
 
 def render_input(field: str, value: Any, *, indent: str) -> list[str] | None:
-    if field.endswith((".raw_prices", ".settlement_price", ".volume")):
+    if field.endswith((".raw_prices", ".settlement_price")):
         return _frame_summary(value, indent=indent)
     if field.endswith(".trading_day_resolver"):
         return _resolver_summary(value, indent=indent)
@@ -21,6 +21,8 @@ def render_input(field: str, value: Any, *, indent: str) -> list[str] | None:
         return _scalar_map(value, field.rsplit(".", 1)[-1], indent=indent)
     if field.endswith(".current_historical_fields"):
         return _field_state(value, indent=indent)
+    if field.endswith(".current_market_snapshot"):
+        return _market_snapshot(value, indent=indent)
     if field.endswith(".current_tradable_status"):
         return _tradable_status(value, indent=indent)
     return None
@@ -123,45 +125,43 @@ def _resolver_summary(value: Any, *, indent: str) -> list[str] | None:
 def _field_state(value: Any, *, indent: str) -> list[str] | None:
     if not isinstance(value, Mapping) or not value or not all(isinstance(item, Mapping) for item in value.values()):
         return None
-    groups = (
-        ("会计语义", ("CostBasisMethod", "MoneyCalculationPolicy")),
-        ("合约与保证金", ("VolumeMultiple", "LongMarginRatioByMoney", "ShortMarginRatioByMoney", "LongMarginRatioByVolume", "ShortMarginRatioByVolume")),
-        ("按金额费率", ("OpenRatioByMoney", "CloseRatioByMoney", "CloseTodayRatioByMoney")),
-        ("按手数费率", ("OpenRatioByVolume", "CloseRatioByVolume", "CloseTodayRatioByVolume")),
-    )
-    lines: list[str] = []
-    for title, fields in groups:
-        if not any(field in item for item in value.values() for field in fields):
-            continue
-        lines.append(f"{indent}{title}:")
-        rows = [
-            {"product": product, **{field: scalar(item.get(field)) for field in fields}}
-            for product, item in value.items()
-        ]
-        lines.extend(table_from_mappings(rows, indent=indent + "  "))
-    return lines
+    field_names = list(dict.fromkeys(field for item in value.values() for field in item))
+    semantic, numeric = [], []
+    for field in field_names:
+        values = [item.get(field) for item in value.values() if field in item]
+        numbers = [float(item) for item in values if isinstance(item, (int, float))]
+        unique = list(dict.fromkeys(scalar(item) for item in values))
+        if numbers and len(numbers) == len(values):
+            numeric.append({"field": field, "products": len(values), "nonzero": sum(item != 0 for item in numbers), "min": min(numbers), "max": max(numbers), "unique": len(unique)})
+        else:
+            semantic.append({"field": field, "products": len(values), "values": unique})
+    return [
+        f"{indent}会计语义:", *table_from_mappings(semantic, indent=indent + "  "),
+        f"{indent}数值规则范围:", *table_from_mappings(numeric, indent=indent + "  "),
+        click.style(f"{indent}逐品种规则请使用 job step-field 查看。", dim=True),
+    ]
 
 
 def _scalar_map(value: Any, label: str, *, indent: str) -> list[str] | None:
     if not isinstance(value, Mapping) or not value or not all(not isinstance(item, Mapping) for item in value.values()):
         return None
-    return table_from_mappings(
-        ({"instrument": instrument, label: scalar(item)} for instrument, item in value.items()),
-        indent=indent,
-    )
+    numeric = [float(item) for item in value.values() if isinstance(item, (int, float))]
+    return [*table_from_mappings([{
+        "field": label, "instruments": len(value), "non_null": sum(item is not None for item in value.values()),
+        "min": min(numeric) if numeric else None, "max": max(numeric) if numeric else None,
+    }], indent=indent), click.style(f"{indent}逐品种值请使用 job step-field 查看。", dim=True)]
 
 
 def _market_snapshot(value: Any, *, indent: str) -> list[str] | None:
     if not isinstance(value, Mapping) or not value or not all(isinstance(item, Mapping) for item in value.values()):
         return None
-    instruments = list(dict.fromkeys(
-        instrument for basis in value.values() for instrument in basis
-    ))
     rows = [
-        {"instrument": instrument, **{basis: scalar(values.get(instrument)) for basis, values in value.items()}}
-        for instrument in instruments
+        {"basis": basis, "instruments": len(values), "non_null": sum(item is not None for item in values.values()),
+         "min": min((float(item) for item in values.values() if isinstance(item, (int, float))), default=None),
+         "max": max((float(item) for item in values.values() if isinstance(item, (int, float))), default=None)}
+        for basis, values in value.items()
     ]
-    return table_from_mappings(rows, indent=indent)
+    return [*table_from_mappings(rows, indent=indent), click.style(f"{indent}逐品种快照请使用 job step-field 查看。", dim=True)]
 
 
 def _tradable_status(value: Any, *, indent: str) -> list[str] | None:

@@ -448,6 +448,22 @@ def test_current_market_snapshot_and_constraints_render_semantically() -> None:
     assert '"can_buy"' not in output
 
 
+def test_current_market_snapshot_input_is_summarized_by_basis() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "margin", "outputs": [], "output_changes": [],
+        "inputs": [{"field": "MarketDataModule.current_market_snapshot", "values": [{"value": {
+            "close": {"AP.CZC": 10, "CJ.CZC": 20},
+            "settlement": {"AP.CZC": 9, "CJ.CZC": 21},
+        }}]}],
+    })
+    output = "\n".join(lines)
+    assert "basis" in output and "close" in output and "settlement" in output
+    assert "instruments" in output and "逐品种快照" in output
+    assert '"AP.CZC"' not in output
+
+
 def test_current_historical_fields_preserve_accounting_semantics() -> None:
     from tools.cli.step import render_step_event
 
@@ -463,11 +479,11 @@ def test_current_historical_fields_preserve_accounting_semantics() -> None:
     })
     output = "\n".join(lines)
     assert "会计语义" in output and "DailyMarkToMarket" in output and "aggregate" in output
-    assert "合约与保证金" in output and "按手数费率" in output
+    assert "数值规则范围" in output and "VolumeMultiple" in output and "OpenRatioByVolume" in output
     assert '"CostBasisMethod"' not in output
 
 
-def test_portfolio_maps_render_owner_instrument_rows() -> None:
+def test_delta_maps_render_compact_owner_summary() -> None:
     from tools.cli.step import render_step_event
 
     lines = render_step_event({
@@ -478,8 +494,9 @@ def test_portfolio_maps_render_owner_instrument_rows() -> None:
         ],
     })
     output = "\n".join(lines)
-    assert "owner" in output and "instrument" in output
-    assert "A1" in output and "A2" in output and "AP.CZC" in output
+    assert "owner" in output and "instruments" in output and "gross_abs" in output
+    assert "A1" in output and "A2" in output and "AP.CZC" not in output
+    assert "step-field" in output
     assert '"AP.CZC"' not in output
 
 
@@ -494,8 +511,34 @@ def test_delta_maps_omit_only_zero_entries_with_explicit_note() -> None:
         }],
     })
     output = "\n".join(lines)
-    assert "AP.CZC" in output and "CJ.CZC" not in output
+    assert "AP.CZC" not in output and "CJ.CZC" not in output
     assert "已省略 1 个零 delta" in output and "step-field" in output
+
+
+def test_trade_intent_summarizes_weights_without_repeating_map() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "group", "inputs": [], "outputs": [],
+        "output_changes": [{
+            "field": "TargetStrategyModule.trade_intent", "strategy": "A1", "before": None,
+            "after": {"type": "rebalance", "reason": "signal", "weights": {"AP.CZC": 0.5, "CJ.CZC": -0.5}},
+        }],
+    })
+    output = "\n".join(lines)
+    assert "weight_count" in output and "2" in output
+    assert "rebalance" in output and "signal" in output
+    assert "AP.CZC" not in output and "target_weights" in output
+
+
+def test_empty_dmtm_payload_is_not_rendered() -> None:
+    from tools.cli.step import render_step_event
+
+    output = "\n".join(render_step_event({
+        "flow_id": "signal", "inputs": [], "outputs": [], "output_changes": [],
+        "dmtm": {"events": [], "resolved": [], "cash_changes": [], "position_changes": []},
+    }))
+    assert "DMTM 审计" not in output
 
 
 def test_orders_render_as_rows_with_rejection_semantics() -> None:
@@ -510,8 +553,9 @@ def test_orders_render_as_rows_with_rejection_semantics() -> None:
         "output_changes": [{"field": "OrderConstructModule.orders", "strategy": "A1", "before": None, "after": [order]}],
     })
     output = "\n".join(lines)
-    assert "quantity" in output and "intent" in output
+    assert "orders" in output and "quantity" in output and "intent" in output
     assert "rejected" in output and "cash" in output and "o1" in output
+    assert "step-field" in output
     assert '"reject_reason"' not in output
 
 
@@ -531,7 +575,9 @@ def test_dmtm_renders_data_money_units_and_position_settlement() -> None:
     output = "\n".join(lines)
     assert "before_major" in output and "before_minor" in output
     assert "delta_major" in output and "delta_minor" in output
-    assert "settlement_after" in output and "AP.CZC" in output
+    assert "settled" in output and "instruments" in output
+    assert "margin_before_major" in output and "L1" in output
+    assert "AP.CZC" not in output and "step-field" in output
 
 
 def test_dmtm_deduplicates_fields_represented_by_dedicated_audit() -> None:
@@ -552,6 +598,23 @@ def test_dmtm_deduplicates_fields_represented_by_dedicated_audit() -> None:
     assert output.count("MarketDataModule.current_market_snapshot") == 1
     assert output.count("LedgerModule.positions") == 0
     assert "large" not in output and "DMTM 解析" in output
+
+
+def test_margin_only_position_changes_are_summarized_per_ledger() -> None:
+    from tools.cli.step import render_step_event
+
+    before = {"type": "DataMoney", "major_units": 10, "minor_units": 1000, "currency": "CNY", "scale": 100}
+    after = {"type": "DataMoney", "major_units": 12, "minor_units": 1200, "currency": "CNY", "scale": 100}
+    lines = render_step_event({
+        "flow_id": "margin", "inputs": [], "outputs": [],
+        "output_changes": [{"field": "LedgerModule.positions", "ledger": "L1", "changes": [
+            {"instrument": "AP.CZC", "before": {"quantity": 1, "margin_reserved": before},
+             "after": {"quantity": 1, "margin_reserved": after}},
+        ]}],
+    })
+    output = "\n".join(lines)
+    assert "before_major" in output and "after_major" in output and "L1" in output
+    assert "AP.CZC" not in output and "step-field" in output
 
 
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:

@@ -11,7 +11,10 @@ from .values import scalar, table_from_mappings
 
 
 def render(value: Any) -> list[str]:
-    if not isinstance(value, Mapping):
+    if not isinstance(value, Mapping) or not any(value.get(key) for key in (
+        "events", "resolved", "accounting_inputs", "market_rule_inputs",
+        "cash_changes", "position_changes", "margin_changes",
+    )):
         return []
     lines = [click.style("DMTM 审计", bold=True)]
     lines.extend(_section("事件", value.get("events")))
@@ -45,7 +48,7 @@ def _accounting(records: Any) -> list[str]:
 
 
 def _resolved(records: Any) -> list[str]:
-    rows = []
+    grouped: dict[str, dict[str, Any]] = {}
     for record in records or []:
         value = record.get("value") if isinstance(record, Mapping) else None
         if not isinstance(value, Mapping):
@@ -55,8 +58,14 @@ def _resolved(records: Any) -> list[str]:
                 continue
             for instrument, item in instruments.items():
                 if isinstance(item, Mapping):
-                    rows.append({"ledger": ledger, "instrument": instrument, **item})
-    return [f"  DMTM 解析: {len(rows)} instruments", *table_from_mappings(rows, indent="    ")]
+                    row = grouped.setdefault(str(ledger), {"ledger": ledger, "instruments": 0, "enabled": 0, "sources": set(), "methods": set()})
+                    row["instruments"] += 1
+                    row["enabled"] += bool(item.get("enabled"))
+                    row["sources"].add(str(item.get("source")))
+                    row["methods"].add(str(item.get("cost_basis_method")))
+    rows = [{**row, "sources": sorted(row["sources"]), "methods": sorted(row["methods"])} for row in grouped.values()]
+    return [f"  DMTM 解析: {sum(row['instruments'] for row in rows)} instruments", *table_from_mappings(rows, indent="    "),
+            click.style("    逐合约解析结果请使用 job step-field 查看。", dim=True)]
 
 
 def _market_rules(records: Any) -> list[str]:
@@ -98,7 +107,7 @@ def _cash(records: Any) -> list[str]:
 
 
 def _positions(records: Any) -> list[str]:
-    rows = []
+    grouped: dict[str, dict[str, Any]] = {}
     for record in records or []:
         if not isinstance(record, Mapping):
             continue
@@ -107,11 +116,17 @@ def _positions(records: Any) -> list[str]:
                 continue
             before = change.get("before") if isinstance(change.get("before"), Mapping) else {}
             after = change.get("after") if isinstance(change.get("after"), Mapping) else {}
-            rows.append({
-                "ledger": record.get("ledger"), "instrument": change.get("instrument"),
-                "quantity": after.get("quantity"), "settlement_before": before.get("settlement_price"),
-                "settlement_after": after.get("settlement_price"),
-                **_money_parts(before.get("margin_reserved"), "margin_before"),
-                **_money_parts(after.get("margin_reserved"), "margin_after"),
-            })
-    return [f"  持仓结算变化: {len(rows)}", *table_from_mappings(rows, indent="    ")]
+            ledger = str(record.get("ledger"))
+            row = grouped.setdefault(ledger, {"ledger": ledger, "instruments": 0, "settled": 0,
+                                               "margin_before_major": 0.0, "margin_after_major": 0.0,
+                                               "margin_before_minor": 0, "margin_after_minor": 0})
+            row["instruments"] += 1
+            row["settled"] += after.get("settlement_price") is not None
+            for source, prefix in ((before, "margin_before"), (after, "margin_after")):
+                money = source.get("margin_reserved")
+                if isinstance(money, Mapping):
+                    row[f"{prefix}_major"] += float(money.get("major_units") or 0)
+                    row[f"{prefix}_minor"] += int(money.get("minor_units") or 0)
+    rows = list(grouped.values())
+    return [f"  持仓结算变化: {sum(row['instruments'] for row in rows)}", *table_from_mappings(rows, indent="    "),
+            click.style("    逐合约持仓结算变化请使用 job step-field 查看。", dim=True)]

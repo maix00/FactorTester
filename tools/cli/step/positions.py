@@ -43,3 +43,35 @@ def render_values(values: list[Mapping[str, Any]], *, indent: str) -> list[str] 
         )
         summaries.append({"owner": route_label(row), "instruments": len(book), "nonzero": nonzero})
     return table_from_mappings(summaries, indent=indent)
+
+
+def render_margin_changes(rows: list[Mapping[str, Any]], *, indent: str) -> list[str] | None:
+    summaries = []
+    for row in rows:
+        changes = [item for item in row.get("changes") or [] if isinstance(item, Mapping)]
+        if not changes:
+            return None
+        pairs = []
+        for change in changes:
+            before = change.get("before") if isinstance(change.get("before"), Mapping) else {}
+            after = change.get("after") if isinstance(change.get("after"), Mapping) else {}
+            if set(before) != set(after) or any(
+                before.get(key) != after.get(key) for key in before if key != "margin_reserved"
+            ):
+                return None
+            pairs.append((before.get("margin_reserved"), after.get("margin_reserved")))
+        summaries.append({
+            "owner": route_label(row), "instruments": len(changes),
+            "before_major": sum(_money_major(before) for before, _ in pairs),
+            "after_major": sum(_money_major(after) for _, after in pairs),
+        })
+    return [
+        *table_from_mappings(summaries, indent=indent),
+        click.style(f"{indent}逐合约保证金变化请使用 job step-field 查看。", dim=True),
+    ]
+
+
+def _money_major(value: Any) -> float:
+    if isinstance(value, Mapping) and value.get("type") == "DataMoney":
+        return float(value.get("major_units") or 0)
+    return float(value or 0)
