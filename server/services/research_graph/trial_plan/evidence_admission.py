@@ -67,12 +67,28 @@ def admit_current_action(
         target="admitted",
         qualification=qualification,
     )
+    receipt = {
+        "schema_version": 1,
+        "trial_plan_hash": json_hash(plan),
+        "action_id": action["action_id"],
+        "stage_id": action["stage_id"],
+        "action_input_hash": action["input_hash"],
+        "evidence_contract_ref": action["evidence_contract_ref"],
+        "expected_evidence_kind": action["expected_evidence_kind"],
+        "run_spec_hashes": sorted(action["run_spec_hashes"]),
+        "evidence_refs": sorted(evidence_refs),
+        "qualification": qualification,
+    }
     return {
         "schema_version": 1,
         "action_id": action["action_id"],
         "qualification": qualification,
         "evidence_refs": sorted(evidence_refs),
         "reason_codes": sorted(rejection_codes),
+        "admission_receipt": {
+            **receipt,
+            "receipt_hash": json_hash(receipt),
+        },
         "checkpoint": admitted,
     }
 

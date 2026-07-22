@@ -17,6 +17,7 @@ from .execution_checkpoint import (
     validate_execution_checkpoint,
 )
 from .evidence_admission import admit_current_action
+from .evidence_reuse import reuse_exact_action_evidence
 from .result_audit import audit_current_action
 from .retention import trial_plan_trace_retention
 from .stage_projection import (
@@ -39,6 +40,7 @@ __all__ = [
     "advance_after_audit",
     "admit_current_action",
     "audit_current_action",
+    "reuse_exact_action_evidence",
     "agent_action_summary",
     "canonical_trial_plan",
     "initial_execution_checkpoint",

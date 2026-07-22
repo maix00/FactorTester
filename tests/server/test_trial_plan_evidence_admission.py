@@ -13,6 +13,7 @@ from server.services.research_graph.research_cycle.evidence import (
 from server.services.research_graph.trial_plan import (
     admit_current_action,
     initial_execution_checkpoint,
+    reuse_exact_action_evidence,
     transition_action_status,
     trial_plan_hash,
 )
@@ -147,4 +148,64 @@ def test_gate_rejects_stale_action_binding_and_incomplete_run_set() -> None:
             _ready(plan, record),
             trial_plan=plan,
             evidence_records=[],
+        )
+
+
+def test_exact_reuse_releases_only_an_unchanged_eligible_action() -> None:
+    plan = trial_plan_v5()
+    record = _record(plan)
+    admitted = admit_current_action(
+        _ready(plan, record),
+        trial_plan=plan,
+        evidence_records=[record],
+    )
+    fresh = initial_execution_checkpoint(
+        trial_plan=plan,
+        expected_trial_plan_hash=trial_plan_hash(plan),
+        execution_node="trial_execution",
+    )
+
+    reused = reuse_exact_action_evidence(
+        fresh,
+        trial_plan=plan,
+        admission_receipt=admitted["admission_receipt"],
+    )
+
+    assert reused["reuse"] == "exact"
+    assert reused["checkpoint"]["current_action_status"] == "evidence_ready"
+
+
+def test_exact_reuse_rejects_changed_input_or_noneligible_evidence() -> None:
+    plan = trial_plan_v5()
+    record = _record(plan)
+    admitted = admit_current_action(
+        _ready(plan, record),
+        trial_plan=plan,
+        evidence_records=[record],
+    )
+    fresh = initial_execution_checkpoint(
+        trial_plan=plan,
+        expected_trial_plan_hash=trial_plan_hash(plan),
+        execution_node="trial_execution",
+    )
+    changed = deepcopy(admitted["admission_receipt"])
+    changed["action_input_hash"] = "f" * 64
+    unsigned = {key: value for key, value in changed.items() if key != "receipt_hash"}
+    changed["receipt_hash"] = json_hash(unsigned)
+    with pytest.raises(ValueError, match="exact Action match"):
+        reuse_exact_action_evidence(
+            fresh,
+            trial_plan=plan,
+            admission_receipt=changed,
+        )
+
+    rejected = deepcopy(admitted["admission_receipt"])
+    rejected["qualification"] = "limited"
+    unsigned = {key: value for key, value in rejected.items() if key != "receipt_hash"}
+    rejected["receipt_hash"] = json_hash(unsigned)
+    with pytest.raises(ValueError, match="only eligible"):
+        reuse_exact_action_evidence(
+            fresh,
+            trial_plan=plan,
+            admission_receipt=rejected,
         )
