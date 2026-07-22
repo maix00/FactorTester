@@ -95,6 +95,28 @@ def test_graph_upgrade_retargets_one_stable_work_package_record(
         "graph_branch_ref": "graph-branch:physical-v7:branch-v7",
         "checkpoint_ref": "trace:v7",
         "evidence_refs": ["evidence:v7"],
+        "artifacts": [{
+            "artifact_ref": (
+                "artifact:research/physical-v7/branches/branch-v7/REPORT.md"
+            ),
+            "format": "markdown",
+            "status": "ready",
+            "content_hash": "abc",
+            "local_ref": (
+                tmp_path / "workspace" / "research" / "physical-v7"
+                / "branches" / "branch-v7" / "REPORT.md"
+            ).as_uri(),
+            "index_ref": (
+                tmp_path / "workspace" / "research" / "physical-v7"
+                / "INDEX.json"
+            ).as_uri(),
+            "journal_ref": (
+                tmp_path / "workspace" / "research" / "physical-v7"
+                / "branches" / "branch-v7" / "JOURNAL.json"
+            ).as_uri(),
+            "journal_hash": "a" * 64,
+            "section_refs": [],
+        }],
         "provenance": {"kind": "active_graph_research"},
     }
     profile["research_records"] = [stable, duplicate]
@@ -128,6 +150,12 @@ def test_graph_upgrade_retargets_one_stable_work_package_record(
     assert record["updated_at"] == 3.0
     assert record["checkpoint_ref"] == "trace:v7"
     assert record["evidence_refs"] == ["evidence:v6", "evidence:v7"]
+    artifact = record["artifacts"][0]
+    assert artifact["artifact_ref"].startswith(
+        "artifact:research/sgccs-work-package/"
+    )
+    assert "/research/sgccs-work-package/" in artifact["local_ref"]
+    assert "/research/physical-v7/" not in artifact["journal_ref"]
 
     repeated = store.retarget_research_incarnation(
         "maxa",

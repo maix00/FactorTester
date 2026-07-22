@@ -311,6 +311,14 @@ class LocalProfileStore:
                 for record in matching
                 for item in record["timeline_refs"]
             ),
+            "artifacts": _retarget_research_artifacts(
+                latest["artifacts"],
+                work_package_id=work_package_id,
+                physical_instance_ids={
+                    source_instance_id,
+                    target_instance_id,
+                },
+            ),
         }
         if not merged["run_ref"]:
             merged["run_ref"] = next(
@@ -448,6 +456,31 @@ def _unique_descriptors(values) -> list[dict[str, Any]]:
             continue
         identities.add(identity)
         result.append(value)
+    return result
+
+
+def _retarget_research_artifacts(
+    values: list[dict[str, Any]],
+    *,
+    work_package_id: str,
+    physical_instance_ids: set[str],
+) -> list[dict[str, Any]]:
+    result = []
+    for value in values:
+        item = dict(value)
+        for field in (
+            "artifact_ref", "local_ref", "index_ref", "journal_ref",
+        ):
+            if field not in item:
+                continue
+            reference = str(item.get(field) or "")
+            for physical_id in physical_instance_ids:
+                reference = reference.replace(
+                    f"research/{physical_id}/",
+                    f"research/{work_package_id}/",
+                )
+            item[field] = reference
+        result.append(item)
     return result
 
 
