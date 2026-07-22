@@ -939,6 +939,107 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertNil(page.nextCursor)
     }
 
+    func testResearchListRequestsOneLifecycleProjection() async throws {
+        let session = stubSession()
+        StubURLProtocol.handler = { request in
+            let components = URLComponents(
+                url: request.url!,
+                resolvingAgainstBaseURL: false
+            )
+            let values = Dictionary(
+                uniqueKeysWithValues: components!.queryItems!.map {
+                    ($0.name, $0.value ?? "")
+                }
+            )
+            XCTAssertEqual(values["workspace_ref"], "workspace:w")
+            XCTAssertEqual(values["lifecycle"], "archived")
+            return (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200,
+                    httpVersion: nil, headerFields: nil
+                )!,
+                listJSON().data(using: .utf8)!
+            )
+        }
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: URLSessionProfileResearchTransport(session: session)
+        )
+
+        let page = try await service.list(
+            workspaceRef: "workspace:w",
+            lifecycle: "archived"
+        )
+
+        XCTAssertEqual(page.items.count, 1)
+    }
+
+    func testLifecycleMutationUsesPatchAndRevisionCAS() async throws {
+        let transport = FakeProjectionTransport(responses: [
+            ResearchHTTPResponse(
+                data: Data("""
+                {"success":true,"work_package_ref":"work-package:i",
+                 "lifecycle":"archived","revision":8,"updated_at":2}
+                """.utf8),
+                statusCode: 200,
+                etag: nil
+            )
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        let result = try await service.transitionLifecycle(
+            workPackageRef: "work-package:i",
+            target: "archived",
+            expectedRevision: 7,
+            reason: "用户归档"
+        )
+
+        XCTAssertEqual(result.lifecycle, "archived")
+        XCTAssertEqual(result.revision, 8)
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.httpMethod, "PATCH")
+        XCTAssertTrue(request.url!.path.hasSuffix(
+            "/api/profile-research/work-package:i/lifecycle"
+        ))
+        let body = try JSONSerialization.jsonObject(
+            with: try XCTUnwrap(request.httpBody)
+        ) as! [String: Any]
+        XCTAssertEqual(body["target"] as? String, "archived")
+        XCTAssertEqual(body["expected_revision"] as? Int, 7)
+    }
+
+    @MainActor
+    func testResearchDirectoryForwardsSelectedLifecycle() async {
+        let profile = LocalProfileModel(json: [
+            "profile_id": "maxa",
+            "display_name": "MaxA",
+            "server": ["base_url": "http://example.test:8141"],
+            "workspaces": [[
+                "workspace_id": "w",
+                "server_workspace_ref": "workspace:w",
+            ]],
+        ])
+        var requestedLifecycle = ""
+        let controller = ResearchDirectoryController(
+            profiles: [profile],
+            lifecycleLoad: { _, _, lifecycle in
+                requestedLifecycle = lifecycle
+                return try JSONDecoder().decode(
+                    ProfileResearchListResponse.self,
+                    from: listJSON().data(using: .utf8)!
+                )
+            }
+        )
+
+        await controller.refresh(lifecycle: .deleted)
+
+        XCTAssertEqual(requestedLifecycle, "deleted")
+        XCTAssertEqual(controller.lifecycle, .deleted)
+    }
+
     private func stubSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
@@ -1182,10 +1283,11 @@ private func response(
 
 private func listJSON() -> String {
     """
-    {"success":true,"workspace_ref":"workspace:w","items":[{
+    {"success":true,"workspace_ref":"workspace:w","lifecycle":"active","items":[{
       "research_ref":"work-package:i","work_package_ref":"work-package:i",
       "workspace_ref":"workspace:w","product_group":"CNFutures",
-      "status":"running","branch_count":1,"running_branch_count":1,
+      "status":"running","lifecycle":"active","lifecycle_revision":1,
+      "branch_count":1,"running_branch_count":1,
       "updated_at":1,"detail_href":"/api/profile-research/work-package:i",
       "report_lookup_ref":"work-package:i"}],
      "next_cursor":null,"etag":"sha256:list"}
@@ -1196,7 +1298,8 @@ private func workPackageJSON() -> String {
     """
     {"success":true,"research_ref":"work-package:i",
      "work_package_ref":"work-package:i","product_group":"CNFutures",
-     "mode":"live","branch_count":1,"omitted_branch_count":0,
+     "mode":"live","lifecycle":"active","lifecycle_revision":1,
+     "branch_count":1,"omitted_branch_count":0,
      "branches":[{"research_ref":"work-package:i",
        "work_package_ref":"work-package:i","branch_ref":"graph-branch:i:b",
        "workspace_ref":"workspace:w","graph_ref":"factor-research@v6",

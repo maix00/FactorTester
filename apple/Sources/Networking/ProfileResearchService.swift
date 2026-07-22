@@ -82,17 +82,47 @@ struct ProfileResearchService {
 
     func list(
         workspaceRef: String,
+        lifecycle: String = "active",
         after: String? = nil
     ) async throws -> ProfileResearchListResponse {
         let path = path(
             "/api/profile-research",
             query: [
                 URLQueryItem(name: "workspace_ref", value: workspaceRef),
+                URLQueryItem(name: "lifecycle", value: lifecycle),
                 URLQueryItem(name: "limit", value: "20"),
                 URLQueryItem(name: "after", value: after),
             ]
         )
         return try await value(path: path, as: ProfileResearchListResponse.self)
+    }
+
+    func transitionLifecycle(
+        workPackageRef: String,
+        target: String,
+        expectedRevision: Int,
+        reason: String
+    ) async throws -> ProfileResearchLifecycleResult {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "target": target,
+            "expected_revision": expectedRevision,
+            "reason": reason,
+        ])
+        let response = try await transport.data(for: request(
+            path: "/api/profile-research/\(workPackageRef)/lifecycle",
+            etag: nil,
+            method: "PATCH",
+            body: body
+        ))
+        guard (200..<300).contains(response.statusCode) else {
+            throw APIError.transport(
+                "Research lifecycle HTTP \(response.statusCode)"
+            )
+        }
+        return try decoder.decode(
+            ProfileResearchLifecycleResult.self,
+            from: response.data
+        )
     }
 
     func workPackageDetail(
@@ -180,10 +210,23 @@ struct ProfileResearchService {
         )
     }
 
-    private func request(path: String, etag: String?) -> URLRequest {
+    private func request(
+        path: String,
+        etag: String?,
+        method: String = "GET",
+        body: Data? = nil
+    ) -> URLRequest {
         let url = URL(string: path, relativeTo: baseURL)!.absoluteURL
         var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if body != nil {
+            request.setValue(
+                "application/json",
+                forHTTPHeaderField: "Content-Type"
+            )
+        }
         if let etag {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }

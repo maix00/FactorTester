@@ -12,6 +12,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
         self,
         *,
         workspace_ref: str,
+        lifecycle: str = "active",
         limit: int = 20,
         after: str = "",
     ) -> dict[str, Any]:
@@ -20,6 +21,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
             "/api/profile-research",
             query={
                 "workspace_ref": workspace_ref,
+                "lifecycle": lifecycle,
                 "limit": limit,
                 "after": after or None,
             },
@@ -32,6 +34,23 @@ class ResearchGraphClientMixin(ClientMixinBase):
         """Load one bounded current-state projection."""
         return self._expect_success(self.session.get(
             f"/api/profile-research/{research_ref}"
+        ))
+
+    def transition_profile_research_lifecycle(
+        self,
+        work_package_ref: str,
+        *,
+        target: str,
+        expected_revision: int,
+        reason: str,
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.patch(
+            f"/api/profile-research/{work_package_ref}/lifecycle",
+            {
+                "target": target,
+                "expected_revision": expected_revision,
+                "reason": reason,
+            },
         ))
 
     def get_profile_research_branch(

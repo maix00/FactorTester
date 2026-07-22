@@ -41,6 +41,7 @@ from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
 from server.services.research_graph.versions import load_graph_from_conn
+from server.services.research_graph.work_packages import require_active
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -105,6 +106,7 @@ def continue_graph_branch(
         )
         if source is None:
             raise KeyError("source graph branch not found")
+        require_active(source)
         if not bool(source["is_current_incarnation"]):
             raise ValueError(
                 "Graph continuation source is not the current incarnation"
@@ -182,6 +184,7 @@ def _prepare(
         )
         if source is None:
             raise KeyError("source graph branch not found")
+        require_active(source)
         if not bool(source["is_current_incarnation"]):
             raise ValueError(
                 "Graph continuation source is not the current incarnation"

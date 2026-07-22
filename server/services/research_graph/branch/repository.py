@@ -14,12 +14,19 @@ from server.services.research_graph.protocol import loads
 
 CURRENT_BRANCH_CONTEXT_SQL = """
     SELECT i.*, b.*, t.edge_id AS latest_trace_edge_id,
-           t.evidence_json AS latest_trace_evidence_json
+           t.evidence_json AS latest_trace_evidence_json,
+           COALESCE(w.lifecycle, 'active') AS work_package_lifecycle,
+           COALESCE(w.revision, 1) AS work_package_revision
     FROM research_graph_instances i
     JOIN research_graph_branches b
       ON b.instance_id=i.instance_id
     LEFT JOIN research_graph_trace t
       ON t.trace_id=b.latest_trace_id
+    LEFT JOIN research_work_packages w
+      ON w.owner=i.owner
+     AND w.work_package_id=COALESCE(
+         NULLIF(i.work_package_id, ''), i.instance_id
+     )
     WHERE i.instance_id=? AND b.branch_id=? AND i.owner=?
 """
 
@@ -46,6 +53,10 @@ def branch_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "label": str(row["label"]),
         "current_node": str(row["current_node"]),
         "status": str(row["status"]),
+        "work_package_lifecycle": str(
+            row["work_package_lifecycle"] or "active"
+        ),
+        "work_package_revision": int(row["work_package_revision"] or 1),
         "created_at": float(row["created_at"]),
         "updated_at": float(row["updated_at"]),
     }
@@ -100,10 +111,17 @@ def load_instance_branch_row(
 ) -> sqlite3.Row | None:
     return conn.execute(
         """
-        SELECT i.*, b.*
+        SELECT i.*, b.*,
+               COALESCE(w.lifecycle, 'active') AS work_package_lifecycle,
+               COALESCE(w.revision, 1) AS work_package_revision
         FROM research_graph_instances i
         JOIN research_graph_branches b
           ON b.instance_id=i.instance_id
+        LEFT JOIN research_work_packages w
+          ON w.owner=i.owner
+         AND w.work_package_id=COALESCE(
+             NULLIF(i.work_package_id, ''), i.instance_id
+         )
         WHERE i.instance_id=? AND b.branch_id=? AND i.owner=?
         """,
         (instance_id, branch_id, owner),

@@ -10,6 +10,9 @@ from server.services.research_graph.profile_research_projection import (
     projection_etag,
 )
 from server.services.session_runtime import require_user
+from server.services.research_graph.work_packages import (
+    transition_lifecycle,
+)
 
 
 _projection = ProfileResearchProjection()
@@ -47,6 +50,7 @@ def list_profile_research():
             workspace_ref=str(
                 request.args.get("workspace_ref") or ""
             ),
+            lifecycle=str(request.args.get("lifecycle") or "active"),
             limit=_limit(20),
             after=str(request.args.get("after") or ""),
         )
@@ -61,6 +65,24 @@ def get_profile_research(research_ref: str):
         payload = _projection.get_research(
             owner=require_user(),
             research_ref=research_ref,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return _error(exc)
+    return _response(payload)
+
+
+@sft_bp.patch("/api/profile-research/<work_package_ref>/lifecycle")
+def change_profile_research_lifecycle(work_package_ref: str):
+    data = request.get_json(silent=True) or {}
+    owner = require_user()
+    try:
+        payload = transition_lifecycle(
+            owner=owner,
+            work_package_ref=work_package_ref,
+            target=str(data.get("target") or ""),
+            expected_revision=int(data.get("expected_revision") or 0),
+            actor=owner,
+            reason=str(data.get("reason") or ""),
         )
     except (KeyError, TypeError, ValueError) as exc:
         return _error(exc)

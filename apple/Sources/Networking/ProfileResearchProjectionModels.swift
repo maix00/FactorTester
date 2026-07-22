@@ -2,12 +2,14 @@ import Foundation
 
 struct ProfileResearchListResponse: Decodable {
     let workspaceRef: String
+    let lifecycle: String?
     let items: [ProfileResearchSummary]
     let nextCursor: String?
     let etag: String
 
     enum CodingKeys: String, CodingKey {
         case workspaceRef = "workspace_ref"
+        case lifecycle
         case items
         case nextCursor = "next_cursor"
         case etag
@@ -27,6 +29,8 @@ struct ProfileResearchSummary: Decodable, Identifiable {
     let reportLookupRef: String?
     let createdByProfileRef: String?
     let currentOwnerProfileRef: String?
+    let lifecycle: String?
+    let lifecycleRevision: Int?
     var id: String { researchRef }
 
     enum CodingKeys: String, CodingKey {
@@ -42,6 +46,8 @@ struct ProfileResearchSummary: Decodable, Identifiable {
         case reportLookupRef = "report_lookup_ref"
         case createdByProfileRef = "created_by_profile_ref"
         case currentOwnerProfileRef = "current_owner_profile_ref"
+        case lifecycle
+        case lifecycleRevision = "lifecycle_revision"
     }
 }
 
@@ -56,6 +62,8 @@ struct ProfileResearchWorkPackageDetail: Decodable {
     let tree: ResearchVersionTreeProjection?
     let reportLookupRef: String?
     let etag: String
+    let lifecycle: String?
+    let lifecycleRevision: Int?
 
     enum CodingKeys: String, CodingKey {
         case researchRef = "research_ref"
@@ -68,6 +76,22 @@ struct ProfileResearchWorkPackageDetail: Decodable {
         case tree
         case reportLookupRef = "report_lookup_ref"
         case etag
+        case lifecycle
+        case lifecycleRevision = "lifecycle_revision"
+    }
+}
+
+struct ProfileResearchLifecycleResult: Decodable {
+    let workPackageRef: String
+    let lifecycle: String
+    let revision: Int
+    let updatedAt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case workPackageRef = "work_package_ref"
+        case lifecycle
+        case revision
+        case updatedAt = "updated_at"
     }
 }
 

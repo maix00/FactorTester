@@ -51,6 +51,8 @@ LIST_FIRST_SQL = """
                COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
                    AS work_package_id,
                i.created_by_profile_ref, i.current_owner_profile_ref,
+               COALESCE(wp.lifecycle, 'active') AS lifecycle,
+               COALESCE(wp.revision, 1) AS lifecycle_revision,
                i.graph_id, i.graph_version, i.product_group,
                i.workspace_id, i.mode,
                (
@@ -85,10 +87,15 @@ LIST_FIRST_SQL = """
         FROM research_graph_instances AS i
         JOIN research_graph_branches AS b
           ON b.instance_id=i.instance_id
+        LEFT JOIN research_work_packages AS wp
+          ON wp.owner=i.owner
+         AND wp.work_package_id=COALESCE(
+             NULLIF(i.work_package_id, ''), i.instance_id
+         )
         WHERE i.owner=? AND i.workspace_id=?
           AND b.is_current_incarnation=1
     )
-    SELECT * FROM candidates WHERE head_rank=1
+    SELECT * FROM candidates WHERE head_rank=1 AND lifecycle=?
     ORDER BY updated_at DESC, work_package_id DESC
     LIMIT ?
 """
@@ -99,6 +106,8 @@ LIST_AFTER_SQL = """
                COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
                    AS work_package_id,
                i.created_by_profile_ref, i.current_owner_profile_ref,
+               COALESCE(wp.lifecycle, 'active') AS lifecycle,
+               COALESCE(wp.revision, 1) AS lifecycle_revision,
                i.graph_id, i.graph_version, i.product_group,
                i.workspace_id, i.mode,
                (
@@ -133,11 +142,16 @@ LIST_AFTER_SQL = """
         FROM research_graph_instances AS i
         JOIN research_graph_branches AS b
           ON b.instance_id=i.instance_id
+        LEFT JOIN research_work_packages AS wp
+          ON wp.owner=i.owner
+         AND wp.work_package_id=COALESCE(
+             NULLIF(i.work_package_id, ''), i.instance_id
+         )
         WHERE i.owner=? AND i.workspace_id=?
           AND b.is_current_incarnation=1
     )
     SELECT * FROM candidates
-    WHERE head_rank=1 AND (
+    WHERE head_rank=1 AND lifecycle=? AND (
         updated_at<? OR (updated_at=? AND work_package_id<?)
     )
     ORDER BY updated_at DESC, work_package_id DESC
@@ -150,6 +164,8 @@ WORK_PACKAGE_DETAIL_SQL = f"""
                AS work_package_id,
            i.created_by_profile_ref,
            i.current_owner_profile_ref, i.graph_id, i.graph_version,
+           COALESCE(wp.lifecycle, 'active') AS lifecycle,
+           COALESCE(wp.revision, 1) AS lifecycle_revision,
            i.product_group,
            i.workspace_id, i.mode,
            (
@@ -295,6 +311,11 @@ WORK_PACKAGE_DETAIL_SQL = f"""
     FROM research_graph_instances AS i
     JOIN research_graph_branches AS b
       ON b.instance_id=i.instance_id
+    LEFT JOIN research_work_packages AS wp
+      ON wp.owner=i.owner
+     AND wp.work_package_id=COALESCE(
+         NULLIF(i.work_package_id, ''), i.instance_id
+     )
     LEFT JOIN research_graph_trace AS lineage
       ON lineage.trace_id=(
           SELECT candidate.trace_id
@@ -461,10 +482,13 @@ class ProfileResearchProjection:
         *,
         owner: str,
         workspace_ref: str,
+        lifecycle: str = "active",
         limit: int = DEFAULT_LIST_LIMIT,
         after: str = "",
     ) -> dict[str, Any]:
         workspace_id = parse_workspace_ref(workspace_ref)
+        if lifecycle not in {"active", "archived", "deleted"}:
+            raise ValueError("lifecycle must be active, archived, or deleted")
         page_limit = bounded_limit(
             limit,
             default=DEFAULT_LIST_LIMIT,
@@ -475,7 +499,7 @@ class ProfileResearchProjection:
             if cursor is None:
                 rows = conn.execute(
                     LIST_FIRST_SQL,
-                    (owner, workspace_id, page_limit + 1),
+                    (owner, workspace_id, lifecycle, page_limit + 1),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -483,6 +507,7 @@ class ProfileResearchProjection:
                     (
                         owner,
                         workspace_id,
+                        lifecycle,
                         cursor["at"],
                         cursor["at"],
                         cursor["id"],
@@ -504,6 +529,7 @@ class ProfileResearchProjection:
         return bounded_projection({
             "schema_version": 2,
             "workspace_ref": workspace_ref_for(workspace_id),
+            "lifecycle": lifecycle,
             "items": items,
             "next_cursor": next_cursor,
         })
@@ -540,6 +566,8 @@ class ProfileResearchProjection:
             ),
             "product_group": str(first["product_group"]),
             "mode": str(first["mode"]),
+            "lifecycle": str(first["lifecycle"]),
+            "lifecycle_revision": int(first["lifecycle_revision"]),
             "created_at": min(
                 float(row["instance_created_at"]) for row in rows
             ),
@@ -946,6 +974,8 @@ def _work_package_summary(row: sqlite3.Row) -> dict[str, Any]:
         ),
         "product_group": str(row["product_group"]),
         "mode": str(row["mode"]),
+        "lifecycle": str(row["lifecycle"]),
+        "lifecycle_revision": int(row["lifecycle_revision"]),
         "branch_count": branch_count,
         "running_branch_count": running_count,
         "status": "running" if running_count else "stopped",

@@ -22,6 +22,7 @@ from server.services.research_graph.branch.research_cycle import (
 )
 from server.services.research_graph.protocol import serialize_bounded_trace_evidence
 from tools.data.sqlite.db import connect_sqlite
+from server.services.research_graph.work_packages import require_active
 
 
 def handoff_graph_branch(
@@ -67,6 +68,7 @@ def handoff_graph_branch(
         )
         if branch is None:
             raise KeyError("graph branch not found")
+        require_active(branch)
         if not bool(branch["is_current_incarnation"]):
             raise ValueError("graph branch is not the current incarnation")
         current_owner = str(branch["current_owner_profile_ref"] or "")

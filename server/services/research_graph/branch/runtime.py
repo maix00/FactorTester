@@ -33,6 +33,10 @@ from server.services.research_graph.protocol import (
     serialize_bounded_trace_evidence,
 )
 from server.services.research_graph.versions import load_graph
+from server.services.research_graph.work_packages import (
+    insert_active,
+    require_active,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -143,6 +147,13 @@ def create_graph_instance(
                 now,
             ),
         )
+        insert_active(
+            conn,
+            owner=owner,
+            work_package_id=instance_id,
+            workspace_id=workspace_id,
+            created_at=now,
+        )
         _, resolution_json, resolution_hash = (
             serialize_capability_resolution(
                 local_resolution,
@@ -239,6 +250,7 @@ def fork_graph_branch(
         )
         if source is None:
             raise KeyError("source branch not found")
+        require_active(source)
         if not bool(source["is_current_incarnation"]):
             raise ValueError("source branch is not the current incarnation")
         current_owner_profile_ref = str(

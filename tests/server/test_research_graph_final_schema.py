@@ -36,7 +36,7 @@ def _initialize(tmp_path, monkeypatch):
     return graph_path, flow_path
 
 
-def test_fresh_schema_has_exact_six_graph_and_two_agent_flow_owners(
+def test_fresh_schema_has_exact_seven_graph_and_two_agent_flow_owners(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -51,7 +51,7 @@ def test_fresh_schema_has_exact_six_graph_and_two_agent_flow_owners(
         assert final_schema_report(conn) == {
             "graph_owner_tables": sorted(GRAPH_OWNER_TABLES),
             "legacy_graph_tables": [],
-            "owner_count": 6,
+            "owner_count": 7,
             "is_final": True,
         }
 

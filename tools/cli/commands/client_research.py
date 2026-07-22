@@ -96,12 +96,19 @@ def publish_checkpoint(
 
 @client_research.command("list")
 @click.option("--workspace-ref", required=True)
+@click.option(
+    "--lifecycle",
+    type=click.Choice(["active", "archived", "deleted"]),
+    default="active",
+    show_default=True,
+)
 @click.option("--limit", default=20, show_default=True, type=int)
 @click.option("--after", default="")
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
 def list_research(
     workspace_ref: str,
+    lifecycle: str,
     limit: int,
     after: str,
     as_json: bool,
@@ -109,6 +116,7 @@ def list_research(
     """List one Work Package per research, never one row per branch."""
     value = client_from_config().list_profile_research(
         workspace_ref=workspace_ref,
+        lifecycle=lifecycle,
         limit=limit,
         after=after,
     )
@@ -123,6 +131,35 @@ def show_research(work_package_ref: str, as_json: bool) -> None:
     """Show one Work Package with compact Hypothesis Branch summaries."""
     _echo_json(
         client_from_config().get_profile_research(work_package_ref)
+    )
+
+
+@client_research.command("lifecycle")
+@click.argument("work_package_ref")
+@click.option(
+    "--target",
+    required=True,
+    type=click.Choice(["active", "archived", "deleted"]),
+)
+@click.option("--expected-revision", required=True, type=click.IntRange(min=1))
+@click.option("--reason", required=True)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def change_research_lifecycle(
+    work_package_ref: str,
+    target: str,
+    expected_revision: int,
+    reason: str,
+    as_json: bool,
+) -> None:
+    """Archive, activate, soft-delete, or restore one Work Package."""
+    _echo_json(
+        client_from_config().transition_profile_research_lifecycle(
+            work_package_ref,
+            target=target,
+            expected_revision=expected_revision,
+            reason=reason,
+        )
     )
 
 

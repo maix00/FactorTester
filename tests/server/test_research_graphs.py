@@ -1975,13 +1975,17 @@ def test_instance_creation_writes_only_instance_and_branch(
         for statement in statements
         if statement.lstrip().upper().startswith("INSERT ")
     ]
-    assert len(inserts) == 2
+    assert len(inserts) == 3
     assert any(
         "INTO RESEARCH_GRAPH_INSTANCES" in statement.upper()
         for statement in inserts
     )
     assert any(
         "INTO RESEARCH_GRAPH_BRANCHES" in statement.upper()
+        for statement in inserts
+    )
+    assert any(
+        "INTO RESEARCH_WORK_PACKAGES" in statement.upper()
         for statement in inserts
     )
     assert not any(

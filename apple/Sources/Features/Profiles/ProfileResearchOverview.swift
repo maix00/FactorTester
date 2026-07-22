@@ -15,6 +15,22 @@ struct ResearchDirectoryItem: Identifiable {
     }
 }
 
+enum ResearchLifecycleFilter: String, CaseIterable, Identifiable {
+    case active
+    case archived
+    case deleted
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .active: return "研究中"
+        case .archived: return "已归档"
+        case .deleted: return "最近删除"
+        }
+    }
+}
+
 /// Empty states are deliberately separate from a confirmed empty server
 /// result.  In particular, an empty local snapshot while the bundled CLI is
 /// still starting must never be rendered as "no Profile".
@@ -58,19 +74,55 @@ final class ResearchDirectoryController: ObservableObject {
         _ serverURL: URL,
         _ workspaceRef: String
     ) async throws -> ProfileResearchListResponse
+    typealias LifecycleLoader = @MainActor (
+        _ serverURL: URL,
+        _ workspaceRef: String,
+        _ lifecycle: String
+    ) async throws -> ProfileResearchListResponse
+    typealias LifecycleMutator = @MainActor (
+        _ item: ResearchDirectoryItem,
+        _ target: String,
+        _ reason: String
+    ) async throws -> Void
 
     @Published private(set) var items: [ResearchDirectoryItem] = []
     @Published private(set) var isLoading = false
     @Published private(set) var error: String?
+    @Published private(set) var lifecycle: ResearchLifecycleFilter = .active
 
     private var profiles: [LocalProfileModel]
-    private let load: Loader
+    private let load: LifecycleLoader
+    private let mutate: LifecycleMutator
 
-    init(profiles: [LocalProfileModel], load: Loader? = nil) {
+    init(
+        profiles: [LocalProfileModel],
+        load: Loader? = nil,
+        lifecycleLoad: LifecycleLoader? = nil,
+        mutate: LifecycleMutator? = nil
+    ) {
         self.profiles = profiles
-        self.load = load ?? { serverURL, workspaceRef in
-            try await ProfileResearchService(baseURL: serverURL).list(
-                workspaceRef: workspaceRef
+        if let lifecycleLoad {
+            self.load = lifecycleLoad
+        } else if let load {
+            self.load = { serverURL, workspaceRef, _ in
+                try await load(serverURL, workspaceRef)
+            }
+        } else {
+            self.load = { serverURL, workspaceRef, lifecycle in
+                try await ProfileResearchService(baseURL: serverURL).list(
+                    workspaceRef: workspaceRef,
+                    lifecycle: lifecycle
+                )
+            }
+        }
+        self.mutate = mutate ?? { item, target, reason in
+            _ = try await ProfileResearchService(
+                baseURL: item.serverURL
+            ).transitionLifecycle(
+                workPackageRef: item.summary.workPackageRef,
+                target: target,
+                expectedRevision: item.summary.lifecycleRevision ?? 1,
+                reason: reason
             )
         }
     }
@@ -79,7 +131,8 @@ final class ResearchDirectoryController: ObservableObject {
         self.profiles = profiles
     }
 
-    func refresh() async {
+    func refresh(lifecycle: ResearchLifecycleFilter = .active) async {
+        self.lifecycle = lifecycle
         isLoading = true
         error = nil
         defer { isLoading = false }
@@ -89,7 +142,8 @@ final class ResearchDirectoryController: ObservableObject {
             do {
                 let page = try await load(
                     binding.serverURL,
-                    binding.workspaceRef
+                    binding.workspaceRef,
+                    lifecycle.rawValue
                 )
                 loaded += page.items.map { summary in
                     let owners = authoritativeOwners(
@@ -126,6 +180,32 @@ final class ResearchDirectoryController: ObservableObject {
         if !failures.isEmpty {
             error = failures.joined(separator: " · ")
         }
+    }
+
+    func transition(
+        _ item: ResearchDirectoryItem,
+        to target: ResearchLifecycleFilter
+    ) async {
+        isLoading = true
+        error = nil
+        do {
+            try await mutate(
+                item,
+                target.rawValue,
+                lifecycleReason(from: lifecycle, to: target)
+            )
+            await refresh(lifecycle: lifecycle)
+        } catch {
+            self.error = error.localizedDescription
+            isLoading = false
+        }
+    }
+
+    private func lifecycleReason(
+        from source: ResearchLifecycleFilter,
+        to target: ResearchLifecycleFilter
+    ) -> String {
+        "FTClient 用户操作：\(source.title) → \(target.title)"
     }
 
     /// The server owns the current Work Package ownership projection.  Local
@@ -223,6 +303,7 @@ struct ProfileResearchOverview: View {
     let profileLoadState: LocalProfileLoadState
     let openWorkPackage: (ResearchDirectoryItem) -> Void
     @StateObject private var controller: ResearchDirectoryController
+    @State private var lifecycle: ResearchLifecycleFilter = .active
 
     init(
         profiles: [LocalProfileModel],
@@ -243,6 +324,13 @@ struct ProfileResearchOverview: View {
                 Text("研究进度").font(.largeTitle.weight(.semibold))
                 Text("按 Work Package 查看跨 Profile 的阶段、义务、证据与报告。")
                     .foregroundStyle(.secondary)
+                Picker("研究状态", selection: $lifecycle) {
+                    ForEach(ResearchLifecycleFilter.allCases) { value in
+                        Text(value.title).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 420)
                 if let error = controller.error {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.callout)
@@ -267,20 +355,38 @@ struct ProfileResearchOverview: View {
                     }
                 }
                 if !controller.items.isEmpty {
-                    Button("刷新") { Task { await controller.refresh() } }
+                    Button("刷新") {
+                        Task { await controller.refresh(lifecycle: lifecycle) }
+                    }
                         .buttonStyle(.bordered)
                 }
             }
             .padding(24)
         }
-        .task(id: bindingSignature) {
+        .task(id: "\(bindingSignature)|\(lifecycle.rawValue)") {
             controller.replaceProfiles(profiles)
-            await controller.refresh()
+            await controller.refresh(lifecycle: lifecycle)
         }
     }
 
     private func workPackageCard(_ item: ResearchDirectoryItem) -> some View {
-        Button { openWorkPackage(item) } label: {
+        HStack(spacing: 8) {
+            Button { openWorkPackage(item) } label: {
+                cardContent(item)
+            }
+            .buttonStyle(.plain)
+            lifecycleMenu(item)
+        }
+        .padding(16)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.separator, lineWidth: 0.5)
+        }
+    }
+
+    private func cardContent(_ item: ResearchDirectoryItem) -> some View {
             HStack(spacing: 16) {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
                     .font(.title2)
@@ -308,7 +414,7 @@ struct ProfileResearchOverview: View {
                     Label {
                         Text(
                             item.profileNames.isEmpty
-                                ? "Profile 归属不可用"
+                                ? "未分配 Profile"
                                 : "关联 Profile：\(item.profileNames.joined(separator: "、"))"
                         )
                     } icon: {
@@ -330,26 +436,57 @@ struct ProfileResearchOverview: View {
                 Image(systemName: "chevron.right")
                     .foregroundStyle(.secondary)
             }
-            .padding(16)
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(.separator, lineWidth: 0.5)
+            .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func lifecycleMenu(_ item: ResearchDirectoryItem) -> some View {
+        Menu {
+            switch lifecycle {
+            case .active:
+                Button("归档", systemImage: "archivebox") {
+                    Task { await controller.transition(item, to: .archived) }
+                }
+            case .archived:
+                Button("重新启用", systemImage: "arrow.uturn.backward") {
+                    Task { await controller.transition(item, to: .active) }
+                }
+                Button("移到最近删除", systemImage: "trash", role: .destructive) {
+                    Task { await controller.transition(item, to: .deleted) }
+                }
+            case .deleted:
+                Button("恢复到已归档", systemImage: "arrow.uturn.backward") {
+                    Task { await controller.transition(item, to: .archived) }
+                }
             }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title3)
+                .frame(width: 32, height: 32)
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     private func statusBadge(_ summary: ProfileResearchSummary) -> some View {
-        Text(summary.runningBranchCount > 0 ? "进行中" : summary.status)
+        let lifecycle = summary.lifecycle ?? "active"
+        let label: String = switch lifecycle {
+        case "archived": "已归档"
+        case "deleted": "最近删除"
+        default: summary.runningBranchCount > 0 ? "进行中" : summary.status
+        }
+        let color: Color = switch lifecycle {
+        case "archived": .secondary
+        case "deleted": .orange
+        default: summary.runningBranchCount > 0 ? .blue : .secondary
+        }
+        Text(label)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(summary.runningBranchCount > 0 ? .blue : .secondary)
+            .foregroundStyle(color)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(
-                summary.runningBranchCount > 0
-                    ? Color.blue.opacity(0.10) : Color.secondary.opacity(0.10),
+                color.opacity(0.10),
                 in: Capsule()
             )
     }

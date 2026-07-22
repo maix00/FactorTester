@@ -71,6 +71,7 @@ from server.services.research_graph.trial_plan.stage_projection import (
     trial_stage_guard_facts,
 )
 from server.services.research_graph.versions import load_graph_from_conn
+from server.services.research_graph.work_packages import require_active
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -145,6 +146,7 @@ def advance_graph_branch(
         )
         if branch_row is None:
             raise KeyError("graph branch not found")
+        require_active(branch_row)
         if not bool(branch_row["is_current_incarnation"]):
             raise ValueError("graph branch is not the current incarnation")
         current_owner_profile_ref = str(

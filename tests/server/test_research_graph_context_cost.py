@@ -251,10 +251,11 @@ def test_context_query_plan_uses_primary_key_lookups(
 
     details = [str(row["detail"]).upper() for row in plan]
     assert not any("SCAN " in detail for detail in details)
-    assert sum("SEARCH " in detail for detail in details) == 3
+    assert sum("SEARCH " in detail for detail in details) == 4
     assert any("RESEARCH_GRAPH_INSTANCES" in detail for detail in details)
     assert any("RESEARCH_GRAPH_BRANCHES" in detail for detail in details)
     assert any("RESEARCH_GRAPH_TRACE" in detail for detail in details)
+    assert any("RESEARCH_WORK_PACKAGES" in detail for detail in details)
 
 
 def test_context_request_closes_its_sqlite_connection(

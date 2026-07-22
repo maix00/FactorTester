@@ -7,6 +7,11 @@ import sqlite3
 
 
 def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
+    from server.services.research_graph.work_packages import (
+        create_schema as create_work_package_schema,
+    )
+
+    create_work_package_schema(conn)
     statements = (
         """
         CREATE TABLE IF NOT EXISTS research_graph_instances (
@@ -159,6 +164,9 @@ def ensure_instance_branch_schema(conn: sqlite3.Connection) -> None:
         "ON research_graph_branches(hypothesis_branch_id) "
         "WHERE is_current_incarnation=1 AND hypothesis_branch_id<>''"
     )
+    from server.services.research_graph.work_packages import backfill
+
+    backfill(conn)
 
 
 def _restore_continuation_identities(conn: sqlite3.Connection) -> None:

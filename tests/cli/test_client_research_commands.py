@@ -13,6 +13,7 @@ class _FakeClient:
     def list_profile_research(self, **kwargs):
         assert kwargs == {
             "workspace_ref": "workspace:workspace-a",
+            "lifecycle": "active",
             "limit": 7,
             "after": "",
         }
@@ -28,6 +29,23 @@ class _FakeClient:
             "schema_version": 2,
             "work_package_ref": research_ref,
             "branches": [{"branch_ref": "graph-branch:instance-a:b"}],
+        }
+
+    def transition_profile_research_lifecycle(
+        self,
+        work_package_ref,
+        **kwargs,
+    ):
+        assert work_package_ref == "work-package:instance-a"
+        assert kwargs == {
+            "target": "archived",
+            "expected_revision": 1,
+            "reason": "pause research",
+        }
+        return {
+            "work_package_ref": work_package_ref,
+            "lifecycle": "archived",
+            "revision": 2,
         }
 
     def get_profile_research_branch(self, work_package_ref, branch_id):
@@ -94,6 +112,31 @@ def test_client_research_show_returns_work_package(monkeypatch) -> None:
     assert json.loads(result.output)["work_package_ref"] == (
         "work-package:instance-a"
     )
+
+
+def test_client_research_lifecycle_is_cross_platform(monkeypatch) -> None:
+    monkeypatch.setattr(
+        client_research,
+        "client_from_config",
+        lambda: _FakeClient(),
+    )
+
+    result = CliRunner().invoke(cli, [
+        "client",
+        "research",
+        "lifecycle",
+        "work-package:instance-a",
+        "--target",
+        "archived",
+        "--expected-revision",
+        "1",
+        "--reason",
+        "pause research",
+        "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["revision"] == 2
 
 
 def test_client_research_branch_and_timeline_are_public(monkeypatch) -> None:

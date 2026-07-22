@@ -1,4 +1,4 @@
-"""Final six-owner Graph schema and startup cutover guard."""
+"""Final seven-owner Graph schema and startup cutover guard."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ GRAPH_OWNER_TABLES = frozenset({
     "research_graph_instances",
     "research_graph_branches",
     "research_graph_trace",
+    "research_work_packages",
     "research_maintenance_cases",
 })
 
@@ -85,6 +86,9 @@ def ensure_schema() -> None:
                 "trial_stage_projection_json",
             ),
             "research_graph_trace": ("acting_profile_ref",),
+            "research_work_packages": (
+                "lifecycle", "revision", "lifecycle_history_json",
+            ),
         }
         if any(
             column not in definitions.get(table, "")

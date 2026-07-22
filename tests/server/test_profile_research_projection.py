@@ -11,8 +11,13 @@ from server.modules.single_factor_test import sft_bp
 from server.services.research_graph.branch.schema import (
     create_instance_branch_schema,
 )
+from server.services.research_graph.branch.runtime import fork_graph_branch
 from server.services.research_graph import (
     profile_research_projection as projection,
+)
+from server.services.research_graph.work_packages import (
+    backfill as backfill_work_packages,
+    transition_lifecycle,
 )
 from tests.server.trial_plan_fixtures import trial_plan
 from tools.data.sqlite.db import connect_sqlite
@@ -225,6 +230,160 @@ def test_research_projects_one_work_package_with_hypothesis_branches(
     assert tree["nodes"][0]["checkpoint_ref"].startswith("trace:")
     assert tree["nodes"][0]["is_root"] is True
     assert sum(node["is_head"] for node in tree["nodes"]) == 1
+
+
+def test_work_package_lifecycle_filters_without_hiding_reports(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "work-package-lifecycle.sqlite"
+    _seed(path, branch_count=1)
+    service = _service(path, monkeypatch)
+    with connect_sqlite(path) as conn:
+        backfill_work_packages(conn)
+
+    active = service.list_research(
+        owner="alice",
+        workspace_ref="workspace:workspace-a",
+    )
+    assert active["items"][0]["current_owner_profile_ref"] is None
+    assert active["items"][0]["lifecycle"] == "active"
+    archived = transition_lifecycle(
+        owner="alice",
+        work_package_ref="work-package:instance-a",
+        target="archived",
+        expected_revision=1,
+        actor="alice",
+        reason="暂时停止研究但保留报告。",
+    )
+
+    assert archived["revision"] == 2
+    with pytest.raises(ValueError, match="work package is archived"):
+        fork_graph_branch(
+            instance_id="instance-a",
+            source_branch_id="branch-0000",
+            owner="alice",
+            label="should-not-fork",
+        )
+    assert service.list_research(
+        owner="alice",
+        workspace_ref="workspace:workspace-a",
+    )["items"] == []
+    archived_items = service.list_research(
+        owner="alice",
+        workspace_ref="workspace:workspace-a",
+        lifecycle="archived",
+    )["items"]
+    assert archived_items[0]["work_package_ref"] == (
+        "work-package:instance-a"
+    )
+    detail = service.get_research(
+        owner="alice",
+        research_ref="work-package:instance-a",
+    )
+    assert detail["lifecycle"] == "archived"
+    assert detail["branches"]
+
+    deleted = transition_lifecycle(
+        owner="alice",
+        work_package_ref="work-package:instance-a",
+        target="deleted",
+        expected_revision=2,
+        actor="alice",
+        reason="移入最近删除。",
+    )
+    assert deleted["revision"] == 3
+    assert service.list_research(
+        owner="alice",
+        workspace_ref="workspace:workspace-a",
+        lifecycle="deleted",
+    )["items"][0]["lifecycle"] == "deleted"
+
+    restored = transition_lifecycle(
+        owner="alice",
+        work_package_ref="work-package:instance-a",
+        target="archived",
+        expected_revision=3,
+        actor="alice",
+        reason="恢复为只读归档。",
+    )
+    assert restored["lifecycle"] == "archived"
+    assert restored["revision"] == 4
+
+
+def test_archive_rejects_a_non_terminal_job(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "work-package-live-job.sqlite"
+    _seed(path, branch_count=1)
+    _service(path, monkeypatch)
+    with connect_sqlite(path) as conn:
+        backfill_work_packages(conn)
+        conn.execute(
+            "CREATE TABLE research_runs ("
+            "run_id TEXT PRIMARY KEY, graph_instance_id TEXT NOT NULL)"
+        )
+        conn.execute(
+            "CREATE TABLE research_jobs ("
+            "job_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, status TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO research_runs VALUES ('run-live', 'instance-a')"
+        )
+        conn.execute(
+            "INSERT INTO research_jobs VALUES ('job-live', 'run-live', 'running')"
+        )
+
+    with pytest.raises(ValueError, match="non-terminal job: job-live"):
+        transition_lifecycle(
+            owner="alice",
+            work_package_ref="work-package:instance-a",
+            target="archived",
+            expected_revision=1,
+            actor="alice",
+            reason="不能静默终止仍在运行的任务。",
+        )
+
+
+def test_lifecycle_route_is_owner_scoped_and_uses_revision_cas(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "work-package-lifecycle-route.sqlite"
+    _seed(path, branch_count=1)
+    _service(path, monkeypatch)
+    with connect_sqlite(path) as conn:
+        backfill_work_packages(conn)
+    app = Flask(__name__)
+    app.secret_key = "work-package-lifecycle-test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    href = "/api/profile-research/work-package:instance-a/lifecycle"
+
+    with client.session_transaction() as session:
+        session["username"] = "bob"
+    assert client.patch(href, json={
+        "target": "archived",
+        "expected_revision": 1,
+        "reason": "unauthorized",
+    }).status_code == 404
+
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    response = client.patch(href, json={
+        "target": "archived",
+        "expected_revision": 1,
+        "reason": "保留报告并停止推进。",
+    })
+    assert response.status_code == 200
+    assert response.get_json()["lifecycle"] == "archived"
+    conflict = client.patch(href, json={
+        "target": "active",
+        "expected_revision": 1,
+        "reason": "stale revision",
+    })
+    assert conflict.status_code == 400
 
 
 def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
@@ -945,7 +1104,7 @@ def test_large_scope_query_plans_use_indexes_and_ignore_global_history(
     with connect_sqlite(path) as conn:
         list_plan = conn.execute(
             "EXPLAIN QUERY PLAN " + projection.LIST_FIRST_SQL,
-            ("alice", "workspace-a", 21),
+            ("alice", "workspace-a", "active", 21),
         ).fetchall()
         timeline_plan = conn.execute(
             "EXPLAIN QUERY PLAN " + projection.TIMELINE_FIRST_SQL,
