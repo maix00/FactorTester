@@ -17,6 +17,12 @@ def render_input(field: str, value: Any, *, indent: str) -> list[str] | None:
         return _resolver_summary(value, indent=indent)
     if field.endswith(".price_tables"):
         return _price_tables(value, indent=indent)
+    if field.endswith((".current_prices", ".volume")):
+        return _scalar_map(value, field.rsplit(".", 1)[-1], indent=indent)
+    if field.endswith(".current_historical_fields"):
+        return _field_state(value, indent=indent)
+    if field.endswith(".current_tradable_status"):
+        return _tradable_status(value, indent=indent)
     return None
 
 

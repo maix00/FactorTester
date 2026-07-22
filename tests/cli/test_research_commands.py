@@ -467,6 +467,22 @@ def test_current_historical_fields_preserve_accounting_semantics() -> None:
     assert '"CostBasisMethod"' not in output
 
 
+def test_portfolio_maps_render_owner_instrument_rows() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "size", "inputs": [], "outputs": [],
+        "output_changes": [
+            {"field": "OrderConstructModule.raw_deltas", "strategy": strategy, "before": None, "after": {"AP.CZC": value}}
+            for strategy, value in (("A1", 2.5), ("A2", -3.0))
+        ],
+    })
+    output = "\n".join(lines)
+    assert "owner" in output and "instrument" in output
+    assert "A1" in output and "A2" in output and "AP.CZC" in output
+    assert '"AP.CZC"' not in output
+
+
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

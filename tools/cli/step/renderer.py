@@ -11,7 +11,7 @@ import click
 from tools.cli.table import render_key_value_rows
 
 from .changes import render_changes
-from . import market_data, products, run_window
+from . import market_data, portfolio, positions, products, run_window
 from .values import is_scalar, render_value, route_label, scalar, scope, table_from_mappings
 
 
@@ -98,6 +98,11 @@ def _render_field_values(
 
 def _render_scoped_values(field: str, values: list[Any]) -> list[str]:
     values, omitted_empty = _drop_shadowed_empty_values(values)
+    mapped = [item for item in values if isinstance(item, Mapping)]
+    position_lines = positions.render_values(mapped, indent="  ") if field.endswith(".positions") else None
+    portfolio_lines = portfolio.render_rows(field, mapped, indent="  ")
+    if position_lines is not None or portfolio_lines is not None:
+        return [*(position_lines or portfolio_lines or []), *_omitted_empty_note(omitted_empty)]
     product_lines = products.render_values(field, values, indent="  ")
     if product_lines is not None:
         return [*product_lines, *_omitted_empty_note(omitted_empty)]

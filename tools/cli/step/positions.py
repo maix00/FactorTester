@@ -28,3 +28,18 @@ def render_initialization(rows: list[Mapping[str, Any]], *, indent: str) -> list
         *table_from_mappings(summaries, indent=indent),
         click.style(f"{indent}空仓初始化未展开逐品种零值；可用 job step-field 查看完整 PositionBook。", dim=True),
     ]
+
+
+def render_values(values: list[Mapping[str, Any]], *, indent: str) -> list[str] | None:
+    books = [row for row in values if isinstance(row.get("value"), Mapping)]
+    if not books:
+        return None
+    summaries = []
+    for row in books:
+        book = row["value"]
+        nonzero = sum(
+            1 for position in book.values()
+            if isinstance(position, Mapping) and float(position.get("quantity") or 0) != 0
+        )
+        summaries.append({"owner": route_label(row), "instruments": len(book), "nonzero": nonzero})
+    return table_from_mappings(summaries, indent=indent)

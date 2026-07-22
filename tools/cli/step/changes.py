@@ -8,7 +8,7 @@ from typing import Any
 
 import click
 
-from . import events, market_data, positions, products, run_window
+from . import events, market_data, portfolio, positions, products, run_window
 from .values import highlighted, is_scalar, render_value, route_label, scalar, scope, table_from_mappings
 
 
@@ -29,7 +29,11 @@ def render_changes(title: str, changes: Any, *, field_optional: bool = False) ->
             )
         else:
             rows = _group_identical_changes(rows)
-            body.extend(products.render_products_change(field, rows, indent="  ") or render_change_rows(rows, indent="  "))
+            body.extend(
+                portfolio.render_rows(field, rows, indent="  ")
+                or products.render_products_change(field, rows, indent="  ")
+                or render_change_rows(rows, indent="  ")
+            )
     return [click.style(title, bold=True), *body] if body else []
 
 
