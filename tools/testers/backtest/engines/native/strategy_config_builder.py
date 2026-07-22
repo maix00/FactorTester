@@ -141,8 +141,6 @@ def _uses_daily_mark_to_market_flow(resolved_settings: Mapping[str, Any]) -> boo
     engine_mode = str(resolved_settings.get("engine_mode", "auto") or "auto").lower()
     if engine_mode == "basic":
         return False
-    if resolved_settings.get("daily_mark_to_market_enabled") is False:
-        return False
     accounting_mode = str(resolved_settings.get("accounting_mode", "Auto") or "Auto")
     if accounting_mode == "Basic":
         return False

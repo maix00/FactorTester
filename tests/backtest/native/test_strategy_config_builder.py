@@ -197,6 +197,15 @@ def test_long_short_strategy_does_not_require_group_membership_fields():
 
 def test_daily_mark_to_market_flow_gating_by_engine_and_custom_field():
     auto = next(iter(build_strategy_configs({"A1": {"engine_mode": "auto", **_GROUP_FIELDS}}).values()))
+    custom_engine_auto_accounting = next(iter(build_strategy_configs({
+        "A1": {
+            "engine_mode": "custom",
+            "accounting_mode": "Auto",
+            "daily_mark_to_market_enabled": False,
+            "margin_mode": "auto",
+            **_GROUP_FIELDS,
+        },
+    }).values()))
     exact = next(iter(build_strategy_configs({"A1": {"engine_mode": "exact", **_GROUP_FIELDS}}).values()))
     basic = next(iter(build_strategy_configs({"A1": {"engine_mode": "basic", **_GROUP_FIELDS}}).values()))
     custom_off = next(iter(build_strategy_configs({
@@ -218,7 +227,7 @@ def test_daily_mark_to_market_flow_gating_by_engine_and_custom_field():
         },
     }).values()))
 
-    for config in (auto, exact, custom_on):
+    for config in (auto, custom_engine_auto_accounting, exact, custom_on):
         assert config.uses_flow("register_daily_mark_to_market_notices")
         assert config.uses_flow("apply_daily_mark_to_market")
     for config in (basic, custom_off):
