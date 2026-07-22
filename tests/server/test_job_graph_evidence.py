@@ -418,4 +418,5 @@ def test_blocked_closure_guard_fact_is_server_derived() -> None:
     assert facts == {
         "gap_origin_edge_id": "job_evidence_ready__capability_gap",
         "bounded_closure_disposition": "blocked",
+        "material_data_obligations_adjudicated_or_not_triggered": True,
     }
