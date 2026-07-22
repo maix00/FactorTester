@@ -8,7 +8,7 @@ from typing import Any
 
 import click
 
-from . import market_data, positions, products, run_window
+from . import events, market_data, positions, products, run_window
 from .values import highlighted, is_scalar, render_value, route_label, scalar, scope, table_from_mappings
 
 
@@ -43,7 +43,8 @@ def render_change_rows(rows: list[Mapping[str, Any]], *, indent: str) -> list[st
             continue
         field = str(row.get("field") or "")
         special_after = (
-            market_data.render_change(field, after, indent=indent + "    ")
+            events.render(field, after, indent=indent + "    ")
+            or market_data.render_change(field, after, indent=indent + "    ")
             or run_window.render(field, after, indent=indent + "    ")
         )
         if before is None and special_after is not None:

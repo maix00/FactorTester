@@ -15,6 +15,8 @@ def render_input(field: str, value: Any, *, indent: str) -> list[str] | None:
         return _frame_summary(value, indent=indent)
     if field.endswith(".trading_day_resolver"):
         return _resolver_summary(value, indent=indent)
+    if field.endswith(".price_tables"):
+        return _price_tables(value, indent=indent)
     return None
 
 

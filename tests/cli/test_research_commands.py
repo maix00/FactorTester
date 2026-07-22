@@ -385,6 +385,46 @@ def test_shadowed_empty_defaults_are_reported_not_repeated() -> None:
     assert "strategy_config" not in output
 
 
+def test_event_drafts_render_as_semantic_rows() -> None:
+    from tools.cli.step import render_step_event
+
+    draft = {
+        "type": "EventDraft", "timestamp": "2026-01-05 15:00:00", "kind": "ledger",
+        "ledger": "L1", "strategy": "", "index_key": None,
+        "payload": {"kind": "daily_mark_to_market", "ledger_id": "L1", "trading_day": "2026-01-05"},
+    }
+    lines = render_step_event({
+        "flow_id": "register_dmtm", "inputs": [], "outputs": [],
+        "output_changes": [{
+            "field": "TradingRuleModule.daily_mark_to_market_events",
+            "before": None, "after": [draft],
+        }],
+    })
+    output = "\n".join(lines)
+    assert "events=1" in output and "daily_mark_to_market" in output
+    assert '"payload"' not in output
+
+
+def test_sampled_signal_events_render_count_and_rows() -> None:
+    from tools.cli.step import render_step_event
+
+    draft = {
+        "type": "EventDraft", "timestamp": "2026-01-05 09:01:00", "kind": "signal",
+        "strategy": "A1", "ledger": "", "payload": None,
+        "index_key": ["2026-01-05", "2026-01-05 09:01:00"],
+    }
+    lines = render_step_event({
+        "flow_id": "signals", "inputs": [], "outputs": [],
+        "output_changes": [{
+            "field": "FactorSignalModule.signal_value", "before": None,
+            "after": {"type": "list", "length": 1800, "truncated": True, "sample": {"head": [draft], "tail": []}},
+        }],
+    })
+    output = "\n".join(lines)
+    assert "events=1800" in output and "A1" in output
+    assert '"index_key"' not in output
+
+
 def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
