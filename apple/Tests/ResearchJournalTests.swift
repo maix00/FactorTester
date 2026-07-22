@@ -4,6 +4,31 @@ import XCTest
 @testable import FTClient
 
 final class ResearchJournalTests: XCTestCase {
+    func testDecodesAndPartitionsEntryResolutionWithoutRawIDsInLabels() throws {
+        let step = try JSONDecoder().decode(
+            ResearchTransitionStep.self,
+            from: Data(
+                """
+                {"step_ref":"trace:entry","edge_ref":"graph-edge:continue","from_node":"factor_semantics","to_node":"factor_semantics","created_at":1,"evidence_refs":[],"trial_plan_refs":[],"obligation_refs":[],"claim_refs":[],"job_refs":[],"run_refs":[],"obligation_changes":[],"claim_changes":[],"entry_resolution":{"reason":"graph_continuation","assessed_requirement_ids":["factor.expression"],"reused_requirement_ids":[],"reference_only_requirement_ids":["factor.expression"],"unresolved_requirement_ids":[],"items":[{"requirement_id":"factor.expression","title_zh":"因子表达式的经济语义是否成立","assessed":true,"change_kind":"revised","resolution_status":"reference_only"}],"resume_node":"factor_semantics"}}
+                """.utf8
+            )
+        )
+
+        let resolution = try XCTUnwrap(step.entryResolution)
+        let groups = ResearchEntryResolutionPresentation.groups(resolution)
+        XCTAssertEqual(groups.referenceOnly.map(\.titleZh), [
+            "因子表达式的经济语义是否成立",
+        ])
+        XCTAssertTrue(groups.reviewed.isEmpty)
+        XCTAssertTrue(groups.reused.isEmpty)
+        XCTAssertEqual(
+            ResearchEntryResolutionPresentation.changeLabel(
+                groups.referenceOnly[0].changeKind
+            ),
+            "语义已修订"
+        )
+    }
+
     func testDecodesStructuredListAndTableWithRowLinks() throws {
         let document = try JSONDecoder().decode(
             ResearchJournalDocument.self,

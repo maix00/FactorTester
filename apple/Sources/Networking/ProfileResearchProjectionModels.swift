@@ -382,6 +382,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
     let objectHrefs: [String]?
     let obligationChanges: [ResearchStateChange]
     let claimChanges: [ResearchStateChange]
+    let entryResolution: ResearchEntryResolutionDelta?
     var id: String { stepRef }
 
     enum CodingKeys: String, CodingKey {
@@ -401,6 +402,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
         case objectHrefs = "object_hrefs"
         case obligationChanges = "obligation_changes"
         case claimChanges = "claim_changes"
+        case entryResolution = "entry_resolution"
     }
 
     var allRefs: Set<String> {

@@ -179,6 +179,10 @@ struct ResearchNarrativeReportView: View {
                 }
             }
 
+            if let entryResolution = transitionStep(for: section)?.entryResolution {
+                ResearchEntryResolutionView(value: entryResolution)
+            }
+
             obligationTable(section)
 
             if !unboundLinks(in: section).isEmpty {
@@ -666,8 +670,14 @@ struct ResearchNarrativeReportView: View {
     }
 
     private func stageLabel(for section: ResearchJournalSection) -> String {
-        let step = steps.first { $0.stepRef == section.checkpointRef }
+        let step = transitionStep(for: section)
         return ResearchDisplayText.node(step?.toNode ?? detail.currentNode)
+    }
+
+    private func transitionStep(
+        for section: ResearchJournalSection
+    ) -> ResearchTransitionStep? {
+        steps.first { $0.stepRef == section.checkpointRef }
     }
 
     private func loadReport() async {
