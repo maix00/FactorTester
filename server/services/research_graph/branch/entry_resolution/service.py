@@ -14,6 +14,7 @@ from .frame import (
     advance_entry_resolution_frame,
     entry_resolution_trace_delta,
 )
+from ..entry_requirements import requirement_map
 
 
 def assess_departure(
@@ -82,5 +83,9 @@ def project_arrival(
             current_node=attempt["current_node"],
             target_node=attempt["target_node"],
             assessments=assessments,
+            requirement_titles={
+                requirement_id: str(item.get("title_zh") or requirement_id)
+                for requirement_id, item in requirement_map(graph).items()
+            },
         ),
     }

@@ -227,6 +227,7 @@ def transition_step_projection(
                 "reused_requirement_ids",
                 "reference_only_requirement_ids",
                 "unresolved_requirement_ids",
+                "items",
                 "resume_node",
             )
         }

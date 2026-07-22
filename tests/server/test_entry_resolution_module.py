@@ -43,3 +43,9 @@ def test_public_module_resolves_departure_and_reuses_same_node_arrival() -> None
     assert outcome["trace_delta"]["assessed_requirement_ids"] == [
         REQUIREMENT_ID
     ]
+    assert outcome["trace_delta"]["items"] == [{
+        "requirement_id": REQUIREMENT_ID,
+        "title_zh": "是否有数据源覆盖目标产品、合约和市场",
+        "assessed": True,
+        "arrival_status": "reused",
+    }]
