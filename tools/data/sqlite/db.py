@@ -9,10 +9,24 @@ from typing import Any
 import pandas as pd
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back a context-managed operation, then release its FD."""
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        try:
+            return bool(super().__exit__(exc_type, exc_value, traceback))
+        finally:
+            self.close()
+
+
 def connect_sqlite(db_path: str | Path, *, foreign_keys: bool = False) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=30.0)
+    conn = sqlite3.connect(
+        str(path),
+        timeout=30.0,
+        factory=_ClosingConnection,
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 30000")
     if foreign_keys:
