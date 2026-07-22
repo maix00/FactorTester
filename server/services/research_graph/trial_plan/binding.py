@@ -160,6 +160,7 @@ def validate_branch_binding(
           ON b.instance_id=i.instance_id
         WHERE i.instance_id=? AND b.branch_id=?
           AND i.owner=? AND i.workspace_id=?
+          AND b.is_current_incarnation=1
         """,
         (
             owner,

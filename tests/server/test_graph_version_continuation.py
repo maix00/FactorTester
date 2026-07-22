@@ -261,15 +261,20 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
     )
 
     assert continued["graph_version"] == 2
+    assert continued["work_package_id"] == "instance-1"
     branch = continued["branches"][0]
     assert branch["current_node"] == "job_evidence_ready"
     assert branch["status"] == "running"
+    assert branch["hypothesis_branch_id"] == "branch-1"
+    assert branch["is_current_incarnation"] is True
     assert continued["instance_id"] != "instance-1"
     assert branch["branch_id"] != "branch-1"
     with connect_sqlite(path) as conn:
         source = conn.execute(
             """
-            SELECT i.graph_version, b.current_node, b.status, b.latest_trace_id
+            SELECT i.graph_version, i.work_package_id,
+                   b.hypothesis_branch_id, b.is_current_incarnation,
+                   b.current_node, b.status, b.latest_trace_id
             FROM research_graph_instances i
             JOIN research_graph_branches b ON b.instance_id=i.instance_id
             WHERE i.instance_id='instance-1' AND b.branch_id='branch-1'
@@ -299,14 +304,34 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
             branch_id=branch["branch_id"],
             owner="alice",
         )
+        target_identity = conn.execute(
+            """
+            SELECT i.work_package_id, b.hypothesis_branch_id,
+                   b.is_current_incarnation
+            FROM research_graph_instances AS i
+            JOIN research_graph_branches AS b
+              ON b.instance_id=i.instance_id
+            WHERE i.instance_id=? AND b.branch_id=?
+            """,
+            (continued["instance_id"], branch["branch_id"]),
+        ).fetchone()
     assert dict(source) == {
         "graph_version": 1,
+        "work_package_id": "instance-1",
+        "hypothesis_branch_id": "branch-1",
+        "is_current_incarnation": 0,
         "current_node": "capability_gap",
         "status": "paused",
         "latest_trace_id": source["latest_trace_id"],
     }
+    assert dict(target_identity) == {
+        "work_package_id": "instance-1",
+        "hypothesis_branch_id": "branch-1",
+        "is_current_incarnation": 1,
+    }
     assert trace["edge_id"] == "__graph_continuation__"
     evidence = orjson.loads(trace["evidence_json"])
+    assert evidence["graph_continuation"]["schema_version"] == 2
     assert evidence["graph_continuation"]["source_branch_id"] == "branch-1"
     assert (
         evidence["server_evidence"]["job_attempt"]["facts"]["job_id"]

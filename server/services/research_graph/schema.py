@@ -77,9 +77,13 @@ def ensure_schema() -> None:
         # PRAGMA/DDL.
         required_columns = {
             "research_graph_instances": (
-                "created_by_profile_ref", "current_owner_profile_ref",
+                "work_package_id", "created_by_profile_ref",
+                "current_owner_profile_ref",
             ),
-            "research_graph_branches": ("trial_stage_projection_json",),
+            "research_graph_branches": (
+                "hypothesis_branch_id", "is_current_incarnation",
+                "trial_stage_projection_json",
+            ),
             "research_graph_trace": ("acting_profile_ref",),
         }
         if any(

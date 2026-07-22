@@ -46,51 +46,121 @@ TREE_LAST_WINDOW = 1
 MAX_TREE_NODES = 120
 
 LIST_FIRST_SQL = """
-    SELECT i.instance_id, i.created_by_profile_ref,
-           i.current_owner_profile_ref, i.graph_id, i.graph_version,
-           i.product_group,
-           i.workspace_id, i.mode, i.created_at AS instance_created_at,
-           COUNT(b.branch_id) AS branch_count,
-           SUM(CASE WHEN b.status='running' THEN 1 ELSE 0 END)
-               AS running_branch_count,
-           MAX(b.updated_at) AS updated_at
-    FROM research_graph_instances AS i
-    JOIN research_graph_branches AS b
-      ON b.instance_id=i.instance_id
-    WHERE i.owner=? AND i.workspace_id=?
-    GROUP BY i.instance_id
-    ORDER BY updated_at DESC, i.instance_id DESC
+    WITH candidates AS (
+        SELECT i.instance_id,
+               COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
+                   AS work_package_id,
+               i.created_by_profile_ref, i.current_owner_profile_ref,
+               i.graph_id, i.graph_version, i.product_group,
+               i.workspace_id, i.mode,
+               (
+                   SELECT MIN(root.created_at)
+                   FROM research_graph_instances AS root
+                   WHERE root.owner=i.owner AND COALESCE(
+                       NULLIF(root.work_package_id, ''), root.instance_id
+                   )=COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
+               ) AS instance_created_at,
+               COUNT(b.branch_id) OVER (
+                   PARTITION BY COALESCE(
+                       NULLIF(i.work_package_id, ''), i.instance_id
+                   )
+               ) AS branch_count,
+               SUM(CASE WHEN b.status='running' THEN 1 ELSE 0 END) OVER (
+                   PARTITION BY COALESCE(
+                       NULLIF(i.work_package_id, ''), i.instance_id
+                   )
+               ) AS running_branch_count,
+               MAX(b.updated_at) OVER (
+                   PARTITION BY COALESCE(
+                       NULLIF(i.work_package_id, ''), i.instance_id
+                   )
+               ) AS updated_at,
+               ROW_NUMBER() OVER (
+                   PARTITION BY COALESCE(
+                       NULLIF(i.work_package_id, ''), i.instance_id
+                   )
+                   ORDER BY b.updated_at DESC, i.graph_version DESC,
+                            b.branch_id DESC
+               ) AS head_rank
+        FROM research_graph_instances AS i
+        JOIN research_graph_branches AS b
+          ON b.instance_id=i.instance_id
+        WHERE i.owner=? AND i.workspace_id=?
+          AND b.is_current_incarnation=1
+    )
+    SELECT * FROM candidates WHERE head_rank=1
+    ORDER BY updated_at DESC, work_package_id DESC
     LIMIT ?
 """
 
 LIST_AFTER_SQL = """
-    SELECT i.instance_id, i.created_by_profile_ref,
-           i.current_owner_profile_ref, i.graph_id, i.graph_version,
-           i.product_group,
-           i.workspace_id, i.mode, i.created_at AS instance_created_at,
-           COUNT(b.branch_id) AS branch_count,
-           SUM(CASE WHEN b.status='running' THEN 1 ELSE 0 END)
-               AS running_branch_count,
-           MAX(b.updated_at) AS updated_at
-    FROM research_graph_instances AS i
-    JOIN research_graph_branches AS b
-      ON b.instance_id=i.instance_id
-    WHERE i.owner=? AND i.workspace_id=?
-    GROUP BY i.instance_id
-    HAVING (
-        MAX(b.updated_at)<?
-        OR (MAX(b.updated_at)=? AND i.instance_id<?)
+    WITH candidates AS (
+        SELECT i.instance_id,
+               COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
+                   AS work_package_id,
+               i.created_by_profile_ref, i.current_owner_profile_ref,
+               i.graph_id, i.graph_version, i.product_group,
+               i.workspace_id, i.mode,
+               (
+                   SELECT MIN(root.created_at)
+                   FROM research_graph_instances AS root
+                   WHERE root.owner=i.owner AND COALESCE(
+                       NULLIF(root.work_package_id, ''), root.instance_id
+                   )=COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
+               ) AS instance_created_at,
+               COUNT(b.branch_id) OVER (
+                   PARTITION BY COALESCE(
+                       NULLIF(i.work_package_id, ''), i.instance_id
+                   )
+               ) AS branch_count,
+               SUM(CASE WHEN b.status='running' THEN 1 ELSE 0 END) OVER (
+                   PARTITION BY COALESCE(
+                       NULLIF(i.work_package_id, ''), i.instance_id
+                   )
+               ) AS running_branch_count,
+               MAX(b.updated_at) OVER (
+                   PARTITION BY COALESCE(
+                       NULLIF(i.work_package_id, ''), i.instance_id
+                   )
+               ) AS updated_at,
+               ROW_NUMBER() OVER (
+                   PARTITION BY COALESCE(
+                       NULLIF(i.work_package_id, ''), i.instance_id
+                   )
+                   ORDER BY b.updated_at DESC, i.graph_version DESC,
+                            b.branch_id DESC
+               ) AS head_rank
+        FROM research_graph_instances AS i
+        JOIN research_graph_branches AS b
+          ON b.instance_id=i.instance_id
+        WHERE i.owner=? AND i.workspace_id=?
+          AND b.is_current_incarnation=1
     )
-    ORDER BY updated_at DESC, i.instance_id DESC
+    SELECT * FROM candidates
+    WHERE head_rank=1 AND (
+        updated_at<? OR (updated_at=? AND work_package_id<?)
+    )
+    ORDER BY updated_at DESC, work_package_id DESC
     LIMIT ?
 """
 
 WORK_PACKAGE_DETAIL_SQL = """
-    SELECT i.instance_id, i.created_by_profile_ref,
+    SELECT i.instance_id,
+           COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
+               AS work_package_id,
+           i.created_by_profile_ref,
            i.current_owner_profile_ref, i.graph_id, i.graph_version,
            i.product_group,
-           i.workspace_id, i.mode, i.created_at AS instance_created_at,
-           b.branch_id, b.label, b.current_node, b.status,
+           i.workspace_id, i.mode,
+           (
+               SELECT MIN(root.created_at)
+               FROM research_graph_instances AS root
+               WHERE root.owner=i.owner AND COALESCE(
+                   NULLIF(root.work_package_id, ''), root.instance_id
+               )=COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
+           ) AS instance_created_at,
+           b.branch_id, b.hypothesis_branch_id,
+           b.label, b.current_node, b.status,
            b.current_trial_plan_hash, b.latest_trace_id,
            b.created_at, b.updated_at,
            lineage.edge_id AS lineage_edge_id,
@@ -98,14 +168,23 @@ WORK_PACKAGE_DETAIL_SQL = """
            CASE WHEN b.branch_id=(
                SELECT candidate.branch_id
                FROM research_graph_branches AS candidate
-               WHERE candidate.instance_id=i.instance_id
-               ORDER BY candidate.updated_at DESC, candidate.branch_id DESC
+               JOIN research_graph_instances AS candidate_instance
+                 ON candidate_instance.instance_id=candidate.instance_id
+               WHERE COALESCE(
+                   NULLIF(candidate_instance.work_package_id, ''),
+                   candidate_instance.instance_id
+               )=COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
+               ORDER BY candidate.updated_at DESC,
+                        candidate_instance.graph_version DESC,
+                        candidate.branch_id DESC
                LIMIT 1
            ) THEN (
                SELECT json_object(
                    'nodes', COALESCE(json_group_array(json_object(
                        'trace_id', selected.trace_id,
+                       'instance_id', selected.instance_id,
                        'branch_id', selected.branch_id,
+                       'hypothesis_branch_id', selected.hypothesis_branch_id,
                        'edge_id', selected.edge_id,
                        'from_node', selected.from_node,
                        'to_node', selected.to_node,
@@ -121,16 +200,50 @@ WORK_PACKAGE_DETAIL_SQL = """
                FROM (
                    SELECT ranked.*
                    FROM (
-                       SELECT t.trace_id, t.branch_id, t.edge_id,
+                       SELECT t.trace_id, t.instance_id, t.branch_id,
+                              COALESCE(
+                                  NULLIF(branch.hypothesis_branch_id, ''),
+                                  branch.branch_id
+                              ) AS hypothesis_branch_id,
+                              t.edge_id,
                               t.from_node, t.to_node, t.created_at,
-                              branch.status AS branch_status,
-                              branch.latest_trace_id,
+                              COALESCE((
+                                  SELECT current.status
+                                  FROM research_graph_branches AS current
+                                  WHERE COALESCE(
+                                      NULLIF(current.hypothesis_branch_id, ''),
+                                      current.branch_id
+                                  )=COALESCE(
+                                      NULLIF(branch.hypothesis_branch_id, ''),
+                                      branch.branch_id
+                                  ) AND current.is_current_incarnation=1
+                                  LIMIT 1
+                              ), branch.status) AS branch_status,
+                              COALESCE((
+                                  SELECT current.latest_trace_id
+                                  FROM research_graph_branches AS current
+                                  WHERE COALESCE(
+                                      NULLIF(current.hypothesis_branch_id, ''),
+                                      current.branch_id
+                                  )=COALESCE(
+                                      NULLIF(branch.hypothesis_branch_id, ''),
+                                      branch.branch_id
+                                  ) AND current.is_current_incarnation=1
+                                  LIMIT 1
+                              ), branch.latest_trace_id) AS latest_trace_id,
+                              branch.latest_trace_id AS incarnation_latest_trace_id,
                               ROW_NUMBER() OVER (
-                                  PARTITION BY t.branch_id
+                                  PARTITION BY COALESCE(
+                                      NULLIF(branch.hypothesis_branch_id, ''),
+                                      branch.branch_id
+                                  )
                                   ORDER BY t.created_at ASC, t.trace_id ASC
                               ) AS first_rank,
                               ROW_NUMBER() OVER (
-                                  PARTITION BY t.branch_id
+                                  PARTITION BY COALESCE(
+                                      NULLIF(branch.hypothesis_branch_id, ''),
+                                      branch.branch_id
+                                  )
                                   ORDER BY t.created_at DESC, t.trace_id DESC
                               ) AS last_rank,
                               COUNT(*) OVER () AS total_trace_count
@@ -138,17 +251,32 @@ WORK_PACKAGE_DETAIL_SQL = """
                        JOIN research_graph_branches AS branch
                          ON branch.instance_id=t.instance_id
                         AND branch.branch_id=t.branch_id
-                       WHERE t.instance_id=i.instance_id
+                       JOIN research_graph_instances AS trace_instance
+                         ON trace_instance.instance_id=t.instance_id
+                       WHERE COALESCE(
+                           NULLIF(trace_instance.work_package_id, ''),
+                           trace_instance.instance_id
+                       )=COALESCE(
+                           NULLIF(i.work_package_id, ''), i.instance_id
+                       )
                          AND t.branch_id IN (
                              SELECT visible.branch_id
                              FROM research_graph_branches AS visible
-                             WHERE visible.instance_id=i.instance_id
+                             JOIN research_graph_instances AS visible_instance
+                               ON visible_instance.instance_id=visible.instance_id
+                             WHERE COALESCE(
+                                 NULLIF(visible_instance.work_package_id, ''),
+                                 visible_instance.instance_id
+                             )=COALESCE(
+                                 NULLIF(i.work_package_id, ''), i.instance_id
+                             )
                              ORDER BY visible.updated_at DESC,
                                       visible.branch_id DESC
                              LIMIT 50
                          )
                    ) AS ranked
                    WHERE ranked.first_rank<=1 OR ranked.last_rank<=1
+                      OR ranked.trace_id=ranked.incarnation_latest_trace_id
                    ORDER BY ranked.created_at ASC, ranked.trace_id ASC
                    LIMIT 120
                ) AS selected
@@ -170,13 +298,18 @@ WORK_PACKAGE_DETAIL_SQL = """
           ORDER BY candidate.trace_id
           LIMIT 1
       )
-    WHERE i.owner=? AND i.instance_id=?
-    ORDER BY b.updated_at DESC, b.branch_id DESC
+    WHERE i.owner=? AND COALESCE(
+        NULLIF(i.work_package_id, ''), i.instance_id
+    )=? AND b.is_current_incarnation=1
+    ORDER BY b.updated_at DESC, i.graph_version DESC, b.branch_id DESC
     LIMIT ?
 """
 
 BRANCH_DETAIL_SQL = """
-    SELECT i.instance_id, i.created_by_profile_ref,
+    SELECT i.instance_id,
+           COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
+               AS work_package_id,
+           i.created_by_profile_ref,
            i.current_owner_profile_ref, i.graph_id, i.graph_version,
            i.product_group,
            i.workspace_id, i.mode, i.created_at AS instance_created_at,
@@ -213,6 +346,13 @@ BRANCH_DETAIL_SQL = """
     WHERE i.owner=? AND i.instance_id=? AND b.branch_id=?
 """
 
+WORK_PACKAGE_BRANCH_DETAIL_SQL = BRANCH_DETAIL_SQL.replace(
+    "WHERE i.owner=? AND i.instance_id=? AND b.branch_id=?",
+    """WHERE i.owner=? AND COALESCE(
+        NULLIF(i.work_package_id, ''), i.instance_id
+    )=? AND b.branch_id=? AND b.is_current_incarnation=1""",
+)
+
 TIMELINE_FIRST_SQL = """
     SELECT t.trace_id, t.edge_id, t.from_node, t.to_node, t.actor,
            t.acting_profile_ref,
@@ -245,6 +385,49 @@ TIMELINE_AFTER_SQL = """
     ORDER BY t.created_at DESC, t.trace_id DESC
     LIMIT ?
 """
+
+WORK_PACKAGE_TIMELINE_FIRST_SQL = """
+    SELECT t.trace_id, t.instance_id AS trace_instance_id,
+           t.branch_id AS trace_branch_id,
+           t.edge_id, t.from_node, t.to_node, t.actor,
+           t.acting_profile_ref, t.created_at, t.evidence_json,
+           current.status AS branch_status,
+           current.latest_trace_id,
+           current.instance_id AS current_instance_id
+    FROM research_graph_instances AS current_instance
+    JOIN research_graph_branches AS current
+      ON current.instance_id=current_instance.instance_id
+     AND current.branch_id=? AND current.is_current_incarnation=1
+    JOIN research_graph_branches AS history
+      ON COALESCE(NULLIF(history.hypothesis_branch_id, ''), history.branch_id)
+       = COALESCE(NULLIF(current.hypothesis_branch_id, ''), current.branch_id)
+    JOIN research_graph_instances AS history_instance
+      ON history_instance.instance_id=history.instance_id
+    LEFT JOIN research_graph_trace AS t
+      ON t.instance_id=history.instance_id AND t.branch_id=history.branch_id
+    WHERE current_instance.owner=?
+      AND COALESCE(
+          NULLIF(current_instance.work_package_id, ''),
+          current_instance.instance_id
+      )=?
+      AND history_instance.owner=current_instance.owner
+      AND COALESCE(
+          NULLIF(history_instance.work_package_id, ''),
+          history_instance.instance_id
+      )=COALESCE(
+          NULLIF(current_instance.work_package_id, ''),
+          current_instance.instance_id
+      )
+    ORDER BY t.created_at DESC, t.trace_id DESC
+    LIMIT ?
+"""
+
+WORK_PACKAGE_TIMELINE_AFTER_SQL = WORK_PACKAGE_TIMELINE_FIRST_SQL.replace(
+    "WHERE current_instance.owner=?",
+    """WHERE t.trace_id IS NOT NULL AND (
+        t.created_at<? OR (t.created_at=? AND t.trace_id<?)
+    ) AND current_instance.owner=?""",
+)
 
 _TERMINAL_JOB_STATUSES = frozenset({
     "cancelled",
@@ -303,7 +486,7 @@ class ProfileResearchProjection:
             encode_cursor(
                 kind="research",
                 at=float(visible[-1]["updated_at"]),
-                identifier=str(visible[-1]["instance_id"]),
+                identifier=str(visible[-1]["work_package_id"]),
             )
             if has_more and visible
             else None
@@ -326,17 +509,17 @@ class ProfileResearchProjection:
                 owner=owner,
                 branch_ref=research_ref,
             )
-        instance_id = parse_work_package_ref(research_ref)
+        work_package_id = parse_work_package_ref(research_ref)
         with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
             rows = conn.execute(
                 WORK_PACKAGE_DETAIL_SQL,
-                (owner, instance_id, MAX_LIST_LIMIT + 1),
+                (owner, work_package_id, MAX_LIST_LIMIT + 1),
             ).fetchall()
         if not rows:
             raise KeyError("profile research not found")
         visible = rows[:MAX_LIST_LIMIT]
         first = visible[0]
-        work_package_ref = work_package_ref_for(instance_id)
+        work_package_ref = work_package_ref_for(work_package_id)
         return bounded_projection({
             "schema_version": 2,
             "research_ref": work_package_ref,
@@ -347,7 +530,9 @@ class ProfileResearchProjection:
             ),
             "product_group": str(first["product_group"]),
             "mode": str(first["mode"]),
-            "created_at": float(first["instance_created_at"]),
+            "created_at": min(
+                float(row["instance_created_at"]) for row in rows
+            ),
             "updated_at": max(float(row["updated_at"]) for row in rows),
             "branch_count": int(first["total_branch_count"]),
             "omitted_branch_count": max(
@@ -381,6 +566,12 @@ class ProfileResearchProjection:
             ).fetchone()
         if row is None:
             raise KeyError("profile research branch not found")
+        return self._branch_projection(row)
+
+    def _branch_projection(self, row: sqlite3.Row) -> dict[str, Any]:
+        instance_id = str(row["instance_id"])
+        work_package_id = str(row["work_package_id"] or instance_id)
+        branch_id = str(row["branch_id"])
         evidence = _json_object(row["latest_trace_evidence_json"])
         cycle = _cycle_projection(evidence.get("research_cycle_checkpoint"))
         job_refs = _named_refs(evidence, "job_id", prefix="job:")
@@ -424,13 +615,14 @@ class ProfileResearchProjection:
             "run_refs": run_refs,
             "timeline_href": (
                 f"/api/profile-research/"
-                f"{work_package_ref_for(instance_id)}/branches/"
+                f"{work_package_ref_for(work_package_id)}/branches/"
                 f"{branch_id}/timeline"
             ),
             "refresh": refresh,
             "report_checkpoint": (
                 report_checkpoint_projection(
                     instance_id=str(row["instance_id"]),
+                    work_package_id=work_package_id,
                     branch_id=str(row["branch_id"]),
                     workspace_id=str(row["workspace_id"]),
                     graph_id=str(row["graph_id"]),
@@ -455,6 +647,24 @@ class ProfileResearchProjection:
             ),
         }
         return bounded_projection(value)
+
+    def get_work_package_branch(
+        self,
+        *,
+        owner: str,
+        work_package_ref: str,
+        branch_id: str,
+    ) -> dict[str, Any]:
+        work_package_id = parse_work_package_ref(work_package_ref)
+        branch_id = _identifier(branch_id, field="branch_id")
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            row = conn.execute(
+                WORK_PACKAGE_BRANCH_DETAIL_SQL,
+                (owner, work_package_id, branch_id),
+            ).fetchone()
+        if row is None:
+            raise KeyError("profile research branch not found")
+        return self._branch_projection(row)
 
     def list_timeline(
         self,
@@ -508,6 +718,67 @@ class ProfileResearchProjection:
         return bounded_projection({
             "schema_version": 1,
             "research_ref": research_ref_for(instance_id, branch_id),
+            "items": items,
+            "next_cursor": next_cursor,
+        })
+
+    def list_work_package_timeline(
+        self,
+        *,
+        owner: str,
+        work_package_ref: str,
+        branch_id: str,
+        limit: int = DEFAULT_TIMELINE_LIMIT,
+        after: str = "",
+    ) -> dict[str, Any]:
+        work_package_id = parse_work_package_ref(work_package_ref)
+        branch_id = _identifier(branch_id, field="branch_id")
+        page_limit = bounded_limit(
+            limit,
+            default=DEFAULT_TIMELINE_LIMIT,
+            maximum=MAX_TIMELINE_LIMIT,
+        )
+        cursor = decode_cursor(after, kind="timeline") if after else None
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            if cursor is None:
+                rows = conn.execute(
+                    WORK_PACKAGE_TIMELINE_FIRST_SQL,
+                    (branch_id, owner, work_package_id, page_limit + 1),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    WORK_PACKAGE_TIMELINE_AFTER_SQL,
+                    (
+                        branch_id,
+                        cursor["at"],
+                        cursor["at"],
+                        cursor["id"],
+                        owner,
+                        work_package_id,
+                        page_limit + 1,
+                    ),
+                ).fetchall()
+        if not rows:
+            raise KeyError("profile research not found")
+        rows = [row for row in rows if row["trace_id"] is not None]
+        has_more = len(rows) > page_limit
+        visible = rows[:page_limit]
+        current_instance_id = str(rows[0]["current_instance_id"])
+        current_ref = research_ref_for(current_instance_id, branch_id)
+        items = [_transition_step(row, current_ref) for row in visible]
+        next_cursor = (
+            encode_cursor(
+                kind="timeline",
+                at=float(visible[-1]["created_at"]),
+                identifier=str(visible[-1]["trace_id"]),
+            )
+            if has_more and visible
+            else None
+        )
+        return bounded_projection({
+            "schema_version": 2,
+            "work_package_ref": work_package_ref_for(work_package_id),
+            "research_ref": current_ref,
             "items": items,
             "next_cursor": next_cursor,
         })
@@ -648,8 +919,8 @@ def bounded_projection(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def _work_package_summary(row: sqlite3.Row) -> dict[str, Any]:
-    instance_id = str(row["instance_id"])
-    work_package_ref = work_package_ref_for(instance_id)
+    work_package_id = str(row["work_package_id"] or row["instance_id"])
+    work_package_ref = work_package_ref_for(work_package_id)
     branch_count = int(row["branch_count"])
     running_count = int(row["running_branch_count"])
     return {
@@ -677,9 +948,10 @@ def _work_package_summary(row: sqlite3.Row) -> dict[str, Any]:
 
 def _branch_summary(row: sqlite3.Row) -> dict[str, Any]:
     instance_id = str(row["instance_id"])
+    work_package_id = str(row["work_package_id"] or instance_id)
     branch_id = str(row["branch_id"])
     branch_ref = research_ref_for(instance_id, branch_id)
-    work_package_ref = work_package_ref_for(instance_id)
+    work_package_ref = work_package_ref_for(work_package_id)
     trial_plan_hash = str(row["current_trial_plan_hash"] or "")
     return {
         "research_ref": work_package_ref,
@@ -810,8 +1082,9 @@ def _tree_projection(
     raw_nodes = payload.get("nodes")
     if not isinstance(raw_nodes, list):
         raw_nodes = []
-    branch_by_id = {
-        str(row["branch_id"]): row for row in branch_rows
+    branch_by_hypothesis = {
+        str(row["hypothesis_branch_id"] or row["branch_id"]): row
+        for row in branch_rows
     }
     nodes: list[dict[str, Any]] = []
     by_branch: dict[str, list[dict[str, Any]]] = {}
@@ -820,10 +1093,13 @@ def _tree_projection(
             continue
         trace_id = _safe_identifier(raw.get("trace_id"))
         branch_id = _safe_identifier(raw.get("branch_id"))
+        hypothesis_branch_id = _safe_identifier(
+            raw.get("hypothesis_branch_id")
+        ) or branch_id
         edge_id = _safe_identifier(raw.get("edge_id"))
-        if not (trace_id and branch_id and edge_id):
+        if not (trace_id and branch_id and hypothesis_branch_id and edge_id):
             continue
-        if branch_id not in branch_by_id:
+        if hypothesis_branch_id not in branch_by_hypothesis:
             # The SQL limits nodes to visible branches.  Keep this guard in
             # case an older cache returns a malformed carrier.
             continue
@@ -833,8 +1109,9 @@ def _tree_projection(
             last_rank = int(raw.get("last_rank"))
         except (TypeError, ValueError):
             continue
+        head = branch_by_hypothesis[hypothesis_branch_id]
         branch_ref = research_ref_for(
-            str(branch_by_id[branch_id]["instance_id"]), branch_id
+            str(head["instance_id"]), str(head["branch_id"])
         )
         trace_ref = f"trace:{trace_id}"
         node = {
@@ -857,13 +1134,13 @@ def _tree_projection(
             "_history_rank": last_rank,
         }
         nodes.append(node)
-        by_branch.setdefault(branch_id, []).append(node)
+        by_branch.setdefault(hypothesis_branch_id, []).append(node)
 
     nodes.sort(
         key=lambda item: (item["created_at"], item["checkpoint_ref"])
     )
     edges: list[dict[str, Any]] = []
-    for branch_id, branch_nodes in by_branch.items():
+    for hypothesis_branch_id, branch_nodes in by_branch.items():
         branch_nodes.sort(
             key=lambda item: (
                 item["_sequence_rank"], item["checkpoint_ref"]
@@ -882,7 +1159,7 @@ def _tree_projection(
                 "source_branch_ref": previous["branch_ref"],
                 "target_branch_ref": current["branch_ref"],
             })
-        row = branch_by_id[branch_id]
+        row = branch_by_hypothesis[hypothesis_branch_id]
         lineage = _branch_lineage(row)
         target = next(
             (item for item in branch_nodes if item["is_root"]),
@@ -894,7 +1171,8 @@ def _tree_projection(
             if isinstance(source_branch_ref, str):
                 edges.append({
                     "edge_ref": (
-                        f"lineage:{branch_id}:{target['checkpoint_ref']}"
+                        "lineage:"
+                        f"{hypothesis_branch_id}:{target['checkpoint_ref']}"
                     ),
                     "relation": str(lineage["relation"]),
                     "source_node_ref": source_trace_ref or "",
@@ -927,6 +1205,13 @@ def _transition_step(
     row: sqlite3.Row,
     research_ref: str,
 ) -> dict[str, Any]:
+    fallback_instance_id, fallback_branch_id = parse_research_ref(research_ref)
+    try:
+        trace_instance_id = str(row["trace_instance_id"] or fallback_instance_id)
+        trace_branch_id = str(row["trace_branch_id"] or fallback_branch_id)
+    except (IndexError, KeyError):
+        trace_instance_id = fallback_instance_id
+        trace_branch_id = fallback_branch_id
     evidence = _json_object(row["evidence_json"])
     step = transition_step_projection(
         trace_id=str(row["trace_id"]),
@@ -977,8 +1262,8 @@ def _transition_step(
         "object_hrefs": [
             (
                 "/api/research-graph-instances/"
-                f"{parse_research_ref(research_ref)[0]}/branches/"
-                f"{parse_research_ref(research_ref)[1]}/cycle-objects/"
+                f"{trace_instance_id}/branches/"
+                f"{trace_branch_id}/cycle-objects/"
                 f"{_cycle_object_type(ref)}/{ref.split(':', 1)[1]}"
                 f"?trace_id={str(row['trace_id'])}"
             )

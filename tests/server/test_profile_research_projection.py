@@ -227,6 +227,121 @@ def test_research_projects_one_work_package_with_hypothesis_branches(
     assert sum(node["is_head"] for node in tree["nodes"]) == 1
 
 
+def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "work-package-continuation.sqlite"
+    _seed(path, branch_count=1, trace_count=2)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            "UPDATE research_graph_instances SET work_package_id=instance_id "
+            "WHERE instance_id='instance-a'"
+        )
+        conn.execute(
+            """
+            UPDATE research_graph_branches
+            SET hypothesis_branch_id=branch_id, is_current_incarnation=0,
+                latest_trace_id='trace-000001'
+            WHERE branch_id='branch-0000'
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner, graph_id, graph_version,
+                product_group, workspace_id, mode, shadow_run_id, created_at
+            ) VALUES (
+                'instance-v7', 'instance-a', 'alice', 'factor-research', 7,
+                'CNFutures', 'workspace-a', 'live', '', 2000
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_branches (
+                branch_id, hypothesis_branch_id, is_current_incarnation,
+                instance_id, label, current_node, status,
+                current_capability_resolution_json,
+                current_capability_resolution_hash,
+                current_trial_plan_hash, trial_stage_projection_json,
+                evidence_refs_json, omitted_evidence_count,
+                latest_trace_id, created_at, updated_at
+            ) VALUES (
+                'branch-v7', 'branch-0000', 1, 'instance-v7', 'primary',
+                'statistical_robustness', 'running', '{}', 'resolution-v7',
+                ?, '{}', '[]', 0, 'trace-v7', 2000, 2000
+            )
+            """,
+            ("c" * 64,),
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id, from_node, to_node,
+                evidence_json, telemetry_json, actor, created_at
+            ) VALUES (
+                'trace-v7', 'instance-v7', 'branch-v7',
+                '__graph_continuation__', 'statistical_robustness',
+                'statistical_robustness', ?, '{}', 'research-agent', 2000
+            )
+            """,
+            (orjson.dumps({
+                **_evidence(7),
+                "graph_continuation": {
+                    "schema_version": 2,
+                    "source_instance_id": "instance-a",
+                    "source_branch_id": "branch-0000",
+                    "source_trace_id": "trace-000001",
+                    "source_checkpoint_hash": "a" * 64,
+                    "work_package_id": "instance-a",
+                    "hypothesis_branch_id": "branch-0000",
+                },
+            }).decode(),),
+        )
+    service = _service(path, monkeypatch)
+
+    listing = service.list_research(
+        owner="alice",
+        workspace_ref="workspace:workspace-a",
+    )
+    assert [item["research_ref"] for item in listing["items"]] == [
+        "work-package:instance-a",
+    ]
+    assert listing["items"][0]["branch_count"] == 1
+    assert listing["items"][0]["created_at"] == 1000
+
+    detail = service.get_research(
+        owner="alice",
+        research_ref="work-package:instance-a",
+    )
+    assert [item["branch_ref"] for item in detail["branches"]] == [
+        "graph-branch:instance-v7:branch-v7",
+    ]
+    assert detail["created_at"] == 1000
+    assert {
+        node["checkpoint_ref"] for node in detail["tree"]["nodes"]
+    } == {
+        "trace:trace-000000",
+        "trace:trace-000001",
+        "trace:trace-v7",
+    }
+    assert {
+        node["branch_ref"] for node in detail["tree"]["nodes"]
+    } == {"graph-branch:instance-v7:branch-v7"}
+
+    timeline = service.list_work_package_timeline(
+        owner="alice",
+        work_package_ref="work-package:instance-a",
+        branch_id="branch-v7",
+    )
+    assert [item["step_ref"] for item in timeline["items"]] == [
+        "trace:trace-v7",
+        "trace:trace-000001",
+        "trace:trace-000000",
+    ]
+
+
 def test_projection_exposes_server_profile_ownership_and_trace_actor(
     tmp_path,
     monkeypatch,

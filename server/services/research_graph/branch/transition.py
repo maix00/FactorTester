@@ -138,6 +138,8 @@ def advance_graph_branch(
         )
         if branch_row is None:
             raise KeyError("graph branch not found")
+        if not bool(branch_row["is_current_incarnation"]):
+            raise ValueError("graph branch is not the current incarnation")
         current_owner_profile_ref = str(
             branch_row["current_owner_profile_ref"] or ""
         )
@@ -469,6 +471,9 @@ def advance_graph_branch(
         )
         report_checkpoint = report_checkpoint_projection(
             instance_id=instance_id,
+            work_package_id=str(
+                branch_row["work_package_id"] or instance_id
+            ),
             branch_id=branch_id,
             workspace_id=str(branch_row["workspace_id"]),
             graph_id=str(branch_row["graph_id"]),

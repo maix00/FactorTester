@@ -67,6 +67,8 @@ def handoff_graph_branch(
         )
         if branch is None:
             raise KeyError("graph branch not found")
+        if not bool(branch["is_current_incarnation"]):
+            raise ValueError("graph branch is not the current incarnation")
         current_owner = str(branch["current_owner_profile_ref"] or "")
         if not current_owner:
             raise ValueError(
@@ -125,21 +127,39 @@ def handoff_graph_branch(
             },
         }
         evidence_json = serialize_bounded_trace_evidence(evidence)
+        work_package_id = str(
+            branch["work_package_id"] or instance_id
+        )
+        expected_owner_rows = conn.execute(
+            """
+            SELECT COUNT(*) AS count FROM research_graph_instances
+            WHERE owner=? AND COALESCE(
+                NULLIF(work_package_id, ''), instance_id
+            )=? AND current_owner_profile_ref=?
+            """,
+            (owner, work_package_id, source_profile_ref),
+        ).fetchone()["count"]
         conn.execute(
             """
             UPDATE research_graph_instances
             SET current_owner_profile_ref=?
-            WHERE instance_id=? AND owner=?
+            WHERE owner=? AND COALESCE(
+                NULLIF(work_package_id, ''), instance_id
+            )=?
               AND current_owner_profile_ref=?
             """,
             (
                 destination_profile_ref,
-                instance_id,
                 owner,
+                work_package_id,
                 source_profile_ref,
             ),
         )
-        if conn.execute("SELECT changes()").fetchone()[0] != 1:
+        if (
+            expected_owner_rows < 1
+            or conn.execute("SELECT changes()").fetchone()[0]
+            != expected_owner_rows
+        ):
             raise PermissionError("branch ownership changed during handoff")
         conn.execute(
             """

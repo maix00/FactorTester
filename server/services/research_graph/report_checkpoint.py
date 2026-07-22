@@ -21,6 +21,7 @@ _REFERENCE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:[^\\\s]{1,255}$")
 def report_checkpoint_projection(
     *,
     instance_id: str,
+    work_package_id: str,
     branch_id: str,
     workspace_id: str,
     graph_id: str,
@@ -61,6 +62,7 @@ def report_checkpoint_projection(
         raise ValueError("omitted_evidence_count exceeds supported range")
     identities = {
         "instance_id": instance_id,
+        "work_package_id": work_package_id,
         "branch_id": branch_id,
         "workspace_id": workspace_id,
         "graph_id": graph_id,
@@ -81,7 +83,7 @@ def report_checkpoint_projection(
     value = {
         "schema_version": 2,
         "workspace_ref": f"workspace:{workspace_id}",
-        "work_package_ref": f"work-package:{instance_id}",
+        "work_package_ref": f"work-package:{work_package_id}",
         "branch_ref": f"graph-branch:{instance_id}:{branch_id}",
         "graph_ref": f"{graph_id}@v{int(graph_version)}",
         "checkpoint_ref": f"trace:{trace_id}",

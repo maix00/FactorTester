@@ -1157,6 +1157,7 @@ def test_server_checkpoint_carrier_publishes_without_translation(
     _profile(root)
     carrier = report_checkpoint_projection(
         instance_id="sgccs-review",
+        work_package_id="sgccs-review",
         branch_id="branch-sgccs",
         workspace_id="workspace-maxa",
         graph_id="factor-research",

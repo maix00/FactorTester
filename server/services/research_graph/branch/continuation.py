@@ -71,7 +71,7 @@ def continue_graph_branch(
     expected_target_hash: str,
     human_authorization_id: str,
 ) -> dict[str, Any]:
-    """Create one new-version branch; never rewrite or rebind its source."""
+    """Create one immutable version instance inside the same Work Package."""
     prepared = _prepare(
         source_instance_id=source_instance_id,
         source_branch_id=source_branch_id,
@@ -99,6 +99,10 @@ def continue_graph_branch(
         )
         if source is None:
             raise KeyError("source graph branch not found")
+        if not bool(source["is_current_incarnation"]):
+            raise ValueError(
+                "Graph continuation source is not the current incarnation"
+            )
         if branch_identity(source) != prepared["source_identity"]:
             raise ValueError("Graph continuation source identity is stale")
         active = conn.execute(
@@ -131,6 +135,8 @@ def continue_graph_branch(
         )
     branch = {
         "branch_id": branch_id,
+        "hypothesis_branch_id": prepared["hypothesis_branch_id"],
+        "is_current_incarnation": True,
         "instance_id": instance_id,
         "label": f"continuation-v{int(target_graph_version)}",
         "current_node": prepared["target_node"],
@@ -140,6 +146,7 @@ def continue_graph_branch(
     }
     return {
         "instance_id": instance_id,
+        "work_package_id": prepared["work_package_id"],
         "owner": owner,
         "graph_id": prepared["graph_id"],
         "graph_version": int(target_graph_version),
@@ -169,6 +176,10 @@ def _prepare(
         )
         if source is None:
             raise KeyError("source graph branch not found")
+        if not bool(source["is_current_incarnation"]):
+            raise ValueError(
+                "Graph continuation source is not the current incarnation"
+            )
         source_graph = load_graph_from_conn(
             conn,
             graph_id=str(source["graph_id"]),
@@ -259,7 +270,7 @@ def _prepare(
             f"target Graph lacks capability-free {target_node} node"
         )
     descriptor = {
-        "schema_version": 1,
+        "schema_version": 2,
         "continuation_mode": continuation_mode,
         "owner": owner,
         "graph_id": str(source["graph_id"]),
@@ -273,6 +284,18 @@ def _prepare(
         "target_graph_hash": str(target_graph["content_hash"]),
         "target_node": target_node,
         "workspace_id": str(source["workspace_id"]),
+        "work_package_id": str(
+            source["work_package_id"] or source_instance_id
+        ),
+        "hypothesis_branch_id": str(
+            source["hypothesis_branch_id"] or source_branch_id
+        ),
+        "created_by_profile_ref": str(
+            source["created_by_profile_ref"] or ""
+        ),
+        "current_owner_profile_ref": str(
+            source["current_owner_profile_ref"] or ""
+        ),
     }
     if continuation_mode == JOB_EVIDENCE_MODE:
         assert envelope is not None
@@ -294,6 +317,18 @@ def _prepare(
         "graph_id": str(source["graph_id"]),
         "product_group": str(source["product_group"]),
         "workspace_id": str(source["workspace_id"]),
+        "work_package_id": str(
+            source["work_package_id"] or source_instance_id
+        ),
+        "hypothesis_branch_id": str(
+            source["hypothesis_branch_id"] or source_branch_id
+        ),
+        "created_by_profile_ref": str(
+            source["created_by_profile_ref"] or ""
+        ),
+        "current_owner_profile_ref": str(
+            source["current_owner_profile_ref"] or ""
+        ),
         "target_graph_version": int(target_graph_version),
         "target_graph_hash": str(target_graph["content_hash"]),
         "current_trial_plan_hash": str(

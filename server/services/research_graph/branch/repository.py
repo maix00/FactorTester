@@ -29,7 +29,14 @@ def branch_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None
     return {
         "branch_id": str(row["branch_id"]),
+        "hypothesis_branch_id": str(
+            row["hypothesis_branch_id"] or row["branch_id"]
+        ),
+        "is_current_incarnation": bool(row["is_current_incarnation"]),
         "instance_id": str(row["instance_id"]),
+        "work_package_id": str(
+            row["work_package_id"] or row["instance_id"]
+        ),
         "created_by_profile_ref": str(
             row["created_by_profile_ref"] or ""
         ),

@@ -123,12 +123,13 @@ def create_graph_instance(
         conn.execute(
             """
             INSERT INTO research_graph_instances (
-                instance_id, owner, created_by_profile_ref,
+                instance_id, work_package_id, owner, created_by_profile_ref,
                 current_owner_profile_ref, graph_id, graph_version,
                 product_group, workspace_id, mode, shadow_run_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                instance_id,
                 instance_id,
                 owner,
                 profile_ref,
@@ -151,15 +152,18 @@ def create_graph_instance(
         conn.execute(
             """
             INSERT INTO research_graph_branches (
-                branch_id, instance_id, label, current_node, status,
+                branch_id, hypothesis_branch_id, is_current_incarnation,
+                instance_id,
+                label, current_node, status,
                 current_capability_resolution_json,
                 current_capability_resolution_hash,
                 current_trial_plan_hash, created_at, updated_at
             ) VALUES (
-                ?, ?, 'primary', ?, 'running', ?, ?, '', ?, ?
+                ?, ?, 1, ?, 'primary', ?, 'running', ?, ?, '', ?, ?
             )
             """,
             (
+                branch_id,
                 branch_id,
                 instance_id,
                 entry_node,
@@ -171,6 +175,7 @@ def create_graph_instance(
         )
         branch = {
             "branch_id": branch_id,
+            "hypothesis_branch_id": branch_id,
             "instance_id": instance_id,
             "label": "primary",
             "current_node": entry_node,
@@ -180,6 +185,7 @@ def create_graph_instance(
         }
     return {
         "instance_id": instance_id,
+        "work_package_id": instance_id,
         "owner": owner,
         "created_by_profile_ref": profile_ref,
         "current_owner_profile_ref": profile_ref,
@@ -233,6 +239,8 @@ def fork_graph_branch(
         )
         if source is None:
             raise KeyError("source branch not found")
+        if not bool(source["is_current_incarnation"]):
+            raise ValueError("source branch is not the current incarnation")
         current_owner_profile_ref = str(
             source["current_owner_profile_ref"] or ""
         )
@@ -270,16 +278,18 @@ def fork_graph_branch(
         conn.execute(
             """
             INSERT INTO research_graph_branches (
-                branch_id, instance_id, label, current_node, status,
+                branch_id, hypothesis_branch_id, is_current_incarnation,
+                instance_id, label, current_node, status,
                 current_capability_resolution_json,
                 current_capability_resolution_hash,
                 current_trial_plan_hash, trial_stage_projection_json,
                 evidence_refs_json,
                 omitted_evidence_count, latest_trace_id,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, 1, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                branch_id,
                 branch_id,
                 instance_id,
                 str(label or "fork").strip(),

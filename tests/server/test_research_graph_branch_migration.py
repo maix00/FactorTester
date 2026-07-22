@@ -324,7 +324,7 @@ def test_forward_migration_is_atomic_replayable_and_restart_safe(
             "DROP ",
         ))
         for statement in first_migration_statements
-    ) == 16
+    ) == 19  # stable Work Package, hypothesis lookup, and unique HEAD indexes
     assert sum(
         statement.lstrip().upper().startswith("COMMIT")
         for statement in first_migration_statements

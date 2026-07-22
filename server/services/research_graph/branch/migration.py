@@ -128,18 +128,16 @@ def migrate_graph_branch_projection(
 def _project_instances(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [
         {
-            key: row[key]
-            for key in (
-                "instance_id",
-                "owner",
-                "graph_id",
-                "graph_version",
-                "product_group",
-                "workspace_id",
-                "mode",
-                "shadow_run_id",
-                "created_at",
-            )
+            "instance_id": row["instance_id"],
+            "work_package_id": row["instance_id"],
+            **{
+                key: row[key]
+                for key in (
+                    "owner", "graph_id", "graph_version",
+                    "product_group", "workspace_id", "mode",
+                    "shadow_run_id", "created_at",
+                )
+            },
         }
         for row in conn.execute(
             "SELECT * FROM research_graph_instances ORDER BY created_at"
@@ -199,6 +197,8 @@ def _project_branches(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         )
         projected.append({
             "branch_id": branch_id,
+            "hypothesis_branch_id": branch_id,
+            "is_current_incarnation": 1,
             "instance_id": instance_id,
             "label": str(row["label"]),
             "current_node": node_id,
@@ -248,13 +248,15 @@ def _write_instances(
     conn.executemany(
         """
         INSERT INTO research_graph_instances (
-            instance_id, owner, graph_id, graph_version, product_group,
+            instance_id, work_package_id, owner, graph_id, graph_version,
+            product_group,
             workspace_id, mode, shadow_run_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             tuple(instance[key] for key in (
                 "instance_id",
+                "work_package_id",
                 "owner",
                 "graph_id",
                 "graph_version",
@@ -275,6 +277,8 @@ def _write_branches(
 ) -> None:
     keys = (
         "branch_id",
+        "hypothesis_branch_id",
+        "is_current_incarnation",
         "instance_id",
         "label",
         "current_node",
@@ -291,12 +295,13 @@ def _write_branches(
     conn.executemany(
         """
         INSERT INTO research_graph_branches (
-            branch_id, instance_id, label, current_node, status,
+            branch_id, hypothesis_branch_id, is_current_incarnation,
+            instance_id, label, current_node, status,
             current_capability_resolution_json,
             current_capability_resolution_hash, current_trial_plan_hash,
             evidence_refs_json, omitted_evidence_count, latest_trace_id,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [tuple(branch[key] for key in keys) for branch in branches],
     )
