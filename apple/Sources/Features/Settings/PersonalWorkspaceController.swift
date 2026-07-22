@@ -13,10 +13,19 @@ final class PersonalWorkspaceController: ObservableObject {
     func refresh(principal: String) async {
         guard !principal.isEmpty else { return }
         await perform {
-            let value = try await ReleaseCommand.runObject([
-                "client", "profile", "user-layout", "show",
-                "--principal", principal,
-            ], executable: self.cliPath)
+            guard let rootPath = PersonalWorkspaceAccessStore.authorizedRootPath
+            else {
+                throw ResearchJournalError.workspaceAccessRequired
+            }
+            let root = URL(fileURLWithPath: rootPath, isDirectory: true)
+            let value = try await PersonalWorkspaceAccessStore.withAccess(
+                to: root
+            ) {
+                try await ReleaseCommand.runObject([
+                    "client", "profile", "user-layout", "show",
+                    "--principal", principal,
+                ], executable: self.cliPath)
+            }
             let canonical = value["canonical"] as? [String: Any] ?? [:]
             self.current = PersonalCanonicalWorkspace(
                 json: canonical, principal: principal

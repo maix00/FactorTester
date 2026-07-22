@@ -22,49 +22,78 @@ enum PersonalWorkspaceAccessStore {
         defer {
             if started { normalized.stopAccessingSecurityScopedResource() }
         }
-        let options: URL.BookmarkCreationOptions = started
-            ? .withSecurityScope
-            : []
-        let bookmark = try normalized.bookmarkData(
-            options: options,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        )
-        UserDefaults.standard.set(bookmark, forKey: bookmarkKey)
+        try persistBookmark(for: normalized, securityScoped: started)
     }
 
     static func withAccess<T>(
         to target: URL,
         _ operation: () throws -> T
     ) throws -> T {
+        let access = try prepareAccess(to: target)
+        defer { finishAccess(access) }
+        return try operation()
+    }
+
+    static func withAccess<T>(
+        to target: URL,
+        _ operation: () async throws -> T
+    ) async throws -> T {
+        let access = try prepareAccess(to: target)
+        defer { finishAccess(access) }
+        return try await operation()
+    }
+
+    private struct PreparedAccess {
+        let root: URL?
+        let started: Bool
+    }
+
+    private static func prepareAccess(to target: URL) throws -> PreparedAccess {
         guard requiresExplicitAccess(target) else {
-            return try operation()
+            return PreparedAccess(root: nil, started: false)
         }
-        guard let storedRoot = storedAuthorizedRoot(for: target) else {
+        guard let storedRoot = storedAuthorizedRoot(for: target),
+              let bookmark = UserDefaults.standard.data(forKey: bookmarkKey),
+              let resolved = resolve(bookmark),
+              sameLocation(resolved.root, storedRoot),
+              contains(target, in: resolved.root) else {
+            // Never fall through to an unscoped Documents read. Besides
+            // bypassing the explicit directory choice, doing so makes macOS
+            // show its TCC prompt whenever an ad-hoc build changes identity.
             throw ResearchJournalError.workspaceAccessRequired
         }
-        if let bookmark = UserDefaults.standard.data(forKey: bookmarkKey),
-           let resolved = resolve(bookmark),
-           sameLocation(resolved.root, storedRoot),
-           contains(target, in: resolved.root) {
-            if resolved.stale {
-                try? storeBookmark(for: storedRoot)
-            }
-            let started = resolved.root.startAccessingSecurityScopedResource()
-            defer {
-                if started { resolved.root.stopAccessingSecurityScopedResource() }
-            }
-            return try operation()
+        let started = resolved.root.startAccessingSecurityScopedResource()
+        guard started else {
+            throw ResearchJournalError.workspaceAccessRequired
         }
+        if resolved.stale {
+            // Refresh only after the original security extension is active.
+            // Refreshing first performs a naked Documents access and can ask
+            // for permission again after an otherwise compatible update.
+            try? persistBookmark(for: resolved.root, securityScoped: true)
+        }
+        return PreparedAccess(root: resolved.root, started: true)
+    }
 
-        // This app intentionally runs outside App Sandbox so its local CLI and
-        // adapters can execute. In that mode the directory choice is a durable
-        // consent marker, while a security-scoped bookmark may become
-        // unresolvable after an ad-hoc Beta update. Keep the exact canonical
-        // user root, refresh the bookmark without widening the path, and let
-        // the filesystem enforce the actual read permission.
-        try? storeBookmark(for: storedRoot)
-        return try operation()
+    private static func finishAccess(_ access: PreparedAccess) {
+        if access.started {
+            access.root?.stopAccessingSecurityScopedResource()
+        }
+    }
+
+    private static func persistBookmark(
+        for root: URL,
+        securityScoped: Bool
+    ) throws {
+        let options: URL.BookmarkCreationOptions = securityScoped
+            ? .withSecurityScope
+            : []
+        let bookmark = try root.bookmarkData(
+            options: options,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        UserDefaults.standard.set(bookmark, forKey: bookmarkKey)
     }
 
     private static func resolve(

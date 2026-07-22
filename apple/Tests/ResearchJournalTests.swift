@@ -452,6 +452,20 @@ final class ResearchJournalTests: XCTestCase {
         )
     }
 
+    func testWorkspaceAccessScopeRemainsActiveForAsyncOperation() async throws {
+        let target = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let observed = try await PersonalWorkspaceAccessStore.withAccess(
+            to: target
+        ) {
+            try await Task.sleep(for: .milliseconds(1))
+            return target.path
+        }
+
+        XCTAssertEqual(observed, target.path)
+    }
+
     func testLoadsVerifiedChineseJournalAndBindsCheckpointIdentity() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
