@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 
-MAX_BYTES = 6000
+# A proposal is a one-time structured delta, not the repeatedly loaded Agent
+# context packet.  It may contain one complete obligation body and still stay
+# compact; long reports and raw artifacts remain references.
+MAX_BYTES = 12 * 1024
 FORBIDDEN_SKILL_FIELDS = {
     "implementation_id",
     "loaded_skill_ids",
@@ -45,8 +48,11 @@ def validate_adjudication(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("schema_version must be 1 or 2")
     for field in ("proposal_id", "proposer_invocation_id"):
         _text(value.get(field), field)
-    for field in ("contract_hash", "trial_plan_hash", "methodology_hash"):
+    for field in ("contract_hash", "methodology_hash"):
         _sha(value.get(field), field)
+    value["trial_plan_hash"] = _optional_sha(
+        value.get("trial_plan_hash"), "trial_plan_hash"
+    )
     _refs(value.get("evidence_refs"), "evidence_refs", required=True)
     claim_delta = _object_array(
         value.get("claim_evidence_delta"),
@@ -94,8 +100,12 @@ def validate_adjudication(value: dict[str, Any]) -> dict[str, Any]:
         "limitation_refs",
     ):
         _refs(warrant.get(field), f"decision_warrant.{field}")
-    if not isinstance(warrant.get("reentry_predicates"), list):
-        raise ValueError("reentry_predicates must be an array")
+    reentry_predicates = warrant.get("reentry_predicates")
+    if (
+        not isinstance(reentry_predicates, list)
+        or not all(isinstance(item, dict) for item in reentry_predicates)
+    ):
+        raise ValueError("reentry_predicates must be an object array")
     if not isinstance(warrant.get("preregistered"), bool):
         raise ValueError("preregistered must be boolean")
     if warrant.get("required_authority") not in AUTHORITIES:
@@ -141,6 +151,8 @@ def validate_obligation_discovery(
         if obligation.get("methodology_hash") != validated["methodology_hash"]:
             raise ValueError("obligation methodology hash does not match")
         _refs(obligation.get("claim_ids"), "obligation.claim_ids", required=True)
+        if "requirement_refs" in obligation:
+            _refs(obligation.get("requirement_refs"), "obligation.requirement_refs")
         if not isinstance(obligation.get("scope"), dict):
             raise ValueError("obligation scope must be an object")
         if not isinstance(obligation.get("discharge_criterion"), dict):
@@ -215,6 +227,12 @@ def _refs(value: Any, field: str, *, required: bool = False) -> list[str]:
     ):
         raise ValueError(f"{field} must be a reference array")
     return value
+
+
+def _optional_sha(value: Any, field: str) -> str:
+    if value in ("", None):
+        return ""
+    return _sha(value, field)
 
 
 def _object_array(value: Any, field: str) -> list[dict[str, Any]]:

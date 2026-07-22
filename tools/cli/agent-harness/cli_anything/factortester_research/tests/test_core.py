@@ -924,7 +924,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "336546b68a014df6046bb8e750ba311c6e75b3f06b0b4df22388ab473285d4ac"
+        "f38013159147c34d7c08b8c9902c0165921437c5a400bc92a82e6965978e8333"
     )
 
 
@@ -947,6 +947,11 @@ def test_obligation_skill_guides_temporal_product_and_event_transfer() -> None:
     assert "Do not generate the Cartesian product" in discovery
     assert "Do not load" in discovery
     assert "search the web for ordinary stable windows" in discovery
+    assert "factortester custom_factors describe <factor-ref>" in discovery
+    assert "`column_refs` contains only fixed `ColumnRef`" in discovery
+    assert "Do not create an obligation\nfor every fixed column" in discovery
+    assert "strictly generalizes its parent" in discovery
+    assert "old job evidence, sample exposure" in discovery
     assert "expanding or rolling" in synthesis
     assert "2024 for selection and seal 2025 as holdout" in synthesis
     assert "month- or day-scale stages" in synthesis

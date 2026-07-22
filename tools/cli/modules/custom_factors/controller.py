@@ -177,6 +177,7 @@ def describe_factor(
             "params": validation.get("params") or factor.get("params") or [],
         },
         "tree_repr": validation.get("tree_repr") or factor.get("tree_repr") or "",
+        "column_refs": validation.get("column_refs") or [],
         "operator_keys": _operator_keys_from_tree(validation.get("tree_repr") or factor.get("tree_repr") or ""),
     }
     payload["source_checks"] = _source_tree_checks(
@@ -922,6 +923,8 @@ def _print_factor_description(payload: dict[str, Any], *, include_source: bool, 
             click.echo(line)
     keys = payload.get("operator_keys") or []
     click.echo("算子: " + (", ".join(keys) if keys else "未解析到算子"))
+    columns = payload.get("column_refs") or []
+    click.echo("固定数据列: " + (", ".join(columns) if columns else "无"))
     tree = payload.get("tree_repr") or ""
     if tree:
         click.echo("算子树:")

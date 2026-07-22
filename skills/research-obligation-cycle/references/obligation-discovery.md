@@ -38,9 +38,39 @@ Keep routine existence, permission, and exact predeclared coverage checks as
 deterministic constraints or Capability Gaps. Create an obligation only when
 the remaining data question could change the bounded research decision,
 representativeness, transfer boundary, TrialPlan, or permitted use.
+When the obligation bears on a deterministic data gate, attach stable machine
+`requirement_refs` rather than encoding gate meaning in `obligation_kind`:
+use `data-availability.scope` for usable-scope debt and
+`data-provenance.point-in-time` for visibility-time, vintage, membership, or
+look-ahead debt. `obligation_kind` remains open research vocabulary; the
+deterministic runner must never infer authorization from its wording.
 
 The lenses above are prompts, not a universal checklist. Create factor-specific
 obligations when first principles require them, and omit irrelevant lenses.
+
+## Inspect factor expression semantics
+
+At `factor_semantics`, inspect the exact expression revision authorized for the
+current Profile before creating empirical obligations. Read an authorized local
+worktree source directly. When local source is unavailable but source access is
+authorized, use `factortester custom_factors describe <factor-ref> --source-code
+--json`; otherwise use the same command without `--source-code` and retain the
+visibility limitation. Do not infer a private expression from execution access.
+
+Review the original expression for economic mechanism, units, price basis,
+direction, timing, numerator/denominator construction, and factor-specific
+errors. The describe response's `column_refs` contains only fixed `ColumnRef`
+leaves; compare it with `factor.params` to ask whether a fixed input has an
+economically coherent parameterized alternative. Do not create an obligation
+for every fixed column. Create one only when the alternative is material,
+falsifiable, and could change construction, TrialPlan, scope, or permitted use.
+
+When a derived family strictly generalizes its parent, create a migration
+obligation that tests structural and numerical equivalence at the parent
+parameter point under identical data, timing, cost, and product scope. Preserve
+old job evidence, sample exposure, trial-ledger history, and multiplicity. Old
+evidence may extend to the exact special-case scope only after accepted
+equivalence evidence; it never validates the rest of the new parameter space.
 
 ## Discover transfer and market-context obligations
 

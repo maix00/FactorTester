@@ -9,6 +9,7 @@ from server.modules.custom_factors.source_helpers import (
     assemble_factor_source,
     strip_factor_meta,
 )
+from server.modules.custom_factors.expression_inspection import fixed_column_refs
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.param_meta import serialize_param_meta
 from tools.data.account_manage import can_view_user_scope
@@ -47,6 +48,7 @@ def api_validate_expr():
                 'error': None,
                 'tree_repr': tree_repr,
                 'visual_graph': visual_graph,
+                'column_refs': fixed_column_refs(factor_family.expr),
                 'factor_name': factor_family.__class__.__name__,
                 'params': [serialize_param_meta(param) for param in factor_family.params],
                 'desc': getattr(factor_family, 'desc', '') or '',
@@ -128,6 +130,7 @@ def api_validate_expr():
                 'error': None,
                 'tree_repr': tree_repr,
                 'visual_graph': visual_graph,
+                'column_refs': fixed_column_refs(factor_family.expr),
                 'factor_name': factor_cls.__name__,
                 'params': [serialize_param_meta(param) for param in factor_family.params],
                 'desc': getattr(factor_family, 'desc', '') or '',

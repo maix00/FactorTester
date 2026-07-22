@@ -222,6 +222,7 @@ def workspace_inspect(ctx: click.Context, factor_family: str, root: str, sync: b
     source_checks = factor_tree.get("source_checks") or {}
     report["tree_repr"] = factor_tree.get("tree_repr") or ""
     report["operator_keys"] = factor_tree.get("operator_keys") or []
+    report["column_refs"] = factor_tree.get("column_refs") or []
     report["source_checks"] = source_checks
     if factor_family not in session.factor_families:
         session.factor_families.append(factor_family)
