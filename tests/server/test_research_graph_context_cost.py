@@ -135,6 +135,41 @@ def test_context_cost_is_constant_for_empty_and_large_history(
     assert small["context"] == large["context"]
 
 
+def test_next_packet_uses_one_read_and_never_writes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "next-cost.sqlite"
+    initialize(path)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    research_graphs.build_graph_branch_next(
+        instance_id="instance-1", branch_id="branch-1", owner="alice",
+    )
+    statements: list[str] = []
+    real_connect = connect_sqlite
+
+    def traced_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(branch_context, "connect_sqlite", traced_connect)
+    before_bytes = _file_bytes(path)
+    packet = research_graphs.build_graph_branch_next(
+        instance_id="instance-1", branch_id="branch-1", owner="alice",
+    )
+    after_bytes = _file_bytes(path)
+    normalized = [statement.lstrip().upper() for statement in statements]
+
+    assert sum(item.startswith("SELECT ") for item in normalized) == 1
+    assert not any(item.startswith((
+        "INSERT ", "UPDATE ", "DELETE ", "REPLACE ",
+    )) for item in normalized)
+    assert before_bytes == after_bytes
+    assert packet["next_bytes"] == len(orjson.dumps(packet))
+    assert packet["next_bytes"] <= MAX_AGENT_PACKET_BYTES
+
+
 def test_context_keeps_many_obligation_aliases_inside_agent_budget(
     tmp_path,
     monkeypatch,
