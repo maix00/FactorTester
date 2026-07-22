@@ -175,11 +175,17 @@ def publish_research_checkpoint(
         work_package_id=work_package_id,
         branch_id=branch_id,
     )
+    journal_replaced_branch_id = (
+        journal_prefix_branch_id
+        if _is_graph_continuation(value["latest_transition"])
+        else None
+    )
     report = render_branch_report(
         snapshot,
         workspace_root=Path(profile["workspace_root"]),
         journal_fragment=fragment,
         journal_prefix_branch_id=journal_prefix_branch_id,
+        journal_replaced_branch_id=journal_replaced_branch_id,
     )
     if (
         previous_checkpoint == value["checkpoint_ref"]
@@ -465,6 +471,11 @@ def _journal_prefix_branch_id(
     if source_branch_id == branch_id:
         raise ValueError("report lineage source branch cannot equal target")
     return source_branch_id
+
+
+def _is_graph_continuation(transition: dict[str, Any]) -> bool:
+    """Distinguish a Graph-version continuation from a real research fork."""
+    return transition.get("edge_ref") == "graph-edge:__graph_continuation__"
 
 
 def _canonical_narrative(

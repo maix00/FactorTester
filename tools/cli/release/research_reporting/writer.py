@@ -76,6 +76,7 @@ def render_branch_report(
     target: ReportTarget | None = None,
     journal_fragment: dict[str, Any] | None = None,
     journal_prefix_branch_id: str | None = None,
+    journal_replaced_branch_id: str | None = None,
 ) -> dict[str, Any]:
     """Update one branch and its Work Package generation under one lock."""
     canonical = canonical_report_snapshot(snapshot)
@@ -155,6 +156,7 @@ def render_branch_report(
             renderer,
             content_hash,
             refs,
+            replaced_branch_id=journal_replaced_branch_id,
             project_sections=(
                 journal_fragment is None or fragment_changed
                 or (
@@ -367,18 +369,33 @@ def _merge_index(
     content_hash: str,
     refs: dict[str, str],
     *,
+    replaced_branch_id: str | None = None,
     project_sections: bool = True,
 ) -> dict[str, Any]:
     value = dict(index)
+    if replaced_branch_id == snapshot["branch_id"]:
+        raise ValueError("continued branch cannot replace itself")
+    replaced_section_prefix = (
+        f"report-section:{replaced_branch_id}:"
+        if replaced_branch_id else ""
+    )
     value["branches"] = sorted(
         [
             item for item in index["branches"]
-            if item["branch_id"] != snapshot["branch_id"]
+            if item["branch_id"] not in {
+                snapshot["branch_id"], replaced_branch_id,
+            }
         ]
         + [_branch_entry(snapshot, renderer, content_hash, refs)],
         key=lambda item: item["branch_id"],
     )
+    if replaced_section_prefix:
+        value["sections"] = [
+            item for item in index["sections"]
+            if not item["section_ref"].startswith(replaced_section_prefix)
+        ]
     if not project_sections:
+        _validate_index(value, snapshot)
         return value
     projected_sections = _project_sections(snapshot)
     projected_refs = {
@@ -386,7 +403,7 @@ def _merge_index(
     }
     merged_sections = sorted(
         [
-            item for item in index["sections"]
+            item for item in value["sections"]
             if item["section_ref"] not in projected_refs
         ]
         + projected_sections,

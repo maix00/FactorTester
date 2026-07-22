@@ -414,6 +414,67 @@ def test_checkpoint_publish_materializes_source_prefix_for_fork(
     assert len(list((branch_root / "sections").glob("*.json"))) == 2
 
 
+def test_graph_continuation_replaces_physical_branch_in_work_package_index(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    source = _carrier()
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=source,
+        narrative=_narrative(source, body="旧图版本已完成可信研究检查点。"),
+    )
+
+    profile = store.load("maxa")
+    profile["agents"][0]["scope"] = {
+        "instance_id": "sgccs-v8",
+        "branch_id": "branch-v8",
+    }
+    profile["research_records"][0]["graph_branch_ref"] = (
+        "graph-branch:sgccs-v8:branch-v8"
+    )
+    store.save(profile)
+    continued = deepcopy(source)
+    continued.update({
+        "branch_ref": "graph-branch:sgccs-v8:branch-v8",
+        "checkpoint_ref": "trace:checkpoint-v8",
+    })
+    continued["latest_transition"].update({
+        "step_ref": "trace:checkpoint-v8",
+        "edge_ref": "graph-edge:__graph_continuation__",
+        "created_at": 3.0,
+    })
+    continued["report_lineage"] = {
+        "status": "linked",
+        "predecessor_checkpoint_ref": "trace:checkpoint-1",
+        "source_branch_ref": "graph-branch:sgccs-review:branch-sgccs",
+    }
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=continued,
+        narrative=_narrative(continued, body="同一研究在图 v8 中连续开展。"),
+    )
+
+    package_root = root / "profile-root" / "research" / "sgccs-review"
+    index = json.loads((package_root / "INDEX.json").read_text())
+    assert [item["branch_id"] for item in index["branches"]] == ["branch-v8"]
+    assert all(
+        item["section_ref"].startswith("report-section:branch-v8:")
+        for item in index["sections"]
+    )
+    aggregate = (package_root / "REPORT.md").read_text(encoding="utf-8")
+    assert "Hypothesis branches: 1" in aggregate
+    continued_report = (
+        package_root / "branches" / "branch-v8" / "REPORT.md"
+    ).read_text(encoding="utf-8")
+    assert "旧图版本已完成可信研究检查点" in continued_report
+
+
 def test_checkpoint_publish_rejects_fork_without_source_journal(
     tmp_path: Path,
 ) -> None:
