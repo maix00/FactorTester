@@ -16,6 +16,10 @@ from .execution_checkpoint import (
     transition_action_status,
     validate_execution_checkpoint,
 )
+from .execution_checkpoint_store import (
+    ExecutionCheckpointConflictError,
+    apply_execution_checkpoint_operation,
+)
 from .evidence_admission import admit_current_action
 from .evidence_reuse import reuse_exact_action_evidence
 from .result_audit import audit_current_action
@@ -56,4 +60,6 @@ __all__ = [
     "validate_trial_plan_transition",
     "validate_trial_stage_projection",
     "validate_execution_checkpoint",
+    "ExecutionCheckpointConflictError",
+    "apply_execution_checkpoint_operation",
 ]
