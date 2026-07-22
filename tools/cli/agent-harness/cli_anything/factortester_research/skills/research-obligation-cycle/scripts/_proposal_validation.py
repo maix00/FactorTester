@@ -97,8 +97,12 @@ def validate_adjudication(value: dict[str, Any]) -> dict[str, Any]:
         "limitation_refs",
     ):
         _refs(warrant.get(field), f"decision_warrant.{field}")
-    if not isinstance(warrant.get("reentry_predicates"), list):
-        raise ValueError("reentry_predicates must be an array")
+    reentry_predicates = warrant.get("reentry_predicates")
+    if (
+        not isinstance(reentry_predicates, list)
+        or not all(isinstance(item, dict) for item in reentry_predicates)
+    ):
+        raise ValueError("reentry_predicates must be an object array")
     if not isinstance(warrant.get("preregistered"), bool):
         raise ValueError("preregistered must be boolean")
     if warrant.get("required_authority") not in AUTHORITIES:

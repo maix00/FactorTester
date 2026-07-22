@@ -878,7 +878,7 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "365924ac12a4eb82efca431d48da00f686bb1be498ff320faa911f2e1b387097"
+        "ae4edd2517d1dcf8232292e58c5f40f4117d0efe98a6dc959a617da3c522fd8f"
     )
 
 
@@ -1029,6 +1029,28 @@ def test_cycle_evidence_validation_is_local_and_rejects_skill_identity() -> None
         "must-stay-local"
     )
     with pytest.raises(ValueError, match="Skill identity"):
+        validate_transition_evidence(evidence)
+
+
+def test_cycle_evidence_rejects_non_object_reentry_predicates() -> None:
+    proposal = _research_cycle_discovery_proposal()
+    proposal["decision_warrant"]["reentry_predicates"] = [
+        "factor version changes"
+    ]
+    evidence = {
+        "research_cycle": {
+            "schema_version": 1,
+            "events": [{
+                "event_type": "adjudication_proposed",
+                "proposal": proposal,
+            }],
+        },
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="reentry_predicates must be an object array",
+    ):
         validate_transition_evidence(evidence)
 
 
