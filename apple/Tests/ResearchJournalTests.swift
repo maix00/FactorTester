@@ -467,6 +467,138 @@ final class ResearchJournalTests: XCTestCase {
         ))
     }
 
+    func testDisplayProjectionHidesPureGraphMigrationAndDeduplicatesBindings()
+        throws
+    {
+        let document = try JSONDecoder().decode(
+            ResearchJournalDocument.self,
+            from: Data(
+                """
+                {
+                  "schema_version":4,"language":"zh-Hans",
+                  "journal_kind":"work_package","work_package_id":"wp",
+                  "branch_refs":["graph-branch:i:b"],"history_status":"complete",
+                  "root_checkpoint_ref":"trace:research",
+                  "checkpoints":[
+                    {
+                      "checkpoint_ref":"trace:research","created_at":1,
+                      "carrier_hash":"\(String(repeating: "a", count: 64))",
+                      "narrative_hash":"\(String(repeating: "b", count: 64))",
+                      "section_hash":"\(String(repeating: "c", count: 64))",
+                      "graph_ref":"factor-research@v9",
+                      "instance_ref":"graph-instance:i",
+                      "branch_ref":"graph-branch:i:b",
+                      "lineage_status":"root","lineage_relation":"root",
+                      "predecessor_checkpoint_ref":"","source_branch_ref":"",
+                      "sections":[
+                        {
+                          "section_id":"current-node-report-1",
+                          "title":"当前节点报告项 1",
+                          "blocks":[{
+                            "kind":"list",
+                            "rows":[{"text":"因子公式的经济含义已经逐项核对。","link_ids":[]}],
+                            "report_binding":{
+                              "report_requirement_id":"report.requirement.semantics",
+                              "subject_ref":"obligation:first"
+                            }
+                          }],
+                          "links":[]
+                        },
+                        {
+                          "section_id":"current-node-report-2",
+                          "title":"当前节点报告项 2",
+                          "blocks":[{
+                            "kind":"list",
+                            "rows":[{"text":"因子公式的经济含义已经逐项核对。","link_ids":[]}],
+                            "report_binding":{
+                              "report_requirement_id":"report.requirement.semantics",
+                              "subject_ref":"obligation:second"
+                            }
+                          }],
+                          "links":[]
+                        }
+                      ]
+                    },
+                    {
+                      "checkpoint_ref":"trace:migration","created_at":2,
+                      "carrier_hash":"\(String(repeating: "d", count: 64))",
+                      "narrative_hash":"\(String(repeating: "e", count: 64))",
+                      "section_hash":"\(String(repeating: "f", count: 64))",
+                      "graph_ref":"factor-research@v10",
+                      "instance_ref":"graph-instance:i",
+                      "branch_ref":"graph-branch:i:b",
+                      "lineage_status":"linked",
+                      "lineage_relation":"graph_continuation",
+                      "predecessor_checkpoint_ref":"trace:research",
+                      "source_branch_ref":"graph-branch:i:old",
+                      "sections":[{
+                        "section_id":"graph-continuation-reentry",
+                        "title":"研究图切换与当前节点重新进入",
+                        "blocks":[{"kind":"paragraph","text":"只记录图版本变化。"}],
+                        "links":[]
+                      }]
+                    }
+                  ]
+                }
+                """.utf8
+            )
+        )
+        let index = [
+            ResearchReportSection(
+                id: "report-section:one",
+                sectionID: "current-node-report-1",
+                checkpointRef: "trace:research",
+                branchRef: "graph-branch:i:b",
+                title: "当前节点报告项 1",
+                summary: "摘要",
+                links: []
+            ),
+            ResearchReportSection(
+                id: "report-section:two",
+                sectionID: "current-node-report-2",
+                checkpointRef: "trace:research",
+                branchRef: "graph-branch:i:b",
+                title: "当前节点报告项 2",
+                summary: "摘要",
+                links: []
+            ),
+            ResearchReportSection(
+                id: "report-section:migration",
+                sectionID: "graph-continuation-reentry",
+                checkpointRef: "trace:migration",
+                branchRef: "graph-branch:i:b",
+                title: "研究图切换与当前节点重新进入",
+                summary: "摘要",
+                links: []
+            ),
+        ]
+
+        let sections = try ResearchJournalPresentation.displaySections(
+            in: document,
+            indexedBy: index
+        )
+
+        XCTAssertEqual(sections.count, 1)
+        XCTAssertEqual(sections[0].title, "因子公式的经济含义已经逐项核对")
+        XCTAssertEqual(
+            sections[0].blocks[0].reportBinding?.subjectRef,
+            "obligation:first"
+        )
+    }
+
+    func testInlineLatexIsProjectedIntoRealMathComponents() {
+        let components = ResearchReportTextProjection.components(
+            #"原始公式为：\(X_t=\frac{P_t}{H_t-L_t}\)，其中 \(P_t\) 为价格。"#
+        )
+
+        XCTAssertEqual(components.map(\.kind), [
+            .prose, .math, .prose, .math, .prose,
+        ])
+        XCTAssertEqual(components.filter { $0.kind == .math }.map(\.text), [
+            #"X_t=\frac{P_t}{H_t-L_t}"#, "P_t",
+        ])
+    }
+
     func testCheckpointStatusRewindsOnlyLaterObligationChanges() throws {
         let obligations = try decodeObligations(
             """

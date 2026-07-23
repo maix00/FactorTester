@@ -15,6 +15,7 @@ final class LocalProfileController: ObservableObject {
     @Published var error: String?
     @Published var lifecycleReceipt: ProfileLifecycleReceipt?
     private let snapshotStore: LocalProfileSnapshotStore
+    private var localFileFingerprint: String
     private var refreshInFlight = false
     private static var sharedProfileListTask:
         Task<[[String: Any]], Error>?
@@ -23,11 +24,13 @@ final class LocalProfileController: ObservableObject {
         defaults: UserDefaults = .standard,
         profileDirectory: URL? = nil
     ) {
-        snapshotStore = LocalProfileSnapshotStore(
+        let store = LocalProfileSnapshotStore(
             defaults: defaults,
             profileDirectory: profileDirectory
         )
-        profiles = snapshotStore.hydrate().map(LocalProfileModel.init)
+        snapshotStore = store
+        localFileFingerprint = store.fileFingerprint()
+        profiles = store.hydrate().map(LocalProfileModel.init)
             .filter { !$0.id.isEmpty }
     }
     var cliPath: String {
@@ -71,7 +74,25 @@ final class LocalProfileController: ObservableObject {
         profiles = values.map(LocalProfileModel.init)
             .filter { !$0.id.isEmpty }
         snapshotStore.cache(values)
+        localFileFingerprint = snapshotStore.fileFingerprint()
         loadState = .loaded
+    }
+
+    /// Refresh source-free local report descriptors only after a filesystem
+    /// head change. This is the report hot path: no server request, CLI cold
+    /// start, or database read occurs on an unchanged poll.
+    @discardableResult
+    func refreshLocalReportsIfChanged() -> Bool {
+        let fingerprint = snapshotStore.fileFingerprint()
+        guard fingerprint != localFileFingerprint else { return false }
+        let values = snapshotStore.loadCurrentFiles()
+        guard !values.isEmpty else { return false }
+        profiles = values.map(LocalProfileModel.init)
+            .filter { !$0.id.isEmpty }
+        snapshotStore.cache(values)
+        localFileFingerprint = fingerprint
+        loadState = .loaded
+        return true
     }
 
     private func loadProfileValues() async throws -> [[String: Any]] {

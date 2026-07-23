@@ -6,6 +6,7 @@ struct WorkPackageResearchView: View {
     let primaryProfile: LocalProfileModel
     let isActive: Bool
     let onCheckpointChange: @MainActor (String) -> Void
+    let refreshLocalReports: @MainActor () -> Void
 
     @StateObject private var controller: ProfileLiveProcessController
     @State private var branchTask: Task<Void, Never>?
@@ -15,13 +16,15 @@ struct WorkPackageResearchView: View {
         profiles: [LocalProfileModel],
         primaryProfile: LocalProfileModel,
         isActive: Bool,
-        onCheckpointChange: @escaping @MainActor (String) -> Void
+        onCheckpointChange: @escaping @MainActor (String) -> Void,
+        refreshLocalReports: @escaping @MainActor () -> Void
     ) {
         self.item = item
         self.profiles = profiles
         self.primaryProfile = primaryProfile
         self.isActive = isActive
         self.onCheckpointChange = onCheckpointChange
+        self.refreshLocalReports = refreshLocalReports
         _controller = StateObject(
             wrappedValue: ProfileLiveProcessController(
                 profile: primaryProfile,
@@ -44,6 +47,18 @@ struct WorkPackageResearchView: View {
         .task(id: "\(isActive)|\(item.id)") {
             guard isActive else { return }
             await controller.observeSelectedResearch()
+        }
+        .task(id: "local-report|\(isActive)|\(item.id)") {
+            guard isActive else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 3_000_000_000)
+                } catch {
+                    return
+                }
+                guard isActive else { return }
+                refreshLocalReports()
+            }
         }
         .onChange(of: controller.selectedBranchID) { _ in
             guard isActive, controller.detail != nil else { return }

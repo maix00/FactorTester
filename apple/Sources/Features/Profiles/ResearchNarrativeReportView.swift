@@ -268,11 +268,7 @@ struct ResearchNarrativeReportView: View {
         section: ResearchJournalSection
     ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(text)
-                .font(.body)
-                .lineSpacing(6)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            reportRichText(text)
             if !linkIDs.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(auditLinks(in: section).filter {
@@ -281,6 +277,36 @@ struct ResearchNarrativeReportView: View {
                         link in
                         auditChip(link, section: section)
                     }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func reportRichText(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(
+                Array(
+                    ResearchReportTextProjection.components(text).enumerated()
+                ),
+                id: \.offset
+            ) { _, component in
+                switch component.kind {
+                case .prose:
+                    Text(component.text)
+                        .font(.body)
+                        .lineSpacing(6)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case .math:
+                    RenderedMathFormulaView(
+                        latex: component.text,
+                        fallback: "因子公式：\(component.text)"
+                    )
+                    .background(
+                        Color.secondary.opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 7)
+                    )
                 }
             }
         }
@@ -360,9 +386,7 @@ struct ResearchNarrativeReportView: View {
                         Text("•")
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(row.text ?? "")
-                                .lineSpacing(4)
-                                .textSelection(.enabled)
+                            reportRichText(row.text ?? "")
                             rowChips(row, section: section)
                         }
                     }
@@ -661,7 +685,7 @@ struct ResearchNarrativeReportView: View {
             let (document, indexSections) = try await (
                 documentTask, indexTask
             )
-            let loadedSections = try ResearchJournalLoader.sections(
+            let loadedSections = try ResearchJournalPresentation.displaySections(
                 in: document,
                 indexedBy: indexSections
             )
@@ -690,7 +714,10 @@ struct ResearchNarrativeReportView: View {
     }
 
     private var orderedSteps: [ResearchTransitionStep] {
-        steps.sorted {
+        steps.filter {
+            $0.edgeRef != "graph-edge:__graph_continuation__"
+                || sectionRefsByCheckpoint[$0.stepRef] != nil
+        }.sorted {
             if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
             return $0.id < $1.id
         }

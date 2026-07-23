@@ -194,7 +194,7 @@ def _narrative(
         content["report_binding"] = deepcopy(item["report_binding"])
         sections.append({
             "section_id": f"current-node-report-{item_index + 1}",
-            "title": f"当前节点报告项 {item_index + 1}",
+            "title": _report_title(item, item_index=item_index),
             "blocks": [content],
             "links": deepcopy(item.get("links") or []),
         })
@@ -207,3 +207,21 @@ def _narrative(
         "time_source_refs": [],
         "sections": sections,
     }
+
+
+def _report_title(item: dict[str, Any], *, item_index: int) -> str:
+    """Use local Graph presentation text without changing report identity."""
+    title = str(item.get("title_zh") or "").strip()
+    if title:
+        return title
+    content = item.get("content")
+    rows = content.get("rows") if isinstance(content, dict) else None
+    first = str((rows or [{}])[0].get("text") or "").strip()
+    if first:
+        for separator in ("。", "；", "："):
+            first = first.split(separator, 1)[0]
+        if len(first) > 44:
+            first = first[:43].rstrip() + "…"
+        if first:
+            return first
+    return f"当前节点研究记录 {item_index + 1}"

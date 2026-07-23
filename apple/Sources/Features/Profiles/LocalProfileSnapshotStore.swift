@@ -27,6 +27,41 @@ struct LocalProfileSnapshotStore {
         return cached
     }
 
+    /// A metadata-only fingerprint for cheap foreground observation. Profile
+    /// publishers replace these small JSON descriptors after a new journal
+    /// head is committed, so unchanged polls do not launch the CLI, read a
+    /// database, or reopen the report.
+    func fileFingerprint() -> String {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: profileDirectory,
+            includingPropertiesForKeys: [
+                .contentModificationDateKey, .fileSizeKey,
+                .fileResourceIdentifierKey,
+            ],
+            options: [.skipsHiddenFiles]
+        ) else { return "missing" }
+        return urls.filter { $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .map { url in
+                let values = try? url.resourceValues(forKeys: [
+                    .contentModificationDateKey, .fileSizeKey,
+                    .fileResourceIdentifierKey,
+                ])
+                return [
+                    url.lastPathComponent,
+                    String(values?.contentModificationDate?
+                        .timeIntervalSince1970 ?? -1),
+                    String(values?.fileSize ?? -1),
+                    String(describing: values?.fileResourceIdentifier),
+                ].joined(separator: "|")
+            }
+            .joined(separator: "\n")
+    }
+
+    func loadCurrentFiles() -> [[String: Any]] {
+        loadLocalFiles()
+    }
+
     func cache(_ values: [[String: Any]]) {
         guard JSONSerialization.isValidJSONObject(values),
               let data = try? JSONSerialization.data(

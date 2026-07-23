@@ -308,6 +308,10 @@ def test_current_node_maxa_projection_updates_real_journal_index_and_report(
         )
         local_items.append({
             **binding,
+            "title_zh": (
+                "因子公式、方向与单位"
+                if index == 0 else f"第{index + 1}项语义核对"
+            ),
             "content_kind": content_kind,
             "item_hash": item_hash,
             "content": content,
@@ -354,6 +358,13 @@ def test_current_node_maxa_projection_updates_real_journal_index_and_report(
     assert "report-checkpoint:sha256:" in index
     assert r"\operatorname{SgCPSVol}_{t}" in report
     assert "第11项中文语义已完成核对" in report
+    journal_value = json.loads(journal)
+    assert journal_value["checkpoints"][-1]["sections"][0]["title"] == (
+        "因子公式、方向与单位"
+    )
+    assert journal_value["checkpoints"][-1]["sections"][10]["title"] == (
+        "第11项语义核对"
+    )
     replay = publish_current_node_report_checkpoint(
         client_root=root,
         profile_id="maxa",

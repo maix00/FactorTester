@@ -171,11 +171,13 @@ struct ResearchJournalBlock: Decodable {
     let columns: [String]
     let rows: [ResearchJournalRow]
     let reportTiming: ResearchOccurrenceTiming?
+    let reportBinding: ResearchJournalReportBinding?
 
     enum CodingKeys: String, CodingKey {
         case kind, text, latex, fallback, asset, columns, rows
         case linkIDs = "link_ids"
         case reportTiming = "report_timing"
+        case reportBinding = "report_binding"
     }
 
     init(from decoder: Decoder) throws {
@@ -203,6 +205,22 @@ struct ResearchJournalBlock: Decodable {
             ResearchOccurrenceTiming.self,
             forKey: .reportTiming
         )
+        reportBinding = try container.decodeIfPresent(
+            ResearchJournalReportBinding.self,
+            forKey: .reportBinding
+        )
+    }
+}
+
+struct ResearchJournalReportBinding: Decodable {
+    let reportRequirementID: String
+    let subjectRef: String
+    let reportItemRef: String?
+
+    enum CodingKeys: String, CodingKey {
+        case reportRequirementID = "report_requirement_id"
+        case subjectRef = "subject_ref"
+        case reportItemRef = "report_item_ref"
     }
 }
 

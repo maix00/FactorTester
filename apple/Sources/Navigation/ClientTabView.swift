@@ -118,6 +118,9 @@ struct ClientTabView: View {
                             checkpointRef: checkpointRef
                         )
                     }
+                },
+                refreshLocalReports: {
+                    profiles.refreshLocalReportsIfChanged()
                 }
             )
         } else {

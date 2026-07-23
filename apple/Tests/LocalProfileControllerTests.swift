@@ -82,4 +82,69 @@ final class LocalProfileControllerTests: XCTestCase {
             ["stable-work-package"]
         )
     }
+
+    func testVisibleReportPollReloadsOnlyAfterLocalArtifactHeadChanges()
+        throws
+    {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let profiles = root.appendingPathComponent("profiles")
+        try FileManager.default.createDirectory(
+            at: profiles,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profileURL = profiles.appendingPathComponent("maxa.json")
+        func value(hash: String) -> [String: Any] {
+            [
+                "profile_id": "maxa",
+                "display_name": "MaxA",
+                "research_records": [[
+                    "record_id": "wp",
+                    "checkpoint_ref": "trace:unchanged",
+                    "graph_branch_ref": "graph-branch:i:b",
+                    "artifacts": [[
+                        "artifact_ref": "artifact:journal",
+                        "journal_ref": "file:///tmp/LOGICAL_JOURNAL.json",
+                        "journal_hash": hash,
+                        "section_refs": [[
+                            "link_id": "head",
+                            "kind": "checkpoint",
+                            "target_ref": "trace:unchanged",
+                            "section_ref": "report-section:head",
+                        ]],
+                    ]],
+                ]],
+            ]
+        }
+        try JSONSerialization.data(
+            withJSONObject: value(hash: String(repeating: "a", count: 64))
+        ).write(to: profileURL)
+        let suite = "LocalProfileControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = LocalProfileController(
+            defaults: defaults,
+            profileDirectory: profiles
+        )
+
+        XCTAssertFalse(controller.refreshLocalReportsIfChanged())
+        XCTAssertEqual(
+            controller.profiles[0].researchRecords[0]
+                .currentJournalArtifact?.journalHash,
+            String(repeating: "a", count: 64)
+        )
+
+        try JSONSerialization.data(
+            withJSONObject: value(hash: String(repeating: "bb", count: 64))
+        ).write(to: profileURL, options: .atomic)
+
+        XCTAssertTrue(controller.refreshLocalReportsIfChanged())
+        XCTAssertEqual(
+            controller.profiles[0].researchRecords[0]
+                .currentJournalArtifact?.journalHash,
+            String(repeating: "bb", count: 64)
+        )
+        XCTAssertFalse(controller.refreshLocalReportsIfChanged())
+    }
 }

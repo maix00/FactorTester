@@ -25,6 +25,10 @@ def build_report_items(
         raise ValueError(f"{prefix}.report.report_requirement_id is required")
     if report.get("content_kind") != "list":
         raise ValueError(f"{prefix}.report.content_kind must be list")
+    title_zh = chinese_text(
+        item.get("title_zh"),
+        f"{prefix}.title_zh",
+    )
     rows = report.get("content_zh")
     if not isinstance(rows, list) or not rows:
         raise ValueError(f"{prefix}.report.content_zh must be a non-empty array")
@@ -61,6 +65,7 @@ def build_report_items(
     return [
         _report_item(
             report_id=report_id,
+            title_zh=title_zh,
             subject=subject,
             content=content,
             chinese_rows=chinese_rows,
@@ -73,6 +78,7 @@ def build_report_items(
 def _report_item(
     *,
     report_id: str,
+    title_zh: str,
     subject: str,
     content: dict[str, Any],
     chinese_rows: list[str],
@@ -80,6 +86,11 @@ def _report_item(
 ) -> dict[str, Any]:
     return {
         "report_requirement_id": report_id,
+        # Local presentation metadata is deliberately excluded from the
+        # compact server submission and report-item identity. Graph-owned
+        # requirement titles can therefore improve the local chapter heading
+        # without changing the audited research fact or its hash.
+        "title_zh": title_zh,
         "subject_ref": subject,
         "content_kind": "list",
         "item_hash": report_item_hash(

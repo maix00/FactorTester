@@ -347,6 +347,9 @@ def test_validation_supports_all_coverage_decisions(decision: str) -> None:
     assert result["local_report_items"][0]["content_zh"][0].startswith(
         "表达式身份"
     )
+    assert result["local_report_items"][0]["title_zh"] == (
+        document["assessments"][0]["title_zh"]
+    )
 
 
 def test_validation_requires_a_trial_ref_for_trial_candidate() -> None:
