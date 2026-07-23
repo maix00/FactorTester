@@ -40,7 +40,12 @@ def apply_scale(
             rounded = reducing
         order.quantity = rounded
         if recalculate_fee:
-            price = float(order.get("effective_price", prices[order.instrument]))
+            effective_price = order.get("effective_price")
+            price = float(
+                effective_price
+                if effective_price is not None
+                else prices[order.instrument]
+            )
             order.set("fee_cost", estimate_signal_fee(
                 state, ctx, strategy, ledger, order, historical,
                 ledger.get(LedgerModule.positions, {}), price,

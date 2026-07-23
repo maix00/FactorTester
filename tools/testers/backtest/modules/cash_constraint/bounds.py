@@ -28,7 +28,12 @@ def execution_cash_required_upper_bound(
         config = state.config_for(strategy)
         ledger_config = state.ledger_config_for(ledger)
         for order in orders:
-            price = float(order.get("effective_price", prices[order.instrument]))
+            effective_price = order.get("effective_price")
+            price = float(
+                effective_price
+                if effective_price is not None
+                else prices[order.instrument]
+            )
             fee = max(float(order.get("fee_cost", 0.0) or 0.0), 0.0)
             if _uses_margin(config, historical_fields, order.instrument, ledger_config):
                 total += fee + _margin_increase(

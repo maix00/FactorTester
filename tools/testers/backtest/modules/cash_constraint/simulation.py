@@ -22,7 +22,12 @@ def estimated_execution_cash_delta(
         _uses_margin_accounting,
     )
 
-    price = float(order.get("effective_price", current_prices[order.instrument]))
+    effective_price = order.get("effective_price")
+    price = float(
+        effective_price
+        if effective_price is not None
+        else current_prices[order.instrument]
+    )
     fee_cost = float(order.get("fee_cost", 0.0) or 0.0)
     if _uses_margin_accounting(strategy_config, historical_fields, order.instrument, ledger_config):
         after = _apply_margin_accounting_fill(

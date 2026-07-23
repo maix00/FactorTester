@@ -34,7 +34,12 @@ def resolve_fee_cost(state, ctx) -> None:
             fixed_rate = float(
                 getattr(ledger_config, "fixed_fee_rate", None) or 0.0
             )
-            price = float(order.get("effective_price", prices[order.instrument]))
+            effective_price = order.get("effective_price")
+            price = float(
+                effective_price
+                if effective_price is not None
+                else prices[order.instrument]
+            )
             fixed_fee = resolve_fixed_fee_cost(
                 mode, fixed_rate, order.quantity, price,
                 contract_multiplier_from_fields(
