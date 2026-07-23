@@ -413,6 +413,7 @@ def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():
 
     open_ts = pd.Timestamp("2024-01-01")
     open_order = Order(instrument=p, timestamp=open_ts, quantity=10.0, intent_quantity=10.0, strategy=s)
+    open_order.set("effective_price", 101.0)
     open_ctx = FlowContext(
         timestamp=open_ts,
         event_queue=EventQueue(),
@@ -420,12 +421,16 @@ def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():
         drafts_by_strategy={s: [EventDraft(EventKind.ORDER, open_ts, s, open_order)]},
     )
     open_ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    open_ctx.set(
+        MarketDataModule.current_market_snapshot,
+        {"close": {p: 90.0}},
+    )
     open_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
 
     _apply_order_fill(account, open_ctx)
     _basic_equity(account, open_ctx)
 
-    assert _cash_major(account, s) == pytest.approx(999_800.0)
+    assert _cash_major(account, s) == pytest.approx(999_798.0)
     assert open_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_000.0)
 
     signal_ctx = FlowContext(
@@ -436,7 +441,7 @@ def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():
     signal_ctx.set(MarketDataModule.current_prices, {p: 110.0})
     signal_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
     _basic_equity(account, signal_ctx)
-    assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_200.0)
+    assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_180.0)
 
     close_ts = pd.Timestamp("2024-01-03")
     close_order = Order(instrument=p, timestamp=close_ts, quantity=-10.0, intent_quantity=-10.0, strategy=s)
@@ -452,8 +457,8 @@ def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():
     _apply_order_fill(account, close_ctx)
     _basic_equity(account, close_ctx)
 
-    assert _cash_major(account, s) == pytest.approx(1_000_200.0)
-    assert close_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_200.0)
+    assert _cash_major(account, s) == pytest.approx(1_000_180.0)
+    assert close_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_180.0)
 
 
 def test_margin_recalculation_uses_remaining_position_side_not_order_side():

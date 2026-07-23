@@ -40,6 +40,7 @@ def apply_order_fill(state, ctx) -> None:
         strategy: state.config_for(strategy)
         for strategy in ctx.active_strategies
     }
+    fill_prices_by_ledger: dict[str, dict[object, float]] = {}
     for strategy, order in settlement_order(state, ctx):
         if not prepare_order_fill(state, ctx, strategy, order, audit_store):
             continue
@@ -102,6 +103,9 @@ def apply_order_fill(state, ctx) -> None:
             cash_before=float(cash_before), cash_after=float(cash.to_major()),
             margin_before=margin_before, margin_after=margin_after,
         )
+        fill_prices_by_ledger.setdefault(ledger.ledger_id, {})[
+            order.instrument
+        ] = fill.price
         audit_store.record(
             order, step="ledger_update", label="成交落账",
             timestamp=ctx.timestamp,
@@ -117,3 +121,7 @@ def apply_order_fill(state, ctx) -> None:
                 "margin_after": margin_after,
             },
         )
+    ctx.set(
+        LedgerModule._order_fill_valuation_prices_ref,
+        fill_prices_by_ledger,
+    )

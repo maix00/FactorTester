@@ -55,6 +55,7 @@ def build_ledger_flows(module):
         outputs=(
             module.positions, module.cash, module._margin_reserved_ref,
             module._margin_deficit_ref, module._margin_excess_ref,
+            module._order_fill_valuation_prices_ref,
         ),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=11,
         description="成交落账", event_payload_inputs=("order",),
@@ -76,4 +77,5 @@ def equity_inputs(module):
         module.cash, module.positions, module._engine_mode_ref,
         module._accounting_mode_ref, module._cost_basis_method_ref,
         module._daily_mark_to_market_enabled_ref,
+        module._order_fill_valuation_prices_ref,
     )

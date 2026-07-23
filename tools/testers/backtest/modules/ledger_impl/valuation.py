@@ -13,7 +13,6 @@ from tools.testers.backtest.modules.trading_rule import mark_to_market
 def basic_equity(state, ctx, *, equity_fn=None) -> None:
     from tools.testers.backtest.modules.ledger_module import LedgerModule
 
-    prices = valuation_prices_for_equity(ctx)
     equity_fn = equity_fn or ledger_equity
     equity_by_ledger: dict[int, float] = {}
     for strategy in ctx.active_strategies:
@@ -21,18 +20,31 @@ def basic_equity(state, ctx, *, equity_fn=None) -> None:
         cache_key = id(ledger)
         value = equity_by_ledger.get(cache_key)
         if value is None:
+            prices = valuation_prices_for_equity(ctx, ledger=ledger)
             value = equity_fn(state, ctx, strategy, ledger, prices)
             equity_by_ledger[cache_key] = value
         ctx.set_for(LedgerModule.equity, strategy, value)
 
 
-def valuation_prices_for_equity(ctx) -> dict:
+def valuation_prices_for_equity(ctx, *, ledger=None) -> dict:
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+
     snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
+    prices = None
     if isinstance(snapshot, dict):
         close = snapshot.get("close")
         if isinstance(close, dict):
-            return close
-    return ctx.get(MarketDataModule.current_prices)
+            prices = close
+    if prices is None:
+        prices = ctx.get(MarketDataModule.current_prices)
+    if ledger is None:
+        return prices
+    fill_prices = ctx.get(
+        LedgerModule._order_fill_valuation_prices_ref, {},
+    ).get(ledger.ledger_id, {})
+    if not fill_prices:
+        return prices
+    return {**prices, **fill_prices}
 
 
 def ledger_equity(state, ctx, strategy, ledger, prices: dict) -> float:
