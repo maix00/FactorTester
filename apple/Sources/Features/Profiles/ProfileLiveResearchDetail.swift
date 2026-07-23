@@ -37,6 +37,11 @@ struct ProfileLiveResearchDetail: View {
                             controller.selectedBranchID = branchID
                         },
                         loadEarlier: { await controller.loadEarlierTimeline() },
+                        loadHistory: { checkpointRefs in
+                            await controller.loadTimeline(
+                                through: checkpointRefs
+                            )
+                        },
                         loadAuditObject: { href in
                             guard let url = context.flatMap({
                                 URL(string: $0.profile.serverURL)

@@ -17,6 +17,10 @@ struct ResearchStageObligationRows {
 }
 
 extension ResearchJournalPresentation {
+    static func readableObligationQuestion(_ value: String?) -> String {
+        chineseText(value) ?? "义务描述缺失"
+    }
+
     static func stageObligationRows(
         rows: [ResearchObligationTableRow],
         currentRefs: [String],
@@ -50,8 +54,8 @@ extension ResearchJournalPresentation {
     static func obligationRows(
         links: [ResearchJournalLink],
         checkpointObligationRefs: [String]? = nil,
-        aliases: [String: String] = [:],
         obligations: [ResearchObligationProjection],
+        obligationPresentations: [ResearchObligationPresentation] = [],
         changes: [ResearchStateChange],
         statusOverrides: [String: String] = [:]
     ) -> [ResearchObligationTableRow] {
@@ -69,9 +73,12 @@ extension ResearchJournalPresentation {
                 linkID: "checkpoint-obligation|\(objectID)",
                 kind: "obligation",
                 targetRef: reference,
-                label: aliases[objectID]
+                label: nil
             )
             let obligation = obligations.first {
+                obligationObjectID($0.obligationRef) == objectID
+            }
+            let presentation = obligationPresentations.first {
                 obligationObjectID($0.obligationRef) == objectID
             }
             let change = changes.first {
@@ -85,12 +92,13 @@ extension ResearchJournalPresentation {
             return ResearchObligationTableRow(
                 obligationLink: link,
                 deltaLink: delta,
-                question: chineseText(link.label)
-                    ?? aliases[objectID].flatMap(chineseText)
+                question: presentation.flatMap {
+                        chineseText($0.questionSummary)
+                    }
                     ?? obligation.flatMap {
                         chineseText($0.questionSummary)
                     }
-                    ?? "该检查点尚未提供中文义务说明",
+                    ?? readableObligationQuestion(nil),
                 materiality: materialityLabel(obligation?.materiality),
                 change: change.map {
                     "\(statusLabel($0.fromState)) → \(statusLabel($0.toState))"
@@ -103,19 +111,6 @@ extension ResearchJournalPresentation {
                 )
             )
         }
-    }
-
-    static func obligationAliases(
-        sections: [ResearchJournalSection]
-    ) -> [String: String] {
-        var result: [String: String] = [:]
-        for section in sections.sorted(by: sectionChronology) {
-            for link in section.links where link.kind == "obligation" {
-                guard let label = chineseText(link.label) else { continue }
-                result[obligationObjectID(link.targetRef)] = label
-            }
-        }
-        return result
     }
 
     static func obligationStatuses(
@@ -166,12 +161,4 @@ private func chineseText(_ value: String?) -> String? {
         return nil
     }
     return text
-}
-
-private func sectionChronology(
-    _ lhs: ResearchJournalSection,
-    _ rhs: ResearchJournalSection
-) -> Bool {
-    if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
-    return lhs.id < rhs.id
 }

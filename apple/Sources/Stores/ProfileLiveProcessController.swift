@@ -187,6 +187,20 @@ final class ProfileLiveProcessController: ObservableObject {
         }
     }
 
+    func loadTimeline(through checkpointRefs: [String]) async {
+        let required = Set(checkpointRefs)
+        while !required.isSubset(of: Set(timeline.map(\.stepRef))),
+              nextTimelineCursor != nil {
+            let previousCursor = nextTimelineCursor
+            let previousCount = timeline.count
+            await loadEarlierTimeline()
+            if nextTimelineCursor == previousCursor
+                && timeline.count == previousCount {
+                return
+            }
+        }
+    }
+
     func refreshSelectedResearch() async {
         guard let branch = selectedBranch else { return }
         do {

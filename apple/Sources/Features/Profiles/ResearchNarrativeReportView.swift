@@ -11,10 +11,10 @@ struct ResearchNarrativeReportView: View {
     let artifact: ResearchArtifactModel?
     let selectBranch: (String) -> Void
     let loadEarlier: () async -> Void
+    let loadHistory: ([String]) async -> Void
     let loadAuditObject: (String) async throws -> ResearchAuditObjectPayload
 
     @State private var sections: [ResearchJournalSection] = []
-    @State private var obligationAliases: [String: String] = [:]
     @State private var reportError: String?
     @State private var selectedCheckpointRef = ""
     @State private var sectionRefsByCheckpoint: [String: String] = [:]
@@ -464,10 +464,13 @@ struct ResearchNarrativeReportView: View {
         section: ResearchJournalSection,
         displayLabel: String? = nil
     ) -> some View {
+        let step = steps.first { $0.stepRef == section.checkpointRef }
         let label = displayLabel ?? ResearchJournalPresentation.chipLabel(
             link,
             sectionTitle: section.title,
-            obligations: detail.researchCycle.obligations
+            obligations: detail.researchCycle.obligations,
+            obligationPresentations: step?.obligationPresentations ?? [],
+            evidencePresentations: step?.evidencePresentations ?? []
         )
         return Button {
             selectedAudit = ResearchAuditSelection(
@@ -599,8 +602,8 @@ struct ResearchNarrativeReportView: View {
         return ResearchJournalPresentation.obligationRows(
             links: section.links,
             checkpointObligationRefs: step?.obligationRefs,
-            aliases: obligationAliases,
             obligations: detail.researchCycle.obligations,
+            obligationPresentations: step?.obligationPresentations ?? [],
             changes: step?.obligationChanges ?? [],
             statusOverrides: ResearchJournalPresentation.obligationStatuses(
                 at: section.checkpointRef,
@@ -645,7 +648,6 @@ struct ResearchNarrativeReportView: View {
     private func loadReport() async {
         guard let artifact, !artifact.journalRef.isEmpty else {
             sections = []
-            obligationAliases = [:]
             reportError = "报告未按新协议完成，需重做：本地记录缺少 JOURNAL.json，没有经过校验的中文 journal。请让对应 research Agent 从可信 root 重新提交该分支的 checkpoint；客户端不会用旧 REPORT.md 或 INDEX.json 冒充完整报告。"
             return
         }
@@ -670,12 +672,10 @@ struct ResearchNarrativeReportView: View {
                     return $0.id < $1.id
                 }
             sections = loadedSections
+            await loadHistory(loadedSections.map(\.checkpointRef))
             sectionRefsByCheckpoint = Dictionary(
                 loadedSections.map { ($0.checkpointRef, $0.sectionRef) },
                 uniquingKeysWith: { first, _ in first }
-            )
-            obligationAliases = ResearchJournalPresentation.obligationAliases(
-                sections: loadedSections
             )
             reportError = nil
             selectedCheckpointRef = ResearchReportNavigation.reconciledSelection(
@@ -685,7 +685,6 @@ struct ResearchNarrativeReportView: View {
         } catch {
             sections = []
             sectionRefsByCheckpoint = [:]
-            obligationAliases = [:]
             reportError = error.localizedDescription
         }
     }

@@ -1149,6 +1149,45 @@ private final class FakeProjectionTransport: ProfileResearchTransport {
 
 @MainActor
 final class ProfileLiveProcessControllerTests: XCTestCase {
+    func testReadableReportHistoryLoadsTimelinePagesUntilCheckpointCovered() async {
+        let older = response(
+            """
+            {"success":true,"research_ref":"graph-branch:i:b","items":[{
+              "step_ref":"trace:root","edge_ref":"graph-edge:root",
+              "from_node":"start","to_node":"trial","created_at":0,
+              "evidence_refs":[],"trial_plan_refs":[],
+              "obligation_refs":[],"claim_refs":[],
+              "job_refs":[],"run_refs":[],"object_hrefs":[],
+              "obligation_changes":[],"claim_changes":[]}],
+             "next_cursor":null,"etag":"sha256:older"}
+            """,
+            etag: "\"timeline-v0\""
+        )
+        let transport = FakeProjectionTransport(
+            responses: fixtureResponses(
+                detailRefresh: #"{"mode":"stopped","terminal":true}"#
+            ) + [older]
+        )
+        let controller = makeController(transport: transport)
+        await controller.loadSelectedWorkspace()
+        await controller.observeSelectedResearch()
+
+        await controller.loadTimeline(
+            through: ["trace:root", "trace:s"]
+        )
+
+        XCTAssertEqual(
+            Set(controller.timeline.map(\.stepRef)),
+            ["trace:root", "trace:s"]
+        )
+        XCTAssertNil(controller.nextTimelineCursor)
+        XCTAssertEqual(
+            transport.requests.last?.url?.query?
+                .contains("after=older"),
+            true
+        )
+    }
+
     func testTerminalDetailStopsWithoutClockOrSSE() async throws {
         let transport = FakeProjectionTransport(
             responses: fixtureResponses(

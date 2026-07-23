@@ -335,6 +335,30 @@ struct ResearchObligationProjection: Decodable, Identifiable {
     }
 }
 
+struct ResearchObligationPresentation: Decodable, Identifiable {
+    let obligationRef: String
+    let questionSummary: String
+    var id: String { obligationRef }
+
+    enum CodingKeys: String, CodingKey {
+        case obligationRef = "obligation_ref"
+        case questionSummary = "question_summary"
+    }
+}
+
+struct ResearchEvidencePresentation: Decodable, Identifiable {
+    let evidenceRef: String
+    let title: String
+    let claimSummary: String
+    var id: String { evidenceRef }
+
+    enum CodingKeys: String, CodingKey {
+        case evidenceRef = "evidence_ref"
+        case title
+        case claimSummary = "claim_summary"
+    }
+}
+
 struct ResearchClosureProjection: Decodable {
     let proposalRef: String?
     let disposition: String
@@ -387,6 +411,8 @@ struct ResearchTransitionStep: Decodable, Identifiable {
     let objectHrefs: [String]?
     let obligationChanges: [ResearchStateChange]
     let claimChanges: [ResearchStateChange]
+    let obligationPresentations: [ResearchObligationPresentation]?
+    let evidencePresentations: [ResearchEvidencePresentation]?
     let entryResolution: ResearchEntryResolutionDelta?
     var id: String { stepRef }
 
@@ -407,6 +433,8 @@ struct ResearchTransitionStep: Decodable, Identifiable {
         case objectHrefs = "object_hrefs"
         case obligationChanges = "obligation_changes"
         case claimChanges = "claim_changes"
+        case obligationPresentations = "obligation_presentations"
+        case evidencePresentations = "evidence_presentations"
         case entryResolution = "entry_resolution"
     }
 

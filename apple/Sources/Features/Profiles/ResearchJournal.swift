@@ -283,12 +283,41 @@ enum ResearchJournalPresentation {
     static func chipLabel(
         _ link: ResearchJournalLink,
         sectionTitle: String,
-        obligations: [ResearchObligationProjection]
+        obligations: [ResearchObligationProjection],
+        obligationPresentations: [ResearchObligationPresentation] = [],
+        evidencePresentations: [ResearchEvidencePresentation] = []
     ) -> String {
-        let summary = link.label.flatMap(displayAlias)
-            ?? obligationSummary(for: link, in: obligations)
-            ?? contextualSummary(for: link.kind, sectionTitle: sectionTitle)
+        let summary: String
+        if link.kind == "evidence" {
+            summary = evidenceSummary(
+                for: link,
+                in: evidencePresentations
+            ) ?? "证据描述缺失"
+        } else if link.kind == "obligation" {
+            summary = obligationSummary(
+                for: link,
+                in: obligationPresentations
+            )
+                ?? obligationSummary(for: link, in: obligations)
+                ?? "义务描述缺失"
+        } else {
+            summary = link.label.flatMap(displayAlias)
+                ?? contextualSummary(
+                    for: link.kind,
+                    sectionTitle: sectionTitle
+                )
+        }
         return "\(ResearchDisplayText.linkKind(link.kind)) · \(summary)"
+    }
+
+    private static func obligationSummary(
+        for link: ResearchJournalLink,
+        in presentations: [ResearchObligationPresentation]
+    ) -> String? {
+        guard link.kind == "obligation" else { return nil }
+        return presentations.first {
+            $0.obligationRef == link.targetRef
+        }.flatMap { chineseSummary($0.questionSummary) }
     }
 
     private static func obligationSummary(
@@ -299,6 +328,23 @@ enum ResearchJournalPresentation {
         return obligations.first {
             $0.obligationRef == link.targetRef
         }.flatMap { nonEmpty($0.questionSummary) }
+    }
+
+    private static func evidenceSummary(
+        for link: ResearchJournalLink,
+        in presentations: [ResearchEvidencePresentation]
+    ) -> String? {
+        guard let presentation = presentations.first(where: {
+            $0.evidenceRef == link.targetRef
+        }) else { return nil }
+        let title = chineseSummary(presentation.title)
+        let claim = chineseSummary(presentation.claimSummary)
+        switch (title, claim) {
+        case let (title?, claim?): return "\(title)：\(claim)"
+        case let (title?, nil): return title
+        case let (nil, claim?): return claim
+        case (nil, nil): return nil
+        }
     }
 
     private static func contextualSummary(
@@ -328,6 +374,17 @@ enum ResearchJournalPresentation {
             options: [.regularExpression, .caseInsensitive]
         ) != nil
         return opaque ? nil : text
+    }
+
+    private static func chineseSummary(_ value: String) -> String? {
+        guard let text = nonEmpty(value),
+              text.range(
+                of: #"\p{Han}"#,
+                options: .regularExpression
+              ) != nil else {
+            return nil
+        }
+        return text
     }
 
     static func statusLabel(_ status: String) -> String {

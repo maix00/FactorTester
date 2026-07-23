@@ -191,6 +191,11 @@ def transition_step_projection(
     created_at: float,
     evidence: dict[str, Any],
 ) -> dict[str, Any]:
+    from .report_object_presentations import (
+        evidence_presentations,
+        obligation_presentations,
+    )
+
     obligation_changes, claim_changes = research_cycle_deltas(evidence)
     obligation_refs = unique_refs([
         *(f"obligation:{item['obligation_id']}" for item in obligation_changes),
@@ -224,6 +229,8 @@ def transition_step_projection(
         "delta_refs": delta_refs[:MAX_CARRIER_ITEMS],
         "obligation_changes": obligation_changes,
         "claim_changes": claim_changes,
+        "obligation_presentations": obligation_presentations(evidence),
+        "evidence_presentations": evidence_presentations(evidence),
     }
     report_fragment_hash = (
         safe_hash(report_submission.get("fragment_hash"))

@@ -15,6 +15,9 @@ from server.services.research_graph.branch.runtime import fork_graph_branch
 from server.services.research_graph import (
     profile_research_projection as projection,
 )
+from server.services.research_graph.research_cycle.evidence import (
+    validate_agent_evidence_envelope,
+)
 from server.services.research_graph.profile_research_projection import (
     service as projection_service,
 )
@@ -1138,6 +1141,103 @@ def test_historical_report_carrier_is_one_exact_read_without_head_changes(
             branch_id="branch-0000",
             trace_id="trace-000002",
         )
+
+
+def test_historical_checkpoint_projects_persisted_chinese_object_summaries_in_one_read(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "historical-readable-objects.sqlite"
+    _seed(path)
+    with connect_sqlite(path) as conn:
+        backfill_work_packages(conn)
+        row = conn.execute(
+            "SELECT evidence_json FROM research_graph_trace "
+            "WHERE trace_id='trace-000002'"
+        ).fetchone()
+        evidence = orjson.loads(row["evidence_json"])
+        evidence["research_cycle_checkpoint"]["obligations"][0][
+            "epistemic_question"
+        ] = "交易成本后，这个因子是否仍然有效？"
+        envelope = validate_agent_evidence_envelope({
+            "schema_version": 2,
+            "envelope_id": "cost-check",
+            "evidence_kind": "factor_semantics",
+            "title": "交易成本压力测试",
+            "claim_summary": "证明该因子在冻结成本假设下是否仍有净收益",
+            "source_refs": ["research-configuration:cost-check"],
+            "identity_refs": {
+                "contract_hash": "b" * 64,
+                "methodology_hash": "d" * 64,
+            },
+            "facts": {"cost_assumption_frozen": True},
+            "metric_refs": [],
+            "artifact_refs": [],
+            "hypotheses_tested": 0,
+            "stop_condition": None,
+            "limitations": [],
+            "conflicts": [],
+        })
+        envelope_hash = envelope["envelope_hash"]
+        evidence["server_evidence"] = {
+            "cost_check": envelope,
+        }
+        evidence["evidence_refs"].append("evidence:" + envelope_hash)
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? "
+            "WHERE trace_id='trace-000002'",
+            (orjson.dumps(evidence).decode(),),
+        )
+
+    statements: list[str] = []
+    real_connect = connect_sqlite
+
+    def traced_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(projection_service, "connect_sqlite", traced_connect)
+    carrier = _service(path, monkeypatch).get_report_checkpoint(
+        owner="alice",
+        work_package_ref="work-package:instance-a",
+        branch_id="branch-0000",
+        trace_id="trace-000002",
+    )
+
+    assert carrier["latest_transition"]["obligation_presentations"] == [{
+        "obligation_ref": "obligation:obligation-1",
+        "question_summary": "交易成本后，这个因子是否仍然有效？",
+    }]
+    assert carrier["latest_transition"]["evidence_presentations"] == [{
+        "evidence_ref": "evidence:" + envelope_hash,
+        "title": "交易成本压力测试",
+        "claim_summary": "证明该因子在冻结成本假设下是否仍有净收益",
+    }]
+    normalized = [" ".join(item.upper().split()) for item in statements]
+    assert sum(item.startswith("SELECT ") for item in normalized) == 1
+
+
+def test_evidence_display_description_rejects_opaque_identifier() -> None:
+    with pytest.raises(ValueError, match="Chinese display text"):
+        validate_agent_evidence_envelope({
+            "schema_version": 2,
+            "envelope_id": "opaque-title",
+            "evidence_kind": "factor_semantics",
+            "title": "approval:1234",
+            "source_refs": ["research-configuration:opaque"],
+            "identity_refs": {
+                "contract_hash": "b" * 64,
+                "methodology_hash": "d" * 64,
+            },
+            "facts": {},
+            "metric_refs": [],
+            "artifact_refs": [],
+            "hypotheses_tested": 0,
+            "stop_condition": None,
+            "limitations": [],
+            "conflicts": [],
+        })
 
 
 def test_projection_uses_one_read_and_owner_scope_returns_not_found(

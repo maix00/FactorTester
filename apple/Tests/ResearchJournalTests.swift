@@ -139,12 +139,21 @@ final class ResearchJournalTests: XCTestCase {
                 """.utf8
             )
         )
+        let presentation = try JSONDecoder().decode(
+            ResearchObligationPresentation.self,
+            from: Data(
+                """
+                {"obligation_ref":"obligation:7ce46d1a-6bfd-43cc-a2ba-6b03e4617304","question_summary":"交易成本后仍能存活吗？"}
+                """.utf8
+            )
+        )
 
         XCTAssertEqual(
             ResearchJournalPresentation.chipLabel(
                 link,
                 sectionTitle: "交易执行审查",
-                obligations: []
+                obligations: [],
+                obligationPresentations: [presentation]
             ),
             "研究义务 · 交易成本后仍能存活吗？"
         )
@@ -170,6 +179,98 @@ final class ResearchJournalTests: XCTestCase {
         )
     }
 
+    func testEvidenceChipUsesPersistedChineseSummaryAndNeverItsHash() throws {
+        let link = try JSONDecoder().decode(
+            ResearchJournalLink.self,
+            from: Data(
+                """
+                {"link_id":"evidence","kind":"evidence","target_ref":"evidence:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}
+                """.utf8
+            )
+        )
+        let presentation = try JSONDecoder().decode(
+            ResearchEvidencePresentation.self,
+            from: Data(
+                """
+                {"evidence_ref":"evidence:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","title":"交易成本压力测试","claim_summary":"证明该因子在冻结成本假设下是否仍有净收益"}
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            ResearchJournalPresentation.chipLabel(
+                link,
+                sectionTitle: "回测结果",
+                obligations: [],
+                obligationPresentations: [],
+                evidencePresentations: [presentation]
+            ),
+            "证据 · 交易成本压力测试：证明该因子在冻结成本假设下是否仍有净收益"
+        )
+    }
+
+    func testEvidenceChipStatesDescriptionMissingInsteadOfShowingIdentifier() throws {
+        let link = try JSONDecoder().decode(
+            ResearchJournalLink.self,
+            from: Data(
+                """
+                {"link_id":"evidence","kind":"evidence","target_ref":"evidence:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","label":"approval:1234"}
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            ResearchJournalPresentation.chipLabel(
+                link,
+                sectionTitle: "回测结果",
+                obligations: [],
+                obligationPresentations: [],
+                evidencePresentations: []
+            ),
+            "证据 · 证据描述缺失"
+        )
+    }
+
+    func testObligationCodeIsNotUsedAsReadableQuestion() {
+        XCTAssertEqual(
+            ResearchJournalPresentation.readableObligationQuestion(
+                "sgccs-semantic-causal-role"
+            ),
+            "义务描述缺失"
+        )
+    }
+
+    func testHistoricalObligationUsesCheckpointPersistedChineseQuestion() throws {
+        let links = try JSONDecoder().decode(
+            [ResearchJournalLink].self,
+            from: Data(
+                """
+                [{"link_id":"semantic","kind":"obligation","target_ref":"obligation:sgccs-semantic-causal-role","label":"sgccs-semantic-causal-role"}]
+                """.utf8
+            )
+        )
+        let presentation = try JSONDecoder().decode(
+            ResearchObligationPresentation.self,
+            from: Data(
+                """
+                {"obligation_ref":"obligation:sgccs-semantic-causal-role","question_summary":"SgCCS 的语义和因果时点是否正确？"}
+                """.utf8
+            )
+        )
+
+        let rows = ResearchJournalPresentation.obligationRows(
+            links: links,
+            checkpointObligationRefs: [
+                "obligation:sgccs-semantic-causal-role",
+            ],
+            obligations: [],
+            obligationPresentations: [presentation],
+            changes: []
+        )
+
+        XCTAssertEqual(rows[0].question, "SgCCS 的语义和因果时点是否正确？")
+    }
+
     func testStageObligationsSeparateChangesFromInheritedQuestions() throws {
         let obligations = try decodeObligations(
             """
@@ -193,7 +294,6 @@ final class ResearchJournalTests: XCTestCase {
             checkpointObligationRefs: [
                 "obligation:timing", "obligation:cost", "obligation:parameter",
             ],
-            aliases: [:],
             obligations: obligations,
             changes: changes
         )
@@ -259,7 +359,7 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(rows[0].deltaLink?.linkID, "coverage-change")
     }
 
-    func testCheckpointRowsUseAllRefsAndLaterChineseAliases() throws {
+    func testCheckpointRowsUseAllRefsAndPersistedChineseQuestions() throws {
         let links = try decodeLinks(
             """
             [{"link_id":"coverage","kind":"obligation","target_ref":"obligation:data-coverage","label":"Does data cover the plan?"}]
@@ -273,6 +373,17 @@ final class ResearchJournalTests: XCTestCase {
             ]
             """
         )
+        let presentations = try JSONDecoder().decode(
+            [ResearchObligationPresentation].self,
+            from: Data(
+                """
+                [
+                  {"obligation_ref":"obligation:data-coverage","question_summary":"数据是否覆盖试验计划？"},
+                  {"obligation_ref":"obligation:timing","question_summary":"信号与成交时点是否满足因果约束？"}
+                ]
+                """.utf8
+            )
+        )
 
         let rows = ResearchJournalPresentation.obligationRows(
             links: links,
@@ -280,11 +391,8 @@ final class ResearchJournalTests: XCTestCase {
                 "obligation:data-coverage",
                 "obligation:timing",
             ],
-            aliases: [
-                "data-coverage": "数据是否覆盖试验计划？",
-                "timing": "信号与成交时点是否满足因果约束？",
-            ],
             obligations: obligations,
+            obligationPresentations: presentations,
             changes: [],
             statusOverrides: [
                 "data-coverage": "open",
@@ -299,44 +407,6 @@ final class ResearchJournalTests: XCTestCase {
         ])
         XCTAssertEqual(rows.map(\.currentStatus), ["待验证", "待验证"])
         XCTAssertTrue(rows.allSatisfy { !$0.obligationLink.linkID.isEmpty })
-    }
-
-    func testAliasesPreferChineseAcrossWholeJournal() throws {
-        let english = ResearchJournalSection(
-            sectionID: "early",
-            sectionRef: "report-section:b:early",
-            title: "起点",
-            body: "",
-            blocks: [],
-            links: try decodeLinks(
-                """
-                [{"link_id":"early","kind":"obligation","target_ref":"obligation:data-coverage","label":"Does data cover the plan?"}]
-                """
-            ),
-            checkpointRef: "trace:early",
-            createdAt: 1
-        )
-        let chinese = ResearchJournalSection(
-            sectionID: "later",
-            sectionRef: "report-section:b:later",
-            title: "数据审查",
-            body: "",
-            blocks: [],
-            links: try decodeLinks(
-                """
-                [{"link_id":"later","kind":"obligation","target_ref":"obligation:data-coverage","label":"数据是否覆盖试验计划？"}]
-                """
-            ),
-            checkpointRef: "trace:later",
-            createdAt: 2
-        )
-
-        XCTAssertEqual(
-            ResearchJournalPresentation.obligationAliases(
-                sections: [english, chinese]
-            )["data-coverage"],
-            "数据是否覆盖试验计划？"
-        )
     }
 
     func testDuplicateIndexJoinCannotCrashOrAmbiguouslyBindJournal() throws {
@@ -409,10 +479,6 @@ final class ResearchJournalTests: XCTestCase {
         let rows = ResearchJournalPresentation.obligationRows(
             links: [],
             checkpointObligationRefs: ["obligation:known"],
-            aliases: [
-                "known": "已知义务",
-                "future": "未来新增义务",
-            ],
             obligations: obligations,
             changes: [],
             statusOverrides: ["known": "open", "future": "open"]

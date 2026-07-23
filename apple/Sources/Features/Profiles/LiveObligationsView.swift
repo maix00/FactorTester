@@ -17,7 +17,12 @@ struct LiveObligationsView: View {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 7) {
                             HStack {
-                                Text(obligation.questionSummary)
+                                Text(
+                                    ResearchJournalPresentation
+                                        .readableObligationQuestion(
+                                            obligation.questionSummary
+                                        )
+                                )
                                     .font(.headline)
                                 Spacer()
                                 Text(obligation.status)
@@ -26,9 +31,6 @@ struct LiveObligationsView: View {
                             Text(obligation.materiality)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
-                            Text(obligation.obligationRef)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.tertiary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
