@@ -32,7 +32,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, FlowBinding, FlowDefinition, Phase
 from tools.testers.backtest.modules.custom_product import CustomProductModule, apply_custom_product_fields
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
-from tools.testers.backtest.modules.factor import FactorModule
+from tools.testers.backtest.modules.factor import FactorModule, factors_for_config
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
 from tools.testers.backtest.modules.term_structure import TermStructureExpandModule
@@ -576,10 +576,11 @@ def _resolve_market_data_request(state, ctx) -> None:
         config = state.config_for(strategy)
         source = _required_data_source_for_strategy(config)
         frequency = _required_frequency_for_strategy(config, products)
-        factor_columns = (
-            _factor_required_columns(config.get(FactorModule.factor))
-            if config.uses_flow("signal_live") else ()
-        )
+        factor_columns = tuple(dict.fromkeys(
+            column
+            for factor in factors_for_config(config)
+            for column in (_factor_required_columns(factor) if config.uses_flow("signal_live") else ())
+        ))
         sources_by_strategy[strategy] = source
         frequencies_by_strategy[strategy] = frequency
         factor_columns_by_strategy[strategy] = factor_columns
@@ -834,11 +835,15 @@ def _required_frequency_for_strategy(config, products: list[Any]) -> DataFreq:
         return DataFreq(fixed)
     if mode != "auto":
         raise ValueError(f"不支持的数据频率模式: {mode!r}")
-    return _infer_required_frequency_from_factor(config.get(FactorModule.factor), products)
+    return _infer_required_frequency_from_factors(factors_for_config(config), products)
 
 
 def _infer_required_frequency_from_factor(factor: Any, products: list[Any]) -> DataFreq:
-    desired_freqs = _desired_factor_frequencies(factor)
+    return _infer_required_frequency_from_factors((factor,), products)
+
+
+def _infer_required_frequency_from_factors(factors: tuple[Any, ...], products: list[Any]) -> DataFreq:
+    desired_freqs = set().union(*(_desired_factor_frequencies(factor) for factor in factors)) if factors else set()
     available_set: set[DataFreq] | None = None
     for product in products:
         freqs = set(_product_available_freqs(product))

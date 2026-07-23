@@ -14,6 +14,7 @@ from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
+from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.group_membership import (
     GroupMembershipModule, _group_quantile_membership, _resolve_execution_schedule,
     _resolve_execution_timestamp, _schedule_order_execution, target_trace_for,
@@ -52,6 +53,28 @@ def test_group_quantile_membership_selects_highest_bucket_first():
     assert set(weights) == {products[2], products[3]}
     assert weights[products[2]] == pytest.approx(0.5)
     assert sum(weights.values()) == pytest.approx(1.0)
+
+
+def test_group_policy_uses_bound_ranking_factor_role():
+    strategy = Strategy(alias="S")
+    products = [_product() for _ in range(4)]
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.split_count: 2,
+        GroupMembershipModule.group_index: 0,
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    ctx.set_for(FactorSignalModule.signal_value, strategy, {
+        product: float(len(products) - index) for index, product in enumerate(products)
+    })
+    ctx.set_for(FactorModule.factor_role_values, strategy, {
+        "ranking": {product: float(index) for index, product in enumerate(products)},
+    })
+
+    _group_quantile_membership(account, ctx)
+
+    weights = ctx.get_for(GroupMembershipModule.target_weights, strategy)
+    assert set(weights) == {products[2], products[3]}
 
 
 def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_signal_value(monkeypatch):

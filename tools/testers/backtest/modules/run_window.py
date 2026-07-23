@@ -18,9 +18,11 @@ from tools.data.types import DataTime
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 
 from .base import ExecutableModule, FieldDefinition, FieldRef
+from .factor import FactorModule, factors_for_config
 
 
 _FACTOR_REF = FieldRef("factor", owner="FactorModule")
+_FACTOR_ROLE_BINDINGS_REF = FieldRef("factor_role_bindings", owner="FactorModule")
 _WARMUP_MODE_REF = FieldRef("warmup_mode", owner="FactorSignalModule")
 _WARMUP_WINDOW_REF = FieldRef("warmup_window", owner="FactorSignalModule")
 
@@ -124,7 +126,7 @@ class RunWindowModule(ExecutableModule):
         "resolve_run_window",
         inputs=(
             start_date, end_date, start_time, end_time, timezone, time_precision,
-            _FACTOR_REF, _WARMUP_MODE_REF, _WARMUP_WINDOW_REF,
+            _FACTOR_REF, _FACTOR_ROLE_BINDINGS_REF, _WARMUP_MODE_REF, _WARMUP_WINDOW_REF,
         ),
         outputs=(strategy_windows, run_window_envelope),
         phase=Phase.PRE_REPLAY,
@@ -155,11 +157,11 @@ def _resolve_run_window(state, ctx) -> None:
 
 def resolve_strategy_run_window(config) -> StrategyRunWindow:
     start_dt, end_dt = strategy_run_window_datetimes(config)
-    factor = config.get(_FACTOR_REF)
+    warmups = [warmup_window_for_strategy(config, factor) for factor in factors_for_config(config)]
     return StrategyRunWindow(
         start_dt=start_dt,
         end_dt=end_dt,
-        warmup_window=warmup_window_for_strategy(config, factor),
+        warmup_window=max(warmups, default=_zero_warmup()),
     )
 
 

@@ -28,6 +28,7 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.modules.time_index_lookup import row_at, signal_event_times, signal_timestamps
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
+from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     current_historical_fields_at,
@@ -151,6 +152,7 @@ class GroupMembershipModule(TargetStrategyModule):
         "group_quantile_membership",
         inputs=(
             FactorSignalModule.signal_value, split_count, group_index,
+            FactorModule.factor_role_values,
             MarketDataModule.current_historical_fields,
             MarketDataModule.current_prices,
             MarketDataModule.current_tradable_status,
@@ -263,8 +265,9 @@ def _group_quantile_membership(state, ctx, strategies: Sequence[object] | None =
             allocation_name=allocation_policy,
         )
 
+        role_values = ctx.get_for(FactorModule.factor_role_values, strategy, {}) or {}
         signal_value = _tradable_signal_values(
-            ctx.get_for(FactorSignalModule.signal_value, strategy, {}),
+            role_values.get("ranking", ctx.get_for(FactorSignalModule.signal_value, strategy, {})),
             ctx.get(MarketDataModule.current_prices),
             ctx.get(MarketDataModule.current_tradable_status, None),
         )
@@ -383,7 +386,9 @@ def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
     by_event: dict[Any, list[tuple[Any, Any, dict]]] = {}
     strategies_by_table: dict[int, tuple[pd.DataFrame, list[Any]]] = {}
     for strategy in strategies:
-        table = signal_store.precomputed_table_for(strategy)
+        table = signal_store.precomputed_role_tables_for(strategy).get("ranking")
+        if table is None:
+            table = signal_store.precomputed_table_for(strategy)
         if table is None:
             continue
         if not _can_vectorize_group_precompute(state, strategy):
@@ -402,7 +407,9 @@ def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
             fallback_strategies.append(strategy)
 
     for strategy in fallback_strategies:
-        table = signal_store.precomputed_table_for(strategy)
+        table = signal_store.precomputed_role_tables_for(strategy).get("ranking")
+        if table is None:
+            table = signal_store.precomputed_table_for(strategy)
         if table is None:
             continue
         store.precomputed_target_intents.setdefault(strategy, {})
