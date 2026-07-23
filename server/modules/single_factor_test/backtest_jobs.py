@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import os
 import time
 import uuid
 
@@ -171,7 +172,11 @@ def retry_test_job(job_id: str):
         step_mode=old.step_mode,
         retention_mode=old.retention_mode,
         deployment_id=_deployment_id(),
-        source_revision=old.source_revision,
+        # A retry is a new JobAttempt executed by the currently deployed
+        # backend.  Keep the immutable RunSpec/job_spec below, but attest the
+        # code that will actually execute this attempt rather than copying the
+        # previous attempt's runtime revision.
+        source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
         runner_path=old.runner_path,
         job_spec=deepcopy(old.job_spec),
         run_spec_hash=old.run_spec_hash,

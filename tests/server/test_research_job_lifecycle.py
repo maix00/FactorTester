@@ -549,6 +549,43 @@ def test_submission_payload_cannot_write_terminal_assurance(client) -> None:
     assert "terminal_assurance" not in job.summary()
 
 
+def test_retry_attests_current_backend_revision_without_changing_frozen_run(
+    client,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("GTHT_SOURCE_REVISION", "old-backend-revision")
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+    })
+    assert response.status_code == 202, response.get_data(as_text=True)
+    original = JobRepository().list(
+        owner="alice",
+        run_id=response.get_json()["run_id"],
+    )[0]
+    repository = JobRepository()
+    repository.transition(original.job_id, "planning")
+    repository.transition(
+        original.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "backend_regression", "message": "retry after deployment"},
+    )
+
+    monkeypatch.setenv("GTHT_SOURCE_REVISION", "new-backend-revision")
+    retried_response = client.post(f"/api/jobs/{original.job_id}/retry")
+
+    assert retried_response.status_code == 202, retried_response.get_data(as_text=True)
+    retried = repository.require(retried_response.get_json()["job_id"])
+    assert retried.source_revision == "new-backend-revision"
+    assert retried.run_spec_hash == original.run_spec_hash
+    assert retried.job_spec == original.job_spec
+    assert retried.retry_of == original.job_id
+
+
 def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)
