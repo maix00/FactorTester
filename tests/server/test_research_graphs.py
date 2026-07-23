@@ -456,6 +456,7 @@ def _commit_scope_usage(
     scope_id: str,
     input_tokens: int,
     output_tokens: int,
+    provider_actual: bool = True,
 ) -> str:
     store = agent_flow.get_store()
     invocation = store.reserve_invocation(
@@ -476,9 +477,9 @@ def _commit_scope_usage(
     store.settle_invocation(
         owner_user_id="alice",
         invocation_id=invocation["invocation_id"],
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        provider_request_id=uuid.uuid4().hex,
+        input_tokens=input_tokens if provider_actual else None,
+        output_tokens=output_tokens if provider_actual else None,
+        provider_request_id=uuid.uuid4().hex if provider_actual else "",
     )
     return invocation["invocation_id"]
 
@@ -488,11 +489,13 @@ def _commit_usage(
     instance_id: str,
     input_tokens: int,
     output_tokens: int,
+    provider_actual: bool = True,
 ) -> str:
     return _commit_scope_usage(
         scope_id=f"instance:{instance_id}",
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        provider_actual=provider_actual,
     )
 
 
@@ -503,6 +506,7 @@ def _server_validation_evidence(
     baseline_tokens: int = 100,
     matching_run_spec: bool = True,
     launch_subagent: bool = False,
+    fallback_graph_usage: bool = False,
 ) -> dict:
     workspace_id = f"shadow-workspace-{uuid.uuid4().hex}"
     run_spec = {
@@ -555,6 +559,7 @@ def _server_validation_evidence(
             instance_id=instance["instance_id"],
             input_tokens=max(graph_tokens - 10, 0),
             output_tokens=min(graph_tokens, 10),
+            provider_actual=not fallback_graph_usage,
         )
     if launch_subagent:
         _create_agent_invocation(
@@ -1475,6 +1480,29 @@ def test_validation_rejects_a_token_efficient_claim_with_regression(
             evidence=_server_validation_evidence(
                 graph_tokens=120,
                 baseline_tokens=100,
+            ),
+        )
+
+
+def test_validation_rejects_reserved_fallback_as_calibration_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    proposal, _ = _approve_proposal()
+
+    with pytest.raises(
+        ValueError,
+        match="provider_actual_token_comparison",
+    ):
+        research_graphs.record_validation(
+            graph_id="factor-research",
+            version=2,
+            proposal_id=proposal["proposal_id"],
+            actor="alice",
+            evidence=_server_validation_evidence(
+                fallback_graph_usage=True,
             ),
         )
 

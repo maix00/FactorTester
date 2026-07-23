@@ -178,6 +178,17 @@ class AgentFlowStore:
             invocation_ids=invocation_ids,
         )
 
+    def measurement_quality_counts(
+        self,
+        *,
+        owner_user_id: str,
+        period_ids: list[str],
+    ) -> dict[str, dict[str, int]]:
+        return self._queries.measurement_quality_counts(
+            owner_user_id=owner_user_id,
+            period_ids=period_ids,
+        )
+
     def release_invocation(
         self,
         *,

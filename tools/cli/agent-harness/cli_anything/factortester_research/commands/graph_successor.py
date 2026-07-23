@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import click
 
+from ..core.trial_plan_fixture import (
+    validate_trial_plan_fixture,
+)
 from ..core.successor_graph import build_successor_graph
 from .common import echo_json
 
@@ -191,6 +196,36 @@ def graph_source(source_ref: str, as_json: bool) -> None:
     click.echo(source["principle_zh"])
     for locator in source["locators"]:
         click.echo(f"- {locator}")
+
+
+@click.command("trial-plan-check")
+@click.argument(
+    "document_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+def graph_trial_plan_check(
+    document_file: Path,
+    as_json: bool,
+) -> None:
+    """Validate one TrialPlan and its bounded RunSpec control summaries."""
+    document = json.loads(document_file.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise click.ClickException("TrialPlan document must be an object")
+    try:
+        result = validate_trial_plan_fixture(
+            document.get("trial_plan"),
+            validation_contract=document.get("validation_contract"),
+            action_input_summaries=document.get("action_input_summaries"),
+            run_spec_summaries=document.get("run_spec_summaries"),
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        echo_json(result)
+        return
+    click.echo("TrialPlan research sequence: passed")
+    click.echo(" → ".join(result["ordered_action_ids"]))
 
 
 def _anchor_requirements(

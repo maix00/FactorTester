@@ -26,6 +26,11 @@ from server.services.research_graph.protocol import (
     serialize_capability_resolution_submission,
     serialize_bounded_trace_evidence,
 )
+from server.services.research_graph.packet_budget import (
+    LEGACY_AGENT_PACKET_BYTES,
+    graph_packet_budget,
+    validate_graph_packet_budget,
+)
 from tests.server.data_contract_fixtures import initialize
 from tests.server.data_contract_fixtures import checkpoint as data_checkpoint
 from server.services.research_graph.research_cycle.replay import (
@@ -242,6 +247,56 @@ def test_context_transition_and_persisted_trace_have_distinct_budgets() -> None:
     serialized_trace = serialize_bounded_trace_evidence(audit_payload)
     assert len(serialized_trace.encode()) > MAX_AGENT_TRANSITION_BYTES
     assert len(serialized_trace.encode()) < MAX_PERSISTED_TRACE_BYTES
+
+
+def test_graph_packet_budget_is_calibrated_per_version() -> None:
+    legacy = graph_packet_budget({})
+    assert legacy == {
+        "policy_ref": "agent-packet-budget@legacy",
+        "ceiling_bytes": LEGACY_AGENT_PACKET_BYTES,
+        "calibration_status": "legacy_schema_exempt",
+    }
+    assert graph_packet_budget({"schema_version": 2})[
+        "calibration_status"
+    ] == "missing_graph_calibration"
+
+    calibrated = validate_graph_packet_budget({
+        "schema_version": 1,
+        "policy_ref": "agent-packet-budget@factor-research-v9",
+        "ceiling_bytes": 6400,
+        "observed_max_packet_bytes": 5800,
+        "sample_count": 2,
+        "sampled_anchor_refs": [
+            "node:factor_semantics",
+            "node:validation_design",
+        ],
+        "activation_measurements": [
+            "provider_actual_token_comparison",
+            "server_packet_latency",
+        ],
+    })
+
+    assert calibrated["ceiling_bytes"] == 6400
+    assert calibrated["headroom_bytes"] == 600
+    assert calibrated["calibration_status"] == "graph_version_calibrated"
+
+
+def test_graph_packet_budget_rejects_magic_limit_without_headroom() -> None:
+    with pytest.raises(
+        ValueError,
+        match="lacks calibrated semantic headroom",
+    ):
+        validate_graph_packet_budget({
+            "schema_version": 1,
+            "ceiling_bytes": 6000,
+            "observed_max_packet_bytes": 5700,
+            "sample_count": 1,
+            "sampled_anchor_refs": ["node:validation_design"],
+            "activation_measurements": [
+                "provider_actual_token_comparison",
+                "server_packet_latency",
+            ],
+        })
 
 
 def test_target_resolution_does_not_consume_agent_delta_budget() -> None:

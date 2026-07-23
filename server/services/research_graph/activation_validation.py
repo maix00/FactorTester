@@ -23,6 +23,7 @@ _VALIDATION_GATES = (
     "replay_passed",
     "shadow_passed",
     "capability_resolution_complete",
+    "requirement_resolvers_complete",
     "unaffected_jobs_preserved",
     "token_efficiency_passed",
 )
@@ -44,6 +45,7 @@ def record_validation(
         "token_metrics",
         "replay_summary",
         "shadow_summary",
+        "requirement_resolver_summary",
     }
     supplied = sorted(forbidden.intersection(evidence))
     if supplied:

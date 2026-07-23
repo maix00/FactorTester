@@ -1441,9 +1441,9 @@ are unchanged.
 | Branch derives from issue-123 | merge-base and parent commit output |
 | Existing Harness behavior preserved | old Harness unit and subprocess tests |
 | Default context is token-bounded | context schema excludes full graph, contracts, artifacts, and history |
-| Routine packet size is bounded | `routine_context_bytes <= 6000` activation gate |
+| Routine packet size is bounded | graph-version calibration records all local anchors, observed maximum and at least 10%/512-byte semantic headroom |
 | Context and next have distinct leverage | context returns state; next deterministically returns readiness, blockers, and judgment triggers |
-| Next packet is also bounded | server measures final serialized next packet and rejects anything above 6000 bytes |
+| Next packet is also bounded | server measures final serialized next packet and rejects anything above the graph-version calibrated ceiling |
 | Runtime resolution is node-local | no untriggered conditionals or future-node gaps in context |
 | Full contracts are opt-in | CLI subprocess test for `--include-contracts` |
 | Reviewer use is risk-bounded | L1/L2 default zero; L3 one specialist; L4 proposer plus one reviewer, third only on disagreement |
@@ -1456,7 +1456,7 @@ are unchanged.
 | Missing provider usage remains bounded | settlement charges the reservation as `reserved_fallback` and records measurement quality |
 | Runtime replacement cannot block startup | provider-neutral adapter accepts a changed runtime/model without changing Agent identity or requiring HMAC receipts |
 | Attribution does not double count | Skill/artifact/cache subsets cannot exceed input tokens |
-| Context has a real response cap | server measures final serialized packet and rejects anything above 6000 bytes |
+| Context has a real response cap | server enforces the calibrated graph ceiling plus a protocol absolute maximum; activation also requires actual token and latency evidence |
 | Request hot paths are schema-free | startup migration runs once; traced graph requests execute 0 DDL and 0 `PRAGMA table_info` |
 | Context database cost is history-independent | current node/resolution/plan projections live on the branch; routine context performs 0 trace-history scans and 0 Agent Flow reads |
 | Context reads have a measured fixed upper bound | query-count tests pin a constant owner/instance/branch read path independent of trace, catalog, and usage-history size |

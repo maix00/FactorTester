@@ -12,9 +12,15 @@ from cli_anything.factortester_research.core.graph import (
     graph_content_hash as protocol_graph_content_hash,
     validate_graph as validate_protocol_graph,
 )
+from server.services.research_graph.packet_budget import (
+    LEGACY_AGENT_PACKET_BYTES,
+    validate_graph_packet_budget,
+)
 
 
-MAX_AGENT_PACKET_BYTES = 6000
+# Compatibility name for provider-neutral startup packets and pre-v9 Graphs.
+# A schema-v2 Graph may carry a separately calibrated packet budget.
+MAX_AGENT_PACKET_BYTES = LEGACY_AGENT_PACKET_BYTES
 # A repeated Agent packet is a model-context budget.  A submitted transition
 # is a one-time structured delta and can legitimately contain one complete
 # obligation plus a TrialPlan; it must not inherit the repeated-context cap.
@@ -86,6 +92,8 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("graph version must be positive")
     if str(protocol_value.get("research_semantics") or "") != "product_neutral":
         raise ValueError("research graph must declare product_neutral semantics")
+    if "agent_packet_budget" in protocol_value:
+        validate_graph_packet_budget(protocol_value["agent_packet_budget"])
     actual_hash = graph_content_hash(protocol_value)
     declared_hash = str(protocol_value.get("content_hash") or "")
     if declared_hash and declared_hash != actual_hash:

@@ -9,7 +9,6 @@ from typing import Any
 import orjson
 
 from server.services.research_graph.branch.context import _build_local_state
-from server.services.research_graph.protocol import MAX_AGENT_PACKET_BYTES
 
 
 def build_graph_branch_next(
@@ -19,7 +18,7 @@ def build_graph_branch_next(
     owner: str,
 ) -> dict[str, Any]:
     """Return current semantics without a full Graph, catalog, or history."""
-    context, edges = _build_local_state(
+    context, edges, ceiling_bytes = _build_local_state(
         instance_id=instance_id,
         branch_id=branch_id,
         owner=owner,
@@ -121,10 +120,10 @@ def build_graph_branch_next(
     for _ in range(3):
         packet["next_bytes"] = len(orjson.dumps(packet))
     serialized_bytes = len(orjson.dumps(packet))
-    if serialized_bytes > MAX_AGENT_PACKET_BYTES:
+    if serialized_bytes > ceiling_bytes:
         raise ValueError(
             "bounded next packet exceeds "
-            f"{MAX_AGENT_PACKET_BYTES} bytes: {serialized_bytes}"
+            f"{ceiling_bytes} bytes: {serialized_bytes}"
         )
     return packet
 

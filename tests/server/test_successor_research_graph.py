@@ -8,6 +8,9 @@ from cli_anything.factortester_research.factortester_research_cli import cli
 from cli_anything.factortester_research.core.successor_graph import (
     build_successor_graph,
 )
+from cli_anything.factortester_research.core.successor_graph.resolvers import (
+    validate_requirement_resolver_activation,
+)
 from cli_anything.factortester_research.core.draft_graph import (
     build_draft_graph,
 )
@@ -62,6 +65,76 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
         for requirement_id in node["entry_requirement_refs"]
     }
     assert entry_requirements == catalog_requirements
+
+
+def test_every_successor_requirement_has_one_activatable_typed_resolver() -> None:
+    graph = build_successor_graph()
+    requirements = graph["requirement_catalog"]["requirements"]
+    bindings = graph["requirement_resolver_bindings"]
+
+    audit = validate_requirement_resolver_activation(graph)
+
+    assert audit["passed"] is True, audit
+    assert audit["requirement_count"] == 60
+    assert audit["binding_count"] == 60
+    assert {item["requirement_ref"] for item in bindings} == {
+        item["requirement_id"] for item in requirements
+    }
+    assert {
+        item["resolver_kind"] for item in bindings
+    } == {"deterministic_cli_fact", "requires_agent_judgment"}
+    assert all(
+        item["invocation_contract"]["operation_id"]
+        != "factortester-research.graph.requirement-detail"
+        for item in bindings
+    )
+    assert all(
+        item["resolver_binding_ref"] in {
+            binding["binding_id"] for binding in bindings
+        }
+        for item in requirements
+    )
+    by_requirement = {
+        item["requirement_ref"]: item for item in bindings
+    }
+    assert by_requirement["data.source_availability"]["resolver_kind"] == (
+        "deterministic_cli_fact"
+    )
+    assert by_requirement["data.quality_and_continuity"]["resolver_kind"] == (
+        "requires_agent_judgment"
+    )
+    assert by_requirement["data.point_in_time_semantics"]["resolver_kind"] == (
+        "requires_agent_judgment"
+    )
+    assert by_requirement[
+        "data.provenance_permission_version"
+    ]["resolver_kind"] == "requires_agent_judgment"
+    deterministic_data = [
+        item for item in bindings
+        if item["requirement_ref"].startswith("data.")
+        and item["resolver_kind"] == "deterministic_cli_fact"
+    ]
+    assert len({
+        item["invocation_contract"]["operation_id"]
+        for item in deterministic_data
+    }) == len(deterministic_data) == 4
+    assert all(
+        item["output_contract"]["required_entry_fields"]
+        for item in deterministic_data
+    )
+
+
+def test_resolver_activation_audit_rejects_static_contract_lookup() -> None:
+    graph = build_successor_graph()
+    binding = graph["requirement_resolver_bindings"][0]
+    binding["invocation_contract"]["operation_id"] = (
+        "factortester-research.graph.requirement-detail"
+    )
+
+    audit = validate_requirement_resolver_activation(graph)
+
+    assert audit["passed"] is False
+    assert "static_contract_lookup" in audit["failure_codes"]
 
 
 def test_successor_graph_removes_fixed_method_states() -> None:
@@ -231,6 +304,45 @@ def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
     }
     assert all(item["industry_basis_refs"] for item in payload["category_contexts"])
     assert all(item["industry_principle_zh"] for item in payload["category_contexts"])
+
+
+def test_v9_packet_budget_matches_every_declared_local_anchor() -> None:
+    graph = build_successor_graph()
+    budget = graph["agent_packet_budget"]
+    measured: dict[str, int] = {}
+    option_by_kind = {
+        "node": "--node",
+        "edge": "--edge",
+        "system_gate": "--system-gate",
+    }
+
+    for anchor_ref in budget["sampled_anchor_refs"]:
+        anchor_kind, local_ref = anchor_ref.split(":", 1)
+        result = CliRunner().invoke(
+            cli,
+            [
+                "graph",
+                "requirements",
+                option_by_kind[anchor_kind],
+                local_ref,
+                "--json",
+            ],
+        )
+        assert result.exit_code == 0, (anchor_ref, result.output)
+        measured[anchor_ref] = len(result.output.encode())
+
+    expected_refs = {
+        *(f"node:{item['node_id']}" for item in graph["nodes"]),
+        *(f"edge:{item['edge_id']}" for item in graph["edges"]),
+        *(
+            f"system_gate:{item['policy_kind']}"
+            for item in graph["system_transition_policies"]
+        ),
+    }
+    assert set(measured) == expected_refs
+    assert len(measured) == budget["sample_count"]
+    assert max(measured.values()) == budget["observed_max_packet_bytes"]
+    assert max(measured.values()) <= budget["ceiling_bytes"]
 
 
 def test_trial_execution_packet_covers_strategy_and_market_rules() -> None:

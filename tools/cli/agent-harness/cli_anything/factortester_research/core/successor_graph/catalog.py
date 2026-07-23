@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from .resolvers import resolver_binding_ref
 
 CATEGORY_SPECS = {
     "hypothesis_validity": (
@@ -164,17 +165,7 @@ def build_requirement_catalog() -> dict[str, Any]:
                 "industry_principle_zh": _industry_principle(category_id),
                 "industry_basis_refs": _basis_refs(category_id),
                 "resolver_capability_ids": [capability_id],
-                "cli_invocation_templates": [
-                    "factortester research-graph requirement-detail "
-                    f"<instance> <branch> {requirement_id}",
-                ],
-                "resolver_output_schema": {
-                    "type": "object",
-                    "required": [
-                        "applicability", "decision", "rationale",
-                        "evidence_refs", "limitations", "first_trial_ref",
-                    ],
-                },
+                "resolver_binding_ref": resolver_binding_ref(requirement_id),
                 "fallback_route": "capability_gap",
                 "report_requirement_refs": [
                     f"report.requirement.{requirement_id}"

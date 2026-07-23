@@ -68,7 +68,7 @@ and the named acceptance evidence; documentation alone is not completion.
 |---|---|---|
 | canonical Work Package lifecycle owner | implemented; production owner table explicitly backfilled 17/17 after backup and integrity check | exact-manifest purge/orphan cleanup, read-path benchmark, UI acceptance |
 | seven semantic obligation categories plus `other` | successor v9 catalog aligned; 60 subcategories; not activated | activation validator must prove every subcategory has a real resolver and report contract |
-| local current-anchor context under 6000 bytes | implemented for successor requirement inspection; 13-item validation-design packet is 5605 bytes | enforce the same bound on real server `next/context` after v9 publication |
+| graph-version calibrated local context budget | v9 inventories 40 local node/edge/gate packets; current maximum is 5628 bytes and the provisional calibrated ceiling is 6400 bytes | activation must remeasure the final catalog, preserve at least 10%/512-byte semantic headroom, and bind real provider-token plus server-latency evidence |
 | provider-neutral resolver for every active subcategory | descriptor and output schema exist only | implement category resolver packages and factual CLI operations; descriptors cannot satisfy the gate |
 | methods as TrialPlan Evidence Actions and Evidence admission | protocol and transition components implemented | full successor-graph path acceptance and actual capability bindings |
 | report requirement per node/edge/gate | v9 transition rejects missing requirement/subject bindings; local narrative v3 rehashes every Chinese item while keeping body local; formulas, frozen run configuration and hash-verified local figures now have bounded report projections | add pre-transition CLI preparation, current-anchor packet acceptance and complete FTClient bound-item presentation |
@@ -103,8 +103,9 @@ another open-ended design interview:
    its Graph, backend and database references exist, but that completion does
    not satisfy the separate resolver, lifecycle or release gates;
 5. continuation, Evidence admission and report coverage have protocol tests,
-   but still need final-catalog end-to-end validation, a real under-6000-byte
-   current-anchor packet and complete FTClient bound-item presentation;
+   but still need final-catalog end-to-end validation, a real packet within
+   the graph-version calibrated ceiling and complete FTClient bound-item
+   presentation;
 6. canonical Work Package lifecycle is implemented, while retention-aware
    exact-manifest purge, orphan/reference checks, database statement
    benchmarks and UI acceptance remain open;
@@ -727,8 +728,10 @@ Gates:
 - old Harness tests remain green;
 - new core, installed-command subprocess, and real-server E2E tests pass;
 - forced-installed CLI works outside the repository;
-- default packet remains within the existing 6000-byte server ceiling and a
-  stricter measured routine target set from baseline;
+- default packet remains within its graph-version calibrated ceiling; the
+  activation receipt records the complete local-anchor inventory, observed
+  maximum, semantic headroom, actual provider-token comparison and server
+  packet latency;
 - untriggered modes, full Skill bodies, full Graph, full catalog, trace
   history, stdout/stderr, and artifacts do not leak into routine output;
 - unchanged context produces zero writes.

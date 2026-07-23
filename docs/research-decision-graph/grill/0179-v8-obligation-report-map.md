@@ -2647,8 +2647,11 @@ Jobs 和 artifact metadata，并验证没有跨 workspace/pin 引用。当前 ar
    用 alias-bearing Chip/表格行绑定并懒加载；
 9. 每个可激活义务小类必须在发布前具有 provider-neutral CLI resolver、紧凑 schema、
    fallback route、报告 contract 和行业依据边界；无实现的 Graph 只能 draft；
-10. Agent packet 与 transition input 保持独立硬预算；完整审计 trace、统计表、权益曲线和
-    stdout 分别使用审计上限或 artifact refs，不能为了 6000-byte 上下文预算删掉必要事实；
+10. Agent packet 与 transition input 保持独立硬预算；Agent packet 上限不是行业常数，
+    而是每个 Graph 版本在激活前以完整局部 anchor 清单、真实 provider token 和服务端延迟
+    重新校准，并保留至少 10% 且不少于 512 bytes 的语义余量；协议另设绝对防护上限。
+    完整审计 trace、统计表、权益曲线和 stdout 分别使用审计上限或 artifact refs，超预算时
+    只能去重或改为引用，不能截断义务、Evidence 或必报内容；
 11. Work Package lifecycle 使用最小 canonical owner 行，UI/CLI 共享 API；旧 orphan 验收
     数据通过 exact-manifest server maintenance 清理，不自动归属、不做兼容性读取。
 

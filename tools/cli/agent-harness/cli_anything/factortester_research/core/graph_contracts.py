@@ -107,7 +107,6 @@ def _validate_catalog(
             "not_sufficient_zh",
             "industry_basis_refs",
             "resolver_capability_ids",
-            "cli_invocation_templates",
             "report_requirement_refs",
         ):
             if not _text_list(item.get(field)):
@@ -126,8 +125,37 @@ def _validate_catalog(
             raise ValueError(
                 f"entry requirement resolver descriptors missing: {', '.join(missing)}"
             )
-        if not isinstance(item.get("resolver_output_schema"), dict):
-            raise ValueError(f"resolver_output_schema is required: {requirement_id}")
+        binding_ref = item.get("resolver_binding_ref")
+        if binding_ref is None:
+            if not _text_list(item.get("cli_invocation_templates")):
+                raise ValueError(
+                    f"legacy cli_invocation_templates are required: {requirement_id}"
+                )
+            if not isinstance(item.get("resolver_output_schema"), dict):
+                raise ValueError(
+                    f"legacy resolver_output_schema is required: {requirement_id}"
+                )
+        elif not _text(binding_ref):
+            raise ValueError(
+                f"resolver_binding_ref is required: {requirement_id}"
+            )
+    binding_refs = {
+        str(item.get("resolver_binding_ref") or "")
+        for item in requirements.values()
+        if item.get("resolver_binding_ref") is not None
+    }
+    if binding_refs:
+        bindings = _unique_ids(
+            graph.get("requirement_resolver_bindings"),
+            "binding_id",
+            "requirement resolver bindings",
+        )
+        missing = sorted(binding_refs - set(bindings))
+        if missing:
+            raise ValueError(
+                "requirement resolver bindings missing: "
+                + ", ".join(missing)
+            )
     return categories, requirements
 
 

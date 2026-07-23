@@ -16,6 +16,7 @@ from .reporting import (
     build_report_requirements,
     system_transition_policies,
 )
+from .resolvers import build_requirement_resolver_bindings
 from .topology import build_edges, build_nodes
 from .sources import build_industry_basis_catalog
 
@@ -35,6 +36,9 @@ def build_successor_graph() -> dict[str, Any]:
         capability_descriptors[capability_id] = capability_descriptor(
             registry[capability_id]
         )
+    nodes = build_nodes()
+    edges = build_edges()
+    transition_policies = system_transition_policies()
     graph = {
         "schema_version": 2,
         "graph_id": "factor-research",
@@ -43,8 +47,8 @@ def build_successor_graph() -> dict[str, Any]:
         "lifecycle": "draft",
         "research_semantics": "product_neutral",
         "entry_node": "hypothesis_preregistration",
-        "nodes": build_nodes(),
-        "edges": build_edges(),
+        "nodes": nodes,
+        "edges": edges,
         "research_cycle_operations": cycle_operations,
         "maintenance_operations": maintenance,
         "review_policy": {
@@ -55,6 +59,9 @@ def build_successor_graph() -> dict[str, Any]:
         "capability_descriptors": capability_descriptors,
         "change_manifest": _change_manifest(),
         "requirement_catalog": catalog,
+        "requirement_resolver_bindings": (
+            build_requirement_resolver_bindings(catalog)
+        ),
         "industry_basis_catalog": build_industry_basis_catalog(),
         "report_method_descriptors": build_report_method_descriptors(),
         "report_requirements": build_report_requirements(catalog),
@@ -63,7 +70,14 @@ def build_successor_graph() -> dict[str, Any]:
             "submission_schema_version": 1,
             "local_body_policy": "hash_bound_local_only",
         },
-        "system_transition_policies": system_transition_policies(),
+        "system_transition_policies": transition_policies,
+        "agent_packet_budget": _agent_packet_budget(
+            nodes=nodes,
+            edges=edges,
+            system_gate_ids=sorted(
+                str(item["policy_kind"]) for item in transition_policies
+            ),
+        ),
         "provenance": {
             "source": "grill-179-canonical-handoff",
             "description": (
@@ -77,13 +91,38 @@ def build_successor_graph() -> dict[str, Any]:
     return graph
 
 
+def _agent_packet_budget(
+    *,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    system_gate_ids: list[str],
+) -> dict[str, Any]:
+    """Bind v9 to its checked local-anchor inventory, not a magic constant."""
+    return {
+        "schema_version": 1,
+        "policy_ref": "agent-packet-budget@factor-research-v9",
+        "ceiling_bytes": 6400,
+        "observed_max_packet_bytes": 5628,
+        "sample_count": len(nodes) + len(edges) + len(system_gate_ids),
+        "sampled_anchor_refs": [
+            *(f"node:{item['node_id']}" for item in nodes),
+            *(f"edge:{item['edge_id']}" for item in edges),
+            *(f"system_gate:{item}" for item in system_gate_ids),
+        ],
+        "activation_measurements": [
+            "provider_actual_token_comparison",
+            "server_packet_latency",
+        ],
+    }
+
+
 def _change_manifest() -> dict[str, Any]:
     return {
         "parent_version": 8,
         "draft_revision": {
             "replaces_content_hash": (
-                "66f977ae88bbd3b97d4eed0a1738b58"
-                "bee295deeaae9e2f90affa0c2f4587ae8"
+                "dae9053ada256a60e8d1a3a69a8ad304"
+                "9324d501c3da229df80c4054a47aef52"
             ),
             "reason_code": "independent_activation_review_blockers",
         },

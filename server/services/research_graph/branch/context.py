@@ -26,9 +26,9 @@ from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
 )
 from server.services.research_graph.protocol import (
-    MAX_AGENT_PACKET_BYTES,
     loads,
 )
+from server.services.research_graph.packet_budget import graph_packet_budget
 from server.services.research_graph.versions import load_graph_from_conn
 from server.services.research_graph.trial_plan.stage_projection import (
     agent_trial_stage_summary,
@@ -74,7 +74,7 @@ def _build_local_state(
     instance_id: str,
     branch_id: str,
     owner: str,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
     """Build compact current state plus internal candidate edge definitions."""
     with closing(connect_sqlite(Settings.CACHE_DB_PATH)) as conn:
         branch_row = load_instance_branch_with_latest_trace(
@@ -281,16 +281,18 @@ def _build_local_state(
             *node.get("entry_report_refs", []),
             *node.get("node_report_refs", []),
         ]
+    packet_budget = graph_packet_budget(graph)
     context["context_bytes"] = 0
     for _ in range(3):
         context["context_bytes"] = len(orjson.dumps(context))
     serialized_bytes = len(orjson.dumps(context))
-    if serialized_bytes > MAX_AGENT_PACKET_BYTES:
+    ceiling_bytes = int(packet_budget["ceiling_bytes"])
+    if serialized_bytes > ceiling_bytes:
         raise ValueError(
             "bounded context exceeds "
-            f"{MAX_AGENT_PACKET_BYTES} bytes: {serialized_bytes}"
+            f"{ceiling_bytes} bytes: {serialized_bytes}"
         )
-    return context, available_edges
+    return context, available_edges, ceiling_bytes
 
 
 def build_graph_branch_context(
@@ -300,7 +302,7 @@ def build_graph_branch_context(
     owner: str,
 ) -> dict[str, Any]:
     """Return current state without edge-selection instructions."""
-    context, _ = _build_local_state(
+    context, _, _ = _build_local_state(
         instance_id=instance_id,
         branch_id=branch_id,
         owner=owner,

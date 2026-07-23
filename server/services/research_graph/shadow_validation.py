@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import time
 from typing import Any
 
 import settings as Settings
@@ -25,6 +26,9 @@ from server.services.research_graph.shadow_outcome import (
     canonical_terminal_assurance,
 )
 from server.services.research_graph.versions import load_graph
+from cli_anything.factortester_research.core.successor_graph.resolvers import (
+    validate_requirement_resolver_activation,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -61,11 +65,13 @@ def derive_activation_evidence(
         graph_run_id=graph_run_id,
         baseline_run_id=baseline_run_id,
     )
+    context_started = time.perf_counter()
     context = build_graph_branch_context(
         instance_id=routine_instance_id,
         branch_id=routine_branch_id,
         owner=owner,
     )
+    context_latency_ms = (time.perf_counter() - context_started) * 1000
     token_metrics = derive_token_metrics(
         owner=owner,
         instance_id=routine_instance_id,
@@ -74,13 +80,16 @@ def derive_activation_evidence(
         run_spec_hash=str(runs[graph_run_id]["run_spec_hash"]),
         graph=graph,
         context=context,
+        context_latency_ms=context_latency_ms,
     )
     token_failure_codes = token_failures(token_metrics)
     capability_complete = not (context.get("open_gaps") or [])
+    resolver_audit = validate_requirement_resolver_activation(graph)
     return {
         "replay_passed": bool(replay["passed"]),
         "shadow_passed": bool(outcomes["equivalent"]),
         "capability_resolution_complete": capability_complete,
+        "requirement_resolvers_complete": resolver_audit["passed"],
         "unaffected_jobs_preserved": bool(outcomes["isolated"]),
         "token_efficiency_passed": not token_failure_codes,
         "replay_summary": replay,
@@ -88,6 +97,7 @@ def derive_activation_evidence(
         "token_metrics": token_metrics,
         "token_failures": token_failure_codes,
         "token_metrics_authority": "server_derived",
+        "requirement_resolver_summary": resolver_audit,
         "evidence_authority": "server_derived",
     }
 
