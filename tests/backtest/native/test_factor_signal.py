@@ -1227,6 +1227,7 @@ def test_signal_live_compiles_factor_expr_executor_from_bar_events():
     _observe_signal_live_bar(account, bar_ctx)
 
     assert bar_ctx.get_for(FactorSignalModule.live_factor_state, strategy) == {"P1": 11.0}
+    assert account.factor_signal_store.live_price_tables == {}
 
     signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                              active_strategies=frozenset({strategy}))
@@ -1278,6 +1279,7 @@ def test_signal_live_shared_factor_expr_executor_updates_once_across_strategies(
         "CLOSE": {"P1": 12.0, "P2": 18.0},
     })
     _observe_signal_live_bar(account, second_bar)
+    assert account.factor_signal_store.live_price_tables == {}
 
     signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
                              active_strategies=frozenset({s1, s2}))

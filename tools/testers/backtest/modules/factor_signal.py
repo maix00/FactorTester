@@ -961,15 +961,8 @@ def _observe_signal_live_bar(state, ctx) -> None:
         factor_by_key[state_key] = factor
 
     close_prices = snapshot.get("close", {})
-    row = pd.DataFrame([close_prices], index=[pd.Timestamp(ctx.timestamp)])
     for factor_key in by_factor:
         factor = factor_by_key[factor_key]
-        table = tables.get(factor_key)
-        if table is None:
-            tables[factor_key] = row
-        else:
-            updated = pd.concat([table, row])
-            tables[factor_key] = updated.iloc[~updated.index.duplicated(keep="last")]
         executor = executors.get(factor_key)
         if executor is None:
             products = _live_products_for_strategies(by_factor[factor_key], ctx)
@@ -994,6 +987,17 @@ def _observe_signal_live_bar(state, ctx) -> None:
                 for strategy in by_factor[factor_key]:
                     ctx.set_for(FactorSignalModule.live_factor_state, strategy, values)
             continue
+        # Legacy live adapters receive the complete causal close history in
+        # on_signal/evaluate_live. Compiled FactorExpr executors already own
+        # their causal rolling state, so maintaining a second pandas history
+        # would add O(T²) concat/dedup work without affecting their signal.
+        row = pd.DataFrame([close_prices], index=[pd.Timestamp(ctx.timestamp)])
+        table = tables.get(factor_key)
+        if table is None:
+            tables[factor_key] = row
+        else:
+            updated = pd.concat([table, row])
+            tables[factor_key] = updated.iloc[~updated.index.duplicated(keep="last")]
         on_bar = getattr(factor, "on_bar", None)
         if callable(on_bar):
             # Preserve the public live-adapter contract: custom factors receive
