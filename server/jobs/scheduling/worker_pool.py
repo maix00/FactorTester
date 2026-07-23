@@ -16,6 +16,11 @@ from typing import Any
 
 import orjson
 
+from server.jobs.equity_curve_artifact import (
+    build_equity_curve_artifact,
+    receipt_bytes,
+)
+
 
 class WorkerUnavailable(RuntimeError):
     pass
@@ -134,10 +139,28 @@ class _WorkerSink:
         self._emit("runtime_info", data)
 
     def emit_result(self, data: dict[str, Any]) -> None:
+        curve = build_equity_curve_artifact(data)
+        if curve is not None:
+            image, receipt = curve
+            self._write_bytes_artifact(
+                "equity_curve_report",
+                image,
+                extension="svg",
+                content_type="image/svg+xml",
+            )
+            self._write_bytes_artifact(
+                "equity_curve_receipt",
+                receipt_bytes(receipt),
+                extension="json",
+                content_type="application/json",
+            )
         if self.retention_mode == "full":
             self._write_artifact("result", data)
         self._flush_live_events()
-        self._emit("result", _bounded_summary(data))
+        summary = _bounded_summary(data)
+        if curve is not None:
+            summary["equity_curve_artifact_available"] = True
+        self._emit("result", summary)
 
     def emit_error(self, error: str, traceback: str = "", **extra) -> None:
         self._flush_live_events()
@@ -173,18 +196,34 @@ class _WorkerSink:
     def _write_artifact(self, name: str, value: Any) -> None:
         if self.artifact_root is None:
             raise RuntimeError("artifact root is required for full retention")
+        self._write_bytes_artifact(
+            name,
+            _json_bytes(value),
+            extension="json",
+            content_type="application/json",
+        )
+
+    def _write_bytes_artifact(
+        self,
+        name: str,
+        raw: bytes,
+        *,
+        extension: str,
+        content_type: str,
+    ) -> None:
+        if self.artifact_root is None:
+            raise RuntimeError("artifact root is required")
         safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in name)
         directory = self.artifact_root / self.job_id
         directory.mkdir(parents=True, exist_ok=True)
-        target = directory / f"{safe_name}.json"
+        target = directory / f"{safe_name}.{extension}"
         staging = directory / f".{safe_name}.{os.getpid()}.tmp"
-        raw = _json_bytes(value)
         staging.write_bytes(raw)
         staging.replace(target)
         self._emit("artifact", {
             "name": name,
             "relative_path": f"{self.job_id}/{target.name}",
-            "content_type": "application/json",
+            "content_type": content_type,
             "content_hash": hashlib.sha256(raw).hexdigest(),
             "size_bytes": len(raw),
         })
@@ -221,6 +260,70 @@ def _bounded_summary(data: dict[str, Any], *, max_bytes: int = 512 * 1024) -> di
             summary["groups_chart_only"] = True
             summary["equity_curve_downsampled"] = downsampled
     return summary
+
+
+def persisted_result_summary(
+    data: dict[str, Any],
+    *,
+    max_bytes: int = 64 * 1024,
+) -> dict[str, Any]:
+    """Project terminal facts without persisting chart point sequences.
+
+    The live broker may briefly carry the bounded chart series so the current
+    browser session remains interactive.  Durable history uses the immutable
+    SVG artifact instead; keeping the same points in SQLite would duplicate a
+    quota-bearing report projection on every status/detail read.
+    """
+    projected: dict[str, Any] = {
+        "success": bool(data.get("success", True)),
+        "equity_curve_points_persisted": False,
+    }
+    if data.get("equity_curve_artifact_available") is True:
+        projected.update({
+            "equity_curve_artifact_available": True,
+            "equity_curve_artifact": "equity_curve_report",
+            "equity_curve_receipt_artifact": "equity_curve_receipt",
+        })
+    excluded = {
+        "groups", "equity_curve", "curves", "details", "engine_result",
+    }
+    for key, value in data.items():
+        if key in excluded or key == "success":
+            continue
+        candidate = {**projected, key: value}
+        if len(_json_bytes(candidate)) <= max_bytes:
+            projected[key] = value
+
+    groups = data.get("groups")
+    if isinstance(groups, list):
+        compact_groups = [_persisted_group(value) for value in groups]
+        candidate = {**projected, "groups": compact_groups}
+        if len(_json_bytes(candidate)) <= max_bytes:
+            projected["groups"] = compact_groups
+        else:
+            projected["group_count"] = len(compact_groups)
+            projected["group_summaries_omitted"] = True
+    return projected
+
+
+def _persisted_group(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    curve_keys = {
+        "timestamps", "total_equity", "gross_returns", "net_returns",
+        "equity_curve", "curves", "daily_returns", "period_returns",
+        "pre_rebalance_total_equity", "post_rebalance_total_equity",
+    }
+    compact: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in curve_keys:
+            continue
+        # A group summary should contain identifiers and statistical facts, not
+        # another opaque payload large enough to become an accidental artifact.
+        if len(_json_bytes(item)) <= 16 * 1024:
+            compact[key] = item
+    compact["equity_curve_points_persisted"] = False
+    return compact
 
 
 def _bounded_chart_groups(

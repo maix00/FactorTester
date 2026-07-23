@@ -193,6 +193,22 @@ def _prepare(path, *, run_branch: str = "branch-1") -> JobRepository:
         content_hash="6" * 64,
         size_bytes=128,
     )
+    repository.record_artifact(
+        job_id="job-1",
+        name="equity_curve_report",
+        relative_path="job-1/equity_curve_report.svg",
+        content_type="image/svg+xml",
+        content_hash="7" * 64,
+        size_bytes=512,
+    )
+    repository.record_artifact(
+        job_id="job-1",
+        name="equity_curve_receipt",
+        relative_path="job-1/equity_curve_receipt.json",
+        content_type="application/json",
+        content_hash="8" * 64,
+        size_bytes=256,
+    )
     repository.transition(
         "job-1",
         JobStatus.SUCCEEDED,
@@ -236,6 +252,11 @@ def test_backtest_edge_binds_trusted_job_evidence(tmp_path, monkeypatch) -> None
     assert "terminal_job_trusted" not in trace
     envelope = trace["server_evidence"]["job_attempt"]
     assert envelope["facts"]["net_return_series_available"] is True
+    assert envelope["facts"]["equity_curve_report_available"] is True
+    assert envelope["facts"]["equity_curve_source_retained"] is True
+    assert "artifact:equity_curve_report:sha256:" + "7" * 64 in (
+        envelope["artifact_refs"]
+    )
     assert envelope["identity_refs"]["trial_plan_hash"] == PLAN_HASH
 
 
@@ -249,8 +270,8 @@ def test_generic_result_cannot_certify_net_returns(
     with connect_sqlite(path) as conn:
         conn.execute(
             """
-            UPDATE research_job_artifacts
-            SET name='result' WHERE job_id='job-1'
+                UPDATE research_job_artifacts
+                SET name='result' WHERE job_id='job-1' AND name='net_returns'
             """
         )
 

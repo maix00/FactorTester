@@ -11,7 +11,11 @@ from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 
-from .worker_pool import LongLivedWorkerPool, WorkerUnavailable
+from .worker_pool import (
+    LongLivedWorkerPool,
+    WorkerUnavailable,
+    persisted_result_summary,
+)
 
 
 PLANNER_RUNNER = "server.jobs.planning.runners:plan_job"
@@ -278,7 +282,7 @@ class ResearchJobScheduler:
                 )
                 self.broker.close(job_id)
                 return
-            summary = dict(data)
+            summary = persisted_result_summary(data)
             self.repository.transition(
                 job_id,
                 JobStatus.SUCCEEDED,

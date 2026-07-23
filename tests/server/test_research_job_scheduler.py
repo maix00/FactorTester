@@ -9,7 +9,10 @@ import orjson
 from server.jobs.models import JobRecord, SchedulingEntitlement
 from server.jobs.repository import JobRepository
 from server.jobs.scheduling import ResearchJobScheduler
-from server.jobs.scheduling.worker_pool import _bounded_summary
+from server.jobs.scheduling.worker_pool import (
+    _bounded_summary,
+    persisted_result_summary,
+)
 from server.jobs.states import JobStatus
 
 
@@ -277,10 +280,22 @@ def test_full_result_uses_files_and_over_quota_cancels_waiting_not_running(tmp_p
     assert completed.status is JobStatus.SUCCEEDED
     assert completed.result_summary["summary_truncated"] is True
     assert "equity_curve" not in completed.result_summary
+    assert completed.result_summary["equity_curve_points_persisted"] is False
+    assert completed.result_summary["equity_curve_artifact"] == (
+        "equity_curve_report"
+    )
+    assert len(orjson.dumps(completed.result_summary)) < 64 * 1024
     assert waiting.status is JobStatus.CANCELLED
     assert waiting.cancel_reason == "storage_quota_exceeded"
     artifacts = repository.list_artifacts(job_id="full", owner="alice")
-    assert {item["name"] for item in artifacts} == {"details", "result"}
+    assert {item["name"] for item in artifacts} == {
+        "details", "result", "equity_curve_report", "equity_curve_receipt",
+    }
+    curve = next(
+        item for item in artifacts if item["name"] == "equity_curve_report"
+    )
+    assert curve["content_type"] == "image/svg+xml"
+    assert curve["size_bytes"] < 100_000
     assert all((artifact_dir / item["relative_path"]).is_file() for item in artifacts)
 
 
@@ -307,6 +322,34 @@ def test_bounded_summary_preserves_web_equity_curve_contract() -> None:
     assert len(result["groups"][0]["timestamps"]) < points
     assert result["equity_curve_downsampled"] is True
     assert len(orjson.dumps(result)) <= 64 * 1024
+
+
+def test_persisted_result_summary_replaces_curve_points_with_artifact_refs() -> None:
+    result = persisted_result_summary({
+        "success": True,
+        "equity_curve_artifact_available": True,
+        "metrics": {"A1": {"Sharpe": 1.2, "Max Drawdown": -0.08}},
+        "groups": [{
+            "key": "A1",
+            "timestamps": list(range(20_000)),
+            "total_equity": [100_000_000 + value for value in range(20_000)],
+            "gross_returns": [0.001] * 20_000,
+            "annualized_return": 0.18,
+        }],
+        "engine_result": {"opaque": "x" * 100_000},
+    })
+
+    assert result["metrics"]["A1"]["Sharpe"] == 1.2
+    assert result["groups"] == [{
+        "key": "A1",
+        "annualized_return": 0.18,
+        "equity_curve_points_persisted": False,
+    }]
+    assert result["equity_curve_artifact"] == "equity_curve_report"
+    assert result["equity_curve_receipt_artifact"] == "equity_curve_receipt"
+    assert "engine_result" not in result
+    assert b"total_equity" not in orjson.dumps(result)
+    assert len(orjson.dumps(result)) < 64 * 1024
 
 
 def test_step_job_pauses_and_continues_in_same_worker_process(tmp_path) -> None:

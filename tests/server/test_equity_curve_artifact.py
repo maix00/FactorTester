@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+import queue
+
+from server.jobs.equity_curve_artifact import build_equity_curve_artifact
+from server.jobs.scheduling.worker_pool import _WorkerSink
+
+
+def test_equity_curve_artifact_is_small_deterministic_and_self_describing() -> None:
+    result = {
+        "groups": [{
+            "name": "SgCCS 参数 1",
+            "timestamps": [f"2025-01-{index + 1:02d}" for index in range(20)],
+            "total_equity": [100 + index * 2 - (8 if index == 11 else 0) for index in range(20)],
+        }]
+    }
+
+    first = build_equity_curve_artifact(result)
+    second = build_equity_curve_artifact(result)
+
+    assert first == second
+    assert first is not None
+    image, receipt = first
+    assert image.startswith(b'<svg xmlns="http://www.w3.org/2000/svg"')
+    assert b"<polyline" in image
+    assert b"SgCCS" in image
+    assert len(image) < 100_000
+    assert receipt["panels"] == ["equity", "drawdown"]
+    assert receipt["series"][0]["original_points"] == 20
+    assert receipt["downsampling"] == "bucket_minmax_preserve_endpoints"
+
+
+def test_equity_curve_artifact_downsamples_and_rejects_invalid_series() -> None:
+    curve = build_equity_curve_artifact({
+        "groups": [{
+            "key": "long-history",
+            "timestamps": list(range(10_000)),
+            "total_equity": [100 + index / 100 for index in range(10_000)],
+        }]
+    })
+    assert curve is not None
+    _, receipt = curve
+    assert receipt["series"][0]["rendered_points"] <= 800
+    assert receipt["series"][0]["original_points"] == 10_000
+    assert build_equity_curve_artifact({"groups": [{
+        "total_equity": [1.0, float("nan")],
+    }]}) is None
+
+
+def test_summary_retention_keeps_curve_image_and_receipt_not_full_result(
+    tmp_path,
+) -> None:
+    output = queue.Queue()
+    sink = _WorkerSink(
+        "job-summary",
+        output,
+        artifact_root=str(tmp_path),
+        retention_mode="summary",
+    )
+
+    sink.emit_result({
+        "success": True,
+        "groups": [{
+            "name": "main",
+            "timestamps": [1, 2, 3],
+            "total_equity": [100.0, 103.0, 101.0],
+        }],
+    })
+
+    messages = []
+    while not output.empty():
+        messages.append(output.get_nowait())
+    names = {
+        item["data"]["name"]
+        for item in messages
+        if item.get("event") == "artifact"
+    }
+    assert names == {"equity_curve_report", "equity_curve_receipt"}
+    assert not (tmp_path / "job-summary" / "result.json").exists()
+    assert (tmp_path / "job-summary" / "equity_curve_report.svg").is_file()

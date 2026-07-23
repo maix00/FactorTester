@@ -123,7 +123,10 @@ _DETAIL_COLUMNS = """
             SELECT name, content_hash, content_type, size_bytes
             FROM research_job_artifacts
             WHERE job_id=jobs.job_id AND state='active'
-              AND name IN ('net_returns', 'net_return_series')
+              AND name IN (
+                'net_returns', 'net_return_series',
+                'equity_curve_report', 'equity_curve_receipt'
+              )
             ORDER BY name
         ) AS evidence_artifacts
     ), '[]') AS detail_artifacts_json
