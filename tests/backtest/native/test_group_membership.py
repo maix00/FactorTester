@@ -1067,7 +1067,9 @@ def test_schedule_order_execution_sets_scheduled_and_pushes_event():
     queue.set_dispatcher(EventKind.ORDER, lambda batch: seen.extend(batch))
     queue.run_until_drained()
     assert len(seen) == 1
-    assert seen[0].payload is order
+    assert seen[0].payload.order is order
+    assert seen[0].payload.order_id == order.order_id
+    assert seen[0].payload.revision == order.revision
 
 
 def test_schedule_order_execution_uses_each_products_next_available_open_bar():

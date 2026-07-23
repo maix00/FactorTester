@@ -115,6 +115,14 @@ def fake_server() -> Iterator[str]:
             content_type="image/svg+xml",
         )
 
+    @app.get("/api/jobs/job-1/artifacts/order_audit")
+    def order_audit_artifact():
+        assert session.get("username") == "alice"
+        return jsonify(
+            run_id="run-1",
+            strategies={"A1": {"groups": [{"order_group_id": "G1"}]}},
+        )
+
     @app.get("/admin/api/server-instances")
     def admin_server_instances():
         return jsonify(success=True, instances=[{
@@ -300,6 +308,9 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     artifact = client.job_artifact("job-1", "equity_curve_report")
     assert artifact.content == b"<svg><title>curve</title></svg>"
     assert artifact.content_type == "image/svg+xml"
+    assert client.job_order_audit("job-1")["strategies"]["A1"]["groups"][0][
+        "order_group_id"
+    ] == "G1"
     research = client.list_profile_research(
         workspace_ref="workspace:workspace-1",
         limit=7,

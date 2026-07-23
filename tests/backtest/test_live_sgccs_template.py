@@ -81,7 +81,12 @@ def test_live_template_import_runs_as_a_durable_process_job() -> None:
     net_returns = client.get(
         f"/api/jobs/{job_id}/artifacts/net_returns"
     ).get_json()["artifact"]
+    order_audit = client.get(
+        f"/api/jobs/{job_id}/artifacts/order_audit"
+    ).get_json()
     assert result["success"] is True
     assert artifact.get("groups") or artifact.get("group_results")
     assert net_returns["artifact_kind"] == "net_return_series"
     assert net_returns["series"]
+    assert order_audit["run_id"] == result["run_id"]
+    assert isinstance(order_audit["strategies"], dict)

@@ -1,0 +1,39 @@
+"""Create immutable execution attempts for one persistent Order."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from tools.testers.backtest.engines.native.order import OrderAttempt, OrderStatus
+
+from .actions import record_initial_submit
+
+
+def create_order_attempt(
+    state: Any,
+    order: Any,
+    *,
+    timestamp: Any,
+    market_timestamp: Any,
+) -> OrderAttempt:
+    if not order.order_id:
+        order.order_id = state.order_flow_store.next_order_id(order.strategy, order.timestamp)
+    if order.order_id not in state.order_store.orders_by_id:
+        state.order_store.register_order(order)
+    sequence = int(order.get("attempt_sequence", 0) or 0) + 1
+    order.set("attempt_sequence", sequence)
+    order.timestamp = timestamp
+    order.eligible_at = timestamp
+    order.set("price_timestamp", market_timestamp)
+    order.status = OrderStatus.SCHEDULED
+    record_initial_submit(state, order, timestamp)
+    attempt = OrderAttempt(
+        attempt_id=f"{order.order_id}:attempt:{sequence}",
+        order_id=order.order_id,
+        revision=order.revision,
+        timestamp=timestamp,
+        market_timestamp=market_timestamp,
+        _order=order,
+    )
+    state.order_store.register_attempt(attempt)
+    return attempt

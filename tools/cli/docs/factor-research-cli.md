@@ -38,6 +38,8 @@ factortester run submit \
 
 factortester job list
 factortester job watch <job_id>
+factortester job orders <job_id>
+factortester job order <job_id> <order_group_id>
 factortester job status <job_id>
 factortester job artifact <job_id> <name>
 factortester job cancel <job_id>
@@ -54,6 +56,12 @@ bindings that would otherwise be ignored. Use `--clear-role ROLE` to return a
 role to the primary-factor fallback.
 
 CLI jobs use the `durable` lifecycle and do not depend on `page_uuid` or a browser view lease. Web observer-bound jobs may be cancelled after their view lease expires; refresh can reclaim the same view UUID during its grace period.
+
+`job orders` reads the retained `order_audit` artifact and prints compact
+OrderGroup status, requested quantity, cumulative fills, and active leaves.
+`job order` expands atomic Orders, attempts, Fills, settlements, and actions;
+use `--order-id` to select one atomic Order. Both commands support `--json` and
+require the backtest to have been submitted with `--retain-full`.
 
 Every comparison must keep the ranking universe/product mask, signal visibility, forward-return window, next-open execution, fees, capacity, and sample slices aligned. Failed jobs retain their traceback, cancelled jobs retain a reason, and terminal records remain queryable until the configured TTL.
 

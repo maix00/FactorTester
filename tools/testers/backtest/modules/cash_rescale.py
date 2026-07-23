@@ -87,7 +87,7 @@ class LedgerCashConstraintModule(ExecutableModule):
         outputs=(OrderConstructModule.orders,),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER,
-        order=8,
+        order=9,
         after=(FeeModule.resolve_fee_cost,),
         description="成交现金约束",
         event_payload_inputs=("order",),

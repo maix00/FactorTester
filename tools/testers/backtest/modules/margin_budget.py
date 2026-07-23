@@ -108,7 +108,7 @@ class MarginBudgetModule(ExecutableModule):
             execution_margin_summary, cash_pool_equity, projected_margin,
             gross_leverage, rounding_error, hard_limit_headroom,
         ),
-        phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=9,
+        phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
         description="按现金池保证金利用率硬上限调整增仓",
         event_payload_inputs=("order",),
         compute=lambda state, ctx: enforce_execution_margin_limit(state, ctx),

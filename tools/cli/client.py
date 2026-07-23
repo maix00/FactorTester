@@ -8,6 +8,7 @@ from .client_agent_flow import AgentFlowClientMixin
 from .client_admin import AdminClientMixin
 from .client_factor_library import FactorLibraryClientMixin
 from .client_protocol import ProtocolClientMixin
+from .client_order_audit import OrderAuditClientMixin
 from .client_research import ResearchClientMixin
 from .client_research_graph import ResearchGraphClientMixin
 from .http import HttpSession
@@ -18,6 +19,7 @@ class FactorTesterClient(
     ProtocolClientMixin,
     ResearchGraphClientMixin,
     AgentFlowClientMixin,
+    OrderAuditClientMixin,
     ResearchClientMixin,
     FactorLibraryClientMixin,
 ):
