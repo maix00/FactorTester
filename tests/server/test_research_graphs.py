@@ -17,6 +17,7 @@ from server.jobs.states import JobStatus
 from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs, research_runs
 from server.services import agent_flow
+from server.services.agent_flow.verified_usage import VerifiedProviderUsage
 from server.services.research_graph import versions as graph_versions
 from server.services.research_graph import active_pointer
 from server.services.research_graph.branch import (
@@ -31,6 +32,7 @@ from server.services.research_graph.branch.repository import (
     load_instance_branch_row,
 )
 from server.services.research_graph.shadow_trace import replay_shadow_trace
+from server.services.research_graph.shadow_tokens import shadow_token_contract
 from server.services.research_graph.protocol import MAX_AGENT_TRANSITION_BYTES
 
 
@@ -499,6 +501,65 @@ def _commit_usage(
     )
 
 
+def _commit_shadow_usage(
+    *,
+    agent_id: str,
+    task_ref: str,
+    lineage_hash: str,
+    input_hash: str,
+    input_tokens: int,
+    output_tokens: int,
+    verified: bool = True,
+) -> str:
+    store = agent_flow.get_store()
+    invocation = store.reserve_invocation(
+        owner_user_id="alice",
+        agent_id=agent_id,
+        actor_role="researcher",
+        authority_scope="local_research",
+        task_ref=task_ref,
+        purpose="active Graph token shadow",
+        runtime_id="test-runtime",
+        model_id="test-model",
+        max_input_tokens=input_tokens,
+        max_output_tokens=output_tokens,
+        agent_principal_hash=hashlib.sha256(agent_id.encode()).hexdigest(),
+        lineage_hash=lineage_hash,
+        input_hash=input_hash,
+    )
+
+    class Verifier:
+        def verify(self, receipt, *, reservation):
+            return VerifiedProviderUsage(
+                provider_id="test-provider",
+                provider_request_id=receipt,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=0,
+                provider_attestation=f"signed:{receipt}",
+                launcher_attestation="verified-by:test-provider@1",
+            )
+
+    if verified:
+        store.settle_verified_invocation(
+            owner_user_id="alice",
+            invocation_id=invocation["invocation_id"],
+            receipt=f"receipt:{uuid.uuid4().hex}",
+            expected_provider_id="test-provider",
+            verifier=Verifier(),
+        )
+    else:
+        store.settle_invocation(
+            owner_user_id="alice",
+            invocation_id=invocation["invocation_id"],
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            provider_request_id=f"unverified:{uuid.uuid4().hex}",
+            provider_attestation="caller-controlled",
+        )
+    return invocation["invocation_id"]
+
+
 def _server_validation_evidence(
     *,
     version: int = 2,
@@ -507,6 +568,7 @@ def _server_validation_evidence(
     matching_run_spec: bool = True,
     launch_subagent: bool = False,
     fallback_graph_usage: bool = False,
+    extra_shadow_usage: bool = False,
 ) -> dict:
     workspace_id = f"shadow-workspace-{uuid.uuid4().hex}"
     run_spec = {
@@ -554,12 +616,26 @@ def _server_validation_evidence(
         agent_id=f"instance:{instance['instance_id']}",
         token_limit=1000,
     )
+    branch_id = instance["branches"][0]["branch_id"]
+    token_contract = shadow_token_contract(
+        graph_id="factor-research",
+        version=version,
+        instance_id=instance["instance_id"],
+        branch_id=branch_id,
+        graph_run_id=graph_run["run_id"],
+        baseline_run_id=baseline_run["run_id"],
+        run_spec_hash=graph_run["run_spec_hash"],
+    )
     if graph_tokens:
-        _commit_usage(
-            instance_id=instance["instance_id"],
+        graph_binding = token_contract["graph"]
+        _commit_shadow_usage(
+            agent_id=graph_binding["agent_id"],
+            task_ref=graph_binding["task_ref"],
+            lineage_hash=token_contract["comparison_hash"],
+            input_hash=token_contract["input_hash"],
             input_tokens=max(graph_tokens - 10, 0),
             output_tokens=min(graph_tokens, 10),
-            provider_actual=not fallback_graph_usage,
+            verified=not fallback_graph_usage,
         )
     if launch_subagent:
         _create_agent_invocation(
@@ -574,15 +650,28 @@ def _server_validation_evidence(
         token_limit=1000,
     )
     if baseline_tokens:
-        _commit_scope_usage(
-            scope_id=baseline_scope_id,
+        baseline_binding = token_contract["baseline"]
+        _commit_shadow_usage(
+            agent_id=baseline_binding["agent_id"],
+            task_ref=baseline_binding["task_ref"],
+            lineage_hash=token_contract["comparison_hash"],
+            input_hash=token_contract["input_hash"],
             input_tokens=max(baseline_tokens - 10, 0),
             output_tokens=min(baseline_tokens, 10),
+        )
+    if extra_shadow_usage:
+        _commit_shadow_usage(
+            agent_id=token_contract["graph"]["agent_id"],
+            task_ref="unapproved-extra-shadow-call",
+            lineage_hash=token_contract["comparison_hash"],
+            input_hash=token_contract["input_hash"],
+            input_tokens=1,
+            output_tokens=1,
         )
     return {
         "shadow_comparison_refs": {
             "routine_instance_id": instance["instance_id"],
-            "routine_branch_id": instance["branches"][0]["branch_id"],
+            "routine_branch_id": branch_id,
             "baseline_run_id": baseline_run["run_id"],
         },
     }
@@ -1484,7 +1573,7 @@ def test_validation_rejects_a_token_efficient_claim_with_regression(
         )
 
 
-def test_validation_rejects_reserved_fallback_as_calibration_evidence(
+def test_validation_rejects_caller_reported_usage_as_calibration_evidence(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1503,6 +1592,29 @@ def test_validation_rejects_reserved_fallback_as_calibration_evidence(
             actor="alice",
             evidence=_server_validation_evidence(
                 fallback_graph_usage=True,
+            ),
+        )
+
+
+def test_validation_rejects_unbounded_extra_shadow_usage(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    proposal, _ = _approve_proposal()
+
+    with pytest.raises(
+        ValueError,
+        match="provider_actual_token_comparison",
+    ):
+        research_graphs.record_validation(
+            graph_id="factor-research",
+            version=2,
+            proposal_id=proposal["proposal_id"],
+            actor="alice",
+            evidence=_server_validation_evidence(
+                extra_shadow_usage=True,
             ),
         )
 

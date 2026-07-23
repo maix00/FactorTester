@@ -6,6 +6,7 @@ from flask import jsonify, request
 
 from server.modules.single_factor_test import sft_bp
 from server.services import agent_flow
+from server.services.agent_flow.verified_usage import usage_receipt_verifier
 from server.services.agent_flow.authorization import (
     require_invocation_authority,
     require_resume_role,
@@ -141,19 +142,31 @@ def reserve_agent_invocation():
 def settle_agent_invocation(invocation_id: str):
     data = request.get_json(silent=True) or {}
     try:
-        invocation = agent_flow.get_store().settle_invocation(
-            owner_user_id=require_user(),
-            invocation_id=invocation_id,
-            input_tokens=data.get("input_tokens"),
-            output_tokens=data.get("output_tokens"),
-            cache_read_tokens=data.get("cache_read_tokens", 0),
-            provider_request_id=str(
-                data.get("provider_request_id") or ""
-            ),
-            provider_attestation=str(
-                data.get("provider_attestation") or ""
-            ),
-        )
+        owner = require_user()
+        receipt = str(data.get("provider_receipt") or "")
+        if receipt:
+            provider_id = str(data.get("provider_id") or "")
+            invocation = agent_flow.get_store().settle_verified_invocation(
+                owner_user_id=owner,
+                invocation_id=invocation_id,
+                receipt=receipt,
+                expected_provider_id=provider_id,
+                verifier=usage_receipt_verifier(provider_id),
+            )
+        else:
+            invocation = agent_flow.get_store().settle_invocation(
+                owner_user_id=owner,
+                invocation_id=invocation_id,
+                input_tokens=data.get("input_tokens"),
+                output_tokens=data.get("output_tokens"),
+                cache_read_tokens=data.get("cache_read_tokens", 0),
+                provider_request_id=str(
+                    data.get("provider_request_id") or ""
+                ),
+                provider_attestation=str(
+                    data.get("provider_attestation") or ""
+                ),
+            )
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
     return jsonify({"success": True, "invocation": invocation})

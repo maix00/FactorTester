@@ -111,16 +111,23 @@ class AgentFlowClientMixin(ClientMixinBase):
         cache_read_tokens: int = 0,
         provider_request_id: str = "",
         provider_attestation: str = "",
+        provider_id: str = "",
+        provider_receipt: str = "",
     ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            "provider_request_id": provider_request_id,
+            "provider_attestation": provider_attestation,
+        }
+        if provider_id:
+            payload["provider_id"] = provider_id
+        if provider_receipt:
+            payload["provider_receipt"] = provider_receipt
         data = self._expect_success(self.session.post(
             f"/api/agent-flow/invocations/{invocation_id}/settle",
-            {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cache_read_tokens": cache_read_tokens,
-                "provider_request_id": provider_request_id,
-                "provider_attestation": provider_attestation,
-            },
+            payload,
         ))
         return dict(data.get("invocation") or {})
 

@@ -1027,6 +1027,32 @@ def test_agent_flow_invocation_commands_preserve_provenance(
         },
     )
 
+    receipt_file = tmp_path / "provider-receipt.json"
+    receipt_file.write_text(
+        '{"provider_request_id":"provider-request-verified"}'
+    )
+    verified = runner.invoke(cli, [
+        "agent-flow", "invocation", "settle", "invocation-3",
+        "--provider-id", "provider-a",
+        "--provider-receipt-file", str(receipt_file),
+    ])
+    assert verified.exit_code == 0, verified.output
+    assert fake.agent_invocation_call == (
+        "settle",
+        {
+            "invocation_id": "invocation-3",
+            "input_tokens": None,
+            "output_tokens": None,
+            "cache_read_tokens": 0,
+            "provider_request_id": "",
+            "provider_attestation": "",
+            "provider_id": "provider-a",
+            "provider_receipt": (
+                '{"provider_request_id":"provider-request-verified"}'
+            ),
+        },
+    )
+
     released = runner.invoke(cli, [
         "agent-flow", "invocation", "release", "invocation-1",
     ])

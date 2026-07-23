@@ -74,7 +74,10 @@ def derive_activation_evidence(
     context_latency_ms = (time.perf_counter() - context_started) * 1000
     token_metrics = derive_token_metrics(
         owner=owner,
+        graph_id=graph_id,
+        version=version,
         instance_id=routine_instance_id,
+        branch_id=routine_branch_id,
         graph_run_id=graph_run_id,
         baseline_run_id=baseline_run_id,
         run_spec_hash=str(runs[graph_run_id]["run_spec_hash"]),

@@ -2805,3 +2805,44 @@ artifact 来源恢复；找不到 canonical bytes 时保留缺失祖先占位，
 
 如果历史 v1 plan 身份无法由代码和测试唯一证明，必须继续寻找当时 session/
 artifact，而不能改用当前 plan 猜测；最终验收仍要求 v1–v3 全部存在。
+
+## Grill 180.1 — Provider 用量信任链与 v9 Shadow 激活
+
+**决定：调用方提交的 token 数值只能称为 `caller_reported`；只有服务器通过
+provider-neutral receipt verifier 验证的用量才可称为 `provider_actual`，并参与
+Active Graph 激活。** 随机 request ID、任意 attestation 字符串或仅保存它们的 hash
+都不能证明用量来自 Provider。
+
+该决定修正了当前 `AgentInvocation` settlement 与 v9 shadow gate 的信任边界：
+
+- 普通 CLI/HTTP settlement 继续允许 Agent 无缝结算，但即使同时提交 input/output
+  token、provider request ID 和 attestation，也只能形成 `caller_reported`；
+- `provider_actual` 只能由 server-owned verified settlement 写入。可替换 verifier
+  校验 opaque receipt 与 reservation 中的 owner、provider、runtime、model、
+  `input_hash`、request identity 和 token breakdown 一致；不支持验证的 Provider
+  可以正常研究，但不能为图激活提供真实用量证据；
+- 验证成功后复用现有 `launcher_attestation_hash` 记录“本服务器 verifier 已接受该
+  receipt”的持久标记；`provider_attestation_hash` 只表示外部凭据指纹，不能单独作为
+  信任标志；
+- 复用现有 AgentBudgetPeriod 与 AgentInvocation，不新增 receipt、comparison 或 token
+  表，不保存原始凭据。Provider request 唯一约束用于防重放，不被误作真实性证明；
+- 每次激活 shadow 由 canonical graph/version、graph Run、baseline Run、共同 RunSpec
+  和冻结 workload 计算 comparison lineage。两侧必须使用相同且非空的 workload
+  `input_hash`，同时分别绑定精确的 graph instance/branch/run 与 baseline run；
+- 激活只读取该 comparison cohort，不能再把两个“当前 budget period”的无关累计用量
+  当作对照。两侧均须为已封闭、无 sponsor、角色匹配且全部 `provider_actual` 的完整
+  invocation 集合；不允许选择性登记或用其他任务补足；
+- activation 冷路径使用一次有界 grouped query 返回两侧 binding、quality、provider
+  hashes 和 token 合计，替代现有 measurement-quality 聚合。Routine Agent packet、
+  Graph transition 和普通 Job 热路径不增加数据库读取或写入；
+- token shadow 与 outcome shadow 均须使用真实 CLI Run/Job。两个空 ResearchRun 或
+  测试中手填的 70/10、90/10 只能验证协议，不能作为 v9 真实激活证据；
+- outcome shadow 是激活 smoke，不等于 MaxA 的完整 v9 Research Agent 路径。图激活后
+  仍须在同一 Work Package 完成语义、TrialPlan、样本内 IC、无费/含费对照、日夜分组、
+  Evidence/义务裁决和报告验收。
+
+验收必须覆盖：公开 settlement 不可伪造 actual；有效 receipt 可通过两种 fake Provider
+verifier 证明 provider-neutral；篡改 token/request/input/runtime/model/provider、receipt
+重放、错误 run/instance/branch/lineage、混入其他 period 或未封闭 cohort 均 fail closed；
+graph 真实 receipt 加 baseline 手填用量仍失败；token 聚合保持一次查询且最终 schema
+不增加 owner table。
