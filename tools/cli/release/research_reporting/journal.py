@@ -245,7 +245,7 @@ def validate_fragment(value: Any) -> dict[str, Any]:
     if (
         not isinstance(candidate.get("sections"), list)
         or not candidate["sections"]
-        or len(candidate["sections"]) > 8
+        or len(candidate["sections"]) > 16
         or not isinstance(candidate.get("evidence_refs"), list)
         or len(candidate["evidence_refs"]) > 64
         or not isinstance(candidate.get("gaps"), list)
@@ -270,8 +270,12 @@ def validate_fragment(value: Any) -> dict[str, Any]:
         lineage_relation != "root" or source_branch_ref
     ):
         raise ValueError("root research fragment lineage is invalid")
-    if lineage_status == "linked" and not predecessor.startswith("trace:"):
-        raise ValueError("linked research fragment requires a trace predecessor")
+    if lineage_status == "linked" and not predecessor.startswith(
+        ("trace:", "report-checkpoint:sha256:")
+    ):
+        raise ValueError(
+            "linked research fragment requires a checkpoint predecessor"
+        )
     if lineage_relation in {"branch_fork", "graph_continuation"}:
         if not source_branch_ref.startswith("graph-branch:"):
             raise ValueError("cross-branch fragment requires a source branch")

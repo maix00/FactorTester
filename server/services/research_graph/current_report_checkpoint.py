@@ -120,7 +120,7 @@ def _validate_submission(value: Any) -> tuple[str, list[dict[str, str]]]:
             not all(item.values())
             or not _SHA256.fullmatch(item["item_hash"])
             or item["content_kind"] not in {
-                "narrative", "markdown", "latex", "list", "table",
+                "sentence", "list", "table", "figure",
             }
         ):
             raise ValueError("report item is invalid")

@@ -148,8 +148,8 @@ def _validate_lineage(lineage: Any) -> None:
     if status != "linked":
         raise ValueError("report_lineage status is invalid")
     reference(predecessor, "report_lineage.predecessor_checkpoint_ref")
-    if not predecessor.startswith("trace:"):
-        raise ValueError("report lineage predecessor must be a trace ref")
+    if not predecessor.startswith(("trace:", "report-checkpoint:sha256:")):
+        raise ValueError("report lineage predecessor must be a checkpoint ref")
     if "source_branch_ref" in lineage:
         reference(lineage["source_branch_ref"], "report_lineage.source_branch_ref")
         if not lineage["source_branch_ref"].startswith("graph-branch:"):

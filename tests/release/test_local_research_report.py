@@ -13,6 +13,9 @@ from tools.cli.release.research_reporting import (
     publish_research_checkpoint as _publish_checkpoint,
     stage_historical_research_checkpoint,
 )
+from tools.cli.release.research_reporting.publisher import (
+    publish_current_node_report_checkpoint,
+)
 from tools.cli.release.research_reporting.report_items import (
     report_fragment_hash,
     report_item_hash,
@@ -254,6 +257,119 @@ def _profile(root: Path) -> LocalProfileStore:
     }]
     store.save(profile)
     return store
+
+
+def test_current_node_maxa_projection_updates_real_journal_index_and_report(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+    )
+    local_items = []
+    for index in range(11):
+        binding = {
+            "report_requirement_id": f"maxa.requirement.{index + 1}",
+            "subject_ref": "factor:SgCPSVol",
+        }
+        link = {
+            "link_id": "fact",
+            "kind": "evidence",
+            "target_ref": f"evidence:maxa-{index + 1}",
+            "label": "研究事实",
+        }
+        if index == 0:
+            content = {
+                "kind": "math",
+                "latex": (
+                    r"\operatorname{SgCPSVol}_{t}"
+                    r"=\sigma\!\left(r_{t-19:t}\right)"
+                ),
+                "fallback": "SgCPSVol 为二十日收益率波动率。",
+                "link_ids": ["fact"],
+            }
+            content_kind = "figure"
+        else:
+            content = {
+                "kind": "list",
+                "rows": [{
+                    "text": f"第{index + 1}项中文语义已完成核对。",
+                    "link_ids": ["fact"],
+                }],
+            }
+            content_kind = "list"
+        item_hash = report_item_hash(
+            **binding, content_kind=content_kind, content=content,
+        )
+        local_items.append({
+            **binding,
+            "content_kind": content_kind,
+            "item_hash": item_hash,
+            "content": content,
+            "content_zh": ["中文语义"],
+            "links": [link],
+            "report_binding": binding,
+        })
+    projected = [
+        {
+            key: item[key] for key in (
+                "report_requirement_id", "subject_ref",
+                "content_kind", "item_hash",
+            )
+        }
+        for item in local_items
+    ]
+    result = publish_current_node_report_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        projection={
+            "report_submission": {
+                "schema_version": 1,
+                "fragment_hash": report_fragment_hash(projected),
+                "items": projected,
+            },
+            "local_report_items": local_items,
+        },
+    )
+
+    package = root / "profile-root" / "research" / "sgccs-review"
+    journal = (package / "branches" / "branch-sgccs" /
+               "LOGICAL_JOURNAL.json").read_text(encoding="utf-8")
+    index = (package / "INDEX.json").read_text(encoding="utf-8")
+    report = (
+        package / "branches" / "branch-sgccs" / "REPORT.md"
+    ).read_text(encoding="utf-8")
+    assert result["checkpoint_ref"].startswith("report-checkpoint:sha256:")
+    assert result["journal_artifact_ref"].startswith(
+        "journal-artifact:sha256:"
+    )
+    assert "report-checkpoint:sha256:" in journal
+    assert "report-checkpoint:sha256:" in index
+    assert r"\operatorname{SgCPSVol}_{t}" in report
+    assert "第11项中文语义已完成核对" in report
+    replay = publish_current_node_report_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        projection={
+            "report_submission": {
+                "schema_version": 1,
+                "fragment_hash": report_fragment_hash(projected),
+                "items": projected,
+            },
+            "local_report_items": local_items,
+        },
+    )
+    assert replay["checkpoint_ref"] == result["checkpoint_ref"]
+    assert replay["changed"] is False
 
 
 def test_stages_content_addressed_passive_report_image_once(

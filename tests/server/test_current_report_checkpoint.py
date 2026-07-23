@@ -55,7 +55,7 @@ def _submission(count: int = 11) -> dict:
     ]
     items = []
     for index in range(count):
-        kind = ("narrative", "latex", "list", "table")[index % 4]
+        kind = ("sentence", "figure", "list", "table")[index % 4]
         item = {
             "report_requirement_id": f"maxa-{index + 1}",
             "subject_ref": "factor:SgCPSVol",

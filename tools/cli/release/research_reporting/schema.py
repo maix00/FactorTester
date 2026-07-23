@@ -128,7 +128,9 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
             branch_ref = item.get("branch_ref")
             if (
                 not isinstance(checkpoint_ref, str)
-                or not checkpoint_ref.startswith("trace:")
+                or not checkpoint_ref.startswith(
+                    ("trace:", "report-checkpoint:sha256:")
+                )
                 or not isinstance(branch_ref, str)
                 or not branch_ref.startswith("graph-branch:")
             ):

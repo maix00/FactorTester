@@ -69,7 +69,7 @@ def canonical_narrative(
         raise ValueError("report-enforced checkpoint requires narrative v3")
     title = chinese_text(narrative["title"], "narrative.title", maximum=256)
     sections = narrative["sections"]
-    if not isinstance(sections, list) or not sections or len(sections) > 8:
+    if not isinstance(sections, list) or not sections or len(sections) > 16:
         raise ValueError("local narrative sections must be a bounded array")
     allowed_refs = _carrier_reference_allowlist(carrier)
     result = []
@@ -213,6 +213,8 @@ def _validate_result_table_bindings(
 def _is_result_checkpoint(
     carrier: dict[str, Any], transition: dict[str, Any]
 ) -> bool:
+    if transition.get("edge_ref") == "graph-edge:__current_node_report__":
+        return False
     nodes = {carrier["current_node"], transition["to_node"]}
     if nodes & _RESULT_NODES:
         return True

@@ -208,7 +208,9 @@ def _validate_section(
         branch_ref = _reference(value["branch_ref"], "branch_ref")
         branch_parts = branch_ref.split(":")
         if (
-            not checkpoint_ref.startswith("trace:")
+            not checkpoint_ref.startswith(
+                ("trace:", "report-checkpoint:sha256:")
+            )
             or len(branch_parts) != 3
             or branch_parts[0] != "graph-branch"
             or section_ref
@@ -345,7 +347,9 @@ def _project_sections(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         branch_ref = section.get("branch_ref")
         if (
             not isinstance(checkpoint_ref, str)
-            or not checkpoint_ref.startswith("trace:")
+            or not checkpoint_ref.startswith(
+                ("trace:", "report-checkpoint:sha256:")
+            )
             or not isinstance(branch_ref, str)
             or not branch_ref.startswith("graph-branch:")
         ):

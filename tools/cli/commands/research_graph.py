@@ -14,6 +14,7 @@ from tools.cli.http import HttpSession
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.publisher import (
+    publish_current_node_report_checkpoint,
     publish_research_checkpoint,
 )
 from tools.cli.release.research_reporting.continuation_narrative import (
@@ -514,30 +515,65 @@ def show_current_graph_requirement(
     required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
-@click.option("--journal-artifact-ref", required=True)
+@click.option("--work-package-id", required=True)
+@click.option("--profile-id", required=True)
+@click.option("--agent-id", required=True)
+@click.option(
+    "--release-profile",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 def checkpoint_current_report(
     instance_id: str,
     branch_id: str,
     node_id: str,
     projection_file: Path,
-    journal_artifact_ref: str,
+    work_package_id: str,
+    profile_id: str,
+    agent_id: str,
+    release_profile: Path,
 ) -> None:
-    """登记 entry-validate 报告项；不推进 Graph 节点。"""
+    """发布 entry-validate 正文并登记；不推进 Graph 节点。"""
     projection = json.loads(projection_file.read_text(encoding="utf-8"))
-    submission = projection.get("report_submission")
-    if not isinstance(submission, dict):
+    if not isinstance(projection, dict):
         raise click.ClickException(
-            "projection file must contain report_submission"
+            "projection file must contain an entry projection"
         )
-    click.echo(_json(
-        client_from_config().append_current_report_checkpoint(
+    client_root = load_profile_root(release_profile)
+    client = _client_for_profile(client_root, profile_id)
+    branch = client.get_profile_research_branch(
+        f"work-package:{work_package_id}", branch_id,
+    )
+    carrier = branch.get("report_checkpoint")
+    if not isinstance(carrier, dict):
+        raise click.ClickException("current report Carrier is unavailable")
+    if carrier.get("current_node") != node_id:
+        raise click.ClickException("requested node is no longer current")
+    try:
+        published = publish_current_node_report_checkpoint(
+            client_root=client_root,
+            profile_id=profile_id,
+            agent_id=agent_id,
+            carrier=carrier,
+            projection=projection,
+        )
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    # Publication happens first. A failed receipt leaves a complete,
+    # content-addressed local checkpoint that the same command can retry.
+    receipt = client.append_current_report_checkpoint(
             instance_id,
             branch_id,
             node_id=node_id,
-            report_submission=submission,
-            journal_artifact_ref=journal_artifact_ref,
-        )
-    ))
+            report_submission=published["report_submission"],
+            journal_artifact_ref=published["journal_artifact_ref"],
+    )
+    click.echo(_json({
+        "checkpoint_ref": published["checkpoint_ref"],
+        "artifact": published["artifact"],
+        "receipt": receipt,
+        "changed": published["changed"],
+    }))
 
 
 @research_graph.command("fork")
