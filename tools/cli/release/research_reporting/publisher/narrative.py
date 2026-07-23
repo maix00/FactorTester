@@ -126,6 +126,7 @@ def canonical_narrative(
             section["blocks"] = _canonical_blocks(
                 item["blocks"],
                 declared_link_ids=link_ids,
+                recorded_at=carrier["latest_transition"]["created_at"],
                 expected_report_items=(
                     expected_report_items if schema_version == 3 else None
                 ),
@@ -220,6 +221,7 @@ def _is_result_checkpoint(
 
 def _canonical_blocks(
     value: Any, *, declared_link_ids: set[str],
+    recorded_at: float,
     expected_report_items: dict[tuple[str, str], dict[str, str]] | None = None,
     used_report_bindings: set[tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -231,10 +233,11 @@ def _canonical_blocks(
         if not isinstance(block, dict):
             raise ValueError("narrative block must be an object")
         report_binding = block.get("report_binding")
-        if "report_binding" in block:
+        report_timing = block.get("report_timing")
+        if "report_binding" in block or "report_timing" in block:
             block = {
                 key: item for key, item in block.items()
-                if key != "report_binding"
+                if key not in {"report_binding", "report_timing"}
             }
         kind = block.get("kind")
         if kind == "math" and set(block) == {
@@ -255,6 +258,8 @@ def _canonical_blocks(
             blocks.append(_bind_report_item(
                 projected,
                 report_binding=report_binding,
+                report_timing=report_timing,
+                recorded_at=recorded_at,
                 expected=expected_report_items,
                 used=used_report_bindings,
             ))
@@ -272,6 +277,8 @@ def _canonical_blocks(
             blocks.append(_bind_report_item(
                 projected,
                 report_binding=report_binding,
+                report_timing=report_timing,
+                recorded_at=recorded_at,
                 expected=expected_report_items,
                 used=used_report_bindings,
             ))
@@ -284,6 +291,8 @@ def _canonical_blocks(
             blocks.append(_bind_report_item(
                 {"kind": kind, "rows": rows},
                 report_binding=report_binding,
+                report_timing=report_timing,
+                recorded_at=recorded_at,
                 expected=expected_report_items,
                 used=used_report_bindings,
             ))
@@ -315,6 +324,8 @@ def _canonical_blocks(
             blocks.append(_bind_report_item(
                 projected,
                 report_binding=report_binding,
+                report_timing=report_timing,
+                recorded_at=recorded_at,
                 expected=expected_report_items,
                 used=used_report_bindings,
             ))
@@ -331,12 +342,14 @@ def _bind_report_item(
     content: dict[str, Any],
     *,
     report_binding: Any,
+    report_timing: Any,
+    recorded_at: float,
     expected: dict[tuple[str, str], dict[str, str]] | None,
     used: set[tuple[str, str]] | None,
 ) -> dict[str, Any]:
     if expected is None:
-        if report_binding is not None:
-            raise ValueError("report_binding requires narrative v3")
+        if report_binding is not None or report_timing is not None:
+            raise ValueError("report binding and timing require narrative v3")
         return content
     if not isinstance(report_binding, dict) or set(report_binding) != {
         "report_requirement_id", "subject_ref",
@@ -368,7 +381,7 @@ def _bind_report_item(
     if expected_item["report_item_ref"] != f"report-item:sha256:{item_hash}":
         raise ValueError("narrative report item hash does not match Carrier")
     used.add(key)
-    return {
+    result = {
         **content,
         "report_binding": {
             "report_requirement_id": key[0],
@@ -376,6 +389,12 @@ def _bind_report_item(
             "report_item_ref": expected_item["report_item_ref"],
         },
     }
+    if report_timing is not None:
+        result["report_timing"] = _report_timing(
+            report_timing,
+            recorded_at=recorded_at,
+        )
+    return result
 
 
 def _expected_report_items(
@@ -412,33 +431,74 @@ def _timing(
 ) -> dict[str, Any]:
     occurred_at = narrative.get("research_occurred_at")
     recorded_at = carrier["latest_transition"]["created_at"]
+    time_basis = narrative.get("time_basis")
+    refs = narrative.get("time_source_refs")
+    timing = _canonical_timing(
+        occurred_at=occurred_at,
+        time_basis=time_basis,
+        refs=refs,
+        recorded_at=recorded_at,
+        field="research",
+    )
+    return {
+        "research_occurred_at": timing["occurred_at"],
+        "time_basis": timing["time_basis"],
+        "time_source_refs": timing["time_source_refs"],
+    }
+
+
+def _report_timing(value: Any, *, recorded_at: float) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != {
+        "occurred_at", "time_basis", "time_source_refs",
+    }:
+        raise ValueError("report_timing fields are invalid")
+    return _canonical_timing(
+        occurred_at=value["occurred_at"],
+        time_basis=value["time_basis"],
+        refs=value["time_source_refs"],
+        recorded_at=recorded_at,
+        field="report",
+    )
+
+
+def _canonical_timing(
+    *, occurred_at: Any, time_basis: Any, refs: Any,
+    recorded_at: float, field: str,
+) -> dict[str, Any]:
     if (
-        not isinstance(occurred_at, (int, float))
+        type(occurred_at) not in {int, float}
         or not math.isfinite(occurred_at)
         or occurred_at < 0
         or occurred_at > recorded_at
     ):
         raise ValueError(
-            "research_occurred_at must be finite, non-negative, and not later "
+            f"{field} occurred_at must be finite, non-negative, and not later "
             "than the trusted trace"
         )
-    time_basis = narrative.get("time_basis")
     if time_basis not in {"transition", "historical_backfill"}:
-        raise ValueError("time_basis is invalid")
-    refs = narrative.get("time_source_refs")
+        raise ValueError(f"{field} time_basis is invalid")
     if (
         not isinstance(refs, list) or len(refs) > MAX_ITEMS
         or not all(isinstance(item, str) and item for item in refs)
     ):
-        raise ValueError("time_source_refs must be a bounded reference array")
+        raise ValueError(
+            f"{field} time_source_refs must be a bounded reference array"
+        )
     for item in refs:
-        reference(item, "narrative.time_source_ref")
+        reference(item, f"narrative.{field}.time_source_ref")
+    refs = sorted(set(refs))
+    if time_basis == "transition" and occurred_at != recorded_at:
+        raise ValueError(
+            f"{field} transition time must equal the trusted trace"
+        )
     if time_basis == "historical_backfill" and not refs:
-        raise ValueError("historical_backfill requires time_source_refs")
+        raise ValueError(
+            f"{field} historical_backfill requires time_source_refs"
+        )
     return {
-        "research_occurred_at": float(occurred_at),
+        "occurred_at": float(occurred_at),
         "time_basis": time_basis,
-        "time_source_refs": list(refs),
+        "time_source_refs": refs,
     }
 
 

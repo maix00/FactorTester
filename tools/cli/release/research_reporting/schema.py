@@ -142,35 +142,17 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
         if timing_fields.intersection(item):
             if not timing_fields.issubset(item):
                 raise ValueError("section occurrence timing is incomplete")
-            occurred_at = item["research_occurred_at"]
-            recorded_at = section["created_at"]
-            if (
-                not isinstance(occurred_at, (int, float))
-                or not math.isfinite(occurred_at)
-                or occurred_at < 0
-                or not isinstance(recorded_at, (int, float))
-                or not math.isfinite(recorded_at)
-                or recorded_at < 0
-                or occurred_at > recorded_at
-            ):
-                raise ValueError("section.research_occurred_at is invalid")
-            if item["time_basis"] not in {
-                "transition", "historical_backfill",
-            }:
-                raise ValueError("section.time_basis is invalid")
-            time_source_refs = _text_refs(
-                item["time_source_refs"], field="section.time_source_refs",
+            timing = _canonical_occurrence_timing(
+                occurred_at=item["research_occurred_at"],
+                time_basis=item["time_basis"],
+                time_source_refs=item["time_source_refs"],
+                recorded_at=section["created_at"],
+                field="section",
             )
-            if item["time_basis"] == "historical_backfill" and not (
-                time_source_refs
-            ):
-                raise ValueError(
-                    "historical section requires time_source_refs"
-                )
             section.update({
-                "research_occurred_at": float(occurred_at),
-                "time_basis": item["time_basis"],
-                "time_source_refs": time_source_refs,
+                "research_occurred_at": timing["occurred_at"],
+                "time_basis": timing["time_basis"],
+                "time_source_refs": timing["time_source_refs"],
             })
         _safe_id(section["section_id"], field="section_id")
         _bounded_text(section["title"], field="section.title")
@@ -191,6 +173,7 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
             section["blocks"] = _canonical_blocks(
                 item["blocks"],
                 link_ids={link["link_id"] for link in section["links"]},
+                recorded_at=section["created_at"],
             )
         sections.append(section)
     return sections
@@ -200,6 +183,7 @@ def _canonical_blocks(
     value: Any,
     *,
     link_ids: set[str],
+    recorded_at: float,
 ) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not value or len(value) > 32:
         raise ValueError("section.blocks must be a bounded array")
@@ -209,10 +193,11 @@ def _canonical_blocks(
         if not isinstance(block, dict):
             raise ValueError("section block must be an object")
         report_binding = block.get("report_binding")
-        if "report_binding" in block:
+        report_timing = block.get("report_timing")
+        if "report_binding" in block or "report_timing" in block:
             block = {
                 key: item for key, item in block.items()
-                if key != "report_binding"
+                if key not in {"report_binding", "report_timing"}
             }
         kind = block.get("kind")
         if kind == "math" and set(block) == {
@@ -235,7 +220,7 @@ def _canonical_blocks(
                     maximum=4000,
                 ),
                 "link_ids": list(refs),
-            }, report_binding))
+            }, report_binding, report_timing, recorded_at))
             used_link_ids.update(refs)
             continue
         if kind == "paragraph" and set(block) in (
@@ -257,7 +242,9 @@ def _canonical_blocks(
                     raise ValueError("section paragraph links are invalid")
                 projected["link_ids"] = list(refs)
                 used_link_ids.update(refs)
-            blocks.append(_with_report_binding(projected, report_binding))
+            blocks.append(_with_report_binding(
+                projected, report_binding, report_timing, recorded_at,
+            ))
             continue
         if kind == "list":
             expected = {"kind", "rows"}
@@ -327,15 +314,20 @@ def _canonical_blocks(
             projected_block["columns"] = columns
         if kind == "table" and result_kind is not None:
             projected_block["result_kind"] = result_kind
-        blocks.append(_with_report_binding(projected_block, report_binding))
+        blocks.append(_with_report_binding(
+            projected_block, report_binding, report_timing, recorded_at,
+        ))
     return blocks
 
 
 def _with_report_binding(
-    block: dict[str, Any], value: Any,
+    block: dict[str, Any], value: Any, report_timing: Any,
+    recorded_at: float,
 ) -> dict[str, Any]:
-    if value is None:
+    if value is None and report_timing is None:
         return block
+    if value is None:
+        raise ValueError("section report_timing requires report_binding")
     if not isinstance(value, dict) or set(value) != {
         "report_requirement_id", "subject_ref", "report_item_ref",
     }:
@@ -353,7 +345,60 @@ def _with_report_binding(
         )
     ):
         raise ValueError("section.report_binding.report_item_ref is invalid")
-    return {**block, "report_binding": dict(value)}
+    result = {**block, "report_binding": dict(value)}
+    if report_timing is not None:
+        if not isinstance(report_timing, dict) or set(report_timing) != {
+            "occurred_at", "time_basis", "time_source_refs",
+        }:
+            raise ValueError("section report_timing fields are invalid")
+        result["report_timing"] = _canonical_occurrence_timing(
+            occurred_at=report_timing["occurred_at"],
+            time_basis=report_timing["time_basis"],
+            time_source_refs=report_timing["time_source_refs"],
+            recorded_at=recorded_at,
+            field="section.report",
+        )
+    return result
+
+
+def _canonical_occurrence_timing(
+    *, occurred_at: Any, time_basis: Any, time_source_refs: Any,
+    recorded_at: Any, field: str,
+) -> dict[str, Any]:
+    if (
+        type(occurred_at) not in {int, float}
+        or not math.isfinite(occurred_at)
+        or occurred_at < 0
+        or (
+            recorded_at is not None
+            and (
+                type(recorded_at) not in {int, float}
+                or not math.isfinite(recorded_at)
+                or recorded_at < 0
+                or occurred_at > recorded_at
+            )
+        )
+    ):
+        raise ValueError(f"{field}.occurred_at is invalid")
+    if time_basis not in {"transition", "historical_backfill"}:
+        raise ValueError(f"{field}.time_basis is invalid")
+    refs = sorted(set(_text_refs(
+        time_source_refs,
+        field=f"{field}.time_source_refs",
+    )))
+    if (
+        time_basis == "transition"
+        and recorded_at is not None
+        and occurred_at != recorded_at
+    ):
+        raise ValueError(f"{field} transition time must equal recorded time")
+    if time_basis == "historical_backfill" and not refs:
+        raise ValueError(f"historical {field} requires time_source_refs")
+    return {
+        "occurred_at": float(occurred_at),
+        "time_basis": time_basis,
+        "time_source_refs": refs,
+    }
 
 
 def _canonical_links(value: Any) -> list[dict[str, str]]:

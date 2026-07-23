@@ -820,6 +820,15 @@ def test_narrative_v3_binds_graph_report_item_and_occurrence_time(
                     "report_requirement_id": report_id,
                     "subject_ref": subject_ref,
                 },
+                "report_timing": {
+                    "occurred_at": 1.75,
+                    "time_basis": "historical_backfill",
+                    "time_source_refs": [
+                        "conversation:maxa-report",
+                        "conversation:maxa-report",
+                        "conversation:maxa-factor-semantics",
+                    ],
+                },
             }],
             "links": [],
         }],
@@ -845,6 +854,40 @@ def test_narrative_v3_binds_graph_report_item_and_occurrence_time(
         "subject_ref": subject_ref,
         "report_item_ref": f"report-item:sha256:{item_hash}",
     }
+    assert section["blocks"][0]["report_timing"] == {
+        "occurred_at": 1.75,
+        "time_basis": "historical_backfill",
+        "time_source_refs": [
+            "conversation:maxa-factor-semantics",
+            "conversation:maxa-report",
+        ],
+    }
+
+    invalid_transition = deepcopy(narrative)
+    invalid_transition.update({
+        "research_occurred_at": 1.5,
+        "time_basis": "transition",
+        "time_source_refs": [],
+    })
+    with pytest.raises(ValueError, match="must equal the trusted trace"):
+        publish_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=invalid_transition,
+        )
+
+    invalid_bool = deepcopy(narrative)
+    invalid_bool["research_occurred_at"] = True
+    with pytest.raises(ValueError, match="research occurred_at"):
+        publish_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=invalid_bool,
+        )
 
 
 def test_narrative_v3_rejects_historical_time_without_source(
