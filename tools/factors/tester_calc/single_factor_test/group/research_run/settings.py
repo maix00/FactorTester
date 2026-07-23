@@ -9,6 +9,8 @@ from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
 from tools.testers.settings import backtest_setting_registry
 from tools.testers.settings.resolver import resolve_group_settings
 
+from .factor_roles import resolve_factor, resolve_factor_role_bindings
+
 
 _GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "shortAlias", "_expanded"}
 _AUTO_INFERRED_LEDGER_DEFAULTS = {
@@ -306,26 +308,25 @@ def resolve_group_strategy_settings(
         group_settings["product_mask_names"] = tuple(product_list)
 
     factor_alias = str(group.get("factorAlias", ""))
-    factor = page_factors_dict.get(factor_alias)
-    if factor is None:
-        from server.services.external_factor_artifacts import factor_by_alias
-
-        factor = factor_by_alias(data.get("external_factor_artifacts"), factor_alias)
-    if factor is None:
-        from server.services.factor_registry import factor_from_alias
-
-        try:
-            factor = factor_from_alias(
-                factor_alias,
-                username=username,
-                page_uuid=page_uuid,
-            )
-        except Exception as exc:
-            raise ValueError(
-                f"未找到因子 {factor_alias}。仅允许从当前用户可访问的公共因子家族"
-                "或当前用户自己的因子家族解析。"
-            ) from exc
-    group_settings["factor"] = factor
+    group_settings["factor"] = resolve_factor(
+        factor_alias,
+        data=data,
+        page_factors=page_factors_dict,
+        page_uuid=page_uuid,
+        username=username,
+    )
+    raw_role_bindings = group.get("factorRoleBindings")
+    if raw_role_bindings is None:
+        raw_role_bindings = group.get(
+            "factor_role_bindings", group_settings.get("factor_role_bindings")
+        )
+    group_settings["factor_role_bindings"] = resolve_factor_role_bindings(
+        raw_role_bindings,
+        data=data,
+        page_factors=page_factors_dict,
+        page_uuid=page_uuid,
+        username=username,
+    )
     return group_settings
 
 

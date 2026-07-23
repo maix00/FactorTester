@@ -55,12 +55,22 @@ def test_resolve_group_strategy_settings_converts_index_and_resolves_objects(mon
 
     factor_table = pd.DataFrame({p1: [1.0], p2: [2.0]})
     factor = _FakeFactor(factor_table)
-    page_factors_dict = {"FactorA": factor}
+    entry_factor = _FakeFactor(factor_table)
+    exit_factor = _FakeFactor(factor_table)
+    page_factors_dict = {
+        "FactorA": factor,
+        "EntryFactor": entry_factor,
+        "ExitFactor": exit_factor,
+    }
 
     g = {
         "id": "group-1",
         "product_path_selection_id": "sel-1",
         "factorAlias": "FactorA",
+        "factorRoleBindings": {
+            "entry": "EntryFactor",
+            "exit": {"factorAlias": "ExitFactor"},
+        },
         "splitCount": 5,
         "groupIndex": 2,  # 1-based
     }
@@ -78,6 +88,10 @@ def test_resolve_group_strategy_settings_converts_index_and_resolves_objects(mon
     assert selection_cache["sel-1"] is selection
 
     assert settings["factor"] is factor
+    assert settings["factor_role_bindings"] == {
+        "entry": entry_factor,
+        "exit": exit_factor,
+    }
 
 
 def test_resolve_group_strategy_settings_strips_implicit_auto_cost_basis_default(monkeypatch):

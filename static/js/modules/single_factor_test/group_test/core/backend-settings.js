@@ -789,6 +789,25 @@
             control.style.width = '16px';
             control.style.height = '16px';
             control.style.margin = '0';
+        } else if (setting.control_template === 'factor_role_bindings') {
+            var roleControl = window.FactorRoleBindingsControl;
+            if (!roleControl || typeof roleControl.render !== 'function') {
+                throw new Error('因子角色控件未加载');
+            }
+            var candidateKey = setting.serialization && setting.serialization.candidate_field || 'factor_candidates';
+            var candidateSetting = settingDef(candidateKey);
+            var strategySetting = settingDef('strategy_intent_mode');
+            return roleControl.render({
+                setting: setting,
+                value: effectiveValue(setting, mount),
+                candidates: candidateSetting ? effectiveValue(candidateSetting, mount) : [],
+                strategyKind: strategySetting ? effectiveValue(strategySetting, mount) : 'group',
+                disabled: disabled,
+                onChange: function(value) {
+                    writeValue(setting, mount, value);
+                    rerenderAfterChange();
+                },
+            });
         } else if (setting.control_template === 'custom_product_overrides') {
             control = renderCustomProductOverridesControl(setting, mount, rerenderAfterChange, disabled);
             return control;
