@@ -21,34 +21,23 @@ from tools.testers.backtest.engines.native.config import CashPoolConfig
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
+from tools.testers.backtest.policies import (
+    CashAvailabilityPolicy,
+    HierarchyConstraintPolicy,
+    OrderRoutingPolicy,
+    OrderSizingPolicy,
+    PendingOrderConflictPolicy,
+    StrategyBookPolicies,
+    StrategyIntentPolicy,
+    StrategyIntentPrecomputePolicy,
+    TradeDecisionMergePolicy,
+)
 
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.config import StrategyConfig
 
 StrategyBookMode = Literal["per_strategy_one_ledger"]
 LedgerSessionPolicyMode = Literal["error", "auto_split", "custom"]
-
-OrderRoutingPolicy = Callable[[object, object], str | Ledger]
-CashAvailabilityPolicy = Callable[[object, object, float, str], float]
-OrderSizingPolicy = Callable[[object, object, object, dict[Any, float]], dict[Any, float]]
-PendingOrderConflictPolicy = Callable[[object, object, object, object], None]
-TradeDecisionMergePolicy = Callable[[object, object], object]
-HierarchyConstraintPolicy = Callable[[object, object], object]
-StrategyIntentPrecomputePolicy = Callable[[object, object, Sequence[object], object], None]
-
-
-class StrategyIntentPolicy:
-    """Base hook for a concrete signal-to-intent policy.
-
-    Group membership, long-short composition, and future technical-rule
-    strategies can all produce trade intents, but their precompute semantics
-    differ. The owning policy implements those semantics; executable modules
-    only schedule the lifecycle flow that calls the policy.
-    """
-
-    def precompute_strategy_intents(self, state: object, ctx: object, strategies: Sequence[object]) -> None:
-        return None
-
 
 class StrategyBookModule(ExecutableModule):
     key: ClassVar[str] = "strategy_book"
@@ -139,24 +128,6 @@ class StrategyBookModule(ExecutableModule):
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (validate_ledger_sessions,)
-
-
-@dataclass
-class StrategyBookPolicies:
-    """StrategyBook extension points.
-
-    Policy slots describe user-overridable decisions that cross strategy,
-    ledger, or pending-order boundaries. Default business behavior belongs to
-    the owning module helper; StrategyBook only hosts the override slot.
-    """
-
-    order_routing: OrderRoutingPolicy | None = None
-    cash_availability: CashAvailabilityPolicy | None = None
-    order_sizing: OrderSizingPolicy | None = None
-    pending_order_conflict: PendingOrderConflictPolicy | None = None
-    trade_decision_merge: TradeDecisionMergePolicy | None = None
-    hierarchy_constraints: HierarchyConstraintPolicy | None = None
-    strategy_intent_precompute: StrategyIntentPrecomputePolicy | None = None
 
 
 @dataclass
@@ -711,6 +682,14 @@ def apply_strategy_intent_precompute_policy(
         policy(state, ctx, strategies, default_policy)
         return
     default_policy.precompute_strategy_intents(state, ctx, strategies)
+
+
+def resolve_strategy_intent_policy(
+    state: object,
+    strategy: object,
+    default_policy: StrategyIntentPolicy,
+) -> StrategyIntentPolicy:
+    return strategy_book_store_for(state).policies.strategy_intent_for(strategy, default_policy)
 
 
 def _strategy_alias(strategy: object) -> str:

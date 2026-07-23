@@ -22,7 +22,11 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.engine import EngineModule
-from tools.testers.backtest.modules.strategy_book import StrategyBookPolicies, strategy_book_store_for
+from tools.testers.backtest.modules.strategy_book import (
+    StrategyBookPolicies,
+    StrategyIntentPolicy,
+    strategy_book_store_for,
+)
 from tools.testers.backtest.modules.target import _precompute_strategy_intents
 
 
@@ -499,6 +503,44 @@ def test_precomputed_group_target_intents_uses_strategy_book_policy_hook():
 
     assert calls == [((strategy,), "GroupMembershipIntentPolicy")]
     assert account.target_store.precomputed_target_intents[strategy]
+
+
+def test_precomputed_intent_resolves_per_strategy_policy_before_kind_default():
+    custom_strategy = Strategy(alias="custom")
+    default_strategy = Strategy(alias="default")
+    strategies = (custom_strategy, default_strategy)
+    idx = pd.date_range("2024-01-01 09:00", periods=1, freq="min")
+    product = _product()
+    configs = {
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_precomputed", "precompute_strategy_intents"}),
+            field_values={GroupMembershipModule.split_count: 1, GroupMembershipModule.group_index: 0},
+        )
+        for strategy in strategies
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [10.0]}, index=idx)
+    account.factor_signal_store.put_precomputed_table("schedule", pd.DataFrame({product: [1.0]}, index=idx))
+    for strategy in strategies:
+        account.factor_signal_store.bind_precomputed_table(strategy, "schedule")
+
+    calls = []
+
+    class RecordingPolicy(StrategyIntentPolicy):
+        def precompute_strategy_intents(self, state, ctx, selected_strategies):
+            calls.append(tuple(selected_strategies))
+
+    strategy_book_store_for(account).policies = StrategyBookPolicies(
+        strategy_intent_by_alias={"custom": RecordingPolicy()},
+    )
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset(strategies))
+
+    _precompute_strategy_intents(account, ctx)
+
+    assert calls == [(custom_strategy,)]
+    assert default_strategy in account.target_store.precomputed_target_intents
+    assert custom_strategy not in account.target_store.precomputed_target_intents
 
 
 def test_group_quantile_membership_ignores_products_without_current_price():

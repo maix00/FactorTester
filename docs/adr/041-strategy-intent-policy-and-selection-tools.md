@@ -39,6 +39,16 @@ the order layer trades the difference from current holdings.
 - book-level coordination policies such as decision merge and hierarchy;
 - ledger/order overrides such as routing, cash availability, and sizing.
 
+The container is not itself one flat toolkit. A slot becomes a reusable tool
+only when it has a stable decision contract and useful composition semantics:
+
+- intent selection, decision merge, hierarchy constraints, target allocation,
+  and standard capacity/risk constraints are named toolkit components;
+- order routing, cash availability, and pending-order conflict remain runtime
+  boundary hooks because they inspect mutable ledger or order state;
+- target sizing belongs to allocation, while target-to-order conversion and
+  executable capacity remain in the order layer.
+
 `StrategyIntentPolicy` becomes a first-class per-strategy policy resolved by
 the StrategyBook. The global strategy-kind registry remains only as the catalog
 of built-in defaults during migration. A precompute-only override is not the
