@@ -66,6 +66,64 @@ class FakeClient:
             content_type="image/svg+xml",
         )
 
+    def job_order_audit(self, job_id):
+        assert job_id == "job-orders"
+        return {
+            "run_id": "run-orders",
+            "strategies": {
+                "A1": {
+                    "groups": [{
+                        "order_group_id": "G1",
+                        "status": "partially_filled",
+                        "execution_policy": "sequential_close_then_open",
+                        "supersedes_group_id": "",
+                        "products": ["RB.SHF"],
+                        "requested_quantity": 15.0,
+                        "filled_quantity": 6.0,
+                        "active_leaves": 9.0,
+                        "terminal_unfilled": 9.0,
+                        "child_count": 2,
+                        "child_order_ids": ["C1", "O1"],
+                    }],
+                    "orders": [
+                        {
+                            "order_id": "C1", "order_group_id": "G1",
+                            "product": "RB.SHF", "side": "sell",
+                            "offset": "close", "status": "partially_filled",
+                            "requested_quantity": 10.0, "filled_quantity": 6.0,
+                            "active_leaves": 4.0, "terminal_unfilled": 4.0,
+                            "next_attempt_at": "2026-01-05T09:02:00",
+                        },
+                        {
+                            "order_id": "O1", "order_group_id": "G1",
+                            "product": "RB.SHF", "side": "sell",
+                            "offset": "open", "status": "blocked",
+                            "requested_quantity": 5.0, "filled_quantity": 0.0,
+                            "active_leaves": 5.0, "terminal_unfilled": 5.0,
+                            "next_attempt_at": None,
+                        },
+                    ],
+                    "attempts": [{
+                        "attempt_id": "C1:attempt:1", "order_id": "C1",
+                        "revision": 0, "timestamp": "2026-01-05T09:01:00",
+                        "market_timestamp": "2026-01-05T09:01:00",
+                    }],
+                    "fills": [{
+                        "fill_id": "C1:fill:1", "order_id": "C1",
+                        "attempt_id": "C1:attempt:1",
+                        "timestamp": "2026-01-05T09:01:00",
+                        "quantity": 6.0, "price": 3500.0, "fee": 1.0,
+                    }],
+                    "settlements": [{
+                        "fill_id": "C1:fill:1", "realized_pnl": 10.0,
+                        "fee": 1.0, "cash_before": 100.0, "cash_after": 109.0,
+                        "margin_before": 20.0, "margin_after": 8.0,
+                    }],
+                    "actions": [],
+                },
+            },
+        }
+
     def clone_run_workspace(self, run_id, *, title=""):
         assert run_id == "run-1"
         self.clone_title = title
@@ -211,6 +269,41 @@ def test_job_watch_json_preserves_original_event(tmp_path, monkeypatch) -> None:
     event = json.loads(result.output)
     assert event["event"] == "step"
     assert event["data"]["inputs"][0]["field"] == "CashPoolModule.cash"
+
+
+def test_job_orders_lists_compact_group_rows(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.job_orders.client_from_config", lambda: fake,
+    )
+
+    result = CliRunner().invoke(cli, ["job", "orders", "job-orders"])
+
+    assert result.exit_code == 0, result.output
+    assert "order_group_id" in result.output
+    assert "G1" in result.output
+    assert "partially_filled" in result.output
+    assert "RB.SHF" in result.output
+
+
+def test_job_order_json_expands_one_atomic_order(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.job_orders.client_from_config", lambda: fake,
+    )
+
+    result = CliRunner().invoke(cli, [
+        "job", "order", "job-orders", "G1", "--order-id", "C1", "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert [row["order_id"] for row in payload["orders"]] == ["C1"]
+    assert payload["attempts"][0]["attempt_id"] == "C1:attempt:1"
+    assert payload["fills"][0]["fill_id"] == "C1:fill:1"
+    assert payload["settlements"][0]["margin_after"] == 8.0
 
 
 def test_job_step_field_prints_exact_serialized_record(tmp_path, monkeypatch) -> None:
@@ -615,7 +708,10 @@ def test_orders_render_as_rows_with_rejection_semantics() -> None:
 
     order = {
         "instrument": "AP.CZC", "quantity": 2, "intent_quantity": 3,
-        "status": "rejected", "reject_reason": "cash", "order_id": "o1", "fields": {},
+        "status": "rejected", "reject_reason": "cash", "order_id": "o1",
+        "order_group_id": "g1", "offset": "open",
+        "requested_quantity": 3, "accepted_quantity": 3, "filled_quantity": 1,
+        "fields": {},
     }
     lines = render_step_event({
         "flow_id": "orders", "inputs": [], "outputs": [],
@@ -624,6 +720,8 @@ def test_orders_render_as_rows_with_rejection_semantics() -> None:
     output = "\n".join(lines)
     assert "orders" in output and "quantity" in output and "intent" in output
     assert "rejected" in output and "cash" in output and "o1" in output
+    assert "groups" in output and "g1" in output and "active_leaves" in output
+    assert "job orders/order" in output
     assert "step-field" in output
     assert '"reject_reason"' not in output
 

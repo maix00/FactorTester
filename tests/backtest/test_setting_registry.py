@@ -54,7 +54,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "label": "Native 事件驱动回测工具",
     }
     assert index["defaults"]["order_type"]["value"] == "market"
-    assert index["defaults"]["matching_model"]["value"] == "next_bar_full_fill"
+    assert index["defaults"]["matching_model"]["value"] == "auto"
     assert index["defaults"]["quantity_rounding_policy"]["value"] == "floor_to_lot"
     assert index["defaults"]["volatility_lookback"]["visible_when"] == {
         "allocation_policy": ["inverse_volatility"],

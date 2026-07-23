@@ -18,10 +18,12 @@ from .orders import (
     OrderSide,
     OrderStatus,
     TimeInForce,
+    derive_group_status,
 )
 
 __all__ = [
     "Fill", "FillSettlement", "Order", "OrderAction", "OrderActionType",
     "OrderAttempt", "OrderEffect", "OrderGroup", "OrderLegRole", "OrderOffset",
     "OrderSide", "OrderStatus", "TimeInForce",
+    "derive_group_status",
 ]
