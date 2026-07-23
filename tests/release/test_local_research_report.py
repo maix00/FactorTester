@@ -1000,12 +1000,19 @@ def test_graph_continuation_replaces_physical_branch_in_work_package_index(
         "predecessor_checkpoint_ref": "trace:checkpoint-1",
         "source_branch_ref": "graph-branch:sgccs-review:branch-sgccs",
     }
+    continuation_narrative = _narrative(
+        continued, body="同一研究在图 v8 中连续开展。",
+    )
+    continuation_narrative["title"] = "研究图切换：factor-research@v8"
+    continuation_narrative["sections"][0]["title"] = (
+        "研究图切换与当前节点重新进入"
+    )
     publish_research_checkpoint(
         client_root=root,
         profile_id="maxa",
         agent_id="research-maxa",
         carrier=continued,
-        narrative=_narrative(continued, body="同一研究在图 v8 中连续开展。"),
+        narrative=continuation_narrative,
     )
 
     package_root = root / "profile-root" / "research" / "sgccs-review"
@@ -1025,7 +1032,11 @@ def test_graph_continuation_replaces_physical_branch_in_work_package_index(
     continued_report = (
         package_root / "branches" / "branch-v8" / "REPORT.md"
     ).read_text(encoding="utf-8")
+    assert continued_report.startswith("# SgCCS review\n")
+    assert "# 研究图切换：factor-research@v8" not in continued_report
+    assert "## 研究图切换与当前节点重新进入" in continued_report
     assert "旧图版本已完成可信研究检查点" in continued_report
+    assert store.load("maxa")["research_records"][0]["title"] == "SgCCS review"
     source_journal = json.loads((
         package_root / "branches" / "branch-sgccs" / "JOURNAL.json"
     ).read_text())

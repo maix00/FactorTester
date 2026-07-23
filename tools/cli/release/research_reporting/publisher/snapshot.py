@@ -9,6 +9,7 @@ from typing import Any
 
 def report_snapshot(
     carrier: dict[str, Any], *, narrative: dict[str, Any],
+    report_title: str,
     workspace_id: str, work_package_id: str,
     branch_id: str, factor_family_versions: list[str],
     scope_identity: dict[str, Any],
@@ -71,7 +72,7 @@ def report_snapshot(
         "workspace_id": workspace_id,
         "work_package_id": work_package_id,
         "branch_id": branch_id,
-        "title": narrative["title"],
+        "title": report_title,
         "status": carrier["status"],
         "product_group": carrier["product_group"],
         "current_node": carrier["current_node"],

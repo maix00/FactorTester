@@ -98,6 +98,7 @@ def publish_research_checkpoint(
     snapshot = report_snapshot(
         value,
         narrative=narrative_value,
+        report_title=record["title"],
         workspace_id=workspace_id,
         work_package_id=work_package_id,
         branch_id=branch_id,
@@ -160,7 +161,6 @@ def publish_research_checkpoint(
     descriptor = deepcopy(report["local_artifact_descriptor"])
     updated = deepcopy(record)
     updated.update({
-        "title": value["title"],
         "status": "ready",
         "updated_at": value["latest_transition"]["created_at"],
         "checkpoint_ref": value["checkpoint_ref"],

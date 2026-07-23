@@ -158,6 +158,7 @@ def _context(
     snapshot = report_snapshot(
         value,
         narrative=narrative_value,
+        report_title=record["title"],
         workspace_id=workspace_id,
         work_package_id=work_package_id,
         branch_id=branch_id,
