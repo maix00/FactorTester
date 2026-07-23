@@ -12,15 +12,19 @@ def test_event_kind_values_and_ordering():
         EventKind.FIELD_CHANGE,
         EventKind.ORDER,
         EventKind.SIGNAL,
+        EventKind.LIFECYCLE_NOTICE,
         EventKind.TRADE_INTENT,
         EventKind.LEDGER,
     ]
     assert EventKind.BAR == 0
     assert EventKind.SIGNAL == 10
+    assert EventKind.LIFECYCLE_NOTICE == 14
     assert EventKind.TRADE_INTENT == 15
     assert EventKind.ORDER == 5
     assert EventKind.BAR < EventKind.ORDER
     assert EventKind.ORDER < EventKind.SIGNAL
+    assert EventKind.SIGNAL < EventKind.LIFECYCLE_NOTICE
+    assert EventKind.LIFECYCLE_NOTICE < EventKind.TRADE_INTENT
     assert EventKind.SIGNAL < EventKind.TRADE_INTENT
 
 

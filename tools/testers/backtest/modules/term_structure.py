@@ -191,7 +191,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         inputs=(_POSITIONS_REF,),
         outputs=(forced_close_orders,),
         phase=Phase.PER_EVENT,
-        event_kind=EventKind.TRADE_INTENT,
+        event_kind=EventKind.LIFECYCLE_NOTICE,
         order=15,
         description="处理交割强平通知",
         event_payload_inputs=("force_close",),
@@ -265,7 +265,7 @@ class RolloverModule(ExecutableModule):
         inputs=(_POSITIONS_REF,),
         outputs=(rollover_orders,),
         phase=Phase.PER_EVENT,
-        event_kind=EventKind.TRADE_INTENT,
+        event_kind=EventKind.LIFECYCLE_NOTICE,
         order=10,
         description="处理换月通知",
         event_payload_inputs=("rollover",),
@@ -1061,7 +1061,12 @@ def _lifecycle_event_drafts(
             "notice_type": notice_type,
             "notice_reason": notice_reason,
         }
-        drafts.append(EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload=payload))
+        drafts.append(EventDraft(
+            EventKind.LIFECYCLE_NOTICE,
+            ts,
+            strategy,
+            payload=payload,
+        ))
     return drafts
 
 
