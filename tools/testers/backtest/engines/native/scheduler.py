@@ -775,7 +775,7 @@ class FlowContext:
                 f"payload_for expected exactly one draft for {strategy!r} in this "
                 f"batch, found {len(drafts)} -- use payloads_for for event kinds "
                 "that can carry multiple simultaneous drafts per strategy (e.g. ORDER)")
-        payload = drafts[0].payload
+        payload = _unwrap_order_attempt(drafts[0].payload)
         self._record_event_payload_read([payload])
         return payload
 
@@ -790,7 +790,10 @@ class FlowContext:
         if cached is None:
             cached = [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
             self._payloads_by_strategy_cache[strategy] = cached
-        payloads = self._filter_event_payloads(cached, kind=kind)
+        payloads = [
+            _unwrap_order_attempt(payload)
+            for payload in self._filter_event_payloads(cached, kind=kind)
+        ]
         self._record_event_payload_read(payloads)
         return payloads
 
@@ -1705,6 +1708,9 @@ def make_dispatcher(
     strategies_by_ledger = _ledger_strategy_sets(state)
 
     def handler(batch: list[EventDraft]) -> None:
+        batch = _actionable_event_batch(state, batch)
+        if not batch:
+            return
         timestamp = batch[0].timestamp
         # A strategy can appear more than once in one batch (e.g. several
         # ORDER events for different products at the same timestamp) --
@@ -1763,6 +1769,34 @@ def make_dispatcher(
         if tracker is not None and batch and batch[0].kind is EventKind.SIGNAL:
             tracker.signal_batch_done(len(batch))
     return handler
+
+
+def _unwrap_order_attempt(payload: Any) -> Any:
+    from .order import OrderAttempt
+
+    return payload.order if isinstance(payload, OrderAttempt) else payload
+
+
+def _actionable_event_batch(
+    state: "BacktestRunState",
+    batch: list[EventDraft],
+) -> list[EventDraft]:
+    if not batch or batch[0].kind is not EventKind.ORDER:
+        return batch
+    from .order import OrderAttempt
+
+    actionable: list[EventDraft] = []
+    for draft in batch:
+        attempt = draft.payload
+        if not isinstance(attempt, OrderAttempt):
+            actionable.append(draft)
+            continue
+        if not state.order_store.attempt_is_actionable(attempt):
+            continue
+        attempt.order.set("active_attempt_id", attempt.attempt_id)
+        attempt.order.set("active_market_timestamp", attempt.market_timestamp)
+        actionable.append(draft)
+    return actionable
 
 
 def _ledger_identity_for_scheduler(ledger: Any) -> Any:

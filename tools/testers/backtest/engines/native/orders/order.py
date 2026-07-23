@@ -33,6 +33,7 @@ class Order:
     order_id: str = ""
     fields: dict[str, Any] = field(default_factory=dict)
     requested_quantity: float | None = None
+    accepted_quantity: float | None = None
     filled_quantity: float = 0.0
     parent_intent_id: str = ""
     order_group_id: str = ""
@@ -50,6 +51,10 @@ class Order:
             self.requested_quantity = abs(float(self.quantity))
         if self.requested_quantity < 0:
             raise ValueError("Order.requested_quantity must be non-negative")
+        if self.accepted_quantity is None:
+            self.accepted_quantity = self.requested_quantity
+        if self.accepted_quantity < 0:
+            raise ValueError("Order.accepted_quantity must be non-negative")
         if self.filled_quantity < 0:
             raise ValueError("Order.filled_quantity must be non-negative")
         if self.side is None:
@@ -60,7 +65,7 @@ class Order:
 
     @property
     def current_order_quantity(self) -> float:
-        return abs(float(self.quantity))
+        return float(self.accepted_quantity or 0.0)
 
     @property
     def unfilled_quantity(self) -> float:

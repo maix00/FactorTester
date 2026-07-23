@@ -16,6 +16,7 @@ from tools.testers.backtest.modules.market_data import (
 )
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
+from tools.testers.backtest.modules.order_lifecycle import create_order_attempt
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 from tools.testers.backtest.modules.time_index_lookup import signal_timestamps
 
@@ -88,11 +89,14 @@ def schedule_order_execution(state, ctx) -> None:
                     "price_timestamp", stale.timestamp,
                 ) > ctx.timestamp:
                     stale.status = OrderStatus.CANCELLED
-            order.status = OrderStatus.SCHEDULED
-            order.timestamp = execution_ts
-            order.set("price_timestamp", price_ts)
+            attempt = create_order_attempt(
+                state,
+                order,
+                timestamp=execution_ts,
+                market_timestamp=price_ts,
+            )
             pending[key] = order
-            drafts.append(EventDraft(EventKind.ORDER, execution_ts, strategy, order))
+            drafts.append(EventDraft(EventKind.ORDER, execution_ts, strategy, attempt))
     if drafts:
         ctx.set(GroupMembershipModule.dispatched_order_events, drafts)
 

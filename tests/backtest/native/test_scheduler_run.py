@@ -6,7 +6,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import StrategyConfig
-from tools.testers.backtest.engines.native.order import Order, OrderStatus
+from tools.testers.backtest.engines.native.order import Order, OrderAttempt, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy import Strategy
 
@@ -120,6 +120,52 @@ def test_chained_event_production_is_consumed_not_dropped():
     run(account, queue, registry.resolve())
 
     assert fills == ["signal", "order"]
+
+
+def test_stale_order_attempt_is_skipped_before_order_flows_run():
+    s = Strategy(alias="S")
+    called: list[str] = []
+    timestamp = pd.Timestamp("2024-01-02")
+    order = Order(
+        instrument="P1",
+        timestamp=timestamp,
+        quantity=1.0,
+        intent_quantity=1.0,
+        strategy=s,
+        status=OrderStatus.SCHEDULED,
+        order_id="O1",
+    )
+    attempt = OrderAttempt(
+        attempt_id="A1",
+        order_id=order.order_id,
+        revision=order.revision,
+        timestamp=timestamp,
+        market_timestamp=timestamp,
+        _order=order,
+    )
+    flow = Flow(
+        "on_stale_order",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        compute=lambda _state, _ctx: called.append("order"),
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    account = _account([s], active_flow_names=frozenset({"on_stale_order"}))
+    account.order_store.register_order(order)
+    account.order_store.register_attempt(attempt)
+    order.revision += 1
+
+    from tools.testers.backtest.engines.native.scheduler import make_dispatcher, sort_and_validate
+
+    flows = sort_and_validate(registry.resolve())[(Phase.PER_EVENT, EventKind.ORDER)]
+    make_dispatcher(flows, account, EventQueue())([
+        EventDraft(EventKind.ORDER, timestamp, s, attempt),
+    ])
+
+    assert called == []
 
 
 def test_dispatch_grouped_by_active_flow_names():

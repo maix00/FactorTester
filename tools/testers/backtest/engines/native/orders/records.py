@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import pandas as pd
 
@@ -16,6 +17,21 @@ class OrderAttempt:
     revision: int
     timestamp: pd.Timestamp
     market_timestamp: pd.Timestamp
+    _order: Any = field(repr=False, compare=False)
+
+    @property
+    def order(self) -> Any:
+        return self._order
+
+    def to_audit_dict(self) -> dict[str, Any]:
+        return {
+            "type": "OrderAttempt",
+            "attempt_id": self.attempt_id,
+            "order_id": self.order_id,
+            "revision": self.revision,
+            "timestamp": self.timestamp,
+            "market_timestamp": self.market_timestamp,
+        }
 
 
 @dataclass(frozen=True)

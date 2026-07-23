@@ -58,6 +58,7 @@ def test_stale_attempt_revision_is_not_actionable():
         revision=order.revision,
         timestamp=pd.Timestamp("2024-01-02"),
         market_timestamp=pd.Timestamp("2024-01-02"),
+        _order=order,
     )
     store.register_attempt(attempt)
     order.revision += 1
