@@ -14,9 +14,14 @@ import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.modules.market_data import MarketDataModule, market_price_tables_for
+from tools.testers.backtest.modules.engine import bar_price_visibility_timestamp
+from tools.testers.backtest.modules.market_data import (
+    MarketDataModule,
+    market_price_tables_for,
+    resolved_bar_frequency_for_strategy,
+)
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
-from tools.testers.backtest.modules.time_index_lookup import row_at
+from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
 from .base import ExecutableModule, FieldDefinition, FieldRef
 
 
@@ -94,14 +99,50 @@ def _price_table(state: Any, basis: str) -> pd.DataFrame:
 def _execution_price_at(state: Any, order: Any, basis: str) -> float:
     timestamp = cast(pd.Timestamp, order.get("price_timestamp", order.timestamp))
     table = _price_table(state, basis)
+    _require_price_visible(state, order, basis, table, timestamp)
     row = row_at(table, timestamp, asof=False)
     return float(cast(Any, row[order.instrument]))
+
+
+def _require_price_visible(
+    state: Any,
+    order: Any,
+    basis: str,
+    table: pd.DataFrame,
+    price_timestamp: pd.Timestamp,
+) -> None:
+    if basis == "open":
+        return
+    series = table[order.instrument].dropna()
+    index = signal_timestamps(series)
+    positions = index.get_indexer(pd.Index([price_timestamp]))
+    price_pos = int(positions[0]) if len(positions) else -1
+    if price_pos < 0:
+        raise KeyError(
+            f"execution price timestamp {price_timestamp} is absent for "
+            f"{order.instrument}"
+        )
+    config = state.config_for(order.strategy)
+    visible_at = bar_price_visibility_timestamp(
+        index,
+        price_pos=price_pos,
+        basis=basis,
+        config=config,
+        bar_freq=resolved_bar_frequency_for_strategy(
+            state, order.strategy,
+        ),
+    )
+    order_timestamp = pd.Timestamp(order.timestamp)
+    if order_timestamp < visible_at:
+        raise ValueError(
+            f"execution basis {basis!r} for {order.instrument} is not visible "
+            f"until {visible_at}; order timestamp is {order_timestamp}"
+        )
 
 
 def _resolve_execution_price(state: Any, ctx: Any) -> None:
     resolved: dict[Any, dict[Any, float]] = {}
     constraints = ctx.get(MarketDataModule.current_order_constraints, {})
-    current_prices = ctx.get(MarketDataModule.current_prices, {}) or {}
     store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
@@ -113,9 +154,11 @@ def _resolve_execution_price(state: Any, ctx: Any) -> None:
             ))
             if basis != "open" and order.get("matching_model") != "bar_volume_limited":
                 raise ValueError("next-bar full-fill execution requires next-bar open price")
-            price = current_prices.get(order.instrument)
-            if price is None:
-                price = _execution_price_at(state, order, basis)
+            # Resolve against this immutable attempt's own market timestamp and
+            # basis.  A batch-level current_prices view cannot represent mixed
+            # OPEN and completed-bar capacity attempts without overwriting one
+            # order's policy with another's.
+            price = _execution_price_at(state, order, basis)
             order.set("execution_price_basis", basis)
             order.set("effective_price", float(price))
             reject_reason = _reject_reason_for_order(order, constraints)

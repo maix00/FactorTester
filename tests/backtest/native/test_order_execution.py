@@ -80,6 +80,96 @@ def test_execution_price_rejects_close_or_vwap_basis():
         _resolve_execution_price(account, ctx)
 
 
+def test_completed_bar_capacity_order_uses_its_declared_close_basis():
+    product = _product()
+    idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+    completed_bar_ts = idx[1]
+    strategy = Strategy(alias="volume-limited")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            OrderExecutionModule.execution_price_basis: "open",
+        }),
+    })
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0, 20.0]}, index=idx),
+        "close": pd.DataFrame({product: [11.0, 21.0]}, index=idx),
+    }
+    order = Order(
+        instrument=product, timestamp=completed_bar_ts, quantity=1.0,
+        intent_quantity=1.0, strategy=strategy,
+    )
+    order.set("price_timestamp", completed_bar_ts)
+    order.set("matching_model", "bar_volume_limited")
+    order.set("execution_price_basis", "close")
+    ctx = FlowContext(
+        timestamp=completed_bar_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset((strategy,)),
+        drafts_by_strategy={
+            strategy: [
+                EventDraft(
+                    EventKind.ORDER, completed_bar_ts, strategy, order,
+                ),
+            ],
+        },
+    )
+    # This reproduces the old bug: the global ORDER view followed the ordinary
+    # open policy even though the completed-bar attempt explicitly chose close.
+    ctx.set(MarketDataModule.current_prices, {product: 20.0})
+    ctx.set(MarketDataModule.current_order_constraints, {
+        product: OrderTradeConstraint(
+            tradable=True, can_buy=True, can_sell=True,
+        ),
+    })
+
+    _resolve_execution_price(account, ctx)
+
+    assert order.get("effective_price") == 21.0
+
+
+def test_completed_bar_price_is_rejected_at_next_bar_open_visibility_time():
+    product = _product()
+    idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+    next_bar_open_visible_at = idx[0] + pd.Timedelta(microseconds=1)
+    strategy = Strategy(alias="premature-capacity")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            OrderExecutionModule.execution_price_basis: "open",
+        }),
+    })
+    account.market_data_store.market_price_tables = {
+        "close": pd.DataFrame({product: [11.0, 21.0]}, index=idx),
+    }
+    order = Order(
+        instrument=product, timestamp=next_bar_open_visible_at, quantity=1.0,
+        intent_quantity=1.0, strategy=strategy,
+    )
+    order.set("price_timestamp", idx[1])
+    order.set("matching_model", "bar_volume_limited")
+    order.set("execution_price_basis", "close")
+    ctx = FlowContext(
+        timestamp=next_bar_open_visible_at,
+        event_queue=EventQueue(),
+        active_strategies=frozenset((strategy,)),
+        drafts_by_strategy={
+            strategy: [
+                EventDraft(
+                    EventKind.ORDER, next_bar_open_visible_at, strategy, order,
+                ),
+            ],
+        },
+    )
+    ctx.set(MarketDataModule.current_order_constraints, {
+        product: OrderTradeConstraint(
+            tradable=True, can_buy=True, can_sell=True,
+        ),
+    })
+
+    import pytest
+    with pytest.raises(ValueError, match="is not visible until"):
+        _resolve_execution_price(account, ctx)
+
+
 def test_execution_constraint_rejects_buy_at_upper_limit_but_keeps_sell_allowed():
     product = _product()
     idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")

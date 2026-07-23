@@ -23,6 +23,7 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 from tools.testers.backtest.modules.strategy_book import (
     StrategyBookPolicies,
     StrategyIntentPolicy,
@@ -880,6 +881,28 @@ def test_resolve_execution_schedule_next_bar_open_uses_next_row_price_and_open_v
 
     assert open_event_ts == idx[0] + pd.Timedelta(microseconds=1)
     assert open_price_ts == idx[1]
+
+
+def test_volume_limited_schedule_waits_until_target_bar_is_complete():
+    strategy = Strategy(alias="volume-limited")
+    idx = pd.date_range("2024-01-01 09:01", periods=3, freq="1min")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            GroupMembershipModule.execution_timing: "next_bar",
+            GroupMembershipModule.execution_delay_bars: 1,
+            OrderExecutionModule.matching_model: "bar_volume_limited",
+            OrderExecutionModule.volume_execution_price_basis: "close",
+            VolumeCapacityMode.liquidity_mode: "volume_participation",
+        }),
+    })
+    account.market_data_store.market_price_tables = {
+        "close": pd.DataFrame({"P1": [1.0, 2.0, 3.0]}, index=idx),
+    }
+    ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue())
+
+    schedule = _resolve_execution_schedule(account, ctx, strategy)
+
+    assert schedule == (idx[1], idx[1])
 
 
 def test_resolve_execution_schedule_allows_configured_open_visibility_delay():
