@@ -59,6 +59,8 @@ def test_margin_budget_scales_equal_notional_targets_and_publishes_step_fields()
     MarginBudgetModule.apply_target_margin_budget.compute(state, ctx)
 
     weights = ctx.get_for(TargetStrategyModule.target_weights, strategy)
+    scaled_intent = ctx.get_for(TargetStrategyModule.trade_intent, strategy)
+    assert type(scaled_intent) is TargetWeightIntent
     assert list(weights.values()) == pytest.approx([1.6] * 4)
     assert ctx.get(MarginBudgetModule.gross_leverage)["private:A1"] == pytest.approx(6.4)
     assert ctx.get(MarginBudgetModule.projected_margin)["private:A1"] == pytest.approx(80_000_000.0)
