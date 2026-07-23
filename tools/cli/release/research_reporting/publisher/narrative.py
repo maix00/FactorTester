@@ -543,8 +543,14 @@ def _validate_link_ids(
     declared_link_ids: set[str],
     used_link_ids: set[str],
     owner: str,
+    *,
+    allow_empty: bool = False,
 ) -> None:
-    if not isinstance(refs, list) or not refs or len(refs) > MAX_ITEMS:
+    if (
+        not isinstance(refs, list)
+        or (not refs and not allow_empty)
+        or len(refs) > MAX_ITEMS
+    ):
         raise ValueError(f"narrative {owner} link_ids are invalid")
     for link_id in refs:
         safe_id(link_id, f"narrative.{owner}.link_id")
@@ -574,7 +580,11 @@ def _canonical_rows(
             raise ValueError("narrative row fields are invalid")
         link_ids = item["link_ids"]
         _validate_link_ids(
-            link_ids, declared_link_ids, used_link_ids, "row",
+            link_ids,
+            declared_link_ids,
+            used_link_ids,
+            "row",
+            allow_empty=True,
         )
         if table_columns is None:
             rows.append({

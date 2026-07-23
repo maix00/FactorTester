@@ -307,7 +307,6 @@ def _canonical_blocks(
             refs = row["link_ids"]
             if (
                 not isinstance(refs, list)
-                or not refs
                 or len(refs) > 16
                 or any(ref not in link_ids for ref in refs)
             ):

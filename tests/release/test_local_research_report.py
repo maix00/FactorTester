@@ -1822,6 +1822,62 @@ def test_structured_narrative_rejects_unbound_row_chip(tmp_path: Path) -> None:
         )
 
 
+def test_structured_narrative_allows_explanatory_rows_without_chips(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    base = _narrative(carrier)
+    links = base["sections"][0]["links"]
+    narrative = {
+        "schema_version": 2,
+        "language": "zh-Hans",
+        "title": "因子研究报告",
+        "sections": [{
+            "section_id": "research-progress",
+            "title": "研究进展",
+            "blocks": [{
+                "kind": "list",
+                "rows": [{
+                    "text": "本条仅解释研究判断，不虚构证据引用。",
+                    "link_ids": [],
+                }, {
+                    "text": "本检查点的研究对象仍可按引用审计。",
+                    "link_ids": [item["link_id"] for item in links],
+                }],
+            }, {
+                "kind": "table",
+                "columns": ["事项", "说明"],
+                "rows": [{
+                    "cells": ["下一步", "准备验证设计"],
+                    "link_ids": [],
+                }, {
+                    "cells": ["检查点", "研究对象均可按引用审计"],
+                    "link_ids": [item["link_id"] for item in links],
+                }],
+            }],
+            "links": links,
+        }],
+    }
+
+    result = publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        narrative=narrative,
+    )
+
+    journal = Path(
+        result["artifact"]["journal_ref"].removeprefix("file://")
+    )
+    saved = json.loads(journal.read_text())
+    section = saved["checkpoints"][-1]["sections"][0]
+    assert section["blocks"][0]["rows"][0]["link_ids"] == []
+    assert section["blocks"][1]["rows"][0]["link_ids"] == []
+
+
 def test_result_checkpoint_requires_job_and_run_in_result_table(
     tmp_path: Path,
 ) -> None:
