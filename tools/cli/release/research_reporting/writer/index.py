@@ -282,13 +282,23 @@ def merge_index(
         _validate_index(value, snapshot)
         return value
     projected_sections = _project_sections(snapshot)
-    projected_refs = {
-        item["section_ref"] for item in projected_sections
+    projected_branch_prefixes = {
+        (
+            "report-section:"
+            f"{section['branch_ref'].split(':')[-1]}:"
+        )
+        for section in snapshot["sections"]
     }
+    projected_branch_prefixes.add(
+        f"report-section:{snapshot['branch_id']}:"
+    )
     merged_sections = sorted(
         [
             item for item in value["sections"]
-            if item["section_ref"] not in projected_refs
+            if not any(
+                item["section_ref"].startswith(prefix)
+                for prefix in projected_branch_prefixes
+            )
         ]
         + projected_sections,
         key=lambda item: (item["created_at"], item["section_ref"]),

@@ -545,6 +545,123 @@ def test_current_node_maxa_projection_updates_real_journal_index_and_report(
     assert replay["changed"] is False
 
 
+def test_current_node_report_projects_latest_revision_per_requirement_subject(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+    )
+
+    report_id = "report.node.validation_design.action"
+    trial_a = "trial-plan:sha256:" + "a" * 64
+    trial_b = "trial-plan:sha256:" + "b" * 64
+
+    def projection(
+        rows: list[tuple[str, str, str]],
+    ) -> dict[str, object]:
+        local_items = []
+        submitted = []
+        for subject_ref, text, evidence_ref in rows:
+            binding = {
+                "report_requirement_id": report_id,
+                "subject_ref": subject_ref,
+            }
+            content = {
+                "kind": "list",
+                "rows": [{
+                    "text": text,
+                    "link_ids": ["evidence"],
+                }],
+            }
+            item_hash = report_item_hash(
+                **binding,
+                content_kind="list",
+                content=content,
+            )
+            submitted.append({
+                **binding,
+                "content_kind": "list",
+                "item_hash": item_hash,
+            })
+            local_items.append({
+                **binding,
+                "title_zh": text,
+                "content_kind": "list",
+                "item_hash": item_hash,
+                "content": content,
+                "content_zh": [text],
+                "links": [{
+                    "link_id": "evidence",
+                    "kind": "evidence",
+                    "target_ref": evidence_ref,
+                    "label": text,
+                }],
+                "report_binding": binding,
+            })
+        return {
+            "report_submission": {
+                "schema_version": 1,
+                "fragment_hash": report_fragment_hash(submitted),
+                "items": submitted,
+            },
+            "local_report_items": local_items,
+        }
+
+    first = publish_current_node_report_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        projection=projection([
+            (trial_a, "试验 A 的旧版分析", "evidence:trial-a-v1"),
+            (trial_b, "试验 B 的独立分析", "evidence:trial-b-v1"),
+        ]),
+    )
+    second = publish_current_node_report_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        projection=projection([
+            (trial_a, "试验 A 的最新修订", "evidence:trial-a-v2"),
+        ]),
+    )
+
+    branch_root = (
+        root / "profile-root" / "research" / "sgccs-review"
+        / "branches" / "branch-sgccs"
+    )
+    report = (branch_root / "REPORT.md").read_text(encoding="utf-8")
+    logical = json.loads(
+        (branch_root / "LOGICAL_JOURNAL.json").read_text(encoding="utf-8")
+    )
+    index = json.loads(
+        (branch_root.parent.parent / "INDEX.json").read_text(encoding="utf-8")
+    )
+
+    assert first["checkpoint_ref"] != second["checkpoint_ref"]
+    assert "试验 A 的旧版分析" not in report
+    assert report.count("试验 A 的最新修订") == 2
+    assert report.count("试验 B 的独立分析") == 2
+    journal_text = json.dumps(logical, ensure_ascii=False)
+    assert "试验 A 的旧版分析" in journal_text
+    assert "试验 A 的最新修订" in journal_text
+    assert "试验 B 的独立分析" in journal_text
+    indexed_text = [
+        item["title"] + "\n" + item["summary"]
+        for item in index["sections"]
+    ]
+    assert not any("试验 A 的旧版分析" in item for item in indexed_text)
+    assert any("试验 A 的最新修订" in item for item in indexed_text)
+    assert any("试验 B 的独立分析" in item for item in indexed_text)
+
+
 def test_stages_content_addressed_passive_report_image_once(
     tmp_path: Path,
 ) -> None:
