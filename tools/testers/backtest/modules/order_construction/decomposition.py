@@ -29,6 +29,7 @@ def decompose_position_delta(
     parent_intent_id: str,
     order_ids: Iterator[str],
     cost_basis_method: str,
+    supersedes_group_id: str = "",
 ) -> tuple[OrderGroup, list[Order]]:
     current = float(getattr(position, "quantity", 0.0) or 0.0)
     close_quantity = (
@@ -64,6 +65,7 @@ def decompose_position_delta(
         parent_intent_id=parent_intent_id,
         created_at=timestamp,
         child_order_ids=tuple(order.order_id for order in orders),
+        supersedes_group_id=supersedes_group_id,
     )
     return group, orders
 

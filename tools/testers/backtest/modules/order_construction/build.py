@@ -42,6 +42,9 @@ def construct_orders(state, ctx, module) -> None:
                 parent_intent_id=parent_intent_id,
                 order_ids=order_id_stream(audit_store, strategy, ctx.timestamp),
                 cost_basis_method=method,
+                supersedes_group_id=state.order_store.superseded_group_id_by_scope.pop(
+                    (strategy, product), "",
+                ),
             )
             state.order_store.register_group(group)
             for order in children:

@@ -29,6 +29,7 @@ class OrderStore:
     live_order_ids_by_scope: dict[Any, list[str]] = field(default_factory=dict)
     capacity_limit_by_key: dict[Any, float] = field(default_factory=dict)
     capacity_consumed_by_key: dict[Any, float] = field(default_factory=dict)
+    superseded_group_id_by_scope: dict[Any, str] = field(default_factory=dict)
 
     def register_order(self, order: Order, *, scope: Any | None = None) -> None:
         if not order.order_id:

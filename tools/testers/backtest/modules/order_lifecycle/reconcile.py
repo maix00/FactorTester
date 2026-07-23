@@ -24,6 +24,9 @@ def reconcile_target_delta(
     projected = actual_quantity + sum(order.signed_remaining_quantity for order in live)
     if abs(target_quantity - projected) <= 1e-12:
         return 0.0
+    superseded_groups = {
+        order.order_group_id for order in live if order.order_group_id
+    }
     for order in live:
         order.status = OrderStatus.CANCELLED
         order.revision += 1
@@ -42,4 +45,12 @@ def reconcile_target_delta(
                 "target_quantity": target_quantity,
             },
         )
+    if superseded_groups:
+        latest = max(
+            superseded_groups,
+            key=lambda group_id: getattr(
+                order_store.groups_by_id.get(group_id), "created_at", timestamp,
+            ),
+        )
+        order_store.superseded_group_id_by_scope[scope] = latest
     return target_quantity - actual_quantity
