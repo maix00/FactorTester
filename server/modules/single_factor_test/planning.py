@@ -48,7 +48,7 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
     end_text = _timestamp_text(prepared["end_dt"])
     start_date = start_text[:10] or None
     end_date = end_text[:10] or None
-    requirements: dict[str, dict[str, Any]] = {}
+    requirements: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     strategies: dict[str, dict[str, Any]] = {}
     notices: list[dict[str, Any]] = []
     for strategy_id, config in prepared["resolved_settings_by_alias"].items():
@@ -93,18 +93,23 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
                 if source is _MISSING_DATA_SOURCE:
                     raise ValueError(f"{_name(item)} does not provide the requested data source")
                 source_label = _data_source_instance_label(source)
-                key = _name(item)
+                product_name = _name(item)
+                key = (
+                    product_name, source_label, frequency.name, start_text, end_text,
+                )
                 resolved = {
-                    "product": key,
+                    "product": product_name,
                     "frequency": frequency.name,
                     "data_source": source_label,
-                    "factor_columns": factor_columns,
+                    "factor_columns": sorted(set(factor_columns)),
                     "start": start_text,
                     "end": end_text,
                 }
                 existing = requirements.get(key)
-                if existing is not None and existing != resolved:
-                    raise ValueError(f"conflicting market data requirements for {key}")
+                if existing is not None:
+                    resolved["factor_columns"] = sorted(set(
+                        existing["factor_columns"]
+                    ).union(factor_columns))
                 requirements[key] = resolved
         strategies[str(strategy_id)] = {
             "selection_id": str(getattr(selection, "selection_id", "")),
