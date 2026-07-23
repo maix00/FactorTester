@@ -78,7 +78,7 @@ enum ResearchReportIndex {
                   document.sections.allSatisfy({ section in
                       section.id.hasPrefix("report-section:")
                           && !section.sectionID.isEmpty
-                          && section.checkpointRef.hasPrefix("trace:")
+                          && isSupportedCheckpointRef(section.checkpointRef)
                           && section.branchRef.hasPrefix("graph-branch:")
                           && section.summary.count <= maximumSummaryCharacters
                           && section.links.count <= 50
@@ -87,6 +87,11 @@ enum ResearchReportIndex {
             }
             return document.sections
         }.value
+    }
+
+    private static func isSupportedCheckpointRef(_ value: String) -> Bool {
+        value.hasPrefix("trace:")
+            || value.hasPrefix("report-checkpoint:")
     }
 
     private static func readVerifiedIndexData(_ url: URL) throws -> Data {

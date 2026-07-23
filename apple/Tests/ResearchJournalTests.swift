@@ -44,6 +44,43 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(record.currentJournalArtifact?.id, "artifact:latest")
     }
 
+    func testReportIndexAcceptsCurrentNodeReportCheckpoint() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let indexURL = directory.appendingPathComponent("INDEX.json")
+        try Data(
+            """
+            {"schema_version":2,"sections":[{
+              "section_ref":"report-section:branch:semantics",
+              "section_id":"semantics",
+              "checkpoint_ref":"report-checkpoint:sha256:\(String(repeating: "a", count: 64))",
+              "branch_ref":"graph-branch:instance:branch",
+              "title":"因子语义",
+              "summary":"当前节点增量报告",
+              "links":[]
+            }]}
+            """.utf8
+        ).write(to: indexURL)
+        let artifact = ResearchArtifactModel(json: [
+            "artifact_ref": "artifact:report",
+            "index_ref": indexURL.absoluteString,
+        ])
+
+        let sections = try await ResearchReportIndex.loadVerified(
+            artifact: artifact
+        )
+
+        XCTAssertEqual(sections.count, 1)
+        XCTAssertTrue(
+            sections[0].checkpointRef.hasPrefix("report-checkpoint:")
+        )
+    }
+
     func testDecodesAndPartitionsEntryResolutionWithoutRawIDsInLabels() throws {
         let step = try JSONDecoder().decode(
             ResearchTransitionStep.self,
