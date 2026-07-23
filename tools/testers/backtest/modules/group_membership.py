@@ -53,6 +53,7 @@ from tools.testers.backtest.modules.target import (
     target_weight_intent,
 )
 from tools.testers.backtest.modules.time_index_lookup import row_at_index_key
+from tools.testers.backtest.policies.allocation import equal_weight, inverse_measure_weight
 from tools.testers.backtest.policies.cross_section import rank_cross_section, select_rank_group
 
 
@@ -717,14 +718,12 @@ def _allocate_weights(state, ctx, strategy, members: frozenset) -> dict:
     if policy == "equal_margin":
         return _allocate_equal_margin(state, ctx, strategy, members)
     if policy != "inverse_volatility":
-        weight = 1.0 / len(members)
-        return {product: weight for product in members}
+        return equal_weight(members)
 
     lookback = config.get(GroupMembershipModule.volatility_lookback, 20)
     warmup = config.get(GroupMembershipModule.volatility_warmup, "equal_notional")
     table = current_prices_table_for(state)
-    inv_vol: dict = {}
-    fallback_equal: list = []
+    volatility: dict = {}
     for product in members:
         vol = _trailing_volatility(state, table, product, ctx.timestamp, lookback)
         if vol is None or vol <= 0:
@@ -732,24 +731,9 @@ def _allocate_weights(state, ctx, strategy, members: frozenset) -> dict:
                 raise ValueError(
                     f"insufficient price history to estimate volatility for {product!r} "
                     f"(need {lookback} trailing periods)")
-            fallback_equal.append(product)
             continue
-        inv_vol[product] = 1.0 / vol
-
-    weights: dict = {}
-    total_inv_vol = sum(inv_vol.values())
-    # Reserve an equal-notional share of the bucket for warmup fallbacks,
-    # then split the remainder by inverse volatility -- so a few
-    # not-yet-estimable products don't silently zero out, but also don't
-    # dilute the inverse-vol weighting of the rest beyond their fair share.
-    fallback_share = len(fallback_equal) / len(members)
-    remaining_share = 1.0 - fallback_share
-    for product in fallback_equal:
-        weights[product] = fallback_share / len(fallback_equal) if fallback_equal else 0.0
-    if total_inv_vol > 0:
-        for product, iv in inv_vol.items():
-            weights[product] = remaining_share * iv / total_inv_vol
-    return weights
+        volatility[product] = vol
+    return inverse_measure_weight(members, volatility, missing="equal_share")
 
 
 def _allocate_equal_margin(state, ctx, strategy, members: frozenset) -> dict:
@@ -758,16 +742,12 @@ def _allocate_equal_margin(state, ctx, strategy, members: frozenset) -> dict:
         strategy,
         ctx.get(MarketDataModule.current_historical_fields, {}),
     ) or {}
-    raw: dict = {}
+    margin_ratios: dict = {}
     for product in members:
         ratio = _margin_ratio_for_product(ratios, product)
         if ratio is not None and ratio > 0:
-            raw[product] = 1.0 / ratio
-    total = sum(raw.values())
-    if total <= 0:
-        weight = 1.0 / len(members)
-        return {product: weight for product in members}
-    return {product: value / total for product, value in raw.items()}
+            margin_ratios[product] = ratio
+    return inverse_measure_weight(members, margin_ratios, missing="exclude")
 
 
 def _margin_ratio_for_product(fields: dict, product) -> float | None:
