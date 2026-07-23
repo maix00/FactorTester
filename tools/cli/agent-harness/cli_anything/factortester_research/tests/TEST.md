@@ -39,13 +39,18 @@ artifact contracts produced by the workflow.
 
 ### Passing results (2026-07-23)
 
-- Native factor-role, policy, and Flow-contract suite: `580 passed`.
+- Native factor-role, policy, Flow-contract, and scoped server suite:
+  `619 passed`.
 - Full CLI plus non-server Harness suite: `220 passed`.
 - Installed Harness subprocess delegation with
   `CLI_ANYTHING_FORCE_INSTALLED=1`: passed using the resolved console script.
 - Installed `factortester` plus Harness against a complete isolated Flask
   server over TCP: strategy-intent workspace configure/show round-trip passed.
 - Web factor-role control Node test: passed.
+- Broad `tests/backtest tests/server tests/cli` gate: `1317 passed`, `1 skipped`,
+  with 3 failures reproduced unchanged at the exact issue-141 base commit
+  (incremental EMA expectation and two research-graph projection/migration
+  tests); none of their files differ on this branch.
 
 ## Test inventory
 
