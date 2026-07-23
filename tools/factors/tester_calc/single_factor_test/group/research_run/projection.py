@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections import Counter
 from typing import Any
 
 import numpy as np
@@ -159,6 +160,10 @@ def serialize_event_execution(
     metrics_by_segment = {}
     comparison_strategies = []
     split = pd.Timestamp(evaluation_split) if evaluation_split else None
+    display_name_counts = Counter(
+        str(owner.get("group_name") or owner.get("group_id") or "")
+        for owner in execution["group_owner"]
+    )
 
     for owner in execution["group_owner"]:
         strategy_id = str(owner.get("group_id") or "")
@@ -184,6 +189,11 @@ def serialize_event_execution(
             )
         returns = pd.Series(equity, index=index).pct_change().fillna(0.0)
         display_name = str(owner.get("group_name") or strategy_id)
+        metrics_key = (
+            display_name
+            if display_name_counts[display_name] == 1
+            else strategy_id
+        )
         settings = settings_by_group[strategy_id]
         strategy_target_trace = target_trace.get(strategy_id, {})
         execution_trace = portfolio.get("execution_trace") or {}
@@ -211,6 +221,7 @@ def serialize_event_execution(
             "key": display_name,
             "name": display_name,
             "group_id": strategy_id,
+            "metrics_key": metrics_key,
             "group_index": int(owner.get("group_index") or 0),
             "product_path_selection_id": str(
                 owner.get("product_path_selection_id") or ""
@@ -234,7 +245,7 @@ def serialize_event_execution(
             ),
             **module_outputs,
         })
-        metrics[display_name] = _compute_return_metrics(
+        metrics[metrics_key] = _compute_return_metrics(
             returns.to_numpy(),
             index_like=index,
         )
@@ -246,7 +257,7 @@ def serialize_event_execution(
                 comparable_split = split.tz_localize(None)
             in_sample = returns[index <= comparable_split]
             out_of_sample = returns[index > comparable_split]
-            metrics_by_segment[display_name] = {
+            metrics_by_segment[metrics_key] = {
                 "in_sample": _compute_return_metrics(
                     in_sample.to_numpy(),
                     index_like=in_sample.index,
@@ -255,7 +266,7 @@ def serialize_event_execution(
                     out_of_sample.to_numpy(),
                     index_like=out_of_sample.index,
                 ),
-                "full": metrics[display_name],
+                "full": metrics[metrics_key],
             }
     initial_values = [
         float(value.get("initial_value") or 0.0)
