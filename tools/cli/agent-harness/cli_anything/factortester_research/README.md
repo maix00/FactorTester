@@ -123,8 +123,11 @@ complete graph, catalog, artifacts, stdout/stderr, or untriggered future gaps.
 Conditional capabilities use machine predicates first and ask an Agent only
 when the predicate is genuinely undetermined.
 
-The Harness `cycle next` wrapper is read-only and fails closed if an older or
-changed backend returns more than 6000 bytes or leaks a heavy/legacy field.
+The Harness `cycle next` wrapper is read-only and fails closed if a changed
+backend exceeds the 16 KiB protocol safety ceiling or leaks a heavy/legacy
+field. The server separately enforces the lower ceiling calibrated for the
+immutable Graph version; the Harness does not impose a stale project-local
+6000-byte limit on newer Graphs.
 `cycle advance` validates local Research Cycle proposals before invoking the
 real client and retains only a factual local command envelope for audit.
 `cycle continuation-preview` performs no write and returns the exact

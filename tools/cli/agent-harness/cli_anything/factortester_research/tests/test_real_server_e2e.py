@@ -580,8 +580,11 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         metrics = validation["evidence"]["token_metrics"]
         assert metrics["shadow_graph_total_tokens"] == 80
         assert metrics["shadow_baseline_total_tokens"] == 100
-        assert metrics["routine_context_bytes"] <= 6000
-        assert metrics["token_authority"] == "normalized_agent_invocations"
+        assert metrics["routine_context_bytes"] <= (
+            metrics["routine_context_ceiling_bytes"]
+        )
+        assert metrics["provider_actual_token_comparison"] is True
+        assert metrics["token_authority"] == "provider_actual"
 
         grill_file = tmp_path / "grill.json"
         grill_file.write_text(
@@ -751,9 +754,12 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             ],
             env=env,
         )
-        assert context["context_bytes"] <= 6000
+        packet_ceiling = (
+            graph.get("agent_packet_budget") or {"ceiling_bytes": 6000}
+        )["ceiling_bytes"]
+        assert context["context_bytes"] <= packet_ceiling
         assert "candidate_edges" not in context
-        assert next_packet["next_bytes"] <= 6000
+        assert next_packet["next_bytes"] <= packet_ceiling
         assert "candidate_edges" in next_packet
         assert "required_capabilities" not in next_packet
 

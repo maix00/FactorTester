@@ -34,7 +34,10 @@ _FORBIDDEN_SKILL_FIELDS = {
     "source_fingerprint",
     "source_path",
 }
-MAX_NEXT_BYTES = 6000
+# The server applies the lower, graph-version calibrated ceiling. The Harness
+# keeps only a provider-neutral protocol safety ceiling so a valid newer Graph
+# is not rejected by an older project-local magic number.
+MAX_NEXT_PACKET_HARD_CEILING_BYTES = 16 * 1024
 
 
 def validate_transition_evidence(
@@ -117,9 +120,10 @@ def validate_next_packet(packet: dict[str, Any]) -> dict[str, Any]:
         sort_keys=True,
         separators=(",", ":"),
     ).encode())
-    if size > MAX_NEXT_BYTES:
+    if size > MAX_NEXT_PACKET_HARD_CEILING_BYTES:
         raise ValueError(
-            f"FactorTester next packet exceeds {MAX_NEXT_BYTES} bytes"
+            "FactorTester next packet exceeds protocol hard ceiling "
+            f"{MAX_NEXT_PACKET_HARD_CEILING_BYTES} bytes"
         )
     return packet
 

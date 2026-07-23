@@ -1340,6 +1340,14 @@ def test_cycle_next_packet_rejects_full_graph_and_raw_output() -> None:
                 "required_transition_facts": [],
             }],
         })
+    with pytest.raises(ValueError, match="protocol hard ceiling"):
+        validate_next_packet({
+            **packet,
+            "node": {
+                "node_id": "factor_semantics",
+                "purpose": "x" * (16 * 1024),
+            },
+        })
 
 
 def test_model_identity_does_not_change_deterministic_resolution() -> None:
