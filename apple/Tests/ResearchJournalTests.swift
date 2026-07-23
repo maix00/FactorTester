@@ -490,6 +490,98 @@ final class ResearchJournalTests: XCTestCase {
         ))
     }
 
+    func testIndexJoinUsesLatestCurrentNodeRevisionFromImmutableJournal()
+        throws
+    {
+        let oldCheckpoint = "report-checkpoint:sha256:"
+            + String(repeating: "1", count: 64)
+        let newCheckpoint = "report-checkpoint:sha256:"
+            + String(repeating: "2", count: 64)
+        let document = try JSONDecoder().decode(
+            ResearchJournalDocument.self,
+            from: Data(
+                """
+                {
+                  "schema_version":4,"language":"zh-Hans",
+                  "journal_kind":"work_package","work_package_id":"wp",
+                  "branch_refs":["graph-branch:i:b"],
+                  "history_status":"complete",
+                  "root_checkpoint_ref":"\(oldCheckpoint)",
+                  "checkpoints":[
+                    {
+                      "checkpoint_ref":"\(oldCheckpoint)","created_at":1,
+                      "carrier_hash":"\(String(repeating: "a", count: 64))",
+                      "narrative_hash":"\(String(repeating: "b", count: 64))",
+                      "section_hash":"\(String(repeating: "c", count: 64))",
+                      "graph_ref":"factor-research@v9",
+                      "instance_ref":"graph-instance:i",
+                      "branch_ref":"graph-branch:i:b",
+                      "lineage_status":"root","lineage_relation":"root",
+                      "predecessor_checkpoint_ref":"","source_branch_ref":"",
+                      "sections":[{
+                        "section_id":"old-current-node-report-1",
+                        "title":"旧解释",
+                        "blocks":[{
+                          "kind":"paragraph","text":"旧的临时解释。",
+                          "report_binding":{
+                            "report_requirement_id":"report.requirement.semantics",
+                            "subject_ref":"obligation:semantics"
+                          }
+                        }],
+                        "links":[]
+                      }]
+                    },
+                    {
+                      "checkpoint_ref":"\(newCheckpoint)","created_at":2,
+                      "carrier_hash":"\(String(repeating: "d", count: 64))",
+                      "narrative_hash":"\(String(repeating: "e", count: 64))",
+                      "section_hash":"\(String(repeating: "f", count: 64))",
+                      "graph_ref":"factor-research@v9",
+                      "instance_ref":"graph-instance:i",
+                      "branch_ref":"graph-branch:i:b",
+                      "lineage_status":"linked",
+                      "lineage_relation":"transition",
+                      "predecessor_checkpoint_ref":"\(oldCheckpoint)",
+                      "source_branch_ref":"",
+                      "sections":[{
+                        "section_id":"new-current-node-report-1",
+                        "title":"最新解释",
+                        "blocks":[{
+                          "kind":"paragraph","text":"当前有效解释。",
+                          "report_binding":{
+                            "report_requirement_id":"report.requirement.semantics",
+                            "subject_ref":"obligation:semantics"
+                          }
+                        }],
+                        "links":[]
+                      }]
+                    }
+                  ]
+                }
+                """.utf8
+            )
+        )
+        let index = [
+            ResearchReportSection(
+                id: "report-section:b:new-current-node-report-1",
+                sectionID: "new-current-node-report-1",
+                checkpointRef: newCheckpoint,
+                branchRef: "graph-branch:i:b",
+                title: "最新解释",
+                summary: "当前有效解释。",
+                links: []
+            )
+        ]
+
+        let sections = try ResearchJournalPresentation.displaySections(
+            in: document,
+            indexedBy: index
+        )
+
+        XCTAssertEqual(sections.map(\.title), ["最新解释"])
+        XCTAssertEqual(sections.map(\.auditCheckpointRef), [newCheckpoint])
+    }
+
     func testDisplayProjectionHidesPureGraphMigrationAndDeduplicatesBindings()
         throws
     {

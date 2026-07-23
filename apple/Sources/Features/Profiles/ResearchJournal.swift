@@ -540,8 +540,20 @@ enum ResearchJournalLoader {
             }
         }
         var result: [ResearchJournalSection] = []
+        let latestRevisions = latestCurrentNodeRevisions(
+            in: document.checkpoints
+        )
         for checkpoint in document.checkpoints {
             for section in checkpoint.sections {
+                if let key = currentNodeRevisionKey(
+                    checkpoint: checkpoint,
+                    section: section
+                ), latestRevisions[key] != SectionIdentity(
+                    checkpointRef: checkpoint.checkpointRef,
+                    sectionID: section.sectionID
+                ) {
+                    continue
+                }
                 let key = "\(checkpoint.checkpointRef)|\(section.sectionID)"
                 guard let indexed = refs[key],
                       indexed.branchRef == checkpoint.branchRef else {
@@ -557,6 +569,59 @@ enum ResearchJournalLoader {
             throw ResearchJournalError.historyIncomplete
         }
         return result
+    }
+
+    /// `LOGICAL_JOURNAL` is the immutable audit lineage. `INDEX` and REPORT
+    /// deliberately project only the latest revision of each current-node
+    /// report requirement/subject pair. Mirror the writer's deterministic
+    /// projection before joining the two verified objects; never require an
+    /// index row for an intentionally superseded audit revision.
+    private static func latestCurrentNodeRevisions(
+        in checkpoints: [ResearchJournalCheckpoint]
+    ) -> [CurrentNodeRevisionKey: SectionIdentity] {
+        var latest: [CurrentNodeRevisionKey: SectionIdentity] = [:]
+        for checkpoint in checkpoints {
+            for section in checkpoint.sections {
+                guard let key = currentNodeRevisionKey(
+                    checkpoint: checkpoint,
+                    section: section
+                ) else { continue }
+                latest[key] = SectionIdentity(
+                    checkpointRef: checkpoint.checkpointRef,
+                    sectionID: section.sectionID
+                )
+            }
+        }
+        return latest
+    }
+
+    private static func currentNodeRevisionKey(
+        checkpoint: ResearchJournalCheckpoint,
+        section: ResearchJournalSection
+    ) -> CurrentNodeRevisionKey? {
+        guard checkpoint.checkpointRef.hasPrefix(
+            "report-checkpoint:sha256:"
+        ), section.sectionID.contains("-current-node-"),
+              section.blocks.count == 1,
+              let binding = section.blocks[0].reportBinding,
+              !binding.reportRequirementID.isEmpty,
+              !binding.subjectRef.isEmpty else {
+            return nil
+        }
+        return CurrentNodeRevisionKey(
+            reportRequirementID: binding.reportRequirementID,
+            subjectRef: binding.subjectRef
+        )
+    }
+
+    private struct CurrentNodeRevisionKey: Hashable {
+        let reportRequirementID: String
+        let subjectRef: String
+    }
+
+    private struct SectionIdentity: Equatable {
+        let checkpointRef: String
+        let sectionID: String
     }
 
     private static func validate(_ value: ResearchJournalDocument) throws {
