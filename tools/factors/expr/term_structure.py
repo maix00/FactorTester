@@ -73,7 +73,16 @@ class TermStructureOp(OperandExpr):
             return False
         return True
 
-    def _time_index_for_product(self, product: 'Product', freq: DataFreq) -> pd.Index:
+    def _time_index_for_product(
+        self,
+        product: 'Product',
+        freq: DataFreq,
+        preloaded: Optional[Dict[Any, pd.DataFrame]] = None,
+    ) -> pd.Index:
+        if preloaded is not None:
+            data = preloaded.get((product, freq.name))
+            if data is not None:
+                return data.index
         try:
             data = product.get_some_data(freq, copy=False)
         except Exception:
@@ -195,31 +204,36 @@ class TermStructureOp(OperandExpr):
                 continue
             if not hasattr(product, 'get_term_structure'):
                 continue
-            raw_idx = self._time_index_for_product(product, freq)
+            raw_idx = self._time_index_for_product(
+                product,
+                freq,
+                ctx.preloaded,
+            )
             if len(raw_idx) == 0:
                 continue
             trading_days = self._trading_days_for_index(raw_idx)
             if len(trading_days) == 0:
                 continue
+            unique_days = trading_days.drop_duplicates()
             if self.op == 'term_spread':
                 batch_fn = getattr(product, 'term_spread_series', None)
                 if not callable(batch_fn):
                     raise TypeError(f"Product {getattr(product, 'name', product)} missing required method term_spread_series")
-                series = batch_fn(trading_days, near_rank=near_rank, far_rank=far_rank, column=column)
+                series = batch_fn(unique_days, near_rank=near_rank, far_rank=far_rank, column=column)
             elif self.op == 'term_ratio':
                 batch_fn = getattr(product, 'term_ratio_series', None)
                 if not callable(batch_fn):
                     raise TypeError(f"Product {getattr(product, 'name', product)} missing required method term_ratio_series")
-                series = batch_fn(trading_days, near_rank=near_rank, far_rank=far_rank, column=column)
+                series = batch_fn(unique_days, near_rank=near_rank, far_rank=far_rank, column=column)
             else:
                 if self.op == 'term_slope':
                     batch_fn = getattr(product, 'term_slope_series', None)
                     if callable(batch_fn):
-                        series = batch_fn(trading_days, depth=depth, column=column)
+                        series = batch_fn(unique_days, depth=depth, column=column)
                     else:
-                        series = self._evaluate_series_from_curves(product, trading_days, near_rank, far_rank, depth, column)
+                        series = self._evaluate_series_from_curves(product, unique_days, near_rank, far_rank, depth, column)
                 else:
-                    series = self._evaluate_series_from_curves(product, trading_days, near_rank, far_rank, depth, column)
+                    series = self._evaluate_series_from_curves(product, unique_days, near_rank, far_rank, depth, column)
             if not isinstance(series, pd.Series):
                 raise TypeError(f"Batch method for {getattr(product, 'name', product)} must return pd.Series, got {type(series).__name__}")
             mapped = series.astype(float).reindex(trading_days).to_numpy(dtype=float)
