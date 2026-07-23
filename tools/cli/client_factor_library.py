@@ -31,6 +31,12 @@ class FactorLibraryClientMixin(ClientMixinBase):
                     "kind": "module",
                     "has_children": False,
                 },
+                {
+                    "key": "products/liquidity",
+                    "label": "逐产品流动性证据",
+                    "kind": "module",
+                    "has_children": False,
+                },
             ]
         if parent == "custom_factors":
             return [
@@ -220,6 +226,25 @@ class FactorLibraryClientMixin(ClientMixinBase):
                 "fields": list(fields),
                 "include_field_catalog": bool(include_field_catalog),
                 "include_historical_fields": bool(include_historical_fields),
+            },
+        ))
+
+    def product_liquidity(
+        self,
+        *,
+        products: list[str] | tuple[str, ...],
+        source: str,
+        as_of: str,
+        window_days: int = 365,
+    ) -> dict[str, Any]:
+        """Compute one batch of point-in-time DAY1 volume evidence."""
+        return self._expect_success(self.session.post(
+            "/api/product-liquidity",
+            {
+                "products": list(products),
+                "source": str(source),
+                "as_of": str(as_of),
+                "window_days": int(window_days),
             },
         ))
 

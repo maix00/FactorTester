@@ -11,6 +11,7 @@ from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
 from tools.cli.table import render_table
+from .liquidity import product_liquidity
 
 
 @click.group("products", invoke_without_command=True)
@@ -325,3 +326,6 @@ def _format_field_value(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     except Exception:
         return str(value)
+
+
+products.add_command(product_liquidity)

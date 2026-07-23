@@ -6,6 +6,7 @@ from click.testing import CliRunner
 
 from tools.cli.app import cli
 from tools.cli.modules.products import controller
+from tools.cli.modules.products import liquidity
 
 
 class _AvailabilityClient:
@@ -54,6 +55,81 @@ class _AvailabilityClient:
             "product_scope": ["A.DCE"],
             "entries": [self.entry],
         }
+
+
+class _LiquidityClient:
+    def __init__(self) -> None:
+        self.request: dict | None = None
+
+    def product_liquidity(
+        self,
+        *,
+        products,
+        source,
+        as_of,
+        window_days,
+    ):
+        self.request = {
+            "products": list(products),
+            "source": source,
+            "as_of": as_of,
+            "window_days": window_days,
+        }
+        return {
+            "schema_version": 1,
+            "evidence_kind": "product_liquidity",
+            "evidence_hash": "sha256:liquidity",
+            "product_scope": list(products),
+            "source": source,
+            "frequency": "DAY1",
+            "as_of": as_of,
+            "window_days": window_days,
+            "entries": [{
+                "product": "A.DCE",
+                "status": "available",
+                "statistics_as_of": "2024-12-31",
+                "latest_daily_volume": 1200.0,
+                "average_daily_volume": 800.0,
+                "zero_volume_days": 0,
+                "coverage": {
+                    "start": "2024-01-02",
+                    "end": "2024-12-31",
+                    "observed_days": 242,
+                },
+            }],
+        }
+
+
+def test_products_liquidity_emits_batch_json_for_explicit_as_of(
+    monkeypatch,
+) -> None:
+    fake = _LiquidityClient()
+    monkeypatch.setattr(liquidity, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "products",
+        "liquidity",
+        "--product",
+        "A.DCE",
+        "--source",
+        "LocalCNFuturesDAY1",
+        "--as-of",
+        "2024-12-31",
+        "--window-days",
+        "365",
+        "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["evidence_kind"] == "product_liquidity"
+    assert payload["entries"][0]["average_daily_volume"] == 800.0
+    assert fake.request == {
+        "products": ["A.DCE"],
+        "source": "LocalCNFuturesDAY1",
+        "as_of": "2024-12-31",
+        "window_days": 365,
+    }
 
 
 def test_products_availability_emits_compact_json_for_explicit_scope(

@@ -101,3 +101,27 @@ The response reports the file-backed MIN1/DAY1 cache independently from the
 L2 probe. An active `OSEFuturesQuoteLv2` entitlement is reported separately
 from `latency_class`; the latter remains `unverified` until a market-session
 latency test has been accepted.
+
+Before freezing a product-by-product TrialPlan, screen liquidity independently
+of factor or backtest results. The cutoff is mandatory so the screen cannot
+silently inspect a later holdout:
+
+```bash
+factortester products liquidity \
+  --product A.DCE \
+  --product RB.SHF \
+  --source LocalCNFuturesDAY1 \
+  --as-of 2024-12-31 \
+  --window-days 365 \
+  --json
+```
+
+The server projects only the physical DAY1 date and VOLUME columns in one
+batch scan, performs no database reads, and returns a hash-bound evidence
+document. Each product reports the latest observed daily volume at or before
+the cutoff, average daily volume, observed zero-volume days, and exact window
+coverage. Missing calendar days are not invented as zero-volume days. Missing
+files, columns, or unreadable scans are reported as `capability_gap`; the
+command never substitutes turnover, open interest, MIN1 data, or a different
+provider. Thresholds remain part of the predeclared TrialPlan rather than this
+evidence collector.

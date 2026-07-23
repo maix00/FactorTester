@@ -9,6 +9,7 @@ def register_routes() -> None:
         factor_param_resolver,
         page_lifecycle,
         price_data,
+        product_liquidity,
         protocol_manifest,
         submissions,
         time_range,

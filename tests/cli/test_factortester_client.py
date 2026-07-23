@@ -271,6 +271,23 @@ def fake_server() -> Iterator[str]:
             entries=[],
         )
 
+    @app.post("/api/product-liquidity")
+    def product_liquidity():
+        payload = request.get_json()
+        assert payload == {
+            "products": ["A.DCE", "RB.SHF"],
+            "source": "LocalCNFuturesDAY1",
+            "as_of": "2024-12-31",
+            "window_days": 365,
+        }
+        return jsonify(
+            success=True,
+            schema_version=1,
+            evidence_kind="product_liquidity",
+            evidence_hash="sha256:liquidity",
+            entries=[],
+        )
+
     @app.get("/api/factor-library-overview")
     def factor_library():
         return jsonify(success=True, factors=[{"alias": "SgCCS|N:2m"}])
@@ -287,6 +304,11 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     workspace = client.create_workspace(factor_families=[{"alias": "MmRet"}])
     assert workspace["workspace_id"] == "workspace-1"
     assert client.list_workspaces()[0]["workspace_id"] == "workspace-1"
+    assert client.product_liquidity(
+        products=["A.DCE", "RB.SHF"],
+        source="LocalCNFuturesDAY1",
+        as_of="2024-12-31",
+    )["evidence_hash"] == "sha256:liquidity"
     assert client.submit_run(
         "workspace-1",
         1,
