@@ -13,7 +13,6 @@ from tools.factors.expr import (
     CrossSectionalOp,
     EvaluateContext,
     RollingOp,
-    WhereOp,
     term_carry_annualized,
     term_contango,
     term_curvature,
@@ -231,11 +230,10 @@ def _live_term_eval(expr, products: tuple[_TermProduct, ...], index: pd.Index) -
         RollingOp("rolling_cov", ConstExpr(3), ColumnRef(DataColumn.CLOSE), ColumnRef(DataColumn.OPEN)),
         ColumnRef(DataColumn.CLOSE).cs_rank(),
         ColumnRef(DataColumn.CLOSE).cs_zscore(),
-        WhereOp(
-            "where",
+        ColumnRef(DataColumn.CLOSE).tanh(),
+        ColumnRef(DataColumn.CLOSE).where(
             ColumnRef(DataColumn.CLOSE) > ConstExpr(15.0),
-            ColumnRef(DataColumn.CLOSE),
-            ConstExpr(np.nan),
+            other=np.nan,
         ),
     ],
 )

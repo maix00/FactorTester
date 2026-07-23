@@ -3,7 +3,7 @@
 # 因子表达式系统 — 向后兼容重导入层
 #
 # 核心代码已迁移到 tools/factors/expr/ 文件夹：
-#   core.py, operands.py, leaf.py, rolling.py, shift.py,
+#   core.py, operands.py, leaf.py, pointwise.py, rolling.py, shift.py,
 #   cross_sectional.py, composite.py, conditional.py,
 #   term_structure.py, signal_align.py, visual_groups.py
 #
@@ -51,6 +51,7 @@ if FACTOR_WORKSPACE:
         expr_min,
         # conditional
         WhereOp,
+        where,
         # term_structure
         TermStructureOp,
         term_carry_annualized,
@@ -117,6 +118,7 @@ __all__ = [
     "expr_max",
     "expr_min",
     "WhereOp",
+    "where",
     "TermStructureOp",
     "term_carry_annualized",
     "term_contango",

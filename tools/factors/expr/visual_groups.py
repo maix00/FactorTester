@@ -81,6 +81,7 @@ VISUAL_OPERATOR_GROUPS = [
         'more_label': '更多算数一元',
         'more_operators': [
             {'key': 'sqrt', 'label': '平方根', 'symbol': 'sqrt', 'desc': 'X.sqrt()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'tanh', 'label': '双曲正切', 'symbol': 'tanh', 'desc': 'X.tanh()', 'arity': 1, 'slots': ['序列 X']},
             {'key': 'sign', 'label': '符号', 'symbol': 'sign', 'desc': 'X.sign()', 'arity': 1, 'slots': ['序列 X']},
             {'key': 'neg', 'label': '取负', 'symbol': '-', 'desc': 'X.neg()', 'arity': 1, 'slots': ['序列 X']},
             {'key': '~', 'label': '逻辑非', 'symbol': '~', 'desc': '~A', 'arity': 1, 'slots': ['条件 X'], 'syntax': 'prefix'},
@@ -226,6 +227,7 @@ VISUAL_COMPOSITE_KEY = {
     'abs': 'abs',
     'log': 'log',
     'sqrt': 'sqrt',
+    'tanh': 'tanh',
     'sign': 'sign',
     'bimax': 'max',
     'bimin': 'min',
@@ -239,6 +241,7 @@ VISUAL_OPERATOR_CATEGORY = {
     'abs': 'arithUnary',
     'log': 'arithUnary',
     'sqrt': 'arithUnary',
+    'tanh': 'arithUnary',
     'sign': 'arithUnary',
     'expr_max': 'arithVariadic',
     'expr_min': 'arithVariadic',

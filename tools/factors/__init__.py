@@ -30,5 +30,6 @@ if FACTOR_WORKSPACE:
         term_ratio,
         term_slope,
         term_slope_segment,
+        where,
         SMALL_VAL,
     )

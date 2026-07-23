@@ -22,6 +22,8 @@ from tools.factors.expr import (
     WhereOp,
 )
 from tools.factors.expr.term_structure_math import evaluate_term_curve, normalize_term_curve
+from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
+from tools.factors.expr.conditional import apply_where
 from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
 )
@@ -252,10 +254,10 @@ class WhereNode:
     false_value: StreamingNode
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
-        cond = self.cond.update(market, cache).astype(bool)
+        cond = self.cond.update(market, cache)
         true_value = self.true_value.update(market, cache)
         false_value = self.false_value.update(market, cache)
-        return np.where(cond, true_value, false_value)
+        return np.asarray(apply_where(cond, true_value, false_value), dtype=float)
 
 
 class StreamingFactorPlan:
@@ -518,54 +520,11 @@ def _resolve_window_bars(
     return bars
 
 
-_COMPOSITE_OPS = {
-    "add", "sub", "mul", "div", "neg", "abs", "sign", "sqrt", "log",
-    "pow", "bimax", "bimin", "max", "min", "gt", "lt", "ge", "le",
-    "eq", "ne", "and", "or", "not",
-}
+_COMPOSITE_OPS = POINTWISE_OPS
 
 
 def _apply_composite(op: str, values: list[np.ndarray]) -> np.ndarray:
-    if op == "add":
-        return values[0] + values[1]
-    if op == "sub":
-        return values[0] - values[1]
-    if op == "mul":
-        return values[0] * values[1]
-    if op == "div":
-        return values[0] / values[1]
-    if op == "neg":
-        return -values[0]
-    if op == "abs":
-        return np.abs(values[0])
-    if op == "sign":
-        return np.sign(values[0])
-    if op == "sqrt":
-        return np.sqrt(values[0])
-    if op == "log":
-        return np.log(values[0])
-    if op == "pow":
-        return values[0] ** values[1]
-    if op == "gt":
-        return values[0] > values[1]
-    if op == "lt":
-        return values[0] < values[1]
-    if op == "ge":
-        return values[0] >= values[1]
-    if op == "le":
-        return values[0] <= values[1]
-    if op == "eq":
-        return values[0] == values[1]
-    if op == "ne":
-        return values[0] != values[1]
-    if op == "and":
-        return values[0].astype(bool) & values[1].astype(bool)
-    if op == "or":
-        return values[0].astype(bool) | values[1].astype(bool)
-    if op == "not":
-        return ~values[0].astype(bool)
-    if op in {"bimax", "max"}:
-        return np.maximum.reduce(values)
-    if op in {"bimin", "min"}:
-        return np.minimum.reduce(values)
-    raise UnsupportedStreamingFactor(f"unsupported composite op: {op}")
+    try:
+        return np.asarray(apply_pointwise(op, values))
+    except ValueError as exc:
+        raise UnsupportedStreamingFactor(f"unsupported composite op: {op}") from exc

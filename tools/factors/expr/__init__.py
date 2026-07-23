@@ -14,7 +14,7 @@ if FACTOR_WORKSPACE:
     from .shift import ShiftOp, _is_zero_shift_period, _strip_latex_time_subscript
     from .cross_sectional import CrossSectionalOp
     from .composite import CompositeExpr, _reduce_biop, expr_max, expr_min
-    from .conditional import WhereOp
+    from .conditional import WhereOp, where
     from .term_structure import (
         TermStructureOp,
         term_carry_annualized,

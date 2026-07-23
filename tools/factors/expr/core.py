@@ -646,6 +646,18 @@ class FactorExpr:
         return _lazy()['CompositeExpr']('sqrt', self)
 
     @factor_workspace
+    def tanh(self) -> 'FactorExpr':
+        """逐元素双曲正切，将有限输入平滑压缩到 (-1, 1)。"""
+        return _lazy()['CompositeExpr']('tanh', self)
+
+    @factor_workspace
+    def where(self, condition: Any, other: Any = np.nan) -> 'FactorExpr':
+        """按条件选择当前表达式，否则选择 ``other``。"""
+        from .conditional import where
+
+        return where(condition, self, other)
+
+    @factor_workspace
     def neg(self) -> 'FactorExpr':
         """取负。"""
         return _lazy()['CompositeExpr']('neg', self)

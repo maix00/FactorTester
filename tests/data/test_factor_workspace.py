@@ -372,6 +372,8 @@ def test_author_sdk_is_explicit_resolvable_and_excludes_runtime_internals(tmp_pa
         assert name not in combined
     assert "def rolling_mean(" in combined
     assert "def shift(" in combined
+    assert "def tanh(" in combined
+    assert "def where(" in combined
 
     for stub_path in workspace_root.rglob("*.pyi"):
         tree = ast.parse(stub_path.read_text(encoding="utf-8"), filename=str(stub_path))
@@ -389,9 +391,16 @@ def test_generated_factor_workspace_passes_real_pyright(tmp_path):
     factor_workspace_construct._ensure_workspace_layout(str(workspace_root))
     factor_workspace_construct._sync_tools_sdk(str(workspace_root))
     (workspace_root / "custom_factors" / "ClientAlpha.py").write_text(
-        "from tools.factors import FactorFamily\n\n"
+        "from tools.data.types import DataColumn\n"
+        "from tools.factors import FactorFamily, where\n"
+        "from tools.factors.FactorExpr import ColumnRef\n\n"
         "class ClientAlpha(FactorFamily):\n"
-        "    pass\n",
+        "    @staticmethod\n"
+        "    def factor_expr():\n"
+        "        close = ColumnRef(DataColumn.CLOSE)\n"
+        "        bounded = close.tanh()\n"
+        "        method_form = bounded.where(close > 0, other=0.0)\n"
+        "        return where(close <= 0, 0.0, method_form)\n",
         encoding="utf-8",
     )
 
