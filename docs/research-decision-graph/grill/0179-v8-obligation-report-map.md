@@ -2880,3 +2880,27 @@ Run / Transition
   token 为零或 v9 token 高于 baseline 不阻止激活；
 - 只有预算策略永久跳过必要 reviewer、证据或研究步骤时，才构成研究语义变化并进入
   Graph/执行策略审查。
+
+## Grill 182 — Draft continuation 与运行时预算对象收口
+
+外部审计指出两个残余耦合：本地 Work Package 不能显式试用未激活的 draft，且
+schema-v2 校验器仍接受图内 `agent_packet_budget`。用户进一步确认：当服务器随后
+激活完全相同的 Graph 时，先前进入该 draft 的 continuation shadow 应视为 live。
+
+最终语义：
+
+1. continuation 的 `execution_mode` 只有 `live` 与 `shadow`。它与描述研究状态如何
+   续接的 `same_node_reentry`、`job_evidence`、`pre_trial_checkpoint` 分开记录；
+2. `live` 必须命中 Active pointer；`shadow` 可进入已登记且 hash 精确匹配的 draft，
+   并明确标记为非生产研究；
+3. 激活同一 `graph_id + version + content_hash` 时，只把没有 `shadow_run_id` 的
+   continuation shadow 晋升为 live。用于 activation outcome comparison 的 shadow
+   不晋升。原 continuation trace 仍保留 `execution_mode=shadow`，因此历史可审计；
+4. schema-v2 Graph 出现 `agent_packet_budget` 一律拒绝；v1 历史图只读兼容；
+5. 6400 bytes 仅是未配置服务器的 bootstrap default。管理员可通过 CLI 创建并切换
+   独立、内容寻址的 Budget Profile；旧 Profile 保留，普通 context/next 使用进程内
+   缓存，不增加数据库热路径读取；
+6. 改变 Budget Profile hash 不改变 Graph hash。Run/Transition 继续同时记录二者。
+
+验收覆盖 draft shadow 成功、同 draft live 失败、v2 内嵌预算失败、Profile 变化不改
+Graph hash、激活只晋升 continuation shadow、HTTP/CLI 模式透传和激活 SQL 上限。

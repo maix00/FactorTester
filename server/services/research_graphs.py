@@ -52,6 +52,10 @@ from server.services.research_graph.protocol import (
     GraphActivationBlocked,
     GraphVersionConflict,
 )
+from server.services.research_graph.packet_budget import (
+    active_runtime_packet_budget_configuration,
+    configure_runtime_packet_budget_profile,
+)
 from server.services.research_graph.schema import ensure_schema
 from server.services.research_graph.versions import (
     clear_graph_cache_for_current_db as _clear_graph_cache_for_current_db,
@@ -67,10 +71,12 @@ __all__ = [
     "GraphVersionConflict",
     "activate_graph",
     "advance_graph_branch",
+    "active_runtime_packet_budget_configuration",
     "authorize_graph_activation",
     "build_graph_branch_context",
     "build_graph_branch_next",
     "continue_graph_branch",
+    "configure_runtime_packet_budget_profile",
     "create_graph_instance",
     "ensure_schema",
     "fork_graph_branch",

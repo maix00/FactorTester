@@ -74,6 +74,43 @@ def active_graph(graph_id: str) -> None:
     click.echo(_json(client_from_config().get_active_research_graph(graph_id)))
 
 
+@research_graph.command("budget-profile")
+def active_budget_profile() -> None:
+    """读取当前运行时 Budget Profile；它不属于 Graph 内容。"""
+    click.echo(_json(
+        client_from_config().get_active_research_runtime_budget_profile()
+    ))
+
+
+@research_graph.command("budget-profile-configure")
+@click.option(
+    "--ceiling-bytes",
+    required=True,
+    type=click.IntRange(min=1, max=16 * 1024),
+)
+@click.option("--provider-id", default="")
+@click.option("--model-id", default="")
+@click.option("--tokenizer-id", default="")
+@click.option("--tokenizer-revision", default="")
+def configure_budget_profile(
+    ceiling_bytes: int,
+    provider_id: str,
+    model_id: str,
+    tokenizer_id: str,
+    tokenizer_revision: str,
+) -> None:
+    """创建并切换独立运行时 Budget Profile；不升级 Active Graph。"""
+    click.echo(_json(
+        client_from_config().configure_research_runtime_budget_profile(
+            ceiling_bytes=ceiling_bytes,
+            provider_id=provider_id,
+            model_id=model_id,
+            tokenizer_id=tokenizer_id,
+            tokenizer_revision=tokenizer_revision,
+        )
+    ))
+
+
 @research_graph.command("validate")
 @click.argument("graph_id")
 @click.argument("version", type=int)

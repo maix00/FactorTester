@@ -8,6 +8,35 @@ from .client_base import ClientMixinBase
 
 
 class ResearchGraphClientMixin(ClientMixinBase):
+    def get_active_research_runtime_budget_profile(
+        self,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            "/api/research-runtime-budget-profiles/active"
+        ))
+        return dict(data.get("profile") or {})
+
+    def configure_research_runtime_budget_profile(
+        self,
+        *,
+        ceiling_bytes: int,
+        provider_id: str = "",
+        model_id: str = "",
+        tokenizer_id: str = "",
+        tokenizer_revision: str = "",
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/research-runtime-budget-profiles",
+            {
+                "ceiling_bytes": ceiling_bytes,
+                "provider_id": provider_id,
+                "model_id": model_id,
+                "tokenizer_id": tokenizer_id,
+                "tokenizer_revision": tokenizer_revision,
+            },
+        ))
+        return dict(data.get("profile") or {})
+
     def list_profile_research(
         self,
         *,

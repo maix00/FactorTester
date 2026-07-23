@@ -84,6 +84,48 @@ def get_active_research_graph(graph_id: str):
     return jsonify({"success": True, "graph": graph})
 
 
+@sft_bp.get("/api/research-runtime-budget-profiles/active")
+def get_active_research_runtime_budget_profile():
+    require_user()
+    return jsonify({
+        "success": True,
+        "profile": (
+            research_graphs.active_runtime_packet_budget_configuration()
+        ),
+    })
+
+
+@sft_bp.post("/api/research-runtime-budget-profiles")
+def configure_research_runtime_budget_profile():
+    actor = require_user()
+    if not is_super_admin_account(get_account(actor)):
+        return jsonify({
+            "success": False,
+            "error": "only a super administrator may configure runtime budget",
+        }), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        profile = research_graphs.configure_runtime_packet_budget_profile(
+            ceiling_bytes=int(data.get("ceiling_bytes") or 0),
+            actor=actor,
+            provider_id=str(data.get("provider_id") or ""),
+            model_id=str(data.get("model_id") or ""),
+            tokenizer_id=str(data.get("tokenizer_id") or ""),
+            tokenizer_revision=str(
+                data.get("tokenizer_revision") or ""
+            ),
+            calibration_receipt_ref=str(
+                data.get("calibration_receipt_ref") or ""
+            ),
+            calibration_receipt_hash=str(
+                data.get("calibration_receipt_hash") or ""
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "profile": profile}), 201
+
+
 @sft_bp.post(
     "/api/research-graphs/<graph_id>/versions/<int:version>/proposals"
 )

@@ -179,6 +179,19 @@ class FakeClient:
             "token_limit": 2000,
         }
 
+    def get_active_research_runtime_budget_profile(self):
+        return {
+            "profile_ref": "agent-packet-runtime:test",
+            "ceiling_bytes": 7000,
+        }
+
+    def configure_research_runtime_budget_profile(self, **kwargs):
+        self.runtime_budget_profile = kwargs
+        return {
+            "profile_ref": "agent-packet-runtime:configured",
+            **kwargs,
+        }
+
     def configure_agent_budget_period(self, agent_id, *, token_limit):
         self.agent_budget_call = (
             "configure",
@@ -802,6 +815,31 @@ def test_research_graph_continuation_is_previewed_then_exactly_authorized(
         "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "gate-146",
         "live",
     )
+
+
+def test_runtime_budget_profile_cli_configures_without_graph_version(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "budget-profile-configure",
+        "--ceiling-bytes", "7200",
+        "--provider-id", "provider-a",
+        "--model-id", "model-a",
+        "--tokenizer-id", "tokenizer-a",
+        "--tokenizer-revision", "revision-1",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.runtime_budget_profile == {
+        "ceiling_bytes": 7200,
+        "provider_id": "provider-a",
+        "model_id": "model-a",
+        "tokenizer_id": "tokenizer-a",
+        "tokenizer_revision": "revision-1",
+    }
 
 
 def test_research_graph_continuation_retargets_local_profile_without_new_record(

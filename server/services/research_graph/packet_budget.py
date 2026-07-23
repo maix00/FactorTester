@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import hashlib
 from math import ceil
-import os
 from typing import Any
 
 import orjson
+from server.services.research_graph.runtime_budget_profiles import (
+    MAX_AGENT_PACKET_HARD_CEILING_BYTES,
+    active_runtime_packet_budget_configuration,
+    configure_runtime_packet_budget_profile,
+    reset_runtime_packet_budget_cache,
+)
 
 
 LEGACY_AGENT_PACKET_BYTES = 6000
-DEFAULT_RUNTIME_AGENT_PACKET_BYTES = 6400
-MAX_AGENT_PACKET_HARD_CEILING_BYTES = 16 * 1024
 MIN_CALIBRATION_HEADROOM_BYTES = 512
 MIN_CALIBRATION_HEADROOM_RATIO = 0.10
 REQUIRED_ACTIVATION_MEASUREMENTS = (
@@ -50,24 +53,17 @@ def graph_packet_budget(graph: dict[str, Any]) -> dict[str, Any]:
 
 
 def runtime_packet_budget_profile(graph: dict[str, Any]) -> dict[str, Any]:
-    raw_ceiling = os.environ.get(
-        "GTHT_AGENT_PACKET_CEILING_BYTES",
-        str(DEFAULT_RUNTIME_AGENT_PACKET_BYTES),
-    )
-    try:
-        ceiling = int(raw_ceiling)
-    except ValueError as exc:
-        raise ValueError(
-            "GTHT_AGENT_PACKET_CEILING_BYTES must be an integer"
-        ) from exc
+    base = active_runtime_packet_budget_configuration()
+    ceiling = int(base["ceiling_bytes"])
     if ceiling <= 0 or ceiling > MAX_AGENT_PACKET_HARD_CEILING_BYTES:
         raise ValueError(
             "runtime packet budget exceeds the protocol safety boundary"
         )
     profile = {
         "schema_version": 2,
-        "profile_ref": "agent-packet-runtime@1",
-        "policy_ref": "agent-packet-runtime@1",
+        "profile_ref": str(base["profile_ref"]),
+        "policy_ref": str(base["profile_ref"]),
+        "base_profile_hash": str(base["base_profile_hash"]),
         "budget_scope": "runtime_profile",
         "ceiling_bytes": ceiling,
         "protocol_hard_ceiling_bytes": (
@@ -104,9 +100,19 @@ def runtime_packet_budget_profile(graph: dict[str, Any]) -> dict[str, Any]:
         "calibration_receipt_contract_ref": (
             "provider-verified-packet-calibration@1"
         ),
-        "calibration_receipt_ref": "",
-        "calibration_receipt_hash": "",
-        "calibration_status": "uncalibrated",
+        "provider_id": str(base.get("provider_id") or ""),
+        "model_id": str(base.get("model_id") or ""),
+        "tokenizer_id": str(base.get("tokenizer_id") or ""),
+        "tokenizer_revision": str(base.get("tokenizer_revision") or ""),
+        "calibration_receipt_ref": str(
+            base.get("calibration_receipt_ref") or ""
+        ),
+        "calibration_receipt_hash": str(
+            base.get("calibration_receipt_hash") or ""
+        ),
+        "calibration_status": str(
+            base.get("calibration_status") or "uncalibrated"
+        ),
     }
     profile["profile_hash"] = hashlib.sha256(orjson.dumps(
         profile,
