@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from tools.data.availability.schema import availability_dimensions
+
 
 PYTHON_ENV = "FACTORTESTER_TIGER_PYTHON"
 PROPS_ENV = "FACTORTESTER_TIGEROPEN_PROPS_PATH"
@@ -194,9 +196,14 @@ class TigerConnector:
         entry: dict[str, Any] = {
             "product": _product_name(product),
             "source": self.key,
-            "mode": "live_stream",
             "status": status,
-            "frequency": "L2",
+            **availability_dimensions(
+                sampling_mode="snapshot",
+                frequency=None,
+                data_kind="order_book",
+                market_depth="l2",
+                delivery_mode="live_stream",
+            ),
             "connection": "not_probed",
             "entitled_realtime": None,
             "latency_class": "unverified",

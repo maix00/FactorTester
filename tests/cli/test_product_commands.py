@@ -9,8 +9,23 @@ from tools.cli.modules.products import controller
 
 
 class _AvailabilityClient:
-    def __init__(self) -> None:
+    def __init__(self, *, entry: dict | None = None) -> None:
         self.request: dict | None = None
+        self.entry = entry or {
+            "product": "A.DCE",
+            "source": "LocalCNFuturesDAY1",
+            "sampling_mode": "bar",
+            "frequency": "DAY1",
+            "data_kind": "ohlcv_bar",
+            "market_depth": "not_applicable",
+            "delivery_mode": "historical_snapshot",
+            "status": "available",
+            "coverage": {
+                "start": "2010-01-04T00:00:00",
+                "end": "2026-07-18T00:00:00",
+                "assurance": "parquet_footer_statistics",
+            },
+        }
 
     def data_availability(
         self,
@@ -37,18 +52,7 @@ class _AvailabilityClient:
             "profile_hash": "sha256:profile",
             "as_of": "2026-07-19T00:00:00+00:00",
             "product_scope": ["A.DCE"],
-            "entries": [{
-                "product": "A.DCE",
-                "source": "LocalCNFuturesDAY1",
-                "mode": "historical_snapshot",
-                "status": "available",
-                "frequency": "DAY1",
-                "coverage": {
-                    "start": "2010-01-04T00:00:00",
-                    "end": "2026-07-18T00:00:00",
-                    "assurance": "parquet_footer_statistics",
-                },
-            }],
+            "entries": [self.entry],
         }
 
 
@@ -86,3 +90,35 @@ def test_products_availability_does_not_import_server_runtime() -> None:
 
     assert result.exit_code == 0, result.output
     assert "--local-runtime" not in result.output
+
+
+def test_products_availability_renders_orthogonal_stream_dimensions(
+    monkeypatch,
+) -> None:
+    fake = _AvailabilityClient(entry={
+        "product": "JNI.OSE",
+        "source": "Tiger",
+        "sampling_mode": "snapshot",
+        "frequency": None,
+        "data_kind": "order_book",
+        "market_depth": "l2",
+        "delivery_mode": "live_stream",
+        "status": "available",
+        "latency_class": "unverified",
+    })
+    monkeypatch.setattr(controller, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "products",
+        "availability",
+        "--product",
+        "JNI.OSE",
+        "--source",
+        "Tiger",
+    ])
+
+    assert result.exit_code == 0, result.output
+    for heading in ("采样", "时间频率", "内容", "深度", "交付"):
+        assert heading in result.output
+    for value in ("snapshot", "order_book", "l2", "live_stream"):
+        assert value in result.output

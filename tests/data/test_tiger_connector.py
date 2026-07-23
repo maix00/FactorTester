@@ -55,7 +55,12 @@ print(json.dumps({
     )
 
     assert [entry["status"] for entry in entries] == ["available", "available"]
-    assert all(entry["mode"] == "live_stream" for entry in entries)
+    assert all(entry["sampling_mode"] == "snapshot" for entry in entries)
+    assert all(entry["frequency"] is None for entry in entries)
+    assert all(entry["data_kind"] == "order_book" for entry in entries)
+    assert all(entry["market_depth"] == "l2" for entry in entries)
+    assert all(entry["delivery_mode"] == "live_stream" for entry in entries)
+    assert all("mode" not in entry for entry in entries)
     assert all(entry["entitled_realtime"] is True for entry in entries)
     assert all(entry["latency_class"] == "unverified" for entry in entries)
     assert entries[0]["observed_age_ms"] == 8972
@@ -81,6 +86,11 @@ def test_tiger_static_availability_never_spawns_or_claims_live_data(tmp_path):
     assert all(entry["connection"] == "not_probed" for entry in entries)
     assert all(entry["entitled_realtime"] is None for entry in entries)
     assert all(entry["latency_class"] == "unverified" for entry in entries)
+    assert all(entry["sampling_mode"] == "snapshot" for entry in entries)
+    assert all(entry["frequency"] is None for entry in entries)
+    assert all(entry["data_kind"] == "order_book" for entry in entries)
+    assert all(entry["market_depth"] == "l2" for entry in entries)
+    assert all(entry["delivery_mode"] == "live_stream" for entry in entries)
 
 
 def test_tiger_bridge_rejects_non_readonly_operation_without_loading_sdk():

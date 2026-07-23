@@ -5,6 +5,7 @@ import json
 import sys
 
 import pandas as pd
+import pytest
 from flask import Flask
 
 from server.modules.shared import shared_bp
@@ -13,6 +14,7 @@ from server.services.data_availability import availability_for_scope
 from sources.Tiger.connector import TigerConnectorConfig
 from tools.data.availability import build_availability_profile
 from tools.data.availability.model import profile_document
+from tools.data.availability.schema import availability_dimensions
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
 from tools.data.types import DataColumn
 from tools.products.Product import Product
@@ -64,7 +66,10 @@ def test_local_parquet_profile_reports_footer_coverage_without_loading_frame(
         {
             "product": "AVAILABILITY-TEST.LOCAL",
             "source": "AvailabilityTestLocalMIN1",
-            "mode": "historical_snapshot",
+            "sampling_mode": "bar",
+            "data_kind": "ohlcv_bar",
+            "market_depth": "not_applicable",
+            "delivery_mode": "historical_snapshot",
             "status": "available",
             "frequency": "MIN1",
             "coverage": {
@@ -265,6 +270,17 @@ def test_profile_identity_includes_source_and_probe_semantics() -> None:
     assert static["profile_hash"] != probed["profile_hash"]
 
 
+def test_availability_schema_rejects_market_depth_as_temporal_frequency() -> None:
+    with pytest.raises(ValueError):
+        availability_dimensions(
+            sampling_mode="snapshot",
+            frequency="L2",
+            data_kind="order_book",
+            market_depth="l2",
+            delivery_mode="live_stream",
+        )
+
+
 def test_tiger_scope_returns_only_tiger_cache_and_probe_entries(
     monkeypatch,
     tmp_path,
@@ -321,6 +337,11 @@ print(json.dumps({
     )
     assert profile["entries"][-1]["entitled_realtime"] is True
     assert profile["entries"][-1]["latency_class"] == "unverified"
+    assert profile["entries"][-1]["sampling_mode"] == "snapshot"
+    assert profile["entries"][-1]["frequency"] is None
+    assert profile["entries"][-1]["data_kind"] == "order_book"
+    assert profile["entries"][-1]["market_depth"] == "l2"
+    assert profile["entries"][-1]["delivery_mode"] == "live_stream"
     assert profile["schema_version"] == 2
     assert profile["source_scope"] == ["Tiger"]
     assert profile["probe"] is True

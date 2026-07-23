@@ -143,17 +143,32 @@ def product_availability(
         rows.append((
             entry.get("product", ""),
             entry.get("source", ""),
-            entry.get("mode", ""),
-            entry.get("frequency", ""),
+            entry.get("delivery_mode", ""),
+            entry.get("sampling_mode", ""),
+            entry.get("frequency") or "",
+            entry.get("data_kind", ""),
+            entry.get("market_depth", ""),
             entry.get("status", ""),
             coverage.get("start", ""),
             coverage.get("end", ""),
             entry.get("latency_class", ""),
         ))
     for line in render_table(
-        ("产品", "数据源", "模式", "频率", "状态", "起始", "结束", "延迟"),
+        (
+            "产品",
+            "数据源",
+            "交付",
+            "采样",
+            "时间频率",
+            "内容",
+            "深度",
+            "状态",
+            "起始",
+            "结束",
+            "延迟",
+        ),
         rows,
-        max_widths=(20, 28, 20, 10, 14, 22, 22, 18),
+        max_widths=(18, 24, 18, 10, 10, 14, 14, 14, 22, 22, 18),
     ):
         click.echo(line)
     required_rows = []

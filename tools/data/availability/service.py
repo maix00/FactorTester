@@ -10,6 +10,7 @@ from tools.data.types import DataFreq
 
 from .model import profile_document
 from .parquet_footer import inspect_parquet
+from .schema import availability_dimensions
 
 
 def build_availability_profile(
@@ -53,13 +54,18 @@ def _inspect_source(
     base = {
         "product": product_name,
         "source": source_key,
-        "mode": "historical_snapshot",
+        **availability_dimensions(
+            sampling_mode="bar",
+            frequency=frequency,
+            data_kind="ohlcv_bar",
+            market_depth="not_applicable",
+            delivery_mode="historical_snapshot",
+        ),
     }
     if not _timezone_matches(product, source):
         return {
             **base,
             "status": "unavailable",
-            "frequency": frequency,
             "reason": "timezone_mismatch",
         }
     try:
@@ -68,14 +74,12 @@ def _inspect_source(
         return {
             **base,
             "status": "unavailable",
-            "frequency": frequency,
             "reason": "path_resolution_failed",
         }
     if path.suffix.lower() != ".parquet":
         return {
             **base,
             "status": "unavailable",
-            "frequency": frequency,
             "reason": "coverage_inspector_not_registered",
         }
     details = inspect_parquet(
@@ -90,7 +94,7 @@ def _inspect_source(
         frequency=frequency,
     )
     if details.get("status") != "available":
-        return {**base, "frequency": frequency, **details}
+        return {**base, **details}
     result = {
         **base,
         "status": "available",
