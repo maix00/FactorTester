@@ -146,8 +146,13 @@ def derive_token_metrics(
             - int(context["context_bytes"])
         ),
         "routine_context_latency_ms": round(context_latency_ms, 3),
-        "packet_budget_policy_ref": packet_budget["policy_ref"],
+        "packet_budget_policy_ref": str(
+            packet_budget.get("profile_ref")
+            or packet_budget.get("policy_ref")
+            or ""
+        ),
         "packet_budget_policy_status": packet_budget["calibration_status"],
+        "budget_profile_hash": str(packet_budget.get("profile_hash") or ""),
         "packet_budget_calibration_status": calibration[
             "calibration_status"
         ],
@@ -237,14 +242,6 @@ def token_failures(metrics: dict[str, Any]) -> list[str]:
         "missing_graph_calibration"
     ):
         failures.append("packet_budget_calibration")
-    if not metrics["provider_actual_token_comparison"]:
-        failures.append("provider_actual_token_comparison")
-    calibration = metrics.get("packet_calibration") or {}
-    if calibration.get("calibration_status") not in {
-        "provider_verified",
-        "legacy_schema_exempt",
-    }:
-        failures.append("packet_calibration_receipt")
     if metrics["full_graph_loaded_for_routine"]:
         failures.append("full_graph_loaded_for_routine")
     for field in (
@@ -254,12 +251,4 @@ def token_failures(metrics: dict[str, Any]) -> list[str]:
     ):
         if int(metrics[field]) != 0:
             failures.append(field)
-    graph_tokens = int(metrics["shadow_graph_total_tokens"])
-    baseline_tokens = int(metrics["shadow_baseline_total_tokens"])
-    if graph_tokens > baseline_tokens:
-        failures.append("shadow_graph_total_tokens")
-    if not graph_tokens:
-        failures.append("shadow_graph_total_tokens_nonzero")
-    if not baseline_tokens:
-        failures.append("shadow_baseline_total_tokens_nonzero")
     return failures

@@ -112,7 +112,7 @@ def test_calibration_fails_closed_when_identity_does_not_match() -> None:
         )
 
 
-def test_activation_token_gate_fails_closed_without_verified_calibration() -> None:
+def test_activation_context_gate_does_not_require_provider_calibration() -> None:
     metrics = {
         "routine_context_bytes": 100,
         "routine_context_ceiling_bytes": 16 * 1024,
@@ -132,7 +132,7 @@ def test_activation_token_gate_fails_closed_without_verified_calibration() -> No
 
     failures = token_failures(metrics)
 
-    assert "packet_calibration_receipt" in failures
+    assert failures == []
 
 
 def test_calibration_rejects_incomplete_anchor_coverage() -> None:

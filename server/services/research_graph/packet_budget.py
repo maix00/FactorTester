@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 from math import ceil
+import os
 from typing import Any
+
+import orjson
 
 
 LEGACY_AGENT_PACKET_BYTES = 6000
+DEFAULT_RUNTIME_AGENT_PACKET_BYTES = 6400
 MAX_AGENT_PACKET_HARD_CEILING_BYTES = 16 * 1024
 MIN_CALIBRATION_HEADROOM_BYTES = 512
 MIN_CALIBRATION_HEADROOM_RATIO = 0.10
@@ -17,19 +22,97 @@ REQUIRED_ACTIVATION_MEASUREMENTS = (
 
 
 def graph_packet_budget(graph: dict[str, Any]) -> dict[str, Any]:
-    """Return a validated graph-local budget or the legacy fallback."""
+    """Return a runtime Profile for v2 Graphs or a historical Graph budget."""
     policy = graph.get("agent_packet_budget")
     if policy is None:
-        return {
+        if int(graph.get("schema_version") or 0) >= 2:
+            return runtime_packet_budget_profile(graph)
+        legacy = {
             "policy_ref": "agent-packet-budget@legacy",
+            "profile_ref": "agent-packet-budget@legacy",
+            "budget_scope": "graph_legacy",
             "ceiling_bytes": LEGACY_AGENT_PACKET_BYTES,
-            "calibration_status": (
-                "missing_graph_calibration"
-                if int(graph.get("schema_version") or 0) >= 2
-                else "legacy_schema_exempt"
-            ),
+            "calibration_status": "legacy_schema_exempt",
         }
-    return validate_graph_packet_budget(policy)
+        legacy["profile_hash"] = hashlib.sha256(orjson.dumps(
+            legacy,
+            option=orjson.OPT_SORT_KEYS,
+        )).hexdigest()
+        return legacy
+    validated = validate_graph_packet_budget(policy)
+    validated["budget_scope"] = "graph_legacy"
+    validated["profile_ref"] = str(validated["policy_ref"])
+    validated["profile_hash"] = hashlib.sha256(orjson.dumps(
+        validated,
+        option=orjson.OPT_SORT_KEYS,
+    )).hexdigest()
+    return validated
+
+
+def runtime_packet_budget_profile(graph: dict[str, Any]) -> dict[str, Any]:
+    raw_ceiling = os.environ.get(
+        "GTHT_AGENT_PACKET_CEILING_BYTES",
+        str(DEFAULT_RUNTIME_AGENT_PACKET_BYTES),
+    )
+    try:
+        ceiling = int(raw_ceiling)
+    except ValueError as exc:
+        raise ValueError(
+            "GTHT_AGENT_PACKET_CEILING_BYTES must be an integer"
+        ) from exc
+    if ceiling <= 0 or ceiling > MAX_AGENT_PACKET_HARD_CEILING_BYTES:
+        raise ValueError(
+            "runtime packet budget exceeds the protocol safety boundary"
+        )
+    profile = {
+        "schema_version": 2,
+        "profile_ref": "agent-packet-runtime@1",
+        "policy_ref": "agent-packet-runtime@1",
+        "budget_scope": "runtime_profile",
+        "ceiling_bytes": ceiling,
+        "protocol_hard_ceiling_bytes": (
+            MAX_AGENT_PACKET_HARD_CEILING_BYTES
+        ),
+        "coverage": {
+            "required_anchor_refs": [
+                *(
+                    f"node:{item['node_id']}"
+                    for item in graph.get("nodes") or []
+                ),
+                *(
+                    f"edge:{item['edge_id']}"
+                    for item in graph.get("edges") or []
+                ),
+                *(
+                    f"system_gate:{item['policy_kind']}"
+                    for item in graph.get("system_transition_policies") or []
+                ),
+            ],
+            "required_packet_kinds": ["context", "next"],
+            "required_scenarios": ["typical", "max_legal"],
+            "minimum_samples_per_case": 1,
+        },
+        "thresholds": {
+            "minimum_byte_headroom_bytes": 512,
+            "minimum_byte_headroom_ratio": 0.10,
+            "minimum_token_headroom_ratio": 0.10,
+            "maximum_e2e_latency_p95_ms": 5000.0,
+            "maximum_truncated_rate": 0.0,
+            "maximum_rejected_rate": 0.0,
+            "maximum_failed_rate": 0.0,
+        },
+        "calibration_receipt_contract_ref": (
+            "provider-verified-packet-calibration@1"
+        ),
+        "calibration_receipt_ref": "",
+        "calibration_receipt_hash": "",
+        "calibration_status": "uncalibrated",
+    }
+    profile["profile_hash"] = hashlib.sha256(orjson.dumps(
+        profile,
+        option=orjson.OPT_SORT_KEYS,
+    )).hexdigest()
+    return profile
 
 
 def validate_graph_packet_budget(value: Any) -> dict[str, Any]:

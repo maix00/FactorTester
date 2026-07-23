@@ -306,31 +306,9 @@ def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
     assert all(item["industry_principle_zh"] for item in payload["category_contexts"])
 
 
-def test_v9_packet_budget_declares_calibration_policy_not_static_results() -> None:
+def test_v9_graph_does_not_embed_runtime_packet_budget() -> None:
     graph = build_successor_graph()
-    budget = graph["agent_packet_budget"]
-    expected_refs = {
-        *(f"node:{item['node_id']}" for item in graph["nodes"]),
-        *(f"edge:{item['edge_id']}" for item in graph["edges"]),
-        *(
-            f"system_gate:{item['policy_kind']}"
-            for item in graph["system_transition_policies"]
-        ),
-    }
-    assert budget["schema_version"] == 2
-    assert set(budget["coverage"]["required_anchor_refs"]) == expected_refs
-    assert budget["coverage"]["required_packet_kinds"] == ["context", "next"]
-    assert budget["coverage"]["required_scenarios"] == [
-        "typical",
-        "max_legal",
-    ]
-    assert budget["calibration_receipt_contract_ref"] == (
-        "provider-verified-packet-calibration@1"
-    )
-    assert budget["calibration_receipt_ref"] == ""
-    assert budget["calibration_receipt_hash"] == ""
-    assert "ceiling_bytes" not in budget
-    assert "observed_max_packet_bytes" not in budget
+    assert "agent_packet_budget" not in graph
 
 
 def test_trial_execution_packet_covers_strategy_and_market_rules() -> None:

@@ -1887,7 +1887,7 @@ def test_activation_requires_replay_shadow_capability_and_job_isolation(
         )
 
 
-def test_validation_rejects_a_token_efficient_claim_with_regression(
+def test_validation_derives_token_regression_as_nonblocking_telemetry(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1912,20 +1912,22 @@ def test_validation_rejects_a_token_efficient_claim_with_regression(
                 },
             },
         )
-    with pytest.raises(ValueError, match="token_efficiency_passed"):
-        research_graphs.record_validation(
-            graph_id="factor-research",
-            version=2,
-            proposal_id=proposal["proposal_id"],
-            actor="alice",
-            evidence=_server_validation_evidence(
-                graph_tokens=120,
-                baseline_tokens=100,
-            ),
-        )
+    validation = research_graphs.record_validation(
+        graph_id="factor-research",
+        version=2,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        evidence=_server_validation_evidence(
+            graph_tokens=120,
+            baseline_tokens=100,
+        ),
+    )
+    metrics = validation["evidence"]["token_metrics"]
+    assert metrics["shadow_graph_total_tokens"] == 120
+    assert metrics["shadow_baseline_total_tokens"] == 100
 
 
-def test_validation_rejects_caller_reported_usage_as_calibration_evidence(
+def test_validation_records_unverified_usage_without_blocking_activation(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1933,22 +1935,22 @@ def test_validation_rejects_caller_reported_usage_as_calibration_evidence(
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal, _ = _approve_proposal()
 
-    with pytest.raises(
-        ValueError,
-        match="provider_actual_token_comparison",
-    ):
-        research_graphs.record_validation(
-            graph_id="factor-research",
-            version=2,
-            proposal_id=proposal["proposal_id"],
-            actor="alice",
-            evidence=_server_validation_evidence(
-                fallback_graph_usage=True,
-            ),
-        )
+    validation = research_graphs.record_validation(
+        graph_id="factor-research",
+        version=2,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        evidence=_server_validation_evidence(
+            fallback_graph_usage=True,
+        ),
+    )
+
+    metrics = validation["evidence"]["token_metrics"]
+    assert metrics["provider_actual_token_comparison"] is False
+    assert metrics["token_authority"] == "mixed_or_fallback"
 
 
-def test_validation_rejects_unbounded_extra_shadow_usage(
+def test_validation_records_extra_shadow_usage_without_blocking_activation(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1956,26 +1958,24 @@ def test_validation_rejects_unbounded_extra_shadow_usage(
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal, _ = _approve_proposal()
 
-    with pytest.raises(
-        ValueError,
-        match="provider_actual_token_comparison",
-    ):
-        research_graphs.record_validation(
-            graph_id="factor-research",
-            version=2,
-            proposal_id=proposal["proposal_id"],
-            actor="alice",
-            evidence=_server_validation_evidence(
-                extra_shadow_usage=True,
-            ),
-        )
+    validation = research_graphs.record_validation(
+        graph_id="factor-research",
+        version=2,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        evidence=_server_validation_evidence(
+            extra_shadow_usage=True,
+        ),
+    )
+
+    metrics = validation["evidence"]["token_metrics"]
+    assert metrics["provider_actual_token_comparison"] is False
+    assert metrics["token_authority"] == "mixed_or_fallback"
 
 
 @pytest.mark.parametrize(
     ("evidence_kwargs", "message"),
     [
-        ({"graph_tokens": 0}, "nonzero"),
-        ({"baseline_tokens": 0}, "nonzero"),
         ({"matching_run_spec": False}, "RunSpec hash"),
         ({"launch_subagent": True}, "routine_subagent_count"),
     ],
@@ -1998,6 +1998,38 @@ def test_validation_rejects_untrusted_or_noncomparable_shadow_measurements(
             actor="alice",
             evidence=_server_validation_evidence(**evidence_kwargs),
         )
+
+
+@pytest.mark.parametrize(
+    "evidence_kwargs",
+    [
+        {"graph_tokens": 0},
+        {"baseline_tokens": 0},
+    ],
+)
+def test_validation_records_missing_token_measurements_without_blocking(
+    tmp_path,
+    monkeypatch,
+    evidence_kwargs,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    proposal, _ = _approve_proposal()
+
+    validation = research_graphs.record_validation(
+        graph_id="factor-research",
+        version=2,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        evidence=_server_validation_evidence(**evidence_kwargs),
+    )
+
+    metrics = validation["evidence"]["token_metrics"]
+    assert metrics["provider_actual_token_comparison"] is False
+    assert (
+        metrics["shadow_graph_total_tokens"] == 0
+        or metrics["shadow_baseline_total_tokens"] == 0
+    )
 
 
 def test_review_disagreement_adds_a_third_reviewer_only_then(

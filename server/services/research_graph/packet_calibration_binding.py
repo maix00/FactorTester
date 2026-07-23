@@ -30,6 +30,16 @@ def bind_packet_calibration(
     cohort: list[dict[str, Any]],
     request: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    runtime_profile = packet_budget.get("budget_scope") == "runtime_profile"
+    if runtime_profile and not isinstance(request, dict):
+        return {
+            "calibration_status": str(
+                packet_budget.get("calibration_status") or "uncalibrated"
+            ),
+            "budget_profile_hash": str(
+                packet_budget.get("profile_hash") or ""
+            ),
+        }
     if int(packet_budget.get("schema_version") or 0) < 2:
         return {"calibration_status": "legacy_schema_exempt"}
     if not isinstance(request, dict):
@@ -63,12 +73,17 @@ def bind_packet_calibration(
         raise ValueError(
             "packet calibration Provider does not match shadow cohort"
         )
-    return verify_packet_calibration_receipt(
+    verified = verify_packet_calibration_receipt(
         receipt=str(request.get("receipt") or ""),
         expected_identity=expected_identity,
         policy=packet_budget,
         verifier=packet_calibration_receipt_verifier(provider_id),
     )
+    if runtime_profile:
+        verified["budget_profile_hash"] = str(
+            packet_budget.get("profile_hash") or ""
+        )
+    return verified
 
 
 def _single_identity(rows: list[dict[str, Any]], field: str) -> str:

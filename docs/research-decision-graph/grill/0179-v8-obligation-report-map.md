@@ -2846,3 +2846,37 @@ verifier 证明 provider-neutral；篡改 token/request/input/runtime/model/prov
 重放、错误 run/instance/branch/lineage、混入其他 period 或未封闭 cohort 均 fail closed；
 graph 真实 receipt 加 baseline 手填用量仍失败；token 聚合保持一次查询且最终 schema
 不增加 owner table。
+
+## Grill 181 — Token 校准与 Graph 激活解耦
+
+**决定：校准仍然需要，但校准可得性和 token 回归不再是 Active Graph 激活的
+前置条件。** Grill 180 对 `provider_actual` 的信任定义保持不变；没有可信 receipt
+时必须如实记录 `uncalibrated` 或 `mixed_or_fallback`，不得把调用方数字升级为真实
+Provider 用量。
+
+具体 token、packet 上限、Provider、model、tokenizer 和校准结果属于独立、带 hash 的
+运行时 Budget Profile，不属于 Graph canonical content：
+
+```text
+Graph hash
+  └─ 研究节点、边、义务与报告要求
+
+Budget Profile hash
+  └─ Provider/model/tokenizer、packet 上限与校准状态
+
+Run / Transition
+  └─ graph hash + budget profile hash
+```
+
+- v9 Graph 不再嵌入 `agent_packet_budget` 数值或校准阈值；
+- 服务器从当前 Graph 的 node/edge/system-gate 派生校准 anchor，并把 coverage 写入
+  Budget Profile；调整 Profile 不改变 Graph hash；
+- 无 receipt 时使用当前 Profile 的 packet ceiling，并保留未校准状态；取得可信 receipt
+  后生成新的 Profile 版本，后续调用使用新 hash，历史调用保留旧 hash；
+- 协议绝对安全上限属于服务器实现；修改它需要代码发布，但不改变研究图版本；
+- 激活仍必须拒绝局部 context 超限、routine 加载完整 Graph、未触发条件或未来节点
+  gap 进入当前 packet、以及违反风险分层的多 Agent 启动；
+- token 对比、延迟和 cache 命中继续记录并供 UI/维护 Agent 优化，但单纯缺少校准、
+  token 为零或 v9 token 高于 baseline 不阻止激活；
+- 只有预算策略永久跳过必要 reviewer、证据或研究步骤时，才构成研究语义变化并进入
+  Graph/执行策略审查。

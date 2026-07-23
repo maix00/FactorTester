@@ -251,14 +251,18 @@ def test_context_transition_and_persisted_trace_have_distinct_budgets() -> None:
 
 def test_graph_packet_budget_is_calibrated_per_version() -> None:
     legacy = graph_packet_budget({})
-    assert legacy == {
-        "policy_ref": "agent-packet-budget@legacy",
-        "ceiling_bytes": LEGACY_AGENT_PACKET_BYTES,
-        "calibration_status": "legacy_schema_exempt",
-    }
+    assert legacy["policy_ref"] == "agent-packet-budget@legacy"
+    assert legacy["ceiling_bytes"] == LEGACY_AGENT_PACKET_BYTES
+    assert legacy["calibration_status"] == "legacy_schema_exempt"
+    assert legacy["budget_scope"] == "graph_legacy"
+    assert len(legacy["profile_hash"]) == 64
     assert graph_packet_budget({"schema_version": 2})[
         "calibration_status"
-    ] == "missing_graph_calibration"
+    ] == "uncalibrated"
+    assert graph_packet_budget({"schema_version": 2})[
+        "budget_scope"
+    ] == "runtime_profile"
+    assert len(graph_packet_budget({"schema_version": 2})["profile_hash"]) == 64
 
     calibrated = validate_graph_packet_budget({
         "schema_version": 1,

@@ -282,6 +282,9 @@ def _build_local_state(
             *node.get("node_report_refs", []),
         ]
     packet_budget = graph_packet_budget(graph)
+    if packet_budget.get("budget_scope") == "runtime_profile":
+        context["budget_profile_ref"] = packet_budget["profile_ref"]
+        context["budget_profile_hash"] = packet_budget["profile_hash"]
     context["context_bytes"] = 0
     for _ in range(3):
         context["context_bytes"] = len(orjson.dumps(context))

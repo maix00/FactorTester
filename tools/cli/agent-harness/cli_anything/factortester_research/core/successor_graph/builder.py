@@ -71,13 +71,6 @@ def build_successor_graph() -> dict[str, Any]:
             "local_body_policy": "hash_bound_local_only",
         },
         "system_transition_policies": transition_policies,
-        "agent_packet_budget": _agent_packet_budget(
-            nodes=nodes,
-            edges=edges,
-            system_gate_ids=sorted(
-                str(item["policy_kind"]) for item in transition_policies
-            ),
-        ),
         "provenance": {
             "source": "grill-179-canonical-handoff",
             "description": (
@@ -91,53 +84,15 @@ def build_successor_graph() -> dict[str, Any]:
     return graph
 
 
-def _agent_packet_budget(
-    *,
-    nodes: list[dict[str, Any]],
-    edges: list[dict[str, Any]],
-    system_gate_ids: list[str],
-) -> dict[str, Any]:
-    """Declare what v9 calibration must prove before activation."""
-    return {
-        "schema_version": 2,
-        "policy_ref": "agent-packet-budget@2",
-        "protocol_hard_ceiling_bytes": 16 * 1024,
-        "coverage": {
-            "required_anchor_refs": [
-                *(f"node:{item['node_id']}" for item in nodes),
-                *(f"edge:{item['edge_id']}" for item in edges),
-                *(f"system_gate:{item}" for item in system_gate_ids),
-            ],
-            "required_packet_kinds": ["context", "next"],
-            "required_scenarios": ["typical", "max_legal"],
-            "minimum_samples_per_case": 1,
-        },
-        "thresholds": {
-            "minimum_byte_headroom_bytes": 512,
-            "minimum_byte_headroom_ratio": 0.10,
-            "minimum_token_headroom_ratio": 0.10,
-            "maximum_e2e_latency_p95_ms": 5000.0,
-            "maximum_truncated_rate": 0.0,
-            "maximum_rejected_rate": 0.0,
-            "maximum_failed_rate": 0.0,
-        },
-        "calibration_receipt_contract_ref": (
-            "provider-verified-packet-calibration@1"
-        ),
-        "calibration_receipt_ref": "",
-        "calibration_receipt_hash": "",
-    }
-
-
 def _change_manifest() -> dict[str, Any]:
     return {
         "parent_version": 8,
         "draft_revision": {
             "replaces_content_hash": (
-                "829f1ee2b9834631bc79fabcd6679200"
-                "ba98097c8a354e88562f0b2e57f1c807"
+                "4c74378667f1bba06689af7e4ef07f6f"
+                "3a1e233c82eaf4c48705437e92011d29"
             ),
-            "reason_code": "independent_activation_review_blockers",
+            "reason_code": "runtime_budget_profile_decoupling",
         },
         "summary_zh": (
             "按研究生命周期重编主路径，并加入版本化义务、逐项报告和系统门合同。"

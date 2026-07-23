@@ -43,6 +43,7 @@ from server.services.research_graph.branch.topology_preflight import (
 from server.services.research_graph.continuation_gate import (
     consume_continuation_gate,
 )
+from server.services.research_graph.packet_budget import graph_packet_budget
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
@@ -303,6 +304,7 @@ def _prepare(
         raise ValueError(
             f"target Graph lacks capability-free {target_node} node"
         )
+    budget_profile = graph_packet_budget(target_graph)
     descriptor = {
         "schema_version": 2,
         "continuation_mode": continuation_mode,
@@ -316,6 +318,14 @@ def _prepare(
         "source_checkpoint_hash": str(checkpoint["projection_hash"]),
         "target_graph_version": int(target_graph_version),
         "target_graph_hash": str(target_graph["content_hash"]),
+        "budget_profile_ref": str(
+            budget_profile.get("profile_ref")
+            or budget_profile.get("policy_ref")
+            or ""
+        ),
+        "budget_profile_hash": str(
+            budget_profile.get("profile_hash") or ""
+        ),
         "target_node": target_node,
         "workspace_id": str(source["workspace_id"]),
         "work_package_id": str(
