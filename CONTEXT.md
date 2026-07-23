@@ -94,6 +94,20 @@ Risk Module 或 Analyzer。`NextReturns` 是事后评价 label，不得进入因
 
 原始因子值在数据源频率（如 1 分钟）下计算，然后对齐到信号频率（如日频）。`SignalAlign` 在可配置的 `basepoint`（last / first tick）采样，并可跳过盘间间隔（`end_session_skip`）。
 
+### 策略意图 Policy (Strategy Intent Policy)
+
+StrategyBook 为每个 strategy 解析一个 Strategy Intent Policy。Policy 把已对齐因子和
+当前策略状态转换为目标权重或显式订单增量意图；分组、阈值状态和多空组合是平行的
+内置 Policy。选择、入场或退出状态不直接表示下单数量，默认订单管线始终用目标仓位
+减当前仓位得到交易增量。实时回放与预计算 Adapter 必须执行同一种 Policy 语义。
+
+### 横截面选择计划 (Cross-sectional Selection Plan)
+
+可编译的策略选择计划由 `screen`、`rank`、`split`、`top`、`bottom` 等通用工具组成。
+事件 Adapter 用于逐步审计，向量化 Adapter 用于批量加速；两者必须输出相同 membership。
+分组 Policy 是标准选择计划加调仓和分配工具的内置组合。`product_mask` 始终在完整分桶后
+取交集，不参与 screen 或重新排名。
+
 ### 异步产品窗口 (Session-aware Window)
 
 产品组中的品种可能拥有不同日夜盘时段；统一面板因此会包含某些品种原始数据不存在的填充位置。当前没有权威计划时段来源，因此窗口语义以原始观测为准：
