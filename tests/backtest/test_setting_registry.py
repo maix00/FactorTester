@@ -490,7 +490,7 @@ def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> No
 
     by_key = {item["setting_key"]: item for item in defaults}
     assert by_key["allocation_policy"]["value"] == "equal_notional"
-    assert by_key["allocation_policy"]["value_label"] == "等市值"
+    assert by_key["allocation_policy"]["value_label"] == "等名义敞口"
     assert "execution_timing" not in by_key
     assert "execution_price_basis" not in by_key
 

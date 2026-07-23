@@ -24,6 +24,7 @@ from tools.testers.backtest.modules.product_selection import ProductSelectionMod
 from tools.testers.backtest.policies import (
     CashAvailabilityPolicy,
     HierarchyConstraintPolicy,
+    MarginBudgetPolicy,
     OrderRoutingPolicy,
     OrderSizingPolicy,
     PendingOrderConflictPolicy,
@@ -715,6 +716,7 @@ def _policies_from_strategy_book(strategy_book: object, book: object) -> Strateg
         trade_decision_merge=getattr(book, "merge_trade_decisions", None),
         hierarchy_constraints=getattr(book, "apply_hierarchy_constraints", None),
         strategy_intent_precompute=getattr(book, "precompute_strategy_intents", None),
+        margin_budget=getattr(book, "apply_margin_budget", None),
     )
 
 

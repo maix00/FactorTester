@@ -194,7 +194,7 @@ const indexManifest = {
       chip_template: '分配: {value}',
       options: [
         { value: 'inverse_volatility', label: '等风险' },
-        { value: 'equal_notional', label: '等市值' },
+        { value: 'equal_notional', label: '等名义敞口' },
       ],
     },
     volatility_lookback: {

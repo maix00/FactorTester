@@ -4,6 +4,7 @@ from .allocation import equal_weight, inverse_measure_weight
 from .contracts import (
     CashAvailabilityPolicy,
     HierarchyConstraintPolicy,
+    MarginBudgetPolicy,
     OrderRoutingPolicy,
     OrderSizingPolicy,
     PendingOrderConflictPolicy,
@@ -11,6 +12,12 @@ from .contracts import (
     StrategyIntentPolicy,
     StrategyIntentPrecomputePolicy,
     TradeDecisionMergePolicy,
+)
+from .margin_budget import (
+    MarginBudgetDecision,
+    MarginBudgetRequest,
+    default_margin_budget_policy,
+    validate_margin_budget_decision,
 )
 from .cross_section import bottom, rank_cross_section, screen_cross_section, select_rank_group, top
 from .rebalance import (
@@ -22,6 +29,9 @@ from .rebalance import (
 __all__ = (
     "CashAvailabilityPolicy",
     "HierarchyConstraintPolicy",
+    "MarginBudgetDecision",
+    "MarginBudgetPolicy",
+    "MarginBudgetRequest",
     "OrderRoutingPolicy",
     "OrderSizingPolicy",
     "PendingOrderConflictPolicy",
@@ -30,6 +40,7 @@ __all__ = (
     "StrategyIntentPrecomputePolicy",
     "TradeDecisionMergePolicy",
     "bottom",
+    "default_margin_budget_policy",
     "equal_weight",
     "inverse_measure_weight",
     "rank_cross_section",
@@ -38,5 +49,6 @@ __all__ = (
     "screen_cross_section",
     "select_rank_group",
     "top",
+    "validate_margin_budget_decision",
     "validate_rebalance_configuration",
 )

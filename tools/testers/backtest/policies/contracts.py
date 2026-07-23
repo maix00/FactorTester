@@ -15,6 +15,7 @@ PendingOrderConflictPolicy = Callable[[object, object, object, object], None]
 TradeDecisionMergePolicy = Callable[[object, object], object]
 HierarchyConstraintPolicy = Callable[[object, object], object]
 StrategyIntentPrecomputePolicy = Callable[[object, object, Sequence[object], object], None]
+MarginBudgetPolicy = Callable[[object], object]
 
 
 class StrategyIntentPolicy:
@@ -49,6 +50,7 @@ class StrategyBookPolicies:
     hierarchy_constraints: HierarchyConstraintPolicy | None = None
     strategy_intent_by_alias: Mapping[str, StrategyIntentPolicy] = field(default_factory=dict)
     strategy_intent_precompute: StrategyIntentPrecomputePolicy | None = None
+    margin_budget: MarginBudgetPolicy | None = None
 
     def strategy_intent_for(
         self,

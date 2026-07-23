@@ -37,7 +37,7 @@ def group_policy_fields() -> dict[str, FieldDefinition]:
         ),
         "allocation_policy": FieldDefinition(
             public=True, label="分配", default="equal_notional", control_template="select", tab="target_allocation",
-            options=(("equal_notional", "等市值"), ("inverse_volatility", "等风险（波动率倒数）"),
+            options=(("equal_notional", "等名义敞口"), ("inverse_volatility", "等风险（波动率倒数）"),
                      ("equal_margin", "等保证金（对照）"), ("factor_sizing", "按 sizing 因子")),
             chip_template="分配: {value}", tab_label="目标分配", tab_order=60,
         ),
@@ -55,7 +55,7 @@ def group_policy_fields() -> dict[str, FieldDefinition]:
         ),
         "volatility_warmup": FieldDefinition(
             public=True, label="预热", default="equal_notional", control_template="select", tab="target_allocation",
-            options=(("equal_notional", "预热期使用等市值并记录"), ("error", "数据不足即报错")),
+            options=(("equal_notional", "预热期使用等名义敞口并记录"), ("error", "数据不足即报错")),
             visible_when={"allocation_policy": ("inverse_volatility",)}, chip_template="预热: {value}",
             tab_label="目标分配", tab_order=60,
         ),
