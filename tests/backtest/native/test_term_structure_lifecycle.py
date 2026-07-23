@@ -367,12 +367,19 @@ def test_coverage_lifecycle_inference_is_shared_across_strategies_and_notice_flo
 
     calls: list[str] = []
     infer = lifecycle.infer_contract_end_from_coverage
+    offset_calls: list[tuple[pd.Timestamp, pd.Timedelta]] = []
+    apply_offset = term_structure._apply_lifecycle_offset
 
     def counting_infer(row, peer_rows, raw_prices):
         calls.append(str(row.get("uid")))
         return infer(row, peer_rows, raw_prices)
 
+    def counting_apply_offset(base, offset, *, state):
+        offset_calls.append((base, offset))
+        return apply_offset(base, offset, state=state)
+
     monkeypatch.setattr(lifecycle, "infer_contract_end_from_coverage", counting_infer)
+    monkeypatch.setattr(term_structure, "_apply_lifecycle_offset", counting_apply_offset)
     strategies = (Strategy(alias="A"), Strategy(alias="B"))
     product = _CoverageOnlyTwoContractTermProduct()
     account = BacktestRunState(strategy_configs={
@@ -417,6 +424,10 @@ def test_coverage_lifecycle_inference_is_shared_across_strategies_and_notice_flo
     _register_rollover_notices(account, ctx)
 
     assert sorted(calls) == ["P2601.DCE", "P2602.DCE"]
+    assert sorted(offset for _base, offset in offset_calls) == [
+        pd.Timedelta("2D"),
+        pd.Timedelta("5D"),
+    ]
 
 
 def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(monkeypatch):
