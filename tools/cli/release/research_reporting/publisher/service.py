@@ -28,10 +28,15 @@ def publish_research_checkpoint(
     agent_id: str,
     carrier: dict[str, Any],
     narrative: dict[str, Any],
+    local_reference_allowlist: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Materialize one checkpoint and update its existing local record."""
     value = canonical_carrier(carrier)
-    narrative_value = canonical_narrative(narrative, value)
+    narrative_value = canonical_narrative(
+        narrative,
+        value,
+        local_reference_allowlist=local_reference_allowlist,
+    )
     carrier_hash = content_hash(value)
     narrative_hash = content_hash(narrative_value)
     store = LocalProfileStore(client_root)

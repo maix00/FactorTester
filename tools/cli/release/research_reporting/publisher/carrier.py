@@ -19,6 +19,7 @@ from .identity import (
 
 MAX_CARRIER_BYTES = 64 * 1024
 MAX_ITEMS = 16
+MAX_REPORT_ITEMS = 64
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _CARRIER_FIELDS = {
     "schema_version", "workspace_ref", "work_package_ref", "branch_ref",
@@ -254,7 +255,10 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
         ):
             raise ValueError("report_fragment_ref must identify sha256")
         transition["report_items"] = _objects(
-            transition.get("report_items"), _REPORT_ITEM_FIELDS, "report_items",
+            transition.get("report_items"),
+            _REPORT_ITEM_FIELDS,
+            "report_items",
+            maximum=MAX_REPORT_ITEMS,
         )
         bindings = []
         for item in transition["report_items"]:
@@ -325,8 +329,14 @@ def _entry_resolution(value: Any) -> dict[str, Any]:
     return result
 
 
-def _objects(value: Any, fields: set[str], label: str) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or len(value) > MAX_ITEMS:
+def _objects(
+    value: Any,
+    fields: set[str],
+    label: str,
+    *,
+    maximum: int = MAX_ITEMS,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > maximum:
         raise ValueError(f"{label} must be a bounded array")
     if any(not isinstance(item, dict) or set(item) != fields for item in value):
         raise ValueError(f"{label} item fields are invalid")

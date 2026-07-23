@@ -11,6 +11,7 @@ from typing import Any
 
 from ...local_profile import LocalProfileStore
 from ..journal import load_fragments
+from .carrier import MAX_ITEMS as MAX_CARRIER_ITEMS
 from .service import publish_research_checkpoint
 
 
@@ -70,17 +71,18 @@ def publish_current_node_report_checkpoint(
             (carrier.get("latest_transition") or {}).get("created_at") or 0
         ),
     )
+    item_refs = list(dict.fromkeys(
+        str(link["target_ref"])
+        for item in ordered
+        for link in item.get("links") or []
+    ))
     synthetic = _current_node_carrier(
         carrier,
         checkpoint_ref=checkpoint_ref,
         predecessor_ref=previous_ref,
         recorded_at=recorded_at,
         submission=submission,
-        item_refs=list(dict.fromkeys(
-            str(link["target_ref"])
-            for item in ordered
-            for link in item.get("links") or []
-        )),
+        item_refs=item_refs,
     )
     result = publish_research_checkpoint(
         client_root=client_root,
@@ -88,6 +90,7 @@ def publish_current_node_report_checkpoint(
         agent_id=agent_id,
         carrier=synthetic,
         narrative=_narrative(ordered, recorded_at=recorded_at),
+        local_reference_allowlist=tuple(item_refs[MAX_CARRIER_ITEMS:]),
     )
     return {
         **result,
@@ -150,13 +153,16 @@ def _current_node_carrier(
         ),
     }
     base = value["latest_transition"]
+    bounded_item_refs = item_refs[:MAX_CARRIER_ITEMS]
+    newly_omitted = len(item_refs) - len(bounded_item_refs)
+    value["omitted_evidence_count"] += newly_omitted
     value["latest_transition"] = {
         "step_ref": checkpoint_ref,
         "edge_ref": "graph-edge:__current_node_report__",
         "from_node": value["current_node"],
         "to_node": value["current_node"],
         "created_at": recorded_at,
-        "evidence_refs": item_refs,
+        "evidence_refs": bounded_item_refs,
         "trial_plan_refs": [],
         "obligation_refs": [],
         "claim_refs": [],

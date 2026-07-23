@@ -13,6 +13,7 @@ from typing import Any
 
 MAX_FRAGMENT_BYTES = 128 * 1024
 MAX_JOURNAL_BYTES = 4 * 1024 * 1024
+MAX_FRAGMENT_SECTIONS = 64
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FRAGMENT_FIELDS = {
     "schema_version", "language", "checkpoint_ref", "created_at", "carrier_hash",
@@ -245,7 +246,7 @@ def validate_fragment(value: Any) -> dict[str, Any]:
     if (
         not isinstance(candidate.get("sections"), list)
         or not candidate["sections"]
-        or len(candidate["sections"]) > 16
+        or len(candidate["sections"]) > MAX_FRAGMENT_SECTIONS
         or not isinstance(candidate.get("evidence_refs"), list)
         or len(candidate["evidence_refs"]) > 64
         or not isinstance(candidate.get("gaps"), list)

@@ -19,6 +19,7 @@ from ..assets import canonical_asset_descriptor
 
 MAX_NARRATIVE_BYTES = 64 * 1024
 MAX_ITEMS = 16
+MAX_REPORT_SECTIONS = 64
 _NARRATIVE_FIELDS = {"schema_version", "language", "title", "sections"}
 _NARRATIVE_FIELDS_V3 = _NARRATIVE_FIELDS | {
     "research_occurred_at", "time_basis", "time_source_refs",
@@ -44,6 +45,8 @@ _RESULT_KINDS = {"ic", "factor_evaluation", "backtest", "robustness"}
 def canonical_narrative(
     narrative: Any,
     carrier: dict[str, Any],
+    *,
+    local_reference_allowlist: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Return a bounded narrative whose links belong to one Carrier."""
     if not isinstance(narrative, dict):
@@ -69,9 +72,16 @@ def canonical_narrative(
         raise ValueError("report-enforced checkpoint requires narrative v3")
     title = chinese_text(narrative["title"], "narrative.title", maximum=256)
     sections = narrative["sections"]
-    if not isinstance(sections, list) or not sections or len(sections) > 16:
+    if (
+        not isinstance(sections, list)
+        or not sections
+        or len(sections) > MAX_REPORT_SECTIONS
+    ):
         raise ValueError("local narrative sections must be a bounded array")
     allowed_refs = _carrier_reference_allowlist(carrier)
+    for item in local_reference_allowlist:
+        reference(item, "narrative.local_reference_allowlist")
+        allowed_refs.add(item)
     result = []
     seen_ids = set()
     declared_target_refs: set[str] = set()

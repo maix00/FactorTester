@@ -418,7 +418,7 @@ def test_current_node_maxa_projection_updates_real_journal_index_and_report(
         carrier=carrier,
     )
     local_items = []
-    for index in range(11):
+    for index in range(18):
         binding = {
             "report_requirement_id": f"maxa.requirement.{index + 1}",
             "subject_ref": "factor:SgCPSVol",
@@ -503,14 +503,23 @@ def test_current_node_maxa_projection_updates_real_journal_index_and_report(
     assert "report-checkpoint:sha256:" in journal
     assert "report-checkpoint:sha256:" in index
     assert r"\operatorname{SgCPSVol}_{t}" in report
-    assert "第11项中文语义已完成核对" in report
+    assert "第18项中文语义已完成核对" in report
+    assert "有 2 条证据引用未随本次载荷提供" in report
     journal_value = json.loads(journal)
     assert journal_value["checkpoints"][-1]["sections"][0]["title"] == (
         "因子公式、方向与单位"
     )
-    assert journal_value["checkpoints"][-1]["sections"][10]["title"] == (
-        "第11项语义核对"
+    assert journal_value["checkpoints"][-1]["sections"][17]["title"] == (
+        "第18项语义核对"
     )
+    assert len(journal_value["checkpoints"][-1]["sections"]) == 18
+    assert {
+        link["target_ref"]
+        for section in journal_value["checkpoints"][-1]["sections"]
+        for link in section["links"]
+        if link["kind"] == "evidence"
+    } == {f"evidence:maxa-{index + 1}" for index in range(18)}
+    assert len(result["report_submission"]["items"]) == 18
     section_ids = [
         section["section_id"]
         for section in journal_value["checkpoints"][-1]["sections"]
