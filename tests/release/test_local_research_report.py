@@ -1070,6 +1070,85 @@ def test_graph_continuation_replaces_physical_branch_in_work_package_index(
     )
 
 
+def test_idempotent_continuation_repairs_missing_historical_index_sections(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    source = _carrier()
+    source["graph_ref"] = "factor-research@v7"
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=source,
+        narrative=_narrative(source, body="旧图版本已完成可信研究检查点。"),
+    )
+
+    profile = store.load("maxa")
+    profile["agents"][0]["scope"] = {
+        "instance_id": "sgccs-v8",
+        "branch_id": "branch-v8",
+    }
+    profile["research_records"][0]["graph_branch_ref"] = (
+        "graph-branch:sgccs-v8:branch-v8"
+    )
+    store.save(profile)
+    continued = deepcopy(source)
+    continued.update({
+        "branch_ref": "graph-branch:sgccs-v8:branch-v8",
+        "graph_ref": "factor-research@v8",
+        "checkpoint_ref": "trace:checkpoint-v8",
+    })
+    continued["latest_transition"].update({
+        "step_ref": "trace:checkpoint-v8",
+        "edge_ref": "graph-edge:__graph_continuation__",
+        "created_at": 3.0,
+    })
+    continued["report_lineage"] = {
+        "status": "linked",
+        "predecessor_checkpoint_ref": "trace:checkpoint-1",
+        "source_branch_ref": "graph-branch:sgccs-review:branch-sgccs",
+    }
+    narrative = _narrative(
+        continued, body="同一研究在图 v8 中连续开展。",
+    )
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=continued,
+        narrative=narrative,
+    )
+
+    index_path = (
+        root / "profile-root" / "research" / "sgccs-review" / "INDEX.json"
+    )
+    broken = json.loads(index_path.read_text())
+    broken["sections"] = [
+        item for item in broken["sections"]
+        if item["checkpoint_ref"] != "trace:checkpoint-1"
+    ]
+    index_path.write_text(
+        json.dumps(broken, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    repaired = publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=continued,
+        narrative=narrative,
+    )
+
+    index = json.loads(index_path.read_text())
+    assert [item["checkpoint_ref"] for item in index["sections"]] == [
+        "trace:checkpoint-1", "trace:checkpoint-v8",
+    ]
+    assert repaired["report_changed"] is True
+
+
 def test_checkpoint_publish_rejects_fork_without_source_journal(
     tmp_path: Path,
 ) -> None:

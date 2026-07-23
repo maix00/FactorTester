@@ -104,12 +104,10 @@ def render_branch_report(
             replaced_branch_id=journal_replaced_branch_id,
             project_sections=(
                 journal_fragment is None or fragment_changed
-                or (
-                    not any(
-                        item["section_ref"].startswith(branch_section_prefix)
-                        for item in existing_index["sections"]
-                    )
-                    and existing_index["omitted_section_count"] == 0
+                or _index_requires_reprojection(
+                    existing_index,
+                    rendered_snapshot,
+                    branch_section_prefix=branch_section_prefix,
                 )
             ),
         )
@@ -166,6 +164,33 @@ def render_branch_report(
             fragment_changed if journal_fragment is not None else False
         ),
     }
+
+
+def _index_requires_reprojection(
+    index: dict[str, Any],
+    snapshot: dict[str, Any],
+    *,
+    branch_section_prefix: str,
+) -> bool:
+    """Detect a stale derived index without trusting the current branch alone."""
+    if index["omitted_section_count"] != 0:
+        return False
+    indexed = {item["section_ref"] for item in index["sections"]}
+    expected = {
+        (
+            f"report-section:"
+            f"{section['branch_ref'].split(':')[-1]}:"
+            f"{section['section_id']}"
+        )
+        for section in snapshot["sections"]
+    }
+    return (
+        not any(
+            item.startswith(branch_section_prefix)
+            for item in indexed
+        )
+        or not expected.issubset(indexed)
+    )
 
 
 def stage_branch_fragment(
