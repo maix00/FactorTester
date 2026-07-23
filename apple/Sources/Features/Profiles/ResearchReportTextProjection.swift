@@ -12,17 +12,7 @@ struct ResearchReportTextComponent: Equatable {
 
 enum ResearchReportTextProjection {
     static func mathJaxSource(_ value: String) -> String {
-        // Historical reports used `$F` / `$Rev` as compact variable markup.
-        // Normalize only identifier-shaped tokens; currency such as `$100`
-        // remains ordinary prose. Proper paired `$...$` is left to MathJax.
-        guard let expression = try? NSRegularExpression(
-            pattern: #"\$([A-Za-z][A-Za-z0-9_]*)\b(?!\$)"#
-        ) else { return value }
-        return expression.stringByReplacingMatches(
-            in: value,
-            range: NSRange(value.startIndex..., in: value),
-            withTemplate: #"\\($1\\)"#
-        )
+        value
     }
 
     static func containsMath(_ value: String) -> Bool {
@@ -31,10 +21,7 @@ enum ResearchReportTextProjection {
             != nil {
             return true
         }
-        return normalized.range(
-            of: #"\$[^$\n]+\$"#,
-            options: .regularExpression
-        ) != nil
+        return false
     }
 
     static func components(_ value: String) -> [ResearchReportTextComponent] {

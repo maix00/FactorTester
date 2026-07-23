@@ -345,6 +345,18 @@ final class ProfileResearchServiceTests: XCTestCase {
                 """.utf8
             )
         )
+        XCTAssertFalse(
+            ResearchReportNavigation.shouldScrollReport(
+                hasProgrammaticToken: false
+            ),
+            "viewport tracking must not fight the user's report scrolling"
+        )
+        XCTAssertTrue(
+            ResearchReportNavigation.shouldScrollReport(
+                hasProgrammaticToken: true
+            ),
+            "an explicit version-tree click may scroll to its chapter"
+        )
         XCTAssertEqual(node.branchRef, "graph-branch:instance-v7:physical-v7")
         XCTAssertEqual(node.navigationBranchID, "physical-v8")
         XCTAssertFalse(ResearchBranchNavigation.requiresReload(

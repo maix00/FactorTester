@@ -10,6 +10,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any
 
@@ -230,6 +231,68 @@ def migrate_report_fragments(
                 "after_hash": after,
             })
     return changes
+
+
+_FACTOR_META_PARAMETER = re.compile(r"(?<!`)\$(Rev|F)(?!`)")
+
+
+def migrate_factor_meta_parameter_markup(
+    *, package_root: Path,
+) -> tuple[list[dict[str, Any]], int]:
+    """Render FactorTester meta-parameters as Markdown code, idempotently."""
+    changes: list[dict[str, Any]] = []
+    replacement_count = 0
+    for sections_root in sorted(package_root.glob("branches/*/sections")):
+        for fragment in load_fragments(sections_root):
+            candidate = deepcopy(fragment)
+            migrated_sections, count = _markup_value(candidate["sections"])
+            if not count:
+                continue
+            candidate["sections"] = migrated_sections
+            old_section_hash = candidate.pop("section_hash")
+            old_narrative_hash = candidate["narrative_hash"]
+            candidate["narrative_hash"] = content_hash({
+                "migration": "factor-meta-parameter-markup-v1",
+                "prior_narrative_hash": old_narrative_hash,
+                "sections": migrated_sections,
+            })
+            candidate["section_hash"] = content_hash(candidate)
+            target = sections_root / f"{candidate['section_hash']}.json"
+            target.write_bytes(fragment_payload(candidate))
+            (sections_root / f"{old_section_hash}.json").unlink()
+            changes.append({
+                "branch_id": sections_root.parent.name,
+                "checkpoint_ref": candidate["checkpoint_ref"],
+                "replacement_count": count,
+                "before_narrative_hash": old_narrative_hash,
+                "after_narrative_hash": candidate["narrative_hash"],
+                "before_section_hash": old_section_hash,
+                "after_section_hash": candidate["section_hash"],
+            })
+            replacement_count += count
+    return changes, replacement_count
+
+
+def _markup_value(value: Any) -> tuple[Any, int]:
+    if isinstance(value, str):
+        return _FACTOR_META_PARAMETER.sub(r"`$\1`", value), len(
+            _FACTOR_META_PARAMETER.findall(value)
+        )
+    if isinstance(value, list):
+        result, count = [], 0
+        for item in value:
+            migrated, item_count = _markup_value(item)
+            result.append(migrated)
+            count += item_count
+        return result, count
+    if isinstance(value, dict):
+        result, count = {}, 0
+        for key, item in value.items():
+            migrated, item_count = _markup_value(item)
+            result[key] = migrated
+            count += item_count
+        return result, count
+    return value, 0
 
 
 def _repair_obligation_questions(value: Any) -> None:

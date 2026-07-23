@@ -22,7 +22,14 @@ from tools.cli.release.research_reporting.report_items import (
 )
 from tools.cli.release.research_reporting.assets import stage_report_asset
 from tools.cli.release.research_reporting.presentation_migration import (
+    migrate_factor_meta_parameter_markup,
     migrate_trace_evidence_rows,
+)
+from tools.cli.release.research_reporting.journal import (
+    build_fragment,
+    content_hash,
+    fragment_payload,
+    load_fragments,
 )
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
@@ -246,6 +253,51 @@ def test_historical_presentation_migration_rehashes_canonical_objects_only():
     )
     assert receipt["input_hash"] != receipt["output_hash"]
     assert rows[0]["evidence"]["evidence_refs"] == [old_ref]
+
+
+def test_factor_meta_parameter_markup_migration_is_idempotent(tmp_path: Path):
+    sections = [{
+        "section_id": "semantics",
+        "title": "参数语义",
+        "body": "$F 与 $Rev 是元参数；`$F` 已正确标记。",
+        "evidence_refs": [],
+        "asset_refs": [],
+        "links": [],
+        "created_at": 1.0,
+    }]
+    fragment = build_fragment(
+        checkpoint_ref="trace:checkpoint-1",
+        created_at=1.0,
+        carrier_hash="1" * 64,
+        narrative_hash="2" * 64,
+        sections=sections,
+        evidence_refs=[],
+        gaps=[],
+        lineage={"status": "root", "predecessor_checkpoint_ref": ""},
+        graph_ref="factor-research@v9",
+        branch_ref="graph-branch:instance:branch",
+        edge_ref="graph-edge:factor_semantics",
+    )
+    root = tmp_path / "package"
+    path = root / "branches" / "branch" / "sections"
+    path.mkdir(parents=True)
+    (path / f"{fragment['section_hash']}.json").write_bytes(
+        fragment_payload(fragment)
+    )
+
+    changes, count = migrate_factor_meta_parameter_markup(package_root=root)
+    replay_changes, replay_count = migrate_factor_meta_parameter_markup(
+        package_root=root
+    )
+    migrated = load_fragments(path)[0]
+
+    assert count == 2
+    assert "`$F` 与 `$Rev`" in migrated["sections"][0]["body"]
+    assert migrated["sections"][0]["body"].count("`$F`") == 2
+    assert changes[0]["before_narrative_hash"] == "2" * 64
+    assert changes[0]["after_section_hash"] == migrated["section_hash"]
+    assert replay_changes == []
+    assert replay_count == 0
 
 
 def test_ordinary_checkpoint_does_not_require_untouched_cycle_snapshot(

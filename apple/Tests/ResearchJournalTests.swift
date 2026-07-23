@@ -613,16 +613,21 @@ final class ResearchJournalTests: XCTestCase {
             indexedBy: index
         )
 
-        XCTAssertEqual(sections.count, 2)
+        XCTAssertEqual(sections.count, 3)
         XCTAssertEqual(sections[0].title, "因子公式的经济含义已经逐项核对")
         XCTAssertEqual(
             sections[0].blocks[0].reportBinding?.subjectRef,
             "obligation:first"
         )
-        XCTAssertEqual(sections[1].title, "参数化与派生因子")
+        XCTAssertEqual(sections[1].displayKind, "graph_continuation")
         XCTAssertEqual(sections[1].checkpointRef, "trace:research")
+        XCTAssertFalse(sections.contains {
+            $0.checkpointRef == "trace:migration"
+        })
+        XCTAssertEqual(sections[2].title, "参数化与派生因子")
+        XCTAssertEqual(sections[2].checkpointRef, "trace:research")
         XCTAssertTrue(
-            sections[1].auditCheckpointRef.hasPrefix("report-checkpoint:")
+            sections[2].auditCheckpointRef.hasPrefix("report-checkpoint:")
         )
     }
 
@@ -642,15 +647,17 @@ final class ResearchJournalTests: XCTestCase {
     }
 
     func testInlineMathNormalizationPreservesChinesePunctuationAndCurrency() {
-        let source = #"当 \(x_t>0\) 时，比较 \(f(x,y)\)。$F 与 $Rev 控制调度；费用为 $100。另检验 $z_t<0$。"#
+        let source = #"当 \(x_t>0\) 时，比较 \(f(x,y)\)。`$F` 与 `$Rev` 控制调度；费用为 $100。"#
         let normalized = ResearchReportTextProjection.mathJaxSource(source)
 
         XCTAssertTrue(normalized.contains(#"\(x_t>0\) 时，"#))
         XCTAssertTrue(normalized.contains(#"\(f(x,y)\)。"#))
-        XCTAssertTrue(normalized.contains(#"\(F\) 与 \(Rev\)"#))
+        XCTAssertTrue(normalized.contains("`$F` 与 `$Rev`"))
+        XCTAssertFalse(normalized.contains(#"\(F\)"#))
         XCTAssertTrue(normalized.contains("$100"))
-        XCTAssertTrue(normalized.contains("$z_t<0$"))
         XCTAssertTrue(ResearchReportTextProjection.containsMath(source))
+        XCTAssertFalse(ResearchReportTextProjection.containsMath("$F 与 $Rev"))
+        XCTAssertFalse(ResearchReportTextProjection.containsMath("$z_t<0$"))
         XCTAssertFalse(
             ResearchReportTextProjection.containsMath("研究预算为 $100。")
         )

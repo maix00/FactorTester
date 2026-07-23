@@ -48,7 +48,6 @@ struct ResearchNarrativeReportView: View {
                 cacheNamespace: auditCacheNamespace,
                 loadObject: loadAuditObject
             )
-            .frame(width: 380)
         }
         .task(id: artifact?.journalHash ?? "") {
             await loadReport()
@@ -106,6 +105,12 @@ struct ResearchNarrativeReportView: View {
                 selectedCheckpointRef = section.checkpointRef
             }
             .onChange(of: selectedCheckpointRef) { checkpointRef in
+                // Passive viewport tracking updates the tree selection while
+                // the user scrolls. Only an explicit tree click owns a token
+                // and is allowed to scroll the report programmatically.
+                guard ResearchReportNavigation.shouldScrollReport(
+                    hasProgrammaticToken: programmaticScrollToken != nil
+                ) else { return }
                 guard let sectionRef = ResearchReportNavigation.scrollTarget(
                     checkpointRef: checkpointRef,
                     sectionRefsByCheckpoint: sectionRefsByCheckpoint
@@ -158,6 +163,14 @@ struct ResearchNarrativeReportView: View {
         titleOverride: String? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            if section.displayKind == "graph_continuation" {
+                Label(
+                    "图版本承接 / 重新进入审查",
+                    systemImage: "arrow.triangle.branch"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.indigo)
+            }
             if !compact {
                 HStack(spacing: 8) {
                     Text(stageLabel(for: section))
@@ -258,6 +271,13 @@ struct ResearchNarrativeReportView: View {
             }
             Divider().padding(.top, compact ? 8 : 18)
         }
+        .padding(.horizontal, section.displayKind == "graph_continuation" ? 14 : 0)
+        .padding(.top, section.displayKind == "graph_continuation" ? 12 : 0)
+        .background(
+            section.displayKind == "graph_continuation"
+                ? Color.indigo.opacity(0.06) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 10)
+        )
         .padding(.bottom, compact ? 12 : 24)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -315,12 +335,21 @@ struct ResearchNarrativeReportView: View {
             RenderedInlineMathTextView(text: text)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            Text(text)
+            Text(markdownInline(text))
                 .font(.body)
                 .lineSpacing(6)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func markdownInline(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace
+            )
+        )) ?? AttributedString(text)
     }
 
     @ViewBuilder
@@ -807,6 +836,10 @@ enum ResearchBranchNavigation {
 }
 
 enum ResearchReportNavigation {
+    static func shouldScrollReport(hasProgrammaticToken: Bool) -> Bool {
+        hasProgrammaticToken
+    }
+
     static func scrollTarget(
         checkpointRef: String,
         sectionRefsByCheckpoint: [String: String]
@@ -880,12 +913,29 @@ private struct ResearchAuditPopover: View {
     }
 
     var body: some View {
+        ViewThatFits(in: .vertical) {
+            popoverContent
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                popoverContent
+            }
+        }
+        .frame(minWidth: 420, idealWidth: 500, maxWidth: 560)
+        .frame(maxHeight: 620)
+        .task(id: selection.id) {
+            await loadSelectedObject()
+        }
+    }
+
+    private var popoverContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label(
                 selection.displayLabel,
                 systemImage: chipIcon(selection.link.kind)
             )
             .font(.headline)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
             Text(ResearchDisplayText.auditPurpose(selection.link.kind))
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -906,9 +956,6 @@ private struct ResearchAuditPopover: View {
             }
         }
         .padding(18)
-        .task(id: selection.id) {
-            await loadSelectedObject()
-        }
     }
 
     @ViewBuilder

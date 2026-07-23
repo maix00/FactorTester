@@ -258,15 +258,24 @@ enum MathRichTextDocument {
         body{color:CanvasText;font:-apple-system-body;line-height:1.55;overflow:hidden}
         #content{box-sizing:border-box;width:100%;padding:0;visibility:hidden}
         #content mjx-container{margin:0 .08em!important;display:inline!important}
+        #content code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;padding:.08em .28em;border-radius:4px;background:color-mix(in srgb,CanvasText 8%,transparent)}
         #fallback{display:none;color:GrayText}
         </style><script>
         window.ftRichText=\(payload)[0];
         function ftHeight(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.formulaHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});}
         function ftFallback(){document.getElementById('content').style.display='none';document.getElementById('fallback').style.display='block';ftHeight();}
-        window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)'],['$','$']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('content').style.visibility='visible';ftHeight();}).catch(ftFallback);}}};
+        window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('content').style.visibility='visible';ftHeight();}).catch(ftFallback);}}};
         </script><script>\(runtime)</script></head><body>
         <div id="content"></div><div id="fallback"></div><script>
-        document.getElementById('content').textContent=window.ftRichText;
+        (function(){
+          var root=document.getElementById('content'),parts=window.ftRichText.split('`');
+          for(var i=0;i<parts.length;i++){
+            var paired=(i%2===1)&&(i<parts.length-1);
+            var node=paired?document.createElement('code'):document.createTextNode('');
+            if(paired){node.textContent=parts[i];}else{node.nodeValue=(i%2===1?'`':'')+parts[i];}
+            root.appendChild(node);
+          }
+        })();
         document.getElementById('fallback').textContent=window.ftRichText;
         </script></body></html>
         """

@@ -23,9 +23,7 @@ extension ResearchJournalPresentation {
         )
         var result: [ResearchJournalSection] = []
         var fingerprintIndexes: [String: Int] = [:]
-        for section in verified where !pureMigrationRefs.contains(
-            section.checkpointRef
-        ) {
+        for section in verified {
             let displayCheckpointRef = displayCheckpointRef(
                 for: section.checkpointRef,
                 checkpoints: checkpoints,
@@ -33,7 +31,9 @@ extension ResearchJournalPresentation {
             )
             let projected = sectionWithReadableTitle(
                 section,
-                checkpointRef: displayCheckpointRef
+                checkpointRef: displayCheckpointRef,
+                displayKind: pureMigrationRefs.contains(section.checkpointRef)
+                    ? "graph_continuation" : "research"
             )
             let fingerprint = "\(displayCheckpointRef)|"
                 + contentFingerprint(section)
@@ -102,7 +102,8 @@ extension ResearchJournalPresentation {
 
     private static func sectionWithReadableTitle(
         _ section: ResearchJournalSection,
-        checkpointRef: String
+        checkpointRef: String,
+        displayKind: String
     ) -> ResearchJournalSection {
         var title = section.title
         if section.title.range(
@@ -132,7 +133,8 @@ extension ResearchJournalPresentation {
             branchRef: section.branchRef,
             researchOccurredAt: section.researchOccurredAt,
             timeBasis: section.timeBasis,
-            timeSourceRefs: section.timeSourceRefs
+            timeSourceRefs: section.timeSourceRefs,
+            displayKind: displayKind
         )
     }
 
@@ -176,7 +178,8 @@ extension ResearchJournalPresentation {
             branchRef: section.branchRef,
             researchOccurredAt: section.researchOccurredAt,
             timeBasis: section.timeBasis,
-            timeSourceRefs: section.timeSourceRefs
+            timeSourceRefs: section.timeSourceRefs,
+            displayKind: section.displayKind
         )
     }
 }

@@ -76,6 +76,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
     let researchOccurredAt: Double?
     let timeBasis: String?
     let timeSourceRefs: [String]
+    let displayKind: String
 
     var id: String { sectionRef }
 
@@ -112,6 +113,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
         createdAt = 0
         graphRef = ""
         branchRef = ""
+        displayKind = "research"
     }
 
     init(
@@ -128,7 +130,8 @@ struct ResearchJournalSection: Decodable, Identifiable {
         branchRef: String = "",
         researchOccurredAt: Double? = nil,
         timeBasis: String? = nil,
-        timeSourceRefs: [String] = []
+        timeSourceRefs: [String] = [],
+        displayKind: String = "research"
     ) {
         self.sectionID = sectionID
         self.sectionRef = sectionRef
@@ -144,6 +147,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
         self.researchOccurredAt = researchOccurredAt
         self.timeBasis = timeBasis
         self.timeSourceRefs = timeSourceRefs
+        self.displayKind = displayKind
     }
 
     func bound(
@@ -164,7 +168,8 @@ struct ResearchJournalSection: Decodable, Identifiable {
             branchRef: checkpoint.branchRef,
             researchOccurredAt: researchOccurredAt,
             timeBasis: timeBasis,
-            timeSourceRefs: timeSourceRefs
+            timeSourceRefs: timeSourceRefs,
+            displayKind: displayKind
         )
     }
 }
