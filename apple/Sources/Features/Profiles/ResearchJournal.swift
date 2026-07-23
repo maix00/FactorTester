@@ -456,6 +456,7 @@ enum ResearchJournalPresentation {
 enum ResearchJournalLoader {
     static let maximumBytes = 4 * 1024 * 1024
     static let maximumCheckpoints = 4_096
+    static let maximumSectionsPerCheckpoint = 64
     static let maximumLinksPerSection = 50
     private static let linkKinds: Set<String> = [
         "checkpoint", "trial_plan", "obligation", "claim", "evidence",
@@ -588,7 +589,8 @@ enum ResearchJournalLoader {
                   checkpoint.branchRef.hasPrefix("graph-branch:"),
                   value.branchRefs.contains(checkpoint.branchRef),
                   !checkpoint.sections.isEmpty,
-                  checkpoint.sections.count <= 8 else {
+                  checkpoint.sections.count <= maximumSectionsPerCheckpoint
+            else {
                 throw ResearchJournalError.invalidContract
             }
             if let previousCheckpoint {
@@ -694,7 +696,6 @@ enum ResearchJournalLoader {
                 for row in block.rows {
                     guard let text = row.text, !text.isEmpty,
                           row.cells.isEmpty,
-                          !row.linkIDs.isEmpty,
                           Set(row.linkIDs).isSubset(of: linkIDs) else {
                         throw ResearchJournalError.invalidContract
                     }
@@ -708,7 +709,6 @@ enum ResearchJournalLoader {
                 for row in block.rows {
                     guard row.text == nil,
                           row.cells.count == block.columns.count,
-                          !row.linkIDs.isEmpty,
                           Set(row.linkIDs).isSubset(of: linkIDs) else {
                         throw ResearchJournalError.invalidContract
                     }

@@ -887,6 +887,96 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(document.checkpoints[0].sections[0].links.count, 50)
     }
 
+    func testAcceptsProducerMaximumOfSixtyFourCheckpointSections()
+        async throws
+    {
+        var value = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: journalData())
+                as? [String: Any]
+        )
+        var checkpoints = try XCTUnwrap(
+            value["checkpoints"] as? [[String: Any]]
+        )
+        let template = try XCTUnwrap(
+            (checkpoints[0]["sections"] as? [[String: Any]])?.first
+        )
+        checkpoints[0]["sections"] = (0..<64).map { index in
+            var section = template
+            section["section_id"] = "section-\(index)"
+            return section
+        }
+        value["checkpoints"] = checkpoints
+        let data = try JSONSerialization.data(withJSONObject: value)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("LOGICAL_JOURNAL.json")
+        try data.write(to: url)
+        let artifact = ResearchArtifactModel(json: [
+            "artifact_ref": "artifact:report",
+            "journal_ref": url.absoluteString,
+            "journal_hash": sha256(data),
+        ])
+
+        let document = try await ResearchJournalLoader.load(artifact: artifact)
+
+        XCTAssertEqual(document.checkpoints[0].sections.count, 64)
+    }
+
+    func testAcceptsExplanatoryRowsWithoutAuditLinks() async throws {
+        var value = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: structuredJournalData())
+                as? [String: Any]
+        )
+        var checkpoints = try XCTUnwrap(
+            value["checkpoints"] as? [[String: Any]]
+        )
+        var sections = try XCTUnwrap(
+            checkpoints[0]["sections"] as? [[String: Any]]
+        )
+        var blocks = try XCTUnwrap(
+            sections[0]["blocks"] as? [[String: Any]]
+        )
+        for index in blocks.indices {
+            guard blocks[index]["kind"] as? String != "paragraph" else {
+                continue
+            }
+            var rows = try XCTUnwrap(
+                blocks[index]["rows"] as? [[String: Any]]
+            )
+            for rowIndex in rows.indices {
+                rows[rowIndex]["link_ids"] = []
+            }
+            blocks[index]["rows"] = rows
+        }
+        sections[0]["blocks"] = blocks
+        checkpoints[0]["sections"] = sections
+        value["checkpoints"] = checkpoints
+        let data = try JSONSerialization.data(withJSONObject: value)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("LOGICAL_JOURNAL.json")
+        try data.write(to: url)
+        let artifact = ResearchArtifactModel(json: [
+            "artifact_ref": "artifact:report",
+            "journal_ref": url.absoluteString,
+            "journal_hash": sha256(data),
+        ])
+
+        let document = try await ResearchJournalLoader.load(artifact: artifact)
+
+        XCTAssertEqual(document.checkpoints[0].sections[0].blocks.count, 3)
+    }
+
     func testRejectsJournalWhoseProfileHashDoesNotMatch() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
