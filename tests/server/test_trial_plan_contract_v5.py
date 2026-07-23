@@ -8,6 +8,7 @@ import pytest
 from server.services.research_graph.trial_plan import (
     canonical_trial_plan,
     trial_plan_hash,
+    validate_trial_plan_cycle_binding,
 )
 
 
@@ -133,6 +134,34 @@ def test_v5_separates_stage_identity_from_semantic_role() -> None:
     ]
     assert trial_plan_hash(canonical) == trial_plan_hash(trial_plan_v5())
     assert len(orjson.dumps(canonical)) <= 8192
+
+
+def test_v5_freeze_binds_primary_and_secondary_obligations_to_cycle() -> None:
+    plan = canonical_trial_plan(trial_plan_v5())
+    checkpoint = {
+        "contract_hash": "3" * 64,
+        "methodology_hash": "4" * 64,
+        "obligations": [{
+            "obligation_id": "obligation:primary",
+            "status": "open",
+        }, {
+            "obligation_id": "obligation:secondary",
+            "status": "serviced",
+        }],
+    }
+
+    validate_trial_plan_cycle_binding(
+        trial_plan=plan,
+        cycle_checkpoint=checkpoint,
+    )
+    with pytest.raises(ValueError, match="obligation_refs.*secondary"):
+        validate_trial_plan_cycle_binding(
+            trial_plan=plan,
+            cycle_checkpoint={
+                **checkpoint,
+                "obligations": checkpoint["obligations"][:1],
+            },
+        )
 
 
 @pytest.mark.parametrize(
