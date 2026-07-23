@@ -350,10 +350,26 @@ def build_strategy_configs(
                     f"a frontend display suggestion only, not a backend fallback)")
             if not fd.frontend_only_default:
                 field_values[ref] = _default_value_for_field(fd, resolved, field_values, entries)
-        configs[strategy] = StrategyConfig(
+        config = StrategyConfig(
             strategy=strategy, active_flow_names=active_flow_names, field_values=field_values,
         )
+        _validate_margin_budget_config(alias, config)
+        configs[strategy] = config
     return configs
+
+
+def _validate_margin_budget_config(alias: str, config: StrategyConfig) -> None:
+    from tools.testers.backtest.modules.margin_budget import MarginBudgetModule
+
+    target = float(config.get(MarginBudgetModule.target_margin_utilization, 0.80))
+    maximum = float(config.get(MarginBudgetModule.max_margin_utilization, 0.85))
+    tolerance = float(config.get(MarginBudgetModule.margin_utilization_tolerance, 0.01))
+    if not 0 < target <= maximum < 1:
+        raise ValueError(
+            f"strategy {alias!r} margin utilization requires 0 < target <= max < 1"
+        )
+    if tolerance < 0:
+        raise ValueError(f"strategy {alias!r} margin utilization tolerance must be non-negative")
 
 
 def apply_strategy_configs(

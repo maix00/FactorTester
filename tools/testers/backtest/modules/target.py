@@ -12,6 +12,12 @@ from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.policies.registry import (
+    generate_strategy_intents as _generate_strategy_intents,
+    precompute_strategy_intents as _precompute_strategy_intents,
+    register_strategy_intent_policy,
+    strategy_intent_policy_for,
+)
 
 _SIGNAL_VALUE_REF: FieldRef[Any] = FieldRef("signal_value", owner="FactorSignalModule")
 _CURRENT_PRICES_REF: FieldRef[Any] = FieldRef("current_prices", owner="MarketDataModule")
@@ -25,6 +31,10 @@ _ALLOCATION_POLICY_REF: FieldRef[str] = FieldRef("allocation_policy", owner="Gro
 _VOLATILITY_LOOKBACK_REF: FieldRef[Any] = FieldRef("volatility_lookback", owner="GroupMembershipModule")
 _VOLATILITY_WARMUP_REF: FieldRef[int] = FieldRef("volatility_warmup", owner="GroupMembershipModule")
 _PRODUCT_MASK_NAMES_REF: FieldRef[Any] = FieldRef("product_mask_names", owner="GroupMembershipModule")
+_SCREEN_RULE_REF: FieldRef[str] = FieldRef("screen_rule", owner="GroupMembershipModule")
+_SCREEN_LOWER_REF: FieldRef[float] = FieldRef("screen_lower", owner="GroupMembershipModule")
+_SCREEN_UPPER_REF: FieldRef[float] = FieldRef("screen_upper", owner="GroupMembershipModule")
+_SIZING_TRANSFORM_REF: FieldRef[str] = FieldRef("sizing_transform", owner="GroupMembershipModule")
 
 
 @dataclass(frozen=True)
@@ -82,6 +92,10 @@ class TargetStrategyModule(ExecutableModule):
             _VOLATILITY_LOOKBACK_REF,
             _VOLATILITY_WARMUP_REF,
             _PRODUCT_MASK_NAMES_REF,
+            _SCREEN_RULE_REF,
+            _SCREEN_LOWER_REF,
+            _SCREEN_UPPER_REF,
+            _SIZING_TRANSFORM_REF,
         ),
         outputs=(trade_intent, target_weights),
         phase=Phase.PRE_REPLAY,
@@ -115,33 +129,3 @@ class TargetStore:
 
     def target_trace_for(self, strategy: Any) -> dict[str, Any]:
         return dict(self.target_trace.get(strategy, {}))
-
-
-_STRATEGY_INTENT_POLICIES: dict[str, Any] = {}
-
-
-def register_strategy_intent_policy(strategy_kind: str, policy: Any) -> None:
-    _STRATEGY_INTENT_POLICIES[str(strategy_kind)] = policy
-
-
-def strategy_intent_policy_for(strategy_kind: str) -> Any | None:
-    return _STRATEGY_INTENT_POLICIES.get(str(strategy_kind))
-
-
-def _precompute_strategy_intents(state, ctx) -> None:
-    from tools.testers.backtest.modules.strategy_book import apply_strategy_intent_precompute_policy
-
-    by_policy: dict[str, list[Any]] = {}
-    for strategy in ctx.active_strategies:
-        config = state.config_for(strategy)
-        if not config.uses_flow("signal_precomputed"):
-            continue
-        kind = str(config.get(TargetStrategyModule.strategy_kind, "group") or "group")
-        if strategy_intent_policy_for(kind) is None:
-            continue
-        by_policy.setdefault(kind, []).append(strategy)
-    for kind, strategies in by_policy.items():
-        policy = strategy_intent_policy_for(kind)
-        if policy is None:
-            continue
-        apply_strategy_intent_precompute_policy(state, ctx, strategies, policy)

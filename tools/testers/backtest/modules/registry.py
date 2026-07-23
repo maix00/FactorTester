@@ -28,6 +28,7 @@ from .fee import FeeModule
 from .slippage import SlippageModule
 from .volume_capacity import VolumeCapacityMode
 from .margin import MarginModule
+from .margin_budget import MarginBudgetModule
 from .order_execution import OrderExecutionModule
 from .custom_product import CustomProductModule, refresh_custom_product_field_definitions
 from .order_construct import OrderConstructModule
@@ -81,6 +82,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     SlippageModule,
     VolumeCapacityMode,
     MarginModule,
+    MarginBudgetModule,
     OrderExecutionModule,
     CustomProductModule,
     LedgerCashConstraintModule,

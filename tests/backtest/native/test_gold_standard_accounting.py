@@ -93,7 +93,10 @@ def _build_registry() -> FlowRegistry:
     return registry
 
 
-def _run_gold_standard(cost_basis_method: str) -> tuple[BacktestRunState, object]:
+def _run_gold_standard(
+    cost_basis_method: str,
+    step_records: list[dict] | None = None,
+) -> tuple[BacktestRunState, object]:
     p1, p2 = _product(), _product()
     idx = pd.date_range("2024-01-01", periods=6, freq="D")
     raw_prices = pd.DataFrame(
@@ -122,6 +125,10 @@ def _run_gold_standard(cost_basis_method: str) -> tuple[BacktestRunState, object
             "use_int_position": False,
             "margin_mode": "fixed",
             "fixed_margin_ratio": 0.1,
+            # This fixture isolates cost-basis accounting at 1x gross.
+            # Margin-enabled production defaults are tested separately at 80/85%.
+            "target_margin_utilization": 0.1,
+            "max_margin_utilization": 0.85,
         },
     }
 
@@ -133,7 +140,11 @@ def _run_gold_standard(cost_basis_method: str) -> tuple[BacktestRunState, object
     }
 
     registry = _build_registry()
-    run(account, EventQueue(), registry.resolve())
+    run(
+        account, EventQueue(), registry.resolve(),
+        step_mode=step_records is not None,
+        step_callback=step_records.append if step_records is not None else None,
+    )
     strategy = next(iter(account.strategy_configs))
     return account, strategy
 
@@ -198,3 +209,18 @@ def test_lot_methods_track_open_lots_in_the_ledger(method: str):
     )
     # p1 holds 4,687.5 and p2 holds 5,625 -- both must be fully lot-backed.
     assert lot_totals == [pytest.approx(4_687.5), pytest.approx(5_625.0)]
+
+
+def test_real_scheduler_step_reports_margin_budget_gross_leverage() -> None:
+    records: list[dict] = []
+
+    _run_gold_standard("FIFO", records)
+
+    target_steps = [row for row in records if row["flow_id"] == "apply_target_margin_budget"]
+    assert target_steps
+    changes = {
+        row["field"]: row["after"]
+        for row in target_steps[0]["output_changes"]
+    }
+    summary = changes["MarginBudgetModule.margin_budget_summary"]
+    assert next(iter(summary.values()))["gross_leverage"] == pytest.approx(1.0)

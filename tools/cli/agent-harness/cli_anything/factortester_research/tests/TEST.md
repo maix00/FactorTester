@@ -5,6 +5,69 @@ FactorTester backend. A successful process exit is insufficient: tests inspect
 the session, graph, capability, evidence, HTTP, RunSpec, ResearchRun, Job, and
 artifact contracts produced by the workflow.
 
+## Margin-budget step acceptance
+
+- A one-pool margin target step renders a transposed metric/value table with
+  equity, target/projected margin, weighted margin ratio, scale, utilization,
+  hard maximum, gross leverage, rounding error, and headroom.
+- Several cash pools render one compact row per pool instead of nested JSON.
+- Compact output contains no per-product dump and points to `step-field` for
+  the complete request/decision payload.
+- JSON and `step-field` remain lossless; the compact human projection does not
+  delete or rewrite the serialized margin-budget fields.
+- `factortester margin-budget show/configure` reads and revision-updates the
+  real workspace; it validates `0 < target <= max < 1` and exposes that margin
+  mode defaults to 0.80/0.85 while disabled margin leaves weights unscaled.
+- The CLI-Anything command delegates exactly to the installed `factortester`
+  executable and does not reimplement workspace or validation semantics.
+
+## Strategy intent factor-role refinement
+
+- `factortester strategy-intent describe` reads the registered group-test
+  manifest and reports only strategy kinds and factor roles the runtime
+  actually consumes, including group `screen` and `sizing` roles.
+- `factortester strategy-intent show` reads the active workspace configuration
+  and exposes each strategy's kind, primary factor, and explicit role bindings
+  in both bounded human output and stable JSON.
+- `factortester strategy-intent bind GROUP_ID --role ROLE=FACTOR` validates the
+  role against the manifest, validates the factor against the workspace's
+  registered factor candidates, preserves unrelated configuration fields, and
+  updates through the real revision-checked workspace API.
+- Reject unknown groups, malformed bindings, unsupported roles, factor aliases
+  outside the workspace, and roles incompatible with the strategy kind without
+  mutating configuration.
+- Reject a bound group `screen` role while screening is disabled and a bound
+  `sizing` role unless factor sizing is selected, so no registered role can be
+  a silent no-op.
+- The research Harness delegates its matching `strategy-intent` commands to
+  the installed `factortester` executable and propagates its exit status and
+  JSON rather than maintaining a second local configuration model.
+- Installed subprocess coverage resolves both console scripts through
+  `_resolve_cli`; the controlled executable checks exact delegation arguments.
+- Runtime acceptance remains separate from configuration acceptance: native
+  tests prove event/precompute target weights and reason codes are identical,
+  future factor changes cannot alter earlier entry/exit decisions, missing
+  entry values cannot open positions, and missing exit values close positions.
+- Group-role acceptance proves the screen is recalculated per signal event and
+  applied before ranking, sizing only changes weights inside the selected set,
+  event/precompute targets and reasons match, and perturbing future screen or
+  sizing values cannot change an earlier target.
+
+### Passing results (2026-07-23)
+
+- Native factor-role, policy, Flow-contract, and scoped server suite:
+  `619 passed`.
+- Full CLI plus non-server Harness suite: `220 passed`.
+- Installed Harness subprocess delegation with
+  `CLI_ANYTHING_FORCE_INSTALLED=1`: passed using the resolved console script.
+- Installed `factortester` plus Harness against a complete isolated Flask
+  server over TCP: strategy-intent workspace configure/show round-trip passed.
+- Web factor-role control Node test: passed.
+- Broad `tests/backtest tests/server tests/cli` gate: `1317 passed`, `1 skipped`,
+  with 3 failures reproduced unchanged at the exact issue-141 base commit
+  (incremental EMA expectation and two research-graph projection/migration
+  tests); none of their files differ on this branch.
+
 ## Test inventory
 
 - `test_core.py`: deterministic graph/capability/session/evidence and packaging
@@ -378,3 +441,27 @@ The public CLI updates one local server binding, manages compact workspace
 references, derives truthful Agent readiness, and downgrades a planning Agent
 when its workspace is removed. These operations use the existing atomic local
 Profile JSON store and perform no server/database write.
+
+### Margin budget and step audit
+
+Last run: 2026-07-23
+
+```text
+PYTHONPATH="$PWD" conda run -n GTHT pytest -q \
+  tests/backtest/native/test_margin_budget*.py \
+  tests/backtest/native/test_gold_standard_accounting.py
+
+21 passed in 0.55s
+
+PYTHONPATH="$PWD" conda run -n GTHT pytest -q \
+  tools/cli/agent-harness/cli_anything/factortester_research/tests/test_real_server_e2e.py \
+  -k strategy_intent_cli_round_trips_real_workspace
+
+1 passed, 1 deselected in 2.75s
+```
+
+The scheduler assertion reads `gross_leverage` from the actual step record;
+the HTTP round trip verifies margin-budget configure/show against a real
+workspace. The broader backtest/server/CLI suite completed with 1,335 passes,
+1 skip, and the same three branch-baseline failures recorded outside this
+feature.

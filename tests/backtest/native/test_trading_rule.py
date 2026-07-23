@@ -1292,7 +1292,9 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
     queue.run_until_drained()
 
     assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(12.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(13.8)
+    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(2.0)
+    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(13.8)
     assert captured_orders
     order = captured_orders[0].payload
     assert order.instrument is product
@@ -1459,7 +1461,9 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
     assert _cash_major(state, ledger) == pytest.approx(0.0)
     assert entry.margin_reserved.to_major() == pytest.approx(12.0)
     assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(12.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(13.8)
+    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(2.0)
+    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(13.8)
     assert queue.pending_count_by_kind(EventKind.TRADE_INTENT) == 1
     assert queue.pending_count_by_kind(EventKind.ORDER) == 0
 

@@ -35,6 +35,66 @@ class TestCLISubprocess:
         result = self._run(["--help"])
         assert "FactorTester research harness" in result.stdout
 
+    def test_strategy_intent_configure_delegates_exactly_to_factortester(
+        self, tmp_path: Path,
+    ) -> None:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "factortester"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "assert sys.argv[1:] == [\n"
+            "  'strategy-intent', 'configure', 'A1',\n"
+            "  '--role', 'screen=Gate', '--role', 'sizing=Size',\n"
+            "  '--screen-rule', 'gte', '--screen-lower', '1.5',\n"
+            "  '--allocation-policy', 'factor_sizing', '--json'\n"
+            "]\n"
+            "print(json.dumps({'workspace_id': 'w1', 'revision': 5}))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+        result = self._run(
+            [
+                "strategy-intent", "configure", "A1",
+                "--role", "screen=Gate", "--role", "sizing=Size",
+                "--screen-rule", "gte", "--screen-lower", "1.5",
+                "--allocation-policy", "factor_sizing", "--json",
+            ],
+            env={"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")},
+        )
+
+        assert json.loads(result.stdout) == {"workspace_id": "w1", "revision": 5}
+
+    def test_margin_budget_configure_delegates_exactly_to_factortester(
+        self, tmp_path: Path,
+    ) -> None:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "factortester"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "assert sys.argv[1:] == [\n"
+            "  'margin-budget', 'configure', 'A1',\n"
+            "  '--target', '0.8', '--max', '0.85', '--tolerance', '0.01', '--json'\n"
+            "]\n"
+            "print(json.dumps({'workspace_id': 'w1', 'revision': 6}))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+        result = self._run(
+            [
+                "margin-budget", "configure", "A1",
+                "--target", "0.8", "--max", "0.85", "--tolerance", "0.01", "--json",
+            ],
+            env={"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")},
+        )
+
+        assert json.loads(result.stdout) == {"workspace_id": "w1", "revision": 6}
+
     def test_plan_json_writes_session(self, tmp_path: Path) -> None:
         session = tmp_path / "session.json"
         result = self._run([

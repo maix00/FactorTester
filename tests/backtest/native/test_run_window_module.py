@@ -53,6 +53,32 @@ def test_resolve_run_window_sets_account_and_market_data_defaults():
     assert "warmup_window" not in account.market_data_request
 
 
+def test_resolve_run_window_uses_longest_bound_factor_role_warmup():
+    strategy = Strategy(alias="A")
+
+    class _Factor:
+        def __init__(self, warmup):
+            self.warmup = warmup
+
+        def required_warmup_window(self):
+            return self.warmup
+
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            RunWindowModule.start_date: "2026-01-02",
+            RunWindowModule.end_date: "2026-01-31",
+            FactorModule.factor: _Factor("2d"),
+            FactorModule.factor_role_bindings: {"exit": _Factor("20d")},
+            FactorSignalModule.warmup_mode: "auto",
+        }),
+    })
+    account.market_data_request = {}
+
+    _resolve_run_window(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    assert account.run_window_store.strategy_windows[strategy].warmup_window == pd.Timedelta("20D")
+
+
 def test_auto_warmup_reads_resolved_factor_expression_shape():
     class _Factor:
         _expr = ColumnRef(DataColumn.CLOSE).rolling_mean("2D").shift("1D")

@@ -65,6 +65,8 @@ class LedgerModule(ExecutableModule):
     _margin_reserved_ref: ClassVar[FieldRef[float]] = FieldRef("margin_reserved", owner="MarginModule")
     _margin_deficit_ref: ClassVar[FieldRef[float]] = FieldRef("margin_deficit", owner="MarginModule")
     _margin_excess_ref: ClassVar[FieldRef[float]] = FieldRef("margin_excess", owner="MarginModule")
+    _margin_utilization_ref: ClassVar[FieldRef[float]] = FieldRef("margin_utilization", owner="MarginModule")
+    _margin_limit_excess_ref: ClassVar[FieldRef[float]] = FieldRef("margin_limit_excess", owner="MarginModule")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "positions": FieldDefinition(public=False, display_value_kind="positions"),
@@ -76,7 +78,11 @@ class LedgerModule(ExecutableModule):
                  _daily_mark_to_market_enabled_ref, _use_int_position_ref,
                  MinorUnitModule.use_minor_units, initial_capital_major, base_currency,
                  ProductSelectionModule.products, StrategyBookModule.strategy_book_mode, _margin_mode_ref),
-        outputs=(cash, positions, _margin_requirement_ref, _margin_reserved_ref, _margin_deficit_ref, _margin_excess_ref),
+        outputs=(
+            cash, positions, _margin_requirement_ref, _margin_reserved_ref,
+            _margin_deficit_ref, _margin_excess_ref,
+            _margin_utilization_ref, _margin_limit_excess_ref,
+        ),
         phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
         description="初始化交易账本",
         compute=lambda state, ctx: _initialize_ledgers(state, ctx),
@@ -202,6 +208,8 @@ def _initialize_ledgers(state, ctx) -> None:
             ledger.set(MarginModule.margin_reserved, 0.0)
             ledger.set(MarginModule.margin_deficit, 0.0)
             ledger.set(MarginModule.margin_excess, 0.0)
+            ledger.set(MarginModule.margin_utilization, 0.0)
+            ledger.set(MarginModule.margin_limit_excess, 0.0)
         state.ledgers[ledger_key] = ledger
 
 

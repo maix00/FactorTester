@@ -110,6 +110,11 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
         "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
     }
+    assert index["defaults"]["target_margin_utilization"]["value"] == 0.80
+    assert index["defaults"]["max_margin_utilization"]["value"] == 0.85
+    assert index["defaults"]["target_margin_utilization"]["visible_when"] == {
+        "margin_mode": ["auto", "exact", "custom", "fixed"],
+    }
     assert index["defaults"]["accounting_mode"]["editable_when"] == {
         "engine_mode": ["custom"],
     }
@@ -490,7 +495,7 @@ def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> No
 
     by_key = {item["setting_key"]: item for item in defaults}
     assert by_key["allocation_policy"]["value"] == "equal_notional"
-    assert by_key["allocation_policy"]["value_label"] == "等市值"
+    assert by_key["allocation_policy"]["value_label"] == "等名义敞口"
     assert "execution_timing" not in by_key
     assert "execution_price_basis" not in by_key
 

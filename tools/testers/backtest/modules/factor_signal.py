@@ -56,6 +56,7 @@ class FactorSignalStore:
     precomputed_provenance: dict[Any, dict[str, Any]] = field(default_factory=dict)
     precomputed_results: dict[Any, Any] = field(default_factory=dict)
     precomputed_table_keys: dict[Any, Any] = field(default_factory=dict)
+    precomputed_role_table_keys: dict[tuple[Any, str], Any] = field(default_factory=dict)
     precomputed_signal_value_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
     live_price_tables: dict[Any, Any] = field(default_factory=dict)
     live_executors: dict[Any, Any] = field(default_factory=dict)
@@ -79,6 +80,16 @@ class FactorSignalStore:
         if key is None:
             raise KeyError(f"precomputed signal table is not bound for strategy {strategy!r}")
         return self.precomputed_tables.get(key)
+
+    def bind_precomputed_role_table(self, strategy: Any, role: str, key: Any) -> None:
+        self.precomputed_role_table_keys[(strategy, str(role))] = key
+
+    def precomputed_role_tables_for(self, strategy: Any) -> dict[str, Any]:
+        return {
+            role: self.precomputed_tables[key]
+            for (bound_strategy, role), key in self.precomputed_role_table_keys.items()
+            if bound_strategy == strategy and key in self.precomputed_tables
+        }
 
     def precomputed_provenance_for(
         self, strategy: Any, fallback_key: Any = None,
@@ -170,6 +181,7 @@ class FactorSignalModule(ExecutableModule):
         "signal_live",
         inputs=(
             FactorModule.factor,
+            FactorModule.factor_role_bindings,
             calendar_frequency,
             signal_freq,
             basepoint,
@@ -197,6 +209,7 @@ class FactorSignalModule(ExecutableModule):
         "signal_precomputed",
         inputs=(
             FactorModule.factor,
+            FactorModule.factor_role_bindings,
             ProductSelectionModule.products,
             ProductSelectionModule.product_path_selection,
             calendar_frequency,
@@ -228,7 +241,9 @@ class FactorSignalModule(ExecutableModule):
     )
 
     signal_live_on_event: ClassVar[Flow] = Flow(
-        "signal_live", inputs=(FactorModule.factor, live_factor_state), outputs=(signal_value,),
+        "signal_live",
+        inputs=(FactorModule.factor, FactorModule.factor_role_bindings, live_factor_state),
+        outputs=(signal_value, FactorModule.factor_role_values),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取实时因子信号",
         compute=lambda state, ctx: _evaluate_signal_live(state, ctx),
@@ -245,7 +260,9 @@ class FactorSignalModule(ExecutableModule):
         compute=lambda state, ctx: _observe_signal_live_bar(state, ctx),
     )
     signal_precomputed_on_event: ClassVar[Flow] = Flow(
-        "signal_precomputed", inputs=(signal_value,), outputs=(signal_value,),
+        "signal_precomputed",
+        inputs=(signal_value, FactorModule.factor_role_bindings),
+        outputs=(signal_value, FactorModule.factor_role_values),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取预计算信号",
         compute=lambda state, ctx: _evaluate_signal_precomputed(state, ctx),
@@ -314,6 +331,9 @@ def _schedule_signal_live_timestamps(state, ctx) -> None:
     Strategies sharing identical signal_align parameters are grouped so
     signal_align() runs once per unique parameter combination, not once per
     strategy."""
+    from tools.testers.backtest.modules.factor_role_signal import reject_incremental_factor_roles
+
+    reject_incremental_factor_roles(state)
     data = current_prices_table_for(state)
     if data is None:
         return
@@ -384,6 +404,9 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
                 store.bind_precomputed_table(strategy, schedule_key)
             _append_signal_drafts(drafts, signal_event_times(tables[schedule_key]), scheduled_strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)
+    from tools.testers.backtest.modules.factor_role_signal import schedule_precomputed_factor_roles
+
+    schedule_precomputed_factor_roles(state, ctx)
 
 
 def _append_signal_drafts(drafts: list[EventDraft], event_times: list[IndexEventTime], strategies: list) -> None:
@@ -884,6 +907,9 @@ def _evaluate_signal_precomputed(state, ctx) -> None:
         if table is None:
             raise KeyError(f"precomputed signal table is missing for strategy {strategy!r}")
         ctx.set_for(FactorSignalModule.signal_value, strategy, _precomputed_signal_values_for_event(store, table, ctx, strategy))
+    from tools.testers.backtest.modules.factor_role_signal import publish_precomputed_factor_roles
+
+    publish_precomputed_factor_roles(state, ctx, _precomputed_signal_values_for_event)
 
 
 def _precomputed_signal_values_for_event(store: FactorSignalStore, table: pd.DataFrame, ctx, strategy) -> dict[Any, float]:

@@ -293,6 +293,17 @@ def test_fixed_margin_ratio_without_fixed_margin_mode_raises():
         apply_strategy_configs(account, {"A1": {"fixed_margin_ratio": 0.2, **_GROUP_FIELDS}})
 
 
+def test_margin_budget_rejects_target_above_hard_limit() -> None:
+    account = BacktestRunState()
+
+    with pytest.raises(ValueError, match="target <= max"):
+        apply_strategy_configs(account, {"A1": {
+            "target_margin_utilization": 0.90,
+            "max_margin_utilization": 0.85,
+            **_GROUP_FIELDS,
+        }})
+
+
 def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
     account = BacktestRunState()
     book = StrategyBook.from_dict({
@@ -303,6 +314,9 @@ def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
                 "initial_capital_major": 2_500_000.0,
                 "base_currency": "USD",
                 "currency_conversion_fee_rate": 0.0002,
+                "target_margin_utilization": 0.75,
+                "max_margin_utilization": 0.82,
+                "margin_utilization_tolerance": 0.005,
             },
         },
     })
@@ -316,6 +330,9 @@ def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
     assert config.initial_capital_major == 2_500_000.0
     assert config.base_currency == "USD"
     assert config.currency_conversion_fee_rate == 0.0002
+    assert config.target_margin_utilization == 0.75
+    assert config.max_margin_utilization == 0.82
+    assert config.margin_utilization_tolerance == 0.005
 
 
 def test_auto_daily_mark_to_market_is_not_materialized_as_ledger_default():

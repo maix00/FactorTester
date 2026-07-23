@@ -66,12 +66,22 @@ class MarginModule(ExecutableModule):
     margin_reserved: ClassVar[FieldRef[float]] = FieldRef("margin_reserved")
     margin_deficit: ClassVar[FieldRef[float]] = FieldRef("margin_deficit")
     margin_excess: ClassVar[FieldRef[float]] = FieldRef("margin_excess")
+    margin_utilization: ClassVar[FieldRef[float]] = FieldRef("margin_utilization")
+    margin_limit_excess: ClassVar[FieldRef[float]] = FieldRef("margin_limit_excess")
     margin_liquidation_orders: ClassVar[FieldRef[Any]] = FieldRef("margin_liquidation_orders")
 
     _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="CashPoolModule")
     _ledger_positions_ref: ClassVar[FieldRef[Any]] = FieldRef("positions", owner="LedgerModule")
     _cash_reserve_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_ratio", owner="StrategyBookModule")
     _cash_reserve_major_ref: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_major", owner="StrategyBookModule")
+    _max_margin_utilization_ref: ClassVar[FieldRef[float]] = FieldRef(
+        "max_margin_utilization", owner="MarginBudgetModule",
+    )
+    _accounting_mode_ref: ClassVar[FieldRef[str]] = FieldRef("accounting_mode", owner="TradingRuleModule")
+    _cost_basis_method_ref: ClassVar[FieldRef[str]] = FieldRef("cost_basis_method", owner="TradingRuleModule")
+    _daily_mark_to_market_enabled_ref: ClassVar[FieldRef[Any]] = FieldRef(
+        "daily_mark_to_market_enabled", owner="TradingRuleModule",
+    )
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "margin_mode": FieldDefinition(
@@ -131,6 +141,8 @@ class MarginModule(ExecutableModule):
         "margin_reserved": FieldDefinition(public=False),
         "margin_deficit": FieldDefinition(public=False),
         "margin_excess": FieldDefinition(public=False),
+        "margin_utilization": FieldDefinition(public=False),
+        "margin_limit_excess": FieldDefinition(public=False),
         "margin_liquidation_orders": FieldDefinition(public=False),
     }
 
@@ -154,11 +166,19 @@ class MarginModule(ExecutableModule):
             liquidation_target_buffer,
             _cash_reserve_ratio_ref,
             _cash_reserve_major_ref,
+            _max_margin_utilization_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
             FieldRef("current_prices", owner="MarketDataModule"),
             FieldRef("current_market_snapshot", owner="MarketDataModule"),
             FieldRef("current_historical_fields", owner="MarketDataModule"),
         ),
-        outputs=(_ledger_cash_ref, _ledger_positions_ref, margin_requirement, margin_reserved, margin_deficit, margin_excess),
+        outputs=(
+            _ledger_cash_ref, _ledger_positions_ref, margin_requirement,
+            margin_reserved, margin_deficit, margin_excess,
+            margin_utilization, margin_limit_excess,
+        ),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,
         order=60,
@@ -403,8 +423,14 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
         ledger.set(MarginModule.margin_requirement, total_required)
         reserved_after = _current_margin_reserved(positions)
         ledger.set(MarginModule.margin_reserved, reserved_after)
+        utilization, limit_excess = _margin_limit_state(
+            state, ctx, ledger, total_required,
+        )
+        deficit = max(deficit, limit_excess)
         ledger.set(MarginModule.margin_deficit, deficit)
         ledger.set(MarginModule.margin_excess, max(reserved_after - total_required, 0.0))
+        ledger.set(MarginModule.margin_utilization, utilization)
+        ledger.set(MarginModule.margin_limit_excess, limit_excess)
         if deficit > 1e-12 and _resolve_margin_call_mode_from_ledger_config(ledger_config) == "liquidate":
             ctx.set(MarginModule.margin_liquidation_orders, EventDraft(
                 EventKind.TRADE_INTENT,
@@ -417,6 +443,12 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 },
                 ledger=ledger.ledger,
             ))
+
+
+def _margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tuple[float, float]:
+    from tools.testers.backtest.modules.margin_risk.utilization import margin_limit_state
+
+    return margin_limit_state(state, ctx, ledger, required)
 
 
 def _handle_margin_liquidation_notice(state: Any, ctx: Any) -> None:

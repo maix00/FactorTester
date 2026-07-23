@@ -4,6 +4,7 @@ package's factor_signal.py) owns the Flows that actually use it."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
@@ -19,6 +20,8 @@ class FactorModule(ExecutableModule):
     # execution-specific wrapper.
     factor: ClassVar[FieldRef[Any]] = FieldRef("factor")
     factor_candidates: ClassVar[FieldRef[list[Any]]] = FieldRef("factor_candidates")
+    factor_role_bindings: ClassVar[FieldRef[Any]] = FieldRef("factor_role_bindings")
+    factor_role_values: ClassVar[FieldRef[Any]] = FieldRef("factor_role_values")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "factor_candidates": FieldDefinition(
@@ -57,6 +60,30 @@ class FactorModule(ExecutableModule):
                 "label_keys": ("alias", "name", "label"),
             },
         ),
+        "factor_role_bindings": FieldDefinition(
+            public=True,
+            label="因子角色",
+            default={},
+            control_template="factor_role_bindings",
+            tab="factor",
+            chip_template="因子角色: {value}",
+            tab_label="因子执行",
+            tab_order=20,
+            help_text="按策略意图绑定 ranking、screen、entry、exit、sizing；未绑定角色显式使用主因子。",
+            serialization={
+                "kind": "factor_role_bindings",
+                "candidate_field": "factor_candidates",
+                "allowed_roles": ("ranking", "screen", "entry", "exit", "sizing"),
+                "roles_by_strategy_kind": {
+                    "group": ("ranking", "screen", "sizing"),
+                    "threshold": ("entry", "exit"),
+                },
+            },
+        ),
+        "factor_role_values": FieldDefinition(
+            public=False,
+            display_value_kind="factor_role_values",
+        ),
     }
 
 
@@ -73,3 +100,23 @@ def factor_runtime_key(factor: Any) -> Any:
     if custom_key is not None:
         return custom_key
     return ("object", id(factor))
+
+
+def factor_role_bindings_for(config: Any) -> dict[str, Any]:
+    raw = config.get(FactorModule.factor_role_bindings, {}) or {}
+    if not isinstance(raw, Mapping):
+        raise ValueError("factor_role_bindings must be a role-to-factor mapping")
+    allowed = {"ranking", "screen", "entry", "exit", "sizing"}
+    unknown = sorted(str(role) for role in raw if str(role) not in allowed)
+    if unknown:
+        raise ValueError(f"unsupported factor roles: {', '.join(unknown)}")
+    return {str(role): factor for role, factor in raw.items() if factor not in (None, "")}
+
+
+def factors_for_config(config: Any) -> tuple[Any, ...]:
+    factors = [config.get(FactorModule.factor), *factor_role_bindings_for(config).values()]
+    unique: list[Any] = []
+    for factor in factors:
+        if factor is not None and all(factor is not existing for existing in unique):
+            unique.append(factor)
+    return tuple(unique)

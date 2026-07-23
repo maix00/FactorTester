@@ -539,6 +539,48 @@ def test_trade_intent_summarizes_weights_without_repeating_map() -> None:
     assert "AP.CZC" not in output and "target_weights" in output
 
 
+def test_factor_role_values_render_one_compact_row_per_role() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "factor_roles", "inputs": [], "outputs": [],
+        "output_changes": [{
+            "field": "FactorModule.factor_role_values", "strategy": "A1", "before": None,
+            "after": {
+                "screen": {"AP.CZC": 1.0, "CJ.CZC": 0.0},
+                "sizing": {"AP.CZC": 2.0, "CJ.CZC": 4.0},
+            },
+        }],
+    })
+    output = "\n".join(lines)
+    assert "role" in output and "screen" in output and "sizing" in output
+    assert "count" in output and "finite" in output and "step-field" in output
+    assert "AP.CZC" not in output and "CJ.CZC" not in output
+
+
+def test_margin_budget_step_transposes_one_pool_and_reports_gross_leverage() -> None:
+    from tools.cli.step import render_step_event
+
+    output = "\n".join(render_step_event({
+        "flow_id": "apply_target_margin_budget", "inputs": [], "outputs": [],
+        "output_changes": [{
+            "field": "MarginBudgetModule.margin_budget_summary", "before": None,
+            "after": {"private:A1": {
+                "equity": 100_000_000, "target_margin": 80_000_000,
+                "projected_margin": 80_000_000, "weighted_margin_ratio": 0.125,
+                "scale": 6.4, "gross_leverage": 6.4,
+                "projected_utilization": 0.8, "max_utilization": 0.85,
+            }},
+        }],
+    }))
+
+    assert "指标" in output and "数值" in output
+    assert "总名义杠杆" in output and "6.4" in output
+    assert "预计保证金利用率" in output and "保证金硬上限" in output
+    assert "step-field" in output
+    assert '"raw_gross_notional"' not in output
+
+
 def test_large_target_weight_map_keeps_directional_summary_and_samples() -> None:
     from tools.cli.step import render_step_event
 

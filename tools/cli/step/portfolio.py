@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
 import click
 
+from . import margin_budget
 from .values import route_label, scalar, table_from_mappings
 
 
@@ -14,8 +16,13 @@ MAP_FIELDS = (".target_weights", ".raw_deltas", ".sized_deltas", ".deltas", ".si
 
 
 def render_rows(field: str, rows: list[Mapping[str, Any]], *, indent: str) -> list[str] | None:
+    margin_lines = margin_budget.render_rows(field, rows, indent=indent)
+    if margin_lines is not None:
+        return margin_lines
     if field.endswith(".trade_intent"):
         return _trade_intents(rows, indent=indent)
+    if field.endswith(".factor_role_values"):
+        return _factor_role_values(rows, indent=indent)
     if not field.endswith(MAP_FIELDS):
         return None
     if field.endswith(".signal_value"):
@@ -107,6 +114,29 @@ def _signal_summary(rows: list[Mapping[str, Any]], *, indent: str) -> list[str] 
                        "positive": sum(item > 0 for item in numbers), "negative": sum(item < 0 for item in numbers),
                        "zero": sum(item == 0 for item in numbers), "min": min(numbers, default=None), "max": max(numbers, default=None)})
     return [*table_from_mappings(result, indent=indent), click.style(f"{indent}逐品种信号请使用 job step-field 查看。", dim=True)]
+
+
+def _factor_role_values(rows: list[Mapping[str, Any]], *, indent: str) -> list[str] | None:
+    result = []
+    for row in rows:
+        value = row.get("after", row.get("value"))
+        if not isinstance(value, Mapping):
+            return None
+        owner = str(row.get("strategy") or route_label(row))
+        for role, role_values in value.items():
+            if not isinstance(role_values, Mapping):
+                return None
+            numbers = [float(item) for item in role_values.values() if isinstance(item, (int, float))]
+            finite = [item for item in numbers if math.isfinite(item)]
+            result.append({
+                "owner": owner, "role": role, "count": len(role_values),
+                "finite": len(finite), "min": min(finite, default=None),
+                "max": max(finite, default=None),
+            })
+    return [
+        *table_from_mappings(result, indent=indent),
+        click.style(f"{indent}逐角色逐品种值请使用 job step-field 查看。", dim=True),
+    ]
 
 
 def _trade_intents(rows: list[Mapping[str, Any]], *, indent: str) -> list[str] | None:

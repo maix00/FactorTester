@@ -588,6 +588,124 @@ def test_cash_constraint_combines_buys_across_strategies_sharing_one_ledger():
     assert (buy1.quantity + buy2.quantity) * 10.0 == pytest.approx(100.0)
 
 
+def test_signal_cash_constraint_combines_distinct_ledgers_in_one_cash_pool() -> None:
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    p1, p2 = _product(), _product()
+    l1 = LedgerState(strategy=s1, base_currency="CNY", ledger_id="book-a")
+    l2 = LedgerState(strategy=s2, base_currency="CNY", ledger_id="book-b")
+    account = BacktestRunState(
+        ledgers={"book-a": l1, "book-b": l2},
+        strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)},
+    )
+    store = strategy_book_store_for(account)
+    store.register_strategy_ledgers(
+        s1, ("book-a",), default_ledger_id="book-a",
+        cash_pool_ids_by_ledger={"book-a": "shared-pool"},
+    )
+    store.register_strategy_ledgers(
+        s2, ("book-b",), default_ledger_id="book-b",
+        cash_pool_ids_by_ledger={"book-b": "shared-pool"},
+    )
+    _set_cash(account, l1, 100.0)
+    buy1 = Order(instrument=p1, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s1)
+    buy2 = Order(instrument=p2, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s2)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s1, s2}),
+    )
+    ctx.set(MarketDataModule.current_prices, {p1: 10.0, p2: 10.0})
+    ctx.set_for(OrderConstructModule.orders, s1, [buy1])
+    ctx.set_for(OrderConstructModule.orders, s2, [buy2])
+
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert buy1.quantity + buy2.quantity == pytest.approx(10.0)
+
+
+def test_signal_cash_constraint_uses_incremental_futures_margin_not_full_notional():
+    s = Strategy(alias="margin")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "custom"})
+    account = BacktestRunState(strategy_configs={s: config})
+    ledger = account.ledger_for_strategy(s)
+    account.ledger_configs[ledger_identity("private:margin")] = LedgerConfig(
+        fee_mode="zero", margin_mode="fixed", fixed_margin_ratio=0.10,
+    )
+    _set_cash(account, ledger, 100.0)
+    ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=0.0)})
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=10.0, intent_quantity=10.0, strategy=s,
+    )
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert order.quantity == pytest.approx(10.0)
+
+
+def test_signal_cash_constraint_limits_short_open_by_margin() -> None:
+    s = Strategy(alias="short-margin")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "custom"})
+    account = BacktestRunState(strategy_configs={s: config})
+    ledger = account.ledger_for_strategy(s)
+    account.ledger_configs[ledger_identity("private:short-margin")] = LedgerConfig(
+        fee_mode="zero", margin_mode="fixed", fixed_margin_ratio=0.10,
+    )
+    _set_cash(account, ledger, 80.0)
+    ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=0.0)})
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=-10.0, intent_quantity=-10.0, strategy=s,
+    )
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert order.quantity == pytest.approx(-8.0)
+
+
+def test_signal_cash_constraint_never_scales_margin_reduction() -> None:
+    s = Strategy(alias="reduce-margin")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "custom"})
+    account = BacktestRunState(strategy_configs={s: config})
+    ledger = account.ledger_for_strategy(s)
+    account.ledger_configs[ledger_identity("private:reduce-margin")] = LedgerConfig(
+        fee_mode="zero", margin_mode="fixed", fixed_margin_ratio=0.10,
+    )
+    _set_cash(account, ledger, 0.0)
+    ledger.set(LedgerModule.positions, {p: ProductPosition(
+        quantity=10.0, average_cost=100.0,
+        margin_reserved=DataMoney.from_major(100.0, currency="CNY", use_minor_units=False),
+    )})
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=-10.0, intent_quantity=-10.0, strategy=s,
+    )
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert order.quantity == pytest.approx(-10.0)
+
+
 def test_execution_cash_constraint_uses_actual_execution_price_before_ledger_update():
     s = Strategy(alias="S")
     p = _product()

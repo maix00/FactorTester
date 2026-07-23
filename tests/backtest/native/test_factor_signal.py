@@ -497,6 +497,67 @@ def test_signal_precomputed_groups_by_factor_identity():
     assert (expected_key, "factor") in account.factor_signal_store.precomputed_tables
 
 
+def test_signal_precomputed_evaluates_and_publishes_bound_factor_roles():
+    strategy = Strategy(alias="roles")
+
+    class _FakeFactor:
+        def __init__(self, value):
+            self.value = value
+            self.calls = 0
+
+        def evaluate(self):
+            self.calls += 1
+            return pd.DataFrame({"P1": [self.value]}, index=[pd.Timestamp("2024-01-01")])
+
+    primary = _FakeFactor(1.0)
+    entry = _FakeFactor(2.0)
+    exit_factor = _FakeFactor(3.0)
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_precomputed"}),
+        field_values={
+            FactorModule.factor: primary,
+            FactorModule.factor_role_bindings: {"entry": entry, "exit": exit_factor},
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    schedule_ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _schedule_signal_precomputed_timestamps(account, schedule_ctx)
+
+    event_ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    _evaluate_signal_precomputed(account, event_ctx)
+
+    assert (primary.calls, entry.calls, exit_factor.calls) == (1, 1, 1)
+    assert event_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 1.0}
+    assert event_ctx.get_for(FactorModule.factor_role_values, strategy) == {
+        "entry": {"P1": 2.0},
+        "exit": {"P1": 3.0},
+    }
+
+
+def test_signal_live_rejects_factor_roles_instead_of_using_primary_silently():
+    strategy = Strategy(alias="roles")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_live"}),
+        field_values={
+            FactorModule.factor: object(),
+            FactorModule.factor_role_bindings: {"entry": object()},
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+
+    with pytest.raises(NotImplementedError, match="precomputed"):
+        _schedule_signal_live_timestamps(
+            account, FlowContext(timestamp=None, event_queue=EventQueue())
+        )
+
+
 def test_signal_precomputed_splits_shared_factor_by_warmup_window():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 

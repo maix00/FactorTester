@@ -785,7 +785,6 @@ def test_resolve_market_data_request_records_strategy_frequency_and_source_maps(
         s1: DataFreq.MIN1,
         s2: DataFreq.DAY1,
     }
-
     account = BacktestRunState(strategy_configs={
         s1: StrategyConfig(strategy=s1, field_values={
             MarketDataModule.data_source_mode: "list",
@@ -813,6 +812,36 @@ def test_resolve_market_data_request_records_strategy_frequency_and_source_maps(
         s1: ("A",),
         s2: ("B",),
     }
+
+
+def test_auto_frequency_includes_all_bound_factor_roles():
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1, DataFreq.DAY1]
+
+    class _Factor:
+        def __init__(self, freq):
+            self.freq = freq
+
+    strategy = Strategy(alias="S")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_live"}),
+            field_values={
+                FactorModule.factor: _Factor("DAY1"),
+                FactorModule.factor_role_bindings: {"exit": _Factor("MIN1")},
+            },
+        ),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({_Product()}))
+
+    _resolve_market_data_request(account, ctx)
+
+    assert ctx.get_for(MarketDataModule.required_frequency, strategy) == DataFreq.MIN1
 
 
 def test_daily_signal_loads_complete_trading_days_without_mutating_run_settings():
