@@ -24,8 +24,8 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
     assert first["schema_version"] == 2
     assert first["version"] == 9
     assert len(first["content_hash"]) == 64
-    assert len(first["requirement_catalog"]["categories"]) == 7
-    assert len(first["requirement_catalog"]["requirements"]) == 50
+    assert len(first["requirement_catalog"]["categories"]) == 8
+    assert len(first["requirement_catalog"]["requirements"]) == 60
     source_refs = {
         item["source_ref"] for item in first["industry_basis_catalog"]
     }
@@ -107,10 +107,13 @@ def test_successor_graph_keeps_only_semantic_obligation_categories() -> None:
     assert "research_decision" not in category_ids
     assert "report_coverage" not in category_ids
     assert "factor_semantics" in category_ids
-    assert "trading_strategy" in category_ids
-    assert "market_rules_accounting" in category_ids
-    assert "hypothesis_validity" not in category_ids
-    assert "market_execution_accounting" not in category_ids
+    assert "hypothesis_validity" in category_ids
+    assert "trial_design_validity" in category_ids
+    assert "strategy_design" in category_ids
+    assert "market_execution_accounting" in category_ids
+    assert "trial_design" not in category_ids
+    assert "trading_strategy" not in category_ids
+    assert "market_rules_accounting" not in category_ids
 
 
 def test_successor_allows_early_reentry_but_rejects_deleted_method_history() -> None:
@@ -167,10 +170,14 @@ def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["anchor_ref"] == "validation_design"
-    assert len(payload["requirements"]) == 8
+    assert len(payload["requirements"]) == 13
     assert len(result.output.encode()) < 6000
-    assert payload["requirements"][0]["industry_basis_refs"]
-    assert payload["requirements"][0]["industry_principle_zh"]
+    assert {item["category_id"] for item in payload["category_contexts"]} == {
+        "strategy_design",
+        "trial_design_validity",
+    }
+    assert all(item["industry_basis_refs"] for item in payload["category_contexts"])
+    assert all(item["industry_principle_zh"] for item in payload["category_contexts"])
 
 
 def test_successor_source_cli_lazy_loads_one_auditable_reference() -> None:

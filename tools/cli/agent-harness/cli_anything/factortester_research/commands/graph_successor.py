@@ -76,6 +76,10 @@ def graph_requirements(
         _requirement_projection(requirement_by_id[item], include_contracts)
         for item in sorted(requirement_ids)
     ]
+    category_by_id = {
+        str(item["category_id"]): item
+        for item in graph_value["requirement_catalog"]["categories"]
+    }
     payload = {
         "graph_ref": (
             f"{graph_value['graph_id']}@{graph_value['version']}:"
@@ -83,6 +87,12 @@ def graph_requirements(
         ),
         "anchor_kind": anchor_kind,
         "anchor_ref": anchor_ref,
+        "category_contexts": _category_contexts(
+            compact,
+            category_by_id=category_by_id,
+            requirement_by_id=requirement_by_id,
+            include_contracts=include_contracts,
+        ),
         "requirements": compact,
         "report_requirements": [
             _report_projection(report_by_id[item], include_contracts)
@@ -103,11 +113,40 @@ def _requirement_projection(item: dict[str, Any], include: bool) -> dict[str, An
     return {
         "requirement_id": item["requirement_id"],
         "question_zh": item["question_zh"],
-        "industry_principle_zh": item["industry_principle_zh"],
-        "industry_basis_refs": item["industry_basis_refs"],
-        "resolver_capability_ids": item["resolver_capability_ids"],
         "report_requirement_refs": item["report_requirement_refs"],
     }
+
+
+def _category_contexts(
+    requirements: list[dict[str, Any]],
+    *,
+    category_by_id: dict[str, dict[str, Any]],
+    requirement_by_id: dict[str, dict[str, Any]],
+    include_contracts: bool,
+) -> list[dict[str, Any]]:
+    if include_contracts:
+        return []
+    category_ids = sorted({
+        str(item["requirement_id"]).split(".", 1)[0]
+        for item in requirements
+    })
+    values = []
+    for category_id in category_ids:
+        matching = next(
+            requirement_by_id[str(item["requirement_id"])]
+            for item in requirements
+            if str(item["requirement_id"]).startswith(f"{category_id}.")
+        )
+        category = category_by_id[category_id]
+        values.append({
+            "category_id": category_id,
+            "title_zh": category["title_zh"],
+            "description_zh": category["description_zh"],
+            "industry_principle_zh": matching["industry_principle_zh"],
+            "industry_basis_refs": matching["industry_basis_refs"],
+            "resolver_capability_ids": matching["resolver_capability_ids"],
+        })
+    return values
 
 
 def _report_projection(item: dict[str, Any], include: bool) -> dict[str, Any]:

@@ -96,8 +96,8 @@ def _change_manifest() -> dict[str, Any]:
             {
                 "change_id": "change.requirement-catalog",
                 "change_kind": "contract",
-                "subject_ref": "requirement-catalog:1",
-                "impact_zh": "加入六类研究义务、一类兜底义务及 provider-neutral resolver。",
+                "subject_ref": "requirement-catalog:3",
+                "impact_zh": "加入七类研究义务、一类兜底义务及 provider-neutral resolver contract。",
             },
             {
                 "change_id": "change.report-contract",
