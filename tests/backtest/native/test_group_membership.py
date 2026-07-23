@@ -62,15 +62,15 @@ def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_sign
     content, not once per strategy, even when split_count differs too."""
     import tools.testers.backtest.modules.group_membership as group_membership_module
 
-    sort_calls = 0
-    real_sorted = sorted
+    rank_calls = 0
+    real_rank = group_membership_module.rank_cross_section
 
-    def _counting_sorted(*args, **kwargs):
-        nonlocal sort_calls
-        sort_calls += 1
-        return real_sorted(*args, **kwargs)
+    def _counting_rank(*args, **kwargs):
+        nonlocal rank_calls
+        rank_calls += 1
+        return real_rank(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "sorted", _counting_sorted, raising=False)
+    monkeypatch.setattr(group_membership_module, "rank_cross_section", _counting_rank)
 
     products = [_product() for _ in range(4)]
     signal_value = {p: float(i) for i, p in enumerate(products)}
@@ -102,7 +102,7 @@ def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_sign
 
     _group_quantile_membership(account, ctx)
 
-    assert sort_calls == 1
+    assert rank_calls == 1
     # sanity: each strategy still gets its own correct bucket
     weights0 = ctx.get_for(GroupMembershipModule.target_weights, strategies[0])
     weights4 = ctx.get_for(GroupMembershipModule.target_weights, strategies[4])
@@ -118,15 +118,15 @@ def test_group_quantile_membership_reuses_raw_bucket_for_derived_group_sharing_s
     strategy, even though the two strategies differ in product_mask_names."""
     import tools.testers.backtest.modules.group_membership as group_membership_module
 
-    round_calls = 0
-    real_round = round
+    split_calls = 0
+    real_split = group_membership_module.select_rank_group
 
-    def _counting_round(*args, **kwargs):
-        nonlocal round_calls
-        round_calls += 1
-        return real_round(*args, **kwargs)
+    def _counting_split(*args, **kwargs):
+        nonlocal split_calls
+        split_calls += 1
+        return real_split(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "round", _counting_round, raising=False)
+    monkeypatch.setattr(group_membership_module, "select_rank_group", _counting_split)
 
     products = [_product() for _ in range(4)]
     signal_value = {p: float(i) for i, p in enumerate(products)}
@@ -150,9 +150,9 @@ def test_group_quantile_membership_reuses_raw_bucket_for_derived_group_sharing_s
 
     _group_quantile_membership(account, ctx)
 
-    # 2 round() calls (start, end) for one bucket computation; a second
-    # strategy sharing (signal, split_count, group_index) must not add more.
-    assert round_calls == 2
+    # One toolkit split for the shared raw bucket; applying the derived mask
+    # must not split or rerank the cross-section again.
+    assert split_calls == 1
     parent_weights = ctx.get_for(GroupMembershipModule.target_weights, parent)
     derived_weights = ctx.get_for(GroupMembershipModule.target_weights, derived)
     assert set(parent_weights) == {products[2], products[3]}

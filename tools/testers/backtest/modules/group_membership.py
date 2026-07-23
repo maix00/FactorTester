@@ -53,6 +53,7 @@ from tools.testers.backtest.modules.target import (
     target_weight_intent,
 )
 from tools.testers.backtest.modules.time_index_lookup import row_at_index_key
+from tools.testers.backtest.policies.cross_section import rank_cross_section, select_rank_group
 
 
 class GroupMembershipModule(TargetStrategyModule):
@@ -224,7 +225,7 @@ def _group_quantile_membership(state, ctx) -> None:
     # order doesn't depend on it, only the start/end slice does, so
     # strategies sharing signal_value can share a ranking even with
     # different split_count.
-    ranked_cache: dict[frozenset, list[tuple[Any, float]]] = {}
+    ranked_cache: dict[frozenset, Sequence[tuple[Any, float]]] = {}
     # A derived group shares its parent's split_count/group_index exactly
     # (only product_mask_names differs -- "parent bucket intersected with
     # mask", per product_mask_names' own field docstring), so once a
@@ -284,15 +285,12 @@ def _group_quantile_membership(state, ctx) -> None:
             # (not an accident of dict/set iteration order, which for
             # UniqueNameObject-hashed products can vary run to run under
             # PYTHONHASHSEED randomization).
-            ranked = sorted(signal_value.items(), key=lambda kv: (-kv[1], _product_name(kv[0])))
+            ranked = rank_cross_section(signal_value, tie_breaker=_product_name)
             ranked_cache[cache_key] = ranked
         bucket_key = (cache_key, n_groups, group_index)
         members = bucket_cache.get(bucket_key)
         if members is None:
-            bucket_size = len(ranked) / n_groups
-            start = round(group_index * bucket_size)
-            end = round((group_index + 1) * bucket_size)
-            members = frozenset(product for product, _ in ranked[start:end])
+            members = select_rank_group(ranked, split_count=n_groups, group_index=group_index)
             bucket_cache[bucket_key] = members
         product_mask_names = config.get(GroupMembershipModule.product_mask_names)
         if product_mask_names:
@@ -421,7 +419,7 @@ def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
         )
         base_fields = current_historical_fields_at(state, timestamp) if needs_historical_fields else {}
         strategy_fields_cache: dict[Any, dict] = {}
-        ranked_cache: dict[frozenset, list[tuple[Any, float]]] = {}
+        ranked_cache: dict[frozenset, Sequence[tuple[Any, float]]] = {}
         bucket_cache: dict[tuple[frozenset, int, int], frozenset] = {}
         for strategy, event_time, signal_value in items:
             config = state.config_for(strategy)
@@ -597,7 +595,7 @@ def _compute_group_target_weights(
     *,
     established: dict[Any, float] | None = None,
     last_membership: frozenset | None = None,
-    ranked_cache: dict[frozenset, list[tuple[Any, float]]] | None = None,
+    ranked_cache: dict[frozenset, Sequence[tuple[Any, float]]] | None = None,
     bucket_cache: dict[tuple[frozenset, int, int], frozenset] | None = None,
 ) -> tuple[dict, frozenset | None, str]:
     config = state.config_for(strategy)
@@ -636,16 +634,13 @@ def _compute_group_target_weights(
     cache_key = frozenset(signal_value.items())
     ranked = ranked_cache.get(cache_key) if ranked_cache is not None else None
     if ranked is None:
-        ranked = sorted(signal_value.items(), key=lambda kv: (-kv[1], _product_name(kv[0])))
+        ranked = rank_cross_section(signal_value, tie_breaker=_product_name)
         if ranked_cache is not None:
             ranked_cache[cache_key] = ranked
     bucket_key = (cache_key, n_groups, group_index)
     members = bucket_cache.get(bucket_key) if bucket_cache is not None else None
     if members is None:
-        bucket_size = len(ranked) / n_groups
-        start = round(group_index * bucket_size)
-        end = round((group_index + 1) * bucket_size)
-        members = frozenset(product for product, _ in ranked[start:end])
+        members = select_rank_group(ranked, split_count=n_groups, group_index=group_index)
         if bucket_cache is not None:
             bucket_cache[bucket_key] = members
     product_mask_names = config.get(GroupMembershipModule.product_mask_names)
