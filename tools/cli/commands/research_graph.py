@@ -609,7 +609,6 @@ def preview_graph_continuation(
     show_default=True,
 )
 @click.option("--expected-target-hash", required=True)
-@click.option("--human-authorization-id", required=True)
 @click.option("--profile-id")
 @click.option("--agent-id")
 @click.option(
@@ -623,7 +622,6 @@ def continue_graph_branch(
     job_id: str,
     execution_mode: str,
     expected_target_hash: str,
-    human_authorization_id: str,
     profile_id: str | None,
     agent_id: str | None,
     release_profile: Path | None,
@@ -645,7 +643,6 @@ def continue_graph_branch(
             target_graph_version=target_version,
             job_id=job_id,
             expected_target_hash=expected_target_hash,
-            human_authorization_id=human_authorization_id,
             execution_mode=execution_mode,
         )
     if profile_id and agent_id:

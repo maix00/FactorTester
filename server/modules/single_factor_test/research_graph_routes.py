@@ -421,9 +421,6 @@ def continue_research_graph_branch(instance_id: str, branch_id: str):
             expected_target_hash=str(
                 data.get("expected_target_hash") or ""
             ),
-            human_authorization_id=str(
-                data.get("human_authorization_id") or ""
-            ),
             execution_mode=str(data.get("execution_mode") or "live"),
         )
     except KeyError as exc:

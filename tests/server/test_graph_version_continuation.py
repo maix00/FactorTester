@@ -8,14 +8,6 @@ import orjson
 import pytest
 
 import settings as Settings
-from server.services.maintenance_cases import (
-    MaintenanceCaseStore,
-    approve_gate,
-    open_gate,
-    record_gate_grill,
-    record_gate_review,
-    record_gate_validation,
-)
 from server.services.research_graph.branch.continuation import (
     continue_graph_branch,
     preview_graph_continuation,
@@ -217,56 +209,6 @@ def _pause_pretrial_branch(path) -> None:
         )
 
 
-def _approve(path, *, target_hash: str) -> str:
-    store = MaintenanceCaseStore(path)
-    coordinator = "agent:server-maintenance"
-    case = open_gate(
-        store,
-        owner_user_id="alice",
-        coordinator_agent_id=coordinator,
-        proposal_ref="proposal:graph-continuation",
-        proposer_identity_ref="identity:planning-agent",
-        action="continue_graph_branch",
-        target_hash=target_hash,
-        conversation_ref="auth-conversation:grill-146",
-        proposal_evidence_refs=["test:continuation-validation"],
-    )
-    record_gate_review(
-        store,
-        owner_user_id="alice",
-        case_id=case["case_id"],
-        coordinator_agent_id=coordinator,
-        reviewer_identity_ref="identity:independent-reviewer",
-        disposition="approved",
-        evidence_refs=["test:continuation-review"],
-    )
-    record_gate_validation(
-        store,
-        owner_user_id="alice",
-        case_id=case["case_id"],
-        coordinator_agent_id=coordinator,
-        validation_summary_hash="e" * 64,
-    )
-    record_gate_grill(
-        store,
-        owner_user_id="alice",
-        case_id=case["case_id"],
-        coordinator_agent_id=coordinator,
-        disposition="approved",
-        grill_ref="conversation-result:grill-146",
-    )
-    approve_gate(
-        store,
-        owner_user_id="alice",
-        case_id=case["case_id"],
-        coordinator_agent_id=coordinator,
-        action="continue_graph_branch",
-        target_hash=target_hash,
-        approval_ref="approval:grill-146",
-    )
-    return str(case["case_id"])
-
-
 def test_continuation_preserves_source_and_projects_job_into_v2(
     tmp_path,
     monkeypatch,
@@ -283,7 +225,6 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
         target_graph_version=2,
         job_id="job-1",
     )
-    case_id = _approve(path, target_hash=preview["target_hash"])
 
     continued = continue_graph_branch(
         source_instance_id="instance-1",
@@ -292,7 +233,6 @@ def test_continuation_preserves_source_and_projects_job_into_v2(
         target_graph_version=2,
         job_id="job-1",
         expected_target_hash=preview["target_hash"],
-        human_authorization_id=case_id,
     )
 
     assert continued["graph_version"] == 2
@@ -467,7 +407,6 @@ def test_pretrial_continuation_preserves_paused_gap_without_job_evidence(
     )
     assert preview["descriptor"]["continuation_mode"] == "pre_trial_checkpoint"
     assert preview["descriptor"]["target_node"] == "capability_gap"
-    case_id = _approve(path, target_hash=preview["target_hash"])
 
     continued = continue_graph_branch(
         source_instance_id="instance-1",
@@ -476,7 +415,6 @@ def test_pretrial_continuation_preserves_paused_gap_without_job_evidence(
         target_graph_version=2,
         job_id="",
         expected_target_hash=preview["target_hash"],
-        human_authorization_id=case_id,
     )
 
     branch = continued["branches"][0]
@@ -575,7 +513,6 @@ def test_schema_v2_continuation_checks_current_node_not_history_topology(
         "authoritative_backtest"
     )
     assert "topology_preflight" not in preview["descriptor"]
-    case_id = _approve(path, target_hash=preview["target_hash"])
     continued = continue_graph_branch(
         source_instance_id="instance-1",
         source_branch_id="branch-1",
@@ -583,7 +520,6 @@ def test_schema_v2_continuation_checks_current_node_not_history_topology(
         target_graph_version=2,
         job_id="",
         expected_target_hash=preview["target_hash"],
-        human_authorization_id=case_id,
     )
 
     branch = continued["branches"][0]
@@ -644,7 +580,6 @@ def test_draft_target_allows_shadow_but_rejects_live_continuation(
 
     assert preview["descriptor"]["execution_mode"] == "shadow"
     assert preview["descriptor"]["target_graph_lifecycle"] == "draft"
-    case_id = _approve(path, target_hash=preview["target_hash"])
     continued = continue_graph_branch(
         source_instance_id="instance-1",
         source_branch_id="branch-1",
@@ -652,7 +587,6 @@ def test_draft_target_allows_shadow_but_rejects_live_continuation(
         target_graph_version=2,
         job_id="",
         expected_target_hash=preview["target_hash"],
-        human_authorization_id=case_id,
         execution_mode="shadow",
     )
     assert continued["mode"] == "shadow"
@@ -723,7 +657,6 @@ def test_schema_v2_continuation_previews_only_material_requirement_changes(
     assert delta["entry_removed_ids"] == []
     assert delta["assessment_required_ids"] == delta["entry_added_ids"]
     assert len(delta["delta_hash"]) == 64
-    case_id = _approve(path, target_hash=preview["target_hash"])
     continued = continue_graph_branch(
         source_instance_id="instance-1",
         source_branch_id="branch-1",
@@ -731,7 +664,6 @@ def test_schema_v2_continuation_previews_only_material_requirement_changes(
         target_graph_version=2,
         job_id="",
         expected_target_hash=preview["target_hash"],
-        human_authorization_id=case_id,
     )
     branch = continued["branches"][0]
     context = build_graph_branch_context(
@@ -763,7 +695,6 @@ def test_schema_v2_continuation_shadow_replay_rejects_tampered_preflight(
         target_graph_version=2,
         job_id="",
     )
-    case_id = _approve(path, target_hash=preview["target_hash"])
     continued = continue_graph_branch(
         source_instance_id="instance-1",
         source_branch_id="branch-1",
@@ -771,7 +702,6 @@ def test_schema_v2_continuation_shadow_replay_rejects_tampered_preflight(
         target_graph_version=2,
         job_id="",
         expected_target_hash=preview["target_hash"],
-        human_authorization_id=case_id,
     )
     branch = continued["branches"][0]
     with connect_sqlite(path) as conn:
@@ -842,7 +772,6 @@ def test_pretrial_continuation_shadow_replay_rejects_tampered_mode(
         target_graph_version=2,
         job_id="",
     )
-    case_id = _approve(path, target_hash=preview["target_hash"])
     continued = continue_graph_branch(
         source_instance_id="instance-1",
         source_branch_id="branch-1",
@@ -850,7 +779,6 @@ def test_pretrial_continuation_shadow_replay_rejects_tampered_mode(
         target_graph_version=2,
         job_id="",
         expected_target_hash=preview["target_hash"],
-        human_authorization_id=case_id,
     )
     branch = continued["branches"][0]
     with connect_sqlite(path) as conn:
@@ -887,7 +815,6 @@ def test_pretrial_continuation_shadow_replay_rejects_tampered_mode(
         ("source_checkpoint_hash", "2" * 64),
         ("target_graph_hash", "3" * 64),
         ("job_evidence_hash", "4" * 64),
-        ("authorization_ref", "maintenance-case:missing"),
     ],
 )
 def test_continuation_shadow_replay_rejects_tampered_lineage(
@@ -908,7 +835,6 @@ def test_continuation_shadow_replay_rejects_tampered_lineage(
         target_graph_version=2,
         job_id="job-1",
     )
-    case_id = _approve(path, target_hash=preview["target_hash"])
     continued = continue_graph_branch(
         source_instance_id="instance-1",
         source_branch_id="branch-1",
@@ -916,7 +842,6 @@ def test_continuation_shadow_replay_rejects_tampered_lineage(
         target_graph_version=2,
         job_id="job-1",
         expected_target_hash=preview["target_hash"],
-        human_authorization_id=case_id,
     )
     branch = continued["branches"][0]
     with connect_sqlite(path) as conn:
@@ -949,7 +874,7 @@ def test_continuation_shadow_replay_rejects_tampered_lineage(
     )["passed"] is False
 
 
-def test_continuation_rejects_stale_trial_identity_without_consuming_gate(
+def test_continuation_rejects_stale_trial_identity_before_writing(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -965,7 +890,6 @@ def test_continuation_rejects_stale_trial_identity_without_consuming_gate(
         target_graph_version=2,
         job_id="job-1",
     )
-    case_id = _approve(path, target_hash=preview["target_hash"])
     with connect_sqlite(path) as conn:
         conn.execute(
             """
@@ -984,20 +908,15 @@ def test_continuation_rejects_stale_trial_identity_without_consuming_gate(
             target_graph_version=2,
             job_id="job-1",
             expected_target_hash=preview["target_hash"],
-            human_authorization_id=case_id,
         )
 
-    assert MaintenanceCaseStore(path).load_case(
-        owner_user_id="alice",
-        case_id=case_id,
-    )["status"] == "blocked"
     with connect_sqlite(path) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM research_graph_instances"
         ).fetchone()[0] == 1
 
 
-def test_continuation_rolls_back_gate_when_branch_insert_fails(
+def test_continuation_is_atomic_when_branch_insert_fails(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1013,7 +932,6 @@ def test_continuation_rolls_back_gate_when_branch_insert_fails(
         target_graph_version=2,
         job_id="job-1",
     )
-    case_id = _approve(path, target_hash=preview["target_hash"])
     def fail_insert(*_args, **_kwargs) -> None:
         raise RuntimeError("injected insert failure")
 
@@ -1031,13 +949,8 @@ def test_continuation_rolls_back_gate_when_branch_insert_fails(
             target_graph_version=2,
             job_id="job-1",
             expected_target_hash=preview["target_hash"],
-            human_authorization_id=case_id,
         )
 
-    assert MaintenanceCaseStore(path).load_case(
-        owner_user_id="alice",
-        case_id=case_id,
-    )["status"] == "blocked"
     with connect_sqlite(path) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM research_graph_instances"

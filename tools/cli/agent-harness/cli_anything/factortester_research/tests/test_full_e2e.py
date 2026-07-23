@@ -574,7 +574,6 @@ class TestCLISubprocess:
             "--target-version", "6",
             "--job-id", "job-1",
             "--expected-target-hash", "c" * 64,
-            "--human-authorization-id", "gate-146",
             "--json",
         ], env=env)
         payload = json.loads(continued.stdout)

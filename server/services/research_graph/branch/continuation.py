@@ -35,9 +35,6 @@ from server.services.research_graph.branch.requirement_preflight import (
 from server.services.research_graph.branch.entry_resolution import (
     initial_entry_resolution_frame,
 )
-from server.services.research_graph.continuation_gate import (
-    consume_continuation_gate,
-)
 from server.services.research_graph.packet_budget import graph_packet_budget
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
@@ -80,7 +77,6 @@ def continue_graph_branch(
     target_graph_version: int,
     job_id: str,
     expected_target_hash: str,
-    human_authorization_id: str,
     execution_mode: str = "live",
 ) -> dict[str, Any]:
     """Create one immutable version instance inside the same Work Package."""
@@ -97,10 +93,6 @@ def continue_graph_branch(
     instance_id = uuid.uuid4().hex
     branch_id = uuid.uuid4().hex
     trace_id = uuid.uuid4().hex
-    effect_ref = (
-        f"graph-continuation:{instance_id}:{branch_id}:"
-        f"{prepared['target_hash']}"
-    )
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -125,13 +117,6 @@ def continue_graph_branch(
             target_graph_version=target_graph_version,
             execution_mode=execution_mode,
         )
-        consume_continuation_gate(
-            conn,
-            owner_user_id=owner,
-            case_id=human_authorization_id,
-            target_hash=prepared["target_hash"],
-            effect_ref=effect_ref,
-        )
         _insert_continuation(
             conn,
             prepared=prepared,
@@ -139,7 +124,6 @@ def continue_graph_branch(
             instance_id=instance_id,
             branch_id=branch_id,
             trace_id=trace_id,
-            authorization_id=human_authorization_id,
             now=now,
         )
     branch = {

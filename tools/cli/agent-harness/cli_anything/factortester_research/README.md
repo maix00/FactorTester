@@ -131,9 +131,10 @@ immutable Graph version; the Harness does not impose a stale project-local
 `cycle advance` validates local Research Cycle proposals before invoking the
 real client and retains only a factual local command envelope for audit.
 `cycle continuation-preview` performs no write and returns the exact
-cross-version effect hash. After conversation approval,
-`cycle continue` consumes that exact Gate, preserves the old branch and Job
-binding, and records one bounded local command receipt.
+current-node re-entry hash. The authenticated explicit command applies only
+that exact hash, preserves the old physical branch, and records one bounded
+local command receipt. It does not require a second approval Gate or replay
+historical research stages.
 
 For `data_contract__factor_semantics`, transition evidence supplies only an
 explicit `data_availability_request` (`products`, `sources`, `probe`, and

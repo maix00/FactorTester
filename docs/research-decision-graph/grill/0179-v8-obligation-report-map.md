@@ -2922,3 +2922,10 @@ Graph continuation 因此只检查：
 了 Work Package 全历史 topology footprint 查询及 replay 校验，因而同时减少一次
 数据库读取。生产激活的剩余 proposal/review/audit/authorization 对象是否全部折叠为
 一次 exact-hash 激活命令，继续按 Grill 183 的最后一个治理边界收口。
+
+普通 continuation 已先完成同方向收缩：authenticated user/Research Agent 发出的
+命令本身就是显式切换请求，`continuation-preview` 给出 exact target hash，
+`continue` 只接受该 hash。删除额外 Maintenance approval Gate、Gate 反查和对应
+CLI 参数；不可变 trace 仍保存 actor、source/target Graph hash、checkpoint、当前
+节点及 requirement diff。该变化净删除普通路径代码与测试夹具，并不降低 lineage
+或 stale-target 检查。

@@ -30,7 +30,6 @@ def insert_continuation(
     instance_id: str,
     branch_id: str,
     trace_id: str,
-    authorization_id: str,
     now: float,
 ) -> None:
     """Insert one instance, branch, and bootstrap trace in one transaction."""
@@ -126,9 +125,6 @@ def insert_continuation(
     evidence: dict[str, Any] = {
         "graph_continuation": {
             **descriptor,
-            "authorization_ref": (
-                f"maintenance-case:{authorization_id}"
-            ),
         },
         "evidence_refs": prepared["evidence_refs"],
         "research_cycle": {

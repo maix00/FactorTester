@@ -1082,7 +1082,6 @@ def test_graph_continuation_routes_preserve_exact_target(
             "target_graph_version": 6,
             "job_id": "job-1",
             "expected_target_hash": "c" * 64,
-            "human_authorization_id": "gate-146",
             "execution_mode": "live",
         },
     )
@@ -1105,7 +1104,6 @@ def test_graph_continuation_routes_preserve_exact_target(
             "target_graph_version": 6,
             "job_id": "job-1",
             "expected_target_hash": "c" * 64,
-            "human_authorization_id": "gate-146",
             "execution_mode": "live",
         }),
     ]

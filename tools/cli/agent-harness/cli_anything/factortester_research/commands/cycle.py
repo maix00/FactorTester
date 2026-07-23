@@ -187,7 +187,6 @@ def cycle_continuation_preview(
     show_default=True,
 )
 @click.option("--expected-target-hash", required=True)
-@click.option("--human-authorization-id", required=True)
 @click.option("--timeout", default=120, show_default=True, type=int)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 @click.pass_context
@@ -199,7 +198,6 @@ def cycle_continue(
     job_id: str,
     execution_mode: str,
     expected_target_hash: str,
-    human_authorization_id: str,
     timeout: int,
     as_json: bool,
 ) -> None:
@@ -213,8 +211,6 @@ def cycle_continue(
         str(target_version),
         "--expected-target-hash",
         expected_target_hash,
-        "--human-authorization-id",
-        human_authorization_id,
         "--mode",
         execution_mode,
     ]

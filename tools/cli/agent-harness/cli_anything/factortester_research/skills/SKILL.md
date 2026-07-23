@@ -191,32 +191,30 @@ stdout/stderr, full graph/catalog content, artifacts, trace history, or legacy
 evidence. `cycle advance` validates before backend mutation and records only a
 local factual command envelope plus compact event metadata.
 
-When an approved Active Graph direct-child version must continue a paused
-legacy branch without rerunning a trusted Job, preview the exact effect first:
+When a user explicitly continues the current Work Package to a registered
+Graph version, preview the exact current-node re-entry effect first:
 
 ```bash
 cli-anything-factortester-research cycle continuation-preview \
   <source_instance_id> <source_branch_id> \
-  --target-version <version> --job-id <job_id> --json
+  --target-version <version> --mode <live|shadow> --json
 ```
 
-The preview is read-only and creates no local session write. Submit its
-`target_hash` to the conversation approval/Grill flow. Only after the server
-returns the exact Gate ID, consume it with:
+The preview is read-only and creates no local session write. The authenticated
+user command plus its exact `target_hash` is the explicit authorization:
 
 ```bash
 cli-anything-factortester-research cycle continue \
   <source_instance_id> <source_branch_id> \
-  --target-version <version> --job-id <job_id> \
-  --expected-target-hash <sha256> \
-  --human-authorization-id <gate_id> --json
+  --target-version <version> --mode <live|shadow> \
+  --expected-target-hash <sha256> --json
 ```
 
-Never edit `graph_version`, rebind a ResearchRun, or copy an artifact manually.
-The server preserves the source branch and validates the Job, TrialPlan,
-Contract, graph parent, assurance, and target node. The mutating command writes
-one bounded local command receipt; it does not load source history into Agent
-context.
+Never edit `graph_version` or copy artifacts manually. The server preserves the
+source branch, verifies the target hash/current node, and derives only the
+changed Entry Requirements. It does not replay past nodes, data checks,
+semantics work, or Trials. The mutating command writes one bounded local command
+receipt; it does not load source history into Agent context.
 Candidate edges expose `required_research_evidence` separately from
 `required_transition_facts`; never use a permission, budget, Job status, or
 approval fact to adjudicate a research obligation.

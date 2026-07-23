@@ -229,15 +229,7 @@ def _continuation_bootstrap_valid(
     )
     if not isinstance(continuation, dict):
         return False
-    authorization_ref = str(continuation.get("authorization_ref") or "")
-    if not authorization_ref.startswith("maintenance-case:"):
-        return False
-    case_id = authorization_ref.removeprefix("maintenance-case:")
-    descriptor = {
-        key: value
-        for key, value in continuation.items()
-        if key != "authorization_ref"
-    }
+    descriptor = continuation
     target_hash = json_hash(descriptor)
     mode = str(descriptor.get("continuation_mode") or "")
     checkpoint = evidence.get("research_cycle_checkpoint")
@@ -301,24 +293,16 @@ def _continuation_bootstrap_valid(
             SELECT i.graph_id, i.graph_version, i.workspace_id,
                    i.work_package_id, v.graph_json, b.latest_trace_id,
                    b.current_node,
-                   t.evidence_json,
-                   g.status AS gate_status,
-                   g.affected_refs_json AS gate_affected_refs_json,
-                   g.change_refs_json AS gate_change_refs_json,
-                   g.latest_result_ref AS gate_latest_result_ref
+                   t.evidence_json
             FROM research_graph_instances i
             JOIN research_graph_branches b
               ON b.instance_id=i.instance_id
             JOIN research_graph_versions v
               ON v.graph_id=i.graph_id AND v.version=i.graph_version
             JOIN research_graph_trace t ON t.trace_id=b.latest_trace_id
-            JOIN research_maintenance_cases g
-              ON g.owner_user_id=i.owner
-             AND g.case_id=? AND g.kind='approval_gate'
             WHERE i.owner=? AND i.instance_id=? AND b.branch_id=?
             """,
             (
-                case_id,
                 str(runtime["owner"]),
                 str(descriptor.get("source_instance_id") or ""),
                 str(descriptor.get("source_branch_id") or ""),
@@ -330,8 +314,6 @@ def _continuation_bootstrap_valid(
         source_evidence = orjson.loads(source["evidence_json"])
         source_graph = orjson.loads(source["graph_json"])
         source_checkpoint = source_evidence["research_cycle_checkpoint"]
-        affected_refs = orjson.loads(source["gate_affected_refs_json"])
-        change_refs = orjson.loads(source["gate_change_refs_json"])
     except (KeyError, TypeError, orjson.JSONDecodeError):
         return False
     if mode == SAME_NODE_REENTRY_MODE:
@@ -353,10 +335,6 @@ def _continuation_bootstrap_valid(
             != expected_requirement_preflight
         ):
             return False
-    expected_effect = (
-        f"graph-continuation:{runtime['instance_id']}:"
-        f"{runtime['branch_id']}:{target_hash}"
-    )
     return (
         str(source["graph_id"]) == str(descriptor.get("graph_id") or "")
         and int(source["graph_version"])
@@ -369,14 +347,6 @@ def _continuation_bootstrap_valid(
         == str(descriptor.get("source_trace_id") or "")
         and str(source_checkpoint.get("projection_hash") or "")
         == str(descriptor.get("source_checkpoint_hash") or "")
-        and str(source["gate_status"]) == "resolved"
-        and f"gate-action:continue_graph_branch" in affected_refs
-        and f"gate-target-hash:{target_hash}" in affected_refs
-        and any(
-            str(ref).startswith("gate-approval:")
-            for ref in change_refs
-        )
-        and str(source["gate_latest_result_ref"]) == expected_effect
     )
 
 

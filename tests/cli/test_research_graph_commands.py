@@ -152,7 +152,6 @@ class FakeClient:
         target_graph_version,
         job_id,
         expected_target_hash,
-        human_authorization_id,
         execution_mode="live",
     ):
         self.continuation = (
@@ -161,7 +160,6 @@ class FakeClient:
             target_graph_version,
             job_id,
             expected_target_hash,
-            human_authorization_id,
             execution_mode,
         )
         return self.continuation_response or {
@@ -784,7 +782,7 @@ def test_research_graph_advance_marks_uninitialized_cycle_without_local_write(
     }
 
 
-def test_research_graph_continuation_is_previewed_then_exactly_authorized(
+def test_research_graph_continuation_is_previewed_then_exactly_applied(
     monkeypatch,
 ) -> None:
     fake = FakeClient()
@@ -803,7 +801,6 @@ def test_research_graph_continuation_is_previewed_then_exactly_authorized(
         "--target-version", "6",
         "--job-id", "job-1",
         "--expected-target-hash", "c" * 64,
-        "--human-authorization-id", "gate-146",
     ])
 
     assert preview.exit_code == 0
@@ -812,8 +809,7 @@ def test_research_graph_continuation_is_previewed_then_exactly_authorized(
         "instance-v5", "branch-v5", 6, "job-1", "live",
     )
     assert fake.continuation == (
-        "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "gate-146",
-        "live",
+        "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "live",
     )
 
 
@@ -878,7 +874,6 @@ def test_research_graph_continuation_retargets_local_profile_without_new_record(
         "physical-v6", "branch-v6",
         "--target-version", "7",
         "--expected-target-hash", "c" * 64,
-        "--human-authorization-id", "gate-pretrial",
         "--profile-id", "maxa",
         "--agent-id", "research-maxa",
     ])
@@ -918,7 +913,6 @@ def test_research_graph_pretrial_continuation_omits_job_id(
         "instance-v6", "branch-v6",
         "--target-version", "7",
         "--expected-target-hash", "c" * 64,
-        "--human-authorization-id", "gate-pretrial",
     ])
 
     assert preview.exit_code == 0
@@ -927,8 +921,7 @@ def test_research_graph_pretrial_continuation_omits_job_id(
         "instance-v6", "branch-v6", 7, "", "live",
     )
     assert fake.continuation == (
-        "instance-v6", "branch-v6", 7, "", "c" * 64,
-        "gate-pretrial", "live",
+        "instance-v6", "branch-v6", 7, "", "c" * 64, "live",
     )
 
 

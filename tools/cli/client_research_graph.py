@@ -420,7 +420,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
         target_graph_version: int,
         job_id: str,
         expected_target_hash: str,
-        human_authorization_id: str,
         execution_mode: str = "live",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
@@ -430,7 +429,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
                 "target_graph_version": target_graph_version,
                 "job_id": job_id,
                 "expected_target_hash": expected_target_hash,
-                "human_authorization_id": human_authorization_id,
                 "execution_mode": execution_mode,
             },
         ))
