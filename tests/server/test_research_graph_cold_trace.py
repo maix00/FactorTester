@@ -14,6 +14,7 @@ from server.services.research_graph.research_cycle.trace_replay import (
 )
 from server.services.research_graph.report_checkpoint import (
     research_cycle_deltas,
+    transition_step_projection,
 )
 
 
@@ -48,9 +49,6 @@ def test_entry_assessment_receipts_keep_decisions_without_long_body() -> None:
         "requirement_id": "factor_semantics.expression_identity",
         "requirement_revision": 3,
         "assessment_hash": receipts[0]["assessment_hash"],
-        "applicability_status": "applicable",
-        "coverage_decision": "map_existing",
-        "entry_effect_status": "pass_limited",
         "obligation_refs": ["obligation:semantics"],
         "limitation_refs": ["limitation:direction"],
     }]
@@ -112,7 +110,7 @@ def test_cycle_event_receipts_preserve_auditable_delta_identity() -> None:
     }]
 
 
-def test_entry_resolution_delta_drops_repeated_titles_only() -> None:
+def test_entry_resolution_delta_keeps_one_canonical_status_row() -> None:
     delta = {
         "schema_version": 1,
         "reason": "graph_continuation",
@@ -139,6 +137,48 @@ def test_entry_resolution_delta_drops_repeated_titles_only() -> None:
     }]
     assert "title_zh" not in compact["items"][0]
     assert "assessed" not in compact["items"][0]
+    assert "assessed_requirement_ids" not in compact
+    assert "reused_requirement_ids" not in compact
+    assert "reference_only_requirement_ids" not in compact
+    assert "unresolved_requirement_ids" not in compact
+
+
+def test_report_carrier_derives_entry_indexes_from_compact_rows() -> None:
+    step = transition_step_projection(
+        trace_id="trace-1",
+        edge_id="factor_semantics__validation_design",
+        from_node="factor_semantics",
+        to_node="validation_design",
+        created_at=1.0,
+        evidence={
+            "entry_resolution_delta": {
+                "schema_version": 1,
+                "reason": "node_entry",
+                "items": [
+                    {
+                        "requirement_id": "factor_semantics.expression_identity",
+                        "change_kind": "added",
+                        "resolution_status": "assessed_pass",
+                    },
+                    {
+                        "requirement_id": "trial_design_validity.target_contrast",
+                        "change_kind": "unchanged",
+                        "resolution_status": "unresolved",
+                    },
+                ],
+                "resume_node": "validation_design",
+            },
+        },
+    )
+
+    assert step["entry_resolution"]["assessed_requirement_ids"] == [
+        "factor_semantics.expression_identity"
+    ]
+    assert step["entry_resolution"]["unresolved_requirement_ids"] == [
+        "trial_design_validity.target_contrast"
+    ]
+    assert step["entry_resolution"]["reused_requirement_ids"] == []
+    assert step["entry_resolution"]["reference_only_requirement_ids"] == []
 
 
 def test_trace_replay_accepts_hash_verified_cold_events() -> None:

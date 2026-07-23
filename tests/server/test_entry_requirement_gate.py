@@ -356,9 +356,6 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
     receipt = dict(receipts[0])
     assert len(receipt.pop("assessment_hash")) == 64
     assert receipt == {
-        "applicability_status": "applicable",
-        "coverage_decision": "map_existing",
-        "entry_effect_status": "pass_limited",
         "limitation_refs": ["limitation:pit-unverified"],
         "obligation_refs": ["obligation:obligation-data"],
         "requirement_id": "data-availability.scope",
@@ -366,10 +363,11 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
     }
     assert assessment["coverage"]["decision"] == "map_existing"
     assert assessment["resolution"]["route"] == "cli_evidence"
-    assert trace["entry_resolution_delta"]["assessed_requirement_ids"] == [
-        "data-availability.scope"
-    ]
-    assert trace["entry_resolution_delta"]["reused_requirement_ids"] == []
+    assert trace["entry_resolution_delta"]["items"] == [{
+        "change_kind": "unchanged",
+        "requirement_id": "data-availability.scope",
+        "resolution_status": "assessed_limited",
+    }]
     packet = research_graphs.build_graph_branch_next(
         instance_id="instance-1",
         branch_id="branch-1",
@@ -396,7 +394,8 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
             "SELECT evidence_json FROM research_graph_trace "
             "ORDER BY created_at DESC LIMIT 1"
         ).fetchone()["evidence_json"])
-    assert latest["entry_resolution_delta"]["assessed_requirement_ids"] == []
-    assert latest["entry_resolution_delta"]["reused_requirement_ids"] == [
-        "data-availability.scope"
-    ]
+    assert latest["entry_resolution_delta"]["items"] == [{
+        "change_kind": "unchanged",
+        "requirement_id": "data-availability.scope",
+        "resolution_status": "reused",
+    }]

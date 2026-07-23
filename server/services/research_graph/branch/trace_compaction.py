@@ -77,31 +77,38 @@ def compact_entry_assessment_receipts(
     """Retain decision identity while moving explanatory bodies cold."""
     receipts = []
     for item in assessments:
-        applicability = item.get("applicability") or {}
         coverage = item.get("coverage") or {}
-        effect = item.get("entry_effect") or {}
-        receipts.append({
+        receipt = {
             "requirement_id": str(item.get("requirement_id") or ""),
-            "requirement_revision": int(
-                item.get("requirement_revision") or 0
-            ),
             "assessment_hash": json_hash(item),
-            "applicability_status": str(
-                applicability.get("status") or ""
-            ),
-            "coverage_decision": str(coverage.get("decision") or ""),
-            "entry_effect_status": str(effect.get("status") or ""),
-            "obligation_refs": _refs(coverage.get("obligation_refs")),
-            "limitation_refs": _refs(effect.get("limitation_refs")),
-        })
+        }
+        revision = int(item.get("requirement_revision") or 0)
+        if revision:
+            receipt["requirement_revision"] = revision
+        obligation_refs = _refs(coverage.get("obligation_refs"))
+        if obligation_refs:
+            receipt["obligation_refs"] = obligation_refs
+        limitation_refs = _refs(
+            (item.get("entry_effect") or {}).get("limitation_refs")
+        )
+        if limitation_refs:
+            receipt["limitation_refs"] = limitation_refs
+        receipts.append(receipt)
     return receipts
 
 
 def compact_entry_resolution_delta(
     delta: dict[str, Any],
 ) -> dict[str, Any]:
-    """Drop repeated display text while preserving every status transition."""
+    """Keep one canonical row per requirement and drop derived ID indexes."""
     value = deepcopy(delta)
+    for field in (
+        "assessed_requirement_ids",
+        "reused_requirement_ids",
+        "reference_only_requirement_ids",
+        "unresolved_requirement_ids",
+    ):
+        value.pop(field, None)
     items = value.get("items")
     if isinstance(items, list):
         value["items"] = [{
@@ -114,6 +121,38 @@ def compact_entry_resolution_delta(
             if key in item
         } for item in items if isinstance(item, dict)]
     return value
+
+
+def entry_resolution_indexes(
+    delta: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Derive display indexes from the canonical per-requirement rows."""
+    grouped = {
+        "assessed_requirement_ids": [],
+        "reused_requirement_ids": [],
+        "reference_only_requirement_ids": [],
+        "unresolved_requirement_ids": [],
+    }
+    status_fields = {
+        "reused": "reused_requirement_ids",
+        "reference_only": "reference_only_requirement_ids",
+        "unresolved": "unresolved_requirement_ids",
+    }
+    for item in delta.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        requirement_id = str(item.get("requirement_id") or "")
+        status = str(item.get("resolution_status") or "")
+        if not requirement_id:
+            continue
+        field = (
+            "assessed_requirement_ids"
+            if status in {"assessed_pass", "assessed_limited"}
+            else status_fields.get(status)
+        )
+        if field is not None:
+            grouped[field].append(requirement_id)
+    return grouped
 
 
 def compact_research_cycle_event_receipts(

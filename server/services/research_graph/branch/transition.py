@@ -151,7 +151,6 @@ def advance_graph_branch(
         persisted_evidence,
         prepared_server_actions,
     )
-    serialize_bounded_trace_evidence(persisted_evidence)
     proposed_trial_plan_hash = validate_trial_plan_hash(
         proposed_trial_plan_hash
     )
@@ -198,6 +197,10 @@ def advance_graph_branch(
                 ),
                 transition_invocation_ids=invocation_ids,
             )
+        # Invocation identities authorize this write but are already carried
+        # by the hash-bound cold proposal/decision bundle. Do not duplicate
+        # the transport index in every persisted trace.
+        persisted_evidence.pop("agent_invocation_ids", None)
         graph = load_graph_from_conn(
             conn,
             graph_id=str(branch_row["graph_id"]),

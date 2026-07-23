@@ -195,6 +195,7 @@ def transition_step_projection(
         evidence_presentations,
         obligation_presentations,
     )
+    from .branch.trace_compaction import entry_resolution_indexes
 
     obligation_changes, claim_changes = research_cycle_deltas(evidence)
     obligation_refs = unique_refs([
@@ -257,8 +258,13 @@ def transition_step_projection(
             and safe_hash(item.get("item_hash"))
         ][:MAX_CARRIER_ITEMS]
     if isinstance(entry_resolution, dict):
+        indexes = entry_resolution_indexes(entry_resolution)
         value["entry_resolution"] = {
-            key: entry_resolution.get(key)
+            key: (
+                indexes[key]
+                if key in indexes
+                else entry_resolution.get(key)
+            )
             for key in (
                 "reason",
                 "assessed_requirement_ids",
