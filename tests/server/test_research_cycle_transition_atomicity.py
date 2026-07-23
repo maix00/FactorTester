@@ -192,6 +192,81 @@ def _adjudication_events() -> tuple[list[dict], str]:
     ], invocation["invocation_id"]
 
 
+def _reclassification_events() -> tuple[list[dict], str]:
+    invocation = agent_flow.get_store().reserve_invocation(
+        owner_user_id="alice",
+        agent_id="research:entry-reclassification",
+        actor_role="researcher",
+        authority_scope="local_research",
+        purpose="map an existing obligation to a new Graph requirement",
+        runtime_id="pytest",
+        model_id="test-model",
+        max_input_tokens=10,
+        max_output_tokens=10,
+        agent_principal_hash=hashlib.sha256(
+            b"reclassification-principal"
+        ).hexdigest(),
+        lineage_hash=hashlib.sha256(
+            b"reclassification-lineage"
+        ).hexdigest(),
+    )
+    agent_flow.get_store().settle_invocation(
+        owner_user_id="alice",
+        invocation_id=invocation["invocation_id"],
+        input_tokens=1,
+        output_tokens=1,
+        provider_request_id="entry-reclassification-test",
+    )
+    proposal = validate_adjudication_proposal({
+        "schema_version": 2,
+        "proposal_id": "proposal-reclassify-entry-requirement",
+        "proposer_invocation_id": invocation["invocation_id"],
+        "contract_hash": "1" * 64,
+        "trial_plan_hash": "2" * 64,
+        "methodology_hash": "3" * 64,
+        "evidence_refs": ["evidence:semantic-mapping-review"],
+        "claim_evidence_delta": [],
+        "claim_delta_noop_reason": (
+            "requirement classification changes no empirical Claim state"
+        ),
+        "obligation_delta": [{
+            "obligation_id": "obligation-1",
+            "from_state": "open",
+            "to_state": "open",
+            "criterion_ref": "graph-requirement:requirement-new",
+            "from_requirement_refs": ["requirement-old"],
+            "to_requirement_refs": [
+                "requirement-old",
+                "requirement-new",
+            ],
+        }],
+        "decision_warrant": {
+            "finding_refs": ["evidence:semantic-mapping-review"],
+            "rule_refs": ["graph-requirement:requirement-new"],
+            "inference_type": "semantic",
+            "preregistered": False,
+            "alternative_refs": [],
+            "limitation_refs": [],
+            "reentry_predicates": [],
+            "required_authority": "human_audit",
+        },
+        "recommended_action": "continue_execution",
+    })
+    decision = validate_adjudication_decision({
+        "schema_version": 1,
+        "decision_id": "decision-reclassify-entry-requirement",
+        "proposal_hash": proposal["proposal_hash"],
+        "disposition": "accepted",
+        "authority_class": "human_audit",
+        "authority_ref": "human-audit:entry-reclassification-test",
+        "methodology_hash": "3" * 64,
+    })
+    return [
+        {"event_type": "adjudication_proposed", "proposal": proposal},
+        {"event_type": "adjudication_decided", "decision": decision},
+    ], invocation["invocation_id"]
+
+
 def _evidence(
     checkpoint: dict,
     events: list[dict],
@@ -358,3 +433,113 @@ def test_successful_transition_colds_events_and_replays_exact_checkpoint(
 
     assert replayed == persisted["research_cycle_checkpoint"]
     assert len(row["evidence_json"].encode()) < 32 * 1024
+
+
+def test_transition_reclassifies_before_mapping_the_same_entry_requirement(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "reclassify-entry.sqlite"
+    checkpoint = _prepare(path, monkeypatch)
+    checkpoint["obligations"][0]["requirement_refs"] = ["requirement-old"]
+    checkpoint.pop("projection_hash")
+    from server.services.research_graph.research_cycle.replay import (
+        validate_research_cycle_checkpoint,
+    )
+
+    checkpoint = validate_research_cycle_checkpoint(checkpoint)
+    with connect_sqlite(path) as conn:
+        graph = orjson.loads(conn.execute(
+            """
+            SELECT graph_json FROM research_graph_versions
+            WHERE graph_id='factor-research' AND version=1
+            """
+        ).fetchone()["graph_json"])
+        graph["schema_version"] = 2
+        graph["nodes"][0]["entry_requirement_refs"] = ["requirement-new"]
+        graph["requirement_catalog"] = {
+            "catalog_revision": 1,
+            "categories": [],
+            "requirements": [
+                {
+                    "requirement_id": "requirement-old",
+                    "revision": 1,
+                    "gate_policy": "resolve_before_exit",
+                },
+                {
+                    "requirement_id": "requirement-new",
+                    "revision": 1,
+                    "gate_policy": "resolve_before_exit",
+                },
+            ],
+        }
+        conn.execute(
+            """
+            UPDATE research_graph_versions SET graph_json=?
+            WHERE graph_id='factor-research' AND version=1
+            """,
+            (orjson.dumps(graph).decode(),),
+        )
+        conn.execute(
+            """
+            UPDATE research_graph_trace SET evidence_json=?
+            WHERE trace_id='trace-bootstrap'
+            """,
+            (orjson.dumps({
+                "research_cycle_checkpoint": checkpoint,
+                "evidence_refs": [],
+            }).decode(),),
+        )
+    events, invocation_id = _reclassification_events()
+    evidence = _evidence(checkpoint, events, invocation_id)
+    evidence["entry_requirement_assessments"] = [{
+        "requirement_id": "requirement-new",
+        "applicability": {
+            "status": "applicable",
+            "reason_zh": "现有义务语义覆盖新增的试验设计要求。",
+            "fact_refs": ["evidence:semantic-mapping-review"],
+        },
+        "coverage": {
+            "decision": "map_existing",
+            "obligation_refs": ["obligation:obligation-1"],
+        },
+        "resolution": {
+            "route": "trial",
+            "reuse_status": "none",
+            "validation_refs": [],
+        },
+        "entry_effect": {
+            "status": "pass_limited",
+            "limitation_refs": ["limitation:trial-still-required"],
+        },
+    }]
+
+    result = transition.advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="verify-semantics",
+        evidence=evidence,
+    )
+
+    trace_id = result["report_checkpoint"]["checkpoint_ref"].removeprefix(
+        "trace:"
+    )
+    with connect_sqlite(path) as conn:
+        persisted = orjson.loads(conn.execute(
+            "SELECT evidence_json FROM research_graph_trace WHERE trace_id=?",
+            (trace_id,),
+        ).fetchone()["evidence_json"])
+    obligation = persisted["research_cycle_checkpoint"]["obligations"][0]
+    assert obligation["requirement_refs"] == [
+        "requirement-old",
+        "requirement-new",
+    ]
+    receipt = persisted["entry_requirement_assessment_receipts"][0]
+    assert receipt["requirement_id"] == "requirement-new"
+    assert receipt["obligation_refs"] == ["obligation:obligation-1"]
+    assert persisted["entry_resolution_delta"]["items"] == [{
+        "change_kind": "unchanged",
+        "requirement_id": "requirement-new",
+        "resolution_status": "reused",
+    }]
