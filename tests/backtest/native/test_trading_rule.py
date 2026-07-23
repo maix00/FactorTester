@@ -1468,8 +1468,9 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
     assert queue.pending_count_by_kind(EventKind.ORDER) == 0
 
 
-def test_margin_requirement_ignores_intraday_zero_settlement_and_uses_close_price():
+def test_margin_requirement_uses_close_when_settlement_exists_only_for_another_contract():
     product = _product()
+    other_product = _product()
     strategy = Strategy(alias="S")
     ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {
@@ -1499,10 +1500,10 @@ def test_margin_requirement_ignores_intraday_zero_settlement_and_uses_close_pric
             )],
         },
     )
-    # Settlement is a daily-end field.  Intraday LocalCNFutures snapshots may
-    # carry a zero placeholder; that must not clear all reserved margin.
+    # Settlement is sparse across contract lifecycles.  A settlement observed
+    # for another contract must not hide this held contract's causal close.
     ctx.set(MarketDataModule.current_market_snapshot, {
-        "settlement": {product: 0.0},
+        "settlement": {other_product: 9.0},
         "close": {product: 12.0},
     })
     ctx.set(MarketDataModule.current_historical_fields, {
@@ -1518,6 +1519,7 @@ def test_margin_requirement_ignores_intraday_zero_settlement_and_uses_close_pric
     assert entry.margin_reserved is not None
     assert entry.margin_reserved.to_major() == pytest.approx(24.0)
     assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
+    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(24.0 / 102.0)
 
 
 def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_layer():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -23,15 +24,12 @@ def margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tu
     owner = _strategy_for_ledger(state, ledger.ledger)
     if owner is None:
         return 0.0, 0.0
-    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
-    prices = snapshot.get("settlement") or snapshot.get("close") or ctx.get(
-        MarketDataModule.current_prices, {},
-    )
     pool_ledgers = [
         state.ledgers[item]
         for item in ledgers_for_cash_pool(state, ledger)
         if item in state.ledgers
     ] or [ledger]
+    prices = _pool_valuation_prices(ctx, pool_ledgers, LedgerModule, MarketDataModule)
     cash = cash_for_ledger(state, ledger)
     cash_major = float(cash.to_major()) if cash is not None else 0.0
     total_equity = cash_major
@@ -62,3 +60,33 @@ def margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tu
     pool_excess = max(total_required - total_equity * maximum, 0.0)
     share = required / total_required if total_required > 1e-12 else 0.0
     return utilization, pool_excess * share
+
+
+def _pool_valuation_prices(ctx, ledgers, ledger_module, market_data_module) -> dict:
+    """Resolve only held products, preferring a valid settlement per product.
+
+    Settlement snapshots are sparse around listings and rollovers.  Selecting
+    the entire settlement mapping whenever it is non-empty can therefore hide
+    a causal close for another held contract.  This bounded lookup is O(held
+    positions), does not scan market tables, and preserves fail-fast behavior
+    by omitting products that have no causal valuation in any current view.
+    """
+    from tools.testers.backtest.modules.trading_rule import _lookup_product_value
+
+    snapshot = ctx.get(market_data_module.current_market_snapshot, {}) or {}
+    sources = (
+        snapshot.get("settlement") or {},
+        snapshot.get("close") or {},
+        ctx.get(market_data_module.current_prices, {}) or {},
+    )
+    prices: dict[Any, float] = {}
+    for ledger in ledgers:
+        for product, position in ledger.get(ledger_module.positions, {}).items():
+            if abs(float(getattr(position, "quantity", 0.0) or 0.0)) <= 1e-12:
+                continue
+            for source in sources:
+                value = _lookup_product_value(source, product)
+                if value is not None and math.isfinite(value) and value > 0.0:
+                    prices[product] = value
+                    break
+    return prices
