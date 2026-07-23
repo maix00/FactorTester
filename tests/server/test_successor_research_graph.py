@@ -4,6 +4,7 @@ import json
 
 from click.testing import CliRunner
 
+import settings as Settings
 from cli_anything.factortester_research.factortester_research_cli import cli
 from cli_anything.factortester_research.core.successor_graph import (
     build_successor_graph,
@@ -313,13 +314,20 @@ def test_v9_graph_does_not_embed_runtime_packet_budget() -> None:
 
 def test_runtime_budget_change_does_not_change_v9_graph_hash(
     monkeypatch,
+    tmp_path,
 ) -> None:
-    from server.services.research_graph.packet_budget import graph_packet_budget
+    from server.services.research_graph.packet_budget import (
+        graph_packet_budget,
+        reset_runtime_packet_budget_cache,
+    )
 
     graph = build_successor_graph()
     graph_hash = graph["content_hash"]
+    monkeypatch.setattr(Settings, "CACHE_DIR", tmp_path)
+    reset_runtime_packet_budget_cache()
     monkeypatch.setenv("GTHT_AGENT_PACKET_CEILING_BYTES", "7000")
     first = graph_packet_budget(graph)
+    reset_runtime_packet_budget_cache()
     monkeypatch.setenv("GTHT_AGENT_PACKET_CEILING_BYTES", "8000")
     second = graph_packet_budget(graph)
 
