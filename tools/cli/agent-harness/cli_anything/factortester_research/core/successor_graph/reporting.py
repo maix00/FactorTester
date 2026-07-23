@@ -11,6 +11,10 @@ from .topology import EDGE_SPECS, NODE_REQUIREMENTS, NODE_SPECS
 
 METHOD_SPECS = {
     "explain": ("解释机制、选择和限制。", ["sentence", "list"]),
+    "explain_formula": (
+        "展示原式或派生式，并逐项解释计算含义、方向、单位、时序与限制。",
+        ["sentence", "list", "table", "figure"],
+    ),
     "inventory": ("逐项列出事实、状态和引用。", ["list", "table"]),
     "compare": ("以共同口径比较目标、基线和差异。", ["sentence", "table", "figure"]),
     "adjudicate": ("逐项裁决义务或 Claim 的变化与边界。", ["sentence", "list", "table"]),
@@ -46,7 +50,7 @@ def build_report_requirements(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             f"report.requirement.{requirement_id}",
             "node_action",
             home_node,
-            "adjudicate",
+            _requirement_method(requirement_id),
             str(requirement["title_zh"]),
             requirement_ref=requirement_id,
             subject_kind="verification_obligation",
@@ -166,4 +170,17 @@ def _node_method(node_id: str) -> str:
         return "explain_gap"
     if node_id == "trial_execution":
         return "present_result"
+    if node_id == "factor_semantics":
+        return "explain_formula"
     return "explain"
+
+
+def _requirement_method(requirement_id: str) -> str:
+    if requirement_id in {
+        "factor_semantics.expression_identity",
+        "factor_semantics.observable_meaning_direction_units",
+        "factor_semantics.parameterization_and_derivation",
+        "factor_semantics.derived_comparability",
+    }:
+        return "explain_formula"
+    return "adjudicate"

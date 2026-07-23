@@ -466,6 +466,18 @@ struct ResearchAuditObjectPayload: Decodable {
     let stopCondition: String?
     let limitations: [String]?
     let conflicts: [String]?
+    let runID: String?
+    let configurationID: String?
+    let configurationRevision: Int?
+    let runSpecVersion: Int?
+    let runSpecHash: String?
+    let runSpecJSON: String?
+    let trialRole: String?
+    let trialStage: String?
+    let comparisonID: String?
+    let sampleRef: String?
+    let sampleStart: String?
+    let sampleEnd: String?
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -501,6 +513,18 @@ struct ResearchAuditObjectPayload: Decodable {
         case hypothesesTested = "hypotheses_tested"
         case stopCondition = "stop_condition"
         case limitations, conflicts
+        case runID = "run_id"
+        case configurationID = "configuration_id"
+        case configurationRevision = "configuration_revision"
+        case runSpecVersion = "run_spec_version"
+        case runSpecHash = "run_spec_hash"
+        case runSpecJSON = "run_spec_json"
+        case trialRole = "trial_role"
+        case trialStage = "trial_stage"
+        case comparisonID = "comparison_id"
+        case sampleRef = "sample_ref"
+        case sampleStart = "sample_start"
+        case sampleEnd = "sample_end"
     }
 }
 

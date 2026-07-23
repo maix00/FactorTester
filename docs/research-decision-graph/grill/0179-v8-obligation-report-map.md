@@ -2712,6 +2712,43 @@ v9 entry requirements 和研究义务决定，不机械重复所有既有测试�
 equity curve、分组单调性或其他能实质支持判断的图像须生成内容寻址 artifact，嵌入中文
 报告并绑定对应 Trial/Job/Evidence；历史 fragment 回填与当前 v9 正常 transition 必须分开。
 
+## Grill 179.50 — 运行配置、公式排版与限额下的回测曲线
+
+**决定：实验结果必须同时投影运行配置，因子语义必须显示排版公式；默认长期保存回测
+曲线图片而不是完整时间序列。** 三者均为本地报告/Artifact 投影，不复制进 Agent packet，
+也不增加研究 Graph 热路径数据库读取。
+
+每条 Trial 结果表必须绑定 `run:` 与 `job:`；正文逐项列出足以理解比较的关键控制量，
+包括因子家族/版本/参数、产品与频率、样本阶段和时间、策略/session 设置（含显式
+`end_session_skip`）、成本/滑点/保证金以及数据与后端身份。Run Chip 通过 checkpoint-scoped
+lazy endpoint 读取不可变 ResearchRun，并显示 configuration revision、RunSpec hash、Trial
+role/stage、comparison、sample identity 和完整冻结 RunSpec。完整 JSON 不进入正文，不能用
+当前可编辑配置替代历史 RunSpec。
+
+`factor_semantics.expression_identity`、`observable_meaning_direction_units`、参数化/派生比较
+以及 `factor_semantics` 节点 action 允许并要求在适用时提交 `math` block。Markdown/PDF 使用
+LaTeX；FTClient 主视图用随 App 固定版本打包的离线 MathJax 把公式排版为 SVG，LaTeX 源码
+只放在可展开审计区，失败时才显示中文 fallback。不得依赖 CDN，避免网络、提供方升级或
+服务器版本使历史公式失效。
+
+回测完成后，Artifact 阶段从与指标相同的净收益/权益序列确定性生成一张内容寻址的
+`equity_curve` 图：默认采用可缩放 SVG，并包含净值与回撤两个面板；正文显示图和关键指标
+表，Chip 显示毛/净口径、基准、成本/保证金、原始点数、降采样算法/点数、绘图器版本、
+image hash、Run/Job/Evidence refs 与底层序列 retention 状态。图像生成在撮合完成后进行，
+不得把绘图放进计算热循环。
+
+服务器限额策略为：
+
+- `summary`：长期保留小型曲线图、指标摘要和绘图 receipt；生成完成并校验 hash 后可清理
+  完整序列；
+- `full`：图和完整序列均保留，计入用户限额；
+- 序列已按限额清理时，图片仍是可读的历史投影，但不得声称支持逐点重算；需要复核时，
+  只能在数据仍可得的情况下用同一 RunSpec 新建 Job 重跑。
+
+历史 Job 有净收益序列时可确定性补图并标注“历史投影补全”；没有序列时不得从指标猜造
+曲线，必须真实复跑或明确记录不可恢复。FTClient 对图像使用缩略预览和点击懒加载原图；
+本地图像文件按 content hash 复用，页面打开不反复读服务器数据库。
+
 ## 13. Graph 版本 UI 与历史存储
 
 服务器现有 `research_graph_versions` 已是历史版本的 canonical store；每个版本

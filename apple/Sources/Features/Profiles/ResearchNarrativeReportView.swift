@@ -287,12 +287,22 @@ struct ResearchNarrativeReportView: View {
                     .foregroundStyle(Color.accentColor)
                 Text(block.fallback ?? "因子公式")
                     .font(.callout)
-                Text(block.latex ?? "")
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+                RenderedMathFormulaView(
+                    latex: block.latex ?? "",
+                    fallback: block.fallback ?? "因子公式"
+                )
+                .background(
+                    Color.secondary.opacity(0.07),
+                    in: RoundedRectangle(cornerRadius: 7)
+                )
+                DisclosureGroup("公式源码（审计）") {
+                    Text(block.latex ?? "")
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(.top, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.caption.weight(.medium))
                 HStack(spacing: 6) {
                     ForEach(auditLinks(in: section).filter {
                         block.linkIDs.contains($0.linkID)
@@ -856,6 +866,54 @@ private struct ResearchAuditPopover: View {
             }
             if let count = object.hypothesesTested {
                 LabeledContent("已检验假设数", value: String(count))
+            }
+            if let runID = object.runID {
+                LabeledContent("试验运行", value: runID)
+            }
+            if let configurationID = object.configurationID,
+               let revision = object.configurationRevision {
+                LabeledContent(
+                    "运行配置",
+                    value: "\(configurationID) · r\(revision)"
+                )
+            }
+            if let role = object.trialRole, !role.isEmpty {
+                LabeledContent("试验角色", value: role)
+            }
+            if let stage = object.trialStage, !stage.isEmpty {
+                LabeledContent("试验阶段", value: stage)
+            }
+            if let comparison = object.comparisonID, !comparison.isEmpty {
+                LabeledContent("对比组", value: comparison)
+            }
+            if let sample = object.sampleRef, !sample.isEmpty {
+                LabeledContent("样本定义", value: sample)
+            }
+            if let start = object.sampleStart, let end = object.sampleEnd,
+               !start.isEmpty || !end.isEmpty {
+                LabeledContent("样本时间", value: "\(start) — \(end)")
+            }
+            if let hash = object.runSpecHash {
+                LabeledContent("RunSpec 哈希") {
+                    Text(hash)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+            }
+            if let version = object.runSpecVersion {
+                LabeledContent("RunSpec 协议", value: String(version))
+            }
+            if let runSpec = object.runSpecJSON, !runSpec.isEmpty {
+                DisclosureGroup("完整冻结运行配置") {
+                    ScrollView([.horizontal, .vertical]) {
+                        Text(runSpec)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 320)
+                    .padding(.top, 8)
+                }
             }
             referenceValues("指标引用", object.metricRefs ?? [])
             referenceValues("产物引用", object.artifactRefs ?? [])

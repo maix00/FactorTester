@@ -775,6 +775,7 @@ def test_timeline_advertises_only_checkpoint_resolvable_typed_objects(
     )
 
     hrefs = timeline["items"][0]["object_hrefs"]
+    assert any("/cycle-objects/run/run-4?" in item for item in hrefs)
     assert any("/cycle-objects/trial_plan/plan-1?" in item for item in hrefs)
     assert any(
         "/cycle-objects/evidence/" + "e" * 64 + "?" in item
@@ -1031,10 +1032,12 @@ def test_list_detail_and_timeline_are_bounded_source_free_and_keyset_paged(
         "/api/research-graph-instances/instance-a/branches/branch-0000/"
         "cycle-objects/delta/trace-000004:obligation:obligation-1?"
         "trace_id=trace-000004",
-        "/api/research-graph-instances/instance-a/branches/branch-0000/"
-        "cycle-objects/delta/trace-000004:claim:claim-1?"
-        "trace_id=trace-000004",
-    ]
+            "/api/research-graph-instances/instance-a/branches/branch-0000/"
+            "cycle-objects/delta/trace-000004:claim:claim-1?"
+            "trace_id=trace-000004",
+            "/api/research-graph-instances/instance-a/branches/branch-0000/"
+            "cycle-objects/run/run-4?trace_id=trace-000004",
+        ]
     serialized_step = orjson.dumps(step)
     assert b"evidence_json" not in serialized_step
     assert b"telemetry_json" not in serialized_step

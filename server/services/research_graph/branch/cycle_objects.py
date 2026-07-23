@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+import orjson
 import settings as Settings
 from server.services.research_graph.protocol import loads
 from server.services.research_graph.research_cycle.replay import (
@@ -20,6 +21,7 @@ from server.services.research_graph.trial_plan import (
     canonical_trial_plan,
     trial_plan_hash,
 )
+from server.services.research_run_projections import project_run
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -38,9 +40,17 @@ def load_research_cycle_object(
         "obligation": ("obligations", "obligation_id"),
     }.get(object_type)
     if cycle_binding is None and object_type not in {
-        "evidence", "trial_plan", "delta",
+        "evidence", "trial_plan", "delta", "run",
     }:
         raise ValueError("research cycle object_type is invalid")
+    if object_type == "run":
+        return _load_run_object(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=owner,
+            object_id=object_id,
+            trace_id=trace_id,
+        )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         if trace_id:
             row = conn.execute(
@@ -145,6 +155,52 @@ def load_research_cycle_object(
     return deepcopy(value)
 
 
+def _load_run_object(
+    *,
+    instance_id: str,
+    branch_id: str,
+    owner: str,
+    object_id: str,
+    trace_id: str | None,
+) -> dict[str, Any]:
+    """Lazy-load one immutable RunSpec named by the requested checkpoint."""
+    trace_clause = "t.trace_id=?" if trace_id else "t.trace_id=b.latest_trace_id"
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        row = conn.execute(
+            f"""
+            SELECT t.evidence_json, r.*
+            FROM research_graph_instances AS i
+            JOIN research_graph_branches AS b
+              ON b.instance_id=i.instance_id AND b.branch_id=?
+            JOIN research_graph_trace AS t
+              ON t.instance_id=i.instance_id AND t.branch_id=b.branch_id
+            JOIN research_runs AS r
+              ON r.run_id=? AND r.owner=i.owner
+            WHERE i.instance_id=? AND i.owner=? AND {trace_clause}
+            """,
+            (
+                (branch_id, object_id, instance_id, owner, trace_id)
+                if trace_id
+                else (branch_id, object_id, instance_id, owner)
+            ),
+        ).fetchone()
+    if row is None:
+        raise KeyError("research cycle object not found")
+    evidence = loads(row["evidence_json"]) or {}
+    if object_id not in _named_values(evidence, "run_id"):
+        raise KeyError("research cycle object not found")
+    run = project_run(row)
+    return {
+        "schema_version": 1,
+        "object_kind": "run",
+        **run,
+        "run_spec_json": orjson.dumps(
+            run["run_spec"],
+            option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,
+        ).decode(),
+    }
+
+
 def _evidence_envelopes(value: Any):
     if isinstance(value, dict):
         if (
@@ -159,3 +215,17 @@ def _evidence_envelopes(value: Any):
     elif isinstance(value, list):
         for child in value:
             yield from _evidence_envelopes(child)
+
+
+def _named_values(value: Any, field: str) -> set[str]:
+    result: set[str] = set()
+    if isinstance(value, dict):
+        candidate = value.get(field)
+        if isinstance(candidate, str) and candidate:
+            result.add(candidate)
+        for child in value.values():
+            result.update(_named_values(child, field))
+    elif isinstance(value, list):
+        for child in value:
+            result.update(_named_values(child, field))
+    return result

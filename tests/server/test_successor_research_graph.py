@@ -93,6 +93,21 @@ def test_successor_graph_reports_every_node_edge_and_system_gate() -> None:
         if item["report_requirement_id"].startswith("report.requirement.")
     ]
     assert all(item.get("requirement_ref") for item in requirement_reports)
+    methods = graph["report_method_descriptors"]
+    assert "figure" in methods["explain_formula"]["allowed_content"]
+    formula_reports = {
+        item["requirement_ref"]: item["method_ref"]
+        for item in requirement_reports
+        if item["requirement_ref"].startswith("factor_semantics.")
+    }
+    assert formula_reports["factor_semantics.expression_identity"] == (
+        "explain_formula"
+    )
+    factor_node = next(
+        item for item in graph["report_requirements"]
+        if item["report_requirement_id"] == "report.node.factor_semantics.action"
+    )
+    assert factor_node["method_ref"] == "explain_formula"
 
 
 def test_successor_graph_keeps_only_semantic_obligation_categories() -> None:

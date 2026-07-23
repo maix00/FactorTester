@@ -43,7 +43,8 @@ def _transition_step(
         else "historical"
     )
     object_refs = [
-        *step["obligation_refs"], *step["claim_refs"], *step["delta_refs"]
+        *step["obligation_refs"], *step["claim_refs"], *step["delta_refs"],
+        *step["run_refs"],
     ]
     plan = evidence.get("trial_plan")
     if isinstance(plan, dict):

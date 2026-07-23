@@ -389,6 +389,23 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertEqual(evidence.limitations, ["Limited window."])
     }
 
+    func testAuditObjectDecodesImmutableRunConfiguration() throws {
+        let run = try JSONDecoder().decode(
+            ResearchAuditObjectEnvelope.self,
+            from: Data(
+                """
+                {"object":{"schema_version":1,"object_kind":"run","run_id":"run-1","configuration_id":"config-1","configuration_revision":7,"run_spec_version":2,"run_spec_hash":"hhhh","run_spec_json":"{\\n  \\"end_session_skip\\": false\\n}","trial_role":"candidate","trial_stage":"selection","comparison_id":"comparison-1","sample_ref":"sample-1","sample_start":"2024-01-01","sample_end":"2025-12-31"}}
+                """.utf8
+            )
+        ).object
+
+        XCTAssertEqual(run.runID, "run-1")
+        XCTAssertEqual(run.configurationRevision, 7)
+        XCTAssertEqual(run.runSpecVersion, 2)
+        XCTAssertEqual(run.trialRole, "candidate")
+        XCTAssertTrue(run.runSpecJSON?.contains("end_session_skip") == true)
+    }
+
     @MainActor
     func testAuditObjectCacheReusesAnExplicitRead() async throws {
         let cache = ResearchAuditObjectCache()

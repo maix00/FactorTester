@@ -16,6 +16,7 @@ from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
 from server.services.research_graph.trial_plan import trial_plan_hash
+from server.services import research_runs
 from tests.server.trial_plan_fixtures import initialize_branch, trial_plan
 from tools.data.sqlite.db import connect_sqlite
 
@@ -279,6 +280,62 @@ def test_cycle_object_read_derives_delta_from_requested_trace(
             trace_id="trace-current",
         )
 
+
+def test_cycle_object_read_lazy_loads_exact_immutable_run_configuration(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "cycle-run.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _seed(path)
+    run = research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-1",
+        configuration_id="configuration-1",
+        configuration_revision=7,
+        run_spec={
+            "run_spec_version": 2,
+            "products": ["RB.SHF"],
+            "start_date": "2024-01-01",
+            "end_date": "2025-12-31",
+            "end_session_skip": False,
+        },
+    )
+    with connect_sqlite(path) as conn:
+        evidence = orjson.loads(conn.execute(
+            "SELECT evidence_json FROM research_graph_trace "
+            "WHERE trace_id='trace-current'"
+        ).fetchone()["evidence_json"])
+        evidence["run_id"] = run["run_id"]
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? "
+            "WHERE trace_id='trace-current'",
+            (orjson.dumps(evidence).decode(),),
+        )
+
+    value = cycle_objects.load_research_cycle_object(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        object_type="run",
+        object_id=run["run_id"],
+        trace_id="trace-current",
+    )
+
+    assert value["object_kind"] == "run"
+    assert value["configuration_revision"] == 7
+    assert value["run_spec_hash"] == run["run_spec_hash"]
+    assert value["run_spec"]["end_session_skip"] is False
+    assert '"products": [\n    "RB.SHF"\n  ]' in value["run_spec_json"]
+    with pytest.raises(KeyError, match="not found"):
+        cycle_objects.load_research_cycle_object(
+            instance_id="instance-1",
+            branch_id="branch-1",
+            owner="bob",
+            object_type="run",
+            object_id=run["run_id"],
+            trace_id="trace-current",
+        )
 
 def test_cycle_object_read_is_bound_to_requested_historical_trace(
     tmp_path,
