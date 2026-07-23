@@ -1540,7 +1540,10 @@ def test_rollover_notice_emits_close_and_open_orders_for_existing_position():
     assert orders[1].get("reason") == "term_structure_rollover_open"
 
 
-def test_rollover_notice_does_not_open_contract_without_causal_price():
+@pytest.mark.parametrize("future_price", [101.0, float("nan")])
+def test_rollover_notice_waits_for_causal_price_then_retries_with_audit_record(
+    future_price,
+):
     strategy = Strategy(alias="A")
     product = _TwoContractTermProduct()
     old_contract = _Contract("P2601.DCE")
@@ -1570,7 +1573,7 @@ def test_rollover_notice_does_not_open_contract_without_causal_price():
     account.market_data_store.current_prices_table = pd.DataFrame(
         {
             old_contract: [100.0, 99.0],
-            new_contract: [float("nan"), 101.0],
+            new_contract: [float("nan"), future_price],
         },
         index=pd.DatetimeIndex([
             notice_ts,
@@ -1580,6 +1583,18 @@ def test_rollover_notice_does_not_open_contract_without_causal_price():
 
     queue = EventQueue()
     order_events: list[EventDraft] = []
+
+    def dispatch_lifecycle(batch):
+        event_ctx = FlowContext(
+            timestamp=batch[0].timestamp,
+            event_queue=queue,
+            event_kind=EventKind.LIFECYCLE_NOTICE,
+            active_strategies=frozenset({strategy}),
+            drafts_by_strategy={strategy: batch},
+        )
+        _handle_rollover_notice(account, event_ctx)
+
+    queue.set_dispatcher(EventKind.LIFECYCLE_NOTICE, dispatch_lifecycle)
     queue.set_dispatcher(EventKind.ORDER, lambda batch: order_events.extend(batch))
     expand_ctx = FlowContext(
         timestamp=None,
@@ -1604,20 +1619,32 @@ def test_rollover_notice_does_not_open_contract_without_causal_price():
             "contract_object": old_contract,
         },
     )
-    ctx = FlowContext(
-        timestamp=notice_ts,
-        event_queue=queue,
-        active_strategies=frozenset({strategy}),
-        drafts_by_strategy={strategy: [draft]},
-    )
-
-    _handle_rollover_notice(account, ctx)
+    queue.push_event(draft)
     queue.run_until_drained()
 
-    assert order_events == []
     assert account.ledger_for_strategy(strategy).get(
         LedgerModule.positions
     )[old_contract].quantity == 3
+    assert account.term_structure_store.notices[0]["processing_status"] == "delayed"
+    assert (
+        account.term_structure_store.notices[0]["processing_reason"]
+        == "delayed_due_to_no_causal_price"
+    )
+    retry_ts = pd.Timestamp("2026-01-27 09:00")
+    if pd.isna(future_price):
+        assert "retry_timestamp" not in account.term_structure_store.notices[0]
+        assert "retry_ref" not in account.term_structure_store.notices[0]
+        assert order_events == []
+        return
+    assert account.term_structure_store.notices[0]["retry_timestamp"] == retry_ts
+    assert account.term_structure_store.notices[0]["retry_ref"]
+    assert [
+        (event.timestamp, event.payload.instrument, event.payload.quantity)
+        for event in order_events
+    ] == [
+        (retry_ts, old_contract, -3),
+        (retry_ts, new_contract, 3),
+    ]
 
 
 def test_rollover_day_window_uses_trading_axis_not_calendar_days():

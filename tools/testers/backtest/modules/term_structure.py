@@ -66,6 +66,7 @@ class TermStructureStore:
     contract_metadata: dict[Any, Any] = field(default_factory=dict)
     target_mapping: dict[Any, dict[str, Any]] = field(default_factory=dict)
     notices: list[dict[str, Any]] = field(default_factory=list)
+    scheduled_rollover_retries: set[str] = field(default_factory=set)
     # _event_timestamp_from_row(row, offset=...) is deterministic given a
     # metadata row identity and an offset -- it never depends on the current
     # event timestamp -- but resolve_tradable_target_weights calls it on
@@ -277,7 +278,7 @@ class RolloverModule(ExecutableModule):
     handle_rollover_notice: ClassVar[Flow] = Flow(
         "handle_rollover_notice",
         inputs=(_POSITIONS_REF,),
-        outputs=(rollover_orders,),
+        outputs=(rollover_orders, rollover_notices),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LIFECYCLE_NOTICE,
         order=10,
@@ -427,21 +428,55 @@ def _handle_rollover_notice(state, ctx) -> None:
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             if str(payload.get("notice_type") or "") != "rollover":
                 continue
-            _record_term_structure_notice(state, payload)
             old_contract = payload.get("contract_object")
             if old_contract is None:
+                _record_term_structure_notice(state, payload)
                 continue
             held_contract, entry = _held_position_item_for_notice(positions, old_contract, payload)
             if held_contract is None:
+                _record_term_structure_notice(state, payload)
                 continue
             next_contract = _next_contract_object_for_notice(
                 state,
                 strategy,
                 payload,
-                timestamp=ctx.timestamp,
             )
             if next_contract is None:
+                _record_term_structure_notice(state, payload)
                 continue
+            if not _contract_has_causal_price(state, next_contract, ctx.timestamp):
+                retry_timestamp = _first_future_price_timestamp(
+                    state, next_contract, ctx.timestamp,
+                )
+                delayed_notice = {
+                    **payload,
+                    "processing_status": "delayed",
+                    "processing_reason": "delayed_due_to_no_causal_price",
+                    "candidate_contract": next_contract,
+                }
+                if retry_timestamp is not None:
+                    retry_ref = _rollover_retry_ref(
+                        payload, next_contract, retry_timestamp,
+                    )
+                    delayed_notice.update({
+                        "retry_timestamp": retry_timestamp,
+                        "retry_ref": retry_ref,
+                    })
+                    if retry_ref not in state.term_structure_store.scheduled_rollover_retries:
+                        state.term_structure_store.scheduled_rollover_retries.add(retry_ref)
+                        ctx.set(RolloverModule.rollover_notices, EventDraft(
+                            EventKind.LIFECYCLE_NOTICE,
+                            retry_timestamp,
+                            strategy,
+                            payload={
+                                **payload,
+                                "retry_ref": retry_ref,
+                                "retry_of_timestamp": ctx.timestamp,
+                            },
+                        ))
+                _record_term_structure_notice(state, delayed_notice)
+                continue
+            _record_term_structure_notice(state, payload)
             held_key = _position_contract_key(held_contract, payload)
             if held_key in closed_contracts:
                 continue
@@ -542,8 +577,6 @@ def _next_contract_object_for_notice(
     state,
     strategy: Any,
     payload: dict[str, Any],
-    *,
-    timestamp: Any,
 ) -> Any | None:
     current = payload.get("contract_object")
     product_name = payload.get("product")
@@ -557,10 +590,7 @@ def _next_contract_object_for_notice(
             continue
         if idx + 1 >= len(rows):
             return None
-        candidate = rows[idx + 1].get("contract_object")
-        if not _contract_has_causal_price(state, candidate, timestamp):
-            return None
-        return candidate
+        return rows[idx + 1].get("contract_object")
     return None
 
 
@@ -590,6 +620,50 @@ def _contract_has_causal_price(
         if not causal.empty and bool(causal.notna().any()):
             return True
     return False
+
+
+def _first_future_price_timestamp(
+    state: Any,
+    contract: Any,
+    timestamp: Any,
+) -> pd.Timestamp | None:
+    candidates: list[pd.Timestamp] = []
+    _start, run_end = run_window_envelope_for_state(state)
+    for table in (_current_prices_table_for(state), _raw_prices_table_for(state)):
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        column = next(
+            (
+                candidate
+                for candidate in table.columns
+                if _contracts_match(candidate, contract)
+            ),
+            None,
+        )
+        if column is None:
+            continue
+        data_index = DataIndex(table.index)
+        event_times = data_index.event_timestamps()
+        current = data_index.tz_align(pd.Timestamp(timestamp))
+        # Scheduling observes only the availability bitmap and its timestamp;
+        # the future price value is not read or attached to the retry event.
+        eligible = (event_times > current) & table[column].notna().to_numpy()
+        if run_end is not None and run_end.ts is not None:
+            eligible &= event_times <= data_index.tz_align(run_end.ts)
+        future_times = event_times[eligible]
+        if not future_times.empty:
+            candidates.append(pd.Timestamp(future_times.min()))
+    return min(candidates) if candidates else None
+
+
+def _rollover_retry_ref(
+    payload: dict[str, Any],
+    contract: Any,
+    retry_timestamp: pd.Timestamp,
+) -> str:
+    product = str(payload.get("product") or "")
+    contract_name = str(getattr(contract, "name", contract))
+    return f"rollover:{product}:{contract_name}:{retry_timestamp.isoformat()}"
 
 
 def _held_position_item_for_notice(
