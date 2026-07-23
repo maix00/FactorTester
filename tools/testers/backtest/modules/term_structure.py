@@ -93,6 +93,10 @@ class TermStructureStore:
     lifecycle_offset_cache: dict[tuple[Any, ...], pd.Timestamp] = field(
         default_factory=dict
     )
+    # Prepared once for the current market-data table; lifecycle offsets reuse
+    # this immutable axis instead of rebuilding DataIndex on every lookup.
+    lifecycle_axis_key: tuple[Any, ...] | None = None
+    lifecycle_axis: Any = None
 
     def set_expansion(self, contracts: dict[Any, Any], metadata: dict[Any, Any]) -> None:
         self.expanded_contracts = contracts
@@ -1484,7 +1488,7 @@ def _apply_lifecycle_offset(
         return base
     table = _current_prices_table_for(state)
     if isinstance(table, pd.DataFrame) and not table.empty:
-        shifted = _shift_on_event_axis(base, offset, table)
+        shifted = _shift_on_event_axis(base, offset, table, state=state)
         if shifted is not None:
             return shifted
     return cast(pd.Timestamp, base - offset)
@@ -1504,32 +1508,85 @@ def _current_prices_table_for(state: Any | None) -> Any:
     return current_prices_table_for(state)
 
 
-def _shift_on_event_axis(base: pd.Timestamp, offset: pd.Timedelta, table: pd.DataFrame) -> pd.Timestamp | None:
+@dataclass(frozen=True)
+class _PreparedLifecycleAxis:
+    events: pd.DatetimeIndex
+    trading_days: pd.DatetimeIndex
+    unique_days: pd.DatetimeIndex
+    positions_by_day: dict[pd.Timestamp, tuple[int, ...]]
+
+
+def _prepared_lifecycle_axis(
+    table: pd.DataFrame,
+    *,
+    state: Any | None = None,
+) -> _PreparedLifecycleAxis:
+    """Build the immutable event axis once per loaded price table.
+
+    The cache key includes table and index identity so replacing the market
+    data table cannot reuse an axis from a prior run.  A day-to-positions map
+    preserves the previous query order while avoiding a full-axis scan for
+    every lifecycle offset.
+    """
+    store = getattr(state, "term_structure_store", None) if state is not None else None
+    key = (id(table), id(table.index), len(table))
+    if store is not None and store.lifecycle_axis_key == key:
+        prepared = store.lifecycle_axis
+        if isinstance(prepared, _PreparedLifecycleAxis):
+            return prepared
+
     data_index = DataIndex(table.index)
     events = pd.DatetimeIndex(data_index.event_timestamps())
+    trading_days = pd.DatetimeIndex(data_index.trading_day_index())
+    unique_days = pd.DatetimeIndex(pd.unique(trading_days)).sort_values()
+    positions: dict[pd.Timestamp, list[int]] = {}
+    for index, day in enumerate(trading_days):
+        positions.setdefault(pd.Timestamp(day), []).append(index)
+    prepared = _PreparedLifecycleAxis(
+        events=events,
+        trading_days=trading_days,
+        unique_days=unique_days,
+        positions_by_day={day: tuple(items) for day, items in positions.items()},
+    )
+    if store is not None:
+        store.lifecycle_axis_key = key
+        store.lifecycle_axis = prepared
+    return prepared
+
+
+def _shift_on_event_axis(
+    base: pd.Timestamp,
+    offset: pd.Timedelta,
+    table: pd.DataFrame,
+    *,
+    state: Any | None = None,
+) -> pd.Timestamp | None:
+    axis = _prepared_lifecycle_axis(table, state=state)
+    events = axis.events
     if events.empty:
         return None
-    aligned_base = data_index.tz_align(base)
+    aligned_base = DataIndex(events).tz_align(base)
     if aligned_base > events[-1]:
         return None
     day_count = max(0, int(offset.days))
     subday = cast(pd.Timedelta, offset - pd.Timedelta(days=day_count))
     anchor = aligned_base
     if day_count:
-        trading_days = pd.DatetimeIndex(data_index.trading_day_index())
         pos = int(events.searchsorted(cast(Any, aligned_base), side="right")) - 1
         if pos < 0:
             return None
-        base_day = trading_days[pos]
-        unique_days = pd.DatetimeIndex(pd.unique(trading_days)).sort_values()
-        day_pos = int(unique_days.searchsorted(base_day, side="right")) - 1
+        base_day = axis.trading_days[pos]
+        day_pos = int(axis.unique_days.searchsorted(base_day, side="right")) - 1
         target_day_pos = day_pos - day_count
         if target_day_pos < 0:
             return None
-        target_day = unique_days[target_day_pos]
-        day_positions = [i for i, day in enumerate(trading_days) if day == target_day and events[i] <= aligned_base]
+        target_day = axis.unique_days[target_day_pos]
+        day_positions = [
+            index for index in axis.positions_by_day.get(pd.Timestamp(target_day), ())
+            if events[index] <= aligned_base
+        ]
         if not day_positions:
-            day_positions = [i for i, day in enumerate(trading_days) if day == target_day]
+            day_positions = list(axis.positions_by_day.get(pd.Timestamp(target_day), ()))
         if not day_positions:
             return None
         anchor = events[day_positions[-1]]
