@@ -82,6 +82,12 @@ class TermStructureStore:
     coverage_inference_cache: dict[tuple[Any, ...], dict[str, Any]] = field(
         default_factory=dict
     )
+    # Applying a lifecycle offset searches the complete market event axis.
+    # The result depends on the base timestamp, offset, and loaded axis, not
+    # on the strategy-owned metadata row that requested it.
+    lifecycle_offset_cache: dict[tuple[Any, ...], pd.Timestamp] = field(
+        default_factory=dict
+    )
 
     def set_expansion(self, contracts: dict[Any, Any], metadata: dict[Any, Any]) -> None:
         self.expanded_contracts = contracts
@@ -1145,7 +1151,36 @@ def _event_timestamp_from_row(
         row, reference_tz=reference_tz, state=state, peer_rows=peer_rows, engine_mode=engine_mode,
         lifecycle_anchor=lifecycle_anchor,
     )
-    result = None if base is None else _apply_lifecycle_offset(base, offset, state=state)
+    result = None if base is None else _cached_lifecycle_offset(
+        base,
+        offset,
+        state=state,
+    )
+    if cache is not None:
+        cache[cache_key] = result
+    return result
+
+
+def _cached_lifecycle_offset(
+    base: pd.Timestamp,
+    offset: pd.Timedelta,
+    *,
+    state: Any | None,
+) -> pd.Timestamp:
+    if offset <= pd.Timedelta(0):
+        return base
+    store = getattr(state, "term_structure_store", None) if state is not None else None
+    cache = store.lifecycle_offset_cache if store is not None else None
+    table = _current_prices_table_for(state)
+    cache_key = (
+        id(table),
+        int(base.value),
+        str(base.tz),
+        int(offset.value),
+    )
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+    result = _apply_lifecycle_offset(base, offset, state=state)
     if cache is not None:
         cache[cache_key] = result
     return result
