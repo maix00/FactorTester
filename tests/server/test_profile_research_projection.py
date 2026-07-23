@@ -15,6 +15,14 @@ from server.services.research_graph.branch.runtime import fork_graph_branch
 from server.services.research_graph import (
     profile_research_projection as projection,
 )
+from server.services.research_graph.profile_research_projection import (
+    service as projection_service,
+)
+from server.services.research_graph.profile_research_projection.queries import (
+    LIST_FIRST_SQL,
+    TIMELINE_FIRST_SQL,
+    WORK_PACKAGE_DETAIL_SQL,
+)
 from server.services.research_graph.work_packages import (
     backfill as backfill_work_packages,
     transition_lifecycle,
@@ -1028,7 +1036,7 @@ def test_projection_uses_one_read_and_owner_scope_returns_not_found(
         conn.set_trace_callback(statements.append)
         return conn
 
-    monkeypatch.setattr(projection, "connect_sqlite", traced_connect)
+    monkeypatch.setattr(projection_service, "connect_sqlite", traced_connect)
     service = _service(path, monkeypatch)
     service.get_research(
         owner="alice",
@@ -1103,15 +1111,15 @@ def test_large_scope_query_plans_use_indexes_and_ignore_global_history(
     assert elapsed < 2.0
     with connect_sqlite(path) as conn:
         list_plan = conn.execute(
-            "EXPLAIN QUERY PLAN " + projection.LIST_FIRST_SQL,
+            "EXPLAIN QUERY PLAN " + LIST_FIRST_SQL,
             ("alice", "workspace-a", "active", 21),
         ).fetchall()
         timeline_plan = conn.execute(
-            "EXPLAIN QUERY PLAN " + projection.TIMELINE_FIRST_SQL,
+            "EXPLAIN QUERY PLAN " + TIMELINE_FIRST_SQL,
             ("branch-0000", "alice", "instance-a", 51),
         ).fetchall()
         work_package_plan = conn.execute(
-            "EXPLAIN QUERY PLAN " + projection.WORK_PACKAGE_DETAIL_SQL,
+            "EXPLAIN QUERY PLAN " + WORK_PACKAGE_DETAIL_SQL,
             ("alice", "instance-a", 51),
         ).fetchall()
     details = [
