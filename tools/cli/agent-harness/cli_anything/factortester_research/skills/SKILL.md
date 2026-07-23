@@ -176,6 +176,14 @@ Before advancing, validate Research Cycle proposals locally. Then use the thin
 Harness adapter to submit through the installed FactorTester client:
 
 ```bash
+cli-anything-factortester-research cycle entry-prepare \
+  <instance_id> <branch_id> \
+  --factor-family <factor_family> \
+  --requirement-id <current_requirement_id> \
+  --output entry-assessment.json --json
+cli-anything-factortester-research cycle entry-validate \
+  --document-file entry-assessment.json \
+  --output entry-projection.json --json
 cli-anything-factortester-research cycle validate \
   --evidence-file evidence.json --json
 cli-anything-factortester-research cycle advance \
@@ -190,6 +198,17 @@ cli-anything-factortester-research cycle advance \
 stdout/stderr, full graph/catalog content, artifacts, trace history, or legacy
 evidence. `cycle advance` validates before backend mutation and records only a
 local factual command envelope plus compact event metadata.
+
+Prepare Entry Requirements progressively. Pass only requirement IDs present in
+the current `cycle next` packet; the command lazy-loads those detail contracts
+and reuses the real factor `describe` AST. Edit the Chinese decisions and
+reports, then run `entry-validate`. It supports `create_new`, `map_existing`
+and `no_material_issue`, requires fact refs and a first action or Trial ref,
+and deterministically derives report bindings/hashes. With `--output`, stdout
+is only a compact path/hash receipt, so the editable body is not duplicated
+into Agent context. The output is a selected
+Entry Requirement projection, not permission to omit the remaining
+Graph-declared node, edge or target report items from a transition.
 
 When a user explicitly continues the current Work Package to a registered
 Graph version, preview the exact current-node re-entry effect first:

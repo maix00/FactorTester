@@ -1,0 +1,122 @@
+"""Build Chinese report bindings and hashes from validated assessments."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from tools.cli.release.research_reporting.report_items import (
+    report_item_hash,
+)
+
+from .fields import chinese_text, object_field, text_array
+
+
+def build_report_items(
+    *,
+    item: dict[str, Any],
+    prefix: str,
+    obligation_refs: list[str],
+    fallback_fact_refs: list[str],
+    action: dict[str, str],
+) -> list[dict[str, Any]]:
+    report = object_field(item, "report", prefix)
+    report_id = str(report.get("report_requirement_id") or "").strip()
+    if not report_id:
+        raise ValueError(f"{prefix}.report.report_requirement_id is required")
+    if report.get("content_kind") != "list":
+        raise ValueError(f"{prefix}.report.content_kind must be list")
+    rows = report.get("content_zh")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(f"{prefix}.report.content_zh must be a non-empty array")
+    chinese_rows = [
+        chinese_text(value, f"{prefix}.report.content_zh")
+        for value in rows
+    ]
+    report_refs = text_array(
+        report.get("fact_refs"),
+        f"{prefix}.report.fact_refs",
+    )
+    refs = list(dict.fromkeys([
+        *report_refs,
+        *fallback_fact_refs,
+        *filter(None, [action["action_ref"], action["trial_ref"]]),
+    ]))
+    if not refs:
+        raise ValueError(f"{prefix}.report needs at least one reference")
+    links = _links(refs)
+    content = {
+        "kind": "list",
+        "rows": [
+            {
+                "text": text,
+                "link_ids": (
+                    [link["link_id"] for link in links]
+                    if index == 0 else [links[0]["link_id"]]
+                ),
+            }
+            for index, text in enumerate(chinese_rows)
+        ],
+    }
+    subjects = obligation_refs or [f"requirement:{prefix}"]
+    return [
+        _report_item(
+            report_id=report_id,
+            subject=subject,
+            content=content,
+            chinese_rows=chinese_rows,
+            links=links,
+        )
+        for subject in subjects
+    ]
+
+
+def _report_item(
+    *,
+    report_id: str,
+    subject: str,
+    content: dict[str, Any],
+    chinese_rows: list[str],
+    links: list[dict[str, str]],
+) -> dict[str, Any]:
+    return {
+        "report_requirement_id": report_id,
+        "subject_ref": subject,
+        "content_kind": "list",
+        "item_hash": report_item_hash(
+            report_requirement_id=report_id,
+            subject_ref=subject,
+            content_kind="list",
+            content=content,
+        ),
+        "content": content,
+        "content_zh": chinese_rows,
+        "links": links,
+        "report_binding": {
+            "report_requirement_id": report_id,
+            "subject_ref": subject,
+        },
+    }
+
+
+def _links(refs: list[str]) -> list[dict[str, str]]:
+    return [
+        {
+            "link_id": f"entry-ref-{index}",
+            "kind": "evidence",
+            "target_ref": ref,
+            "label": _reference_label(ref),
+        }
+        for index, ref in enumerate(refs, start=1)
+    ]
+
+
+def _reference_label(value: str) -> str:
+    if value.startswith("factor-expression:"):
+        return "因子表达式事实"
+    if value.startswith("factor-column:"):
+        return "因子数据列事实"
+    if value.startswith("trial:"):
+        return "首个 Trial"
+    if value.startswith("cli:"):
+        return "CLI 事实"
+    return "研究事实"

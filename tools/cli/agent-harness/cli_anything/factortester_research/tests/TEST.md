@@ -465,3 +465,57 @@ the HTTP round trip verifies margin-budget configure/show against a real
 workspace. The broader backtest/server/CLI suite completed with 1,335 passes,
 1 skip, and the same three branch-baseline failures recorded outside this
 feature.
+# Entry Requirement authoring refinement (Issue #141)
+
+## Test inventory plan
+
+- `test_entry_preparation.py`: 8 focused unit/CLI tests planned.
+
+## Unit test plan
+
+- `core/entry_preparation/factor_facts.py`
+  - Compact the real `custom_factors describe --debug-graph` response.
+  - Preserve parameter, fixed `ColumnRef`, AST identity and deterministic LaTeX facts.
+  - Do not retain source code, full parameter option catalogs or the full debug payload.
+- `core/entry_preparation/skeleton.py`
+  - Build a draft only for explicitly selected current-node Entry Requirements.
+  - Bind each Chinese report row to the matching Graph report requirement.
+  - Carry existing mapped obligations without loading unrelated obligation bodies.
+- `core/entry_preparation/validation.py`
+  - Accept `create_new`, `map_existing`, and `no_material_issue`.
+  - Require Chinese reasoning, current fact references, obligation mappings where
+    applicable, and one first action or Trial reference.
+  - Produce compact server-facing assessment/report projections without mutating
+    server or local database state.
+
+## CLI workflow plan
+
+- `cycle entry-prepare` calls the real FactorTester CLI for one compact `next`
+  packet, only the requested requirement details, and one factor description.
+- `cycle entry-validate` is offline and deterministic; it fails with itemized
+  errors until the editable draft is complete.
+- Both commands support JSON and ordinary filesystem paths on macOS, Linux and
+  Windows.
+
+## Entry Requirement refinement results
+
+```text
+$ CLI_ANYTHING_FORCE_INSTALLED=1 pytest \
+    test_full_e2e.py test_entry_preparation.py -q
+...............................                                          [100%]
+31 passed in 7.28s
+```
+
+The focused core/CLI suite contains 11 Entry Requirement tests. A real MaxA
+v9 invocation also prepared `factor_semantics.expression_identity` from the
+installed FactorTester CLI and verified:
+
+- one selected requirement detail was loaded;
+- the SgCPS factor facts contained 15 compact AST nodes, deterministic LaTeX,
+  `HA`/`LA` ColumnRefs and one content-addressed expression reference;
+- neither factor source code nor the full parameter option catalog was stored.
+
+The complete Harness suite reached 131 passing tests. Its remaining pre-existing
+real-server E2E fails while starting an old shadow instance because that fixture
+does not supply the now-required shadow proposal; it is outside this
+Entry-authoring refinement and does not exercise these commands.
