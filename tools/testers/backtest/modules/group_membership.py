@@ -55,6 +55,11 @@ from tools.testers.backtest.modules.target import (
 from tools.testers.backtest.modules.time_index_lookup import row_at_index_key
 from tools.testers.backtest.policies.allocation import equal_weight, inverse_measure_weight
 from tools.testers.backtest.policies.cross_section import rank_cross_section, select_rank_group
+from tools.testers.backtest.policies.rebalance import (
+    reuse_buy_and_hold_target,
+    reuse_unchanged_membership_target,
+    validate_rebalance_configuration,
+)
 
 
 class GroupMembershipModule(TargetStrategyModule):
@@ -239,30 +244,21 @@ def _group_quantile_membership(state, ctx) -> None:
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
         policy = config.get(GroupMembershipModule.position_policy, "rebalance_to_target")
-        if policy == "buy_and_hold" and strategy in established:
-            ctx.set_for(GroupMembershipModule.target_weights, strategy, established[strategy])
+        reuse = reuse_buy_and_hold_target(policy, established.get(strategy))
+        if reuse is not None:
+            weights, reason = reuse
+            ctx.set_for(GroupMembershipModule.target_weights, strategy, weights)
             ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
-                established[strategy], reason="buy_and_hold_established_target"))
+                weights, reason=reason))
             continue
 
         trigger = config.get(GroupMembershipModule.rebalance_trigger, "on_factor_signal")
-        if trigger == "scheduled":
-            raise NotImplementedError(
-                'rebalance_trigger="scheduled" requires a calendar-driven SIGNAL '
-                "schedule independent of factor timing, not implemented this round")
-        if trigger == "membership_change":
-            allocation_policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
-            if allocation_policy != "equal_notional":
-                raise ValueError(
-                    'rebalance_trigger="membership_change" only reduces turnover correctly '
-                    'under allocation_policy="equal_notional" -- weight there is a pure '
-                    "function of membership size, so \"same membership\" really does mean "
-                    f'"same weights". allocation_policy={allocation_policy!r} computes weights '
-                    "from time-varying inputs (trailing volatility / current margin ratios) that "
-                    "drift even when membership does not, so reusing the previous weights here "
-                    'would silently serve a stale, no-longer-risk-balanced allocation. Use '
-                    'rebalance_trigger="on_factor_signal" with this allocation_policy instead.'
-                )
+        allocation_policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
+        validate_rebalance_configuration(
+            trigger,
+            allocation_is_membership_only=allocation_policy == "equal_notional",
+            allocation_name=allocation_policy,
+        )
 
         signal_value = _tradable_signal_values(
             ctx.get_for(FactorSignalModule.signal_value, strategy, {}),
@@ -298,10 +294,14 @@ def _group_quantile_membership(state, ctx) -> None:
             allowed = {str(name) for name in product_mask_names}
             members = frozenset(product for product in members if _product_name(product) in allowed)
 
-        if trigger == "membership_change" and last_membership.get(strategy) == members:
-            ctx.set_for(GroupMembershipModule.target_weights, strategy, established.get(strategy, {}))
+        reuse = reuse_unchanged_membership_target(
+            trigger, members, last_membership.get(strategy), established.get(strategy)
+        )
+        if reuse is not None:
+            weights, reason = reuse
+            ctx.set_for(GroupMembershipModule.target_weights, strategy, weights)
             ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
-                established.get(strategy, {}), reason="membership_unchanged"))
+                weights, reason=reason))
             continue
 
         weights = _allocate_weights(state, ctx, strategy, members)
@@ -601,27 +601,18 @@ def _compute_group_target_weights(
 ) -> tuple[dict, frozenset | None, str]:
     config = state.config_for(strategy)
     policy = config.get(GroupMembershipModule.position_policy, "rebalance_to_target")
-    if policy == "buy_and_hold" and established is not None:
-        return established, last_membership, "buy_and_hold_established_target"
+    reuse = reuse_buy_and_hold_target(policy, established)
+    if reuse is not None:
+        weights, reason = reuse
+        return weights, last_membership, reason
 
     trigger = config.get(GroupMembershipModule.rebalance_trigger, "on_factor_signal")
-    if trigger == "scheduled":
-        raise NotImplementedError(
-            'rebalance_trigger="scheduled" requires a calendar-driven SIGNAL '
-            "schedule independent of factor timing, not implemented this round")
-    if trigger == "membership_change":
-        allocation_policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
-        if allocation_policy != "equal_notional":
-            raise ValueError(
-                'rebalance_trigger="membership_change" only reduces turnover correctly '
-                'under allocation_policy="equal_notional" -- weight there is a pure '
-                "function of membership size, so \"same membership\" really does mean "
-                f'"same weights". allocation_policy={allocation_policy!r} computes weights '
-                "from time-varying inputs (trailing volatility / current margin ratios) that "
-                "drift even when membership does not, so reusing the previous weights here "
-                'would silently serve a stale, no-longer-risk-balanced allocation. Use '
-                'rebalance_trigger="on_factor_signal" with this allocation_policy instead.'
-            )
+    allocation_policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
+    validate_rebalance_configuration(
+        trigger,
+        allocation_is_membership_only=allocation_policy == "equal_notional",
+        allocation_name=allocation_policy,
+    )
 
     signal_value = _tradable_signal_values(
         signal_value,
@@ -649,8 +640,10 @@ def _compute_group_target_weights(
         allowed = {str(name) for name in product_mask_names}
         members = frozenset(product for product in members if _product_name(product) in allowed)
 
-    if trigger == "membership_change" and last_membership == members:
-        return established or {}, members, "membership_unchanged"
+    reuse = reuse_unchanged_membership_target(trigger, members, last_membership, established)
+    if reuse is not None:
+        weights, reason = reuse
+        return weights, members, reason
 
     return _allocate_weights(state, ctx, strategy, members), members, "group_membership"
 
