@@ -28,7 +28,11 @@ from tools.testers.backtest.modules.strategy_book import (
     StrategyIntentPolicy,
     strategy_book_store_for,
 )
-from tools.testers.backtest.modules.target import _generate_strategy_intents, _precompute_strategy_intents
+from tools.testers.backtest.modules.target import (
+    TargetStrategyModule,
+    _generate_strategy_intents,
+    _precompute_strategy_intents,
+)
 
 
 def _product() -> Product:
@@ -75,6 +79,67 @@ def test_group_policy_uses_bound_ranking_factor_role():
 
     weights = ctx.get_for(GroupMembershipModule.target_weights, strategy)
     assert set(weights) == {products[2], products[3]}
+
+
+def test_group_screen_builds_dynamic_eligibility_before_ranking():
+    strategy = Strategy(alias="screen")
+    products = [_product() for _ in range(3)]
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.split_count: 1,
+        GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.screen_rule: "gte",
+        GroupMembershipModule.screen_lower: 0.5,
+        FactorModule.factor_role_bindings: {"screen": object()},
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+
+    selected = []
+    for screen_values in ({products[0]: 1, products[1]: 0, products[2]: 1},
+                          {products[0]: 0, products[1]: 1, products[2]: 0}):
+        ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+        ctx.set_for(FactorSignalModule.signal_value, strategy, {p: float(i) for i, p in enumerate(products)})
+        ctx.set_for(FactorModule.factor_role_values, strategy, {"screen": screen_values})
+        _group_quantile_membership(account, ctx)
+        selected.append(set(ctx.get_for(GroupMembershipModule.target_weights, strategy)))
+
+    assert selected == [{products[0], products[2]}, {products[1]}]
+
+
+def test_group_sizing_factor_allocates_only_within_selected_members():
+    strategy = Strategy(alias="sizing")
+    products = [_product() for _ in range(3)]
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.split_count: 1,
+        GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.allocation_policy: "factor_sizing",
+        GroupMembershipModule.sizing_transform: "proportional",
+        FactorModule.factor_role_bindings: {"sizing": object()},
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    ctx.set_for(FactorSignalModule.signal_value, strategy, {product: 1.0 for product in products})
+    ctx.set_for(FactorModule.factor_role_values, strategy, {
+        "sizing": {products[0]: 1.0, products[1]: 3.0, products[2]: float("nan")},
+    })
+
+    _group_quantile_membership(account, ctx)
+
+    assert ctx.get_for(GroupMembershipModule.target_weights, strategy) == pytest.approx({
+        products[0]: 0.25,
+        products[1]: 0.75,
+    })
+
+
+def test_group_rejects_bound_role_that_would_be_a_silent_noop():
+    strategy = Strategy(alias="invalid")
+    config = StrategyConfig(strategy=strategy, field_values={
+        FactorModule.factor_role_bindings: {"screen": object()},
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+
+    with pytest.raises(ValueError, match="screen_rule"):
+        _group_quantile_membership(account, ctx)
 
 
 def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_signal_value(monkeypatch):
@@ -497,6 +562,71 @@ def test_vectorized_precompute_matches_legacy_event_precompute(monkeypatch, allo
         legacy_table = legacy.target_store.precomputed_target_intents[strategy]
         for timestamp in idx:
             assert vectorized_table[timestamp].weights == pytest.approx(legacy_table[timestamp].weights)
+
+
+def test_screen_and_sizing_precompute_matches_event_and_is_future_causal():
+    products = [_product() for _ in range(3)]
+    idx = pd.date_range("2024-01-01 09:00", periods=2, freq="min")
+    primary = pd.DataFrame([[1, 1, 1], [1, 1, 1]], index=idx, columns=products)
+    ranking = pd.DataFrame([[3, 2, 1], [1, 2, 3]], index=idx, columns=products)
+    screen = pd.DataFrame([[1, 1, 0], [0, 1, 1]], index=idx, columns=products)
+    sizing = pd.DataFrame([[1, 3, 99], [99, 2, 1]], index=idx, columns=products)
+    strategy = Strategy(alias="roles")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_precomputed", "precompute_strategy_intents"}),
+        field_values={
+            GroupMembershipModule.split_count: 1,
+            GroupMembershipModule.group_index: 0,
+            GroupMembershipModule.screen_rule: "gte",
+            GroupMembershipModule.screen_lower: 0.5,
+            GroupMembershipModule.allocation_policy: "factor_sizing",
+            FactorModule.factor_role_bindings: {
+                "ranking": object(), "screen": object(), "sizing": object(),
+            },
+        },
+    )
+
+    def precomputed(screen_table=screen, sizing_table=sizing):
+        state = BacktestRunState(strategy_configs={strategy: config})
+        state.market_data_store.current_prices_table = pd.DataFrame(
+            {product: [10.0, 10.0] for product in products}, index=idx,
+        )
+        for key, table in (("primary", primary), ("ranking", ranking),
+                           ("screen", screen_table), ("sizing", sizing_table)):
+            state.factor_signal_store.put_precomputed_table(key, table)
+        state.factor_signal_store.bind_precomputed_table(strategy, "primary")
+        for role in ("ranking", "screen", "sizing"):
+            state.factor_signal_store.bind_precomputed_role_table(strategy, role, role)
+        _precompute_strategy_intents(
+            state,
+            FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy})),
+        )
+        return state.target_store.precomputed_target_intents[strategy]
+
+    intents = precomputed()
+    event_state = BacktestRunState(strategy_configs={strategy: config})
+    for row, timestamp in enumerate(idx):
+        ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+        ctx.set_for(FactorSignalModule.signal_value, strategy, primary.iloc[row].to_dict())
+        ctx.set_for(FactorModule.factor_role_values, strategy, {
+            "ranking": ranking.iloc[row].to_dict(),
+            "screen": screen.iloc[row].to_dict(),
+            "sizing": sizing.iloc[row].to_dict(),
+        })
+        ctx.set(MarketDataModule.current_prices, {product: 10.0 for product in products})
+        _group_quantile_membership(event_state, ctx)
+        event_intent = ctx.get_for(TargetStrategyModule.trade_intent, strategy)
+        assert intents[timestamp].weights == pytest.approx(event_intent.weights)
+        assert intents[timestamp].reason == event_intent.reason
+
+    changed_screen = screen.copy()
+    changed_sizing = sizing.copy()
+    changed_screen.iloc[1] = [1, 0, 0]
+    changed_sizing.iloc[1] = [7, 8, 9]
+    changed = precomputed(changed_screen, changed_sizing)
+    assert changed[idx[0]].weights == pytest.approx(intents[idx[0]].weights)
+    assert changed[idx[0]].reason == intents[idx[0]].reason
 
 
 def test_precomputed_group_target_intents_uses_strategy_book_policy_hook():

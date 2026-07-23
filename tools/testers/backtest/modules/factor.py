@@ -69,13 +69,13 @@ class FactorModule(ExecutableModule):
             chip_template="因子角色: {value}",
             tab_label="因子执行",
             tab_order=20,
-            help_text="按策略意图绑定 ranking、entry、exit；未绑定角色显式使用主因子。",
+            help_text="按策略意图绑定 ranking、screen、entry、exit、sizing；未绑定角色显式使用主因子。",
             serialization={
                 "kind": "factor_role_bindings",
                 "candidate_field": "factor_candidates",
-                "allowed_roles": ("ranking", "entry", "exit"),
+                "allowed_roles": ("ranking", "screen", "entry", "exit", "sizing"),
                 "roles_by_strategy_kind": {
-                    "group": ("ranking",),
+                    "group": ("ranking", "screen", "sizing"),
                     "threshold": ("entry", "exit"),
                 },
             },
@@ -106,7 +106,7 @@ def factor_role_bindings_for(config: Any) -> dict[str, Any]:
     raw = config.get(FactorModule.factor_role_bindings, {}) or {}
     if not isinstance(raw, Mapping):
         raise ValueError("factor_role_bindings must be a role-to-factor mapping")
-    allowed = {"ranking", "entry", "exit"}
+    allowed = {"ranking", "screen", "entry", "exit", "sizing"}
     unknown = sorted(str(role) for role in raw if str(role) not in allowed)
     if unknown:
         raise ValueError(f"unsupported factor roles: {', '.join(unknown)}")

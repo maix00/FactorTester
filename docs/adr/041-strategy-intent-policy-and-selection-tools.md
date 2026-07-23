@@ -295,6 +295,14 @@ product-mask semantics, or intent-policy target traces.
   `trade_intent` without undeclared reads; step output summarizes the role
   values and transition reason.
 - Missing entry values do not enter and missing exit values exit explicitly.
+- Group `screen` values form a timestamp-local eligibility universe before
+  ranking; missing or non-finite values exclude a product. A static
+  `product_mask_names` remains a post-bucket intersection and is not silently
+  reinterpreted as that dynamic universe.
+- Group `sizing` values affect only target weights inside the selected set;
+  missing, non-finite, and non-positive values receive zero weight. Event and
+  precomputed targets and reason codes are identical, and future role values
+  cannot alter an earlier target.
 - Order construction remains target minus current position; fee, margin,
   liquidity, and DMTM behavior is unchanged.
 

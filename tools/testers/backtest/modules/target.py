@@ -31,6 +31,10 @@ _ALLOCATION_POLICY_REF: FieldRef[str] = FieldRef("allocation_policy", owner="Gro
 _VOLATILITY_LOOKBACK_REF: FieldRef[Any] = FieldRef("volatility_lookback", owner="GroupMembershipModule")
 _VOLATILITY_WARMUP_REF: FieldRef[int] = FieldRef("volatility_warmup", owner="GroupMembershipModule")
 _PRODUCT_MASK_NAMES_REF: FieldRef[Any] = FieldRef("product_mask_names", owner="GroupMembershipModule")
+_SCREEN_RULE_REF: FieldRef[str] = FieldRef("screen_rule", owner="GroupMembershipModule")
+_SCREEN_LOWER_REF: FieldRef[float] = FieldRef("screen_lower", owner="GroupMembershipModule")
+_SCREEN_UPPER_REF: FieldRef[float] = FieldRef("screen_upper", owner="GroupMembershipModule")
+_SIZING_TRANSFORM_REF: FieldRef[str] = FieldRef("sizing_transform", owner="GroupMembershipModule")
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,10 @@ class TargetStrategyModule(ExecutableModule):
             _VOLATILITY_LOOKBACK_REF,
             _VOLATILITY_WARMUP_REF,
             _PRODUCT_MASK_NAMES_REF,
+            _SCREEN_RULE_REF,
+            _SCREEN_LOWER_REF,
+            _SCREEN_UPPER_REF,
+            _SIZING_TRANSFORM_REF,
         ),
         outputs=(trade_intent, target_weights),
         phase=Phase.PRE_REPLAY,

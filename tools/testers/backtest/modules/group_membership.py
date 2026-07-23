@@ -28,7 +28,7 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.modules.time_index_lookup import row_at, signal_event_times, signal_timestamps
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
-from tools.testers.backtest.modules.factor import FactorModule
+from tools.testers.backtest.modules.factor import FactorModule, factor_role_bindings_for
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     current_historical_fields_at,
@@ -57,6 +57,7 @@ from tools.testers.backtest.modules.target import (
 from tools.testers.backtest.modules.time_index_lookup import row_at_index_key
 from tools.testers.backtest.policies.allocation import equal_weight, inverse_measure_weight
 from tools.testers.backtest.policies.cross_section import rank_cross_section, select_rank_group
+from tools.testers.backtest.policies.factor_roles import factor_weight, screen_ranking_values
 from tools.testers.backtest.policies.rebalance import (
     reuse_buy_and_hold_target,
     reuse_unchanged_membership_target,
@@ -96,6 +97,10 @@ class GroupMembershipModule(TargetStrategyModule):
         # Optional derived-group product filter.  It must be applied after the
         # full-universe group membership bucket is computed, so derived groups
         # mean "parent bucket intersected with mask", not "re-rank inside mask".
+    screen_rule: ClassVar[FieldRef[str]] = FieldRef("screen_rule")
+    screen_lower: ClassVar[FieldRef[float]] = FieldRef("screen_lower")
+    screen_upper: ClassVar[FieldRef[float]] = FieldRef("screen_upper")
+    sizing_transform: ClassVar[FieldRef[str]] = FieldRef("sizing_transform")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "split_count": FieldDefinition(
@@ -130,8 +135,15 @@ class GroupMembershipModule(TargetStrategyModule):
         ),
         "allocation_policy": FieldDefinition(
             public=True, label="分配", default="equal_notional", control_template="select", tab="target_allocation",
-            options=(("equal_notional", "等市值"), ("inverse_volatility", "等风险（波动率倒数）"), ("equal_margin", "等保证金（对照）")),
+            options=(("equal_notional", "等市值"), ("inverse_volatility", "等风险（波动率倒数）"), ("equal_margin", "等保证金（对照）"), ("factor_sizing", "按 sizing 因子")),
             chip_template="分配: {value}", tab_label="目标分配", tab_order=60,
+        ),
+        "sizing_transform": FieldDefinition(
+            public=True, label="权重变换", default="proportional", control_template="select", tab="target_allocation",
+            options=(("proportional", "正值比例"), ("inverse", "正值倒数")),
+            visible_when={"allocation_policy": ("factor_sizing",)},
+            chip_template="权重变换: {value}", tab_label="目标分配", tab_order=60,
+            help_text="只在已入选品种内归一化；缺失、非有限或非正值权重为零。",
         ),
         "volatility_lookback": FieldDefinition(
             public=True, label="波动窗口", default=20, control_template="number", tab="target_allocation",
@@ -145,6 +157,20 @@ class GroupMembershipModule(TargetStrategyModule):
             chip_template="预热: {value}", tab_label="目标分配", tab_order=60,
         ),
         "product_mask_names": FieldDefinition(public=False, label="品种范围", default=None),
+        "screen_rule": FieldDefinition(
+            public=True, label="动态筛选", default="disabled", control_template="select", tab="group_strategy",
+            options=(("disabled", "关闭"), ("gte", "大于等于下限"), ("lte", "小于等于上限"), ("between", "区间内")),
+            chip_template="动态筛选: {value}", tab_label="分组数量", tab_order=90,
+            help_text="每个信号时点先按 screen 因子生成 eligibility universe，再在其中排名分组。",
+        ),
+        "screen_lower": FieldDefinition(
+            public=True, label="筛选下限", default=0.0, control_template="number", tab="group_strategy",
+            visible_when={"screen_rule": ("gte", "between")}, tab_label="分组数量", tab_order=90,
+        ),
+        "screen_upper": FieldDefinition(
+            public=True, label="筛选上限", default=0.0, control_template="number", tab="group_strategy",
+            visible_when={"screen_rule": ("lte", "between")}, tab_label="分组数量", tab_order=90,
+        ),
         "dispatched_order_events": FieldDefinition(public=False, display_value_kind="event_draft_table"),
     }
 
@@ -162,6 +188,10 @@ class GroupMembershipModule(TargetStrategyModule):
             volatility_lookback,
             volatility_warmup,
             product_mask_names,
+            screen_rule,
+            screen_lower,
+            screen_upper,
+            sizing_transform,
         ),
         outputs=(target_weights, TargetStrategyModule.trade_intent),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
@@ -248,6 +278,7 @@ def _group_quantile_membership(state, ctx, strategies: Sequence[object] | None =
 
     for strategy in active_strategies:
         config = state.config_for(strategy)
+        _validate_group_factor_roles(config)
         policy = config.get(GroupMembershipModule.position_policy, "rebalance_to_target")
         reuse = reuse_buy_and_hold_target(policy, established.get(strategy))
         if reuse is not None:
@@ -266,10 +297,16 @@ def _group_quantile_membership(state, ctx, strategies: Sequence[object] | None =
         )
 
         role_values = ctx.get_for(FactorModule.factor_role_values, strategy, {}) or {}
+        primary_values = ctx.get_for(FactorSignalModule.signal_value, strategy, {})
         signal_value = _tradable_signal_values(
-            role_values.get("ranking", ctx.get_for(FactorSignalModule.signal_value, strategy, {})),
+            role_values.get("ranking", primary_values),
             ctx.get(MarketDataModule.current_prices),
             ctx.get(MarketDataModule.current_tradable_status, None),
+        )
+        signal_value = _screen_group_universe(
+            config,
+            signal_value,
+            role_values.get("screen", primary_values),
         )
         n_groups = config.get(GroupMembershipModule.split_count, 1)
         group_index = config.get(GroupMembershipModule.group_index, 0)
@@ -354,13 +391,15 @@ def _target_intent_event_key(ctx, strategy) -> Any:
 
 
 class _TargetPrecomputeContext:
-    def __init__(self, *, timestamp: pd.Timestamp, prices: dict, historical_fields: dict, strategy_fields: dict[Any, dict]) -> None:
+    def __init__(self, *, timestamp: pd.Timestamp, prices: dict, historical_fields: dict, strategy_fields: dict[Any, dict], factor_values: dict[Any, dict], role_values: dict[Any, dict]) -> None:
         self.timestamp = timestamp
         self._values = {
             MarketDataModule.current_prices: prices,
             MarketDataModule.current_historical_fields: historical_fields,
         }
         self._strategy_fields = strategy_fields
+        self._factor_values = factor_values
+        self._role_values = role_values
 
     def get(self, ref, default=None):
         return self._values.get(ref, default)
@@ -368,6 +407,10 @@ class _TargetPrecomputeContext:
     def get_for(self, ref, strategy, default=None):
         if ref is MarketDataModule.current_historical_fields:
             return self._strategy_fields.get(strategy, default)
+        if ref is FactorSignalModule.signal_value:
+            return self._factor_values.get(strategy, default)
+        if ref is FactorModule.factor_role_values:
+            return self._role_values.get(strategy, default)
         return default
 
 
@@ -383,9 +426,10 @@ def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
     store = state.target_store
     signal_store = state.factor_signal_store
     fallback_strategies: list[Any] = []
-    by_event: dict[Any, list[tuple[Any, Any, dict]]] = {}
+    by_event: dict[Any, list[tuple[Any, Any, dict, dict, dict]]] = {}
     strategies_by_table: dict[int, tuple[pd.DataFrame, list[Any]]] = {}
     for strategy in strategies:
+        _validate_group_factor_roles(state.config_for(strategy))
         table = signal_store.precomputed_role_tables_for(strategy).get("ranking")
         if table is None:
             table = signal_store.precomputed_table_for(strategy)
@@ -414,8 +458,17 @@ def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
             continue
         store.precomputed_target_intents.setdefault(strategy, {})
         for event_time in signal_event_times(table):
+            primary_values, role_values = _precomputed_factor_values(
+                signal_store, strategy, event_time.index_key
+            )
             by_event.setdefault(event_time.index_key, []).append(
-                (strategy, event_time, _signal_values_from_table(table, event_time.index_key))
+                (
+                    strategy,
+                    event_time,
+                    _signal_values_from_table(table, event_time.index_key),
+                    primary_values,
+                    role_values,
+                )
             )
 
     established: dict[Any, dict[Any, float]] = {}
@@ -429,13 +482,13 @@ def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
         prices = current_prices_at(state, timestamp)
         needs_historical_fields = any(
             state.config_for(strategy).get(GroupMembershipModule.allocation_policy, "equal_notional") == "equal_margin"
-            for strategy, _event_time, _signal_value in items
+            for strategy, _event_time, _signal_value, _primary, _roles in items
         )
         base_fields = current_historical_fields_at(state, timestamp) if needs_historical_fields else {}
         strategy_fields_cache: dict[Any, dict] = {}
         ranked_cache: dict[frozenset, Sequence[tuple[Any, float]]] = {}
         bucket_cache: dict[tuple[frozenset, int, int], frozenset] = {}
-        for strategy, event_time, signal_value in items:
+        for strategy, event_time, signal_value, primary_values, role_values in items:
             config = state.config_for(strategy)
             if needs_historical_fields:
                 ledger = state.ledger_for_strategy(strategy)
@@ -455,6 +508,8 @@ def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
                 prices=prices,
                 historical_fields=base_fields,
                 strategy_fields={strategy: strategy_fields},
+                factor_values={strategy: primary_values},
+                role_values={strategy: role_values},
             )
             weights, members, reason = _compute_group_target_weights(
                 state,
@@ -469,7 +524,7 @@ def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
             if reason not in {"buy_and_hold_established_target", "membership_unchanged"} and weights:
                 established[strategy] = weights
                 last_membership[strategy] = members
-            intent = target_weight_intent(weights, reason=f"precomputed_{reason}")
+            intent = target_weight_intent(weights, reason=reason)
             store.precomputed_target_intents[strategy][event_time.index_key] = intent
             store.precomputed_target_intents[strategy][timestamp] = intent
 
@@ -479,6 +534,11 @@ register_strategy_intent_policy("group", GroupMembershipIntentPolicy())
 
 def _can_vectorize_group_precompute(state, strategy) -> bool:
     config = state.config_for(strategy)
+    roles = factor_role_bindings_for(config)
+    if "screen" in roles or "sizing" in roles:
+        return False
+    if config.get(GroupMembershipModule.screen_rule, "disabled") != "disabled":
+        return False
     if config.get(GroupMembershipModule.position_policy, "rebalance_to_target") != "rebalance_to_target":
         return False
     if config.get(GroupMembershipModule.rebalance_trigger, "on_factor_signal") != "on_factor_signal":
@@ -601,6 +661,19 @@ def _signal_values_from_table(table: pd.DataFrame, index_key: Any) -> dict:
     return {product: float(cast(Any, row[product])) for product in table.columns}
 
 
+def _precomputed_factor_values(signal_store, strategy, index_key: Any) -> tuple[dict, dict]:
+    primary_table = signal_store.precomputed_table_for(strategy)
+    primary = (
+        _signal_values_from_table(primary_table, index_key)
+        if primary_table is not None else {}
+    )
+    roles = {
+        role: _signal_values_from_table(table, index_key)
+        for role, table in signal_store.precomputed_role_tables_for(strategy).items()
+    }
+    return primary, roles
+
+
 def _compute_group_target_weights(
     state,
     ctx,
@@ -632,6 +705,13 @@ def _compute_group_target_weights(
         ctx.get(MarketDataModule.current_prices),
         ctx.get(MarketDataModule.current_tradable_status, None),
     )
+    role_values = ctx.get_for(FactorModule.factor_role_values, strategy, {}) or {}
+    primary_values = ctx.get_for(FactorSignalModule.signal_value, strategy, signal_value)
+    signal_value = _screen_group_universe(
+        config,
+        signal_value,
+        role_values.get("screen", primary_values),
+    )
     n_groups = config.get(GroupMembershipModule.split_count, 1)
     group_index = config.get(GroupMembershipModule.group_index, 0)
     if not signal_value or n_groups <= 0:
@@ -659,6 +739,24 @@ def _compute_group_target_weights(
         return weights, members, reason
 
     return _allocate_weights(state, ctx, strategy, members), members, "group_membership"
+
+
+def _screen_group_universe(config, ranking_values: dict, screen_values: dict) -> dict:
+    return screen_ranking_values(
+        ranking_values,
+        screen_values or {},
+        rule=str(config.get(GroupMembershipModule.screen_rule, "disabled") or "disabled"),
+        lower=float(config.get(GroupMembershipModule.screen_lower, 0.0) or 0.0),
+        upper=float(config.get(GroupMembershipModule.screen_upper, 0.0) or 0.0),
+    )
+
+
+def _validate_group_factor_roles(config) -> None:
+    roles = factor_role_bindings_for(config)
+    if "screen" in roles and config.get(GroupMembershipModule.screen_rule, "disabled") == "disabled":
+        raise ValueError("screen factor role requires screen_rule to be enabled")
+    if "sizing" in roles and config.get(GroupMembershipModule.allocation_policy, "equal_notional") != "factor_sizing":
+        raise ValueError("sizing factor role requires allocation_policy='factor_sizing'")
 
 
 def _tradable_signal_values(
@@ -721,6 +819,15 @@ def _allocate_weights(state, ctx, strategy, members: frozenset) -> dict:
         return {}
     config = state.config_for(strategy)
     policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
+    if policy == "factor_sizing":
+        role_values = ctx.get_for(FactorModule.factor_role_values, strategy, {}) or {}
+        primary_values = ctx.get_for(FactorSignalModule.signal_value, strategy, {}) or {}
+        sizing_values = role_values.get("sizing", primary_values)
+        return factor_weight(
+            members,
+            sizing_values,
+            transform=str(config.get(GroupMembershipModule.sizing_transform, "proportional")),
+        )
     if policy == "equal_margin":
         return _allocate_equal_margin(state, ctx, strategy, members)
     if policy != "inverse_volatility":
