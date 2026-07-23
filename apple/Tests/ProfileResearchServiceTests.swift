@@ -24,6 +24,27 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class ProfileResearchServiceTests: XCTestCase {
+    func testEntryRequirementAcceptsCanonicalCompactProjection() throws {
+        let data = Data(
+            """
+            {
+              "requirement_id":"factor_semantics.alternatives_and_falsifiers",
+              "change_kind":"added",
+              "resolution_status":"assessed_limited"
+            }
+            """.utf8
+        )
+        let item = try JSONDecoder().decode(
+            ResearchEntryRequirementItem.self,
+            from: data
+        )
+        XCTAssertEqual(
+            item.titleZh,
+            "factor_semantics.alternatives_and_falsifiers"
+        )
+        XCTAssertTrue(item.assessed)
+    }
+
     func testStableWorkPackageOwnershipUsesCurrentPhysicalAgentScope() {
         let profile = LocalProfileModel(json: [
             "profile_id": "maxa",

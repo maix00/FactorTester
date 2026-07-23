@@ -36,4 +36,25 @@ struct ResearchEntryRequirementItem: Decodable, Identifiable {
         case changeKind = "change_kind"
         case resolutionStatus = "resolution_status"
     }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        requirementID = try values.decode(String.self, forKey: .requirementID)
+        resolutionStatus = try values.decode(
+            String.self,
+            forKey: .resolutionStatus
+        )
+        titleZh = try values.decodeIfPresent(
+            String.self,
+            forKey: .titleZh
+        ) ?? requirementID
+        assessed = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .assessed
+        ) ?? resolutionStatus.hasPrefix("assessed_")
+        changeKind = try values.decode(
+            String.self,
+            forKey: .changeKind
+        )
+    }
 }

@@ -71,7 +71,9 @@ def test_work_package_timeline_pages_large_steps_without_losing_rows(
             break
         after = page["next_cursor"]
 
-    assert len(pages[0]["items"]) < 50
+    # UI/audit projections have a generous ceiling and therefore should not
+    # manufacture extra HTTP pages for this ordinary 50-step history.
+    assert len(pages[0]["items"]) == 50
     assert pages[0]["next_cursor"] is not None
     first_page_last_index = int(
         pages[0]["items"][-1]["step_ref"].rsplit("-", 1)[1]

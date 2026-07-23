@@ -13,7 +13,10 @@ from server.services.research_graph.report_checkpoint import (
     safe_identifier as _safe_identifier,
 )
 
-MAX_PROJECTION_BYTES = 64 * 1024
+# UI/audit projections are not Agent context packets. Keep a generous safety
+# ceiling here; timeline paging still bounds row count and large artifacts stay
+# behind references.
+MAX_PROJECTION_BYTES = 1024 * 1024
 
 def bounded_limit(value: Any, *, default: int, maximum: int) -> int:
     if value in (None, ""):
