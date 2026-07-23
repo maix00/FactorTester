@@ -86,6 +86,12 @@ def validate_group_factor_roles(config) -> None:
     from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 
     roles = factor_role_bindings_for(config)
+    incompatible = sorted(set(roles) - {"ranking", "screen", "sizing"})
+    if incompatible:
+        raise ValueError(
+            "factor roles incompatible with group strategy: "
+            + ", ".join(incompatible)
+        )
     if "screen" in roles and config.get(GroupMembershipModule.screen_rule, "disabled") == "disabled":
         raise ValueError("screen factor role requires screen_rule to be enabled")
     if "sizing" in roles and config.get(GroupMembershipModule.allocation_policy, "equal_notional") != "factor_sizing":

@@ -142,6 +142,18 @@ def test_group_rejects_bound_role_that_would_be_a_silent_noop():
         _group_quantile_membership(account, ctx)
 
 
+def test_group_rejects_threshold_only_factor_role():
+    strategy = Strategy(alias="invalid-role")
+    config = StrategyConfig(strategy=strategy, field_values={
+        FactorModule.factor_role_bindings: {"entry": object()},
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+
+    with pytest.raises(ValueError, match="incompatible with group"):
+        _group_quantile_membership(account, ctx)
+
+
 def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_signal_value(monkeypatch):
     """Strategies sharing a factor's precomputed schedule are dispatched in
     the same SIGNAL batch (same ctx.active_strategies) and see byte-identical

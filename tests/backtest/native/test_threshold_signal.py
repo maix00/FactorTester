@@ -134,6 +134,18 @@ def test_entry_and_exit_factor_roles_drive_separate_state_transitions() -> None:
     assert ctx3.get_for(ThresholdSignalModule.target_weights, strategy) == {}
 
 
+def test_threshold_policy_rejects_group_only_factor_role() -> None:
+    strategy = Strategy(alias="invalid-role")
+    state, ctx = _state_and_ctx(
+        strategy,
+        {FactorModule.factor_role_bindings: {"ranking": object()}},
+        {},
+    )
+
+    with pytest.raises(ValueError, match="incompatible with threshold"):
+        _threshold_signal_target(state, ctx)
+
+
 def test_precomputed_factor_roles_match_ordered_event_state_machine() -> None:
     strategy = Strategy(alias="threshold")
     product = _product()

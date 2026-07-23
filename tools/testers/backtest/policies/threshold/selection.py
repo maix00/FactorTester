@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 
+from tools.testers.backtest.modules.factor import factor_role_bindings_for
 from tools.testers.backtest.modules.threshold_signal import ThresholdSignalModule
 
 from .state import last_threshold_selection, last_threshold_weights, signed_weights
@@ -25,6 +26,14 @@ def compute_threshold_target_weights(
     if previous_weights is None:
         previous_weights = last_threshold_weights(state, strategy)
     config = state.config_for(strategy)
+    incompatible = sorted(
+        set(factor_role_bindings_for(config)) - {"entry", "exit"}
+    )
+    if incompatible:
+        raise ValueError(
+            "factor roles incompatible with threshold strategy: "
+            + ", ".join(incompatible)
+        )
     mode = str(config.get(ThresholdSignalModule.threshold_mode, "absolute") or "absolute")
     side_mode = str(config.get(ThresholdSignalModule.side_mode, "long_only") or "long_only")
     role_values = factor_values_by_role or {}
