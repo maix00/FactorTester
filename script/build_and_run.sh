@@ -38,9 +38,15 @@ xcodebuild \
 SOURCE_REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
   "$APP_BUNDLE/Contents/Info.plist")"
+PYTHON_BIN="${FTCLIENT_PYTHON:-$(command -v python || command -v python3)}"
+if ! "$PYTHON_BIN" -c \
+    'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
+  echo "FTClient runtime build requires Python 3.11 or newer: $PYTHON_BIN" >&2
+  exit 1
+fi
 (
   cd "$ROOT_DIR"
-  python3 -m script.release.embed_runtime \
+  "$PYTHON_BIN" -m script.release.embed_runtime \
     --app "$APP_BUNDLE" \
     --version "bundle-$APP_VERSION-r$SOURCE_REVISION" \
     --source-revision "$SOURCE_REVISION"

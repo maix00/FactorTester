@@ -75,6 +75,8 @@ def test_local_build_script_uses_installed_app_identity() -> None:
         assert contract in source
     assert "--install|install" in source
     assert "script.release.embed_runtime" in source
+    assert "FTCLIENT_PYTHON" in source
+    assert "sys.version_info >= (3, 11)" in source
 
 
 def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
