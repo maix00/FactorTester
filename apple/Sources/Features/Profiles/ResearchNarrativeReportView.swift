@@ -76,8 +76,14 @@ struct ResearchNarrativeReportView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 64)
                     } else {
-                        ForEach(sections) { section in
-                            positionedSection(section)
+                        ForEach(Array(sections.enumerated()), id: \.element.id) {
+                            index, section in
+                            positionedSection(
+                                section,
+                                compact: index > 0
+                                    && sections[index - 1].checkpointRef
+                                        == section.checkpointRef
+                            )
                         }
                     }
                 }
@@ -219,15 +225,36 @@ struct ResearchNarrativeReportView: View {
 
             obligationTable(section)
 
-            if !unboundLinks(in: section).isEmpty {
+            if !readableUnboundLinks(in: section).isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 7) {
-                        ForEach(unboundLinks(in: section)) { link in
+                        ForEach(readableUnboundLinks(in: section)) { link in
                             auditChip(link, section: section)
                         }
                     }
                     .padding(.vertical, 2)
                 }
+            }
+            if !missingPresentationLinks(in: section).isEmpty {
+                DisclosureGroup(
+                    "审计待补：\(missingPresentationLinks(in: section).count) 项证据缺少中文说明"
+                ) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("这些引用仍保留在可信 journal 中，但在补齐历史 presentation metadata 前不会污染研究正文。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(missingPresentationLinks(in: section)) { link in
+                            auditChip(
+                                link,
+                                section: section,
+                                displayLabel: "待补证据说明"
+                            )
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
             }
             Divider().padding(.top, compact ? 8 : 18)
         }
@@ -271,7 +298,7 @@ struct ResearchNarrativeReportView: View {
             reportRichText(text)
             if !linkIDs.isEmpty {
                 HStack(spacing: 6) {
-                    ForEach(auditLinks(in: section).filter {
+                    ForEach(readableAuditLinks(in: section).filter {
                         linkIDs.contains($0.linkID)
                     }) {
                         link in
@@ -284,31 +311,15 @@ struct ResearchNarrativeReportView: View {
 
     @ViewBuilder
     private func reportRichText(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(
-                Array(
-                    ResearchReportTextProjection.components(text).enumerated()
-                ),
-                id: \.offset
-            ) { _, component in
-                switch component.kind {
-                case .prose:
-                    Text(component.text)
-                        .font(.body)
-                        .lineSpacing(6)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                case .math:
-                    RenderedMathFormulaView(
-                        latex: component.text,
-                        fallback: "因子公式：\(component.text)"
-                    )
-                    .background(
-                        Color.secondary.opacity(0.07),
-                        in: RoundedRectangle(cornerRadius: 7)
-                    )
-                }
-            }
+        if ResearchReportTextProjection.containsMath(text) {
+            RenderedInlineMathTextView(text: text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(text)
+                .font(.body)
+                .lineSpacing(6)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -342,7 +353,7 @@ struct ResearchNarrativeReportView: View {
                 }
                 .font(.caption.weight(.medium))
                 HStack(spacing: 6) {
-                    ForEach(auditLinks(in: section).filter {
+                    ForEach(readableAuditLinks(in: section).filter {
                         block.linkIDs.contains($0.linkID)
                     }) { link in
                         auditChip(link, section: section)
@@ -357,7 +368,7 @@ struct ResearchNarrativeReportView: View {
                         reportRef: reportRef
                     )
                     HStack(spacing: 6) {
-                        ForEach(auditLinks(in: section).filter {
+                        ForEach(readableAuditLinks(in: section).filter {
                             block.linkIDs.contains($0.linkID)
                         }) { link in
                             auditChip(link, section: section)
@@ -463,7 +474,9 @@ struct ResearchNarrativeReportView: View {
         in section: ResearchJournalSection
     ) -> [ResearchJournalLink] {
         let ids = Set(row.linkIDs)
-        return auditLinks(in: section).filter { ids.contains($0.linkID) }
+        return readableAuditLinks(in: section).filter {
+            ids.contains($0.linkID)
+        }
     }
 
     private func unboundLinks(
@@ -477,6 +490,37 @@ struct ResearchNarrativeReportView: View {
         return auditLinks(in: section).filter { !bound.contains($0.linkID) }
     }
 
+    private func readableUnboundLinks(
+        in section: ResearchJournalSection
+    ) -> [ResearchJournalLink] {
+        let readable = Set(readableAuditLinks(in: section).map(\.linkID))
+        return unboundLinks(in: section).filter {
+            readable.contains($0.linkID)
+        }
+    }
+
+    private func readableAuditLinks(
+        in section: ResearchJournalSection
+    ) -> [ResearchJournalLink] {
+        let step = steps.first { $0.stepRef == section.auditCheckpointRef }
+        return auditLinks(in: section).filter { link in
+            link.kind != "evidence"
+                || ResearchJournalPresentation.hasReadableEvidencePresentation(
+                    link,
+                    in: step?.evidencePresentations ?? []
+                )
+        }
+    }
+
+    private func missingPresentationLinks(
+        in section: ResearchJournalSection
+    ) -> [ResearchJournalLink] {
+        let readable = Set(readableAuditLinks(in: section).map(\.linkID))
+        return auditLinks(in: section).filter {
+            $0.kind == "evidence" && !readable.contains($0.linkID)
+        }
+    }
+
     private func auditLinks(
         in section: ResearchJournalSection
     ) -> [ResearchJournalLink] {
@@ -488,7 +532,7 @@ struct ResearchNarrativeReportView: View {
         section: ResearchJournalSection,
         displayLabel: String? = nil
     ) -> some View {
-        let step = steps.first { $0.stepRef == section.checkpointRef }
+        let step = steps.first { $0.stepRef == section.auditCheckpointRef }
         let label = displayLabel ?? ResearchJournalPresentation.chipLabel(
             link,
             sectionTitle: section.title,
@@ -499,13 +543,16 @@ struct ResearchNarrativeReportView: View {
         return Button {
             selectedAudit = ResearchAuditSelection(
                 link: link,
-                checkpointRef: section.checkpointRef,
+                checkpointRef: section.auditCheckpointRef,
                 displayLabel: label
             )
         } label: {
             Label(label, systemImage: chipIcon(link.kind))
                 .font(.caption.weight(.medium))
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 280, alignment: .leading)
         }
         .buttonStyle(.bordered)
         .controlSize(.mini)
@@ -621,7 +668,7 @@ struct ResearchNarrativeReportView: View {
         in section: ResearchJournalSection
     ) -> [ResearchObligationTableRow] {
         let step = steps.first {
-            $0.stepRef == section.checkpointRef
+            $0.stepRef == section.auditCheckpointRef
         }
         return ResearchJournalPresentation.obligationRows(
             links: section.links,
@@ -666,7 +713,7 @@ struct ResearchNarrativeReportView: View {
     private func transitionStep(
         for section: ResearchJournalSection
     ) -> ResearchTransitionStep? {
-        steps.first { $0.stepRef == section.checkpointRef }
+        steps.first { $0.stepRef == section.auditCheckpointRef }
     }
 
     private func loadReport() async {
@@ -696,7 +743,11 @@ struct ResearchNarrativeReportView: View {
                     return $0.id < $1.id
                 }
             sections = loadedSections
-            await loadHistory(loadedSections.map(\.checkpointRef))
+            await loadHistory(Array(Set(
+                loadedSections.flatMap {
+                    [$0.checkpointRef, $0.auditCheckpointRef]
+                }
+            )))
             sectionRefsByCheckpoint = Dictionary(
                 loadedSections.map { ($0.checkpointRef, $0.sectionRef) },
                 uniquingKeysWith: { first, _ in first }
@@ -1085,6 +1136,24 @@ private struct ResearchAuditPopover: View {
 }
 
 enum ResearchDisplayText {
+    static func reportRequirement(_ requirementID: String) -> String? {
+        switch requirementID.split(separator: ".").last.map(String.init) {
+        case "expression_identity": return "原公式、参数与版本"
+        case "observable_meaning_direction_units":
+            return "可观察含义、方向、单位与数值域"
+        case "timing_and_causality": return "时序与因果可用性"
+        case "alternatives_and_falsifiers": return "替代解释与可证伪条件"
+        case "behavioral_mechanism": return "行为机制"
+        case "boundary_conditions": return "适用边界与市场环境"
+        case "microstructure_channel": return "微观结构渠道"
+        case "participant_ecology": return "市场参与者生态"
+        case "risk_transfer_and_fundamentals": return "风险转移与基本面机制"
+        case "conditioning_semantics": return "条件化信号的研究语义"
+        case "parameterization_and_derivation": return "参数化与派生因子"
+        default: return nil
+        }
+    }
+
     static func reportTitle(_ title: String) -> String {
         guard title.range(
             of: "\\p{Han}",

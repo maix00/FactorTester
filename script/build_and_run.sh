@@ -142,9 +142,35 @@ install_app() {
   rm -rf "$STAGING_PATH"
   ditto "$APP_BUNDLE" "$STAGING_PATH"
   verify_install "$APP_BUNDLE" "$STAGING_PATH"
-  rm -rf "$INSTALLED_APP"
-  mv "$STAGING_PATH" "$INSTALLED_APP"
-  STAGING_PATH=""
+  if test -d "$INSTALLED_APP"; then
+    /usr/bin/python3 - "$STAGING_PATH" "$INSTALLED_APP" <<'PY'
+import ctypes
+import os
+import sys
+
+libc = ctypes.CDLL(None, use_errno=True)
+renameatx_np = libc.renameatx_np
+renameatx_np.argtypes = [
+    ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+    ctypes.c_uint,
+]
+renameatx_np.restype = ctypes.c_int
+AT_FDCWD = -2
+RENAME_SWAP = 0x00000002
+source, target = (os.fsencode(value) for value in sys.argv[1:3])
+if renameatx_np(
+    AT_FDCWD, source, AT_FDCWD, target, RENAME_SWAP
+) != 0:
+    error = ctypes.get_errno()
+    raise OSError(error, os.strerror(error))
+PY
+    # After the atomic exchange the staging path contains the previous app.
+    rm -rf "$STAGING_PATH"
+    STAGING_PATH=""
+  else
+    mv "$STAGING_PATH" "$INSTALLED_APP"
+    STAGING_PATH=""
+  fi
   verify_install "$APP_BUNDLE" "$INSTALLED_APP"
 }
 

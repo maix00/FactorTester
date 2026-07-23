@@ -66,6 +66,10 @@ struct ResearchJournalSection: Decodable, Identifiable {
     let blocks: [ResearchJournalBlock]
     let links: [ResearchJournalLink]
     let checkpointRef: String
+    /// Immutable checkpoint that owns this prose. `checkpointRef` may be a
+    /// display anchor when a report-only checkpoint is grouped below a graph
+    /// node.
+    let auditCheckpointRef: String
     let createdAt: Double
     let graphRef: String
     let branchRef: String
@@ -104,6 +108,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
         ) ?? []
         sectionRef = ""
         checkpointRef = ""
+        auditCheckpointRef = ""
         createdAt = 0
         graphRef = ""
         branchRef = ""
@@ -117,6 +122,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
         blocks: [ResearchJournalBlock],
         links: [ResearchJournalLink],
         checkpointRef: String,
+        auditCheckpointRef: String? = nil,
         createdAt: Double,
         graphRef: String = "",
         branchRef: String = "",
@@ -131,6 +137,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
         self.blocks = blocks
         self.links = links
         self.checkpointRef = checkpointRef
+        self.auditCheckpointRef = auditCheckpointRef ?? checkpointRef
         self.createdAt = createdAt
         self.graphRef = graphRef
         self.branchRef = branchRef
@@ -151,6 +158,7 @@ struct ResearchJournalSection: Decodable, Identifiable {
             blocks: blocks,
             links: links,
             checkpointRef: checkpoint.checkpointRef,
+            auditCheckpointRef: checkpoint.checkpointRef,
             createdAt: checkpoint.createdAt,
             graphRef: checkpoint.graphRef,
             branchRef: checkpoint.branchRef,
@@ -298,6 +306,13 @@ struct ResearchJournalLink: Decodable, Identifiable, Hashable {
 }
 
 enum ResearchJournalPresentation {
+    static func hasReadableEvidencePresentation(
+        _ link: ResearchJournalLink,
+        in presentations: [ResearchEvidencePresentation]
+    ) -> Bool {
+        evidenceSummary(for: link, in: presentations) != nil
+    }
+
     static func chipLabel(
         _ link: ResearchJournalLink,
         sectionTitle: String,

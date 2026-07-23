@@ -192,8 +192,19 @@ def _narrative(
     for item_index, item in enumerate(items):
         content = deepcopy(item["content"])
         content["report_binding"] = deepcopy(item["report_binding"])
+        stable_key = hashlib.sha256(
+            json.dumps(
+                {
+                    "report_requirement_id": item["report_requirement_id"],
+                    "subject_ref": item["subject_ref"],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:16]
         sections.append({
-            "section_id": f"current-node-report-{item_index + 1}",
+            "section_id": f"current-node-{stable_key}",
             "title": _report_title(item, item_index=item_index),
             "blocks": [content],
             "links": deepcopy(item.get("links") or []),

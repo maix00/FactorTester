@@ -11,12 +11,30 @@ struct RenderedMathFormulaView: View {
         MathFormulaWebView(
             latex: latex,
             fallback: fallback,
+            richText: nil,
             contentHeight: $contentHeight
         )
         .frame(maxWidth: .infinity)
         .frame(height: min(max(contentHeight, 48), 420))
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .accessibilityLabel(fallback)
+    }
+}
+
+struct RenderedInlineMathTextView: View {
+    let text: String
+    @State private var contentHeight: CGFloat = 36
+
+    var body: some View {
+        MathFormulaWebView(
+            latex: "",
+            fallback: text,
+            richText: ResearchReportTextProjection.mathJaxSource(text),
+            contentHeight: $contentHeight
+        )
+        .frame(maxWidth: .infinity)
+        .frame(height: min(max(contentHeight, 28), 420))
+        .accessibilityLabel(text)
     }
 }
 
@@ -73,6 +91,7 @@ private enum BundledMathJaxRuntime {
 private struct MathFormulaWebView: NSViewRepresentable {
     let latex: String
     let fallback: String
+    let richText: String?
     @Binding var contentHeight: CGFloat
 
     func makeCoordinator() -> MathFormulaCoordinator {
@@ -115,15 +134,22 @@ private struct MathFormulaWebView: NSViewRepresentable {
         _ webView: WKWebView,
         coordinator: MathFormulaCoordinator
     ) {
-        guard coordinator.loadedLatex != latex else { return }
-        coordinator.loadedLatex = latex
-        loadDocument(webView, latex: latex, fallback: fallback)
+        let key = richText ?? latex
+        guard coordinator.loadedLatex != key else { return }
+        coordinator.loadedLatex = key
+        loadDocument(
+            webView,
+            latex: latex,
+            fallback: fallback,
+            richText: richText
+        )
     }
 }
 #else
 private struct MathFormulaWebView: UIViewRepresentable {
     let latex: String
     let fallback: String
+    let richText: String?
     @Binding var contentHeight: CGFloat
 
     func makeCoordinator() -> MathFormulaCoordinator {
@@ -160,9 +186,15 @@ private struct MathFormulaWebView: UIViewRepresentable {
         _ webView: WKWebView,
         coordinator: MathFormulaCoordinator
     ) {
-        guard coordinator.loadedLatex != latex else { return }
-        coordinator.loadedLatex = latex
-        loadDocument(webView, latex: latex, fallback: fallback)
+        let key = richText ?? latex
+        guard coordinator.loadedLatex != key else { return }
+        coordinator.loadedLatex = key
+        loadDocument(
+            webView,
+            latex: latex,
+            fallback: fallback,
+            richText: richText
+        )
     }
 }
 #endif
@@ -192,12 +224,12 @@ private final class MathFormulaCoordinator: NSObject, WKScriptMessageHandler {
 private func loadDocument(
     _ webView: WKWebView,
     latex: String,
-    fallback: String
+    fallback: String,
+    richText: String? = nil
 ) {
-    guard let html = MathFormulaDocument.makeHTML(
-        latex: latex,
-        fallback: fallback
-    ) else {
+    let html = richText.flatMap(MathRichTextDocument.makeHTML)
+        ?? MathFormulaDocument.makeHTML(latex: latex, fallback: fallback)
+    guard let html else {
         webView.loadHTMLString(
             "<html><body>\(fallback)</body></html>",
             baseURL: nil
@@ -207,4 +239,36 @@ private func loadDocument(
     let controller = webView.configuration.userContentController
     controller.removeAllUserScripts()
     webView.loadHTMLString(html, baseURL: nil)
+}
+
+enum MathRichTextDocument {
+    static func makeHTML(_ text: String) -> String? {
+        guard let runtime = BundledMathJaxRuntime.source else { return nil }
+        let data = try? JSONSerialization.data(
+            withJSONObject: [text],
+            options: []
+        )
+        let payload = data.flatMap { String(data: $0, encoding: .utf8) }
+            ?? #"[""]"#
+        return """
+        <!doctype html><html><head><meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+        :root{color-scheme:light dark}html,body{margin:0;padding:0;background:transparent}
+        body{color:CanvasText;font:-apple-system-body;line-height:1.55;overflow:hidden}
+        #content{box-sizing:border-box;width:100%;padding:0;visibility:hidden}
+        #content mjx-container{margin:0 .08em!important;display:inline!important}
+        #fallback{display:none;color:GrayText}
+        </style><script>
+        window.ftRichText=\(payload)[0];
+        function ftHeight(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.formulaHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});}
+        function ftFallback(){document.getElementById('content').style.display='none';document.getElementById('fallback').style.display='block';ftHeight();}
+        window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)'],['$','$']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('content').style.visibility='visible';ftHeight();}).catch(ftFallback);}}};
+        </script><script>\(runtime)</script></head><body>
+        <div id="content"></div><div id="fallback"></div><script>
+        document.getElementById('content').textContent=window.ftRichText;
+        document.getElementById('fallback').textContent=window.ftRichText;
+        </script></body></html>
+        """
+    }
 }

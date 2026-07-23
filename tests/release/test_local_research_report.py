@@ -21,6 +21,15 @@ from tools.cli.release.research_reporting.report_items import (
     report_item_hash,
 )
 from tools.cli.release.research_reporting.assets import stage_report_asset
+from tools.cli.release.research_reporting.presentation_migration import (
+    migrate_trace_evidence_rows,
+)
+from server.services.research_graph.research_cycle.evidence import (
+    validate_agent_evidence_envelope,
+)
+from server.services.research_graph.research_cycle.replay import (
+    validate_research_cycle_checkpoint,
+)
 
 
 def _carrier() -> dict:
@@ -152,6 +161,91 @@ def publish_research_checkpoint(**kwargs):
     carrier = kwargs["carrier"]
     kwargs.setdefault("narrative", _narrative(carrier))
     return _publish_checkpoint(**kwargs)
+
+
+def test_historical_presentation_migration_rehashes_canonical_objects_only():
+    carrier = _carrier()
+    checkpoint = {
+        "schema_version": 1,
+        "contract_hash": "2" * 64,
+        "methodology_hash": "1" * 64,
+        "trial_plan_hash": "",
+        "claims": [],
+        "obligations": [{
+            "schema_version": 1,
+            "obligation_id": "sgccs-data-coverage-feasibility",
+            "obligation_kind": "data_availability_for_trial_design",
+            "epistemic_question": "What exact causal data are available?",
+            "scope": {"product_group": "china_futures"},
+            "claim_ids": [],
+            "materiality": "decision_blocking",
+            "status": "open",
+            "discharge_criterion": {"rule_ref": "research-rule:data"},
+            "contract_hash": "2" * 64,
+            "methodology_hash": "1" * 64,
+            "created_event_ref": "event:bootstrap",
+        }],
+        "pending_adjudications": [],
+        "pending_closure": None,
+        "closure": None,
+    }
+    checkpoint = validate_research_cycle_checkpoint(checkpoint)
+    envelope = validate_agent_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "availability",
+        "evidence_kind": "data_availability",
+        "source_refs": ["data-profile:test"],
+        "identity_refs": {
+            "contract_hash": "2" * 64,
+            "methodology_hash": "1" * 64,
+        },
+        "facts": {
+            "product_status": [{"product": "LH.DCE", "available": True}],
+        },
+        "metric_refs": [],
+        "artifact_refs": [],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    })
+    old_ref = "evidence:" + envelope["envelope_hash"]
+    rows = [{
+        "trace_id": "trace-1",
+        "evidence": {
+            "evidence_refs": [old_ref],
+            "server_evidence": {"availability": envelope},
+            "research_cycle": {
+                "schema_version": 1,
+                "bootstrap_checkpoint": True,
+                "checkpoint_before_hash": checkpoint["projection_hash"],
+                "parent_trace_ref": "",
+                "events": [],
+            },
+            "research_cycle_checkpoint": checkpoint,
+        },
+    }]
+
+    migrated, receipt = migrate_trace_evidence_rows(rows)
+    after = migrated[0]["evidence"]
+    migrated_envelope = after["server_evidence"]["availability"]
+
+    assert migrated_envelope["title"] == "LH.DCE 的历史数据覆盖清单"
+    assert "查询范围" in migrated_envelope["claim_summary"]
+    assert after["evidence_refs"] == [
+        "evidence:" + migrated_envelope["envelope_hash"]
+    ]
+    assert (
+        after["research_cycle_checkpoint"]["obligations"][0]["status"]
+        == "open"
+    )
+    assert "点时数据" in (
+        after["research_cycle_checkpoint"]["obligations"][0][
+            "epistemic_question"
+        ]
+    )
+    assert receipt["input_hash"] != receipt["output_hash"]
+    assert rows[0]["evidence"]["evidence_refs"] == [old_ref]
 
 
 def test_ordinary_checkpoint_does_not_require_untouched_cycle_snapshot(
@@ -365,6 +459,13 @@ def test_current_node_maxa_projection_updates_real_journal_index_and_report(
     assert journal_value["checkpoints"][-1]["sections"][10]["title"] == (
         "第11项语义核对"
     )
+    section_ids = [
+        section["section_id"]
+        for section in journal_value["checkpoints"][-1]["sections"]
+    ]
+    assert len(section_ids) == len(set(section_ids))
+    assert all("-current-node-" in value for value in section_ids)
+    assert all("-current-node-report-" not in value for value in section_ids)
     replay = publish_current_node_report_checkpoint(
         client_root=root,
         profile_id="maxa",

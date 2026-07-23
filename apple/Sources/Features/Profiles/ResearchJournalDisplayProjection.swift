@@ -16,17 +16,59 @@ extension ResearchJournalPresentation {
             else { return nil }
             return checkpoint.checkpointRef
         })
+        let checkpoints = Dictionary(
+            uniqueKeysWithValues: document.checkpoints.map {
+                ($0.checkpointRef, $0)
+            }
+        )
         var result: [ResearchJournalSection] = []
-        var fingerprints = Set<String>()
+        var fingerprintIndexes: [String: Int] = [:]
         for section in verified where !pureMigrationRefs.contains(
             section.checkpointRef
         ) {
-            let fingerprint = "\(section.checkpointRef)|"
+            let displayCheckpointRef = displayCheckpointRef(
+                for: section.checkpointRef,
+                checkpoints: checkpoints,
+                pureMigrationRefs: pureMigrationRefs
+            )
+            let projected = sectionWithReadableTitle(
+                section,
+                checkpointRef: displayCheckpointRef
+            )
+            let fingerprint = "\(displayCheckpointRef)|"
                 + contentFingerprint(section)
-            guard fingerprints.insert(fingerprint).inserted else { continue }
-            result.append(sectionWithReadableTitle(section))
+            if let index = fingerprintIndexes[fingerprint] {
+                result[index] = sectionWithMergedLinks(
+                    result[index],
+                    projected.links
+                )
+                continue
+            }
+            fingerprintIndexes[fingerprint] = result.count
+            result.append(projected)
         }
         return result
+    }
+
+    /// Report-only checkpoints are immutable audit events, not graph nodes.
+    /// Their prose is displayed as a subsection of the nearest substantive
+    /// graph checkpoint. Pure graph migration events are skipped as well.
+    private static func displayCheckpointRef(
+        for checkpointRef: String,
+        checkpoints: [String: ResearchJournalCheckpoint],
+        pureMigrationRefs: Set<String>
+    ) -> String {
+        var candidate = checkpointRef
+        var visited = Set<String>()
+        while visited.insert(candidate).inserted,
+              let checkpoint = checkpoints[candidate],
+              candidate.hasPrefix("report-checkpoint:")
+                || pureMigrationRefs.contains(candidate),
+              let predecessor = checkpoint.predecessorCheckpointRef,
+              !predecessor.isEmpty {
+            candidate = predecessor
+        }
+        return candidate
     }
 
     private static func isPureMigrationSection(
@@ -55,32 +97,26 @@ extension ResearchJournalPresentation {
                 }.joined(separator: "\n"),
             ].joined(separator: "\u{1f}")
         }.joined(separator: "\u{1e}")
-        let links = section.links.map {
-            "\($0.linkID)|\($0.kind)|\($0.targetRef)|\($0.label ?? "")"
-        }.joined(separator: "\u{1c}")
-        return section.body + "\u{1d}" + blocks + "\u{1b}" + links
+        return section.body + "\u{1d}" + blocks
     }
 
     private static func sectionWithReadableTitle(
-        _ section: ResearchJournalSection
+        _ section: ResearchJournalSection,
+        checkpointRef: String
     ) -> ResearchJournalSection {
-        guard section.title.range(
+        var title = section.title
+        if section.title.range(
             of: #"^当前节点报告项\s+\d+$"#,
             options: .regularExpression
-        ) != nil else { return section }
-        let firstText = section.blocks.lazy.compactMap { block in
-            block.rows.first?.text ?? block.text ?? block.fallback
-        }.first
-        guard var title = firstText?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !title.isEmpty else { return section }
-        for separator in ["。", "；", "："] {
-            title = title.components(separatedBy: separator)[0]
-        }
-        if title.count > 44 {
-            title = String(title.prefix(43)).trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ) + "…"
+        ) != nil {
+            let bindingTitle = section.blocks.lazy.compactMap {
+                $0.reportBinding?.reportRequirementID
+            }.first.flatMap(ResearchDisplayText.reportRequirement)
+            let firstText = section.blocks.lazy.compactMap { block in
+                block.rows.first?.text ?? block.text ?? block.fallback
+            }.first
+            title = bindingTitle ?? readableTitle(from: firstText)
+                ?? "研究记录"
         }
         return ResearchJournalSection(
             sectionID: section.sectionID,
@@ -89,7 +125,52 @@ extension ResearchJournalPresentation {
             body: section.body,
             blocks: section.blocks,
             links: section.links,
+            checkpointRef: checkpointRef,
+            auditCheckpointRef: section.auditCheckpointRef,
+            createdAt: section.createdAt,
+            graphRef: section.graphRef,
+            branchRef: section.branchRef,
+            researchOccurredAt: section.researchOccurredAt,
+            timeBasis: section.timeBasis,
+            timeSourceRefs: section.timeSourceRefs
+        )
+    }
+
+    private static func readableTitle(from value: String?) -> String? {
+        guard var title = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else { return nil }
+        for separator in ["。", "；", "："] {
+            title = title.components(separatedBy: separator)[0]
+        }
+        if title.count > 44 {
+            title = String(title.prefix(43)).trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ) + "…"
+        }
+        return title
+    }
+
+    private static func sectionWithMergedLinks(
+        _ section: ResearchJournalSection,
+        _ additional: [ResearchJournalLink]
+    ) -> ResearchJournalSection {
+        let links = (section.links + additional).reduce(
+            into: [ResearchJournalLink]()
+        ) { result, link in
+            if !result.contains(where: { $0.linkID == link.linkID }) {
+                result.append(link)
+            }
+        }
+        return ResearchJournalSection(
+            sectionID: section.sectionID,
+            sectionRef: section.sectionRef,
+            title: section.title,
+            body: section.body,
+            blocks: section.blocks,
+            links: links,
             checkpointRef: section.checkpointRef,
+            auditCheckpointRef: section.auditCheckpointRef,
             createdAt: section.createdAt,
             graphRef: section.graphRef,
             branchRef: section.branchRef,

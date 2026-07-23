@@ -537,6 +537,31 @@ final class ResearchJournalTests: XCTestCase {
                         "blocks":[{"kind":"paragraph","text":"只记录图版本变化。"}],
                         "links":[]
                       }]
+                    },
+                    {
+                      "checkpoint_ref":"report-checkpoint:sha256:\(String(repeating: "9", count: 64))",
+                      "created_at":3,
+                      "carrier_hash":"\(String(repeating: "1", count: 64))",
+                      "narrative_hash":"\(String(repeating: "2", count: 64))",
+                      "section_hash":"\(String(repeating: "3", count: 64))",
+                      "graph_ref":"factor-research@v10",
+                      "instance_ref":"graph-instance:i",
+                      "branch_ref":"graph-branch:i:b",
+                      "lineage_status":"linked","lineage_relation":"transition",
+                      "predecessor_checkpoint_ref":"trace:migration",
+                      "source_branch_ref":"",
+                      "sections":[{
+                        "section_id":"current-node-report-3",
+                        "title":"当前节点报告项 3",
+                        "blocks":[{
+                          "kind":"paragraph","text":"新增参数化候选。",
+                          "report_binding":{
+                            "report_requirement_id":"report.requirement.factor_semantics.parameterization_and_derivation",
+                            "subject_ref":"obligation:third"
+                          }
+                        }],
+                        "links":[]
+                      }]
                     }
                   ]
                 }
@@ -550,6 +575,16 @@ final class ResearchJournalTests: XCTestCase {
                 checkpointRef: "trace:research",
                 branchRef: "graph-branch:i:b",
                 title: "当前节点报告项 1",
+                summary: "摘要",
+                links: []
+            ),
+            ResearchReportSection(
+                id: "report-section:three",
+                sectionID: "current-node-report-3",
+                checkpointRef: "report-checkpoint:sha256:"
+                    + String(repeating: "9", count: 64),
+                branchRef: "graph-branch:i:b",
+                title: "当前节点报告项 3",
                 summary: "摘要",
                 links: []
             ),
@@ -578,11 +613,16 @@ final class ResearchJournalTests: XCTestCase {
             indexedBy: index
         )
 
-        XCTAssertEqual(sections.count, 1)
+        XCTAssertEqual(sections.count, 2)
         XCTAssertEqual(sections[0].title, "因子公式的经济含义已经逐项核对")
         XCTAssertEqual(
             sections[0].blocks[0].reportBinding?.subjectRef,
             "obligation:first"
+        )
+        XCTAssertEqual(sections[1].title, "参数化与派生因子")
+        XCTAssertEqual(sections[1].checkpointRef, "trace:research")
+        XCTAssertTrue(
+            sections[1].auditCheckpointRef.hasPrefix("report-checkpoint:")
         )
     }
 
@@ -597,6 +637,23 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(components.filter { $0.kind == .math }.map(\.text), [
             #"X_t=\frac{P_t}{H_t-L_t}"#, "P_t",
         ])
+        XCTAssertEqual(components[2].text, "，其中")
+        XCTAssertEqual(components[4].text, "为价格。")
+    }
+
+    func testInlineMathNormalizationPreservesChinesePunctuationAndCurrency() {
+        let source = #"当 \(x_t>0\) 时，比较 \(f(x,y)\)。$F 与 $Rev 控制调度；费用为 $100。另检验 $z_t<0$。"#
+        let normalized = ResearchReportTextProjection.mathJaxSource(source)
+
+        XCTAssertTrue(normalized.contains(#"\(x_t>0\) 时，"#))
+        XCTAssertTrue(normalized.contains(#"\(f(x,y)\)。"#))
+        XCTAssertTrue(normalized.contains(#"\(F\) 与 \(Rev\)"#))
+        XCTAssertTrue(normalized.contains("$100"))
+        XCTAssertTrue(normalized.contains("$z_t<0$"))
+        XCTAssertTrue(ResearchReportTextProjection.containsMath(source))
+        XCTAssertFalse(
+            ResearchReportTextProjection.containsMath("研究预算为 $100。")
+        )
     }
 
     func testCheckpointStatusRewindsOnlyLaterObligationChanges() throws {
