@@ -28,6 +28,42 @@ def _client(monkeypatch):
     return client, saved
 
 
+def _unauthenticated_client():
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(auth.auth_bp)
+
+    @app.get("/api/private-probe")
+    def private_probe():
+        return {"success": True}
+
+    return app.test_client()
+
+
+def test_unauthenticated_api_get_returns_json_instead_of_login_html() -> None:
+    response = _unauthenticated_client().get(
+        "/api/private-probe",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 401
+    assert response.content_type == "application/json"
+    assert response.get_json() == {
+        "success": False,
+        "error": "请先登录",
+        "login_required": True,
+    }
+
+
+def test_unauthenticated_browser_get_still_redirects_to_login() -> None:
+    response = _unauthenticated_client().get("/api/private-probe")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(
+        "/?next=/api/private-probe"
+    )
+
+
 def test_current_account_can_change_password(monkeypatch) -> None:
     client, saved = _client(monkeypatch)
 

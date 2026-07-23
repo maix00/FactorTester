@@ -4,17 +4,29 @@ import Combine
 /// 全局登录态 —— 包装 `/api/me`、`/login`、`/logout`，供整个 App 观察。
 @MainActor
 final class SessionStore: ObservableObject {
+    typealias ClientSessionBridge = @MainActor (String) async -> Bool
 
     @Published private(set) var user: UserInfo?
     @Published private(set) var isWorking = false
     @Published var lastError: String?
+
+    private let api: any SessionAPI
+    private let bridgeOverride: ClientSessionBridge?
+
+    init(
+        api: any SessionAPI = APIClient.shared,
+        bridge: ClientSessionBridge? = nil
+    ) {
+        self.api = api
+        bridgeOverride = bridge
+    }
 
     var isLoggedIn: Bool { user?.isLoggedIn ?? false }
     var role: String? { user?.role }
 
     /// 启动 / 设置变更后刷新当前登录态。
     func refresh() async {
-        do { user = try await APIClient.shared.me() }
+        do { user = try await api.me() }
         catch { user = nil }
     }
 
@@ -22,17 +34,14 @@ final class SessionStore: ObservableObject {
         isWorking = true; lastError = nil
         defer { isWorking = false }
         do {
-            let resp = try await APIClient.shared.login(username: username, password: password)
+            let resp = try await api.login(
+                username: username,
+                password: password
+            )
             if resp.success {
-                await refresh()
-                guard await bridgeClientSession(
+                return await completeAuthentication(
                     principalRef: resp.username ?? username
-                ) else {
-                    try? await APIClient.shared.logout()
-                    user = nil
-                    return false
-                }
-                return true
+                )
             } else {
                 lastError = resp.error ?? L10n.text("登录失败")
                 return false
@@ -44,6 +53,9 @@ final class SessionStore: ObservableObject {
     }
 
     private func bridgeClientSession(principalRef: String) async -> Bool {
+        if let bridgeOverride {
+            return await bridgeOverride(principalRef)
+        }
         guard let serverURL = ServerConfig.shared.baseURL?.absoluteString else {
             lastError = L10n.text("尚未配置服务器地址，请先在设置中填写。")
             return false
@@ -80,10 +92,15 @@ final class SessionStore: ObservableObject {
         isWorking = true; lastError = nil
         defer { isWorking = false }
         do {
-            let resp = try await APIClient.shared.register(username: username, password: password, organizationId: organizationId)
+            let resp = try await api.register(
+                username: username,
+                password: password,
+                organizationId: organizationId
+            )
             if resp.success {
-                await refresh()
-                return true
+                return await completeAuthentication(
+                    principalRef: resp.username ?? username
+                )
             } else {
                 lastError = resp.error ?? L10n.text("注册失败")
                 return false
@@ -94,19 +111,45 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    func logout() async {
-        try? await APIClient.shared.logout()
-        if let serverURL = ServerConfig.shared.baseURL?.absoluteString {
-            _ = try? await ReleaseCommand.runObject([
-                "client", "profile", "clear-ui-session",
-                "--server-url", serverURL,
-            ], executable: ClientCLIResolution.executable())
+    private func completeAuthentication(principalRef: String) async -> Bool {
+        do {
+            try await api.setKeepLogin(true)
+        } catch {
+            user = nil
+            lastError = error.localizedDescription
+            return false
         }
+        await refresh()
+        guard isLoggedIn else {
+            lastError = L10n.text("登录状态未能确认，请重新登录。")
+            return false
+        }
+        guard await bridgeClientSession(principalRef: principalRef) else {
+            try? await api.logout()
+            user = nil
+            return false
+        }
+        return true
+    }
+
+    func logout() async {
         user = nil
+        let api = api
+        let serverURL = ServerConfig.shared.baseURL?.absoluteString
+        let executable = ClientCLIResolution.executable()
+        Task {
+            try? await api.logout()
+            if let serverURL {
+                _ = try? await ReleaseCommand.runObject([
+                    "client", "profile", "clear-ui-session",
+                    "--server-url", serverURL,
+                ], executable: executable)
+            }
+        }
     }
 
     func setKeepLogin(_ keep: Bool) async {
-        try? await APIClient.shared.setKeepLogin(keep)
+        try? await api.setKeepLogin(keep)
         await refresh()
     }
 }

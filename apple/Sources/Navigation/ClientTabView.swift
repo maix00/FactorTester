@@ -1,13 +1,19 @@
 import SwiftUI
 
 struct ClientTabView: View {
+    @EnvironmentObject private var session: SessionStore
     let tab: ClientTab
     @ObservedObject var profiles: LocalProfileController
     let open: (ClientTab) -> Void
     let isActive: Bool
+    @State private var showResearchLogin = false
 
     var body: some View {
         content
+            .sheet(isPresented: $showResearchLogin) {
+                LoginView { _ in showResearchLogin = false }
+                    .environmentObject(session)
+            }
     }
 
     @ViewBuilder
@@ -32,50 +38,20 @@ struct ClientTabView: View {
         case .web(let path):
             WebPageView(path: path)
         case .research:
-            ProfileResearchOverview(
-                profiles: profiles.profiles,
-                profileLoadState: profiles.loadState,
-                openWorkPackage: { open(.workPackage($0)) }
-            )
-        case .workPackage(let item):
-            let visibleProfiles = profiles.profiles.filter {
-                item.profileIDs.contains($0.id)
-            }
-            if profiles.loadState == .loading && visibleProfiles.isEmpty {
-                ProgressView("正在读取本地 Profile…")
-            } else if profiles.loadState == .failed && visibleProfiles.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                    Text("本地 Profile 读取失败")
-                        .font(.headline)
-                    Text("暂不判断该研究是否没有 Profile。")
-                        .foregroundStyle(.secondary)
-                }
-            } else if visibleProfiles.count == 1,
-               let primaryProfile = visibleProfiles.first {
-                WorkPackageResearchView(
-                    item: item,
-                    profiles: visibleProfiles,
-                    primaryProfile: primaryProfile,
-                    isActive: isActive,
-                    onCheckpointChange: { checkpointRef in
-                        Task {
-                            await profiles.refreshUntilCheckpoint(
-                                profileID: primaryProfile.id,
-                                checkpointRef: checkpointRef
-                            )
-                        }
-                    }
+            if ResearchSessionAccess.canLoad(user: session.user) {
+                ProfileResearchOverview(
+                    profiles: profiles.profiles,
+                    profileLoadState: profiles.loadState,
+                    openWorkPackage: { open(.workPackage($0)) }
                 )
             } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "person.crop.circle.badge.questionmark")
-                        .font(.largeTitle)
-                    Text("研究 Profile 不可用").font(.headline)
-                    Text("该 Work Package 没有唯一且可验证的本地 Profile 归属。")
-                        .foregroundStyle(.secondary)
-                }
+                researchLoginPrompt
+            }
+        case .workPackage(let item):
+            if ResearchSessionAccess.canLoad(user: session.user) {
+                workPackage(item)
+            } else {
+                researchLoginPrompt
             }
         case .profiles:
             ProfilesDirectoryView(
@@ -110,5 +86,66 @@ struct ClientTabView: View {
         case .settings:
             ClientSettingsHub(open: open)
         }
+    }
+
+    @ViewBuilder
+    private func workPackage(_ item: ResearchDirectoryItem) -> some View {
+        let visibleProfiles = profiles.profiles.filter {
+            item.profileIDs.contains($0.id)
+        }
+        if profiles.loadState == .loading && visibleProfiles.isEmpty {
+            ProgressView("正在读取本地 Profile…")
+        } else if profiles.loadState == .failed && visibleProfiles.isEmpty {
+            VStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.largeTitle)
+                Text("本地 Profile 读取失败")
+                    .font(.headline)
+                Text("暂不判断该研究是否没有 Profile。")
+                    .foregroundStyle(.secondary)
+            }
+        } else if visibleProfiles.count == 1,
+                  let primaryProfile = visibleProfiles.first {
+            WorkPackageResearchView(
+                item: item,
+                profiles: visibleProfiles,
+                primaryProfile: primaryProfile,
+                isActive: isActive,
+                onCheckpointChange: { checkpointRef in
+                    Task {
+                        await profiles.refreshUntilCheckpoint(
+                            profileID: primaryProfile.id,
+                            checkpointRef: checkpointRef
+                        )
+                    }
+                }
+            )
+        } else {
+            VStack(spacing: 10) {
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .font(.largeTitle)
+                Text("研究 Profile 不可用").font(.headline)
+                Text("该 Work Package 没有唯一且可验证的本地 Profile 归属。")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var researchLoginPrompt: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "person.crop.circle.badge.xmark")
+                .font(.largeTitle)
+            Text("登录后读取研究").font(.headline)
+            Text("当前会话无效；重新登录后将读取该工作区的 Work Packages。")
+                .foregroundStyle(.secondary)
+            Button("登录") { showResearchLogin = true }
+                .buttonStyle(.borderedProminent)
+        }
+    }
+}
+
+enum ResearchSessionAccess {
+    static func canLoad(user: UserInfo?) -> Bool {
+        user?.isLoggedIn == true
     }
 }

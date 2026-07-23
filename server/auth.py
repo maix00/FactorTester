@@ -32,6 +32,15 @@ from server.services.page_runtime import cleanup_user_pages
 
 auth_bp = Blueprint('auth', __name__)
 
+
+def _wants_json_response() -> bool:
+    return (
+        request.is_json
+        or request.method != 'GET'
+        or request.accept_mimetypes.best == 'application/json'
+    )
+
+
 @auth_bp.before_app_request
 def _check_login():
     PUBLIC_ENDPOINTS = {
@@ -64,14 +73,14 @@ def _check_login():
                 cleanup_user_pages(user)
             cleanup_session_resource(session.get('_sid', ''))
             session.clear()
-            if request.is_json or request.method != 'GET':
+            if _wants_json_response():
                 return jsonify({'success': False, 'error': '长时间无操作，已自动退出', 'login_required': True, 'auto_logout': True}), 401
             return redirect(f'/?next={request.path}&auto_logout=1')
         touch_session_activity()
         return None
 
     # 未登录
-    if request.is_json or request.method != 'GET':
+    if _wants_json_response():
         return jsonify({'success': False, 'error': '请先登录', 'login_required': True}), 401
     # 未登录访问受保护页面 → 回首页并带 next 参数，首页会弹出登录框
     return redirect(f'/?next={request.path}')

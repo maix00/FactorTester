@@ -1,5 +1,17 @@
 import Foundation
 
+protocol SessionAPI {
+    func me() async throws -> UserInfo
+    func login(username: String, password: String) async throws -> AuthResponse
+    func register(
+        username: String,
+        password: String,
+        organizationId: String
+    ) async throws -> AuthResponse
+    func logout() async throws
+    func setKeepLogin(_ keep: Bool) async throws
+}
+
 /// 与后端通信的单例。
 ///
 /// - 用基于 cookie 的会话（与 Flask session 一致）：URLSession 默认共享
@@ -96,3 +108,5 @@ final class APIClient: NSObject {
     }
 
 }
+
+extension APIClient: SessionAPI {}

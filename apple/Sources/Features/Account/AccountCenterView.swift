@@ -97,7 +97,7 @@ private struct AccountIdentityCard: View {
 
     var body: some View {
         GroupBox {
-            if let user = session.user {
+            if session.isLoggedIn, let user = session.user {
                 VStack(spacing: 10) {
                     LabeledContent("用户名", value: user.username ?? "—")
                     LabeledContent("角色", value: user.role ?? "—")
