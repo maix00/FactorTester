@@ -302,6 +302,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
         capability_resolution: dict[str, Any],
         shadow_graph_version: int | None = None,
         shadow_run_id: str = "",
+        shadow_proposal_id: str = "",
         profile_ref: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
@@ -313,6 +314,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
                 "capability_resolution": capability_resolution,
                 "shadow_graph_version": shadow_graph_version,
                 "shadow_run_id": shadow_run_id,
+                "shadow_proposal_id": shadow_proposal_id,
                 "profile_ref": profile_ref,
             },
         ))

@@ -20,6 +20,9 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
 )
+from server.services.research_graph.branch.shadow_eligibility import (
+    require_shadow_eligibility,
+)
 from server.services.research_graph.branch.profile_identity import (
     optional_profile_ref,
 )
@@ -32,7 +35,6 @@ from server.services.research_graph.protocol import (
     GraphActivationBlocked,
     serialize_bounded_trace_evidence,
 )
-from server.services.research_graph.versions import load_graph
 from server.services.research_graph.work_packages import (
     insert_active,
     require_active,
@@ -49,45 +51,41 @@ def create_graph_instance(
     capability_resolution: dict[str, Any],
     shadow_graph_version: int | None = None,
     shadow_run_id: str = "",
+    shadow_proposal_id: str = "",
     profile_ref: str = "",
 ) -> dict[str, Any]:
     profile_ref = optional_profile_ref(profile_ref)
     if shadow_graph_version is not None:
-        active = load_graph(
-            graph_id=graph_id,
-            version=int(shadow_graph_version),
-        )
-        if active is None or active.get("lifecycle") != "draft":
-            raise GraphActivationBlocked("shadow draft graph not found")
         if not shadow_run_id:
             raise ValueError("shadow_run_id is required for a shadow instance")
+        if not shadow_proposal_id:
+            raise GraphActivationBlocked(
+                "shadow proposal is required for a shadow instance"
+            )
         mode = "shadow"
     else:
-        if shadow_run_id:
-            raise ValueError("shadow_run_id is only valid in shadow mode")
+        if shadow_run_id or shadow_proposal_id:
+            raise ValueError(
+                "shadow_run_id and shadow_proposal_id are only valid "
+                "in shadow mode"
+            )
         active = load_active_graph(graph_id=graph_id)
         if active is None:
             raise GraphActivationBlocked("active graph not found")
         mode = "live"
-    entry_node = str(
-        active.get("entry_node")
-        or ((active.get("nodes") or [{}])[0].get("node_id") or "")
-    )
-    declared_nodes = {
-        str(node.get("node_id") or "") for node in active.get("nodes") or []
-    }
-    if not entry_node or entry_node not in declared_nodes:
-        raise ValueError("active graph entry_node is invalid")
-    entry = next(
-        node
-        for node in active.get("nodes") or []
-        if str(node.get("node_id") or "") == entry_node
-    )
     instance_id = uuid.uuid4().hex
     branch_id = uuid.uuid4().hex
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         if mode == "shadow":
+            conn.execute("BEGIN IMMEDIATE")
+            active, shadow_active_version = require_shadow_eligibility(
+                conn,
+                graph_id=graph_id,
+                graph_version=int(shadow_graph_version),
+                owner=owner,
+                proposal_id=shadow_proposal_id,
+            )
             try:
                 run = conn.execute(
                     """
@@ -106,6 +104,34 @@ def create_graph_instance(
                     "shadow_run_id must reference an owned research run "
                     "in the same workspace"
                 )
+            current_pointer = conn.execute(
+                """
+                SELECT version FROM active_research_graphs WHERE graph_id=?
+                """,
+                (graph_id,),
+            ).fetchone()
+            if (
+                current_pointer is None
+                or int(current_pointer["version"]) != shadow_active_version
+            ):
+                raise GraphActivationBlocked(
+                    "active Graph pointer changed during shadow start"
+                )
+        entry_node = str(
+            active.get("entry_node")
+            or ((active.get("nodes") or [{}])[0].get("node_id") or "")
+        )
+        declared_nodes = {
+            str(node.get("node_id") or "")
+            for node in active.get("nodes") or []
+        }
+        if not entry_node or entry_node not in declared_nodes:
+            raise ValueError("active graph entry_node is invalid")
+        entry = next(
+            node
+            for node in active.get("nodes") or []
+            if str(node.get("node_id") or "") == entry_node
+        )
         local_resolution = normalize_capability_resolution(
             capability_resolution,
             node_id=entry_node,

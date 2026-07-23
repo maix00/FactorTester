@@ -26,6 +26,7 @@ class FakeClient:
         self.continuation_response = None
         self.agent_budget_call = None
         self.agent_invocation_call = None
+        self.instance_call = None
 
     def publish_research_graph(self, graph):
         self.published = graph
@@ -98,6 +99,7 @@ class FakeClient:
         return {"authorization_id": "gate-rollback-1", **kwargs}
 
     def create_research_graph_instance(self, **kwargs):
+        self.instance_call = kwargs
         return {
             "instance_id": "instance-1",
             **kwargs,
@@ -253,6 +255,38 @@ class FakeClient:
                 "title_zh": "产品数据源",
             },
         }
+
+
+def test_shadow_start_forwards_explicit_proposal_id(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    resolution_file = tmp_path / "resolution.json"
+    resolution_file.write_text(
+        json.dumps({
+            "node_id": "hypothesis",
+            "bindings": [],
+            "gaps": [],
+            "triggered_conditional_bindings": [],
+            "undetermined_conditions": [],
+        }),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "start", "factor-research",
+        "--product-group", "equities",
+        "--workspace-id", "workspace-1",
+        "--shadow-graph-version", "9",
+        "--shadow-run-id", "run-shadow",
+        "--shadow-proposal-id", "proposal-v9",
+        "--capability-resolution-file", str(resolution_file),
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.instance_call["shadow_proposal_id"] == "proposal-v9"
 
 
 def test_research_graph_cli_publishes_and_reads_versions(

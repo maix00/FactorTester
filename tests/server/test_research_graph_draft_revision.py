@@ -7,10 +7,6 @@ import pytest
 import settings as Settings
 from cli_anything.factortester_research.core.graph import graph_content_hash
 from server.services import research_graphs
-from server.services import research_runs
-from server.services.research_graph.branch.runtime import (
-    create_graph_instance,
-)
 
 
 def _graph(*, version: int = 2) -> dict:
@@ -99,28 +95,18 @@ def test_draft_revision_rejects_a_wrong_source_hash(graph_db) -> None:
 
 def test_draft_revision_rejects_an_instantiated_graph(graph_db) -> None:
     original = research_graphs.register_graph(_graph(), actor="curator")
-    run = research_runs.create_run(
-        owner="alice",
-        workspace_id="workspace-1",
-        configuration_id="shadow-config",
-        configuration_revision=1,
-        run_spec={"workspace_id": "workspace-1", "factor": "test"},
-    )
-    create_graph_instance(
-        graph_id="factor-research",
-        owner="alice",
-        product_group="equities",
-        workspace_id="workspace-1",
-        shadow_graph_version=2,
-        shadow_run_id=run["run_id"],
-        capability_resolution={
-            "node_id": "hypothesis",
-            "bindings": [],
-            "gaps": [],
-            "triggered_conditional_bindings": [],
-            "undetermined_conditions": [],
-        },
-    )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner, graph_id, graph_version,
+                product_group, workspace_id, mode, created_at
+            ) VALUES (
+                'existing-instance', 'existing-instance', 'alice',
+                'factor-research', 2, 'equities', 'workspace-1', 'shadow', 1.0
+            )
+            """
+        )
 
     with pytest.raises(ValueError, match="immutable after"):
         research_graphs.revise_unused_draft(

@@ -287,6 +287,7 @@ def _authorize_rollback(
     from_version: int,
     target_version: int,
     reason: str,
+    validation_evidence: dict | None = None,
 ) -> dict:
     target = research_graphs.load_graph(
         graph_id="factor-research",
@@ -304,7 +305,11 @@ def _authorize_rollback(
         version=target_version,
         proposal_id=proposal["proposal_id"],
         actor="alice",
-        evidence=_server_validation_evidence(version=target_version),
+        evidence=(
+            validation_evidence
+            if validation_evidence is not None
+            else _server_validation_evidence(version=target_version)
+        ),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -570,6 +575,29 @@ def _server_validation_evidence(
     fallback_graph_usage: bool = False,
     extra_shadow_usage: bool = False,
 ) -> dict:
+    target_graph = research_graphs.load_graph(
+        graph_id="factor-research",
+        version=version,
+    )
+    parent_version = int(target_graph.get("parent_version") or 0)
+    if parent_version < 1:
+        raise AssertionError("shadow validation requires a parent Graph")
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        previous_pointer = conn.execute(
+            """
+            SELECT version, activated_by, activated_at
+            FROM active_research_graphs WHERE graph_id='factor-research'
+            """
+        ).fetchone()
+        conn.execute(
+            """
+            INSERT INTO active_research_graphs (
+                graph_id, version, activated_by, activated_at
+            ) VALUES ('factor-research', ?, 'alice', 1.0)
+            ON CONFLICT(graph_id) DO UPDATE SET version=excluded.version
+            """,
+            (parent_version,),
+        )
     workspace_id = f"shadow-workspace-{uuid.uuid4().hex}"
     run_spec = {
         "workspace_id": workspace_id,
@@ -609,7 +637,31 @@ def _server_validation_evidence(
         capability_resolution=resolution,
         shadow_graph_version=version,
         shadow_run_id=graph_run["run_id"],
+        shadow_proposal_id=_latest_proposal(
+            graph_version=version,
+        )["proposal_id"],
     )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        if previous_pointer is None:
+            conn.execute(
+                """
+                DELETE FROM active_research_graphs
+                WHERE graph_id='factor-research'
+                """
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE active_research_graphs
+                SET version=?, activated_by=?, activated_at=?
+                WHERE graph_id='factor-research'
+                """,
+                (
+                    int(previous_pointer["version"]),
+                    str(previous_pointer["activated_by"]),
+                    float(previous_pointer["activated_at"]),
+                ),
+            )
     flow_store = agent_flow.get_store()
     flow_store.configure_token_limit(
         owner_user_id="alice",
@@ -706,6 +758,79 @@ def _draft_graph() -> dict:
     return graph
 
 
+def _observed_graph() -> dict:
+    graph = deepcopy(_draft_graph())
+    graph.update({
+        "version": 1,
+        "lifecycle": "observed",
+        "parent_version": 0,
+    })
+    graph["content_hash"] = _hash(graph)
+    return graph
+
+
+def _prepare_shadow_start() -> tuple[dict, dict]:
+    observed = research_graphs.register_graph(
+        _observed_graph(),
+        actor="curator-agent",
+    )
+    draft = research_graphs.register_graph(
+        _draft_graph(),
+        actor="curator-agent",
+    )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO active_research_graphs (
+                graph_id, version, activated_by, activated_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            ("factor-research", 1, "alice", 1.0),
+        )
+    run = research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-1",
+        configuration_id=f"shadow-{uuid.uuid4().hex}",
+        configuration_revision=1,
+        run_spec={"workspace_id": "workspace-1", "factor": "test"},
+    )
+    return observed | {"draft": draft}, run
+
+
+def _open_shadow_proposal(*, version: int = 2) -> dict:
+    proposer = _agent_execution("proposer")
+    return research_graphs.record_proposal(
+        graph_id="factor-research",
+        version=version,
+        owner_user_id="alice",
+        actor_agent_id=proposer["execution_id"],
+        risk_level="L4",
+        change_diff={"reason": f"shadow-test-v{version}"},
+        evidence_refs=["test:shadow-eligibility"],
+        token_estimate=100,
+        conversation_ref="auth-conversation:test-shadow-eligibility",
+    )
+
+
+def _start_shadow(*, run_id: str, proposal_id: str) -> dict:
+    return research_graphs.create_graph_instance(
+        graph_id="factor-research",
+        owner="alice",
+        product_group="equities",
+        workspace_id="workspace-1",
+        capability_resolution=_capability_resolution(
+            node_id="hypothesis",
+            product_group="equities",
+            capability_ids=["research-hypothesis.preregister"],
+            graph_version=2,
+            shadow_mode=True,
+        ),
+        shadow_graph_version=2,
+        shadow_run_id=run_id,
+        shadow_proposal_id=proposal_id,
+    )
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     _initialize_graph_db(tmp_path, monkeypatch)
@@ -716,6 +841,205 @@ def client(tmp_path, monkeypatch):
     with client.session_transaction() as session:
         session["username"] = "alice"
     return client
+
+
+def test_shadow_start_requires_an_explicit_activation_proposal(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    _, run = _prepare_shadow_start()
+
+    with pytest.raises(
+        research_graphs.GraphActivationBlocked,
+        match="shadow proposal",
+    ):
+        research_graphs.create_graph_instance(
+            graph_id="factor-research",
+            owner="alice",
+            product_group="equities",
+            workspace_id="workspace-1",
+            capability_resolution=_capability_resolution(
+                node_id="hypothesis",
+                product_group="equities",
+                capability_ids=["research-hypothesis.preregister"],
+                graph_version=2,
+                shadow_mode=True,
+            ),
+            shadow_graph_version=2,
+            shadow_run_id=run["run_id"],
+        )
+
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_graph_instances"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_work_packages"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_graph_branches"
+        ).fetchone()[0] == 0
+
+
+def test_shadow_start_accepts_direct_child_with_matching_open_proposal(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    _, run = _prepare_shadow_start()
+    proposal = _open_shadow_proposal()
+
+    instance = _start_shadow(
+        run_id=run["run_id"],
+        proposal_id=proposal["proposal_id"],
+    )
+
+    assert instance["mode"] == "shadow"
+    assert instance["graph_version"] == 2
+
+
+def test_shadow_start_rejects_non_direct_child_before_any_write(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    _, run = _prepare_shadow_start()
+    proposal = _open_shadow_proposal()
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            """
+            UPDATE active_research_graphs SET version=2
+            WHERE graph_id='factor-research'
+            """
+        )
+
+    with pytest.raises(
+        research_graphs.GraphActivationBlocked,
+        match="direct child",
+    ):
+        _start_shadow(
+            run_id=run["run_id"],
+            proposal_id=proposal["proposal_id"],
+        )
+
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_graph_instances"
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "proposal_mutation",
+    ["wrong_owner", "wrong_target", "wrong_action", "consumed"],
+)
+def test_shadow_start_rejects_a_nonmatching_or_consumed_proposal(
+    tmp_path,
+    monkeypatch,
+    proposal_mutation,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    _, run = _prepare_shadow_start()
+    if proposal_mutation == "wrong_target":
+        graph = deepcopy(_draft_graph())
+        graph.update({"version": 3, "parent_version": 2})
+        graph["content_hash"] = _hash(graph)
+        research_graphs.register_graph(graph, actor="curator-agent")
+        proposal = _open_shadow_proposal(version=3)
+    elif proposal_mutation == "wrong_action":
+        proposer = _agent_execution("proposer")
+        proposal = research_graphs.record_proposal(
+            graph_id="factor-research",
+            version=2,
+            owner_user_id="alice",
+            actor_agent_id=proposer["execution_id"],
+            risk_level="L4",
+            change_diff={"reason": "wrong shadow action"},
+            evidence_refs=["test:wrong-action"],
+            token_estimate=100,
+            conversation_ref="auth-conversation:test-wrong-action",
+            pointer_action="rollback_graph_pointer",
+            pointer_from_version=1,
+            pointer_reason="test rollback is not shadow authorization",
+        )
+    else:
+        proposal = _open_shadow_proposal()
+        with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            if proposal_mutation == "wrong_owner":
+                conn.execute(
+                    """
+                    UPDATE research_maintenance_cases
+                    SET owner_user_id='bob' WHERE case_id=?
+                    """,
+                    (proposal["proposal_id"],),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE research_maintenance_cases
+                    SET status='resolved', closed_at=2.0 WHERE case_id=?
+                    """,
+                    (proposal["proposal_id"],),
+                )
+
+    with pytest.raises(research_graphs.GraphActivationBlocked):
+        _start_shadow(
+            run_id=run["run_id"],
+            proposal_id=proposal["proposal_id"],
+        )
+
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_graph_instances"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_work_packages"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_graph_branches"
+        ).fetchone()[0] == 0
+
+
+def test_shadow_start_fails_closed_if_active_pointer_changes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    _, run = _prepare_shadow_start()
+    proposal = _open_shadow_proposal()
+    require_eligibility = branch_runtime.require_shadow_eligibility
+
+    def move_pointer_after_check(conn, **kwargs):
+        result = require_eligibility(conn, **kwargs)
+        conn.execute(
+            """
+            UPDATE active_research_graphs SET version=2
+            WHERE graph_id='factor-research'
+            """
+        )
+        return result
+
+    monkeypatch.setattr(
+        branch_runtime,
+        "require_shadow_eligibility",
+        move_pointer_after_check,
+    )
+    with pytest.raises(
+        research_graphs.GraphActivationBlocked,
+        match="pointer changed",
+    ):
+        _start_shadow(
+            run_id=run["run_id"],
+            proposal_id=proposal["proposal_id"],
+        )
+
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        assert conn.execute(
+            "SELECT version FROM active_research_graphs"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_graph_instances"
+        ).fetchone()[0] == 0
 
 
 def test_graph_continuation_routes_preserve_exact_target(
@@ -782,6 +1106,34 @@ def test_graph_continuation_routes_preserve_exact_target(
             "human_authorization_id": "gate-146",
         }),
     ]
+
+
+def test_shadow_start_http_forwards_explicit_proposal_id(
+    client,
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return {"instance_id": "shadow-instance"}
+
+    monkeypatch.setattr(research_graphs, "create_graph_instance", create)
+    response = client.post(
+        "/api/research-graph-instances",
+        json={
+            "graph_id": "factor-research",
+            "product_group": "equities",
+            "workspace_id": "workspace-1",
+            "capability_resolution": {},
+            "shadow_graph_version": 9,
+            "shadow_run_id": "run-shadow",
+            "shadow_proposal_id": "proposal-v9",
+        },
+    )
+
+    assert response.status_code == 201
+    assert captured["shadow_proposal_id"] == "proposal-v9"
 
 
 def test_graph_versions_are_immutable_and_activation_moves_only_pointer(
@@ -1768,12 +2120,13 @@ def test_audited_rollback_moves_only_the_active_pointer(
     _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal, _ = _approve_proposal()
+    first_validation_evidence = _server_validation_evidence()
     research_graphs.record_validation(
         graph_id="factor-research",
         version=2,
         proposal_id=proposal["proposal_id"],
         actor="alice",
-        evidence=_server_validation_evidence(),
+        evidence=first_validation_evidence,
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -1817,6 +2170,7 @@ def test_audited_rollback_moves_only_the_active_pointer(
         from_version=4,
         target_version=2,
         reason=rollback_reason,
+        validation_evidence=first_validation_evidence,
     )
     statements: list[str] = []
     original_connect = active_pointer.connect_sqlite
@@ -1891,6 +2245,7 @@ def test_audited_rollback_moves_only_the_active_pointer(
         from_version=4,
         target_version=2,
         reason=cas_reason,
+        validation_evidence=first_validation_evidence,
     )
     consume_rollback = (
         active_pointer.pointer_gate.consume_rollback

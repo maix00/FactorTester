@@ -267,6 +267,7 @@ def create_research_graph_instance():
             capability_resolution=data.get("capability_resolution") or {},
             shadow_graph_version=data.get("shadow_graph_version"),
             shadow_run_id=str(data.get("shadow_run_id") or ""),
+            shadow_proposal_id=str(data.get("shadow_proposal_id") or ""),
             profile_ref=str(
                 data.get("profile_ref")
                 or data.get("created_by_profile_ref")

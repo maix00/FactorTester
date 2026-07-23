@@ -317,6 +317,7 @@ def rollback_graph(
 @click.option("--workspace-id", required=True)
 @click.option("--shadow-graph-version", type=click.IntRange(min=1))
 @click.option("--shadow-run-id", default="")
+@click.option("--shadow-proposal-id", default="")
 @click.option("--profile-ref", default="")
 @click.option(
     "--capability-resolution-file",
@@ -329,6 +330,7 @@ def start_graph_instance(
     workspace_id: str,
     shadow_graph_version: int | None,
     shadow_run_id: str,
+    shadow_proposal_id: str,
     profile_ref: str,
     capability_resolution_file: Path,
 ) -> None:
@@ -353,6 +355,7 @@ def start_graph_instance(
         capability_resolution=resolution,
         shadow_graph_version=shadow_graph_version,
         shadow_run_id=shadow_run_id,
+        shadow_proposal_id=shadow_proposal_id,
         profile_ref=profile_ref,
     )))
 
