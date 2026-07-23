@@ -7,6 +7,7 @@ from dataclasses import asdict
 from tools.testers.backtest.engines.native.order import derive_group_status
 
 from .projection_values import enum_values, timestamp_text, timestamp_values
+from .projection_paired import project_paired_intents
 
 def project_strategy_order_audit(state, strategy) -> dict:
     store = state.order_store
@@ -31,6 +32,7 @@ def project_strategy_order_audit(state, strategy) -> dict:
             for group_id in sorted(group_ids)
             if group_id in store.groups_by_id
         ],
+        "paired_intents": project_paired_intents(orders),
         "orders": [
             project_order(order, attempts_by_order.get(order.order_id, ()))
             for order in orders

@@ -74,3 +74,38 @@ def test_summary_retention_does_not_pay_order_projection_cost():
             raise AssertionError("order projection was evaluated")
 
     emit_order_audit_artifact(SummarySink(), UnprojectableState(), "run-1")
+
+
+def test_paired_intent_projection_exposes_unbalanced_leg_fills():
+    strategy = Strategy(alias="carry")
+    timestamp = pd.Timestamp("2025-01-01")
+    state = BacktestRunState()
+    orders = [
+        Order(
+            instrument=product,
+            timestamp=timestamp,
+            quantity=quantity,
+            intent_quantity=quantity,
+            strategy=strategy,
+            order_id=f"O{index}",
+            order_group_id=f"G{index}",
+            parent_intent_id="CARRY-1",
+        )
+        for index, (product, quantity) in enumerate(
+            (("NEAR", 2.0), ("FAR", -4.0)),
+            start=1,
+        )
+    ]
+    for order in orders:
+        order.set("paired_execution_policy", "synchronized_submit")
+        state.order_store.register_order(order)
+    orders[0].register_fill(2.0)
+
+    paired = project_strategy_order_audit(
+        state, strategy,
+    )["paired_intents"][0]
+
+    assert paired["fill_ratios"] == [1.0, 0.0]
+    assert paired["leg_exposure"] is True
+    assert paired["status"] == "exposed"
+    assert paired["execution_policy"] == "synchronized_submit"

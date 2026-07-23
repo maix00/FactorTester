@@ -16,7 +16,11 @@ from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, run_window_envelope_for_state
-from tools.testers.backtest.modules.target import TargetStrategyModule, target_weight_intent
+from tools.testers.backtest.modules.target import (
+    PairedTargetWeightIntent,
+    TargetStrategyModule,
+    target_weight_intent,
+)
 
 
 _POSITIONS_REF = FieldRef("positions", owner="LedgerModule")
@@ -396,15 +400,21 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
         mapped: dict[Any, float] = {}
         mapping_trace: dict[str, str | None] = {}
         for product, weight in weights.items():
-            row = _tradable_contract_row(
-                product,
-                metadata,
-                timestamp=ctx.timestamp,
-                rollover_offset=rollover_offset,
-                force_close_offset=force_close_offset,
-                state=state,
-                engine_mode=engine_mode_for(config),
-            )
+            row = next((
+                candidate for candidate in metadata
+                if not candidate.get("is_identity")
+                and _contracts_match(candidate.get("contract_object"), product)
+            ), None)
+            if row is None:
+                row = _tradable_contract_row(
+                    product,
+                    metadata,
+                    timestamp=ctx.timestamp,
+                    rollover_offset=rollover_offset,
+                    force_close_offset=force_close_offset,
+                    state=state,
+                    engine_mode=engine_mode_for(config),
+                )
             target = row.get("contract_object", product) if row is not None else None
             if target is None:
                 mapping_trace[str(product)] = None
@@ -412,8 +422,25 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
             mapped[target] = mapped.get(target, 0.0) + weight
             mapping_trace[str(product)] = str(getattr(target, "name", target))
         ctx.set_for(_TARGET_WEIGHTS_REF, strategy, mapped)
-        ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
-            mapped, reason="term_structure_resolved_target"))
+        current_intent = ctx.get_for(
+            TargetStrategyModule.trade_intent, strategy, None,
+        )
+        if isinstance(current_intent, PairedTargetWeightIntent):
+            resolved_intent = PairedTargetWeightIntent(
+                mapped,
+                reason=current_intent.reason,
+                parent_intent_id=current_intent.parent_intent_id,
+                execution_policy=current_intent.execution_policy,
+            )
+        else:
+            resolved_intent = target_weight_intent(
+                mapped, reason="term_structure_resolved_target",
+            )
+        ctx.set_for(
+            TargetStrategyModule.trade_intent,
+            strategy,
+            resolved_intent,
+        )
         if mapping_trace:
             state.term_structure_store.record_target_mapping(strategy, ctx.timestamp, mapping_trace)
 

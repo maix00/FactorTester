@@ -6,6 +6,8 @@ from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.trading_rule import _resolve_method
+from tools.testers.backtest.modules.target import PairedTargetWeightIntent
+from .sizing import strategy_trade_intent
 
 from .decomposition import decompose_position_delta
 
@@ -18,6 +20,12 @@ def construct_orders(state, ctx, module) -> None:
     for strategy in ctx.active_strategies:
         orders = []
         deltas = ctx.get_for(module.deltas, strategy, {})
+        intent = strategy_trade_intent(ctx, strategy)
+        shared_parent_id = (
+            intent.parent_intent_id
+            if isinstance(intent, PairedTargetWeightIntent)
+            else ""
+        )
         for product in sorted(deltas, key=lambda item: str(getattr(item, "name", item))):
             delta = float(deltas[product] or 0.0)
             if abs(delta) <= 1e-12:
@@ -41,7 +49,7 @@ def construct_orders(state, ctx, module) -> None:
                     ledger_config=state.ledger_config_for(ledger),
                 )
             group_id = audit_store.next_group_id(strategy, ctx.timestamp)
-            parent_intent_id = f"{group_id}:intent"
+            parent_intent_id = shared_parent_id or f"{group_id}:intent"
             group, children = decompose_position_delta(
                 strategy=strategy,
                 product=product,
@@ -57,6 +65,12 @@ def construct_orders(state, ctx, module) -> None:
                     (strategy, product), "",
                 ),
             )
+            if isinstance(intent, PairedTargetWeightIntent):
+                for order in children:
+                    order.set(
+                        "paired_execution_policy",
+                        intent.execution_policy,
+                    )
             state.order_store.register_group(group)
             for order in children:
                 state.order_store.register_order(order)
@@ -65,6 +79,9 @@ def construct_orders(state, ctx, module) -> None:
                     details={
                         "group_policy": group.execution_policy,
                         "child_order_ids": group.child_order_ids,
+                        "paired_execution_policy": getattr(
+                            intent, "execution_policy", None,
+                        ),
                     },
                 )
             orders.extend(children)

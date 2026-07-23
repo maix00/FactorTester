@@ -44,6 +44,14 @@ class TargetWeightIntent:
 
 
 @dataclass(frozen=True)
+class PairedTargetWeightIntent(TargetWeightIntent):
+    """One strategy decision whose products are economically linked legs."""
+
+    parent_intent_id: str = ""
+    execution_policy: str = "synchronized_submit"
+
+
+@dataclass(frozen=True)
 class OrderDeltaIntent:
     deltas: dict[Any, float]
     reason: str = "order_deltas"
@@ -68,7 +76,11 @@ class TargetStrategyModule(ExecutableModule):
             default="group",
             control_template="select",
             tab="group_strategy",
-            options=(("group", "分组"), ("threshold", "阈值")),
+            options=(
+                ("group", "分组"),
+                ("threshold", "阈值"),
+                ("carry", "Carry"),
+            ),
             chip_template="策略意图: {value}",
             tab_label="分组数量",
             tab_order=90,
