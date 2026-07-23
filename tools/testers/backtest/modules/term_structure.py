@@ -74,6 +74,14 @@ class TermStructureStore:
     # price table. Cache by (id(row), offset) so that scan happens once per
     # run, not once per event.
     event_timestamp_cache: dict[tuple[int, Any], Any] = field(default_factory=dict)
+    # Coverage inference scans full contract and peer price series. Metadata
+    # rows are intentionally copied per strategy, so object-identity caching
+    # cannot share that work. Cache the source result by stable contract/peer
+    # identities within the loaded raw-price table; notice-specific offsets
+    # remain owned by event_timestamp_cache above.
+    coverage_inference_cache: dict[tuple[Any, ...], dict[str, Any]] = field(
+        default_factory=dict
+    )
 
     def set_expansion(self, contracts: dict[Any, Any], metadata: dict[Any, Any]) -> None:
         self.expanded_contracts = contracts
@@ -1211,7 +1219,20 @@ def _local_cnfutures_inferred_lifecycle(
         from sources.LocalCNFutures.lifecycle import infer_contract_end_from_coverage
     except Exception:
         return None
-    result = infer_contract_end_from_coverage(row, peer_rows or [row], raw_prices)
+    peers = peer_rows or [row]
+    store = getattr(state, "term_structure_store", None) if state is not None else None
+    cache = store.coverage_inference_cache if store is not None else None
+    cache_key = (
+        id(raw_prices),
+        _lifecycle_row_identity(row),
+        tuple(sorted(_lifecycle_row_identity(peer) for peer in peers)),
+    )
+    if cache is not None and cache_key in cache:
+        result = cache[cache_key]
+    else:
+        result = infer_contract_end_from_coverage(row, peers, raw_prices)
+        if cache is not None:
+            cache[cache_key] = result
     if result.get("status") != "ended":
         return None
     raw_ts = result.get("timestamp")
@@ -1226,6 +1247,14 @@ def _local_cnfutures_inferred_lifecycle(
     row.setdefault("lifecycle_inference", result)
     _record_lifecycle_inference_fallback(state, row, ts, result)
     return cast(pd.Timestamp, ts)
+
+
+def _lifecycle_row_identity(row: dict[str, Any]) -> str:
+    for key in ("contract_product", "uid", "contract_object", "contract"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return str(getattr(value, "name", value))
+    return repr(sorted((str(key), repr(value)) for key, value in row.items()))
 
 
 def _record_lifecycle_inference_fallback(
