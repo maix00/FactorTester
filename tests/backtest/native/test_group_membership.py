@@ -148,17 +148,17 @@ def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_sign
     filtered signal_value -- only their group_index/split_count differ. The
     O(n log n) rank-and-sort should happen once per distinct signal_value
     content, not once per strategy, even when split_count differs too."""
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.selection as selection_module
 
     rank_calls = 0
-    real_rank = group_membership_module.rank_cross_section
+    real_rank = selection_module.rank_cross_section
 
     def _counting_rank(*args, **kwargs):
         nonlocal rank_calls
         rank_calls += 1
         return real_rank(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "rank_cross_section", _counting_rank)
+    monkeypatch.setattr(selection_module, "rank_cross_section", _counting_rank)
 
     products = [_product() for _ in range(4)]
     signal_value = {p: float(i) for i, p in enumerate(products)}
@@ -204,17 +204,17 @@ def test_group_quantile_membership_reuses_raw_bucket_for_derived_group_sharing_s
     with mask") -- the raw bucket slice (before masking) should be computed
     once per (signal content, split_count, group_index), not once per
     strategy, even though the two strategies differ in product_mask_names."""
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.selection as selection_module
 
     split_calls = 0
-    real_split = group_membership_module.select_rank_group
+    real_split = selection_module.select_rank_group
 
     def _counting_split(*args, **kwargs):
         nonlocal split_calls
         split_calls += 1
         return real_split(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "select_rank_group", _counting_split)
+    monkeypatch.setattr(selection_module, "select_rank_group", _counting_split)
 
     products = [_product() for _ in range(4)]
     signal_value = {p: float(i) for i, p in enumerate(products)}
@@ -248,7 +248,7 @@ def test_group_quantile_membership_reuses_raw_bucket_for_derived_group_sharing_s
 
 
 def test_precomputed_target_intents_match_event_membership_and_skip_event_sort(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.selection as selection_module
 
     products = [_product() for _ in range(4)]
     idx = pd.date_range("2024-01-01 09:00", periods=2, freq="min")
@@ -294,7 +294,7 @@ def test_precomputed_target_intents_match_event_membership_and_skip_event_sort(m
         sort_calls += 1
         return real_sorted(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "sorted", _counting_sorted, raising=False)
+    monkeypatch.setattr(selection_module, "sorted", _counting_sorted, raising=False)
 
     event_ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue(), active_strategies=frozenset({s_top, s_bottom}))
     _group_quantile_membership(account, event_ctx)
@@ -345,7 +345,7 @@ def test_precomputed_buy_and_hold_waits_for_first_non_empty_masked_target():
 
 
 def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.execution as execution_module
 
     strategy = Strategy(alias="S")
     config = StrategyConfig(strategy=strategy, field_values={
@@ -357,14 +357,14 @@ def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):
     account.market_data_store.current_prices_table = pd.DataFrame({"P": [1.0, 2.0, 3.0]}, index=idx)
     ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue(), active_strategies=frozenset({strategy}))
     calls = 0
-    real_signal_timestamps = group_membership_module.signal_timestamps
+    real_signal_timestamps = execution_module.signal_timestamps
 
     def _counting_signal_timestamps(table):
         nonlocal calls
         calls += 1
         return real_signal_timestamps(table)
 
-    monkeypatch.setattr(group_membership_module, "signal_timestamps", _counting_signal_timestamps)
+    monkeypatch.setattr(execution_module, "signal_timestamps", _counting_signal_timestamps)
 
     first = _resolve_execution_schedule(account, ctx, strategy)
     second = _resolve_execution_schedule(account, ctx, strategy)
@@ -378,7 +378,7 @@ def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):
 
 
 def test_precomputed_target_intents_share_ranking_across_groups(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.precompute.vectorized as vectorized_module
 
     products = [_product() for _ in range(4)]
     idx = pd.date_range("2024-01-01 09:00", periods=1, freq="min")
@@ -413,18 +413,16 @@ def test_precomputed_target_intents_share_ranking_across_groups(monkeypatch):
         sort_calls += 1
         return real_sorted(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "sorted", _counting_sorted, raising=False)
+    monkeypatch.setattr(vectorized_module, "sorted", _counting_sorted, raising=False)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset(strategies))
     _precompute_strategy_intents(account, ctx)
 
-    # One call orders the precompute event groups; one call ranks the shared
-    # cross-section.  A second strategy sharing the signal row must not add a
-    # second cross-section sort.
-    assert sort_calls == 2
+    # One product ordering is shared by both strategies.
+    assert sort_calls == 1
 
 
 def test_precomputed_target_intents_skip_historical_fields_when_allocation_does_not_need_them(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.precompute.sequential as sequential_module
 
     products = [_product() for _ in range(2)]
     idx = pd.date_range("2024-01-01 09:00", periods=1, freq="min")
@@ -447,7 +445,7 @@ def test_precomputed_target_intents_skip_historical_fields_when_allocation_does_
     def _forbidden(*args, **kwargs):
         raise AssertionError("FieldHistory should not be read for equal_notional precompute")
 
-    monkeypatch.setattr(group_membership_module, "current_historical_fields_at", _forbidden)
+    monkeypatch.setattr(sequential_module, "current_historical_fields_at", _forbidden)
 
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
     _precompute_strategy_intents(account, ctx)
@@ -456,7 +454,7 @@ def test_precomputed_target_intents_skip_historical_fields_when_allocation_does_
 
 
 def test_precomputed_target_intents_read_historical_fields_for_equal_margin(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.precompute.sequential as sequential_module
 
     products = [_product() for _ in range(2)]
     idx = pd.date_range("2024-01-01 09:00", periods=1, freq="min")
@@ -484,7 +482,7 @@ def test_precomputed_target_intents_read_historical_fields_for_equal_margin(monk
             for product in products
         }
 
-    monkeypatch.setattr(group_membership_module, "current_historical_fields_at", _historical_fields_at)
+    monkeypatch.setattr(sequential_module, "current_historical_fields_at", _historical_fields_at)
 
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
     _precompute_strategy_intents(account, ctx)
@@ -495,7 +493,7 @@ def test_precomputed_target_intents_read_historical_fields_for_equal_margin(monk
 
 @pytest.mark.parametrize("allocation_policy", ["equal_notional", "inverse_volatility"])
 def test_vectorized_precompute_matches_legacy_event_precompute(monkeypatch, allocation_policy):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.precompute.coordinator as coordinator_module
 
     products = [_product() for _ in range(5)]
     idx = pd.date_range("2024-01-01 09:00", periods=30, freq="min")
@@ -553,7 +551,7 @@ def test_vectorized_precompute_matches_legacy_event_precompute(monkeypatch, allo
     _precompute_strategy_intents(vectorized, ctx)
 
     legacy = _state()
-    monkeypatch.setattr(group_membership_module, "_can_vectorize_group_precompute", lambda _state, _strategy: False)
+    monkeypatch.setattr(coordinator_module, "can_vectorize", lambda _state, _strategy: False)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset(strategies))
     _precompute_strategy_intents(legacy, ctx)
 
