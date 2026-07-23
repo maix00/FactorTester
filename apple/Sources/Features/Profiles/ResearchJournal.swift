@@ -69,12 +69,18 @@ struct ResearchJournalSection: Decodable, Identifiable {
     let createdAt: Double
     let graphRef: String
     let branchRef: String
+    let researchOccurredAt: Double?
+    let timeBasis: String?
+    let timeSourceRefs: [String]
 
     var id: String { sectionRef }
 
     enum CodingKeys: String, CodingKey {
         case sectionID = "section_id"
         case title, body, blocks, links
+        case researchOccurredAt = "research_occurred_at"
+        case timeBasis = "time_basis"
+        case timeSourceRefs = "time_source_refs"
     }
 
     init(from decoder: Decoder) throws {
@@ -87,6 +93,15 @@ struct ResearchJournalSection: Decodable, Identifiable {
             forKey: .blocks
         ) ?? []
         links = try container.decode([ResearchJournalLink].self, forKey: .links)
+        researchOccurredAt = try container.decodeIfPresent(
+            Double.self,
+            forKey: .researchOccurredAt
+        )
+        timeBasis = try container.decodeIfPresent(String.self, forKey: .timeBasis)
+        timeSourceRefs = try container.decodeIfPresent(
+            [String].self,
+            forKey: .timeSourceRefs
+        ) ?? []
         sectionRef = ""
         checkpointRef = ""
         createdAt = 0
@@ -104,7 +119,10 @@ struct ResearchJournalSection: Decodable, Identifiable {
         checkpointRef: String,
         createdAt: Double,
         graphRef: String = "",
-        branchRef: String = ""
+        branchRef: String = "",
+        researchOccurredAt: Double? = nil,
+        timeBasis: String? = nil,
+        timeSourceRefs: [String] = []
     ) {
         self.sectionID = sectionID
         self.sectionRef = sectionRef
@@ -116,6 +134,9 @@ struct ResearchJournalSection: Decodable, Identifiable {
         self.createdAt = createdAt
         self.graphRef = graphRef
         self.branchRef = branchRef
+        self.researchOccurredAt = researchOccurredAt
+        self.timeBasis = timeBasis
+        self.timeSourceRefs = timeSourceRefs
     }
 
     func bound(
@@ -132,7 +153,10 @@ struct ResearchJournalSection: Decodable, Identifiable {
             checkpointRef: checkpoint.checkpointRef,
             createdAt: checkpoint.createdAt,
             graphRef: checkpoint.graphRef,
-            branchRef: checkpoint.branchRef
+            branchRef: checkpoint.branchRef,
+            researchOccurredAt: researchOccurredAt,
+            timeBasis: timeBasis,
+            timeSourceRefs: timeSourceRefs
         )
     }
 }
@@ -145,10 +169,12 @@ struct ResearchJournalBlock: Decodable {
     let linkIDs: [String]
     let columns: [String]
     let rows: [ResearchJournalRow]
+    let reportTiming: ResearchOccurrenceTiming?
 
     enum CodingKeys: String, CodingKey {
         case kind, text, latex, fallback, columns, rows
         case linkIDs = "link_ids"
+        case reportTiming = "report_timing"
     }
 
     init(from decoder: Decoder) throws {
@@ -168,6 +194,22 @@ struct ResearchJournalBlock: Decodable {
             [ResearchJournalRow].self,
             forKey: .rows
         ) ?? []
+        reportTiming = try container.decodeIfPresent(
+            ResearchOccurrenceTiming.self,
+            forKey: .reportTiming
+        )
+    }
+}
+
+struct ResearchOccurrenceTiming: Decodable {
+    let occurredAt: Double
+    let timeBasis: String
+    let timeSourceRefs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case occurredAt = "occurred_at"
+        case timeBasis = "time_basis"
+        case timeSourceRefs = "time_source_refs"
     }
 }
 
@@ -469,6 +511,12 @@ enum ResearchJournalLoader {
                     throw ResearchJournalError.invalidContract
                 }
                 try validateLinks(section.links)
+                try validateTiming(
+                    occurredAt: section.researchOccurredAt,
+                    timeBasis: section.timeBasis,
+                    timeSourceRefs: section.timeSourceRefs,
+                    recordedAt: checkpoint.createdAt
+                )
                 try validateBlocks(section)
             }
             previousCheckpoint = checkpoint
@@ -483,6 +531,14 @@ enum ResearchJournalLoader {
         }
         let linkIDs = Set(section.links.map(\.linkID))
         for block in section.blocks {
+            if let timing = block.reportTiming {
+                try validateTiming(
+                    occurredAt: timing.occurredAt,
+                    timeBasis: timing.timeBasis,
+                    timeSourceRefs: timing.timeSourceRefs,
+                    recordedAt: section.createdAt
+                )
+            }
             switch block.kind {
             case "math":
                 guard block.text == nil,
@@ -534,6 +590,29 @@ enum ResearchJournalLoader {
         // it as a standalone audit chip below the prose. Every inline
         // reference must resolve, but a valid checkpoint/evidence link does
         // not need to be forced into an unrelated sentence or table row.
+    }
+
+    private static func validateTiming(
+        occurredAt: Double?,
+        timeBasis: String?,
+        timeSourceRefs: [String],
+        recordedAt: Double
+    ) throws {
+        guard occurredAt != nil || timeBasis != nil || !timeSourceRefs.isEmpty
+        else { return }
+        guard let occurredAt,
+              let timeBasis,
+              occurredAt.isFinite,
+              occurredAt >= 0,
+              occurredAt <= recordedAt,
+              Set(["transition", "historical_backfill"]).contains(timeBasis),
+              Set(timeSourceRefs).count == timeSourceRefs.count,
+              timeSourceRefs == timeSourceRefs.sorted(),
+              timeBasis != "transition" || occurredAt == recordedAt,
+              timeBasis != "historical_backfill" || !timeSourceRefs.isEmpty
+        else {
+            throw ResearchJournalError.invalidContract
+        }
     }
 
     private static func validateLinks(

@@ -153,7 +153,16 @@ struct ResearchNarrativeReportView: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Color.secondary.opacity(0.08), in: Capsule())
+                    if let occurredAt = section.researchOccurredAt {
+                        Text("研究发生于")
+                        Text(Date(timeIntervalSince1970: occurredAt), style: .date)
+                        Text(Date(timeIntervalSince1970: occurredAt), style: .time)
+                        Text("· 登记于")
+                    }
                     Text(Date(timeIntervalSince1970: section.createdAt), style: .date)
+                    if section.researchOccurredAt != nil {
+                        Text(Date(timeIntervalSince1970: section.createdAt), style: .time)
+                    }
                     Text("·")
                     Text(shortReference(section.checkpointRef))
                         .monospaced()
@@ -171,7 +180,24 @@ struct ResearchNarrativeReportView: View {
             if !section.blocks.isEmpty {
                 ForEach(Array(section.blocks.enumerated()), id: \.offset) {
                     _, block in
-                    reportBlock(block, section: section)
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let timing = block.reportTiming {
+                            HStack(spacing: 4) {
+                                Text("本条报告形成于")
+                                Text(
+                                    Date(timeIntervalSince1970: timing.occurredAt),
+                                    style: .date
+                                )
+                                Text(
+                                    Date(timeIntervalSince1970: timing.occurredAt),
+                                    style: .time
+                                )
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        }
+                        reportBlock(block, section: section)
+                    }
                 }
             }
 

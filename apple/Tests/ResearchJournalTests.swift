@@ -100,6 +100,20 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(block.linkIDs, ["paired-obligation"])
     }
 
+    func testDecodesHistoricalReportItemOccurrenceTime() throws {
+        let block = try JSONDecoder().decode(
+            ResearchJournalBlock.self,
+            from: Data(
+                #"{"kind":"paragraph","text":"完成语义审查。","report_timing":{"occurred_at":1.5,"time_basis":"historical_backfill","time_source_refs":["conversation:maxa-2"]}}"#.utf8
+            )
+        )
+
+        let timing = try XCTUnwrap(block.reportTiming)
+        XCTAssertEqual(timing.occurredAt, 1.5)
+        XCTAssertEqual(timing.timeBasis, "historical_backfill")
+        XCTAssertEqual(timing.timeSourceRefs, ["conversation:maxa-2"])
+    }
+
     func testReportFacingIdentifiersAreAlwaysSimplifiedChinese() {
         XCTAssertEqual(ResearchDisplayText.node("capability_gap"), "能力缺口")
         XCTAssertEqual(ResearchDisplayText.linkKind("checkpoint"), "检查点")
