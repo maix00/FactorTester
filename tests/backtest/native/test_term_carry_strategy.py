@@ -9,6 +9,7 @@ from tools.testers.backtest.modules.ledger_module import (
     _initialize_ledgers,
 )
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.order_construct import (
     OrderConstructModule,
     _construct_orders,
@@ -59,6 +60,23 @@ def test_term_carry_missing_leg_market_cannot_open_one_leg():
         TermCarryStrategyModule.term_carry_diagnostics, strategy,
     )
     assert diagnostics["blocked"][str(product)] == "missing_leg_market"
+
+
+def test_term_carry_fixed_product_mask_excludes_other_signal_products():
+    state, strategy, product, near, far = term_carry_state()
+    state.config_for(strategy).field_values[
+        GroupMembershipModule.product_mask_names
+    ] = ("OTHER.PRODUCT",)
+
+    ctx = term_carry_target(
+        state, strategy, product, near, far, "2025-01-02", 0.08,
+    )
+
+    assert ctx.get_for(TargetStrategyModule.target_weights, strategy) == {}
+    diagnostics = ctx.get_for(
+        TermCarryStrategyModule.term_carry_diagnostics, strategy,
+    )
+    assert diagnostics["directions"] == {}
 
 
 def test_term_carry_rejects_overlapping_contract_ranks():

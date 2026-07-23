@@ -8,15 +8,16 @@ from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     is_product_tradable,
 )
-from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.target import (
     PairedTargetWeightIntent,
     TargetStrategyModule,
 )
+from tools.testers.backtest.modules.term_carry_universe import (
+    products_for_term_carry_signal,
+)
 from tools.testers.backtest.modules.term_carry_validation import (
     validate_term_carry_config,
 )
-
 
 @dataclass
 class TermCarryStrategyStore:
@@ -32,14 +33,13 @@ def term_carry_strategy_store_for(state) -> TermCarryStrategyStore:
         setattr(state, "term_carry_strategy_store", store)
     return store
 
-
 def build_term_carry_targets(state, ctx, module) -> None:
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
         if config.get(TargetStrategyModule.strategy_kind) != "term_carry":
             continue
         signals = ctx.get_for(module._signal_value_ref, strategy, {}) or {}
-        products = ctx.get_for(ProductSelectionModule.products, strategy, ())
+        products = products_for_term_carry_signal(config, signals)
         targets, diagnostics = _strategy_targets(
             state, ctx, module, strategy, config, signals, products,
         )
