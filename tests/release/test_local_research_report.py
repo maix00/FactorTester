@@ -17,6 +17,7 @@ from tools.cli.release.research_reporting.report_items import (
     report_fragment_hash,
     report_item_hash,
 )
+from tools.cli.release.research_reporting.assets import stage_report_asset
 
 
 def _carrier() -> dict:
@@ -253,6 +254,75 @@ def _profile(root: Path) -> LocalProfileStore:
     }]
     store.save(profile)
     return store
+
+
+def test_stages_content_addressed_passive_report_image_once(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    source = tmp_path / "curve.svg"
+    source.write_bytes(
+        b'<svg xmlns="http://www.w3.org/2000/svg">'
+        b"<title>curve</title></svg>"
+    )
+
+    first = stage_report_asset(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        work_package_ref="work-package:sgccs-review",
+        source_path=source,
+        media_type="image/svg+xml",
+        caption="净值曲线与回撤",
+        alt_text="SgCCS 回测净值曲线",
+        provenance_refs=["job:job-1", "evidence:job-attempt-1"],
+    )
+    second = stage_report_asset(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        work_package_ref="work-package:sgccs-review",
+        source_path=source,
+        media_type="image/svg+xml",
+        caption="净值曲线与回撤",
+        alt_text="SgCCS 回测净值曲线",
+        provenance_refs=["job:job-1", "evidence:job-attempt-1"],
+    )
+
+    target = (
+        Path(store.load("maxa")["workspace_root"])
+        / "research" / "sgccs-review" / "assets" / first["filename"]
+    )
+    assert first["changed"] is True
+    assert second["changed"] is False
+    assert first["asset_ref"] == (
+        f"report-asset:sha256:{first['content_hash']}"
+    )
+    assert target.read_bytes() == source.read_bytes()
+
+
+def test_rejects_active_or_external_report_svg(tmp_path: Path) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    source = tmp_path / "active.svg"
+    source.write_bytes(
+        b'<svg xmlns="http://www.w3.org/2000/svg">'
+        b'<script>alert("x")</script></svg>'
+    )
+
+    with pytest.raises(ValueError, match="passive"):
+        stage_report_asset(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            work_package_ref="work-package:sgccs-review",
+            source_path=source,
+            media_type="image/svg+xml",
+            caption="不可信图像",
+            alt_text="",
+            provenance_refs=["job:job-1"],
+        )
 
 
 def test_historical_backfill_stages_without_moving_local_head_and_finalizes_once(

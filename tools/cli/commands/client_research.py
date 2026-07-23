@@ -17,6 +17,7 @@ from tools.cli.release.research_reporting.publisher import (
     publish_research_checkpoint,
     stage_historical_research_checkpoint,
 )
+from tools.cli.release.research_reporting.assets import stage_report_asset
 
 
 def _echo_json(value: dict) -> None:
@@ -31,6 +32,61 @@ def _echo_json(value: dict) -> None:
 @click.group("research")
 def client_research() -> None:
     """Inspect Work Packages and their Hypothesis Branches."""
+
+
+@client_research.group("asset")
+def research_asset() -> None:
+    """Manage immutable local report images without uploading source."""
+
+
+@research_asset.command("stage")
+@click.argument("profile_id")
+@click.option("--agent-id", required=True)
+@click.option("--work-package-ref", required=True)
+@click.option(
+    "--input",
+    "source_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--media-type",
+    required=True,
+    type=click.Choice([
+        "image/svg+xml", "image/png", "image/jpeg", "image/webp",
+    ]),
+)
+@click.option("--caption", required=True)
+@click.option("--alt-text", default="")
+@click.option("--provenance-ref", "provenance_refs", multiple=True)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@friendly_errors
+def stage_research_asset(
+    profile_id: str,
+    agent_id: str,
+    work_package_ref: str,
+    source_path: Path,
+    media_type: str,
+    caption: str,
+    alt_text: str,
+    provenance_refs: tuple[str, ...],
+    release_profile: Path | None,
+) -> None:
+    """Stage one content-addressed image and print its figure descriptor."""
+    _echo_json(stage_report_asset(
+        client_root=load_profile_root(release_profile),
+        profile_id=profile_id,
+        agent_id=agent_id,
+        work_package_ref=work_package_ref,
+        source_path=source_path,
+        media_type=media_type,
+        caption=caption,
+        alt_text=alt_text,
+        provenance_refs=list(provenance_refs),
+    ))
 
 
 @client_research.group("checkpoint")
