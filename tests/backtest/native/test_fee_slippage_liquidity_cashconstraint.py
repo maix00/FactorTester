@@ -405,6 +405,66 @@ def test_slippage_zero_means_unadjusted_price():
     assert order.get("effective_price") == pytest.approx(10.0)
 
 
+def test_slippage_uses_effective_price_without_requiring_current_market_price():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(
+        instrument=p,
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=10.0,
+        intent_quantity=10.0,
+        strategy=s,
+    )
+    order.set("effective_price", 12.0)
+    config = StrategyConfig(
+        strategy=s,
+        field_values={SlippageModule.slippage_mode: "none"},
+    )
+    account = BacktestRunState(strategy_configs={s: config})
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [draft]},
+    )
+    ctx.set(MarketDataModule.current_prices, {})
+
+    _apply_slippage(account, ctx)
+
+    assert order.get("effective_price") == pytest.approx(12.0)
+
+
+def test_slippage_requires_current_market_price_when_effective_price_is_missing():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(
+        instrument=p,
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=10.0,
+        intent_quantity=10.0,
+        strategy=s,
+    )
+    config = StrategyConfig(
+        strategy=s,
+        field_values={SlippageModule.slippage_mode: "none"},
+    )
+    account = BacktestRunState(strategy_configs={s: config})
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [draft]},
+    )
+    ctx.set(MarketDataModule.current_prices, {})
+
+    with pytest.raises(KeyError) as exc_info:
+        _apply_slippage(account, ctx)
+
+    assert exc_info.value.args == (p,)
+
+
 def test_slippage_worsens_buy_and_sell_price_in_opposite_directions():
     s = Strategy(alias="S")
     p = _product()
