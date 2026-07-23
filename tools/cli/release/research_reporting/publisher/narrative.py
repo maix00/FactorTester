@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from .identity import (
@@ -12,11 +13,15 @@ from .identity import (
     reference,
     safe_id,
 )
+from ..report_items import report_fragment_hash, report_item_hash
 
 
 MAX_NARRATIVE_BYTES = 64 * 1024
 MAX_ITEMS = 16
 _NARRATIVE_FIELDS = {"schema_version", "language", "title", "sections"}
+_NARRATIVE_FIELDS_V3 = _NARRATIVE_FIELDS | {
+    "research_occurred_at", "time_basis", "time_source_refs",
+}
 _SECTION_FIELDS_V1 = {"section_id", "title", "body", "links"}
 _SECTION_FIELDS_V2 = {"section_id", "title", "blocks", "links"}
 _SECTION_FIELDS_V2_WITH_BODY = {
@@ -40,7 +45,7 @@ def canonical_narrative(
     carrier: dict[str, Any],
 ) -> dict[str, Any]:
     """Return a bounded narrative whose links belong to one Carrier."""
-    if not isinstance(narrative, dict) or set(narrative) != _NARRATIVE_FIELDS:
+    if not isinstance(narrative, dict):
         raise ValueError("local narrative fields are invalid")
     encoded = json.dumps(
         narrative, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -49,9 +54,18 @@ def canonical_narrative(
         raise ValueError(
             f"local narrative exceeds {MAX_NARRATIVE_BYTES} bytes"
         )
-    schema_version = narrative["schema_version"]
-    if schema_version not in {1, 2} or narrative["language"] != "zh-Hans":
+    schema_version = narrative.get("schema_version")
+    expected_fields = (
+        _NARRATIVE_FIELDS_V3 if schema_version == 3 else _NARRATIVE_FIELDS
+    )
+    if set(narrative) != expected_fields:
+        raise ValueError("local narrative fields are invalid")
+    if schema_version not in {1, 2, 3} or narrative["language"] != "zh-Hans":
         raise ValueError("local narrative language must be zh-Hans")
+    timing = _timing(narrative, carrier) if schema_version == 3 else None
+    expected_report_items = _expected_report_items(carrier)
+    if expected_report_items and schema_version != 3:
+        raise ValueError("report-enforced checkpoint requires narrative v3")
     title = chinese_text(narrative["title"], "narrative.title", maximum=256)
     sections = narrative["sections"]
     if not isinstance(sections, list) or not sections or len(sections) > 8:
@@ -60,11 +74,12 @@ def canonical_narrative(
     result = []
     seen_ids = set()
     declared_target_refs: set[str] = set()
+    used_report_bindings: set[tuple[str, str]] = set()
     for item in sections:
         fields = set(item) if isinstance(item, dict) else set()
         expected_fields = (
             (_SECTION_FIELDS_V2, _SECTION_FIELDS_V2_WITH_BODY)
-            if schema_version == 2 else (_SECTION_FIELDS_V1,)
+            if schema_version in {2, 3} else (_SECTION_FIELDS_V1,)
         )
         if fields not in expected_fields:
             raise ValueError("local narrative section fields are invalid")
@@ -105,11 +120,16 @@ def canonical_narrative(
             "title": chinese_text(item["title"], "narrative.section.title"),
             "links": projected_links,
         }
-        if schema_version == 2:
+        if schema_version in {2, 3}:
             if "body" in item:
                 section["body"] = _zh_body(item["body"])
             section["blocks"] = _canonical_blocks(
-                item["blocks"], declared_link_ids=link_ids,
+                item["blocks"],
+                declared_link_ids=link_ids,
+                expected_report_items=(
+                    expected_report_items if schema_version == 3 else None
+                ),
+                used_report_bindings=used_report_bindings,
             )
         else:
             section["body"] = _zh_body(item["body"])
@@ -120,14 +140,27 @@ def canonical_narrative(
             "narrative must link every checkpoint object: "
             + ", ".join(sorted(missing))
         )
-    if schema_version == 2:
+    if expected_report_items and used_report_bindings != set(
+        expected_report_items
+    ):
+        missing_bindings = sorted(
+            set(expected_report_items) - used_report_bindings
+        )
+        raise ValueError(
+            "narrative must cover every Graph report item: "
+            + ", ".join(f"{a}@{b}" for a, b in missing_bindings)
+        )
+    if schema_version in {2, 3}:
         _validate_result_table_bindings(carrier, result)
-    return {
+    value = {
         "schema_version": schema_version,
         "language": "zh-Hans",
         "title": title,
         "sections": result,
     }
+    if timing is not None:
+        value.update(timing)
+    return value
 
 
 def _validate_result_table_bindings(
@@ -187,6 +220,8 @@ def _is_result_checkpoint(
 
 def _canonical_blocks(
     value: Any, *, declared_link_ids: set[str],
+    expected_report_items: dict[tuple[str, str], dict[str, str]] | None = None,
+    used_report_bindings: set[tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not value or len(value) > 32:
         raise ValueError("narrative blocks must be a bounded array")
@@ -195,6 +230,12 @@ def _canonical_blocks(
     for block in value:
         if not isinstance(block, dict):
             raise ValueError("narrative block must be an object")
+        report_binding = block.get("report_binding")
+        if "report_binding" in block:
+            block = {
+                key: item for key, item in block.items()
+                if key != "report_binding"
+            }
         kind = block.get("kind")
         if kind == "math" and set(block) == {
             "kind", "latex", "fallback", "link_ids",
@@ -203,14 +244,20 @@ def _canonical_blocks(
             _validate_link_ids(
                 refs, declared_link_ids, used_link_ids, "math",
             )
-            blocks.append({
+            projected = {
                 "kind": kind,
                 "latex": bounded_text(
                     block["latex"], "narrative.math.latex", 2000,
                 ),
                 "fallback": _zh_body(block["fallback"]),
                 "link_ids": list(refs),
-            })
+            }
+            blocks.append(_bind_report_item(
+                projected,
+                report_binding=report_binding,
+                expected=expected_report_items,
+                used=used_report_bindings,
+            ))
             continue
         if kind == "paragraph" and set(block) in (
             {"kind", "text"}, {"kind", "text", "link_ids"}
@@ -222,14 +269,24 @@ def _canonical_blocks(
                     refs, declared_link_ids, used_link_ids, "paragraph",
                 )
                 projected["link_ids"] = list(refs)
-            blocks.append(projected)
+            blocks.append(_bind_report_item(
+                projected,
+                report_binding=report_binding,
+                expected=expected_report_items,
+                used=used_report_bindings,
+            ))
             continue
         if kind == "list" and set(block) == {"kind", "rows"}:
             rows = _canonical_rows(
                 block["rows"], declared_link_ids=declared_link_ids,
                 used_link_ids=used_link_ids, table_columns=None,
             )
-            blocks.append({"kind": kind, "rows": rows})
+            blocks.append(_bind_report_item(
+                {"kind": kind, "rows": rows},
+                report_binding=report_binding,
+                expected=expected_report_items,
+                used=used_report_bindings,
+            ))
             continue
         if kind == "table" and set(block) in (
             {"kind", "columns", "rows"},
@@ -255,7 +312,12 @@ def _canonical_blocks(
                 if result_kind not in _RESULT_KINDS:
                     raise ValueError("narrative table result_kind is invalid")
                 projected["result_kind"] = result_kind
-            blocks.append(projected)
+            blocks.append(_bind_report_item(
+                projected,
+                report_binding=report_binding,
+                expected=expected_report_items,
+                used=used_report_bindings,
+            ))
             continue
         raise ValueError("narrative block fields are invalid")
     if used_link_ids != declared_link_ids:
@@ -263,6 +325,121 @@ def _canonical_blocks(
             "every declared section link must be bound to one list or table row"
         )
     return blocks
+
+
+def _bind_report_item(
+    content: dict[str, Any],
+    *,
+    report_binding: Any,
+    expected: dict[tuple[str, str], dict[str, str]] | None,
+    used: set[tuple[str, str]] | None,
+) -> dict[str, Any]:
+    if expected is None:
+        if report_binding is not None:
+            raise ValueError("report_binding requires narrative v3")
+        return content
+    if not isinstance(report_binding, dict) or set(report_binding) != {
+        "report_requirement_id", "subject_ref",
+    }:
+        raise ValueError("narrative v3 block needs one report_binding")
+    key = (
+        str(report_binding["report_requirement_id"]),
+        str(report_binding["subject_ref"]),
+    )
+    expected_item = expected.get(key)
+    if expected_item is None:
+        raise ValueError("narrative report_binding is not in the Carrier")
+    if used is None or key in used:
+        raise ValueError("narrative report_binding must be unique")
+    content_kind = {
+        "paragraph": "sentence",
+        "list": "list",
+        "table": "table",
+        "math": "figure",
+    }[content["kind"]]
+    if expected_item["content_kind"] != content_kind:
+        raise ValueError("narrative report content kind does not match Carrier")
+    item_hash = report_item_hash(
+        report_requirement_id=key[0],
+        subject_ref=key[1],
+        content_kind=content_kind,
+        content=content,
+    )
+    if expected_item["report_item_ref"] != f"report-item:sha256:{item_hash}":
+        raise ValueError("narrative report item hash does not match Carrier")
+    used.add(key)
+    return {
+        **content,
+        "report_binding": {
+            "report_requirement_id": key[0],
+            "subject_ref": key[1],
+            "report_item_ref": expected_item["report_item_ref"],
+        },
+    }
+
+
+def _expected_report_items(
+    carrier: dict[str, Any],
+) -> dict[tuple[str, str], dict[str, str]]:
+    transition = carrier["latest_transition"]
+    items = transition.get("report_items") or []
+    expected = {
+        (str(item["report_requirement_id"]), str(item["subject_ref"])): item
+        for item in items
+    }
+    if len(expected) != len(items):
+        raise ValueError("Carrier report item bindings must be unique")
+    if expected:
+        records = [
+            {
+                "report_requirement_id": key[0],
+                "subject_ref": key[1],
+                "content_kind": item["content_kind"],
+                "item_hash": item["report_item_ref"].removeprefix(
+                    "report-item:sha256:"
+                ),
+            }
+            for key, item in expected.items()
+        ]
+        actual = f"report-fragment:sha256:{report_fragment_hash(records)}"
+        if transition.get("report_fragment_ref") != actual:
+            raise ValueError("Carrier report fragment hash is invalid")
+    return expected
+
+
+def _timing(
+    narrative: dict[str, Any], carrier: dict[str, Any]
+) -> dict[str, Any]:
+    occurred_at = narrative.get("research_occurred_at")
+    recorded_at = carrier["latest_transition"]["created_at"]
+    if (
+        not isinstance(occurred_at, (int, float))
+        or not math.isfinite(occurred_at)
+        or occurred_at < 0
+        or occurred_at > recorded_at
+    ):
+        raise ValueError(
+            "research_occurred_at must be finite, non-negative, and not later "
+            "than the trusted trace"
+        )
+    time_basis = narrative.get("time_basis")
+    if time_basis not in {"transition", "historical_backfill"}:
+        raise ValueError("time_basis is invalid")
+    refs = narrative.get("time_source_refs")
+    if (
+        not isinstance(refs, list) or len(refs) > MAX_ITEMS
+        or not all(isinstance(item, str) and item for item in refs)
+    ):
+        raise ValueError("time_source_refs must be a bounded reference array")
+    for item in refs:
+        reference(item, "narrative.time_source_ref")
+    if time_basis == "historical_backfill" and not refs:
+        raise ValueError("historical_backfill requires time_source_refs")
+    return {
+        "research_occurred_at": float(occurred_at),
+        "time_basis": time_basis,
+        "time_source_refs": list(refs),
+    }
 
 
 def _validate_link_ids(

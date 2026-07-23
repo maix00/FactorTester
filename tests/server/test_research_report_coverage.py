@@ -8,6 +8,9 @@ from cli_anything.factortester_research.core.successor_graph import (
 from server.services.research_graph.branch.report_coverage import (
     validate_report_submission,
 )
+from tools.cli.release.research_reporting.report_items import (
+    report_fragment_hash,
+)
 
 
 def _parts(edge_id: str = "factor_semantics__validation_design"):
@@ -50,9 +53,9 @@ def _submission(graph, source, edge, target, assessments):
         (report_id, f"node:{target['node_id']}")
         for report_id in target["entry_report_refs"]
     )
-    return {
+    value = {
         "schema_version": 1,
-        "fragment_hash": "a" * 64,
+        "fragment_hash": "",
         "items": [
             {
                 "report_requirement_id": report_id,
@@ -66,6 +69,8 @@ def _submission(graph, source, edge, target, assessments):
             for report_id, subject in bindings
         ],
     }
+    value["fragment_hash"] = report_fragment_hash(value["items"])
+    return value
 
 
 def test_successor_requires_exact_node_edge_and_target_entry_reports() -> None:
@@ -90,6 +95,7 @@ def test_successor_report_coverage_lists_the_missing_binding() -> None:
     graph, source, edge, target, assessments = _parts()
     submitted = _submission(graph, source, edge, target, assessments)
     missing = submitted["items"].pop()
+    submitted["fragment_hash"] = report_fragment_hash(submitted["items"])
 
     with pytest.raises(ValueError, match=missing["report_requirement_id"]):
         validate_report_submission(
@@ -132,6 +138,7 @@ def test_evidence_admission_requires_one_report_item_per_evidence() -> None:
         }
         for index in (1, 2)
     ])
+    submitted["fragment_hash"] = report_fragment_hash(submitted["items"])
 
     value = validate_report_submission(
         graph=graph,

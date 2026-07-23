@@ -7,6 +7,10 @@ from typing import Any
 
 import orjson
 
+from tools.cli.release.research_reporting.report_items import (
+    report_fragment_hash,
+)
+
 
 MAX_REPORT_SUBMISSION_BYTES = 6000
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -78,6 +82,8 @@ def validate_report_submission(
             "report coverage mismatch: "
             f"missing={_pairs(missing)}; extra={_pairs(extra)}"
         )
+    if fragment_hash != report_fragment_hash(normalized):
+        raise ValueError("report_submission fragment_hash mismatch")
     value = {
         "schema_version": 1,
         "fragment_hash": fragment_hash,

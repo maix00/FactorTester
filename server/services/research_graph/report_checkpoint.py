@@ -52,8 +52,14 @@ def report_checkpoint_projection(
         or omitted_evidence_count > 2_147_483_647
     ):
         raise ValueError("omitted_evidence_count must be a non-negative integer")
-    if not isinstance(created_at, (int, float)) or not math.isfinite(created_at):
-        raise ValueError("report checkpoint created_at must be finite")
+    if (
+        not isinstance(created_at, (int, float))
+        or not math.isfinite(created_at)
+        or created_at < 0
+    ):
+        raise ValueError(
+            "report checkpoint created_at must be finite and non-negative"
+        )
     bounded_evidence_refs, newly_omitted = safe_refs_with_omissions(
         evidence_refs
     )

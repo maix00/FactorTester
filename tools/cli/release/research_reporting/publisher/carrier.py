@@ -33,9 +33,14 @@ _TRANSITION_FIELDS = {
     "step_ref", "edge_ref", "from_node", "to_node", "created_at",
     "evidence_refs", "trial_plan_refs", "obligation_refs", "claim_refs",
     "job_refs", "run_refs", "obligation_changes", "claim_changes",
-    "delta_refs", "entry_resolution",
+    "delta_refs", "entry_resolution", "report_fragment_ref", "report_items",
 }
-_TRANSITION_OPTIONAL_FIELDS = {"delta_refs", "entry_resolution"}
+_TRANSITION_OPTIONAL_FIELDS = {
+    "delta_refs", "entry_resolution", "report_fragment_ref", "report_items",
+}
+_REPORT_ITEM_FIELDS = {
+    "report_item_ref", "report_requirement_id", "subject_ref", "content_kind",
+}
 _ENTRY_RESOLUTION_FIELDS = {
     "reason", "assessed_requirement_ids", "reused_requirement_ids",
     "reference_only_requirement_ids", "unresolved_requirement_ids", "items",
@@ -175,8 +180,14 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
     for field in ("from_node", "to_node"):
         bounded_text(transition[field], field)
     timestamp = transition["created_at"]
-    if not isinstance(timestamp, (int, float)) or not math.isfinite(timestamp):
-        raise ValueError("latest_transition.created_at must be finite")
+    if (
+        not isinstance(timestamp, (int, float))
+        or not math.isfinite(timestamp)
+        or timestamp < 0
+    ):
+        raise ValueError(
+            "latest_transition.created_at must be finite and non-negative"
+        )
     transition["created_at"] = float(timestamp)
     for field in (
         "evidence_refs", "trial_plan_refs", "obligation_refs", "claim_refs",
@@ -196,6 +207,40 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
         transition["entry_resolution"] = _entry_resolution(
             transition["entry_resolution"]
         )
+    if "report_fragment_ref" in transition or "report_items" in transition:
+        if not (
+            isinstance(transition.get("report_fragment_ref"), str)
+            and transition["report_fragment_ref"].startswith(
+                "report-fragment:sha256:"
+            )
+            and _SHA256.fullmatch(
+                transition["report_fragment_ref"].removeprefix(
+                    "report-fragment:sha256:"
+                )
+            )
+        ):
+            raise ValueError("report_fragment_ref must identify sha256")
+        transition["report_items"] = _objects(
+            transition.get("report_items"), _REPORT_ITEM_FIELDS, "report_items",
+        )
+        bindings = []
+        for item in transition["report_items"]:
+            reference(item["report_item_ref"], "report_item_ref")
+            if not item["report_item_ref"].startswith("report-item:sha256:"):
+                raise ValueError("report_item_ref must identify sha256")
+            if not _SHA256.fullmatch(
+                item["report_item_ref"].removeprefix("report-item:sha256:")
+            ):
+                raise ValueError("report_item_ref must identify sha256")
+            for field in (
+                "report_requirement_id", "subject_ref", "content_kind",
+            ):
+                bounded_text(item[field], field, maximum=256)
+            bindings.append((
+                item["report_requirement_id"], item["subject_ref"]
+            ))
+        if len(bindings) != len(set(bindings)):
+            raise ValueError("report item bindings must be unique")
     return transition
 
 

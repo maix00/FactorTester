@@ -11,6 +11,10 @@ from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting import (
     publish_research_checkpoint as _publish_checkpoint,
 )
+from tools.cli.release.research_reporting.report_items import (
+    report_fragment_hash,
+    report_item_hash,
+)
 
 
 def _carrier() -> dict:
@@ -758,6 +762,134 @@ def test_checkpoint_publish_preserves_structured_list_and_result_table(
     assert "- 交易成本义务仍未清除。" in report
     assert "| 检验 | 指标 | 结果 |" in report
     assert "| 成本后回测 | 夏普比率 | 0.42 |" in report
+
+
+def test_narrative_v3_binds_graph_report_item_and_occurrence_time(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    carrier.update({
+        "evidence_refs": [], "job_refs": [], "run_refs": [],
+        "claims": [], "open_obligations": [],
+    })
+    carrier["latest_transition"].update({
+        "evidence_refs": [], "trial_plan_refs": [], "obligation_refs": [],
+        "claim_refs": [], "job_refs": [], "run_refs": [], "delta_refs": [],
+    })
+    content = {"kind": "paragraph", "text": "本阶段完成了因子语义逐项审查。"}
+    report_id = "report.node.factor_semantics.action"
+    subject_ref = "node:factor_semantics"
+    item_hash = report_item_hash(
+        report_requirement_id=report_id,
+        subject_ref=subject_ref,
+        content_kind="sentence",
+        content=content,
+    )
+    items = [{
+        "report_requirement_id": report_id,
+        "subject_ref": subject_ref,
+        "content_kind": "sentence",
+        "item_hash": item_hash,
+    }]
+    carrier["latest_transition"].update({
+        "report_fragment_ref": (
+            f"report-fragment:sha256:{report_fragment_hash(items)}"
+        ),
+        "report_items": [{
+            "report_item_ref": f"report-item:sha256:{item_hash}",
+            "report_requirement_id": report_id,
+            "subject_ref": subject_ref,
+            "content_kind": "sentence",
+        }],
+    })
+    narrative = {
+        "schema_version": 3,
+        "language": "zh-Hans",
+        "title": "因子研究报告",
+        "research_occurred_at": 1.5,
+        "time_basis": "historical_backfill",
+        "time_source_refs": ["conversation:maxa-factor-semantics"],
+        "sections": [{
+            "section_id": "factor-semantics",
+            "title": "因子语义",
+            "blocks": [{
+                **content,
+                "report_binding": {
+                    "report_requirement_id": report_id,
+                    "subject_ref": subject_ref,
+                },
+            }],
+            "links": [],
+        }],
+    }
+
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        narrative=narrative,
+    )
+
+    journal = json.loads((
+        root / "profile-root" / "research" / "sgccs-review"
+        / "branches" / "branch-sgccs" / "JOURNAL.json"
+    ).read_text())
+    section = journal["checkpoints"][0]["sections"][0]
+    assert section["research_occurred_at"] == 1.5
+    assert section["time_basis"] == "historical_backfill"
+    assert section["blocks"][0]["report_binding"] == {
+        "report_requirement_id": report_id,
+        "subject_ref": subject_ref,
+        "report_item_ref": f"report-item:sha256:{item_hash}",
+    }
+
+
+def test_narrative_v3_rejects_historical_time_without_source(
+    tmp_path: Path,
+) -> None:
+    carrier = _carrier()
+    carrier["latest_transition"]["report_fragment_ref"] = (
+        "report-fragment:sha256:" + "a" * 64
+    )
+    carrier["latest_transition"]["report_items"] = [{
+        "report_item_ref": "report-item:sha256:" + "b" * 64,
+        "report_requirement_id": "report.node.result_audit.action",
+        "subject_ref": "node:result_audit",
+        "content_kind": "sentence",
+    }]
+    narrative = {
+        "schema_version": 3,
+        "language": "zh-Hans",
+        "title": "因子研究报告",
+        "research_occurred_at": 1.0,
+        "time_basis": "historical_backfill",
+        "time_source_refs": [],
+        "sections": [{
+            "section_id": "audit",
+            "title": "结果审计",
+            "blocks": [{
+                "kind": "paragraph",
+                "text": "本阶段完成结果审计。",
+                "report_binding": {
+                    "report_requirement_id": "report.node.result_audit.action",
+                    "subject_ref": "node:result_audit",
+                },
+            }],
+            "links": [],
+        }],
+    }
+
+    with pytest.raises(ValueError, match="requires time_source_refs"):
+        publish_research_checkpoint(
+            client_root=tmp_path,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=carrier,
+            narrative=narrative,
+        )
 
 
 def test_structured_narrative_rejects_unbound_row_chip(tmp_path: Path) -> None:

@@ -136,6 +136,42 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
                 )
             section["checkpoint_ref"] = checkpoint_ref
             section["branch_ref"] = branch_ref
+        timing_fields = {
+            "research_occurred_at", "time_basis", "time_source_refs",
+        }
+        if timing_fields.intersection(item):
+            if not timing_fields.issubset(item):
+                raise ValueError("section occurrence timing is incomplete")
+            occurred_at = item["research_occurred_at"]
+            recorded_at = section["created_at"]
+            if (
+                not isinstance(occurred_at, (int, float))
+                or not math.isfinite(occurred_at)
+                or occurred_at < 0
+                or not isinstance(recorded_at, (int, float))
+                or not math.isfinite(recorded_at)
+                or recorded_at < 0
+                or occurred_at > recorded_at
+            ):
+                raise ValueError("section.research_occurred_at is invalid")
+            if item["time_basis"] not in {
+                "transition", "historical_backfill",
+            }:
+                raise ValueError("section.time_basis is invalid")
+            time_source_refs = _text_refs(
+                item["time_source_refs"], field="section.time_source_refs",
+            )
+            if item["time_basis"] == "historical_backfill" and not (
+                time_source_refs
+            ):
+                raise ValueError(
+                    "historical section requires time_source_refs"
+                )
+            section.update({
+                "research_occurred_at": float(occurred_at),
+                "time_basis": item["time_basis"],
+                "time_source_refs": time_source_refs,
+            })
         _safe_id(section["section_id"], field="section_id")
         _bounded_text(section["title"], field="section.title")
         _bounded_text(
@@ -172,6 +208,12 @@ def _canonical_blocks(
     for block in value:
         if not isinstance(block, dict):
             raise ValueError("section block must be an object")
+        report_binding = block.get("report_binding")
+        if "report_binding" in block:
+            block = {
+                key: item for key, item in block.items()
+                if key != "report_binding"
+            }
         kind = block.get("kind")
         if kind == "math" and set(block) == {
             "kind", "latex", "fallback", "link_ids",
@@ -182,7 +224,7 @@ def _canonical_blocks(
                 or any(ref not in link_ids for ref in refs)
             ):
                 raise ValueError("section math links are invalid")
-            blocks.append({
+            blocks.append(_with_report_binding({
                 "kind": kind,
                 "latex": _bounded_text(
                     block["latex"], field="section.math.latex", maximum=2000,
@@ -193,7 +235,7 @@ def _canonical_blocks(
                     maximum=4000,
                 ),
                 "link_ids": list(refs),
-            })
+            }, report_binding))
             used_link_ids.update(refs)
             continue
         if kind == "paragraph" and set(block) in (
@@ -215,7 +257,7 @@ def _canonical_blocks(
                     raise ValueError("section paragraph links are invalid")
                 projected["link_ids"] = list(refs)
                 used_link_ids.update(refs)
-            blocks.append(projected)
+            blocks.append(_with_report_binding(projected, report_binding))
             continue
         if kind == "list":
             expected = {"kind", "rows"}
@@ -285,8 +327,33 @@ def _canonical_blocks(
             projected_block["columns"] = columns
         if kind == "table" and result_kind is not None:
             projected_block["result_kind"] = result_kind
-        blocks.append(projected_block)
+        blocks.append(_with_report_binding(projected_block, report_binding))
     return blocks
+
+
+def _with_report_binding(
+    block: dict[str, Any], value: Any,
+) -> dict[str, Any]:
+    if value is None:
+        return block
+    if not isinstance(value, dict) or set(value) != {
+        "report_requirement_id", "subject_ref", "report_item_ref",
+    }:
+        raise ValueError("section report_binding fields are invalid")
+    for field in ("report_requirement_id", "subject_ref"):
+        _bounded_text(
+            value[field], field=f"section.report_binding.{field}", maximum=256,
+        )
+    report_item_ref = value["report_item_ref"]
+    if (
+        not isinstance(report_item_ref, str)
+        or not report_item_ref.startswith("report-item:sha256:")
+        or not _SHA256.fullmatch(
+            report_item_ref.removeprefix("report-item:sha256:")
+        )
+    ):
+        raise ValueError("section.report_binding.report_item_ref is invalid")
+    return {**block, "report_binding": dict(value)}
 
 
 def _canonical_links(value: Any) -> list[dict[str, str]]:

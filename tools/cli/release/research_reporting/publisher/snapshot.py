@@ -43,11 +43,17 @@ def report_snapshot(
             "links": links,
             "created_at": transition["created_at"],
         }
-        if narrative["schema_version"] == 2:
+        if narrative["schema_version"] in {2, 3}:
             projected["body"] = section.get("body", "")
             projected["blocks"] = deepcopy(section["blocks"])
         else:
             projected["body"] = section["body"]
+        if narrative["schema_version"] == 3:
+            projected.update({
+                "research_occurred_at": narrative["research_occurred_at"],
+                "time_basis": narrative["time_basis"],
+                "time_source_refs": list(narrative["time_source_refs"]),
+            })
         sections.append(projected)
     return {
         "schema_version": 1,
