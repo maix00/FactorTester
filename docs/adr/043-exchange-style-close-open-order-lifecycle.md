@@ -1,98 +1,148 @@
-# ADR-043: Exchange-style close/open order lifecycle
+# ADR-043: Exchange-style order lifecycle and bar-capacity matching
 
 - **Date**: 2026-07-23
-- **Status**: Proposed
-- **GitHub issue**: Not registered
-- **Related**: ADR-027, ADR-031, ADR-034, ADR-041, ADR-042
+- **Status**: Accepted
+- **GitHub issue**: #144
+- **Related**: ADR-018, ADR-020, ADR-027, ADR-031, ADR-034, ADR-041, ADR-042
 
 ## Context
 
-The native engine can account for a net reversal atomically. For example, an
-order delta of `-15` against a current long position of `10` produces a final
-short position of `5`; fee and ledger helpers infer the close and open portions
-to calculate realized P&L, fees, and final margin.
+The native engine currently turns a target delta into one signed `Order`, clips
+that delta against signal-bar volume, and later settles the remaining quantity
+as a complete fill at next-bar open. This discards unfilled intent and conflates
+the order request, execution capacity, fill, and ledger settlement.
 
-This is a full-fill accounting approximation, not an exchange-style order
-lifecycle. `Order` has no first-class open/close, close-today/close-yesterday,
-parent group, dependency, filled quantity, remaining quantity, or partial-fill
-state. Liquidity excess is capped rather than carried as a live remainder.
+Domestic futures reversals require distinct close-today, close-yesterday, and
+open instructions. They may fill at different times; unfilled closes cannot
+release margin.
 
-Domestic futures gateways require an offset flag. A reversal is therefore at
-least a close order plus an open order, and may split the close again by
-close-today and close-yesterday. Their fills can occur at different times and
-prices. Margin released by an unfilled close order must not fund a new open
-order.
-
-As of the date above, this capability gap has **not** been registered as a
-GitHub issue. This ADR records a proposed design and acceptance boundary; it
-does not add the work to Issue #143.
+FIX, vn.py, LEAN, and Backtrader share the relevant model: one atomic order has
+stable identity, can receive multiple immutable fills, and projects cumulative
+filled and remaining quantities. A partial fill does not create a child order.
 
 ## Decision
 
-Keep the existing atomic net-delta path as an explicitly named approximation.
-Do not describe it as exchange-exact execution.
+### Domain model
 
-Add an exchange-style path in a future issue:
+Keep `Order` as the atomic executable instruction. Do not introduce a competing
+`OrderLeg` entity. A coordinated transition uses:
 
-1. Decompose a target delta against closeable lots into explicit
-   `close_today`, `close_yesterday`, and `open` order legs.
-2. Link those legs with one `order_group_id` and `parent_intent_id`.
-3. Allow the open leg to declare a dependency on actual close fills.
-4. Track `filled_quantity`, `remaining_quantity`, fill records, and a
-   `partially_filled` state.
-5. Recompute positions, realized P&L, fees, cash, and portfolio margin after
-   every fill; never reserve or release margin from an assumed fill.
-6. Apply liquidity and hard margin limits only to the margin-increasing
-   remainder. Position-reducing legs remain executable.
-7. Keep live pending legs indexed individually. Cancellation, replacement, and
-   rescheduling operate on legs and preserve the parent order-group audit.
+```text
+Parent Intent
+└── OrderGroup (orchestration and audit only)
+    ├── Order(offset=close_today) ── Fill 0..N
+    ├── Order(offset=close_yesterday) ── Fill 0..N
+    └── Order(offset=open, waiting on closes) ── Fill 0..N
+```
 
-Sequential close-then-open is the default when the open leg depends on released
-margin. Parallel submission is a separate execution policy and must prove that
-the account has enough buying power if the open leg fills first.
+`OrderGroup` is never queued, matched, filled, or settled. Its state and
+quantities are derived from its child Orders and Fills.
 
-Exchange and broker rules remain data-driven. Offset flags, close-today fees,
-position-lot selection, margin offsets, and combination benefits must not be
-invented by the generic order model.
+Each Order carries stable `order_id`, `order_group_id`, `parent_intent_id`,
+`leg_role`, `offset`, side, requested quantity, latest accepted revision,
+time-in-force, and eligibility time. Submit, cancel, and replace actions retain
+immutable request identities and revision lineage. A cancel request is not a
+cancel confirmation; fills may still arrive while cancel or replace is pending.
 
-## Observability
+Each execution creates one immutable `Fill`. The Order projects:
 
-Order-flow and step output must show:
+```text
+cumulative_filled = sum(Fill.quantity)
+active_leaves = current_order_quantity - cumulative_filled
+terminal_unfilled = current_order_quantity - cumulative_filled
+```
 
-- parent intent and order-group identities;
-- leg role and offset flag;
-- requested, filled, and remaining quantities;
-- activation dependency and activation reason;
-- per-fill price, fee, realized P&L, margin before/after, and cash before/after;
-- cancellation, rejection, and unfilled-remainder reasons.
+After a terminal state active leaves is zero, while terminal unfilled remains
+auditable. Fee, P&L, cash, and margin effects belong to settlement records
+linked to Fill.
 
-The default view stays compact at order-group level. CLI detail output may
-expand legs and fills without truncation.
+### Scheduling and matching
+
+Keep `EventKind.ORDER`. Each actionable Order has an immutable attempt payload;
+the attempt is not a child order. A partial fill schedules another attempt for
+the same Order at the next eligible market-data bar. Stale attempts are skipped
+by revision identity.
+
+The nonterminal index contains scheduled, partial, and waiting Orders; the queue
+contains only its actionable scheduled subset.
+
+At one timestamp, the execution venue processes the complete batch:
+
+```text
+collect actionable Orders
+→ net explicit account-level conflicts
+→ allocate and settle all risk-reducing fills
+→ recompute position, cash, margin, and buying power
+→ activate satisfied dependencies
+→ allocate and settle all risk-increasing fills
+```
+
+Reduce-before-increase is not sell-before-buy. Ties use submitted time and
+Order ID rather than incidental dictionary order.
+
+Liquidity limits apply to every Order, including closes. Reducing Orders receive
+priority but no fictitious liquidity. Buying-power and hard margin-utilization
+limits constrain only margin-increasing fills.
+
+The default reversal policy activates open Orders only after required closes
+settle fully. Partial release requires a named interleaved policy and hedge
+accounting.
+
+### Bar-volume causality
+
+Matching fidelity is explicit:
+
+| Mode | Capacity known at | Causal execution time |
+|---|---|---|
+| `next_bar_full_fill` | no capacity limit | next bar open |
+| `lagged_bar_volume` | previous completed bar | current bar open |
+| `execution_bar_volume` | execution bar completion | execution bar end |
+| `tick_orderbook` | observed trades/depth | event timestamp |
+
+The engine must not combine next-bar-open execution with that same bar's final
+volume. Exact mode refuses bar proxies when exchange timestamps or
+tick/trade/depth data are required.
+
+### Target reconciliation
+
+For target intents, let `A` be actual position, `R` retained signed leaves, and
+`T` the latest target. If `A + R == T`, retain the Orders. Otherwise replace
+their unfilled remainder, preserve fills, and supersede the group from `A` to
+`T`.
+
+Delta intents remain additive unless their policy explicitly selects replace,
+merge, coexist, or defer. No special `$F=1m` branch changes these semantics.
+
+## Observability and CLI
+
+Compact step output shows group, Order, status, requested, cumulative filled,
+active leaves, terminal unfilled, capacity used, and next attempt. Full detail
+expands attempts, action revisions, Fills, and linked settlements without
+truncation. All CLI inspection commands also provide machine-readable JSON and
+use the real FactorTester backend.
 
 ## Acceptance
 
-- Reversing long `10` to short `5` produces close legs totaling `10` and an
-  open leg of `5`; no single exchange order mixes close and open quantities.
-- When the close fills only `6`, only the corresponding margin is released and
-  the dependent open leg is activated or resized from that actual state.
-- Close-today and close-yesterday quantities follow the configured lot policy
-  and receive their own fees and offset flags.
-- A hard margin-utilization cap never reduces a risk-releasing close leg. It
-  constrains only the margin-increasing open remainder.
-- If open fills before close under an explicitly parallel policy, the
-  intermediate locked position and its actual margin requirement are recorded.
-- Pending indexes, event queue, order statuses, and fill records contain the
-  same live leg set after partial fill, cancellation, replacement, and retry.
-- Bar-volume capacity carries an unfilled remainder when the execution policy
-  permits it; it does not silently discard the excess.
-- Atomic approximation and exchange-style execution produce the same final
-  ledger result when all legs fill completely at one price with no
+- Long `10` to short `5` produces close Orders totaling `10` and an open Order
+  of `5`; no atomic Order mixes close and open.
+- A close filled `6/10` releases only settled margin; its remainder stays live
+  and the sequential open remains waiting.
+- Close Orders are volume-limited but never shrunk by margin hard caps.
+- One Order can produce fills across multiple eligible bars with one Order ID.
+- Capacity is consumed once per venue, instrument, execution bar, and side.
+- Reduce fills settle before increase fills evaluate buying power.
+- Queue contents equal the actionable subset of the nonterminal Order index.
+- Cancelled or superseded attempts cannot execute.
+- Rapid target updates do not add an old remainder to a new target delta.
+- Atomic and legged paths agree only with complete same-price fills, identical
+  lot selection and rounding, linear fees without per-order minimums, and no
   intermediate constraint.
-- Exact mode refuses to run exchange-style execution when required offset,
-  lot-age, fee, margin, or fill data is unavailable.
+- Exact execution fails before mutation when offset, lot age, fee/margin rules,
+  exchange timestamps, or required tick/trade/depth data are unavailable.
 
 ## References
 
-- China Financial Futures Exchange trader API, `CombOffsetFlag`
-- Shanghai Futures Exchange trading API and market-data interface specification
-- ADR-042 margin-budget and buying-power decisions
+- FIX Trading Community, Order State Changes and Trade business area
+- vn.py `OrderData` and `TradeData`
+- QuantConnect LEAN `OrderTicket`, `OrderEvent`, and target ordering
+- Backtrader Order lifecycle and volume fillers
