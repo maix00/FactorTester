@@ -71,19 +71,57 @@ and the named acceptance evidence; documentation alone is not completion.
 | local current-anchor context under 6000 bytes | implemented for successor requirement inspection; 13-item validation-design packet is 5605 bytes | enforce the same bound on real server `next/context` after v9 publication |
 | provider-neutral resolver for every active subcategory | descriptor and output schema exist only | implement category resolver packages and factual CLI operations; descriptors cannot satisfy the gate |
 | methods as TrialPlan Evidence Actions and Evidence admission | protocol and transition components implemented | full successor-graph path acceptance and actual capability bindings |
-| report requirement per node/edge/gate | v9 transition rejects missing requirement/subject bindings; local narrative v3 rehashes every Chinese item while keeping body local | add pre-transition CLI preparation, current-anchor packet acceptance and FTClient bound-item presentation |
+| report requirement per node/edge/gate | v9 transition rejects missing requirement/subject bindings; local narrative v3 rehashes every Chinese item while keeping body local; formulas, frozen run configuration and hash-verified local figures now have bounded report projections | add pre-transition CLI preparation, current-anchor packet acceptance and complete FTClient bound-item presentation |
 | user acceptance objective/criteria | not implemented as a first-class Contract projection | add bounded objective revision, criterion evaluation and no-silent-closure gate without a new owner table |
 | explicit Graph continuation and re-entry | deterministic preflight/frame implemented | rerun against final catalog/topology and show itemized report coverage |
 | `end_session_skip=False` default | implemented across factor family, signal align and runtime fallbacks | keep explicit-True comparison regression and strategy-obligation reporting in end-to-end acceptance |
 | Graph history and obligation/report browser | server version storage exists | restore exact v1-v3, add bounded FTClient read-only version/topology/catalog/report views |
-| historical Agent-conversation report registration | pure one-read historical Carrier GET, checkpoint/report-item timing v3, root-to-current-HEAD local stage/finalize CLI and FTClient dual-time display implemented; replay is idempotent and Graph/Profile/Work Package semantic heads/timestamps stay fixed | add exact-manifest archive/rebuild for a pre-existing invalid derived journal, then exercise the flow against the real `MaxA (2)` conversation and current production Work Package |
+| historical Agent-conversation report registration | pure one-read historical Carrier GET, checkpoint/report-item timing v3, root-to-current-HEAD local stage/finalize CLI and FTClient dual-time display implemented; replay is idempotent and Graph/Profile/Work Package semantic heads/timestamps stay fixed | add exact-manifest archive/rebuild for a pre-existing invalid derived journal, explicit legacy-root and complete-record invariance tests, and an independent current-HEAD comparison; then exercise the flow against the real `MaxA (2)` conversation and current production Work Package |
 | lifecycle cleanup | archive/delete/restore implemented | add retention-aware purge dry-run/apply, orphan checks, exact refs and integrity acceptance |
-| real research proof | not complete | explicitly continue the test research on v9, recover the real SgCCS experiment journal and Chinese itemized report from the Codex conversation `MaxA (2)` without creating another Work Package; when the conversation lacks required server interaction or admissible evidence, rerun the real server Trial under a new current Job/Run/Evidence identity and label it as recovery completion rather than backdating it; then complete the planning/research-agent shadow path and a trend family, compare with prior evidence, and bind result tables plus necessary content-addressed equity/monotonicity images into the report |
+| real research proof | not complete and blocked on the unfinished issue-143 margin-accounting correction | after issue-143 is complete, merge it into the issue-141 baseline and verify the real margin runtime path; then rerun every relevant `MaxA (2)` Trial under new Job/Run/Evidence identities before recovering the Chinese itemized report. Old results remain immutable historical references but cannot support the final comparison. Continue the test research on v9 without creating another Work Package, complete the planning/research-agent shadow path and a trend family, and bind the rerun result tables plus necessary content-addressed equity/monotonicity images into the report |
 
 The successor remains a draft until every activation-relevant row above is
 complete. Existing production research stays pinned to its original Graph
 unless the user explicitly requests a continuation and deterministic preflight
 accepts it.
+
+### Post-grill completion audit (2026-07-23)
+
+Grills 177, 178 and 179 contain no unanswered semantic question. Their status
+is closed. The remaining work is implementation and release acceptance, not
+another open-ended design interview:
+
+1. the active server Graph is still v8; the immutable server history contains
+   v4–v8 only, so exact v1–v3 restoration and v9 publication have not happened;
+2. the successor v9 catalog is a draft implementation surface: category
+   descriptors exist, but every active subcategory still needs a factual
+   provider-neutral resolver, CLI action, report contract and activation proof;
+3. user acceptance objectives and criteria are not yet a first-class bounded
+   Contract projection and therefore cannot prevent silent closure;
+4. `docs/agents/server-maintenance.md` is a useful private contract, but the
+   progressively loaded Server Maintenance Skill accepted in Grill 178.2 has
+   not been packaged or validated;
+5. continuation, Evidence admission and report coverage have protocol tests,
+   but still need final-catalog end-to-end validation, a real under-6000-byte
+   current-anchor packet and complete FTClient bound-item presentation;
+6. canonical Work Package lifecycle is implemented, while retention-aware
+   exact-manifest purge, orphan/reference checks, database statement
+   benchmarks and UI acceptance remain open;
+7. historical backfill fails closed on broken lineage, but lacks the explicit
+   archive/rebuild maintenance operation and the complete invariance/current
+   HEAD tests required before applying it to `MaxA (2)`;
+8. public-client clean-machine installation, repository confidentiality split,
+   stable `main` release, download/reinstall/rollback and remote cleanup gates
+   remain release work outside the semantic Graph runtime;
+9. issue-143 is not complete. No issue-143 merge, final historical recovery or
+   research rerun may begin until its margin semantics are finished and
+   independently verified on the production runtime path.
+
+These gates retain the canonical implementation order: finish provider-neutral
+contracts and resolvers; publish and validate v9; restore history and lifecycle
+maintenance; wait for and integrate issue-143; rerun and recover `MaxA (2)`;
+then perform public-client release acceptance. Each independently reversible
+batch is tested and committed before the next.
 
 ## Protocol package
 
