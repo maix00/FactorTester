@@ -83,6 +83,29 @@ def test_warm_schema_check_is_one_read_with_no_ddl_or_pragma(
     assert _tables(graph_path) == set(GRAPH_OWNER_TABLES)
 
 
+def test_startup_restores_missing_entry_resolution_projection(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    graph_path, _ = _initialize(tmp_path, monkeypatch)
+    with connect_sqlite(graph_path) as conn:
+        conn.execute(
+            "ALTER TABLE research_graph_branches "
+            "DROP COLUMN entry_resolution_frame_json"
+        )
+
+    research_graphs.ensure_schema()
+
+    with connect_sqlite(graph_path) as conn:
+        columns = {
+            str(row["name"])
+            for row in conn.execute(
+                "PRAGMA table_info(research_graph_branches)"
+            ).fetchall()
+        }
+    assert "entry_resolution_frame_json" in columns
+
+
 def test_recreated_work_package_owner_backfills_existing_instances(
     tmp_path,
     monkeypatch,

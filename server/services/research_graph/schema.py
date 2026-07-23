@@ -90,6 +90,7 @@ def ensure_schema() -> None:
             "research_graph_branches": (
                 "hypothesis_branch_id", "is_current_incarnation",
                 "trial_stage_projection_json",
+                "entry_resolution_frame_json",
             ),
             "research_graph_trace": ("acting_profile_ref",),
             "research_work_packages": (
