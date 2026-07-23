@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
@@ -71,9 +71,18 @@ def _apply_scales(state: Any, ctx: Any, items: list[TargetItem], scales: dict[st
         if not any(item.strategy == strategy and item.pool_id in scales for item in items):
             continue
         ctx.set_for(TargetStrategyModule.target_weights, strategy, weights)
-        ctx.set_for(TargetStrategyModule.trade_intent, strategy, TargetWeightIntent(
-            weights, reason=f"{reasons[strategy]}|margin_budget",
-        ))
+        original = ctx.get_for(
+            TargetStrategyModule.trade_intent, strategy,
+        )
+        ctx.set_for(
+            TargetStrategyModule.trade_intent,
+            strategy,
+            replace(
+                original,
+                weights=weights,
+                reason=f"{reasons[strategy]}|margin_budget",
+            ),
+        )
         state.target_store.record_target_trace(strategy, ctx.timestamp, weights)
 
 
