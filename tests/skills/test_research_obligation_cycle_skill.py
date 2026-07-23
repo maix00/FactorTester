@@ -91,6 +91,18 @@ def _synthesis(*, assessment: str, output: dict) -> dict:
     }
 
 
+def _v5_plan(*, obligation_ref: str = "obligation-1") -> dict:
+    return {
+        "schema_version": 5,
+        "primary_obligation_ref": obligation_ref,
+        "secondary_obligation_refs": [],
+        "evidence_actions": [{
+            "action_id": "action-1",
+            "obligation_refs": [obligation_ref],
+        }],
+    }
+
+
 def test_skill_routes_to_exactly_one_progressive_reference() -> None:
     text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     assert "TODO" not in text
@@ -199,10 +211,7 @@ def test_trial_synthesis_rejects_plan_for_non_actionable_obligation(
         assessment="backend_gap",
         output={
             "disposition": "trial_plan",
-            "trial_plan": {
-                "schema_version": 4,
-                "obligation_refs": ["obligation-1"],
-            },
+            "trial_plan": _v5_plan(),
         },
     )), encoding="utf-8")
 
@@ -220,6 +229,22 @@ def test_trial_synthesis_accepts_plan_for_actionable_obligation(
         assessment="actionable_trial",
         output={
             "disposition": "trial_plan",
+            "trial_plan": _v5_plan(),
+        },
+    )), encoding="utf-8")
+
+    result = _run("validate-trial-synthesis.py", path)
+
+    assert result.returncode == 0, result.stdout
+    assert json.loads(result.stdout)["disposition"] == "trial_plan"
+
+
+def test_trial_synthesis_rejects_legacy_v4_plan(tmp_path: Path) -> None:
+    path = tmp_path / "legacy-synthesis.json"
+    path.write_text(json.dumps(_synthesis(
+        assessment="actionable_trial",
+        output={
+            "disposition": "trial_plan",
             "trial_plan": {
                 "schema_version": 4,
                 "obligation_refs": ["obligation-1"],
@@ -229,5 +254,22 @@ def test_trial_synthesis_accepts_plan_for_actionable_obligation(
 
     result = _run("validate-trial-synthesis.py", path)
 
-    assert result.returncode == 0, result.stdout
-    assert json.loads(result.stdout)["disposition"] == "trial_plan"
+    assert result.returncode == 1
+    assert "schema_version 5" in json.loads(result.stdout)["error"]
+
+
+def test_trial_synthesis_rejects_action_outside_declared_obligations(
+    tmp_path: Path,
+) -> None:
+    plan = _v5_plan()
+    plan["evidence_actions"][0]["obligation_refs"] = ["obligation-other"]
+    path = tmp_path / "undeclared-action-obligation.json"
+    path.write_text(json.dumps(_synthesis(
+        assessment="actionable_trial",
+        output={"disposition": "trial_plan", "trial_plan": plan},
+    )), encoding="utf-8")
+
+    result = _run("validate-trial-synthesis.py", path)
+
+    assert result.returncode == 1
+    assert "undeclared obligation" in json.loads(result.stdout)["error"]

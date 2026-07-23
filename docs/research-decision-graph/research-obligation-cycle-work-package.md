@@ -231,7 +231,7 @@ schema or unit test is never counted as current production completion.
 |---:|:---:|---|
 | 114 | D | Scratch-versus-executed candidate preregistration is not enforced because candidate discovery modes are absent. |
 | 115 | D | Immutable `attempt_count` and `outcome_examined_count` do not exist. |
-| 116 | P/X | Skill-neutral descriptions and a local use ledger exist; the full description-search-to-approval-to-execution audit loop is unproven, and the canonical Research Obligation Skill currently differs from its packaged CLI copy. |
+| 116 | P | Skill-neutral descriptions, a local use ledger and canonical/packaged copy parity exist; the full description-search-to-approval-to-execution audit loop remains unproven. |
 | 117 | P | Detailed records were reconstructed; the compact index was stale at 142 and is corrected by this audit. |
 | 118 | P | Work Package, Graph and Agent Flow authority boundaries are substantially implemented, but later lifecycle work superseded parts of the original object-count wording. |
 | 119 | C | TrialPlan is versioned, branch-specific and required by Run/result binding without universal metric thresholds. |
@@ -258,7 +258,7 @@ schema or unit test is never counted as current production completion.
 | 140 | P | One MaintenanceCase table supports dedupe/claim/status/Gates; exact affected-research wake is incomplete. |
 | 141 | P | Retention and exact-hash trust are substantially implemented; complete atomic cross-owner Profile/budget/checkpoint transfer is not. |
 | 142 | S/P | The old six-Graph-owner count was superseded by canonical Work Package lifecycle; Agent Flow still retains its two owners. |
-| 143 | P/X/B | Core Claim/Obligation/Evidence/Adjudication/closure protocols and Skill exist; real resolvers, user objectives, v9, history recovery and shadow research remain incomplete, and the canonical/packaged Skill copies have drifted. |
+| 143 | P/B | Core Claim/Obligation/Evidence/Adjudication/closure protocols and a copy-consistent TrialPlan-v5 Skill exist; real resolvers, user objectives, v9, history recovery and shadow research remain incomplete. |
 
 ### Grill 144–176
 
@@ -378,7 +378,7 @@ initial name as historical provenance.
 | 179.28 | D/P | Six statistical questions are catalogued; Bootstrap/DSR/PBO and other factual resolver capabilities remain largely absent. |
 | 179.29 | P | Capability-gap routing and deterministic equity-curve SVG/receipt generation exist; missing statistical/backend capabilities and full report admission remain. |
 | 179.30 | P | Current Jobs preserve a bounded curve artifact and do not persist full point sequences; historical exact-recovery/reproducibility orchestration is incomplete. |
-| 179.31 | P/X | A provider-neutral availability service, local bundle inspection and Tiger connector exist; it does not resolve all `data.*` subcategories or UI ownership, and its two-stage field-check guidance exists only in the packaged Skill copy. |
+| 179.31 | P | A provider-neutral availability service, local bundle inspection, Tiger connector and copy-consistent two-stage field-check guidance exist; it does not resolve all `data.*` subcategories or UI ownership. |
 | 179.32 | X | `DataFreq` itself remains temporal, but Tiger availability writes `"frequency": "L2"` instead of orthogonal `sampling_mode/frequency/market_depth`, directly violating the accepted contract. |
 | 179.33 | P | Revision identity, `column_refs`, tree and LaTeX support exist; unified Chinese semantic/unit/domain/timing resolvers are incomplete. |
 | 179.34 | P | The Agent can inspect expression structure, but stable paths, units, scale, timing/lookback and parameterization-delta verification are incomplete. |
@@ -413,22 +413,15 @@ initial name as historical provenance.
    public typed `where`, and two `WhereOp` classes.
 4. **Data depth is encoded as frequency in Tiger.** This contradicts the
    accepted orthogonal `DataFreq`/sampling/depth model.
-5. **The Research Obligation Skill is stale.** Its trial-synthesis reference
-   still tells the Agent to return TrialPlan schema v4 while the canonical
-   server protocol is v5 with Evidence Actions.
-6. **Older checkpoint ownership wording is stale.** Grill 77 says the full
+5. **Older checkpoint ownership wording is stale.** Grill 77 says the full
    checkpoint is local, while the later accepted Research Cycle uses the
    server trace as the canonical bounded replay owner.
-7. **Major FTClient contracts are absent.** Data Sources, native aggregated
+6. **Major FTClient contracts are absent.** Data Sources, native aggregated
    Factor Library, Graph browser, token usage/settings, local SQLite, source
    sync modes and stable business-action manifest are not complete.
-8. **“Closed Grill” was mistaken for “completed implementation.”** The former
+7. **“Closed Grill” was mistaken for “completed implementation.”** The former
    audit wording is replaced by this per-proposal matrix; closing a semantic
    question only means no further product choice is required.
-9. **Canonical and packaged Research Obligation Skills differ.** The packaged
-   `obligation-discovery.md` contains the two-stage data/field-coverage gate
-   that is absent from the canonical Skill. The repository's own copy-parity
-   test fails, so Agent behavior currently depends on the Skill load path.
 
 ### Dependency-ordered remaining implementation
 
@@ -436,12 +429,12 @@ This is the execution order derived from the detailed audit, not a new product
 design. Unaffected work may continue, while accounting-dependent research
 acceptance remains blocked until issue-143 is independently verified.
 
-1. **Repair trust and semantic drift first.** Reconcile the canonical and
-   packaged Research Obligation Skills, update TrialPlan v4 guidance to v5,
-   restore the orthogonal Tiger sampling/frequency/depth contract, remove
-   duplicate `WhereOp` ownership, implement the accepted typed `where`/`tanh`
-   surface, and mark the older checkpoint-ownership decision as superseded.
-   These are correctness defects in contracts an Agent may already consume.
+1. **Repair the remaining semantic drift first.** Restore the orthogonal Tiger
+   sampling/frequency/depth contract, remove duplicate `WhereOp` ownership,
+   implement the accepted typed `where`/`tanh` surface, and mark the older
+   checkpoint-ownership decision as superseded. Canonical/packaged Skill parity
+   and TrialPlan-v5 guidance were repaired in commit batch immediately after
+   this audit.
 2. **Finish the v9 deterministic contract before activation.** Implement real
    provider-neutral resolvers and CLI evidence operations for every active
    requirement subcategory, add bounded user acceptance

@@ -114,13 +114,24 @@ Live evidence remains bounded to the market states actually observed.
 
 ## Output
 
-Return a canonical TrialPlan schema version 4. Bind its
-`decision_contract_hash` and `methodology_hash` to the current checkpoint, and
-put every selected serviceable obligation ID in the bounded
-`obligation_refs`; do not copy obligation bodies. Include `stage_policy` and
-`parent_trial_plan_hash` (`null` for the first version). Return the expected
-evidence kind separately. If a required operator, strategy behavior, timing rule,
-authoritative data field, frozen identity, or pre-outcome decision rule is
-unavailable, return a Capability Gap without approximating it. You may return
-a clearly labeled `provisional_outline` to preserve useful design work, but it
-is not a canonical TrialPlan and cannot authorize execution.
+Return a canonical TrialPlan schema version 5. Bind its
+`decision_contract_hash` and `methodology_hash` to the current checkpoint.
+Select one `primary_obligation_ref` and only bounded,
+decision-relevant `secondary_obligation_refs`; do not copy obligation bodies.
+Include `stage_policy`, `samples`, `parent_trial_plan_hash` (`null` for the
+first version), design-evidence and ledger references, reopen predicates, and
+an ordered `evidence_actions` list.
+
+Each Evidence Action must bind its stage, serviced obligation references,
+capability requirement, execution mode, frozen input hash, expected evidence
+kind and contract, prior-action dependencies, cost and stopping predicates.
+Only `job` actions may bind RunSpec hashes and declared comparisons. A
+`sync_cli` or `connector` action returns qualified evidence without claiming a
+research Run. Do not use legacy v4 aliases such as `sample_roles` or the
+undifferentiated `obligation_refs`.
+
+If a required operator, strategy behavior, timing rule, authoritative data
+field, frozen identity, or pre-outcome decision rule is unavailable, return a
+Capability Gap without approximating it. You may return a clearly labeled
+`provisional_outline` to preserve useful design work, but it is not a canonical
+TrialPlan and cannot authorize execution.
