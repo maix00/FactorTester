@@ -27,6 +27,8 @@ class OrderStore:
     settlements_by_fill: dict[str, FillSettlement] = field(default_factory=dict)
     attempts_by_id: dict[str, OrderAttempt] = field(default_factory=dict)
     live_order_ids_by_scope: dict[Any, list[str]] = field(default_factory=dict)
+    capacity_limit_by_key: dict[Any, float] = field(default_factory=dict)
+    capacity_consumed_by_key: dict[Any, float] = field(default_factory=dict)
 
     def register_order(self, order: Order, *, scope: Any | None = None) -> None:
         if not order.order_id:

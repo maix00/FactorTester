@@ -26,6 +26,7 @@ from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.ledger_module import _apply_order_fill
 from tools.testers.backtest.modules.market_data import MarketDataModule, _historical_fields_for_strategy
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
+from tools.testers.backtest.modules.order_flow import record_order_terminal_state
 from tools.testers.backtest.modules.slippage import SlippageModule, _apply_slippage
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
@@ -391,7 +392,7 @@ def test_volume_capacity_uncapped_when_mode_infinite():
     assert capped[p] == 99999.0
 
 
-def test_order_sizing_volume_capacity_caps_to_participation_rate_times_volume():
+def test_order_sizing_does_not_consume_execution_volume_capacity():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -401,11 +402,11 @@ def test_order_sizing_volume_capacity_caps_to_participation_rate_times_volume():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    capped = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
-    assert capped[p] == pytest.approx(10.0)  # capped, 0.1*100
+    sized = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+    assert sized[p] == pytest.approx(50.0)
 
 
-def test_order_sizing_volume_capacity_uses_current_bar_when_ctx_has_volume_table():
+def test_order_sizing_does_not_read_signal_bar_volume_table():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -421,12 +422,11 @@ def test_order_sizing_volume_capacity_uses_current_bar_when_ctx_has_volume_table
     ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, volume_table)
 
-    capped = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+    sized = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+    assert sized[p] == pytest.approx(50.0)
 
-    assert capped[p] == pytest.approx(30.0)
 
-
-def test_order_sizing_volume_capacity_requires_volume_for_each_product():
+def test_order_sizing_defers_missing_volume_validation_to_execution():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -437,17 +437,9 @@ def test_order_sizing_volume_capacity_requires_volume_for_each_product():
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {})
 
-    with pytest.raises(KeyError, match="requires MarketDataModule volume.*delta=50.0.*2024-01-01"):
-        apply_order_sizing_policy(account, ctx, s, {p: 50.0})
-
-    assert account.runtime_info_rows
-    row = account.runtime_info_rows[-1]
-    assert row["code"] == "volume_capacity_missing_volume"
-    assert row["level"] == "error"
-    assert row["details"]["timestamp"] == "2024-01-01 00:00:00"
-    assert row["details"]["products"][0]["delta"] == 50.0
-    assert row["details"]["products"][0]["loaded_volume_column"] is True
-    assert row["details"]["products"][0]["last_observed_volume_timestamp"] == "2023-12-29 15:00:00"
+    sized = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+    assert sized[p] == 50.0
+    assert not account.runtime_info_rows
 
 
 def test_order_sizing_volume_capacity_does_not_require_volume_for_zero_delta():
@@ -465,7 +457,7 @@ def test_order_sizing_volume_capacity_does_not_require_volume_for_zero_delta():
     assert capped[p] == 0.0
 
 
-def test_order_sizing_volume_capacity_does_not_defer_excess_to_next_bar():
+def test_order_sizing_preserves_excess_for_execution_lifecycle():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -475,8 +467,8 @@ def test_order_sizing_volume_capacity_does_not_defer_excess_to_next_bar():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    capped = apply_order_sizing_policy(account, ctx, s, {p: -50.0})
-    assert capped[p] == pytest.approx(-10.0)
+    sized = apply_order_sizing_policy(account, ctx, s, {p: -50.0})
+    assert sized[p] == pytest.approx(-50.0)
 
 
 def test_cash_constraint_haircuts_buy_orders_proportionally():
@@ -814,6 +806,7 @@ def test_order_flow_records_fee_slippage_ledger_and_final_status():
     _apply_slippage(account, ctx)
     _resolve_fee_cost(account, ctx)
     _apply_order_fill(account, ctx)
+    record_order_terminal_state(account, ctx)
 
     records = account.order_flow_store.records_for_order("order-1")
     assert [row["step"] for row in records] == [

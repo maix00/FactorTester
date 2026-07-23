@@ -1,0 +1,45 @@
+"""Reconcile a target position against actual and live Order leaves."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from tools.testers.backtest.engines.native.order import OrderStatus
+
+from .access import order_stores_for
+
+
+def reconcile_target_delta(
+    state: Any,
+    strategy: Any,
+    product: Any,
+    *,
+    actual_quantity: float,
+    target_quantity: float,
+    timestamp: Any,
+) -> float:
+    order_store, audit_store = order_stores_for(state)
+    scope = (strategy, product)
+    live = order_store.live_orders(scope)
+    projected = actual_quantity + sum(order.signed_remaining_quantity for order in live)
+    if abs(target_quantity - projected) <= 1e-12:
+        return 0.0
+    for order in live:
+        order.status = OrderStatus.CANCELLED
+        order.revision += 1
+        order_store.remove_from_live_indexes(order)
+        pending = order_store.pending_orders
+        if pending.get(scope) is order:
+            pending.pop(scope, None)
+        audit_store.record(
+            order,
+            step="target_reconcile_cancel",
+            label="最新目标替换未成交余量",
+            timestamp=timestamp,
+            details={
+                "actual_quantity": actual_quantity,
+                "projected_quantity": projected,
+                "target_quantity": target_quantity,
+            },
+        )
+    return target_quantity - actual_quantity

@@ -24,6 +24,7 @@ from tools.testers.backtest.modules.market_data import (
     market_data_store_for,
 )
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
+from tools.testers.backtest.modules.order_lifecycle import reconcile_target_delta
 from tools.testers.backtest.modules.runtime_info import (
     product_display,
     product_display_text,
@@ -143,7 +144,15 @@ def _basic_size_order(state, ctx) -> None:
             ledger_positions = ledger.get(LedgerModule.positions, {})
             multiplier = contract_multiplier_from_fields(historical_fields, product, state=state, timestamp=ctx.timestamp)
             target_quantity = target_weights.get(product, 0.0) * equity / (float(price) * multiplier)
-            deltas[product] = target_quantity - getattr(ledger_positions.get(product), "quantity", 0.0)
+            actual_quantity = float(getattr(ledger_positions.get(product), "quantity", 0.0) or 0.0)
+            deltas[product] = reconcile_target_delta(
+                state,
+                strategy,
+                product,
+                actual_quantity=actual_quantity,
+                target_quantity=target_quantity,
+                timestamp=ctx.timestamp,
+            )
         deltas = apply_order_sizing_policy(state, ctx, strategy, deltas)
         ctx.set_for(OrderConstructModule.raw_deltas, strategy, deltas)
 

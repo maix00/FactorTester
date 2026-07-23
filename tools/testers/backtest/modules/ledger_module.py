@@ -20,7 +20,8 @@ from tools.testers.backtest.modules.market_data import (
     historical_fields_for_product,
 )
 from tools.testers.backtest.modules.minor_unit import MinorUnitModule
-from tools.testers.backtest.modules.order_flow import order_flow_store_for, record_order_terminal_state
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
+from tools.testers.backtest.modules.order_lifecycle import record_fill_settlement
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.strategy_book import (
@@ -119,7 +120,7 @@ class LedgerModule(ExecutableModule):
             _fixed_margin_ratio_ref,
         ),
         outputs=(positions, cash, _margin_reserved_ref, _margin_deficit_ref, _margin_excess_ref),
-        phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
+        phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=11,
         description="成交落账",
         event_payload_inputs=("order",),
         compute=lambda state, ctx: _apply_order_fill(state, ctx),
@@ -353,6 +354,19 @@ def _apply_order_fill(state, ctx) -> None:
                     details={"reject_reason": str(reject_reason)},
                 )
                 continue
+            if order.get("capacity_limited_attempt") and float(
+                order.get("attempt_fill_quantity", 0.0) or 0.0
+            ) <= 1e-12:
+                store.record(
+                    order,
+                    step="execution_capacity",
+                    label="本 bar 未获得成交容量",
+                    timestamp=ctx.timestamp,
+                    details=dict(order.get("capacity_details", {}) or {}),
+                )
+                continue
+            if not order.get("capacity_limited_attempt"):
+                order.accepted_quantity = abs(float(order.quantity))
             ledger = state.ledger_for(order)
             ledger_config = state.ledger_config_for(ledger)
             positions = ledger.get(LedgerModule.positions, {})
@@ -392,6 +406,7 @@ def _apply_order_fill(state, ctx) -> None:
                 price = prices[order.instrument]
             fee_cost = order.get("fee_cost", 0.0)
             cash_before = cash.to_major()
+            margin_before = _margin_reserved_major(ledger)
             if _uses_margin_accounting(state.config_for(strategy), historical_fields, order.instrument, ledger_config):
                 cash = _apply_margin_accounting_fill(
                     cash,
@@ -434,27 +449,44 @@ def _apply_order_fill(state, ctx) -> None:
                     use_minor_units=cash.use_minor_units,
                 )
                 cash = cash - trade_cost
+            ledger.set(LedgerModule.positions, positions)
+            set_cash_for_ledger_pool(state, ledger, cash)
+            _sync_ledger_margin_reserved(ledger, positions)
+            margin_after = _margin_reserved_major(ledger)
+            fill = record_fill_settlement(
+                state,
+                order,
+                timestamp=ctx.timestamp,
+                price=float(price),
+                fee=float(fee_cost or 0.0),
+                cash_before=float(cash_before),
+                cash_after=float(cash.to_major()),
+                margin_before=margin_before,
+                margin_after=margin_after,
+            )
             store.record(
                 order,
                 step="ledger_update",
                 label="成交落账",
                 timestamp=ctx.timestamp,
                 details={
+                    "fill_id": fill.fill_id,
                     "ledger_id": ledger.ledger_id,
                     "cash_pool_id": cash_pool_id_for_ledger(state, ledger),
                     "price": float(price),
                     "fee_cost": float(fee_cost or 0.0),
                     "cash_before": float(cash_before),
                     "cash_after": float(cash.to_major()),
+                    "margin_before": margin_before,
+                    "margin_after": margin_after,
                 },
             )
-            ledger.set(LedgerModule.positions, positions)
-            set_cash_for_ledger_pool(state, ledger, cash)
-            _sync_ledger_margin_reserved(ledger, positions)
-            order.register_fill(abs(float(order.quantity)))
-            if order.order_id in state.order_store.orders_by_id:
-                state.order_store.remove_from_live_indexes(order)
-    record_order_terminal_state(state, ctx)
+
+
+def _margin_reserved_major(ledger: Any) -> float:
+    from tools.testers.backtest.modules.margin import MarginModule
+
+    return float(ledger.get(MarginModule.margin_reserved, 0.0) or 0.0)
 
 
 def _normalise_fill_quantity(state, strategy, product, quantity: float) -> float:

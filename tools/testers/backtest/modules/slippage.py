@@ -41,7 +41,7 @@ class SlippageModule(ExecutableModule):
         outputs=(),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER,
-        order=6,
+        order=7,
         description="计算滑点价格",
         event_payload_inputs=("order",),
         compute=lambda state, ctx: _apply_slippage(state, ctx),

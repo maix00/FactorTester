@@ -10,19 +10,18 @@ def test_event_kind_values_and_ordering():
     assert list(EventKind) == [
         EventKind.BAR,
         EventKind.FIELD_CHANGE,
+        EventKind.ORDER,
         EventKind.SIGNAL,
         EventKind.TRADE_INTENT,
-        EventKind.ORDER,
         EventKind.LEDGER,
     ]
     assert EventKind.BAR == 0
     assert EventKind.SIGNAL == 10
     assert EventKind.TRADE_INTENT == 15
-    assert EventKind.ORDER == 20
-    assert EventKind.BAR < EventKind.SIGNAL
+    assert EventKind.ORDER == 5
+    assert EventKind.BAR < EventKind.ORDER
+    assert EventKind.ORDER < EventKind.SIGNAL
     assert EventKind.SIGNAL < EventKind.TRADE_INTENT
-    assert EventKind.TRADE_INTENT < EventKind.ORDER
-    assert EventKind.SIGNAL < EventKind.ORDER
 
 
 def test_event_draft_is_frozen_and_comparable():

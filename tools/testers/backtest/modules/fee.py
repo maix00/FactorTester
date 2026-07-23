@@ -119,7 +119,7 @@ class FeeModule(ExecutableModule):
         outputs=(),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER,
-        order=7,
+        order=8,
         description="计算交易费用",
         event_payload_inputs=("order",),
         compute=lambda state, ctx: _resolve_fee_cost(state, ctx),
