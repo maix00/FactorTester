@@ -106,6 +106,29 @@ final class ResearchJournalTests: XCTestCase {
         )
     }
 
+    func testTimelineProjectionExcludesSyntheticReportCarriers() throws {
+        func step(edgeRef: String) throws -> ResearchTransitionStep {
+            try JSONDecoder().decode(
+                ResearchTransitionStep.self,
+                from: Data(
+                    """
+                    {"step_ref":"trace:\(edgeRef)","edge_ref":"\(edgeRef)","from_node":"factor_semantics","to_node":"factor_semantics","created_at":1,"evidence_refs":[],"trial_plan_refs":[],"obligation_refs":[],"claim_refs":[],"job_refs":[],"run_refs":[],"obligation_changes":[],"claim_changes":[]}
+                    """.utf8
+                )
+            )
+        }
+
+        XCTAssertFalse(ResearchTimelineProjection.isGraphNodeTransition(
+            try step(edgeRef: "graph-edge:__current_node_report__")
+        ))
+        XCTAssertFalse(ResearchTimelineProjection.isGraphNodeTransition(
+            try step(edgeRef: "graph-edge:__graph_continuation__")
+        ))
+        XCTAssertTrue(ResearchTimelineProjection.isGraphNodeTransition(
+            try step(edgeRef: "graph-edge:factor_semantics__validation_design")
+        ))
+    }
+
     func testDecodesStructuredListAndTableWithRowLinks() throws {
         let document = try JSONDecoder().decode(
             ResearchJournalDocument.self,

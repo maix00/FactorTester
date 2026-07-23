@@ -352,6 +352,32 @@ def test_validation_supports_all_coverage_decisions(decision: str) -> None:
     )
 
 
+def test_report_projection_requires_inline_code_in_canonical_prose() -> None:
+    document = _completed_document("map_existing")
+    document["assessments"][0]["report"]["content_zh"] = [
+        "$F 决定调度，$Rev 只声明方向；$100 仍是普通金额。",
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=r"must wrap FactorTester meta parameter \$F",
+    ):
+        validate_entry_assessment_document(document)
+
+
+def test_report_projection_preserves_explicit_inline_code_and_amounts() -> None:
+    document = _completed_document("map_existing")
+    document["assessments"][0]["report"]["content_zh"] = [
+        "`$F` 决定调度，`$Rev` 只声明方向；$100 仍是普通金额。",
+    ]
+
+    result = validate_entry_assessment_document(document)
+    rows = result["local_report_items"][0]["content_zh"]
+    assert rows == [
+        "`$F` 决定调度，`$Rev` 只声明方向；$100 仍是普通金额。"
+    ]
+
+
 def test_validation_requires_a_trial_ref_for_trial_candidate() -> None:
     document = _completed_document("map_existing")
     action = document["assessments"][0]["first_resolution_action"]

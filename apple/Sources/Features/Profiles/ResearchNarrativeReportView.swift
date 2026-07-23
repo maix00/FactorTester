@@ -794,10 +794,9 @@ struct ResearchNarrativeReportView: View {
     }
 
     private var orderedSteps: [ResearchTransitionStep] {
-        steps.filter {
-            $0.edgeRef != "graph-edge:__graph_continuation__"
-                || sectionRefsByCheckpoint[$0.stepRef] != nil
-        }.sorted {
+        steps.filter(
+            ResearchTimelineProjection.isGraphNodeTransition
+        ).sorted {
             if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
             return $0.id < $1.id
         }
@@ -821,6 +820,25 @@ struct ResearchNarrativeReportView: View {
         case "failed": return .red
         default: return .blue
         }
+    }
+}
+
+enum ResearchTimelineProjection {
+    /// Synthetic audit/report carriers belong in the narrative attached to
+    /// their substantive checkpoint, never in the graph-node version tree.
+    ///
+    /// The transition projection does not yet expose checkpoint lineage/type,
+    /// so these protocol-defined synthetic edges are the narrow fallback.
+    /// Prefer the structured lineage field here once the server projects it.
+    private static let syntheticCarrierEdges: Set<String> = [
+        "graph-edge:__current_node_report__",
+        "graph-edge:__graph_continuation__",
+    ]
+
+    static func isGraphNodeTransition(
+        _ step: ResearchTransitionStep
+    ) -> Bool {
+        !syntheticCarrierEdges.contains(step.edgeRef)
     }
 }
 

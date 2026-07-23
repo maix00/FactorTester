@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from tools.cli.release.research_reporting.report_items import (
@@ -33,7 +34,10 @@ def build_report_items(
     if not isinstance(rows, list) or not rows:
         raise ValueError(f"{prefix}.report.content_zh must be a non-empty array")
     chinese_rows = [
-        chinese_text(value, f"{prefix}.report.content_zh")
+        _validated_code_aware_prose(
+            chinese_text(value, f"{prefix}.report.content_zh"),
+            field=f"{prefix}.report.content_zh",
+        )
         for value in rows
     ]
     report_refs = text_array(
@@ -131,3 +135,24 @@ def _reference_label(value: str) -> str:
     if value.startswith("cli:"):
         return "CLI 事实"
     return "研究事实"
+
+
+_FACTOR_META_PARAMETER = re.compile(
+    r"(?<![`A-Za-z0-9_])\$(F|Rev)(?![A-Za-z0-9_])"
+)
+
+
+def _validated_code_aware_prose(value: str, *, field: str) -> str:
+    """Reject ambiguous FactorTester meta parameters in report prose.
+
+    The canonical authoring object must carry its own Markdown semantics.
+    Projection is deterministic and must not silently rewrite source facts.
+    Structural IDs and aliases never pass through this prose validator.
+    """
+    match = _FACTOR_META_PARAMETER.search(value)
+    if match is not None:
+        raise ValueError(
+            f"{field} must wrap FactorTester meta parameter "
+            f"{match.group(0)} in Markdown inline code"
+        )
+    return value
