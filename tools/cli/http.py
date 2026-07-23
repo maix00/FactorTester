@@ -19,6 +19,7 @@ CONFIG_ENV = "FACTORTESTER_CONFIG"
 HOME_ENV = "FACTORTESTER_HOME"
 STREAM_TIMEOUT_ENV = "FACTORTESTER_STREAM_TIMEOUT"
 DEFAULT_STREAM_TIMEOUT = 600.0
+DEFAULT_BINARY_LIMIT = 8 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,12 @@ class HttpClientError(RuntimeError):
         self.status = status
         self.url = url
         self.body = body
+
+
+@dataclass(frozen=True, slots=True)
+class BinaryResponse:
+    content: bytes
+    content_type: str
 
 
 def config_path() -> Path:
@@ -126,6 +133,45 @@ class HttpSession:
 
     def stream_get(self, path: str, *, query: dict[str, Any] | None = None):
         yield from self.stream_request("GET", path, query=query)
+
+    def download(
+        self,
+        path: str,
+        *,
+        maximum_bytes: int = DEFAULT_BINARY_LIMIT,
+    ) -> BinaryResponse:
+        """Read one bounded authenticated artifact without JSON coercion."""
+        if maximum_bytes <= 0:
+            raise ValueError("binary download limit must be positive")
+        url = self._url(path)
+        request = Request(
+            url,
+            headers={"Accept": "application/octet-stream, image/*"},
+            method="GET",
+        )
+        try:
+            with self._opener.open(request, timeout=self.timeout) as response:
+                declared = response.headers.get("Content-Length")
+                if declared is not None and int(declared) > maximum_bytes:
+                    raise ValueError("artifact exceeds local download limit")
+                raw = response.read(maximum_bytes + 1)
+                if len(raw) > maximum_bytes:
+                    raise ValueError("artifact exceeds local download limit")
+                content_type = str(
+                    response.headers.get_content_type()
+                    or "application/octet-stream"
+                )
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            if _looks_like_html(body):
+                raise ValueError(
+                    "服务器返回了 HTML 页面而不是 artifact，可能尚未登录、"
+                    "登录已过期，或服务地址配置错误。"
+                ) from exc
+            raise HttpClientError(exc.code, url, body) from exc
+        finally:
+            self._save_cookies()
+        return BinaryResponse(content=raw, content_type=content_type)
 
     def stream_request(
         self,

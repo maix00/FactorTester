@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .client_base import ClientMixinBase
+from .http import BinaryResponse
 
 
 class ResearchClientMixin(ClientMixinBase):
@@ -226,10 +227,10 @@ class ResearchClientMixin(ClientMixinBase):
             self.session.post(f"/api/jobs/{job_id}/continue", payload)
         )
 
-    def job_artifact(self, job_id: str, name: str) -> dict[str, Any]:
-        return self._expect_success(self.session.get(
+    def job_artifact(self, job_id: str, name: str) -> BinaryResponse:
+        return self.session.download(
             f"/api/jobs/{job_id}/artifacts/{name}"
-        ))
+        )
 
     def delete_job_artifacts(self, job_id: str) -> dict[str, Any]:
         return self._expect_success(

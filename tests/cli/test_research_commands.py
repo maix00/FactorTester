@@ -5,6 +5,7 @@ import json
 from click.testing import CliRunner
 
 from tools.cli.app import cli
+from tools.cli.http import BinaryResponse
 from tools.cli.state import load_state, save_state
 from tools.cli.step.values import render_value
 
@@ -57,6 +58,13 @@ class FakeClient:
             "status": "failed",
             "error": {"message": "boom", "traceback": "trace"},
         }
+
+    def job_artifact(self, job_id, name):
+        assert (job_id, name) == ("job-curve", "equity_curve_report")
+        return BinaryResponse(
+            content=b"<svg><title>curve</title></svg>",
+            content_type="image/svg+xml",
+        )
 
     def clone_run_workspace(self, run_id, *, title=""):
         assert run_id == "run-1"
@@ -711,6 +719,28 @@ def test_job_queue_commands_expose_filtered_json_and_failure_result(tmp_path, mo
     }
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["error"]["traceback"] == "trace"
+
+
+def test_job_artifact_writes_binary_file_and_prints_only_receipt(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config", lambda: fake
+    )
+    target = tmp_path / "curve.svg"
+
+    result = CliRunner().invoke(cli, [
+        "job", "artifact", "job-curve", "equity_curve_report",
+        "--output", str(target),
+    ])
+
+    assert result.exit_code == 0, result.output
+    receipt = json.loads(result.output)
+    assert target.read_bytes() == b"<svg><title>curve</title></svg>"
+    assert receipt["content_type"] == "image/svg+xml"
+    assert receipt["path"] == str(target.resolve())
+    assert "svg" not in receipt
 
 
 def test_cli_restores_historical_run_and_bulk_clears_current_workspace(tmp_path, monkeypatch) -> None:

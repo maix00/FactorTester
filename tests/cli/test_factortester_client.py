@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pytest
-from flask import Flask, jsonify, request, session
+from flask import Flask, Response, jsonify, request, session
 from werkzeug.serving import make_server
 
 from tools.cli.client import FactorTesterClient
@@ -106,6 +106,14 @@ def fake_server() -> Iterator[str]:
     @app.get("/api/jobs")
     def list_jobs():
         return jsonify(success=True, jobs=[{"job_id": "job-1", "status": "queued"}])
+
+    @app.get("/api/jobs/job-1/artifacts/equity_curve_report")
+    def job_artifact():
+        assert session.get("username") == "alice"
+        return Response(
+            b"<svg><title>curve</title></svg>",
+            content_type="image/svg+xml",
+        )
 
     @app.get("/admin/api/server-instances")
     def admin_server_instances():
@@ -289,6 +297,9 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         "/research/gtht_handoff.json"
     )["artifact_id"] == "academic_mom:abc"
     assert client.list_jobs(workspace_id="workspace-1")[0]["job_id"] == "job-1"
+    artifact = client.job_artifact("job-1", "equity_curve_report")
+    assert artifact.content == b"<svg><title>curve</title></svg>"
+    assert artifact.content_type == "image/svg+xml"
     research = client.list_profile_research(
         workspace_ref="workspace:workspace-1",
         limit=7,
@@ -343,6 +354,21 @@ def test_client_login_persists_across_processes_and_logout_clears_cookie(
     assert list(second.session.cookie_jar) == []
     third = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
     assert list(third.session.cookie_jar) == []
+
+
+def test_binary_artifact_download_enforces_size_limit(
+    fake_server: str, tmp_path,
+) -> None:
+    client = FactorTesterClient(
+        HttpSession(fake_server, cookies=tmp_path / "cookies.lwp")
+    )
+    client.login("alice", "pw")
+
+    with pytest.raises(ValueError, match="download limit"):
+        client.session.download(
+            "/api/jobs/job-1/artifacts/equity_curve_report",
+            maximum_bytes=8,
+        )
 
 
 def test_client_discards_corrupt_cookie_jar_without_traceback(fake_server: str, tmp_path) -> None:

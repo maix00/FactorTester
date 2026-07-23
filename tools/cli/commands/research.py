@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -462,9 +463,28 @@ def job_continue(job_id: str, until: str, run_to_end: bool, as_json: bool) -> No
 @job.command("artifact")
 @click.argument("job_id")
 @click.argument("name")
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="写入本地文件；不会把二进制内容打印进 Agent 上下文。",
+)
 @friendly_errors
-def job_artifact(job_id: str, name: str) -> None:
-    click.echo(_json(client_from_config().job_artifact(job_id, name)))
+def job_artifact(job_id: str, name: str, output: Path) -> None:
+    response = client_from_config().job_artifact(job_id, name)
+    output = output.expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging = output.with_name(f".{output.name}.part")
+    staging.write_bytes(response.content)
+    staging.replace(output)
+    click.echo(_json({
+        "job_id": job_id,
+        "name": name,
+        "path": str(output),
+        "content_type": response.content_type,
+        "content_hash": hashlib.sha256(response.content).hexdigest(),
+        "size_bytes": len(response.content),
+    }))
 
 
 @job.command("clear-results")
