@@ -111,15 +111,39 @@ def _tree_projection(
             )
         )
         current_row = branch_by_hypothesis[hypothesis_branch_id]
-        for previous, current in zip(branch_nodes, branch_nodes[1:]):
-            if current["_sequence_rank"] != previous["_sequence_rank"] + 1:
-                # Root/head window intentionally may contain a gap.  A
-                # connector over an omitted checkpoint would be misleading.
+        visible_branch_nodes = [
+            item for item in branch_nodes
+            if item["edge_ref"] != "__graph_continuation__"
+        ]
+        for previous, current in zip(
+            visible_branch_nodes, visible_branch_nodes[1:]
+        ):
+            hidden_between = [
+                item for item in branch_nodes
+                if (
+                    previous["_sequence_rank"]
+                    < item["_sequence_rank"]
+                    < current["_sequence_rank"]
+                )
+            ]
+            rank_gap = (
+                current["_sequence_rank"] - previous["_sequence_rank"] - 1
+            )
+            if (
+                len(hidden_between) != rank_gap
+                or any(
+                    item["edge_ref"] != "__graph_continuation__"
+                    for item in hidden_between
+                )
+            ):
+                # Root/head windows may omit substantive checkpoints. Never
+                # draw a connector over missing research history. Graph
+                # continuation receipts are the sole invisible exception:
+                # they remain auditable in the report but are not research
+                # version-tree nodes.
                 continue
             relation = "transition"
-            if current["edge_ref"] in {
-                "__branch_fork__", "__graph_continuation__",
-            }:
+            if current["edge_ref"] == "__branch_fork__":
                 is_current_lineage = (
                     current["_instance_id"] == str(current_row["instance_id"])
                     and current["_physical_branch_id"]
@@ -133,11 +157,7 @@ def _tree_projection(
                 # Older physical incarnations remain part of the same logical
                 # history. Their creation edge must not disappear merely
                 # because a newer continuation is now current.
-                relation = (
-                    "fork"
-                    if current["edge_ref"] == "__branch_fork__"
-                    else "continuation"
-                )
+                relation = "fork"
             edges.append({
                 "edge_ref": current["edge_ref"],
                 "relation": relation,
@@ -151,11 +171,9 @@ def _tree_projection(
         target = next((item for item in branch_nodes if (
             item["_instance_id"] == str(row["instance_id"])
             and item["_physical_branch_id"] == str(row["branch_id"])
-            and item["edge_ref"] in {
-                "__branch_fork__", "__graph_continuation__",
-            }
+            and item["edge_ref"] == "__branch_fork__"
         )), None)
-        if target and lineage.get("relation") in {"fork", "continuation"}:
+        if target and lineage.get("relation") == "fork":
             source_branch_ref = lineage.get("source_branch_ref")
             source_trace_ref = lineage.get("source_trace_ref")
             if isinstance(source_branch_ref, str):
@@ -173,6 +191,7 @@ def _tree_projection(
     public_nodes = [
         {key: value for key, value in node.items() if not key.startswith("_")}
         for node in nodes
+        if node["edge_ref"] != "__graph_continuation__"
     ]
     return {
         "schema_version": 2,

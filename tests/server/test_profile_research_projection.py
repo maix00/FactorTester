@@ -580,7 +580,11 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
     ]
     assert detail["created_at"] == 1000
     tree = detail["tree"]
-    assert len(tree["nodes"]) == 10
+    assert len(tree["nodes"]) == 8
+    assert all(
+        node["edge_ref"] != "__graph_continuation__"
+        for node in tree["nodes"]
+    )
     assert sum(node["is_head"] for node in tree["nodes"]) == 1
     assert next(node for node in tree["nodes"] if node["is_head"])[
         "checkpoint_ref"
@@ -602,26 +606,34 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
         node["navigation_branch_id"] for node in tree["nodes"]
     } == {"branch-v8"}
     assert tree["omitted_node_count"] == 0
-    assert len(tree["edges"]) == 9
-    continuations = [
-        edge for edge in tree["edges"] if edge["relation"] == "continuation"
+    assert len(tree["edges"]) == 7
+    assert all(
+        edge["relation"] != "continuation"
+        for edge in tree["edges"]
+    )
+    cross_version_transitions = [
+        edge for edge in tree["edges"]
+        if edge["source_branch_ref"] != edge["target_branch_ref"]
     ]
     assert [
         (
             edge["source_node_ref"], edge["target_node_ref"],
             edge["source_branch_ref"], edge["target_branch_ref"],
+            edge["edge_ref"],
         )
-        for edge in continuations
+        for edge in cross_version_transitions
     ] == [
         (
-            "trace:trace-000002", "trace:trace-v7",
+            "trace:trace-000002", "trace:trace-v7-1",
             "graph-branch:instance-a:branch-0000",
             "graph-branch:instance-v7:branch-v7",
+            "edge-v7-1",
         ),
         (
-            "trace:trace-v7-4", "trace:trace-v8",
+            "trace:trace-v7-4", "trace:trace-v8-1",
             "graph-branch:instance-v7:branch-v7",
             "graph-branch:instance-v8:branch-v8",
+            "edge-v8-1",
         ),
     ]
 
