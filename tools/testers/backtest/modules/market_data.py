@@ -457,6 +457,7 @@ class MarketDataModule(ExecutableModule):
         name="lookup_current_prices_on_trade_intent",
         phase=Phase.PER_EVENT, event_kind=EventKind.TRADE_INTENT, order=1,
         description="读取交易意图时点市场快照",
+        event_payload_inputs=("*",),
     )
     lookup_current_prices_on_ledger: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
         name="lookup_current_prices_on_ledger",
@@ -2209,7 +2210,26 @@ def _market_snapshot_for_event(state, ctx) -> dict[str, dict[Any, float]]:
         return signal_market_snapshot_at(state, ctx.timestamp)
     if getattr(ctx, "event_kind", None) is EventKind.LEDGER:
         return ledger_market_snapshot_at(state, ctx.timestamp)
+    if (
+        getattr(ctx, "event_kind", None) is EventKind.TRADE_INTENT
+        and _margin_liquidation_payloads_only(ctx)
+    ):
+        return ledger_market_snapshot_at(state, ctx.timestamp)
     return current_market_snapshot_at(state, ctx.timestamp)
+
+
+def _margin_liquidation_payloads_only(ctx) -> bool:
+    payloads: list[Any] = []
+    for strategy in getattr(ctx, "active_strategies", ()) or ():
+        payloads.extend(ctx.payloads_for(strategy))
+    for ledger in getattr(ctx, "active_ledgers", ()) or ():
+        payloads.extend(ctx.payloads_for_ledger(ledger))
+    if not payloads:
+        return False
+    return all(
+        isinstance(payload, dict) and payload.get("kind") == "margin_liquidation"
+        for payload in payloads
+    )
 
 
 def _order_event_price_timestamp(ctx) -> pd.Timestamp | None:

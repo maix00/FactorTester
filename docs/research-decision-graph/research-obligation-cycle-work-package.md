@@ -398,6 +398,7 @@ initial name as historical provenance.
 | 179.46 | C/P | Ordered Evidence Actions, one-action execution checkpoints, admission and result-audit return are implemented; full successor-Graph E2E is pending. |
 | 179.47 | P | Production Work Package owner rows were explicitly backfilled 17/17; exact purge, orphan migration and read-path benchmarks remain. |
 | 179.48 | P/B | The implementation order and final semantics are recorded; v9 activation, real resolvers, user objectives, history and shadow research remain open. |
+| 180.1 | D/B | v9 pre-activation audit found that caller-supplied usage was mislabeled `provider_actual` and shadow totals were not bound to one frozen comparison workload. Grill 180 requires server-verified provider-neutral receipts and an exact sealed comparison cohort before activation; implementation and real receipt evidence remain open. |
 | 179.49 | P | `occurred_at` versus trusted `recorded_at` and historical stage/finalize exist; invalid-journal archive/rebuild and real `MaxA (2)` restoration remain. |
 | 179.50 | P/B | Frozen Run configuration lazy detail, offline MathJax formula rendering and content-addressed equity images exist; the complete MaxA report and post-issue-143 reruns do not. |
 

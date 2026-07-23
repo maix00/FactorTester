@@ -132,6 +132,24 @@ class AgentFlowQueries:
             ] = int(row["count"])
         return result
 
+    def load_shadow_token_cohort(
+        self,
+        *,
+        owner_user_id: str,
+        lineage_hash: str,
+    ) -> list[dict[str, Any]]:
+        with connect_agent_flow(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM agent_invocations
+                WHERE owner_user_id=? AND lineage_hash=?
+                ORDER BY created_at, invocation_id
+                LIMIT 3
+                """,
+                (owner_user_id, lineage_hash),
+            ).fetchall()
+        return [invocation_value(row) for row in rows]
+
 
 def invocation_value(row: sqlite3.Row) -> dict[str, Any]:
     return {

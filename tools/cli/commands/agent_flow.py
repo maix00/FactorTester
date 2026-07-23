@@ -202,6 +202,11 @@ def reserve_agent_invocation(
 @click.option("--cache-read-tokens", type=click.IntRange(min=0), default=0)
 @click.option("--provider-request-id", default="")
 @click.option("--provider-attestation", default="")
+@click.option("--provider-id", default="")
+@click.option(
+    "--provider-receipt-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 @click.option(
     "--reserved-fallback",
     is_flag=True,
@@ -214,15 +219,34 @@ def settle_agent_invocation(
     cache_read_tokens: int,
     provider_request_id: str,
     provider_attestation: str,
+    provider_id: str,
+    provider_receipt_file: Path | None,
     reserved_fallback: bool,
 ) -> None:
     """使用 provider-neutral usage 结算同一个 AgentInvocation。"""
     supplied_usage = input_tokens is not None or output_tokens is not None
+    verified_receipt = (
+        provider_receipt_file.read_text(encoding="utf-8")
+        if provider_receipt_file is not None else ""
+    )
+    if verified_receipt and (
+        supplied_usage
+        or reserved_fallback
+        or provider_request_id
+        or provider_attestation
+    ):
+        raise click.ClickException(
+            "--provider-receipt-file 不能与调用方用量或 fallback 同时使用"
+        )
+    if bool(verified_receipt) != bool(provider_id):
+        raise click.ClickException(
+            "--provider-id 与 --provider-receipt-file 必须同时提供"
+        )
     if reserved_fallback and supplied_usage:
         raise click.ClickException(
             "--reserved-fallback 不能与 --input-tokens/--output-tokens 同时使用"
         )
-    if not reserved_fallback and (
+    if not verified_receipt and not reserved_fallback and (
         input_tokens is None or output_tokens is None
     ):
         raise click.ClickException(
@@ -233,14 +257,20 @@ def settle_agent_invocation(
         raise click.ClickException(
             "--reserved-fallback 不接受 --cache-read-tokens"
         )
+    settle_kwargs = {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "provider_request_id": provider_request_id,
+        "provider_attestation": provider_attestation,
+    }
+    if provider_id:
+        settle_kwargs["provider_id"] = provider_id
+        settle_kwargs["provider_receipt"] = verified_receipt
     click.echo(_json(
         client_from_config().settle_agent_invocation(
             invocation_id,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_read_tokens=cache_read_tokens,
-            provider_request_id=provider_request_id,
-            provider_attestation=provider_attestation,
+            **settle_kwargs,
         )
     ))
 
