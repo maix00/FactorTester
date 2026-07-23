@@ -22,6 +22,10 @@ from server.services.research_graph.trial_plan import (
     trial_plan_hash,
 )
 from server.services.research_run_projections import project_run
+from server.services.research_report_presentations import (
+    run_spec_presentation,
+    trial_plan_presentation,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -91,7 +95,15 @@ def load_research_cycle_object(
         }
         if object_id not in identities:
             raise KeyError("research cycle object not found")
-        return deepcopy(value)
+        presentation = trial_plan_presentation(value)
+        return {
+            **deepcopy(value),
+            "alias_zh": presentation["alias_zh"],
+            "summary_zh": presentation["summary_zh"],
+            "complete_parameters_json": presentation[
+                "complete_parameters_json"
+            ],
+        }
     if object_type == "evidence":
         value = next(
             (
@@ -190,10 +202,22 @@ def _load_run_object(
     if object_id not in _named_values(evidence, "run_id"):
         raise KeyError("research cycle object not found")
     run = project_run(row)
+    presentation = run_spec_presentation(
+        run["run_spec"],
+        run_spec_hash=str(run["run_spec_hash"]),
+        run_id=str(run["run_id"]),
+        sample_identity={
+            "sample_start": run.get("sample_start"),
+            "sample_end": run.get("sample_end"),
+            "sample_hash": run.get("sample_hash"),
+        },
+    )
     return {
         "schema_version": 1,
         "object_kind": "run",
         **run,
+        "alias_zh": presentation["alias_zh"],
+        "summary_zh": presentation["summary_zh"],
         "run_spec_json": orjson.dumps(
             run["run_spec"],
             option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,

@@ -291,6 +291,58 @@ final class ResearchJournalTests: XCTestCase {
         )
     }
 
+    func testEvidenceChipUsesTrustedJournalChineseLabelWhenServerPresentationIsAbsent() throws {
+        let link = try JSONDecoder().decode(
+            ResearchJournalLink.self,
+            from: Data(
+                """
+                {"link_id":"runspec","kind":"evidence","target_ref":"runspec:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","label":"样本内 IC · 日盘 RunSpec"}
+                """.utf8
+            )
+        )
+
+        XCTAssertTrue(
+            ResearchJournalPresentation.hasReadableEvidencePresentation(
+                link,
+                in: []
+            )
+        )
+        XCTAssertEqual(
+            ResearchJournalPresentation.chipLabel(
+                link,
+                sectionTitle: "验证设计",
+                obligations: []
+            ),
+            "证据 · 样本内 IC · 日盘 RunSpec"
+        )
+    }
+
+    func testGenericEvidenceLabelDoesNotHideMissingDescription() throws {
+        let link = try JSONDecoder().decode(
+            ResearchJournalLink.self,
+            from: Data(
+                """
+                {"link_id":"evidence","kind":"evidence","target_ref":"evidence:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","label":"研究事实"}
+                """.utf8
+            )
+        )
+
+        XCTAssertFalse(
+            ResearchJournalPresentation.hasReadableEvidencePresentation(
+                link,
+                in: []
+            )
+        )
+        XCTAssertEqual(
+            ResearchJournalPresentation.chipLabel(
+                link,
+                sectionTitle: "验证设计",
+                obligations: []
+            ),
+            "证据 · 证据描述缺失"
+        )
+    }
+
     func testObligationCodeIsNotUsedAsReadableQuestion() {
         XCTAssertEqual(
             ResearchJournalPresentation.readableObligationQuestion(

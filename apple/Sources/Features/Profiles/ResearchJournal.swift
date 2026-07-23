@@ -316,6 +316,7 @@ enum ResearchJournalPresentation {
         in presentations: [ResearchEvidencePresentation]
     ) -> Bool {
         evidenceSummary(for: link, in: presentations) != nil
+            || link.label.flatMap(readableEvidenceLabel) != nil
     }
 
     static func chipLabel(
@@ -330,7 +331,8 @@ enum ResearchJournalPresentation {
             summary = evidenceSummary(
                 for: link,
                 in: evidencePresentations
-            ) ?? "证据描述缺失"
+            ) ?? link.label.flatMap(readableEvidenceLabel)
+                ?? "证据描述缺失"
         } else if link.kind == "obligation" {
             summary = obligationSummary(
                 for: link,
@@ -383,6 +385,14 @@ enum ResearchJournalPresentation {
         case let (nil, claim?): return claim
         case (nil, nil): return nil
         }
+    }
+
+    private static func readableEvidenceLabel(_ value: String) -> String? {
+        guard let text = chineseSummary(value) else { return nil }
+        let generic = [
+            "证据", "研究证据", "研究事实", "沿用证据", "已沿用证据",
+        ]
+        return generic.contains(text) ? nil : text
     }
 
     private static func contextualSummary(

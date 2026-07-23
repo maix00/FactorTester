@@ -994,6 +994,16 @@ private struct ResearchAuditPopover: View {
     private var objectDetail: some View {
         if let object {
             Divider()
+            if let alias = object.aliasZH, !alias.isEmpty {
+                Text(alias)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let summary = object.summaryZH, !summary.isEmpty {
+                Text(summary)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let question = object.epistemicQuestion {
                 Text(question)
                     .font(.callout)
@@ -1119,6 +1129,23 @@ private struct ResearchAuditPopover: View {
                             .font(.caption.monospaced())
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 320)
+                    .padding(.top, 8)
+                }
+            }
+            if object.runSpecJSON == nil,
+               let parameters = object.completeParametersJSON,
+               !parameters.isEmpty {
+                DisclosureGroup("完整冻结参数") {
+                    ScrollView([.horizontal, .vertical]) {
+                        Text(parameters)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(
+                                maxWidth: .infinity,
+                                alignment: .leading
+                            )
                     }
                     .frame(maxHeight: 320)
                     .padding(.top, 8)

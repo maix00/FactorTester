@@ -511,6 +511,9 @@ struct ResearchAuditObjectPayload: Decodable {
     let sampleRef: String?
     let sampleStart: String?
     let sampleEnd: String?
+    let aliasZH: String?
+    let summaryZH: String?
+    let completeParametersJSON: String?
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -558,6 +561,9 @@ struct ResearchAuditObjectPayload: Decodable {
         case sampleRef = "sample_ref"
         case sampleStart = "sample_start"
         case sampleEnd = "sample_end"
+        case aliasZH = "alias_zh"
+        case summaryZH = "summary_zh"
+        case completeParametersJSON = "complete_parameters_json"
     }
 }
 

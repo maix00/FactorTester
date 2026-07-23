@@ -38,6 +38,12 @@ class FakeClient:
         return {
             "run_id": "run-1",
             "jobs": [{"job_id": f"job-{kind}", "kind": kind, "status": "queued"} for kind in analyses],
+            "report_projection": {
+                "schema_version": 1,
+                "run_spec": {
+                    "alias_zh": "截面 IC · 日盘 · SgCPS",
+                },
+            },
         }
 
     def save_configuration_template(self, workspace_id, *, name):
@@ -822,6 +828,36 @@ def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
 
     assert submitted.exit_code == 0, submitted.output
     assert fake.trial_binding == binding
+
+
+def test_run_submit_json_preserves_server_report_projection(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config",
+        lambda: fake,
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        ["workspace", "create", "--factor-family", "MmRet"],
+    ).exit_code == 0
+    state = load_state()
+    state.configuration_revision = 2
+    save_state(state)
+
+    submitted = runner.invoke(cli, [
+        "run", "submit", "--analysis", "ic", "--json",
+    ])
+
+    assert submitted.exit_code == 0, submitted.output
+    payload = json.loads(submitted.output)
+    assert payload["report_projection"]["run_spec"]["alias_zh"] == (
+        "截面 IC · 日盘 · SgCPS"
+    )
 
 
 def test_save_and_load_template_operate_on_same_configuration(tmp_path, monkeypatch) -> None:

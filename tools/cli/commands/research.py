@@ -257,12 +257,19 @@ def run_preview(
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="绑定当前 Hypothesis Branch 已冻结 TrialPlan 的 JSON 文件。",
 )
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="输出 RunSpec 报告投影、运行与 Job 的完整机器可读响应。",
+)
 @friendly_errors
 def run_submit(
     analyses: tuple[str, ...],
     retain_full: bool,
     step_mode: bool,
     trial_binding_file: Path | None,
+    as_json: bool,
 ) -> None:
     state = _require_workspace()
     trial_binding = None
@@ -282,6 +289,9 @@ def run_submit(
         step_mode=step_mode,
         trial_binding=trial_binding,
     )
+    if as_json:
+        click.echo(_json(result))
+        return
     click.echo(f"run_id={result.get('run_id')}")
     for item in result.get("jobs") or []:
         click.echo(f"job_id={item.get('job_id')} kind={item.get('kind')} status={item.get('status')}")

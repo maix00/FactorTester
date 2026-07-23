@@ -27,6 +27,9 @@ from server.services.session_runtime import require_user
 from server.services.research_graph.trial_plan.sample_identity import (
     derive_sample_identity,
 )
+from server.services.research_report_presentations import (
+    run_spec_presentation,
+)
 
 
 SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analysis"}
@@ -500,7 +503,31 @@ def submit_research_run():
             run_spec_hash=str(run["run_spec_hash"]),
         )
         jobs.append(job.summary())
-    return jsonify({"success": True, "run_id": run["run_id"], "run": run, "jobs": jobs}), 202
+    try:
+        presentation_sample_identity = derive_sample_identity(run_spec)
+    except ValueError:
+        presentation_sample_identity = None
+    presentation = run_spec_presentation(
+        run_spec,
+        run_spec_hash=str(run["run_spec_hash"]),
+        run_id=str(run["run_id"]),
+        sample_identity=presentation_sample_identity,
+    )
+    return jsonify({
+        "success": True,
+        "run_id": run["run_id"],
+        "run": {**run, "report_presentation": presentation},
+        "jobs": jobs,
+        "report_projection": {
+            "schema_version": 1,
+            "links": [{
+                "kind": "run",
+                "target_ref": f"run:{run['run_id']}",
+                "label": presentation["alias_zh"],
+            }],
+            "run_spec": presentation,
+        },
+    }), 202
 
 
 @sft_bp.post("/api/runs/preview")
@@ -521,6 +548,11 @@ def preview_research_run():
             "authority": "unavailable",
             "error": str(exc),
         }
+    presentation = run_spec_presentation(
+        run_spec,
+        run_spec_hash=research_runs.hash_run_spec(run_spec),
+        sample_identity=sample_identity,
+    )
     return jsonify({
         "success": True,
         "run_spec_hash": research_runs.hash_run_spec(run_spec),
@@ -537,6 +569,15 @@ def preview_research_run():
                 "factor_revision_manifests"
             ) or []
         ),
+        "report_projection": {
+            "schema_version": 1,
+            "links": [{
+                "kind": "run_spec",
+                "target_ref": presentation["target_ref"],
+                "label": presentation["alias_zh"],
+            }],
+            "run_spec": presentation,
+        },
     })
 
 
