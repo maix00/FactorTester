@@ -25,12 +25,12 @@ MAX_AGENT_PACKET_BYTES = LEGACY_AGENT_PACKET_BYTES
 # is a one-time structured transport whose nested documents are independently
 # validated and later normalized into a bounded trace. It must not inherit a
 # model-context ceiling.
-MAX_TRANSITION_EVIDENCE_BYTES = 32 * 1024
+MAX_TRANSITION_EVIDENCE_BYTES = 64 * 1024
 # Compatibility export for callers released before the transport boundary was
 # named independently from Agent context.
 MAX_AGENT_TRANSITION_BYTES = MAX_TRANSITION_EVIDENCE_BYTES
 MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES = 4096
-MAX_PERSISTED_TRACE_BYTES = 32 * 1024
+MAX_PERSISTED_TRACE_BYTES = 96 * 1024
 MAX_TRACE_EVIDENCE_BYTES = MAX_PERSISTED_TRACE_BYTES
 MAX_CONTEXT_EVIDENCE_REFS = 8
 MAX_EVIDENCE_REF_BYTES = 256

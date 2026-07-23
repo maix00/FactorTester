@@ -234,7 +234,7 @@ def test_context_transition_and_persisted_trace_have_distinct_budgets() -> None:
 
     assert MAX_AGENT_PACKET_BYTES < MAX_AGENT_TRANSITION_BYTES
     assert MAX_AGENT_TRANSITION_BYTES == MAX_TRANSITION_EVIDENCE_BYTES
-    assert MAX_TRANSITION_EVIDENCE_BYTES == MAX_PERSISTED_TRACE_BYTES
+    assert MAX_TRANSITION_EVIDENCE_BYTES < MAX_PERSISTED_TRACE_BYTES
     serialized_delta = serialize_agent_transition_evidence(legitimate_delta)
     assert len(serialized_delta.encode()) > MAX_AGENT_PACKET_BYTES
 
@@ -250,7 +250,9 @@ def test_context_transition_and_persisted_trace_have_distinct_budgets() -> None:
     ):
         serialize_agent_transition_evidence(oversized_delta)
 
-    audit_payload = {"research_note": "x" * 30_000}
+    audit_payload = {
+        "research_note": "x" * (MAX_TRANSITION_EVIDENCE_BYTES + 1)
+    }
     serialized_trace = serialize_bounded_trace_evidence(audit_payload)
     assert len(serialized_trace.encode()) > MAX_AGENT_PACKET_BYTES
     assert len(serialized_trace.encode()) < MAX_PERSISTED_TRACE_BYTES
