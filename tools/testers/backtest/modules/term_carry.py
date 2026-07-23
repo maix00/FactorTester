@@ -9,8 +9,8 @@ from tools.testers.backtest.engines.native.fields import (
 )
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
+from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
-from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.target import TargetStrategyModule
 
 from .term_carry_runtime import build_term_carry_targets
@@ -76,7 +76,7 @@ class TermCarryStrategyModule(TargetStrategyModule):
         inputs=(
             TargetStrategyModule.strategy_kind,
             FactorSignalModule.signal_value,
-            ProductSelectionModule.products,
+            GroupMembershipModule.product_mask_names,
             MarketDataModule.current_prices,
             MarketDataModule.current_tradable_status,
             MarketDataModule.trading_day_resolver,
