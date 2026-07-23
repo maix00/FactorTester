@@ -49,9 +49,15 @@ struct ResearchNarrativeReportView: View {
                 loadObject: loadAuditObject
             )
         }
-        .task(id: artifact?.journalHash ?? "") {
+        .task(id: reportLoadIdentity) {
             await loadReport()
         }
+    }
+
+    private var reportLoadIdentity: String {
+        ([artifact?.journalHash ?? ""] + steps.map {
+            "\($0.stepRef)|\($0.edgeRef)|\($0.toNode)"
+        }).joined(separator: "\u{1f}")
     }
 
     private var report: some View {
@@ -763,7 +769,8 @@ struct ResearchNarrativeReportView: View {
             )
             let loadedSections = try ResearchJournalPresentation.displaySections(
                 in: document,
-                indexedBy: indexSections
+                indexedBy: indexSections,
+                transitions: steps
             )
                 .sorted {
                     if $0.createdAt != $1.createdAt {

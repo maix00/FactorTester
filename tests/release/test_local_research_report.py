@@ -25,6 +25,9 @@ from tools.cli.release.research_reporting.presentation_migration import (
     migrate_factor_meta_parameter_markup,
     migrate_trace_evidence_rows,
 )
+from tools.cli.release.research_reporting.placeholder_migration import (
+    migrate_placeholders,
+)
 from tools.cli.release.research_reporting.journal import (
     assemble_snapshot,
     build_fragment,
@@ -547,7 +550,7 @@ def test_current_node_maxa_projection_updates_real_journal_index_and_report(
     assert replay["changed"] is False
 
 
-def test_current_node_report_projects_latest_revision_per_requirement_subject(
+def test_current_node_report_preserves_substantive_historical_revisions(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "client-support"
@@ -648,7 +651,7 @@ def test_current_node_report_projects_latest_revision_per_requirement_subject(
     )
 
     assert first["checkpoint_ref"] != second["checkpoint_ref"]
-    assert "试验 A 的旧版分析" not in report
+    assert "试验 A 的旧版分析" in report
     assert report.count("试验 A 的最新修订") == 2
     assert report.count("试验 B 的独立分析") == 2
     journal_text = json.dumps(logical, ensure_ascii=False)
@@ -659,7 +662,7 @@ def test_current_node_report_projects_latest_revision_per_requirement_subject(
         item["title"] + "\n" + item["summary"]
         for item in index["sections"]
     ]
-    assert not any("试验 A 的旧版分析" in item for item in indexed_text)
+    assert any("试验 A 的旧版分析" in item for item in indexed_text)
     assert any("试验 A 的最新修订" in item for item in indexed_text)
     assert any("试验 B 的独立分析" in item for item in indexed_text)
 
@@ -726,6 +729,90 @@ def test_report_snapshot_shows_current_gap_without_accumulating_history() -> Non
     assert "历史数据路由尚未解析。" not in report
     assert "当前 Carrier 仍有 8 条证据引用未随载荷提供。" in report
     assert report.count("report-gap:omitted-evidence") == 1
+
+
+def test_placeholder_migration_removes_only_exact_same_node_revision() -> None:
+    def fragment(
+        checkpoint: str, predecessor: str, graph: str, section_id: str,
+        title: str, requirement: str, subject: str, created_at: float,
+    ) -> dict:
+        return build_fragment(
+            checkpoint_ref=checkpoint,
+            created_at=created_at,
+            carrier_hash="a" * 64,
+            narrative_hash="b" * 64,
+            sections=[{
+                "section_id": section_id,
+                "title": title,
+                "body": "",
+                "created_at": created_at,
+                "blocks": [{
+                    "kind": "paragraph",
+                    "text": title,
+                    "report_binding": {
+                        "report_requirement_id": requirement,
+                        "subject_ref": subject,
+                    },
+                }],
+                "links": [],
+                "evidence_refs": [],
+                "asset_refs": [],
+            }],
+            evidence_refs=[],
+            gaps=[],
+            lineage={
+                "status": "root" if not predecessor else "linked",
+                "predecessor_checkpoint_ref": predecessor,
+            },
+            graph_ref=graph,
+            branch_ref="graph-branch:wp:branch",
+            edge_ref="graph-edge:__current_node_report__",
+        )
+
+    old_v8 = fragment(
+        "trace:v8", "", "factor-research@v8", "v8-semantics",
+        "v8 因子语义结论", "report.requirement.semantics",
+        "obligation:semantics", 1,
+    )
+    placeholder = fragment(
+        "report-checkpoint:sha256:" + "1" * 64, "trace:v8",
+        "factor-research@v9", "old-current-node-semantics",
+        "当前节点报告项 1", "report.requirement.semantics",
+        "obligation:semantics", 2,
+    )
+    successor = fragment(
+        "report-checkpoint:sha256:" + "2" * 64,
+        placeholder["checkpoint_ref"], "factor-research@v9",
+        "new-current-node-semantics", "经济语义与因果时序",
+        "report.requirement.semantics", "obligation:semantics", 3,
+    )
+    replacement = {
+        "before_checkpoint_ref": placeholder["checkpoint_ref"],
+        "before_section_id": "old-current-node-semantics",
+        "successor_checkpoint_ref": successor["checkpoint_ref"],
+        "successor_section_id": "new-current-node-semantics",
+        "graph_ref": "factor-research@v9",
+        "node_or_edge_ref": "node:factor_semantics",
+        "report_requirement_id": "report.requirement.semantics",
+        "subject_ref": "obligation:semantics",
+    }
+
+    migrated, receipt = migrate_placeholders(
+        [old_v8, placeholder, successor], [replacement],
+    )
+
+    assert [item["graph_ref"] for item in migrated] == [
+        "factor-research@v8", "factor-research@v9",
+    ]
+    assert migrated[0]["sections"][0]["title"] == "v8 因子语义结论"
+    assert migrated[1]["sections"][0]["title"] == "经济语义与因果时序"
+    assert migrated[1]["predecessor_checkpoint_ref"] == "trace:v8"
+    assert receipt["removed_section_count"] == 1
+    assert receipt["removed_checkpoint_count"] == 1
+    replayed, replay_receipt = migrate_placeholders(migrated, [replacement])
+    assert replayed == migrated
+    assert replay_receipt["changed"] is False
+    assert replay_receipt["replacements"][0]["status"] == "already_applied"
 
 
 def test_stages_content_addressed_passive_report_image_once(

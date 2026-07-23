@@ -123,16 +123,8 @@ def assemble_snapshot(
     value = deepcopy(base)
     value["sections"] = []
     assets: dict[str, dict[str, Any]] = {}
-    latest_revisions = _latest_current_node_revisions(fragments)
     for fragment in fragments:
         for section in fragment["sections"]:
-            revision_key = _current_node_revision_key(fragment, section)
-            if (
-                revision_key is not None
-                and latest_revisions[revision_key]
-                != (fragment["checkpoint_ref"], section["section_id"])
-            ):
-                continue
             projected = deepcopy(section)
             # Keep immutable prose in its physical fragment. The logical
             # projection receives explicit physical identity solely for the
@@ -155,42 +147,6 @@ def assemble_snapshot(
     ))[:64]
     value["gaps"] = deepcopy(base["gaps"])
     return value
-
-
-def _latest_current_node_revisions(
-    fragments: list[dict[str, Any]],
-) -> dict[tuple[str, str], tuple[str, str]]:
-    latest: dict[tuple[str, str], tuple[str, str]] = {}
-    for fragment in fragments:
-        for section in fragment["sections"]:
-            key = _current_node_revision_key(fragment, section)
-            if key is not None:
-                latest[key] = (
-                    fragment["checkpoint_ref"], section["section_id"],
-                )
-    return latest
-
-
-def _current_node_revision_key(
-    fragment: dict[str, Any],
-    section: dict[str, Any],
-) -> tuple[str, str] | None:
-    if (
-        not fragment["checkpoint_ref"].startswith(
-            "report-checkpoint:sha256:"
-        )
-        or "-current-node-" not in section["section_id"]
-        or len(section.get("blocks") or []) != 1
-    ):
-        return None
-    binding = section["blocks"][0].get("report_binding")
-    if not isinstance(binding, dict):
-        return None
-    report_id = binding.get("report_requirement_id")
-    subject_ref = binding.get("subject_ref")
-    if not isinstance(report_id, str) or not isinstance(subject_ref, str):
-        return None
-    return report_id, subject_ref
 
 
 def journal_payload(

@@ -490,98 +490,6 @@ final class ResearchJournalTests: XCTestCase {
         ))
     }
 
-    func testIndexJoinUsesLatestCurrentNodeRevisionFromImmutableJournal()
-        throws
-    {
-        let oldCheckpoint = "report-checkpoint:sha256:"
-            + String(repeating: "1", count: 64)
-        let newCheckpoint = "report-checkpoint:sha256:"
-            + String(repeating: "2", count: 64)
-        let document = try JSONDecoder().decode(
-            ResearchJournalDocument.self,
-            from: Data(
-                """
-                {
-                  "schema_version":4,"language":"zh-Hans",
-                  "journal_kind":"work_package","work_package_id":"wp",
-                  "branch_refs":["graph-branch:i:b"],
-                  "history_status":"complete",
-                  "root_checkpoint_ref":"\(oldCheckpoint)",
-                  "checkpoints":[
-                    {
-                      "checkpoint_ref":"\(oldCheckpoint)","created_at":1,
-                      "carrier_hash":"\(String(repeating: "a", count: 64))",
-                      "narrative_hash":"\(String(repeating: "b", count: 64))",
-                      "section_hash":"\(String(repeating: "c", count: 64))",
-                      "graph_ref":"factor-research@v9",
-                      "instance_ref":"graph-instance:i",
-                      "branch_ref":"graph-branch:i:b",
-                      "lineage_status":"root","lineage_relation":"root",
-                      "predecessor_checkpoint_ref":"","source_branch_ref":"",
-                      "sections":[{
-                        "section_id":"old-current-node-report-1",
-                        "title":"旧解释",
-                        "blocks":[{
-                          "kind":"paragraph","text":"旧的临时解释。",
-                          "report_binding":{
-                            "report_requirement_id":"report.requirement.semantics",
-                            "subject_ref":"obligation:semantics"
-                          }
-                        }],
-                        "links":[]
-                      }]
-                    },
-                    {
-                      "checkpoint_ref":"\(newCheckpoint)","created_at":2,
-                      "carrier_hash":"\(String(repeating: "d", count: 64))",
-                      "narrative_hash":"\(String(repeating: "e", count: 64))",
-                      "section_hash":"\(String(repeating: "f", count: 64))",
-                      "graph_ref":"factor-research@v9",
-                      "instance_ref":"graph-instance:i",
-                      "branch_ref":"graph-branch:i:b",
-                      "lineage_status":"linked",
-                      "lineage_relation":"transition",
-                      "predecessor_checkpoint_ref":"\(oldCheckpoint)",
-                      "source_branch_ref":"",
-                      "sections":[{
-                        "section_id":"new-current-node-report-1",
-                        "title":"最新解释",
-                        "blocks":[{
-                          "kind":"paragraph","text":"当前有效解释。",
-                          "report_binding":{
-                            "report_requirement_id":"report.requirement.semantics",
-                            "subject_ref":"obligation:semantics"
-                          }
-                        }],
-                        "links":[]
-                      }]
-                    }
-                  ]
-                }
-                """.utf8
-            )
-        )
-        let index = [
-            ResearchReportSection(
-                id: "report-section:b:new-current-node-report-1",
-                sectionID: "new-current-node-report-1",
-                checkpointRef: newCheckpoint,
-                branchRef: "graph-branch:i:b",
-                title: "最新解释",
-                summary: "当前有效解释。",
-                links: []
-            )
-        ]
-
-        let sections = try ResearchJournalPresentation.displaySections(
-            in: document,
-            indexedBy: index
-        )
-
-        XCTAssertEqual(sections.map(\.title), ["最新解释"])
-        XCTAssertEqual(sections.map(\.auditCheckpointRef), [newCheckpoint])
-    }
-
     func testDisplayProjectionHidesPureGraphMigrationAndDeduplicatesBindings()
         throws
     {
@@ -744,6 +652,331 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertTrue(
             sections[2].auditCheckpointRef.hasPrefix("report-checkpoint:")
         )
+    }
+
+    /// Regression fixture copied from MaxA's SgCCS v9 journal and live
+    /// timeline. The three report items share report-carrier checkpoints, but
+    /// their report bindings—not carrier ownership—define chapter placement.
+    func testMaxAReportBindingsAnchorEdgeAndValidationDesignSections()
+        throws
+    {
+        let checkpoint = "report-checkpoint:sha256:"
+            + String(repeating: "7", count: 64)
+        let document = try JSONDecoder().decode(
+            ResearchJournalDocument.self,
+            from: Data(
+                """
+                {"schema_version":4,"language":"zh-Hans",
+                 "journal_kind":"work_package","work_package_id":"wp",
+                 "branch_refs":["graph-branch:i:b"],
+                 "history_status":"complete",
+                 "root_checkpoint_ref":"\(checkpoint)",
+                 "checkpoints":[{
+                   "checkpoint_ref":"\(checkpoint)",
+                   "created_at":1784836707.537136,
+                   "carrier_hash":"\(String(repeating: "a", count: 64))",
+                   "narrative_hash":"\(String(repeating: "b", count: 64))",
+                   "section_hash":"\(String(repeating: "c", count: 64))",
+                   "graph_ref":"factor-research@v9",
+                   "instance_ref":"graph-instance:i",
+                   "branch_ref":"graph-branch:i:b",
+                   "lineage_status":"root","lineage_relation":"root",
+                   "predecessor_checkpoint_ref":"","source_branch_ref":"",
+                   "sections":[
+                     {"section_id":"edge","title":"为什么从因子语义进入验证设计",
+                      "blocks":[{"kind":"paragraph","text":"转移理由",
+                       "report_binding":{
+                         "report_requirement_id":"report.edge.factor_semantics__validation_design",
+                         "subject_ref":"graph-edge:factor_semantics__validation_design"}}],
+                      "links":[]},
+                     {"section_id":"entry","title":"进入验证设计前冻结哪些研究口径",
+                      "blocks":[{"kind":"paragraph","text":"入口要求",
+                       "report_binding":{
+                         "report_requirement_id":"report.node.validation_design.entry",
+                         "subject_ref":"node:validation_design"}}],
+                      "links":[]},
+                     {"section_id":"action","title":"按因子结果之外的信息冻结首轮产品范围",
+                      "blocks":[{"kind":"paragraph","text":"节点动作",
+                       "report_binding":{
+                         "report_requirement_id":"report.node.validation_design.action",
+                         "subject_ref":"node:validation_design"}}],
+                      "links":[]}
+                   ]}]
+                }
+                """.utf8
+            )
+        )
+        let index = ["edge", "entry", "action"].map {
+            ResearchReportSection(
+                id: "report-section:b:\($0)", sectionID: $0,
+                checkpointRef: checkpoint, branchRef: "graph-branch:i:b",
+                title: $0, summary: "", links: []
+            )
+        }
+        let transitions = try JSONDecoder().decode(
+            [ResearchTransitionStep].self,
+            from: Data(
+                """
+                [
+                  {"step_ref":"trace:f0b356d4d98142a6be80fad91f3bd2d8",
+                   "edge_ref":"graph-edge:data_contract__factor_semantics",
+                   "from_node":"data_contract","to_node":"factor_semantics",
+                   "created_at":1784703337.8288739,
+                   "evidence_refs":[],"trial_plan_refs":[],
+                   "obligation_refs":[],"claim_refs":[],"job_refs":[],
+                   "run_refs":[],"obligation_changes":[],"claim_changes":[]},
+                  {"step_ref":"trace:39ee8488334d45f881cddaafce32aec5",
+                   "edge_ref":"graph-edge:factor_semantics__validation_design",
+                   "from_node":"factor_semantics","to_node":"validation_design",
+                   "created_at":1784835593.0260422,
+                   "evidence_refs":[],"trial_plan_refs":[],
+                   "obligation_refs":[],"claim_refs":[],"job_refs":[],
+                   "run_refs":[],"obligation_changes":[],"claim_changes":[]}
+                ]
+                """.utf8
+            )
+        )
+
+        let sections = try ResearchJournalPresentation.displaySections(
+            in: document, indexedBy: index, transitions: transitions
+        )
+
+        XCTAssertEqual(
+            sections.first { $0.sectionID == "edge" }?.checkpointRef,
+            "trace:39ee8488334d45f881cddaafce32aec5"
+        )
+        XCTAssertEqual(
+            sections.first { $0.sectionID == "entry" }?.checkpointRef,
+            "trace:39ee8488334d45f881cddaafce32aec5"
+        )
+        XCTAssertEqual(
+            sections.first { $0.sectionID == "action" }?.checkpointRef,
+            "trace:39ee8488334d45f881cddaafce32aec5"
+        )
+        XCTAssertFalse(sections.filter {
+            $0.checkpointRef
+                == "trace:f0b356d4d98142a6be80fad91f3bd2d8"
+        }.contains { ["entry", "action"].contains($0.sectionID) })
+    }
+
+    func testMaxARequirementBindingsUseHomeNodeAndCheckpointAnchor()
+        throws
+    {
+        let semanticsCheckpoint = "report-checkpoint:sha256:"
+            + String(repeating: "8", count: 64)
+        let validationCheckpoint = "report-checkpoint:sha256:"
+            + String(repeating: "9", count: 64)
+        let document = try JSONDecoder().decode(
+            ResearchJournalDocument.self,
+            from: Data(
+                """
+                {"schema_version":4,"language":"zh-Hans",
+                 "journal_kind":"work_package","work_package_id":"wp",
+                 "branch_refs":["graph-branch:i:b"],
+                 "history_status":"complete",
+                 "root_checkpoint_ref":"\(semanticsCheckpoint)",
+                 "checkpoints":[
+                   {
+                     "checkpoint_ref":"\(semanticsCheckpoint)",
+                     "created_at":1784836208.3355489,
+                     "carrier_hash":"\(String(repeating: "a", count: 64))",
+                     "narrative_hash":"\(String(repeating: "b", count: 64))",
+                     "section_hash":"\(String(repeating: "c", count: 64))",
+                     "graph_ref":"factor-research@v9",
+                     "instance_ref":"graph-instance:i",
+                     "branch_ref":"graph-branch:i:b",
+                     "lineage_status":"root","lineage_relation":"root",
+                     "predecessor_checkpoint_ref":"","source_branch_ref":"",
+                     "sections":[{
+                       "section_id":"factor-semantics-requirement",
+                       "title":"每项输入何时可知",
+                       "blocks":[{"kind":"paragraph","text":"因果时序义务",
+                         "report_binding":{
+                           "report_requirement_id":"report.requirement.factor_semantics.timing_and_causality",
+                           "subject_ref":"obligation:factor-timing"}}],
+                       "links":[]
+                     }]
+                   },
+                   {
+                     "checkpoint_ref":"\(validationCheckpoint)",
+                     "created_at":1784838820.674013,
+                     "carrier_hash":"\(String(repeating: "d", count: 64))",
+                     "narrative_hash":"\(String(repeating: "e", count: 64))",
+                     "section_hash":"\(String(repeating: "f", count: 64))",
+                     "graph_ref":"factor-research@v9",
+                     "instance_ref":"graph-instance:i",
+                     "branch_ref":"graph-branch:i:b",
+                     "lineage_status":"linked",
+                     "lineage_relation":"transition",
+                     "predecessor_checkpoint_ref":"\(semanticsCheckpoint)",
+                     "source_branch_ref":"",
+                     "sections":[
+                       {"section_id":"validation-action",
+                        "title":"冻结首轮产品范围",
+                        "blocks":[{"kind":"paragraph","text":"验证设计动作",
+                          "report_binding":{
+                            "report_requirement_id":"report.node.validation_design.action",
+                            "subject_ref":"node:validation_design"}}],
+                        "links":[]},
+                       {"section_id":"target-contrast",
+                        "title":"目标与对照",
+                        "blocks":[{"kind":"paragraph","text":"主要对照关系",
+                          "report_binding":{
+                            "report_requirement_id":"report.requirement.trial_design_validity.target_contrast",
+                            "subject_ref":"obligation:target-contrast"}}],
+                        "links":[]},
+                       {"section_id":"temporal-overlap",
+                        "title":"时间交叠与间隔",
+                        "blocks":[{"kind":"paragraph","text":"检查 purge 和 gap",
+                          "report_binding":{
+                            "report_requirement_id":"report.requirement.trial_design_validity.temporal_overlap_and_gap",
+                            "subject_ref":"obligation:temporal-overlap"}}],
+                        "links":[]},
+                       {"section_id":"replication",
+                        "title":"重复结构",
+                        "blocks":[{"kind":"paragraph","text":"定义独立重复单元",
+                          "report_binding":{
+                            "report_requirement_id":"report.requirement.trial_design_validity.replication_structure",
+                            "subject_ref":"obligation:replication"}}],
+                        "links":[]}
+                     ]
+                   }
+                 ]}
+                """.utf8
+            )
+        )
+        let index = [
+            ("factor-semantics-requirement", semanticsCheckpoint),
+            ("validation-action", validationCheckpoint),
+            ("target-contrast", validationCheckpoint),
+            ("temporal-overlap", validationCheckpoint),
+            ("replication", validationCheckpoint),
+        ].map { sectionID, checkpointRef in
+            ResearchReportSection(
+                id: "report-section:b:\(sectionID)",
+                sectionID: sectionID,
+                checkpointRef: checkpointRef,
+                branchRef: "graph-branch:i:b",
+                title: sectionID,
+                summary: "",
+                links: []
+            )
+        }
+        let transitions = try JSONDecoder().decode(
+            [ResearchTransitionStep].self,
+            from: Data(
+                """
+                [
+                  {"step_ref":"trace:f0b356d4d98142a6be80fad91f3bd2d8",
+                   "edge_ref":"graph-edge:data_contract__factor_semantics",
+                   "from_node":"data_contract","to_node":"factor_semantics",
+                   "created_at":1784703337.8288739,
+                   "evidence_refs":[],"trial_plan_refs":[],
+                   "obligation_refs":[],"claim_refs":[],"job_refs":[],
+                   "run_refs":[],"obligation_changes":[],"claim_changes":[]},
+                  {"step_ref":"trace:39ee8488334d45f881cddaafce32aec5",
+                   "edge_ref":"graph-edge:factor_semantics__validation_design",
+                   "from_node":"factor_semantics","to_node":"validation_design",
+                   "created_at":1784835593.0260422,
+                   "evidence_refs":[],"trial_plan_refs":[],
+                   "obligation_refs":[],"claim_refs":[],"job_refs":[],
+                   "run_refs":[],"obligation_changes":[],"claim_changes":[]}
+                ]
+                """.utf8
+            )
+        )
+
+        let sections = try ResearchJournalPresentation.displaySections(
+            in: document, indexedBy: index, transitions: transitions
+        )
+        let byID = Dictionary(
+            uniqueKeysWithValues: sections.map { ($0.sectionID, $0) }
+        )
+
+        XCTAssertEqual(
+            byID["factor-semantics-requirement"]?.checkpointRef,
+            "trace:f0b356d4d98142a6be80fad91f3bd2d8"
+        )
+        for sectionID in [
+            "target-contrast", "temporal-overlap", "replication",
+        ] {
+            XCTAssertEqual(
+                byID[sectionID]?.checkpointRef,
+                "trace:39ee8488334d45f881cddaafce32aec5"
+            )
+        }
+    }
+
+    func testAmbiguousRequirementAnchorFailsClosedToPhysicalCheckpoint()
+        throws
+    {
+        let checkpoint = "report-checkpoint:sha256:"
+            + String(repeating: "6", count: 64)
+        let document = try JSONDecoder().decode(
+            ResearchJournalDocument.self,
+            from: Data(
+                """
+                {"schema_version":4,"language":"zh-Hans",
+                 "journal_kind":"work_package","work_package_id":"wp",
+                 "branch_refs":["graph-branch:i:b"],
+                 "history_status":"complete",
+                 "root_checkpoint_ref":"\(checkpoint)",
+                 "checkpoints":[{
+                   "checkpoint_ref":"\(checkpoint)","created_at":20,
+                   "carrier_hash":"\(String(repeating: "a", count: 64))",
+                   "narrative_hash":"\(String(repeating: "b", count: 64))",
+                   "section_hash":"\(String(repeating: "c", count: 64))",
+                   "graph_ref":"factor-research@v9",
+                   "instance_ref":"graph-instance:i",
+                   "branch_ref":"graph-branch:i:b",
+                   "lineage_status":"root","lineage_relation":"root",
+                   "predecessor_checkpoint_ref":"","source_branch_ref":"",
+                   "sections":[{
+                     "section_id":"unknown-requirement","title":"未知归属",
+                     "blocks":[{"kind":"paragraph","text":"未知义务",
+                       "report_binding":{
+                         "report_requirement_id":"report.requirement.future_category.question",
+                         "subject_ref":"obligation:future"}}],
+                     "links":[]
+                   }]
+                 }]}
+                """.utf8
+            )
+        )
+        let index = [ResearchReportSection(
+            id: "report-section:b:unknown-requirement",
+            sectionID: "unknown-requirement",
+            checkpointRef: checkpoint,
+            branchRef: "graph-branch:i:b",
+            title: "未知归属",
+            summary: "",
+            links: []
+        )]
+        let transitions = try JSONDecoder().decode(
+            [ResearchTransitionStep].self,
+            from: Data(
+                """
+                [
+                  {"step_ref":"trace:a","edge_ref":"graph-edge:a",
+                   "from_node":"a","to_node":"node_a","created_at":10,
+                   "evidence_refs":[],"trial_plan_refs":[],
+                   "obligation_refs":[],"claim_refs":[],"job_refs":[],
+                   "run_refs":[],"obligation_changes":[],"claim_changes":[]},
+                  {"step_ref":"trace:b","edge_ref":"graph-edge:b",
+                   "from_node":"b","to_node":"node_b","created_at":10,
+                   "evidence_refs":[],"trial_plan_refs":[],
+                   "obligation_refs":[],"claim_refs":[],"job_refs":[],
+                   "run_refs":[],"obligation_changes":[],"claim_changes":[]}
+                ]
+                """.utf8
+            )
+        )
+
+        let sections = try ResearchJournalPresentation.displaySections(
+            in: document, indexedBy: index, transitions: transitions
+        )
+
+        XCTAssertEqual(sections.first?.checkpointRef, checkpoint)
     }
 
     func testInlineLatexIsProjectedIntoRealMathComponents() {
