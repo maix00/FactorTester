@@ -186,8 +186,27 @@ class TermStructureOp(OperandExpr):
         depth: int,
         column: str,
     ) -> pd.Series:
-        values = []
         curve_depth = max(near_rank, far_rank, depth) + 1
+        batch_fn = getattr(product, 'get_term_structures', None)
+        if callable(batch_fn):
+            curves = batch_fn(trading_days, depth=curve_depth)
+            if not isinstance(curves, dict):
+                raise TypeError(
+                    f"Product {getattr(product, 'name', product)} "
+                    "get_term_structures must return a dict"
+                )
+            values = [
+                self._evaluate_curve(
+                    curves.get(pd.Timestamp(day).normalize(), pd.DataFrame()),
+                    near_rank,
+                    far_rank,
+                    depth,
+                    column,
+                )
+                for day in trading_days
+            ]
+            return pd.Series(values, index=trading_days, dtype=float)
+        values = []
         for day in trading_days:
             curve = product.get_term_structure(day, depth=curve_depth)
             values.append(self._evaluate_curve(curve, near_rank, far_rank, depth, column))

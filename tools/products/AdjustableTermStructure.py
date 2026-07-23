@@ -141,6 +141,31 @@ class AdjustableProductMixin:
         """Return contracts for this product/date ordered by maturity."""
         return self.get_term_structure_store(curve_variant).contract_pool(getattr(self, 'name'), trading_day, depth=depth)
 
+    def get_term_structures(
+        self,
+        trading_days: Iterable[Any],
+        depth: Optional[int] = None,
+        curve_variant: str = "listed_contracts",
+    ) -> Dict[pd.Timestamp, pd.DataFrame]:
+        """Return one maturity-ranked curve per requested trading day."""
+        days = self._normalize_trading_days(trading_days)
+        if len(days) == 0:
+            return {}
+        df = self._load_term_structure_days(
+            days,
+            depth=depth,
+            curve_variant=curve_variant,
+        )
+        if df.empty:
+            return {}
+        return {
+            cast(pd.Timestamp, pd.Timestamp(day).normalize()): cast(
+                pd.DataFrame,
+                curve.reset_index(drop=True),
+            )
+            for day, curve in df.groupby(TERM_TRADING_DAY_COL, sort=False)
+        }
+
     def get_term_structure_contracts(
         self,
         trading_day: Any,
@@ -265,11 +290,19 @@ class AdjustableProductMixin:
         normalized = getattr(idx, 'normalize')()
         return cast(pd.DatetimeIndex, normalized).unique().sort_values()
 
-    def _load_term_structure_days(self, trading_days: Iterable[Any], *, depth: Optional[int] = None) -> pd.DataFrame:
+    def _load_term_structure_days(
+        self,
+        trading_days: Iterable[Any],
+        *,
+        depth: Optional[int] = None,
+        curve_variant: str = "listed_contracts",
+    ) -> pd.DataFrame:
         days = self._normalize_trading_days(trading_days)
         if len(days) == 0:
             return pd.DataFrame()
-        df = self.get_term_structure_store().load(product=getattr(self, 'name'))
+        df = self.get_term_structure_store(curve_variant).load(
+            product=getattr(self, 'name'),
+        )
         if df.empty:
             return df
         day_set: set[pd.Timestamp] = set(days)
