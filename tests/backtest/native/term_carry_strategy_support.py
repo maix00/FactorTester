@@ -38,11 +38,11 @@ def term_carry_state():
     product = TermProduct([near, far])
     config = StrategyConfig(strategy=strategy, field_values={
         TargetStrategyModule.strategy_kind: "term_carry",
-        TermCarryStrategyModule.near_rank: 0,
-        TermCarryStrategyModule.far_rank: 1,
-        TermCarryStrategyModule.entry_threshold: 0.05,
-        TermCarryStrategyModule.exit_threshold: 0.01,
-        TermCarryStrategyModule.gross_weight: 1.0,
+        TermCarryStrategyModule.term_carry_near_rank: 0,
+        TermCarryStrategyModule.term_carry_far_rank: 1,
+        TermCarryStrategyModule.term_carry_entry_threshold: 0.05,
+        TermCarryStrategyModule.term_carry_exit_threshold: 0.01,
+        TermCarryStrategyModule.term_carry_gross_weight: 1.0,
         LedgerModule.initial_capital_major: 100_000.0,
         LedgerModule.base_currency: "CNY",
     })

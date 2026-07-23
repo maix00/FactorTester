@@ -55,14 +55,16 @@ def test_term_carry_missing_leg_market_cannot_open_one_leg():
         prices={near: 100.0},
     )
     assert ctx.get_for(TargetStrategyModule.target_weights, strategy) == {}
-    diagnostics = ctx.get_for(TermCarryStrategyModule.diagnostics, strategy)
+    diagnostics = ctx.get_for(
+        TermCarryStrategyModule.term_carry_diagnostics, strategy,
+    )
     assert diagnostics["blocked"][str(product)] == "missing_leg_market"
 
 
 def test_term_carry_rejects_overlapping_contract_ranks():
     state, strategy, product, near, far = term_carry_state()
     state.config_for(strategy).field_values[
-        TermCarryStrategyModule.far_rank
+        TermCarryStrategyModule.term_carry_far_rank
     ] = 0
 
     with pytest.raises(ValueError, match="near_rank < far_rank"):
