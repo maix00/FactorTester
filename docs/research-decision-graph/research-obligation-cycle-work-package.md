@@ -1,7 +1,10 @@
 # Research Obligation Cycle Implementation Work Package
 
-Status: implementation in progress; Grill 143 semantics accepted; Batches 0
-through 5 are complete and Batch 6 is next.
+Status: implementation in progress. The original Grill 143 Batches 0–5 are
+complete, but the former “Batch 6 next” handoff is superseded by the narrower
+canonical sequence in Grill 179.48–179.49. Remaining gates include the final
+obligation catalog/resolvers, report-coverage enforcement, lifecycle cleanup,
+historical-time backfill, v1–v3 restoration, and real-factor shadow acceptance.
 
 Baseline: `56d36913` on `fix/issue-140-active-graph-agentflow`.
 
@@ -53,6 +56,34 @@ Add a token-bounded, first-principles Research Obligation Cycle that:
 
 The Research Decision Contract is a normalized view over the first two owners,
 not a ninth persistence object.
+
+## Grill 179 implementation audit (2026-07-23)
+
+This is the execution checklist for the closed semantic grill. It prevents a
+draft manifest or UI projection from being mistaken for an enforced runtime
+contract. A checked item requires code, deterministic validation, CLI parity,
+and the named acceptance evidence; documentation alone is not completion.
+
+| Accepted contract | Current state | Remaining release gate |
+|---|---|---|
+| canonical Work Package lifecycle owner | implemented; production owner table explicitly backfilled 17/17 after backup and integrity check | exact-manifest purge/orphan cleanup, read-path benchmark, UI acceptance |
+| seven semantic obligation categories plus `other` | successor v9 catalog aligned; 60 subcategories; not activated | activation validator must prove every subcategory has a real resolver and report contract |
+| local current-anchor context under 6000 bytes | implemented for successor requirement inspection; 13-item validation-design packet is 5605 bytes | enforce the same bound on real server `next/context` after v9 publication |
+| provider-neutral resolver for every active subcategory | descriptor and output schema exist only | implement category resolver packages and factual CLI operations; descriptors cannot satisfy the gate |
+| methods as TrialPlan Evidence Actions and Evidence admission | protocol and transition components implemented | full successor-graph path acceptance and actual capability bindings |
+| report requirement per node/edge/gate | v9 transition rejects missing requirement/subject bindings; local narrative v3 rehashes every Chinese item while keeping body local | add pre-transition CLI preparation, current-anchor packet acceptance and FTClient bound-item presentation |
+| user acceptance objective/criteria | not implemented as a first-class Contract projection | add bounded objective revision, criterion evaluation and no-silent-closure gate without a new owner table |
+| explicit Graph continuation and re-entry | deterministic preflight/frame implemented | rerun against final catalog/topology and show itemized report coverage |
+| `end_session_skip=False` default | implemented across factor family, signal align and runtime fallbacks | keep explicit-True comparison regression and strategy-obligation reporting in end-to-end acceptance |
+| Graph history and obligation/report browser | server version storage exists | restore exact v1-v3, add bounded FTClient read-only version/topology/catalog/report views |
+| historical Agent-conversation report registration | timing/report-item v3 protocol implemented; read/backfill orchestration absent | add pure historical-carrier GET, stage root-to-head fragments, finalize once at current HEAD, then FTClient dual-time display; never move Graph/Profile/Work Package heads or timestamps |
+| lifecycle cleanup | archive/delete/restore implemented | add retention-aware purge dry-run/apply, orphan checks, exact refs and integrity acceptance |
+| real research proof | not complete | planning/research-agent shadow runs for SgCCS and a trend family; compare with prior evidence and include result tables/equity curve |
+
+The successor remains a draft until every activation-relevant row above is
+complete. Existing production research stays pinned to its original Graph
+unless the user explicitly requests a continuation and deterministic preflight
+accepts it.
 
 ## Protocol package
 

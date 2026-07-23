@@ -1,6 +1,6 @@
 # Grill 179 — v8 义务分类与逐节点/逐边报告映射
 
-Status: closed; Grill 179.1–179.48 accepted/revised, with the canonical handoff in 179.48.
+Status: closed; Grill 179.1–179.49 accepted/revised, with the canonical handoff in 179.48 and the historical-time addendum in 179.49.
 
 > **Implementation warning:** Sections 3–8 below preserve the initial proposal and are
 > not a canonical implementation map. Grill 179.1–179.40 subsequently renamed or
@@ -2655,6 +2655,43 @@ catalog/topology/report manifests；原表保留为 Grill 历史但不得被 bui
 独立回滚批次提交：共享 Graph schema/validator → catalog/resolver contracts → 后继拓扑与
 continuation preflight → TrialPlan actions/admission → 标准化报告/UI → lifecycle/cleanup →
 历史 v1–v3 恢复与真实 SgCCS shadow acceptance。每批测试通过即提交，不堆到最后。
+
+## Grill 179.49 — 研究发生时间、登记时间与历史对话补登记
+
+**已接受并纳入实施。** 节点访问和报告内容日后可以从既有 Agent 对话补登记，但补登记
+不能伪造原研究顺序、移动当前 Graph HEAD，或把导入时间冒充研究发生时间。
+
+统一使用一个可附着于 checkpoint event 和 Report Item 的最小 timing envelope：
+
+- `recorded_at` 是服务端可信的不可覆盖登记时间；现有 trace `created_at` 在存储层继续承担
+  此语义，并用于 topology、cursor、HEAD、幂等和审计顺序；
+- `occurred_at` 是可选的研究发生时间，可表示当时进入节点、完成边上判断或在 Agent
+  对话中形成该条报告内容的时间；
+- `time_basis` 仅为 `transition` 或 `historical_backfill`；
+- 历史补登记必须提供 `time_source_refs`，指向可复核的原 Agent 对话、checkpoint、Job 或
+  artifact；普通实时 transition 不要求重复保存来源正文；
+- UI 的页面访问时间只属于本地产品 telemetry，不是研究事件，也不得进入 Active Graph
+  或研究报告；确定性生成 Markdown/PDF 的运行时间同样不进入正文，避免相同研究事实因
+  重新渲染而改变 canonical bytes。
+
+旧 v1/v2 narrative 没有 `occurred_at` 时，显示层可回退到 `recorded_at`，但必须标注为
+“登记时间/发生时间未单独记录”。补登记通过独立 CLI action 读取可信历史 Carrier 和来源
+引用，向原 Work Package/branch 插入缺失的 immutable report fragment 并重建本地 journal、
+index 与报告投影；它不得推进 branch、改变 `latest_trace_id`、Profile freshness、Work Package
+`updated_at` 或触发 Graph transition。相同输入必须幂等，冲突叙事、错误 branch、断裂
+checkpoint 或来源循环一律 fail closed。
+
+该能力复用现有 trace、local journal 和 artifact refs，不新增 event/report 时间数据库表。
+FTClient 正文可显示“研究发生于 / 补登记于”，版本树继续按可信 trace 顺序绘制；历史
+发生时间只改善叙事定位，不重新排序或改写版本树拓扑。
+
+补登记必须从可信 root 按 server trace lineage 重建到当前 HEAD，不是在任意既有完整
+journal 中插入一条旧章节。如果旧派生 journal 曾把中途 checkpoint 错当 root，补入更早
+checkpoint 会与不可变 fragment 的 root/predecessor 语义冲突；一次性迁移必须先归档该
+Work Package 的旧派生产物，再从可信根重建，不能修改旧 fragment、保留兼容分叉或在
+重建中间阶段把 REPORT 暂时回退到历史 HEAD。历史 fragments 先 stage，最后只以当前
+可信 HEAD 原子生成 JOURNAL/INDEX/REPORT；Profile/branch/Work Package 的 head 与
+语义时间字段保持不变。
 
 ## 13. Graph 版本 UI 与历史存储
 

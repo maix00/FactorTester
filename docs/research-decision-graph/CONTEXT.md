@@ -376,6 +376,19 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   Graph-continuation/re-entry items use a visibly distinct transition treatment
   while remaining in the same continuous report; they are not shown as ordinary
   research findings or as a second report.
+- Trace `created_at` is the trusted server recording time and remains the owner
+  of cursor, topology, HEAD, stale-write, and audit ordering. A checkpoint event
+  or Report Item may additionally carry one timing envelope with optional
+  `occurred_at`, `time_basis=transition|historical_backfill`, and source refs.
+  Historical occurrence time improves narrative attribution but never reorders
+  topology or changes the current branch/Profile/Work Package freshness.
+- Historical Agent-conversation registration is a dedicated, idempotent CLI
+  action over the existing Work Package, branch, trace carrier, local journal,
+  and artifact refs. It inserts only missing immutable report fragments and
+  rebuilds deterministic projections; it does not transition the Graph, move
+  `latest_trace_id`, or add a persistence owner. Conflicting narrative, broken
+  provenance, wrong branch, or source cycles fail closed. UI page-access time
+  and Markdown/PDF renderer time are not research facts.
 - Node and edge reporting have distinct anchors and presentation. A node item is
   part of the stage it analyzes; an edge item explains an actual transition
   between source and target stages. Graph continuation uses the edge treatment
