@@ -294,6 +294,7 @@ def cycle_validate(evidence_file: Path, as_json: bool) -> None:
     "--target-capability-resolution-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
+@click.option("--acting-profile-ref", default="")
 @click.option("--timeout", default=120, show_default=True, type=int)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 @click.pass_context
@@ -304,6 +305,7 @@ def cycle_advance(
     edge_id: str,
     evidence_file: Path,
     target_capability_resolution_file: Path | None,
+    acting_profile_ref: str,
     timeout: int,
     as_json: bool,
 ) -> None:
@@ -328,6 +330,8 @@ def cycle_advance(
             "--target-capability-resolution-file",
             str(target_capability_resolution_file),
         ])
+    if acting_profile_ref:
+        args.extend(["--acting-profile-ref", acting_profile_ref])
     result = run_factortester(args, timeout=timeout)
     backend = _backend_json(
         result.returncode,

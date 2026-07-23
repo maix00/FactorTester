@@ -473,7 +473,7 @@ class TestCLISubprocess:
         fake.write_text(
             "#!/usr/bin/env python3\n"
             "import json, pathlib, sys\n"
-            f"pathlib.Path({str(marker)!r}).write_text('called')\n"
+            f"pathlib.Path({str(marker)!r}).write_text(json.dumps(sys.argv[1:]))\n"
             "print(json.dumps({'branch_id': 'branch-1', 'status': 'active'}))\n",
             encoding="utf-8",
         )
@@ -522,11 +522,16 @@ class TestCLISubprocess:
             "edge-1",
             "--evidence-file",
             str(valid),
+            "--acting-profile-ref",
+            "profile:maxa",
             "--json",
         ], env=env)
         payload = json.loads(accepted.stdout)
 
         assert marker.exists()
+        assert json.loads(marker.read_text())[-2:] == [
+            "--acting-profile-ref", "profile:maxa",
+        ]
         assert payload["backend"]["branch_id"] == "branch-1"
         assert payload["local_validation"]["proposal_count"] == 0
         persisted = json.loads(session.read_text(encoding="utf-8"))
