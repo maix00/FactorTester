@@ -39,7 +39,7 @@ from .refs import (
     workspace_ref_for,
 )
 from .summary import _branch_summary, _work_package_summary
-from .timeline import _transition_step
+from .timeline import _bounded_transition_page
 from .tree import _tree_projection
 
 DEFAULT_LIST_LIMIT = 20
@@ -234,24 +234,15 @@ class ProfileResearchProjection:
         if not rows:
             raise KeyError("profile research not found")
         rows = [row for row in rows if row["trace_id"] is not None]
-        has_more = len(rows) > page_limit
-        visible = rows[:page_limit]
-        items = [_transition_step(row, research_ref) for row in visible]
-        next_cursor = (
-            encode_cursor(
-                kind="timeline",
-                at=float(visible[-1]["created_at"]),
-                identifier=str(visible[-1]["trace_id"]),
-            )
-            if has_more and visible
-            else None
+        return _bounded_transition_page(
+            rows=rows,
+            research_ref=research_ref,
+            page_limit=page_limit,
+            identity={
+                "schema_version": 1,
+                "research_ref": research_ref_for(instance_id, branch_id),
+            },
         )
-        return bounded_projection({
-            "schema_version": 1,
-            "research_ref": research_ref_for(instance_id, branch_id),
-            "items": items,
-            "next_cursor": next_cursor,
-        })
 
     def list_work_package_timeline(
         self,
@@ -292,27 +283,18 @@ class ProfileResearchProjection:
         if not rows:
             raise KeyError("profile research not found")
         rows = [row for row in rows if row["trace_id"] is not None]
-        has_more = len(rows) > page_limit
-        visible = rows[:page_limit]
         current_instance_id = str(rows[0]["current_instance_id"])
         current_ref = research_ref_for(current_instance_id, branch_id)
-        items = [_transition_step(row, current_ref) for row in visible]
-        next_cursor = (
-            encode_cursor(
-                kind="timeline",
-                at=float(visible[-1]["created_at"]),
-                identifier=str(visible[-1]["trace_id"]),
-            )
-            if has_more and visible
-            else None
+        return _bounded_transition_page(
+            rows=rows,
+            research_ref=current_ref,
+            page_limit=page_limit,
+            identity={
+                "schema_version": 2,
+                "work_package_ref": work_package_ref_for(work_package_id),
+                "research_ref": current_ref,
+            },
         )
-        return bounded_projection({
-            "schema_version": 2,
-            "work_package_ref": work_package_ref_for(work_package_id),
-            "research_ref": current_ref,
-            "items": items,
-            "next_cursor": next_cursor,
-        })
 
     def get_report_checkpoint(
         self,
