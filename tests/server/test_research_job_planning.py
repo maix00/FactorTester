@@ -169,6 +169,82 @@ def test_backtest_planner_merges_compatible_strategy_factor_columns(monkeypatch)
     ]
 
 
+def test_backtest_planner_expands_shared_product_once(monkeypatch) -> None:
+    prepared = {
+        "start_dt": "2025-01-02",
+        "end_dt": "2025-02-14",
+        "resolved_settings_by_alias": {
+            "A1": {
+                "product_path_selection": _Selection(),
+                "factor": object(),
+                "engine_mode": "auto",
+            },
+            "A1.AP": {
+                "product_path_selection": _Selection(),
+                "factor": object(),
+                "engine_mode": "auto",
+            },
+            "A1.legacy": {
+                "product_path_selection": _Selection(),
+                "factor": object(),
+                "engine_mode": "legacy",
+            },
+        },
+    }
+    monkeypatch.setattr(
+        (
+            "tools.factors.tester_calc.single_factor_test.group.research_run."
+            "prepare_group_run_spec"
+        ),
+        lambda data: prepared,
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.engine.engine_mode_for",
+        lambda config: config["engine_mode"],
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._required_frequency_for_strategy",
+        lambda config, products: _Named("DAY1"),
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._required_data_source_for_strategy",
+        lambda config: (),
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._factor_required_columns",
+        lambda factor: ("close",),
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._product_available_freqs",
+        lambda product: [_Named("DAY1")],
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._select_required_product_frequency",
+        lambda product, available, required: required,
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._select_required_product_source",
+        lambda product, frequency, required: _Named("LocalCNFutures"),
+    )
+    expansion_calls = []
+
+    def expand(product, **kwargs):
+        expansion_calls.append((product, kwargs))
+        return ([_Named("AP501.CZCE")], [])
+
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.term_structure._expand_product_contracts",
+        expand,
+    )
+
+    build_execution_plan("backtest", {"_owner": "alice"})
+
+    assert [kwargs["engine_mode"] for _, kwargs in expansion_calls] == [
+        "auto",
+        "legacy",
+    ]
+
+
 def test_backtest_planner_preserves_distinct_frequency_requirements(monkeypatch) -> None:
     prepared = {
         "start_dt": "2025-01-02",

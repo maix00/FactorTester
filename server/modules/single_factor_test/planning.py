@@ -51,6 +51,11 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
     requirements: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     strategies: dict[str, dict[str, Any]] = {}
     notices: list[dict[str, Any]] = []
+    expansion_cache: dict[
+        tuple[Any, str | None, str | None, str],
+        tuple[list[Any], list[dict[str, Any]]],
+    ] = {}
+    missing_lifecycle_notices: set[str] = set()
     for strategy_id, config in prepared["resolved_settings_by_alias"].items():
         selection = config.get("product_path_selection")
         products = list(getattr(selection, "products", ()) or ())
@@ -61,12 +66,15 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         strategy_products: list[str] = []
         strategy_contracts: list[str] = []
         for product in products:
-            contracts, metadata = _expand_product_contracts(
-                product,
-                start_date=start_date,
-                end_date=end_date,
-                engine_mode=engine_mode,
-            )
+            expansion_key = (product, start_date, end_date, engine_mode)
+            if expansion_key not in expansion_cache:
+                expansion_cache[expansion_key] = _expand_product_contracts(
+                    product,
+                    start_date=start_date,
+                    end_date=end_date,
+                    engine_mode=engine_mode,
+                )
+            contracts, metadata = expansion_cache[expansion_key]
             universe = [product, *[item for item in contracts if item != product]]
             strategy_products.append(_name(product))
             strategy_contracts.extend(_name(item) for item in contracts)
@@ -77,12 +85,17 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
                         "last_trade_ts", "expire_ts", "delivery_ts", "maturity_ts",
                     )
                 ):
-                    notices.append({
-                        "severity": "warning",
-                        "code": "term_structure_lifecycle_authority_missing",
-                        "message": "contract lifecycle has no authoritative terminal field",
-                        "details": {"contract": str(row.get("contract_product") or row.get("uid") or "")},
-                    })
+                    contract = str(
+                        row.get("contract_product") or row.get("uid") or ""
+                    )
+                    if contract not in missing_lifecycle_notices:
+                        missing_lifecycle_notices.add(contract)
+                        notices.append({
+                            "severity": "warning",
+                            "code": "term_structure_lifecycle_authority_missing",
+                            "message": "contract lifecycle has no authoritative terminal field",
+                            "details": {"contract": contract},
+                        })
             for item in universe:
                 frequency = _select_required_product_frequency(
                     item, _product_available_freqs(item), required_frequency
