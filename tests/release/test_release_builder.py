@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import plistlib
 import subprocess
@@ -14,6 +15,7 @@ from script.release.assets import (
     embed_client_runtime,
 )
 from script.release import build as release_build
+from script.release import embed_runtime as runtime_refresh
 from script.release.build import build_release
 from script.release.manifest import _kind, create_manifest
 from tools.cli.release.app_archive import install_macos_app
@@ -72,6 +74,48 @@ def test_local_build_script_uses_installed_app_identity() -> None:
     ):
         assert contract in source
     assert "--install|install" in source
+    assert "script.release.embed_runtime" in source
+
+
+def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = tmp_path / "FTClient.app"
+    resources = app / "Contents/Resources/FactorTester"
+    cli = resources / "bin/factortester"
+    cli.parent.mkdir(parents=True)
+    cli.write_bytes(b"old")
+    receipt = resources / "bundle-receipt.json"
+    receipt.write_text(json.dumps({
+        "version": "bundle-1-r" + "a" * 40,
+        "source_revision": "a" * 40,
+    }))
+    calls = []
+
+    def embed(repo, target, *, version, source_revision):
+        calls.append((repo, target, version, source_revision))
+        cli.write_bytes(b"new")
+        return receipt
+
+    monkeypatch.setattr(runtime_refresh, "embed_client_runtime", embed)
+    assert runtime_refresh.ensure_client_runtime(
+        app=app,
+        version="bundle-1-r" + "a" * 40,
+        source_revision="a" * 40,
+    ) is False
+    assert calls == []
+
+    assert runtime_refresh.ensure_client_runtime(
+        app=app,
+        version="bundle-1-r" + "b" * 40,
+        source_revision="b" * 40,
+    ) is True
+    assert calls[0][1:] == (
+        app,
+        "bundle-1-r" + "b" * 40,
+        "b" * 40,
+    )
 
 
 def test_local_build_script_requires_stable_signature_for_privacy_grants() -> None:

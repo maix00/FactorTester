@@ -35,6 +35,17 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build
 
+SOURCE_REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+  "$APP_BUNDLE/Contents/Info.plist")"
+(
+  cd "$ROOT_DIR"
+  python3 -m script.release.embed_runtime \
+    --app "$APP_BUNDLE" \
+    --version "bundle-$APP_VERSION-r$SOURCE_REVISION" \
+    --source-revision "$SOURCE_REVISION"
+)
+
 sign_app() {
   if ! /usr/bin/security find-identity -v -p codesigning |
       /usr/bin/grep -Fq "\"$SIGNING_IDENTITY\""; then
