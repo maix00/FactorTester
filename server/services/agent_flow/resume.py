@@ -43,12 +43,19 @@ def build_agent_resume_packet(
             "budget": _budget_summary(budget_period),
         },
     }
+    packet_ceiling_bytes = MAX_AGENT_PACKET_BYTES
     if role == "research":
         packet["research"] = _research_packet(
             owner=owner,
             instance_id=instance_id,
             branch_id=branch_id,
         )
+        budget_profile = packet["research"].get("budget_profile")
+        if isinstance(budget_profile, dict):
+            packet_ceiling_bytes = int(
+                budget_profile.get("ceiling_bytes")
+                or MAX_AGENT_PACKET_BYTES
+            )
     elif role == "planning":
         packet["planning"] = _planning_packet(
             owner=owner,
@@ -65,10 +72,10 @@ def build_agent_resume_packet(
     packet["packet_bytes"] = 0
     for _ in range(3):
         packet["packet_bytes"] = len(orjson.dumps(packet))
-    if len(orjson.dumps(packet)) > MAX_AGENT_PACKET_BYTES:
+    if len(orjson.dumps(packet)) > packet_ceiling_bytes:
         raise ValueError(
             "Agent resume packet exceeds "
-            f"{MAX_AGENT_PACKET_BYTES} bytes"
+            f"{packet_ceiling_bytes} bytes"
         )
     return packet
 
@@ -142,6 +149,7 @@ def _compact_research_next(source: dict[str, Any]) -> dict[str, Any]:
             "recommended_edge_ids",
             "requires_agent_judgment",
             "running_backend_jobs_action",
+            "budget_profile",
         )
         if key in source
     }

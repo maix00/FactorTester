@@ -92,6 +92,12 @@ def build_graph_branch_next(
         "running_backend_jobs_action": "continue",
         "next_bytes": 0,
     }
+    if context.get("budget_profile_ref"):
+        packet["budget_profile"] = {
+            "profile_ref": str(context["budget_profile_ref"]),
+            "profile_hash": str(context["budget_profile_hash"]),
+            "ceiling_bytes": ceiling_bytes,
+        }
     if "entry_requirements" in context:
         packet["entry_requirements"] = entry_requirements
         if "entry_resolution" in context:
