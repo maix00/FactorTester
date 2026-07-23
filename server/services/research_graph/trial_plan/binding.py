@@ -165,7 +165,7 @@ def validate_branch_binding(
                      AND r.sample_end>=?
                      AND (
                          r.trial_plan_hash<>?
-                         OR r.trial_stage<>?
+                         OR (?<5 AND r.trial_stage<>?)
                      )
                ) AS prior_protected_sample_exposure,
                (
@@ -202,6 +202,7 @@ def validate_branch_binding(
             sample_end,
             sample_start,
             trial_plan_hash,
+            trial_plan_schema_version,
             trial_stage,
             owner,
             run_spec_hash,

@@ -62,7 +62,7 @@ def canonical_v5_samples(
     items = array_field(value, "trial_plan.samples", allow_empty=False)
     normalized: list[dict[str, Any]] = []
     sample_refs: set[str] = set()
-    sample_hashes: set[str] = set()
+    stage_sample_hashes: set[tuple[str, str]] = set()
     run_bindings: dict[str, dict[str, str]] = {}
     observed_stages: set[str] = set()
     for index, raw in enumerate(items):
@@ -82,10 +82,15 @@ def canonical_v5_samples(
         sample_hash = sha256_field(item.get("sample_hash"), f"{path}.sample_hash")
         stage_id = identifier_field(item.get("stage_id"), f"{path}.stage_id")
         role = identifier_field(item.get("semantic_role"), f"{path}.semantic_role")
-        if sample_ref in sample_refs or sample_hash in sample_hashes:
-            raise ValueError("TrialPlan sample identities must be unique")
+        if sample_ref in sample_refs:
+            raise ValueError("TrialPlan sample_ref values must be unique")
         if stage_id not in stage_ids:
             raise ValueError(f"{path}.stage_id is not declared by stage_policy")
+        stage_sample_identity = (stage_id, sample_hash)
+        if stage_sample_identity in stage_sample_hashes:
+            raise ValueError(
+                "TrialPlan sample_hash may appear at most once per stage"
+            )
         if role not in SEMANTIC_ROLES:
             raise ValueError(f"{path}.semantic_role is unsupported: {role}")
         hashes = sha256_list(item.get("run_spec_hashes"), f"{path}.run_spec_hashes")
@@ -97,7 +102,7 @@ def canonical_v5_samples(
                 "semantic_role": role,
             }
         sample_refs.add(sample_ref)
-        sample_hashes.add(sample_hash)
+        stage_sample_hashes.add(stage_sample_identity)
         observed_stages.add(stage_id)
         normalized.append({
             "sample_ref": sample_ref,

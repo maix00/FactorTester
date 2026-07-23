@@ -17,7 +17,7 @@ from .fields import (
 
 
 MAX_EVIDENCE_ACTIONS = 8
-MAX_ACTION_BYTES = 768
+MAX_ACTION_BYTES = 1024
 MAX_ACTION_OBLIGATIONS = 16
 MAX_ACTION_PREDICATES = 16
 EXECUTION_MODES = frozenset({"sync_cli", "job", "connector"})
