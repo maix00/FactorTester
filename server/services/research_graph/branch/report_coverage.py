@@ -12,7 +12,10 @@ from tools.cli.release.research_reporting.report_items import (
 )
 
 
-MAX_REPORT_SUBMISSION_BYTES = 6000
+# This is a persisted audit index of required report bindings, not the
+# routine Agent context packet. Dense v9 nodes can legitimately bind more
+# than twenty compact hash-only items, so keep a separate protocol ceiling.
+MAX_REPORT_SUBMISSION_BYTES = 16 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SUBJECT_PREFIXES = {
     "current_research_scope": ("node:",),
@@ -101,7 +104,9 @@ def validate_report_submission(
     if len(orjson.dumps(value, option=orjson.OPT_SORT_KEYS)) > (
         MAX_REPORT_SUBMISSION_BYTES
     ):
-        raise ValueError("report_submission exceeds 6000 bytes")
+        raise ValueError(
+            f"report_submission exceeds {MAX_REPORT_SUBMISSION_BYTES} bytes"
+        )
     return value
 
 

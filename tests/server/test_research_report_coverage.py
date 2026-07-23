@@ -92,6 +92,52 @@ def test_successor_requires_exact_node_edge_and_target_entry_reports() -> None:
     assert len(value["items"]) == len(source["node_report_refs"]) + 2
 
 
+def test_dense_v9_report_index_is_not_limited_by_agent_packet_budget() -> None:
+    graph, source, edge, target, assessments = _parts(
+        "validation_design__trial_execution"
+    )
+    for index, assessment in enumerate(assessments):
+        assessment["coverage"]["obligation_refs"] = [
+            f"obligation:dense-{index}-a",
+            f"obligation:dense-{index}-b",
+        ]
+    bindings = expected_report_bindings(
+        graph=graph,
+        source_node=source,
+        edge=edge,
+        target_node=target,
+        entry_assessments=assessments,
+        transition_evidence={},
+    )
+    submitted = {
+        "schema_version": 1,
+        "fragment_hash": "",
+        "items": [
+            {
+                "report_requirement_id": item["report_requirement_id"],
+                "subject_ref": item["subject_ref"],
+                "content_kind": item["allowed_content"][0],
+                "item_hash": "b" * 64,
+            }
+            for item in bindings
+        ],
+    }
+    submitted["fragment_hash"] = report_fragment_hash(submitted["items"])
+
+    value = validate_report_submission(
+        graph=graph,
+        source_node=source,
+        edge=edge,
+        target_node=target,
+        entry_assessments=assessments,
+        transition_evidence={},
+        submitted=submitted,
+    )
+
+    assert value is not None
+    assert len(value["items"]) > 20
+
+
 def test_expected_bindings_are_the_same_contract_used_by_validation() -> None:
     graph, source, edge, target, assessments = _parts()
     submitted = _submission(graph, source, edge, target, assessments)
