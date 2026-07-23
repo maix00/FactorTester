@@ -1049,6 +1049,15 @@ def test_historical_report_carrier_is_one_exact_read_without_head_changes(
 ) -> None:
     path = tmp_path / "historical-carrier.sqlite"
     _seed(path)
+    with connect_sqlite(path) as conn:
+        backfill_work_packages(conn)
+        work_package_before = dict(conn.execute(
+            "SELECT updated_at, revision, lifecycle_history_json "
+            "FROM research_work_packages WHERE work_package_id='instance-a'"
+        ).fetchone())
+        trace_count_before = conn.execute(
+            "SELECT COUNT(*) FROM research_graph_trace"
+        ).fetchone()[0]
     statements: list[str] = []
     real_connect = connect_sqlite
 
@@ -1076,6 +1085,7 @@ def test_historical_report_carrier_is_one_exact_read_without_head_changes(
     assert carrier["graph_ref"] == "factor-research@v6"
     assert carrier["latest_transition"]["created_at"] == 1002.0
     assert carrier["evidence_refs"] == ["artifact:evidence-2"]
+    assert carrier["status"] == "historical"
     normalized = [
         " ".join(statement.upper().split())
         for statement in statements
@@ -1092,7 +1102,27 @@ def test_historical_report_carrier_is_one_exact_read_without_head_changes(
             "SELECT latest_trace_id, updated_at FROM research_graph_branches "
             "WHERE instance_id='instance-a' AND branch_id='branch-0000'"
         ).fetchone())
+        work_package_after = dict(conn.execute(
+            "SELECT updated_at, revision, lifecycle_history_json "
+            "FROM research_work_packages WHERE work_package_id='instance-a'"
+        ).fetchone())
+        trace_count_after = conn.execute(
+            "SELECT COUNT(*) FROM research_graph_trace"
+        ).fetchone()[0]
     assert after == before
+    assert work_package_after == work_package_before
+    assert trace_count_after == trace_count_before
+
+    replay = service.get_report_checkpoint(
+        owner="alice",
+        work_package_ref="work-package:instance-a",
+        branch_id="branch-0000",
+        trace_id="trace-000002",
+    )
+    assert orjson.dumps(replay, option=orjson.OPT_SORT_KEYS) == orjson.dumps(
+        carrier,
+        option=orjson.OPT_SORT_KEYS,
+    )
 
     with pytest.raises(KeyError):
         service.get_report_checkpoint(
@@ -1283,6 +1313,14 @@ def test_authenticated_routes_emit_etag_and_honor_conditional_reads(
     assert len(timeline.get_json()["items"]) == 3
     assert carrier.status_code == 200
     assert carrier.get_json()["checkpoint_ref"] == "trace:trace-000002"
+    assert carrier.get_json()["status"] == "historical"
+    replay = app_client.get(
+        "/api/profile-research/"
+        "work-package:instance-a/branches/branch-0000/"
+        "checkpoints/trace-000002/report-carrier",
+        headers={"If-None-Match": carrier.headers["ETag"]},
+    )
+    assert replay.status_code == 304
 
 
 def test_routes_fail_closed_for_other_owner_and_invalid_paging(

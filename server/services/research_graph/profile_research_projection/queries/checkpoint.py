@@ -4,7 +4,7 @@ REPORT_CHECKPOINT_SQL = """
     SELECT t.trace_id, t.instance_id AS trace_instance_id,
            t.branch_id AS trace_branch_id, t.edge_id, t.from_node, t.to_node,
            t.created_at AS trace_created_at, t.evidence_json,
-           history.label, history.status AS branch_status,
+           history.label,
            history_instance.graph_id, history_instance.graph_version,
            history_instance.product_group, history_instance.workspace_id,
            COALESCE(

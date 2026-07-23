@@ -349,7 +349,9 @@ class ProfileResearchProjection:
             title=str(row["label"]),
             product_group=str(row["product_group"]),
             current_node=str(row["to_node"]),
-            status=str(row["branch_status"]),
+            # A trace does not persist a branch-status snapshot. Never project
+            # the later physical-branch status as if it were historical fact.
+            status="historical",
             trace_id=str(row["trace_id"]),
             edge_id=str(row["edge_id"]),
             from_node=str(row["from_node"]),
