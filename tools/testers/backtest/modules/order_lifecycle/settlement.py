@@ -14,6 +14,7 @@ def record_fill_settlement(
     timestamp: Any,
     price: float,
     fee: float,
+    realized_pnl: float,
     cash_before: float,
     cash_after: float,
     margin_before: float,
@@ -40,7 +41,7 @@ def record_fill_settlement(
     order_store.record_fill(fill)
     order_store.record_settlement(FillSettlement(
         fill_id=fill.fill_id,
-        realized_pnl=float(order.get("realized_pnl", 0.0) or 0.0),
+        realized_pnl=float(realized_pnl),
         fee=fee,
         cash_before=cash_before,
         cash_after=cash_after,

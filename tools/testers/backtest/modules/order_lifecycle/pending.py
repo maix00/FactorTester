@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.testers.backtest.engines.native.order import OrderStatus
+from tools.testers.backtest.engines.native.order import (
+    OrderActionType,
+    OrderStatus,
+)
+
+from .actions import record_order_action
 
 
 def default_pending_order_conflict_policy(
@@ -22,6 +27,10 @@ def default_pending_order_conflict_policy(
         and stale.status == OrderStatus.SCHEDULED
         and stale.get("price_timestamp", stale.timestamp) > signal_timestamp
     ):
-        stale.status = OrderStatus.CANCELLED
         stale.revision += 1
+        record_order_action(
+            state, stale, OrderActionType.CANCEL,
+            timestamp=signal_timestamp, reason="pending order conflict",
+        )
+        stale.status = OrderStatus.CANCELLED
         state.order_store.remove_from_live_indexes(stale)

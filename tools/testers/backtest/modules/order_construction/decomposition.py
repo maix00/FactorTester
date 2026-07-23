@@ -15,7 +15,7 @@ from tools.testers.backtest.engines.native.order import (
     OrderStatus,
 )
 
-from .lot_offsets import close_buckets
+from .lot_offsets import close_buckets, validate_exact_close_lots
 
 
 def decompose_position_delta(
@@ -29,6 +29,7 @@ def decompose_position_delta(
     parent_intent_id: str,
     order_ids: Iterator[str],
     cost_basis_method: str,
+    require_exact_offsets: bool = False,
     supersedes_group_id: str = "",
 ) -> tuple[OrderGroup, list[Order]]:
     current = float(getattr(position, "quantity", 0.0) or 0.0)
@@ -37,6 +38,8 @@ def decompose_position_delta(
         if current and delta and (current > 0) != (delta > 0)
         else 0.0
     )
+    if close_quantity > 1e-12 and require_exact_offsets:
+        validate_exact_close_lots(position, close_quantity)
     direction = 1.0 if delta > 0 else -1.0
     orders: list[Order] = []
     close_ids: list[str] = []

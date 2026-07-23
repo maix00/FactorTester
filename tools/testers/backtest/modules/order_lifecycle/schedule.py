@@ -6,6 +6,8 @@ from typing import Any
 
 from tools.testers.backtest.engines.native.order import OrderAttempt, OrderStatus
 
+from .actions import record_initial_submit
+
 
 def create_order_attempt(
     state: Any,
@@ -24,6 +26,7 @@ def create_order_attempt(
     order.eligible_at = timestamp
     order.set("price_timestamp", market_timestamp)
     order.status = OrderStatus.SCHEDULED
+    record_initial_submit(state, order, timestamp)
     attempt = OrderAttempt(
         attempt_id=f"{order.order_id}:attempt:{sequence}",
         order_id=order.order_id,

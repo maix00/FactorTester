@@ -50,6 +50,7 @@ def build_order_construct_flows(module):
         "construct_orders",
         inputs=(
             module.deltas, LedgerModule.positions,
+            EngineModule.engine_mode, MarketDataModule.current_historical_fields,
             TradingRuleModule.cost_basis_method,
             TradingRuleModule.daily_mark_to_market_enabled,
         ),

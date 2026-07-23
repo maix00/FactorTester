@@ -10,7 +10,11 @@ from tools.testers.backtest.engines.native.order import (
     OrderSide,
     OrderStatus,
 )
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.modules.order_lifecycle.schedule import (
+    create_order_attempt,
+)
 from tools.testers.backtest.modules.order_lifecycle.store import OrderStore
 
 
@@ -64,3 +68,40 @@ def test_stale_attempt_revision_is_not_actionable():
     order.revision += 1
 
     assert not store.attempt_is_actionable(attempt)
+
+
+def test_removing_live_order_uses_reverse_scope_index_not_all_scopes():
+    class NoValuesScan(dict):
+        def values(self):
+            raise AssertionError("live-order removal scanned every scope")
+
+    store = OrderStore()
+    first, second = _order("O1"), _order("O2")
+    store.register_order(first, scope="scope-1")
+    store.register_order(second, scope="scope-2")
+    store.live_order_ids_by_scope = NoValuesScan(
+        store.live_order_ids_by_scope
+    )
+
+    store.remove_from_live_indexes(first)
+
+    assert store.live_orders("scope-1") == ()
+    assert store.live_orders("scope-2") == (second,)
+
+
+def test_retries_keep_one_submit_request_lineage():
+    state = BacktestRunState()
+    order = _order()
+    state.order_store.register_order(order)
+
+    for minute in (1, 2):
+        timestamp = pd.Timestamp("2024-01-01") + pd.Timedelta(minutes=minute)
+        create_order_attempt(
+            state, order,
+            timestamp=timestamp, market_timestamp=timestamp,
+        )
+
+    actions = state.order_store.actions_by_order[order.order_id]
+    assert [(action.action.value, action.request_id) for action in actions] == [
+        ("submit", "O1:request:1"),
+    ]

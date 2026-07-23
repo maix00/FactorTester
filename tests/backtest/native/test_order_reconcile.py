@@ -67,6 +67,9 @@ def test_changed_target_cancels_remainder_and_rebuilds_from_actual():
     assert delta == 5.0
     assert order.status is OrderStatus.CANCELLED
     assert order.revision == 1
+    action = state.order_store.actions_by_order[order.order_id][-1]
+    assert action.action.value == "replace"
+    assert action.revision == 1
     assert state.order_store.superseded_group_id_by_scope[
         (strategy, "P1")
     ] == "G1"

@@ -53,9 +53,11 @@ def apply_order_fill(state, ctx) -> None:
         margin_before = margin_reserved_major(ledger)
         historical_fields = historical_by_strategy[strategy]
         config = config_by_strategy[strategy]
-        if uses_margin_accounting(
+        realized_pnl = 0.0
+        margin_accounting = uses_margin_accounting(
             config, historical_fields, order.instrument, ledger_config,
-        ):
+        )
+        if margin_accounting:
             cash = apply_margin_accounting_fill(
                 cash, positions, config, order.instrument,
                 quantity=float(order.quantity), price=price, fee_cost=fee,
@@ -63,7 +65,7 @@ def apply_order_fill(state, ctx) -> None:
                 state=state, timestamp=ctx.timestamp, offset=order.offset,
             )
         else:
-            apply_cash_accounting_position_fill(
+            realized_pnl = apply_cash_accounting_position_fill(
                 positions, config, order.instrument,
                 quantity=float(order.quantity), price=price,
                 historical_fields=historical_fields, ledger_config=ledger_config,
@@ -84,8 +86,14 @@ def apply_order_fill(state, ctx) -> None:
         set_cash_for_ledger_pool(state, ledger, cash)
         sync_ledger_margin_reserved(ledger, positions)
         margin_after = margin_reserved_major(ledger)
+        if margin_accounting:
+            realized_pnl = (
+                float(cash.to_major()) - float(cash_before) + fee
+                + margin_after - margin_before
+            )
         fill = record_fill_settlement(
             state, order, timestamp=ctx.timestamp, price=price, fee=fee,
+            realized_pnl=realized_pnl,
             cash_before=float(cash_before), cash_after=float(cash.to_major()),
             margin_before=margin_before, margin_after=margin_after,
         )

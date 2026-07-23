@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 
 import pandas as pd
+import pytest
 
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.order import (
@@ -68,6 +69,7 @@ def test_dmtm_lots_become_explicit_close_yesterday_and_close_today_orders():
         parent_intent_id="I2",
         order_ids=iter(("CY", "CT", "OPEN")),
         cost_basis_method="FIFO",
+        require_exact_offsets=True,
     )
 
     assert [order.offset for order in orders] == [
@@ -83,6 +85,42 @@ def test_dmtm_lots_become_explicit_close_yesterday_and_close_today_orders():
     assert [order.quantity for order in orders] == [-1.0, -2.0, -2.0]
     assert orders[-1].get("depends_on_order_ids") == ("CY", "CT")
     assert group.execution_policy == "sequential_close_then_open"
+
+
+@pytest.mark.parametrize(
+    "position, message",
+    [
+        (ProductPosition(quantity=2.0), "complete position lots"),
+        (
+            ProductPosition(
+                quantity=2.0,
+                lots=deque([
+                    Lot(
+                        quantity=2.0, entry_price=8.0,
+                        multiplier=1.0, is_today=None,
+                    ),
+                ]),
+            ),
+            "today/yesterday age",
+        ),
+    ],
+)
+def test_exact_reversal_rejects_missing_offset_facts_before_construction(
+    position, message,
+):
+    with pytest.raises(ValueError, match=message):
+        decompose_position_delta(
+            strategy=Strategy(alias="exact"),
+            product=_product(),
+            timestamp=pd.Timestamp("2024-01-01 14:00"),
+            delta=-2.0,
+            position=position,
+            group_id="G-exact",
+            parent_intent_id="I-exact",
+            order_ids=iter(("CLOSE",)),
+            cost_basis_method="FIFO",
+            require_exact_offsets=True,
+        )
 
 
 def test_blocked_open_activates_at_close_fill_timestamp():

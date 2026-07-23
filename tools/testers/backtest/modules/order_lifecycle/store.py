@@ -27,6 +27,7 @@ class OrderStore:
     settlements_by_fill: dict[str, FillSettlement] = field(default_factory=dict)
     attempts_by_id: dict[str, OrderAttempt] = field(default_factory=dict)
     live_order_ids_by_scope: dict[Any, list[str]] = field(default_factory=dict)
+    live_scope_by_order_id: dict[str, Any] = field(default_factory=dict)
     capacity_limit_by_key: dict[Any, float] = field(default_factory=dict)
     capacity_consumed_by_key: dict[Any, float] = field(default_factory=dict)
     superseded_group_id_by_scope: dict[Any, str] = field(default_factory=dict)
@@ -42,6 +43,7 @@ class OrderStore:
         ids = self.live_order_ids_by_scope.setdefault(key, [])
         if order.order_id not in ids and not order.status.terminal:
             ids.append(order.order_id)
+            self.live_scope_by_order_id[order.order_id] = key
 
     def register_group(self, group: OrderGroup) -> None:
         if group.order_group_id in self.groups_by_id:
@@ -88,6 +90,11 @@ class OrderStore:
         )
 
     def remove_from_live_indexes(self, order: Order) -> None:
-        for ids in self.live_order_ids_by_scope.values():
-            if order.order_id in ids:
-                ids.remove(order.order_id)
+        scope = self.live_scope_by_order_id.pop(order.order_id, None)
+        if scope is None:
+            return
+        ids = self.live_order_ids_by_scope.get(scope)
+        if ids is not None and order.order_id in ids:
+            ids.remove(order.order_id)
+            if not ids:
+                self.live_order_ids_by_scope.pop(scope, None)

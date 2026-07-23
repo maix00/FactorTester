@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.order import OrderStatus
+from tools.testers.backtest.engines.native.order import (
+    OrderActionType,
+    OrderStatus,
+)
 from tools.testers.backtest.modules.execution_capacity import effective_matching_model
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
-from tools.testers.backtest.modules.order_lifecycle import create_order_attempt
+from tools.testers.backtest.modules.order_lifecycle import (
+    create_order_attempt,
+    record_order_action,
+)
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 from tools.testers.backtest.modules.time_index_lookup import signal_timestamps
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
@@ -92,4 +98,9 @@ def apply_pending_conflict(
         and stale.status == OrderStatus.SCHEDULED
         and stale.get("price_timestamp", stale.timestamp) > timestamp
     ):
+        stale.revision += 1
+        record_order_action(
+            state, stale, OrderActionType.CANCEL,
+            timestamp=timestamp, reason="pending order conflict",
+        )
         stale.status = OrderStatus.CANCELLED

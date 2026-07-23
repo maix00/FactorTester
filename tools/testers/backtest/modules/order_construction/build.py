@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tools.testers.backtest.modules.engine import engine_mode_for
+from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.trading_rule import _resolve_method
 
@@ -25,9 +27,17 @@ def construct_orders(state, ctx, module) -> None:
             current = float(getattr(position, "quantity", 0.0) or 0.0)
             needs_close = current and (current > 0) != (delta > 0)
             method = "FIFO"
+            exact = False
             if needs_close:
+                config = state.config_for(strategy)
+                exact = engine_mode_for(config) == "exact"
+                historical_fields = ctx.get_for(
+                    MarketDataModule.current_historical_fields, strategy,
+                    ctx.get(MarketDataModule.current_historical_fields, {}),
+                )
                 method = _resolve_method(
-                    state.config_for(strategy), product,
+                    config, product, historical_fields,
+                    require_exact=exact,
                     ledger_config=state.ledger_config_for(ledger),
                 )
             group_id = audit_store.next_group_id(strategy, ctx.timestamp)
@@ -42,6 +52,7 @@ def construct_orders(state, ctx, module) -> None:
                 parent_intent_id=parent_intent_id,
                 order_ids=order_id_stream(audit_store, strategy, ctx.timestamp),
                 cost_basis_method=method,
+                require_exact_offsets=exact,
                 supersedes_group_id=state.order_store.superseded_group_id_by_scope.pop(
                     (strategy, product), "",
                 ),

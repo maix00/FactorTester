@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.testers.backtest.engines.native.order import OrderStatus
+from tools.testers.backtest.engines.native.order import (
+    OrderActionType,
+    OrderStatus,
+)
 
 from .access import order_stores_for
+from .actions import record_order_action
 
 
 def reconcile_target_delta(
@@ -28,8 +32,12 @@ def reconcile_target_delta(
         order.order_group_id for order in live if order.order_group_id
     }
     for order in live:
-        order.status = OrderStatus.CANCELLED
         order.revision += 1
+        record_order_action(
+            state, order, OrderActionType.REPLACE,
+            timestamp=timestamp, reason="latest target superseded leaves",
+        )
+        order.status = OrderStatus.CANCELLED
         order_store.remove_from_live_indexes(order)
         pending = order_store.pending_orders
         if pending.get(scope) is order:

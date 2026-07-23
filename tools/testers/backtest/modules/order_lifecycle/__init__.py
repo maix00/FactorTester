@@ -1,6 +1,7 @@
 """Order lifecycle stores and policies."""
 
 from .access import order_stores_for
+from .actions import record_order_action
 from .dependencies import activate_ready_dependents
 from .audit_store import OrderFlowStore
 from .finalize import record_order_lifecycle_state
@@ -21,5 +22,6 @@ __all__ = [
     "finalize_and_retry_orders",
     "reconcile_target_delta",
     "record_fill_settlement",
+    "record_order_action",
     "record_order_lifecycle_state",
 ]

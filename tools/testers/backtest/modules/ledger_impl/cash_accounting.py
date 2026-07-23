@@ -13,7 +13,7 @@ from tools.testers.backtest.modules.market_data import (
 )
 from tools.testers.backtest.modules.trading_rule import _resolve_method
 
-from .cost_basis import apply_lot_fill, same_direction, weighted_average_cost
+from .cost_basis import apply_lot_fill, same_direction, sign, weighted_average_cost
 
 
 def apply_cash_accounting_position_fill(
@@ -21,7 +21,7 @@ def apply_cash_accounting_position_fill(
     quantity: float, price: float, historical_fields: dict,
     ledger_config=None, state: Any | None = None, timestamp: Any | None = None,
     offset: OrderOffset = OrderOffset.AUTO,
-) -> None:
+) -> float:
     fields = historical_fields_for_product(historical_fields, product)
     multiplier = contract_multiplier_from_fields(
         historical_fields, product, state=state, timestamp=timestamp,
@@ -34,8 +34,9 @@ def apply_cash_accounting_position_fill(
         require_exact=engine_mode_for(strategy_config) == "exact",
         ledger_config=ledger_config,
     )
+    realized = 0.0
     if method in ("FIFO", "LIFO", "HIFO"):
-        apply_lot_fill(
+        realized = apply_lot_fill(
             entry, method, quantity, price, multiplier,
             is_today=None, offset=offset,
         )
@@ -47,9 +48,16 @@ def apply_cash_accounting_position_fill(
             entry.average_cost = weighted_average_cost(
                 prior_quantity, prior_cost, quantity, price,
             )
-        elif abs(new_quantity) <= 1e-12:
-            entry.average_cost = 0.0
-            new_quantity = 0.0
-        elif abs(quantity) > abs(prior_quantity):
-            entry.average_cost = price
+        else:
+            close_abs = min(abs(quantity), abs(prior_quantity))
+            realized = (
+                close_abs * (price - prior_cost)
+                * sign(prior_quantity) * multiplier
+            )
+            if abs(new_quantity) <= 1e-12:
+                entry.average_cost = 0.0
+                new_quantity = 0.0
+            elif abs(quantity) > abs(prior_quantity):
+                entry.average_cost = price
     entry.quantity = int(round(new_quantity)) if isinstance(entry.quantity, int) else new_quantity
+    return realized

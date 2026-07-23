@@ -5,8 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.order import OrderStatus
+from tools.testers.backtest.engines.native.order import (
+    OrderActionType,
+    OrderStatus,
+)
 
+from .actions import record_order_action
 from .schedule import create_order_attempt
 
 
@@ -56,6 +60,12 @@ def activate_ready_dependents(state: Any, ctx: Any) -> list[EventDraft]:
                 and dependency.status is not OrderStatus.FILLED
                 for dependency in dependencies
             ):
+                order.revision += 1
+                record_order_action(
+                    state, order, OrderActionType.CANCEL,
+                    timestamp=ctx.timestamp,
+                    reason="prerequisite close order did not fill",
+                )
                 order.status = OrderStatus.CANCELLED
                 order.reject_reason = "prerequisite close order did not fill"
                 state.order_store.remove_from_live_indexes(order)

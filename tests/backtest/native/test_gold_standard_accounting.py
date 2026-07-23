@@ -195,6 +195,18 @@ def test_final_cash_reflects_per_method_realized_pnl(method: str):
     assert cash == pytest.approx(_EXPECTED_FINAL_CASH[method], abs=1.0)
 
 
+def test_fill_settlement_records_realized_pnl_from_ledger_accounting():
+    account, _ = _run_gold_standard("FIFO")
+
+    realized = [
+        settlement.realized_pnl
+        for settlement in account.order_store.settlements_by_fill.values()
+        if abs(settlement.realized_pnl) > 1e-12
+    ]
+
+    assert realized == [pytest.approx(18_750.0)]
+
+
 @pytest.mark.parametrize("method", ["FIFO", "LIFO", "HIFO"])
 def test_lot_methods_track_open_lots_in_the_ledger(method: str):
     """After D6 the p1 position is 4,687.5 held across the surviving lots.
