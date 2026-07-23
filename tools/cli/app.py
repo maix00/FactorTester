@@ -12,6 +12,7 @@ from tools.cli.commands.client_release import client_release
 from tools.cli.commands.navigation import list_modules
 from tools.cli.commands.protocol import protocol
 from tools.cli.commands.settings import describe, edit
+from tools.cli.commands.strategy_intent import strategy_intent
 from tools.cli.commands.research import external_factor, job, run, workspace
 from tools.cli.commands.research_graph import research_graph
 from tools.cli.modules.registry import register_cli_modules
@@ -49,6 +50,7 @@ cli.add_command(list_modules)
 cli.add_command(protocol)
 cli.add_command(describe)
 cli.add_command(edit)
+cli.add_command(strategy_intent)
 cli.add_command(workspace)
 cli.add_command(external_factor)
 cli.add_command(run)

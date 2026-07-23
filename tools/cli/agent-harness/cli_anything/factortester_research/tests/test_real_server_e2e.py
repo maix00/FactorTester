@@ -265,6 +265,56 @@ def _capability_resolution(
     return resolution
 
 
+def test_strategy_intent_cli_round_trips_real_workspace(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    factortester = _installed_cli("factortester")
+    harness = _installed_cli("cli-anything-factortester-research")
+    env = {
+        **os.environ,
+        "FACTORTESTER_HOME": str(tmp_path / "cli-home-intent"),
+        "CLI_ANYTHING_FORCE_INSTALLED": "1",
+    }
+    with _real_server(tmp_path, monkeypatch) as base_url:
+        alias = f"intent_{uuid.uuid4().hex[:10]}"
+        password = secrets.token_urlsafe(18)
+        assert _post_json(
+            f"{base_url}/register", {"username": alias, "password": password},
+        )["success"] is True
+        _run(factortester, ["configure", "--base-url", base_url], env=env)
+        _run(factortester, ["login", "--username", alias, "--password", password], env=env)
+        _run(factortester, [
+            "workspace", "create", "--factor-family", "Demo",
+            "--factor", "Demo=Rank", "--factor", "Demo=Gate", "--factor", "Demo=Size",
+        ], env=env)
+        payload_file = tmp_path / "intent-workspace.json"
+        payload_file.write_text(json.dumps({
+            "schema_version": 1,
+            "shared": {"factor_families": [{"alias": "Demo"}], "factors": [
+                {"factor_family_alias": "Demo", "alias": item}
+                for item in ("Rank", "Gate", "Size")
+            ]},
+            "analyses": {"backtest": {
+                "local_settings": {},
+                "groups": [{"id": "A1", "name": "A1", "factorAlias": "Rank"}],
+            }},
+            "ui": {},
+        }), encoding="utf-8")
+        _run(factortester, ["workspace", "update", "--file", str(payload_file)], env=env)
+
+        configured = _run_json(harness, [
+            "strategy-intent", "configure", "A1",
+            "--role", "screen=Gate", "--screen-rule", "gte",
+            "--role", "sizing=Size", "--allocation-policy", "factor_sizing", "--json",
+        ], env=env)
+        shown = _run_json(harness, ["strategy-intent", "show", "--group", "A1", "--json"], env=env)
+
+        assert configured["revision"] == 3
+        assert shown["strategies"][0]["factor_role_bindings"] == {
+            "screen": "Gate", "sizing": "Size",
+        }
+
+
 def test_installed_clis_drive_real_server_active_graph_e2e(
     tmp_path: Path,
     monkeypatch,

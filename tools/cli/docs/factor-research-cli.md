@@ -17,6 +17,14 @@ factortester workspace load-template <configuration_id>
 # Or replace the active configuration from a complete JSON object:
 factortester workspace update --file research-configuration.json
 
+# Inspect policy roles, then configure one strategy atomically.
+factortester strategy-intent describe
+factortester strategy-intent show --group A1 --json
+factortester strategy-intent configure A1 \
+  --role screen=LiquidityGate --screen-rule gte --screen-lower 1 \
+  --role sizing=InverseRisk --allocation-policy factor_sizing \
+  --sizing-transform inverse --json
+
 # Validate the full panel through GTHT and freeze its id/hashes in this workspace:
 factortester external-factor validate \
   /path/to/gtht_handoff.json \
@@ -38,6 +46,12 @@ factortester job continue <job_id> --end
 ```
 
 Saved templates use the same open ResearchConfiguration schema as a workspace. Loading one updates the active configuration and restores the Web registry snapshot; a submitted RunSpec freezes the selected configuration revision and provenance.
+
+`screen` is evaluated at every signal timestamp and changes the eligible
+universe before ranking. `sizing` changes only weights inside the selected set.
+The command rejects incompatible roles, unregistered factor aliases, and role
+bindings that would otherwise be ignored. Use `--clear-role ROLE` to return a
+role to the primary-factor fallback.
 
 CLI jobs use the `durable` lifecycle and do not depend on `page_uuid` or a browser view lease. Web observer-bound jobs may be cancelled after their view lease expires; refresh can reclaim the same view UUID during its grace period.
 

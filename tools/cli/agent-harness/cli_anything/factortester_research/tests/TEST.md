@@ -5,6 +5,48 @@ FactorTester backend. A successful process exit is insufficient: tests inspect
 the session, graph, capability, evidence, HTTP, RunSpec, ResearchRun, Job, and
 artifact contracts produced by the workflow.
 
+## Strategy intent factor-role refinement
+
+- `factortester strategy-intent describe` reads the registered group-test
+  manifest and reports only strategy kinds and factor roles the runtime
+  actually consumes, including group `screen` and `sizing` roles.
+- `factortester strategy-intent show` reads the active workspace configuration
+  and exposes each strategy's kind, primary factor, and explicit role bindings
+  in both bounded human output and stable JSON.
+- `factortester strategy-intent bind GROUP_ID --role ROLE=FACTOR` validates the
+  role against the manifest, validates the factor against the workspace's
+  registered factor candidates, preserves unrelated configuration fields, and
+  updates through the real revision-checked workspace API.
+- Reject unknown groups, malformed bindings, unsupported roles, factor aliases
+  outside the workspace, and roles incompatible with the strategy kind without
+  mutating configuration.
+- Reject a bound group `screen` role while screening is disabled and a bound
+  `sizing` role unless factor sizing is selected, so no registered role can be
+  a silent no-op.
+- The research Harness delegates its matching `strategy-intent` commands to
+  the installed `factortester` executable and propagates its exit status and
+  JSON rather than maintaining a second local configuration model.
+- Installed subprocess coverage resolves both console scripts through
+  `_resolve_cli`; the controlled executable checks exact delegation arguments.
+- Runtime acceptance remains separate from configuration acceptance: native
+  tests prove event/precompute target weights and reason codes are identical,
+  future factor changes cannot alter earlier entry/exit decisions, missing
+  entry values cannot open positions, and missing exit values close positions.
+- Group-role acceptance proves the screen is recalculated per signal event and
+  applied before ranking, sizing only changes weights inside the selected set,
+  event/precompute targets and reasons match, and perturbing future screen or
+  sizing values cannot change an earlier target.
+
+### Passing results (2026-07-23)
+
+- Native factor-role, policy, and Flow-contract suite: `580 passed`.
+- Full CLI plus non-server Harness suite: `220 passed`.
+- Installed Harness subprocess delegation with
+  `CLI_ANYTHING_FORCE_INSTALLED=1`: passed using the resolved console script.
+- Installed `factortester` plus Harness against a complete isolated Flask
+  server over TCP: strategy-intent workspace configure/show round-trip passed.
+- Web factor-role control Node test: passed.
+
 ## Test inventory
 
 - `test_core.py`: deterministic graph/capability/session/evidence and packaging

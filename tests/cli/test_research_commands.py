@@ -531,6 +531,25 @@ def test_trade_intent_summarizes_weights_without_repeating_map() -> None:
     assert "AP.CZC" not in output and "target_weights" in output
 
 
+def test_factor_role_values_render_one_compact_row_per_role() -> None:
+    from tools.cli.step import render_step_event
+
+    lines = render_step_event({
+        "flow_id": "factor_roles", "inputs": [], "outputs": [],
+        "output_changes": [{
+            "field": "FactorModule.factor_role_values", "strategy": "A1", "before": None,
+            "after": {
+                "screen": {"AP.CZC": 1.0, "CJ.CZC": 0.0},
+                "sizing": {"AP.CZC": 2.0, "CJ.CZC": 4.0},
+            },
+        }],
+    })
+    output = "\n".join(lines)
+    assert "role" in output and "screen" in output and "sizing" in output
+    assert "count" in output and "finite" in output and "step-field" in output
+    assert "AP.CZC" not in output and "CJ.CZC" not in output
+
+
 def test_large_target_weight_map_keeps_directional_summary_and_samples() -> None:
     from tools.cli.step import render_step_event
 

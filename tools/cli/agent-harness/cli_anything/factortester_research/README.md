@@ -301,6 +301,23 @@ The concrete skill identity stays in the local research audit for replay and
 human inspection. Do not repeatedly load a known skill merely because its name
 appears in history.
 
+## Strategy intent configuration
+
+The Harness exposes the same policy surface without keeping a second local
+configuration model:
+
+```bash
+cli-anything-factortester-research strategy-intent describe --json
+cli-anything-factortester-research strategy-intent show --group A1 --json
+cli-anything-factortester-research strategy-intent configure A1 \
+  --role screen=LiquidityGate --screen-rule gte --screen-lower 1 \
+  --role sizing=RiskSize --allocation-policy factor_sizing --json
+```
+
+These commands delegate to the installed `factortester` executable. Workspace
+revision checks, factor-candidate validation, and manifest role compatibility
+remain owned by the real client and server.
+
 ## Guardrails
 
 - Align signal visibility, IC forward returns, and next-bar execution.
