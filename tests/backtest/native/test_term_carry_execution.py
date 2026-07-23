@@ -16,7 +16,7 @@ from tools.testers.backtest.modules.order_construct import (
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.target import TargetStrategyModule
 
-from .carry_strategy_support import carry_state, carry_target
+from .term_carry_strategy_support import term_carry_state, term_carry_target
 
 
 def _fill_constructed_orders(state, strategy, ctx):
@@ -52,15 +52,15 @@ def _size_construct_fill(state, strategy, near, far, ctx):
     return _fill_constructed_orders(state, strategy, ctx)
 
 
-def test_carry_target_opens_and_closes_both_ledger_legs():
-    state, strategy, product, near, far = carry_state()
-    init = carry_target(
+def test_term_carry_target_opens_and_closes_both_ledger_legs():
+    state, strategy, product, near, far = term_carry_state()
+    init = term_carry_target(
         state, strategy, product, near, far, "2025-01-01", 0.0,
     )
     init.set_for(ProductSelectionModule.products, strategy, {near, far})
     _initialize_ledgers(state, init)
 
-    opening = carry_target(
+    opening = term_carry_target(
         state, strategy, product, near, far, "2025-01-02", 0.08,
         prices={near: 100.0, far: 80.0},
     )
@@ -72,7 +72,7 @@ def test_carry_target_opens_and_closes_both_ledger_legs():
     assert positions[far].quantity == -625.0
     assert len({order.parent_intent_id for order in open_orders}) == 1
 
-    exiting = carry_target(
+    exiting = term_carry_target(
         state, strategy, product, near, far, "2025-01-03", 0.0,
         prices={near: 100.0, far: 80.0},
     )

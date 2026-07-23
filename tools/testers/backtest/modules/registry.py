@@ -50,7 +50,7 @@ from .target import TargetStrategyModule
 from .group_membership import GroupMembershipModule
 from .threshold_signal import ThresholdSignalModule
 from .long_short import LongShortCompositionModule
-from .carry import CarryStrategyModule
+from .term_carry import TermCarryStrategyModule
 from .order_flow import OrderFlowModule
 from .equity_curve import EquityCurveModule
 from .risk_metrics import RiskMetricsModule
@@ -79,7 +79,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     GroupMembershipModule,
     ThresholdSignalModule,
     LongShortCompositionModule,
-    CarryStrategyModule,
+    TermCarryStrategyModule,
     FeeModule,
     SlippageModule,
     VolumeCapacityMode,

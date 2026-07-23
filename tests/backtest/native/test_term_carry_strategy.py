@@ -4,7 +4,7 @@ import pytest
 
 from tools.testers.backtest.engines.native.order import OrderSide
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
-from tools.testers.backtest.modules.carry import CarryStrategyModule
+from tools.testers.backtest.modules.term_carry import TermCarryStrategyModule
 from tools.testers.backtest.modules.ledger_module import (
     _initialize_ledgers,
 )
@@ -22,61 +22,61 @@ from tools.testers.backtest.modules.term_structure import (
     _resolve_tradable_target_weights,
 )
 
-from .carry_strategy_support import carry_state, carry_target
+from .term_carry_strategy_support import term_carry_state, term_carry_target
 
 
-def test_carry_state_machine_opens_both_directions_and_exits_together():
-    state, strategy, product, near, far = carry_state()
+def test_term_carry_state_machine_opens_both_directions_and_exits_together():
+    state, strategy, product, near, far = term_carry_state()
 
-    positive = carry_target(
+    positive = term_carry_target(
         state, strategy, product, near, far, "2025-01-02", 0.08,
     )
     assert positive.get_for(TargetStrategyModule.target_weights, strategy) == {
         near: pytest.approx(0.5),
         far: pytest.approx(-0.5),
     }
-    negative = carry_target(
+    negative = term_carry_target(
         state, strategy, product, near, far, "2025-01-03", -0.08,
     )
     assert negative.get_for(TargetStrategyModule.target_weights, strategy) == {
         near: pytest.approx(-0.5),
         far: pytest.approx(0.5),
     }
-    exit_ctx = carry_target(
+    exit_ctx = term_carry_target(
         state, strategy, product, near, far, "2025-01-04", 0.0,
     )
     assert exit_ctx.get_for(TargetStrategyModule.target_weights, strategy) == {}
 
 
-def test_carry_missing_leg_market_cannot_open_one_leg():
-    state, strategy, product, near, far = carry_state()
-    ctx = carry_target(
+def test_term_carry_missing_leg_market_cannot_open_one_leg():
+    state, strategy, product, near, far = term_carry_state()
+    ctx = term_carry_target(
         state, strategy, product, near, far, "2025-01-02", 0.08,
         prices={near: 100.0},
     )
     assert ctx.get_for(TargetStrategyModule.target_weights, strategy) == {}
-    diagnostics = ctx.get_for(CarryStrategyModule.diagnostics, strategy)
+    diagnostics = ctx.get_for(TermCarryStrategyModule.diagnostics, strategy)
     assert diagnostics["blocked"][str(product)] == "missing_leg_market"
 
 
-def test_carry_rejects_overlapping_contract_ranks():
-    state, strategy, product, near, far = carry_state()
+def test_term_carry_rejects_overlapping_contract_ranks():
+    state, strategy, product, near, far = term_carry_state()
     state.config_for(strategy).field_values[
-        CarryStrategyModule.far_rank
+        TermCarryStrategyModule.far_rank
     ] = 0
 
     with pytest.raises(ValueError, match="near_rank < far_rank"):
-        carry_target(
+        term_carry_target(
             state, strategy, product, near, far, "2025-01-02", 0.08,
         )
 
 
-def test_carry_orders_share_parent_intent_identity():
-    state, strategy, product, near, far = carry_state()
+def test_term_carry_orders_share_parent_intent_identity():
+    state, strategy, product, near, far = term_carry_state()
     init = FlowContext(timestamp=None, event_queue=EventQueue())
     init.set_for(ProductSelectionModule.products, strategy, {near, far})
     _initialize_ledgers(state, init)
-    target_ctx = carry_target(
+    target_ctx = term_carry_target(
         state, strategy, product, near, far, "2025-01-02", 0.08,
     )
     intent = target_ctx.get_for(TargetStrategyModule.trade_intent, strategy)
@@ -96,9 +96,9 @@ def test_carry_orders_share_parent_intent_identity():
     assert {order.side for order in orders} == {OrderSide.BUY, OrderSide.SELL}
 
 
-def test_term_resolution_preserves_concrete_carry_legs_and_pair_identity():
-    state, strategy, product, near, far = carry_state()
-    ctx = carry_target(
+def test_term_resolution_preserves_concrete_term_carry_legs_and_pair_identity():
+    state, strategy, product, near, far = term_carry_state()
+    ctx = term_carry_target(
         state, strategy, product, near, far, "2025-01-02", 0.08,
     )
     state.term_structure_store.contract_metadata[strategy] = (
