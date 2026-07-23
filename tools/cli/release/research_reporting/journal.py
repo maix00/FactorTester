@@ -153,9 +153,7 @@ def assemble_snapshot(
     value["evidence_refs"] = list(dict.fromkeys(
         ref for fragment in fragments for ref in fragment["evidence_refs"]
     ))[:64]
-    value["gaps"] = [
-        deepcopy(gap) for fragment in fragments for gap in fragment["gaps"]
-    ][-32:]
+    value["gaps"] = deepcopy(base["gaps"])
     return value
 
 

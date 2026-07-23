@@ -26,11 +26,13 @@ from tools.cli.release.research_reporting.presentation_migration import (
     migrate_trace_evidence_rows,
 )
 from tools.cli.release.research_reporting.journal import (
+    assemble_snapshot,
     build_fragment,
     content_hash,
     fragment_payload,
     load_fragments,
 )
+from tools.cli.release.research_reporting.markdown import MarkdownReportTarget
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
@@ -660,6 +662,70 @@ def test_current_node_report_projects_latest_revision_per_requirement_subject(
     assert not any("试验 A 的旧版分析" in item for item in indexed_text)
     assert any("试验 A 的最新修订" in item for item in indexed_text)
     assert any("试验 B 的独立分析" in item for item in indexed_text)
+
+
+def test_report_snapshot_shows_current_gap_without_accumulating_history() -> None:
+    base = {
+        "schema_version": 1,
+        "workspace_id": "workspace-maxa",
+        "work_package_id": "sgccs-review",
+        "branch_id": "branch-sgccs",
+        "title": "SgCCS research",
+        "status": "running",
+        "product_group": "CNFutures",
+        "current_node": "validation_design",
+        "graph_ref": "factor-research@v9",
+        "methodology_hash": "1" * 64,
+        "decision_contract_hash": "2" * 64,
+        "trial_plan_hash": "",
+        "factor_family_versions": ["SgCPS@343c25f"],
+        "evidence_refs": [],
+        "sections": [],
+        "assets": [],
+        "gaps": [{
+            "gap_ref": "report-gap:omitted-evidence",
+            "reason": "当前 Carrier 仍有 8 条证据引用未随载荷提供。",
+        }],
+    }
+    historical = build_fragment(
+        checkpoint_ref="trace:historical-data-gap",
+        created_at=1.0,
+        carrier_hash="3" * 64,
+        narrative_hash="4" * 64,
+        sections=[{
+            "section_id": "historical-data-gap",
+            "title": "历史数据路由检查",
+            "body": "当时数据路由尚未解析，后续检查已解决该问题。",
+            "created_at": 1.0,
+            "links": [],
+            "evidence_refs": [],
+            "asset_refs": [],
+        }],
+        evidence_refs=[],
+        gaps=[{
+            "gap_ref": "capability-condition:data-source.route:undetermined",
+            "reason": "历史数据路由尚未解析。",
+        }],
+        lineage={
+            "status": "root",
+            "predecessor_checkpoint_ref": "",
+        },
+        graph_ref="factor-research@v8",
+        branch_ref="graph-branch:sgccs-review:branch-sgccs",
+        edge_ref="graph-edge:data_contract__capability_gap",
+    )
+
+    snapshot = assemble_snapshot(base, [historical])
+    report = MarkdownReportTarget().render(snapshot).decode("utf-8")
+
+    assert historical["gaps"] == [{
+        "gap_ref": "capability-condition:data-source.route:undetermined",
+        "reason": "历史数据路由尚未解析。",
+    }]
+    assert snapshot["gaps"] == base["gaps"]
+    assert "历史数据路由尚未解析。" not in report
+    assert "当前 Carrier 仍有 8 条证据引用未随载荷提供。" in report
+    assert report.count("report-gap:omitted-evidence") == 1
 
 
 def test_stages_content_addressed_passive_report_image_once(
