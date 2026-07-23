@@ -65,8 +65,14 @@ def ensure_schema() -> None:
                 "migrate_graph_activation_pointer): "
                 + ", ".join(legacy)
             )
+        work_package_owner_missing = "research_work_packages" not in tables
         if not GRAPH_OWNER_TABLES.issubset(tables):
             create_schema(conn)
+            if work_package_owner_missing:
+                from server.services.research_graph.work_packages import (
+                    backfill as backfill_work_packages,
+                )
+                backfill_work_packages(conn)
             definitions = _table_definitions(conn)
             tables = set(definitions)
         # Branch projection and Profile ownership columns were introduced in

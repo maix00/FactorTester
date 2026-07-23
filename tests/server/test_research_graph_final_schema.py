@@ -83,6 +83,48 @@ def test_warm_schema_check_is_one_read_with_no_ddl_or_pragma(
     assert _tables(graph_path) == set(GRAPH_OWNER_TABLES)
 
 
+def test_recreated_work_package_owner_backfills_existing_instances(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    graph_path, _ = _initialize(tmp_path, monkeypatch)
+    with connect_sqlite(graph_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner,
+                created_by_profile_ref, current_owner_profile_ref,
+                graph_id, graph_version, product_group, workspace_id,
+                mode, shadow_run_id, created_at
+            ) VALUES (
+                'instance-old', 'package-old', 'owner-old', '', '',
+                'factor-research', 8, 'china_futures', 'workspace-old',
+                'live', '', 11
+            )
+            """
+        )
+        conn.execute("DROP TABLE research_work_packages")
+
+    research_graphs.ensure_schema()
+
+    with connect_sqlite(graph_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM research_work_packages"
+        ).fetchone()
+    assert dict(row) == {
+        "owner": "owner-old",
+        "work_package_id": "package-old",
+        "workspace_id": "workspace-old",
+        "lifecycle": "active",
+        "revision": 1,
+        "lifecycle_history_json": "[]",
+        "created_at": 11.0,
+        "updated_at": 11.0,
+        "archived_at": None,
+        "deleted_at": None,
+    }
+
+
 def test_legacy_owner_blocks_startup_without_mutating_database(
     tmp_path,
     monkeypatch,
