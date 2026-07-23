@@ -12,6 +12,7 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.execution_capacity.matching import allocate_order_capacity
 from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
 from tools.testers.backtest.modules.ledger_module import _apply_order_fill
+from tools.testers.backtest.modules.ledger_impl.order_checks import settlement_order
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_lifecycle import (
     create_order_attempt,
@@ -93,6 +94,25 @@ def test_volume_snapshot_is_loaded_once_per_timestamp(monkeypatch):
     allocate_order_capacity(state, ctx, VolumeCapacityMode, OrderExecutionModule)
 
     assert calls == 1
+
+
+def test_ledger_settlement_orders_reductions_before_increases():
+    timestamp = pd.Timestamp("2024-01-01 09:01")
+    strategy = Strategy(alias="settlement-priority")
+    product = _product()
+    opening = Order(
+        product, timestamp, 2.0, 2.0, strategy,
+        order_id="open", offset=OrderOffset.OPEN,
+    )
+    close = Order(
+        product, timestamp, -2.0, -2.0, strategy,
+        order_id="close", offset=OrderOffset.CLOSE,
+    )
+    state, ctx = _state_and_ctx([opening, close], product, timestamp)
+
+    ordered = settlement_order(state, ctx)
+
+    assert [order.order_id for _, order in ordered] == ["close", "open"]
 
 
 def test_one_order_carries_partial_fills_across_completed_bars():
