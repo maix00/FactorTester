@@ -283,6 +283,39 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertEqual(active, "section:two")
     }
 
+    func testMiddleCheckpointSelectionSurvivesProjectionRefresh() {
+        let sectionRefs = [
+            "trace:first": "report-section:first",
+            "trace:middle": "report-section:middle",
+            "trace:head": "report-section:head",
+        ]
+        XCTAssertEqual(
+            ResearchReportNavigation.scrollTarget(
+                checkpointRef: "trace:middle",
+                sectionRefsByCheckpoint: sectionRefs
+            ),
+            "report-section:middle"
+        )
+        XCTAssertEqual(
+            ResearchReportNavigation.reconciledSelection(
+                currentCheckpointRef: "trace:middle",
+                availableCheckpointRefs: [
+                    "trace:first", "trace:middle", "trace:head",
+                ]
+            ),
+            "trace:middle"
+        )
+        XCTAssertEqual(
+            ResearchReportNavigation.reconciledSelection(
+                currentCheckpointRef: "trace:removed",
+                availableCheckpointRefs: [
+                    "trace:first", "trace:middle", "trace:head",
+                ]
+            ),
+            "trace:head"
+        )
+    }
+
     func testV8CheckpointDeepLinkDoesNotReloadAlreadyLoadedBranch() {
         XCTAssertFalse(ResearchBranchNavigation.requiresReload(
             currentBranchRef: "graph-branch:v8-instance:v8-branch",
@@ -291,6 +324,32 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertTrue(ResearchBranchNavigation.requiresReload(
             currentBranchRef: "graph-branch:v8-instance:v8-branch",
             targetBranchID: "other-branch"
+        ))
+    }
+
+    func testHistoricalGraphIncarnationNavigatesThroughCurrentBranch() throws {
+        let node = try JSONDecoder().decode(
+            ResearchVersionTreeNode.self,
+            from: Data(
+                """
+                {"node_ref":"trace:v7","checkpoint_ref":"trace:v7",
+                 "trace_ref":"trace:v7",
+                 "branch_ref":"graph-branch:instance-v7:physical-v7",
+                 "navigation_branch_id":"physical-v8",
+                 "graph_ref":"factor-research@v7",
+                 "edge_ref":"factor_semantics__validation_design",
+                 "from_node":"factor_semantics",
+                 "to_node":"validation_design","created_at":1,
+                 "status":"historical","is_head":false,"is_root":false,
+                 "sequence_rank":1,"history_rank":1}
+                """.utf8
+            )
+        )
+        XCTAssertEqual(node.branchRef, "graph-branch:instance-v7:physical-v7")
+        XCTAssertEqual(node.navigationBranchID, "physical-v8")
+        XCTAssertFalse(ResearchBranchNavigation.requiresReload(
+            currentBranchRef: "graph-branch:instance-v8:physical-v8",
+            targetBranchID: node.navigationBranchID
         ))
     }
 
@@ -462,9 +521,10 @@ final class ProfileResearchServiceTests: XCTestCase {
 
     func testWorkPackageDecodesBoundedVersionTreeNodesAndEdges() throws {
         let tree = #"""
-        "tree":{"schema_version":1,"nodes":[{
+        "tree":{"schema_version":2,"nodes":[{
           "node_ref":"trace:s","checkpoint_ref":"trace:s",
           "trace_ref":"trace:s","branch_ref":"graph-branch:i:b",
+          "navigation_branch_id":"b",
           "edge_ref":"edge:e","from_node":"trial","to_node":"audit",
           "created_at":1,"status":"running","is_head":true,
           "is_root":true,"sequence_rank":1,"history_rank":1
@@ -486,6 +546,7 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
         let node = try XCTUnwrap(detail.tree?.nodes.first)
         XCTAssertEqual(node.checkpointRef, "trace:s")
+        XCTAssertEqual(node.navigationBranchID, "b")
         XCTAssertTrue(node.isHead)
         XCTAssertEqual(detail.tree?.edges.first?.relation, "fork")
         XCTAssertEqual(detail.tree?.omittedNodeCount, 4)
@@ -496,15 +557,17 @@ final class ProfileResearchServiceTests: XCTestCase {
             ResearchVersionTreeProjection.self,
             from: Data(
                 """
-                {"schema_version":1,"nodes":[{
+                {"schema_version":2,"nodes":[{
                   "node_ref":"trace:root","checkpoint_ref":"trace:root",
                   "trace_ref":"trace:root","branch_ref":"graph-branch:i:b",
+                  "navigation_branch_id":"b",
                   "edge_ref":"edge:root","from_node":"start","to_node":"scope",
                   "created_at":1,"status":"historical","is_head":false,
                   "is_root":true,"sequence_rank":1,"history_rank":4
                 },{
                   "node_ref":"trace:head","checkpoint_ref":"trace:head",
                   "trace_ref":"trace:head","branch_ref":"graph-branch:i:b",
+                  "navigation_branch_id":"b",
                   "edge_ref":"edge:head","from_node":"data","to_node":"semantics",
                   "created_at":4,"status":"running","is_head":true,
                   "is_root":false,"sequence_rank":4,"history_rank":1
@@ -814,6 +877,95 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
         guard case .notModified = result else {
             return XCTFail("304 must not mutate or decode projection state")
+        }
+    }
+
+    func testStructuredProjectionFailureIsShownInsteadOfBareHTTP500() async {
+        let transport = FakeProjectionTransport(responses: [
+            ResearchHTTPResponse(
+                data: Data(
+                    """
+                    {"success":false,
+                     "error":"研究投影暂时无法读取，请稍后重试。",
+                     "error_code":"research_projection_failed"}
+                    """.utf8
+                ),
+                statusCode: 500,
+                etag: nil
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        do {
+            _ = try await service.workPackageDetail(
+                href: "/api/profile-research/work-package:i"
+            )
+            XCTFail("expected a structured projection failure")
+        } catch {
+            XCTAssertEqual(
+                (error as? APIError)?.errorDescription,
+                "研究投影读取失败（research_projection_failed）："
+                    + "研究投影暂时无法读取，请稍后重试。"
+            )
+        }
+    }
+
+    func testStructuredProjection404IsShown() async {
+        let transport = FakeProjectionTransport(responses: [
+            ResearchHTTPResponse(
+                data: Data(
+                    """
+                    {"success":false,"error":"profile research not found"}
+                    """.utf8
+                ),
+                statusCode: 404,
+                etag: nil
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        do {
+            _ = try await service.workPackageDetail(
+                href: "/api/profile-research/work-package:missing"
+            )
+            XCTFail("expected not-found projection failure")
+        } catch {
+            XCTAssertEqual(
+                (error as? APIError)?.errorDescription,
+                "研究投影读取失败：profile research not found"
+            )
+        }
+    }
+
+    func testProjectionDecodeFailureExplainsProtocolMismatch() async {
+        let transport = FakeProjectionTransport(responses: [
+            ResearchHTTPResponse(
+                data: Data(#"{"success":true,"schema_version":999}"#.utf8),
+                statusCode: 200,
+                etag: nil
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        do {
+            _ = try await service.workPackageDetail(
+                href: "/api/profile-research/work-package:i"
+            )
+            XCTFail("expected projection decode failure")
+        } catch {
+            XCTAssertEqual(
+                (error as? APIError)?.errorDescription,
+                "研究投影格式无法识别；客户端与服务器协议版本可能不一致。"
+            )
         }
     }
 
@@ -1147,6 +1299,83 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         )
         XCTAssertFalse(
             transport.requests.contains { $0.url?.path == "/api/profile-research" }
+        )
+    }
+
+    func testMissingNavigationBranchEndsLoadingWithUsefulError() async {
+        let transport = FakeProjectionTransport(
+            responses: fixtureResponses(
+                detailRefresh: #"{"mode":"stopped","terminal":true}"#
+            )
+        )
+        let controller = makeController(transport: transport)
+        await controller.loadSelectedWorkspace()
+        await controller.observeSelectedResearch()
+
+        controller.selectedBranchID = "stale-physical-v7"
+        await controller.observeSelectedResearch()
+
+        XCTAssertNil(controller.detail)
+        XCTAssertFalse(controller.isLoading)
+        XCTAssertEqual(
+            controller.error,
+            "研究版本树指向的分支不在当前工作包中，请刷新研究目录后重试。"
+        )
+    }
+
+    func testEmptyTimelineCompletesAsSuccessfulEmptyState() async {
+        let emptyTimeline = response(
+            """
+            {"success":true,"research_ref":"graph-branch:i:b",
+             "items":[],"next_cursor":null,"etag":"sha256:empty"}
+            """,
+            etag: "\"timeline-empty\""
+        )
+        var responses = fixtureResponses(
+            detailRefresh: #"{"mode":"stopped","terminal":true}"#
+        )
+        responses[3] = emptyTimeline
+        let controller = makeController(
+            transport: FakeProjectionTransport(responses: responses)
+        )
+
+        await controller.loadSelectedWorkspace()
+        await controller.observeSelectedResearch()
+
+        XCTAssertNotNil(controller.detail)
+        XCTAssertTrue(controller.timeline.isEmpty)
+        XCTAssertNil(controller.error)
+        XCTAssertFalse(controller.isLoadingResearch)
+    }
+
+    func testCancelledObservationTerminatesOnlyCurrentLoadingState() async {
+        var enteredObservationWait = false
+        let controller = makeController(
+            transport: FakeProjectionTransport(
+                responses: fixtureResponses(
+                    detailRefresh:
+                        #"{"mode":"conditional_etag","minimum_interval_seconds":30,"terminal":false}"#
+                )
+            ),
+            sleep: { _ in
+                enteredObservationWait = true
+                try await Task.sleep(nanoseconds: 30_000_000_000)
+            }
+        )
+        await controller.loadSelectedWorkspace()
+        let observation = Task {
+            await controller.observeSelectedResearch()
+        }
+        while !enteredObservationWait {
+            await Task.yield()
+        }
+        observation.cancel()
+        await observation.value
+
+        XCTAssertFalse(controller.isLoadingResearch)
+        XCTAssertEqual(
+            controller.error,
+            "研究过程读取已取消；可重新选择检查点或刷新研究。"
         )
     }
 

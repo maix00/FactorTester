@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from flask import Response, jsonify, request
+from flask import Response, current_app, jsonify, request
 
 from server.modules.single_factor_test import sft_bp
 from server.services.research_graph.profile_research_projection import (
@@ -48,6 +48,18 @@ def _error(exc: Exception):
     return jsonify({"success": False, "error": str(exc)}), status
 
 
+def _projection_failure(exc: Exception):
+    current_app.logger.exception(
+        "profile research projection failed",
+        exc_info=exc,
+    )
+    return jsonify({
+        "success": False,
+        "error": "研究投影暂时无法读取，请稍后重试。",
+        "error_code": "research_projection_failed",
+    }), 500
+
+
 @sft_bp.get("/api/profile-research")
 def list_profile_research():
     try:
@@ -62,6 +74,8 @@ def list_profile_research():
         )
     except (KeyError, TypeError, ValueError) as exc:
         return _error(exc)
+    except Exception as exc:
+        return _projection_failure(exc)
     return _response(payload)
 
 
@@ -74,6 +88,8 @@ def get_profile_research(research_ref: str):
         )
     except (KeyError, TypeError, ValueError) as exc:
         return _error(exc)
+    except Exception as exc:
+        return _projection_failure(exc)
     return _response(payload)
 
 
@@ -92,6 +108,8 @@ def change_profile_research_lifecycle(work_package_ref: str):
         )
     except (KeyError, TypeError, ValueError) as exc:
         return _error(exc)
+    except Exception as exc:
+        return _projection_failure(exc)
     return _response(payload)
 
 
@@ -106,6 +124,8 @@ def list_profile_research_timeline(research_ref: str):
         )
     except (KeyError, TypeError, ValueError) as exc:
         return _error(exc)
+    except Exception as exc:
+        return _projection_failure(exc)
     return _response(payload)
 
 
@@ -124,6 +144,8 @@ def get_profile_research_branch(
         )
     except (KeyError, TypeError, ValueError) as exc:
         return _error(exc)
+    except Exception as exc:
+        return _projection_failure(exc)
     return _response(payload)
 
 
@@ -145,6 +167,8 @@ def list_profile_research_branch_timeline(
         )
     except (KeyError, TypeError, ValueError) as exc:
         return _error(exc)
+    except Exception as exc:
+        return _projection_failure(exc)
     return _response(payload)
 
 
@@ -166,4 +190,6 @@ def get_profile_research_report_carrier(
         )
     except (KeyError, TypeError, ValueError) as exc:
         return _error(exc)
+    except Exception as exc:
+        return _projection_failure(exc)
     return _response(payload)

@@ -18,6 +18,7 @@ struct ResearchNarrativeReportView: View {
     @State private var reportError: String?
     @State private var selectedCheckpointRef = ""
     @State private var sectionRefsByCheckpoint: [String: String] = [:]
+    @State private var programmaticScrollToken: UUID?
     @State private var selectedAudit: ResearchAuditSelection?
     @StateObject private var auditCache = ResearchAuditObjectCache()
 
@@ -88,6 +89,7 @@ struct ResearchNarrativeReportView: View {
             .coordinateSpace(name: "research-report-scroll")
             .onPreferenceChange(ResearchReportSectionPositionKey.self) {
                 positions in
+                guard programmaticScrollToken == nil else { return }
                 guard let sectionRef = ResearchReportScrollResolver
                     .activeSectionRef(positions: positions, viewportTop: 24),
                     let section = sections.first(where: {
@@ -98,10 +100,20 @@ struct ResearchNarrativeReportView: View {
                 selectedCheckpointRef = section.checkpointRef
             }
             .onChange(of: selectedCheckpointRef) { checkpointRef in
-                guard let sectionRef = sectionRefsByCheckpoint[checkpointRef]
+                guard let sectionRef = ResearchReportNavigation.scrollTarget(
+                    checkpointRef: checkpointRef,
+                    sectionRefsByCheckpoint: sectionRefsByCheckpoint
+                )
                 else { return }
                 withAnimation(.easeInOut(duration: 0.22)) {
                     proxy.scrollTo(sectionRef, anchor: .top)
+                }
+                guard let token = programmaticScrollToken else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    if programmaticScrollToken == token {
+                        programmaticScrollToken = nil
+                    }
                 }
             }
         }
@@ -237,12 +249,12 @@ struct ResearchNarrativeReportView: View {
             compact: compact,
             titleOverride: titleOverride
         )
-            .id(section.id)
+            .id(section.sectionRef)
             .background {
                 GeometryReader { geometry in
                     Color.clear.preference(
                         key: ResearchReportSectionPositionKey.self,
-                        value: [section.id: geometry.frame(
+                        value: [section.sectionRef: geometry.frame(
                             in: .named("research-report-scroll")
                         ).minY]
                     )
@@ -666,12 +678,10 @@ struct ResearchNarrativeReportView: View {
                 sections: loadedSections
             )
             reportError = nil
-            if selectedCheckpointRef.isEmpty
-                || !sections.contains(where: {
-                    $0.checkpointRef == selectedCheckpointRef
-                }) {
-                selectedCheckpointRef = sections.last?.checkpointRef ?? ""
-            }
+            selectedCheckpointRef = ResearchReportNavigation.reconciledSelection(
+                currentCheckpointRef: selectedCheckpointRef,
+                availableCheckpointRefs: loadedSections.map(\.checkpointRef)
+            )
         } catch {
             sections = []
             sectionRefsByCheckpoint = [:]
@@ -688,6 +698,7 @@ struct ResearchNarrativeReportView: View {
     }
 
     private func selectCheckpoint(_ checkpointRef: String, _ branchID: String) {
+        programmaticScrollToken = UUID()
         if ResearchBranchNavigation.requiresReload(
             currentBranchRef: detail.branchRef,
             targetBranchID: branchID
@@ -715,6 +726,25 @@ enum ResearchBranchNavigation {
         let currentBranchID = currentBranchRef.split(separator: ":")
             .last.map(String.init) ?? currentBranchRef
         return !targetBranchID.isEmpty && targetBranchID != currentBranchID
+    }
+}
+
+enum ResearchReportNavigation {
+    static func scrollTarget(
+        checkpointRef: String,
+        sectionRefsByCheckpoint: [String: String]
+    ) -> String? {
+        sectionRefsByCheckpoint[checkpointRef]
+    }
+
+    static func reconciledSelection(
+        currentCheckpointRef: String,
+        availableCheckpointRefs: [String]
+    ) -> String {
+        if availableCheckpointRefs.contains(currentCheckpointRef) {
+            return currentCheckpointRef
+        }
+        return availableCheckpointRefs.last ?? ""
     }
 }
 

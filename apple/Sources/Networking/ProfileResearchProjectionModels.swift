@@ -117,6 +117,7 @@ struct ResearchVersionTreeNode: Decodable, Identifiable {
     let checkpointRef: String
     let traceRef: String
     let branchRef: String
+    let navigationBranchID: String
     let graphRef: String
     let edgeRef: String
     let fromNode: String
@@ -135,6 +136,7 @@ struct ResearchVersionTreeNode: Decodable, Identifiable {
         case checkpointRef = "checkpoint_ref"
         case traceRef = "trace_ref"
         case branchRef = "branch_ref"
+        case navigationBranchID = "navigation_branch_id"
         case graphRef = "graph_ref"
         case edgeRef = "edge_ref"
         case fromNode = "from_node"
@@ -157,6 +159,9 @@ struct ResearchVersionTreeNode: Decodable, Identifiable {
             String.self, forKey: .traceRef
         ) ?? checkpointRef
         branchRef = try values.decode(String.self, forKey: .branchRef)
+        navigationBranchID = try values.decode(
+            String.self, forKey: .navigationBranchID
+        )
         graphRef = try values.decodeIfPresent(
             String.self, forKey: .graphRef
         ) ?? ""

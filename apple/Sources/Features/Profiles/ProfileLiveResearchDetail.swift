@@ -10,46 +10,72 @@ struct ProfileLiveResearchDetail: View {
                let workPackage = controller.workPackage {
                 let context = reportContext(for: detail)
                 let artifact = context?.record.currentJournalArtifact
-                ResearchNarrativeReportView(
-                    detail: detail,
-                    workPackage: workPackage,
-                    steps: controller.timeline,
-                    nextCursor: controller.nextTimelineCursor,
-                    profileName: context?.profile.displayName ?? "未知 Profile",
-                    auditCacheNamespace: context.map {
-                        "\($0.profile.id)|\($0.profile.serverURL)"
-                    } ?? detail.branchRef,
-                    reportTitle: ResearchDisplayText.reportTitle(
-                        context?.record.title ?? ""
-                    ),
-                    artifact: artifact,
-                    selectBranch: { branchID in
-                        controller.selectedBranchID = branchID
-                    },
-                    loadEarlier: { await controller.loadEarlierTimeline() },
-                    loadAuditObject: { href in
-                        guard let url = context.flatMap({
-                            URL(string: $0.profile.serverURL)
-                        }) else {
-                            throw APIError.transport(
-                                "研究记录没有有效的服务器地址"
-                            )
-                        }
-                        return try await ProfileResearchService(
-                            baseURL: url
-                        ).auditObject(href: href)
+                VStack(spacing: 0) {
+                    if let error = controller.error {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color.orange.opacity(0.08))
                     }
-                )
+                    ResearchNarrativeReportView(
+                        detail: detail,
+                        workPackage: workPackage,
+                        steps: controller.timeline,
+                        nextCursor: controller.nextTimelineCursor,
+                        profileName: context?.profile.displayName ?? "未知 Profile",
+                        auditCacheNamespace: context.map {
+                            "\($0.profile.id)|\($0.profile.serverURL)"
+                        } ?? detail.branchRef,
+                        reportTitle: ResearchDisplayText.reportTitle(
+                            context?.record.title ?? ""
+                        ),
+                        artifact: artifact,
+                        selectBranch: { branchID in
+                            controller.selectedBranchID = branchID
+                        },
+                        loadEarlier: { await controller.loadEarlierTimeline() },
+                        loadAuditObject: { href in
+                            guard let url = context.flatMap({
+                                URL(string: $0.profile.serverURL)
+                            }) else {
+                                throw APIError.transport(
+                                    "研究记录没有有效的服务器地址"
+                                )
+                            }
+                            return try await ProfileResearchService(
+                                baseURL: url
+                            ).auditObject(href: href)
+                        }
+                    )
+                }
             } else {
                 VStack(spacing: 10) {
-                    Image(systemName: "waveform.path.ecg")
+                    Image(systemName: controller.error == nil
+                        ? "waveform.path.ecg"
+                        : "exclamationmark.triangle")
                         .font(.largeTitle)
-                    Text(controller.error ?? "正在读取研究过程…")
+                    Text(emptyStateMessage)
                         .foregroundStyle(.secondary)
+                    if controller.error != nil {
+                        Button("重试") {
+                            Task {
+                                await controller.observeSelectedResearch()
+                            }
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    private var emptyStateMessage: String {
+        if let error = controller.error { return error }
+        if controller.isLoadingResearch { return "正在读取研究过程…" }
+        return "当前研究分支尚无可显示的检查点。"
     }
 
     private func reportContext(

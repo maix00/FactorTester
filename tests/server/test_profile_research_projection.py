@@ -231,7 +231,7 @@ def test_research_projects_one_work_package_with_hypothesis_branches(
         "relation": "unknown",
     }
     tree = detail["tree"]
-    assert tree["schema_version"] == 1
+    assert tree["schema_version"] == 2
     assert {
         node["branch_ref"] for node in tree["nodes"]
     } == {"graph-branch:instance-a:branch-0000"}
@@ -594,6 +594,10 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
         "factor-research@v7",
         "factor-research@v8",
     }
+    assert tree["schema_version"] == 2
+    assert {
+        node["navigation_branch_id"] for node in tree["nodes"]
+    } == {"branch-v8"}
     assert tree["omitted_node_count"] == 0
     assert len(tree["edges"]) == 9
     continuations = [
@@ -1324,6 +1328,31 @@ def test_authenticated_routes_emit_etag_and_honor_conditional_reads(
         headers={"If-None-Match": carrier.headers["ETag"]},
     )
     assert replay.status_code == 304
+
+
+def test_projection_route_returns_structured_json_for_internal_failure(
+    app_client,
+    monkeypatch,
+) -> None:
+    def fail_projection(**_kwargs):
+        raise RuntimeError("private database detail")
+
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.profile_research_routes."
+        "_projection.get_research",
+        fail_projection,
+    )
+    response = app_client.get(
+        "/api/profile-research/work-package:instance-a"
+    )
+    assert response.status_code == 500
+    assert response.is_json
+    assert response.get_json() == {
+        "success": False,
+        "error": "研究投影暂时无法读取，请稍后重试。",
+        "error_code": "research_projection_failed",
+    }
+    assert b"private database detail" not in response.data
 
 
 def test_routes_fail_closed_for_other_owner_and_invalid_paging(

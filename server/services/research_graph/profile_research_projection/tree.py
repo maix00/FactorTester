@@ -24,7 +24,7 @@ def _tree_projection(
     valid enough for ``_branch_lineage``.
     """
     if value in (None, ""):
-        return {"schema_version": 1, "nodes": [], "edges": [],
+        return {"schema_version": 2, "nodes": [], "edges": [],
                 "omitted_node_count": 0}
     payload = _json_object(value)
     raw_nodes = payload.get("nodes")
@@ -71,6 +71,13 @@ def _tree_projection(
         node = {
             "checkpoint_ref": trace_ref,
             "branch_ref": branch_ref,
+            # A logical hypothesis can span several physical branches after
+            # graph continuation.  Keep ``branch_ref`` as the immutable audit
+            # identity, but navigate every incarnation through the current
+            # visible branch selected by the Work Package projection.
+            "navigation_branch_id": str(
+                branch_by_hypothesis[hypothesis_branch_id]["branch_id"]
+            ),
             "graph_ref": f"{graph_id}@v{graph_version}",
             "edge_ref": edge_id,
             "from_node": str(raw.get("from_node") or ""),
@@ -168,7 +175,7 @@ def _tree_projection(
         for node in nodes
     ]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "nodes": public_nodes,
         "edges": edges,
         "omitted_node_count": max(

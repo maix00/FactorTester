@@ -166,6 +166,7 @@ struct ResearchVersionTreePane: View {
     private let rowHeight: CGFloat = 46
     private let laneSpacing = ResearchTreeLayout.laneSpacing
     @State private var isLoadingEarlier = false
+    @State private var missingReportMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -194,6 +195,15 @@ struct ResearchVersionTreePane: View {
                         Text("尚有 \(omittedNodeCount) 个检查点未载入")
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
+                    }
+                    if let missingReportMessage {
+                        Label(
+                            missingReportMessage,
+                            systemImage: "doc.badge.ellipsis"
+                        )
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -309,8 +319,15 @@ struct ResearchVersionTreePane: View {
 
     private func nodeRow(_ node: ResearchTreeNode) -> some View {
         Button {
-            guard !node.checkpointRef.isEmpty,
-                  !node.sectionRef.isEmpty else { return }
+            guard !node.checkpointRef.isEmpty else {
+                missingReportMessage = "该关系节点不对应独立研究正文。"
+                return
+            }
+            guard !node.sectionRef.isEmpty else {
+                missingReportMessage = "“\(node.title)”尚无已验证的报告正文。"
+                return
+            }
+            missingReportMessage = nil
             select(node.checkpointRef, node.branchID)
         } label: {
             HStack(spacing: ResearchTreeLayout.rowSpacing) {
@@ -401,9 +418,13 @@ struct ResearchVersionTreePane: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(node.sectionRef.isEmpty)
         .accessibilityLabel("\(node.title)，\(node.subtitle)")
         .accessibilityIdentifier("research.tree.node.\(node.id)")
+        .help(
+            node.sectionRef.isEmpty
+                ? "该检查点尚无已验证的报告正文"
+                : "在研究报告中定位该检查点"
+        )
     }
 
     private var nodes: [ResearchTreeNode] {
@@ -566,7 +587,7 @@ struct ResearchVersionTreePane: View {
                 isLineage: lineage != nil,
                 sourceLane: sourceLane,
                 sourceCheckpointRef: lineage?.sourceNodeRef,
-                branchID: branchID(for: node.branchRef),
+                branchID: node.navigationBranchID,
                 graphRef: node.graphRef,
                 edgeRef: node.edgeRef,
                 toNode: node.toNode,

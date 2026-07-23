@@ -13,6 +13,7 @@ final class ProfileLiveProcessController: ObservableObject {
     @Published private(set) var timeline: [ResearchTransitionStep] = []
     @Published private(set) var nextTimelineCursor: String?
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingResearch = false
     @Published private(set) var error: String?
 
     let workspaces: [LocalWorkspaceModel]
@@ -21,6 +22,7 @@ final class ProfileLiveProcessController: ObservableObject {
     private var detailETag: String?
     private var timelineETag: String?
     private var observedCheckpointRef: String?
+    private var activeResearchRequestID: UUID?
     private let localCheckpointRefs: [String: String]
     private let observationSleep: ObservationSleep
     private let onCheckpointChange: CheckpointChange
@@ -100,6 +102,15 @@ final class ProfileLiveProcessController: ObservableObject {
             timeline = []
             return
         }
+        let requestID = UUID()
+        activeResearchRequestID = requestID
+        isLoadingResearch = true
+        error = nil
+        defer {
+            if activeResearchRequestID == requestID {
+                isLoadingResearch = false
+            }
+        }
         do {
             if workPackage?.workPackageRef != summary.workPackageRef {
                 let result = try await service.workPackageDetail(
@@ -118,6 +129,7 @@ final class ProfileLiveProcessController: ObservableObject {
             guard let branch = selectedBranch else {
                 detail = nil
                 timeline = []
+                error = "研究版本树指向的分支不在当前工作包中，请刷新研究目录后重试。"
                 return
             }
             detail = nil
@@ -147,9 +159,14 @@ final class ProfileLiveProcessController: ObservableObject {
                 }
             }
         } catch is CancellationError {
+            if activeResearchRequestID == requestID {
+                error = "研究过程读取已取消；可重新选择检查点或刷新研究。"
+            }
             return
         } catch {
-            self.error = message(error)
+            if activeResearchRequestID == requestID {
+                self.error = message(error)
+            }
         }
     }
 
@@ -202,6 +219,8 @@ final class ProfileLiveProcessController: ObservableObject {
         conditional: Bool
     ) async throws {
         let previousTraceRef = detail?.latestTraceRef
+        var refreshedDetail = detail
+        var refreshedDetailETag = detailETag
         let detailResult = try await service.branchDetail(
             href: branch.detailHref,
             etag: conditional ? detailETag : nil
@@ -211,20 +230,29 @@ final class ProfileLiveProcessController: ObservableObject {
                previousTraceRef != value.latestTraceRef {
                 try await refreshWorkPackage()
             }
-            detail = value
-            detailETag = etag
-            publishCheckpointChange(value.latestTraceRef)
+            refreshedDetail = value
+            refreshedDetailETag = etag
         }
-        guard let href = detail?.timelineHref else { return }
+        guard let candidateDetail = refreshedDetail else { return }
         let timelineResult = try await service.timeline(
-            href: href,
+            href: candidateDetail.timelineHref,
             etag: conditional ? timelineETag : nil
         )
+        var refreshedTimeline = timeline
+        var refreshedCursor = nextTimelineCursor
+        var refreshedTimelineETag = timelineETag
         if case .value(let page, let etag) = timelineResult {
-            timeline = page.items
-            nextTimelineCursor = page.nextCursor
-            timelineETag = etag
+            refreshedTimeline = page.items
+            refreshedCursor = page.nextCursor
+            refreshedTimelineETag = etag
         }
+        try Task.checkCancellation()
+        detail = candidateDetail
+        detailETag = refreshedDetailETag
+        timeline = refreshedTimeline
+        nextTimelineCursor = refreshedCursor
+        timelineETag = refreshedTimelineETag
+        publishCheckpointChange(candidateDetail.latestTraceRef)
     }
 
     private func refreshWorkPackage() async throws {

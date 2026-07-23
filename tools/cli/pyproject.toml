@@ -26,6 +26,7 @@ packages = [
   "tools.cli.modules",
   "tools.cli.modules.custom_factors",
   "tools.cli.modules.products",
+  "tools.cli.step",
   "tools.cli.release",
   "tools.cli.release.adapters",
   "tools.cli.release.research_reporting",
@@ -40,6 +41,7 @@ packages = [
 "tools.cli.modules" = "modules"
 "tools.cli.modules.custom_factors" = "modules/custom_factors"
 "tools.cli.modules.products" = "modules/products"
+"tools.cli.step" = "step"
 "tools.cli.release" = "release"
 "tools.cli.release.adapters" = "release/adapters"
 "tools.cli.release.research_reporting" = "release/research_reporting"

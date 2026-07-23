@@ -200,14 +200,29 @@ struct ProfileResearchService {
             if response.statusCode == 401 || response.statusCode == 403 {
                 throw APIError.transport("没有权限读取该研究工作区")
             }
+            if let payload = try? decoder.decode(
+                ResearchProjectionErrorPayload.self,
+                from: response.data
+            ), !payload.error.isEmpty {
+                let prefix = payload.errorCode.map {
+                    "研究投影读取失败（\($0)）"
+                } ?? "研究投影读取失败"
+                throw APIError.transport("\(prefix)：\(payload.error)")
+            }
             throw APIError.transport(
                 "Research projection HTTP \(response.statusCode)"
             )
         }
-        return .value(
-            try decoder.decode(type, from: response.data),
-            responseETag: response.etag
-        )
+        do {
+            return .value(
+                try decoder.decode(type, from: response.data),
+                responseETag: response.etag
+            )
+        } catch is DecodingError {
+            throw APIError.transport(
+                "研究投影格式无法识别；客户端与服务器协议版本可能不一致。"
+            )
+        }
     }
 
     private func request(
@@ -241,5 +256,15 @@ struct ProfileResearchService {
         components.path = value
         components.queryItems = query.filter { $0.value != nil }
         return components.string ?? value
+    }
+}
+
+private struct ResearchProjectionErrorPayload: Decodable {
+    let error: String
+    let errorCode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case error
+        case errorCode = "error_code"
     }
 }
