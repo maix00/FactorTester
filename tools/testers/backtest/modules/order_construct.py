@@ -228,6 +228,7 @@ def _construct_orders(state, ctx) -> None:
                 strategy=strategy,
                 order_id=store.next_order_id(strategy, ctx.timestamp),
             )
+            state.order_store.register_order(order)
             store.record(order, step="construct_order", label="构造订单")
             orders.append(order)
         ctx.set_for(OrderConstructModule.orders, strategy, orders)

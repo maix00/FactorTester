@@ -451,7 +451,9 @@ def _apply_order_fill(state, ctx) -> None:
             ledger.set(LedgerModule.positions, positions)
             set_cash_for_ledger_pool(state, ledger, cash)
             _sync_ledger_margin_reserved(ledger, positions)
-            order.status = OrderStatus.FILLED
+            order.register_fill(abs(float(order.quantity)))
+            if order.order_id in state.order_store.orders_by_id:
+                state.order_store.remove_from_live_indexes(order)
     record_order_terminal_state(state, ctx)
 
 
