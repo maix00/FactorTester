@@ -500,6 +500,35 @@ def get_current_graph_requirement(
     return jsonify({"success": True, "requirement": value})
 
 
+@sft_bp.post(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/current-report-checkpoints"
+)
+def append_current_report_checkpoint(instance_id: str, branch_id: str):
+    """Append report-item hashes for the current node without advancing it."""
+    from server.services.research_graph.current_report_checkpoint import (
+        append_current_report_checkpoint as append_checkpoint,
+    )
+
+    data = request.get_json(silent=True) or {}
+    try:
+        checkpoint = append_checkpoint(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+            node_id=str(data.get("node_id") or ""),
+            report_submission=data.get("report_submission"),
+            journal_artifact_ref=str(
+                data.get("journal_artifact_ref") or ""
+            ),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "checkpoint": checkpoint}), 201
+
+
 @sft_bp.get(
     "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
     "/cycle-objects/<object_type>/<object_id>"

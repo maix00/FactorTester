@@ -505,6 +505,41 @@ def show_current_graph_requirement(
     )))
 
 
+@research_graph.command("checkpoint-report")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--node-id", required=True)
+@click.option(
+    "--projection-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--journal-artifact-ref", required=True)
+def checkpoint_current_report(
+    instance_id: str,
+    branch_id: str,
+    node_id: str,
+    projection_file: Path,
+    journal_artifact_ref: str,
+) -> None:
+    """登记 entry-validate 报告项；不推进 Graph 节点。"""
+    projection = json.loads(projection_file.read_text(encoding="utf-8"))
+    submission = projection.get("report_submission")
+    if not isinstance(submission, dict):
+        raise click.ClickException(
+            "projection file must contain report_submission"
+        )
+    click.echo(_json(
+        client_from_config().append_current_report_checkpoint(
+            instance_id,
+            branch_id,
+            node_id=node_id,
+            report_submission=submission,
+            journal_artifact_ref=journal_artifact_ref,
+        )
+    ))
+
+
 @research_graph.command("fork")
 @click.argument("instance_id")
 @click.argument("branch_id")

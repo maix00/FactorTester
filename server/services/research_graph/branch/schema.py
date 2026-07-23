@@ -77,6 +77,25 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_research_graph_trace_branch
         ON research_graph_trace(instance_id, branch_id, created_at)
         """,
+        """
+        CREATE TABLE IF NOT EXISTS research_report_item_checkpoints (
+            checkpoint_hash TEXT PRIMARY KEY,
+            instance_id TEXT NOT NULL,
+            branch_id TEXT NOT NULL,
+            node_id TEXT NOT NULL,
+            fragment_hash TEXT NOT NULL,
+            report_items_json TEXT NOT NULL,
+            journal_artifact_ref TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            created_at REAL NOT NULL
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_report_item_checkpoints_branch_node
+        ON research_report_item_checkpoints(
+            instance_id, branch_id, node_id, created_at
+        )
+        """,
     )
     for statement in statements:
         conn.execute(statement)

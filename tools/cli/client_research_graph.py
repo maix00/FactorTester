@@ -479,6 +479,26 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("requirement") or {})
 
+    def append_current_report_checkpoint(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        node_id: str,
+        report_submission: dict[str, Any],
+        journal_artifact_ref: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/current-report-checkpoints",
+            {
+                "node_id": node_id,
+                "report_submission": report_submission,
+                "journal_artifact_ref": journal_artifact_ref,
+            },
+        ))
+        return dict(data.get("checkpoint") or {})
+
     def get_research_cycle_object(
         self,
         instance_id: str,
