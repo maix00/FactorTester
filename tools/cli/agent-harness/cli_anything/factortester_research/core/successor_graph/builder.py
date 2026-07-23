@@ -58,6 +58,11 @@ def build_successor_graph() -> dict[str, Any]:
         "industry_basis_catalog": build_industry_basis_catalog(),
         "report_method_descriptors": build_report_method_descriptors(),
         "report_requirements": build_report_requirements(catalog),
+        "report_policy": {
+            "enforcement": "required",
+            "submission_schema_version": 1,
+            "local_body_policy": "hash_bound_local_only",
+        },
         "system_transition_policies": system_transition_policies(),
         "provenance": {
             "source": "grill-179-canonical-handoff",

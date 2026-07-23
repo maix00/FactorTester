@@ -97,8 +97,18 @@ def graph_requirements(
         "report_requirements": [
             _report_projection(report_by_id[item], include_contracts)
             for item in report_ids
+            if include_contracts or not item.startswith("report.requirement.")
         ],
     }
+    if not include_contracts and any(
+        item.startswith("report.requirement.") for item in report_ids
+    ):
+        payload["requirement_report_policy"] = {
+            "id_template": "report.requirement.<requirement_id>",
+            "method_ref": "adjudicate",
+            "subject_kind": "verification_obligation_or_requirement",
+            "coverage": "one item for every listed requirement subject",
+        }
     if as_json:
         echo_json(payload)
         return

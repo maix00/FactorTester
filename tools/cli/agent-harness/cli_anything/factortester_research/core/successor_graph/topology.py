@@ -181,7 +181,13 @@ def build_nodes() -> list[dict[str, Any]]:
             "conditional_capabilities": conditional_operations.get(node_id, []),
             "entry_requirement_refs": NODE_REQUIREMENTS[node_id],
             "entry_report_refs": [f"report.node.{node_id}.entry"],
-            "node_report_refs": [f"report.node.{node_id}.action"],
+            "node_report_refs": [
+                f"report.node.{node_id}.action",
+                *(
+                    f"report.requirement.{requirement_id}"
+                    for requirement_id in NODE_REQUIREMENTS[node_id]
+                ),
+            ],
         }
         for node_id, (_, purpose) in NODE_SPECS.items()
     ]

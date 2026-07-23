@@ -202,6 +202,7 @@ def transition_step_projection(
         for item in claim_changes
     ]
     entry_resolution = evidence.get("entry_resolution_delta")
+    report_submission = evidence.get("report_submission")
     value = {
         "step_ref": f"trace:{trace_id}",
         "edge_ref": f"graph-edge:{edge_id}",
@@ -218,6 +219,30 @@ def transition_step_projection(
         "obligation_changes": obligation_changes,
         "claim_changes": claim_changes,
     }
+    report_fragment_hash = (
+        safe_hash(report_submission.get("fragment_hash"))
+        if isinstance(report_submission, dict) else ""
+    )
+    if report_fragment_hash:
+        value["report_fragment_ref"] = (
+            f"report-fragment:sha256:{report_fragment_hash}"
+        )
+        value["report_items"] = [
+            {
+                "report_item_ref": (
+                    "report-item:sha256:"
+                    f"{safe_hash(item.get('item_hash'))}"
+                ),
+                "report_requirement_id": bounded_text(
+                    item.get("report_requirement_id"), 256,
+                ),
+                "subject_ref": bounded_text(item.get("subject_ref"), 256),
+                "content_kind": bounded_text(item.get("content_kind"), 32),
+            }
+            for item in report_submission.get("items") or []
+            if isinstance(item, dict)
+            and safe_hash(item.get("item_hash"))
+        ][:MAX_CARRIER_ITEMS]
     if isinstance(entry_resolution, dict):
         value["entry_resolution"] = {
             key: entry_resolution.get(key)

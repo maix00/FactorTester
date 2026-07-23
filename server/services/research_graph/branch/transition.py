@@ -36,6 +36,9 @@ from server.services.research_graph.branch.research_cycle import (
 from server.services.research_graph.branch.profile_identity import (
     optional_profile_ref,
 )
+from server.services.research_graph.branch.report_coverage import (
+    validate_report_submission,
+)
 from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
     validate_resolution_against_node,
@@ -306,6 +309,18 @@ def advance_graph_branch(
         )
         if target is None:
             raise ValueError("transition target node is missing")
+        report_submission = validate_report_submission(
+            graph=graph,
+            source_node=current_node,
+            edge=edge,
+            target_node=target,
+            entry_assessments=entry_assessments,
+            transition_evidence=prepared_evidence,
+            submitted=prepared_evidence.get("report_submission"),
+        )
+        if report_submission is not None:
+            prepared_evidence["report_submission"] = report_submission
+            persisted_evidence["report_submission"] = report_submission
         supplied_resolution = prepared_evidence.get(
             "target_capability_resolution"
         )
