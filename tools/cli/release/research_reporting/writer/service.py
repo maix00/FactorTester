@@ -168,6 +168,39 @@ def render_branch_report(
     }
 
 
+def stage_branch_fragment(
+    fragment: dict[str, Any], *, workspace_root: Path, work_package_id: str,
+) -> dict[str, Any]:
+    """Persist one immutable fragment without publishing a report head."""
+    branch_ref = str(fragment.get("branch_ref") or "")
+    branch_parts = branch_ref.split(":")
+    if len(branch_parts) != 3 or branch_parts[0] != "graph-branch":
+        raise ValueError("research journal branch identity is invalid")
+    branch_id = branch_parts[2]
+    package_root = Path(workspace_root) / "research" / work_package_id
+    sections_root = package_root / "branches" / branch_id / "sections"
+    with work_package_lock(package_root):
+        existing = load_fragments(sections_root)
+        merged, changed = merge_fragment(existing, fragment)
+        all_fragments = _work_package_fragments(
+            package_root,
+            current_branch_id=branch_id,
+            current_fragments=merged,
+        )
+        logical_lineage(
+            all_fragments,
+            checkpoint_ref=fragment["checkpoint_ref"],
+        )
+        fragment_path = sections_root / f"{fragment['section_hash']}.json"
+        writes = publish_generation([
+            ("journal_fragment", fragment_path, fragment_payload(fragment)),
+        ]) if changed else {"journal_fragment": False}
+    return {
+        "changed": bool(writes["journal_fragment"]),
+        "fragment_path": fragment_path,
+    }
+
+
 def _work_package_fragments(
     package_root: Path, *, current_branch_id: str,
     current_fragments: list[dict[str, Any]],

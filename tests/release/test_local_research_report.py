@@ -9,7 +9,9 @@ import pytest
 
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting import (
+    finalize_historical_research_backfill,
     publish_research_checkpoint as _publish_checkpoint,
+    stage_historical_research_checkpoint,
 )
 from tools.cli.release.research_reporting.report_items import (
     report_fragment_hash,
@@ -123,6 +125,25 @@ def _narrative(
     }
 
 
+def _historical_narrative(
+    *, occurred_at: float, text: str = "本阶段完成了历史研究过程补登记。",
+) -> dict:
+    return {
+        "schema_version": 3,
+        "language": "zh-Hans",
+        "title": "因子研究报告",
+        "research_occurred_at": occurred_at,
+        "time_basis": "historical_backfill",
+        "time_source_refs": ["conversation:maxa-history"],
+        "sections": [{
+            "section_id": "research-progress",
+            "title": "研究进展",
+            "blocks": [{"kind": "paragraph", "text": text}],
+            "links": [],
+        }],
+    }
+
+
 def publish_research_checkpoint(**kwargs):
     carrier = kwargs["carrier"]
     kwargs.setdefault("narrative", _narrative(carrier))
@@ -232,6 +253,303 @@ def _profile(root: Path) -> LocalProfileStore:
     }]
     store.save(profile)
     return store
+
+
+def test_historical_backfill_stages_without_moving_local_head_and_finalizes_once(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    profile = store.load("maxa")
+    profile["research_records"][0].update({
+        "checkpoint_ref": "trace:checkpoint-2",
+        "updated_at": 3.0,
+    })
+    store.save(profile)
+    record_before_finalize = deepcopy(
+        store.load("maxa")["research_records"][0]
+    )
+    profile_path = root / "profiles" / "maxa.json"
+    before_stage = profile_path.read_bytes()
+
+    first = _carrier()
+    first.update({
+        "current_node": "factor_semantics",
+        "evidence_refs": [],
+        "job_refs": [],
+        "run_refs": [],
+        "claims": [],
+        "open_obligations": [],
+    })
+    first["latest_transition"].update({
+        "to_node": "factor_semantics",
+        "evidence_refs": [],
+        "trial_plan_refs": [],
+        "obligation_refs": [],
+        "claim_refs": [],
+        "job_refs": [],
+        "run_refs": [],
+        "delta_refs": [],
+    })
+    staged = stage_historical_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        current_branch_id="branch-sgccs",
+        carrier=first,
+        narrative=_historical_narrative(occurred_at=1.5),
+    )
+
+    assert staged["changed"] is True
+    assert staged["finalized"] is False
+    assert profile_path.read_bytes() == before_stage
+    package_root = root / "profile-root" / "research" / "sgccs-review"
+    fragments = list((
+        package_root / "branches" / "branch-sgccs" / "sections"
+    ).glob("*.json"))
+    assert len(fragments) == 1
+    assert not (package_root / "INDEX.json").exists()
+    assert not (package_root / "branches" / "branch-sgccs" / "REPORT.md").exists()
+
+    replay = stage_historical_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        current_branch_id="branch-sgccs",
+        carrier=first,
+        narrative=_historical_narrative(occurred_at=1.5),
+    )
+    assert replay["changed"] is False
+
+    current = deepcopy(first)
+    current["checkpoint_ref"] = "trace:checkpoint-2"
+    current["latest_transition"].update({
+        "step_ref": "trace:checkpoint-2",
+        "created_at": 3.0,
+    })
+    _link_after(current, "trace:checkpoint-1")
+    finalized = finalize_historical_research_backfill(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=current,
+        narrative=_historical_narrative(occurred_at=2.5),
+    )
+
+    assert finalized["changed"] is True
+    assert finalized["finalized"] is True
+    assert (package_root / "INDEX.json").is_file()
+    assert (package_root / "branches" / "branch-sgccs" / "REPORT.md").is_file()
+    saved = store.load("maxa")["research_records"][0]
+    assert saved["checkpoint_ref"] == "trace:checkpoint-2"
+    assert saved["updated_at"] == 3.0
+    assert saved["created_at"] == 1.0
+    assert saved["timeline_refs"]
+    assert {
+        key: value for key, value in saved.items()
+        if key not in {"artifacts", "timeline_refs"}
+    } == {
+        key: value for key, value in record_before_finalize.items()
+        if key not in {"artifacts", "timeline_refs"}
+    }
+    journal = json.loads((
+        package_root / "branches" / "branch-sgccs" / "LOGICAL_JOURNAL.json"
+    ).read_text())
+    assert [item["checkpoint_ref"] for item in journal["checkpoints"]] == [
+        "trace:checkpoint-1", "trace:checkpoint-2",
+    ]
+    replay_finalize = finalize_historical_research_backfill(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=current,
+        narrative=_historical_narrative(occurred_at=2.5),
+    )
+    assert replay_finalize["changed"] is False
+    assert store.load("maxa")["research_records"][0] == saved
+
+
+def test_historical_backfill_conflict_and_broken_lineage_fail_closed(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    profile = store.load("maxa")
+    profile["research_records"][0].update({
+        "checkpoint_ref": "trace:checkpoint-2",
+        "updated_at": 3.0,
+    })
+    store.save(profile)
+    first = _carrier()
+    first.update({
+        "current_node": "factor_semantics",
+        "evidence_refs": [], "job_refs": [], "run_refs": [],
+        "claims": [], "open_obligations": [],
+    })
+    first["latest_transition"].update({
+        "to_node": "factor_semantics",
+        "evidence_refs": [], "trial_plan_refs": [],
+        "obligation_refs": [], "claim_refs": [],
+        "job_refs": [], "run_refs": [], "delta_refs": [],
+    })
+    stage_historical_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        current_branch_id="branch-sgccs",
+        carrier=first,
+        narrative=_historical_narrative(occurred_at=1.5),
+    )
+    profile_path = root / "profiles" / "maxa.json"
+    before = profile_path.read_bytes()
+
+    with pytest.raises(ValueError, match="conflicting narrative"):
+        stage_historical_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            current_branch_id="branch-sgccs",
+            carrier=first,
+            narrative=_historical_narrative(
+                occurred_at=1.5,
+                text="本阶段形成了相互冲突的历史叙事。",
+            ),
+        )
+
+    current = deepcopy(first)
+    current["checkpoint_ref"] = "trace:checkpoint-2"
+    current["latest_transition"].update({
+        "step_ref": "trace:checkpoint-2", "created_at": 3.0,
+    })
+    _link_after(current, "trace:missing-checkpoint")
+    with pytest.raises(ValueError, match="lineage is incomplete"):
+        finalize_historical_research_backfill(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            carrier=current,
+            narrative=_historical_narrative(occurred_at=2.5),
+        )
+
+    assert profile_path.read_bytes() == before
+    package_root = root / "profile-root" / "research" / "sgccs-review"
+    assert not (package_root / "INDEX.json").exists()
+    assert len(list((
+        package_root / "branches" / "branch-sgccs" / "sections"
+    ).glob("*.json"))) == 1
+
+
+def test_historical_backfill_never_invents_a_legacy_root(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    profile = store.load("maxa")
+    profile["research_records"][0].update({
+        "checkpoint_ref": "trace:checkpoint-2",
+        "updated_at": 3.0,
+    })
+    store.save(profile)
+    carrier = _carrier()
+    carrier["report_lineage"] = {
+        "status": "history_incomplete",
+        "predecessor_checkpoint_ref": "",
+    }
+
+    with pytest.raises(ValueError, match="trusted root"):
+        stage_historical_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            current_branch_id="branch-sgccs",
+            carrier=carrier,
+            narrative=_historical_narrative(occurred_at=1.5),
+        )
+
+
+def test_historical_backfill_requires_cross_incarnation_root_before_head(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    profile = store.load("maxa")
+    profile["agents"][0]["scope"] = {
+        "instance_id": "physical-v8", "branch_id": "branch-v8",
+    }
+    profile["research_records"][0].update({
+        "graph_branch_ref": "graph-branch:physical-v8:branch-v8",
+        "checkpoint_ref": "trace:checkpoint-v8",
+        "updated_at": 3.0,
+    })
+    store.save(profile)
+
+    root_v7 = _carrier()
+    root_v7.update({
+        "branch_ref": "graph-branch:physical-v7:branch-v7",
+        "current_node": "factor_semantics",
+        "evidence_refs": [], "job_refs": [], "run_refs": [],
+        "claims": [], "open_obligations": [],
+    })
+    root_v7["checkpoint_ref"] = "trace:checkpoint-v7"
+    root_v7["latest_transition"].update({
+        "step_ref": "trace:checkpoint-v7", "to_node": "factor_semantics",
+        "evidence_refs": [], "trial_plan_refs": [],
+        "obligation_refs": [], "claim_refs": [],
+        "job_refs": [], "run_refs": [], "delta_refs": [],
+    })
+    current_v8 = deepcopy(root_v7)
+    current_v8.update({
+        "branch_ref": "graph-branch:physical-v8:branch-v8",
+        "graph_ref": "factor-research@v8",
+        "checkpoint_ref": "trace:checkpoint-v8",
+    })
+    current_v8["latest_transition"].update({
+        "step_ref": "trace:checkpoint-v8",
+        "edge_ref": "graph-edge:__graph_continuation__",
+        "created_at": 3.0,
+    })
+    current_v8["report_lineage"] = {
+        "status": "linked",
+        "predecessor_checkpoint_ref": "trace:checkpoint-v7",
+        "source_branch_ref": "graph-branch:physical-v7:branch-v7",
+    }
+
+    with pytest.raises(ValueError, match="predecessor is missing"):
+        stage_historical_research_checkpoint(
+            client_root=root,
+            profile_id="maxa",
+            agent_id="research-maxa",
+            current_branch_id="branch-v8",
+            carrier=current_v8,
+            narrative=_historical_narrative(occurred_at=2.5),
+        )
+    stage_historical_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        current_branch_id="branch-v8",
+        carrier=root_v7,
+        narrative=_historical_narrative(occurred_at=1.5),
+    )
+    finalize_historical_research_backfill(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=current_v8,
+        narrative=_historical_narrative(occurred_at=2.5),
+    )
+
+    journal = json.loads((
+        root / "profile-root" / "research" / "sgccs-review"
+        / "branches" / "branch-v8" / "LOGICAL_JOURNAL.json"
+    ).read_text())
+    assert [item["branch_ref"] for item in journal["checkpoints"]] == [
+        "graph-branch:physical-v7:branch-v7",
+        "graph-branch:physical-v8:branch-v8",
+    ]
+    record = store.load("maxa")["research_records"][0]
+    assert record["checkpoint_ref"] == "trace:checkpoint-v8"
+    assert record["updated_at"] == 3.0
 
 
 def test_checkpoint_publish_materializes_report_and_profile_reference(

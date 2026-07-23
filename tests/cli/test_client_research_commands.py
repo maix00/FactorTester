@@ -53,7 +53,25 @@ class _FakeClient:
             "work-package:instance-a",
             "branch-1",
         )
-        return {"branch_ref": "graph-branch:instance-a:branch-1"}
+        return {
+            "branch_ref": "graph-branch:instance-a:branch-1",
+            "latest_trace_ref": "trace:current-head",
+            "report_checkpoint": {
+                "schema_version": 2,
+                "checkpoint_ref": "trace:current-head",
+            },
+        }
+
+    def get_profile_research_report_carrier(
+        self, work_package_ref, branch_id, trace_id,
+    ):
+        assert (work_package_ref, branch_id, trace_id) == (
+            "work-package:instance-a", "branch-1", "historical-1",
+        )
+        return {
+            "schema_version": 2,
+            "checkpoint_ref": "trace:historical-1",
+        }
 
     def list_profile_research_branch_timeline(
         self,
@@ -240,6 +258,96 @@ def test_client_research_checkpoint_publish_accepts_stdin(
     assert json.loads(result.output) == {"changed": False}
     assert captured["carrier"] == {"schema_version": 1}
     assert captured["narrative"] == {"language": "zh-Hans"}
+
+
+def test_client_research_checkpoint_backfill_stages_then_finalizes_current_head(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls = []
+    narrative_path = tmp_path / "narrative.json"
+    narrative_path.write_text(
+        json.dumps({"schema_version": 3, "language": "zh-Hans"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(client_research, "client_from_config", _FakeClient)
+    monkeypatch.setattr(
+        client_research,
+        "load_profile_root",
+        lambda path: tmp_path / "client-root",
+    )
+    monkeypatch.setattr(
+        client_research,
+        "stage_historical_research_checkpoint",
+        lambda **kwargs: calls.append(("stage", kwargs)) or {
+            "changed": True, "finalized": False,
+        },
+    )
+    monkeypatch.setattr(
+        client_research,
+        "finalize_historical_research_backfill",
+        lambda **kwargs: calls.append(("finalize", kwargs)) or {
+            "changed": True, "finalized": True,
+        },
+    )
+    runner = CliRunner()
+
+    staged = runner.invoke(cli, [
+        "client", "research", "checkpoint", "backfill", "stage", "maxa",
+        "--agent-id", "research-maxa",
+        "--work-package-ref", "work-package:instance-a",
+        "--branch-id", "branch-1",
+        "--trace-id", "historical-1",
+        "--narrative-file", str(narrative_path), "--json",
+    ])
+    finalized = runner.invoke(cli, [
+        "client", "research", "checkpoint", "backfill", "finalize", "maxa",
+        "--agent-id", "research-maxa",
+        "--work-package-ref", "work-package:instance-a",
+        "--branch-id", "branch-1",
+        "--narrative-file", str(narrative_path), "--json",
+    ])
+
+    assert staged.exit_code == 0, staged.output
+    assert finalized.exit_code == 0, finalized.output
+    assert [item[0] for item in calls] == ["stage", "finalize"]
+    assert calls[0][1]["carrier"]["checkpoint_ref"] == "trace:historical-1"
+    assert calls[0][1]["current_branch_id"] == "branch-1"
+    assert calls[1][1]["carrier"]["checkpoint_ref"] == "trace:current-head"
+    assert calls[0][1]["narrative"] == calls[1][1]["narrative"]
+
+
+def test_client_research_checkpoint_backfill_rejects_non_head_carrier(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    narrative_path = tmp_path / "narrative.json"
+    narrative_path.write_text("{}", encoding="utf-8")
+
+    class MismatchedHeadClient(_FakeClient):
+        def get_profile_research_branch(self, work_package_ref, branch_id):
+            value = super().get_profile_research_branch(
+                work_package_ref,
+                branch_id,
+            )
+            value["latest_trace_ref"] = "trace:different-head"
+            return value
+
+    monkeypatch.setattr(
+        client_research,
+        "client_from_config",
+        MismatchedHeadClient,
+    )
+    result = CliRunner().invoke(cli, [
+        "client", "research", "checkpoint", "backfill", "finalize", "maxa",
+        "--agent-id", "research-maxa",
+        "--work-package-ref", "work-package:instance-a",
+        "--branch-id", "branch-1",
+        "--narrative-file", str(narrative_path), "--json",
+    ])
+
+    assert result.exit_code != 0
+    assert "does not match branch HEAD" in result.output
 
 
 def test_client_research_checkpoint_rejects_oversized_input_before_publish(

@@ -128,7 +128,9 @@ def canonical_narrative(
                 declared_link_ids=link_ids,
                 recorded_at=carrier["latest_transition"]["created_at"],
                 expected_report_items=(
-                    expected_report_items if schema_version == 3 else None
+                    (expected_report_items or None)
+                    if schema_version == 3
+                    else None
                 ),
                 used_report_bindings=used_report_bindings,
             )
