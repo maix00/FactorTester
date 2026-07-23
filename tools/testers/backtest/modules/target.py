@@ -12,6 +12,12 @@ from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.policies.registry import (
+    generate_strategy_intents as _generate_strategy_intents,
+    precompute_strategy_intents as _precompute_strategy_intents,
+    register_strategy_intent_policy,
+    strategy_intent_policy_for,
+)
 
 _SIGNAL_VALUE_REF: FieldRef[Any] = FieldRef("signal_value", owner="FactorSignalModule")
 _CURRENT_PRICES_REF: FieldRef[Any] = FieldRef("current_prices", owner="MarketDataModule")
@@ -115,40 +121,3 @@ class TargetStore:
 
     def target_trace_for(self, strategy: Any) -> dict[str, Any]:
         return dict(self.target_trace.get(strategy, {}))
-
-
-_STRATEGY_INTENT_POLICIES: dict[str, Any] = {}
-
-
-def register_strategy_intent_policy(strategy_kind: str, policy: Any) -> None:
-    _STRATEGY_INTENT_POLICIES[str(strategy_kind)] = policy
-
-
-def strategy_intent_policy_for(strategy_kind: str) -> Any | None:
-    return _STRATEGY_INTENT_POLICIES.get(str(strategy_kind))
-
-
-def _precompute_strategy_intents(state, ctx) -> None:
-    from tools.testers.backtest.modules.strategy_book import (
-        apply_strategy_intent_precompute_policy,
-        resolve_strategy_intent_policy,
-    )
-
-    policy_batches: list[tuple[Any, list[Any]]] = []
-    for strategy in ctx.active_strategies:
-        config = state.config_for(strategy)
-        if not config.uses_flow("signal_precomputed"):
-            continue
-        kind = str(config.get(TargetStrategyModule.strategy_kind, "group") or "group")
-        default_policy = strategy_intent_policy_for(kind)
-        if default_policy is None:
-            continue
-        policy = resolve_strategy_intent_policy(state, strategy, default_policy)
-        for batched_policy, strategies in policy_batches:
-            if batched_policy is policy:
-                strategies.append(strategy)
-                break
-        else:
-            policy_batches.append((policy, [strategy]))
-    for policy, strategies in policy_batches:
-        apply_strategy_intent_precompute_policy(state, ctx, strategies, policy)

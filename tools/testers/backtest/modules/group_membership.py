@@ -49,6 +49,7 @@ from tools.testers.backtest.modules.strategy_book import (
 )
 from tools.testers.backtest.modules.target import (
     TargetStrategyModule,
+    _generate_strategy_intents,
     register_strategy_intent_policy,
     target_weight_intent,
 )
@@ -163,7 +164,8 @@ class GroupMembershipModule(TargetStrategyModule):
         outputs=(target_weights, TargetStrategyModule.trade_intent),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         description="计算分组隶属",
-        order=10, compute=lambda state, ctx: _group_quantile_membership(state, ctx),
+        order=10,
+        compute=lambda state, ctx: _generate_strategy_intents(state, ctx, expected_kind="group"),
     )
     schedule_order_execution: ClassVar[Flow] = Flow(
         "schedule_order_execution",
@@ -189,7 +191,7 @@ class GroupMembershipModule(TargetStrategyModule):
     )
 
 
-def _group_quantile_membership(state, ctx) -> None:
+def _group_quantile_membership(state, ctx, strategies: Sequence[object] | None = None) -> None:
     """`position_policy="buy_and_hold"`: once a strategy has computed its
     first non-empty target_weights, every later SIGNAL event reuses that
     exact same allocation (cached on the shared target strategy store)
@@ -211,7 +213,8 @@ def _group_quantile_membership(state, ctx) -> None:
     trigger rejects those allocation policies outright rather than serve a
     silently stale allocation. "scheduled" is not implemented (see field
     docstring)."""
-    precomputed = _apply_precomputed_target_intents(state, ctx)
+    active_strategies = strategies if strategies is not None else ctx.active_strategies
+    precomputed = _apply_precomputed_target_intents(state, ctx, active_strategies)
     if precomputed:
         return
 
@@ -241,7 +244,7 @@ def _group_quantile_membership(state, ctx) -> None:
     # re-slicing ranked from scratch.
     bucket_cache: dict[tuple[frozenset, int, int], frozenset] = {}
 
-    for strategy in ctx.active_strategies:
+    for strategy in active_strategies:
         config = state.config_for(strategy)
         policy = config.get(GroupMembershipModule.position_policy, "rebalance_to_target")
         reuse = reuse_buy_and_hold_target(policy, established.get(strategy))
@@ -313,14 +316,14 @@ def _group_quantile_membership(state, ctx) -> None:
         _record_target_trace(state, strategy, ctx.timestamp, weights)
 
 
-def _apply_precomputed_target_intents(state, ctx) -> bool:
+def _apply_precomputed_target_intents(state, ctx, strategies: Sequence[object]) -> bool:
     if ctx.timestamp is None:
         return False
-    for strategy in ctx.active_strategies:
+    for strategy in strategies:
         if state.target_store.precomputed_target_intents.get(strategy) is None:
             return False
     applied = False
-    for strategy in ctx.active_strategies:
+    for strategy in strategies:
         table = state.target_store.precomputed_target_intents[strategy]
         key = _target_intent_event_key(ctx, strategy)
         intent = table.get(key)
@@ -366,6 +369,9 @@ class _TargetPrecomputeContext:
 
 
 class GroupMembershipIntentPolicy(StrategyIntentPolicy):
+    def generate_strategy_intents(self, state: object, ctx: object, strategies: Sequence[object]) -> None:
+        _group_quantile_membership(state, ctx, strategies)
+
     def precompute_strategy_intents(self, state: object, ctx: object, strategies: Sequence[object]) -> None:
         _precompute_group_membership_target_intents(state, ctx, strategies)
 

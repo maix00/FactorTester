@@ -21,6 +21,7 @@ from tools.testers.backtest.modules.market_data import MarketDataModule, current
 from tools.testers.backtest.modules.strategy_book import StrategyIntentPolicy
 from tools.testers.backtest.modules.target import (
     TargetStrategyModule,
+    _generate_strategy_intents,
     register_strategy_intent_policy,
     target_weight_intent,
 )
@@ -142,19 +143,23 @@ class ThresholdSignalModule(TargetStrategyModule):
         event_kind=EventKind.SIGNAL,
         description="计算阈值信号目标",
         order=10,
-        compute=lambda state, ctx: _threshold_signal_target(state, ctx),
+        compute=lambda state, ctx: _generate_strategy_intents(state, ctx, expected_kind="threshold"),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (threshold_signal_target,)
 
 
 class ThresholdSignalIntentPolicy(StrategyIntentPolicy):
+    def generate_strategy_intents(self, state: object, ctx: object, strategies: Sequence[object]) -> None:
+        _threshold_signal_target(state, ctx, strategies)
+
     def precompute_strategy_intents(self, state: object, ctx: object, strategies: Sequence[object]) -> None:
         _precompute_threshold_target_intents(state, strategies)
 
 
-def _threshold_signal_target(state, ctx) -> None:
-    for strategy in ctx.active_strategies:
+def _threshold_signal_target(state, ctx, strategies: Sequence[object] | None = None) -> None:
+    active_strategies = strategies if strategies is not None else ctx.active_strategies
+    for strategy in active_strategies:
         config = state.config_for(strategy)
         if str(config.get(TargetStrategyModule.strategy_kind, "group") or "group") != "threshold":
             continue

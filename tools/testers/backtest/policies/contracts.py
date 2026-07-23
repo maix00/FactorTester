@@ -20,13 +20,21 @@ StrategyIntentPrecomputePolicy = Callable[[object, object, Sequence[object], obj
 class StrategyIntentPolicy:
     """Own signal-to-intent semantics for one or more strategies."""
 
+    def generate_strategy_intents(
+        self,
+        state: object,
+        ctx: object,
+        strategies: Sequence[object],
+    ) -> None:
+        raise NotImplementedError
+
     def precompute_strategy_intents(
         self,
         state: object,
         ctx: object,
         strategies: Sequence[object],
     ) -> None:
-        return None
+        raise NotImplementedError
 
 
 @dataclass

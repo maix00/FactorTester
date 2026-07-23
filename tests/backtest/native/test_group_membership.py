@@ -27,7 +27,7 @@ from tools.testers.backtest.modules.strategy_book import (
     StrategyIntentPolicy,
     strategy_book_store_for,
 )
-from tools.testers.backtest.modules.target import _precompute_strategy_intents
+from tools.testers.backtest.modules.target import _generate_strategy_intents, _precompute_strategy_intents
 
 
 def _product() -> Product:
@@ -541,6 +541,25 @@ def test_precomputed_intent_resolves_per_strategy_policy_before_kind_default():
     assert calls == [(custom_strategy,)]
     assert default_strategy in account.target_store.precomputed_target_intents
     assert custom_strategy not in account.target_store.precomputed_target_intents
+
+
+def test_event_intent_resolves_per_strategy_policy_through_strategy_book():
+    strategy = Strategy(alias="custom")
+    account = BacktestRunState(strategy_configs={strategy: StrategyConfig(strategy=strategy)})
+    calls = []
+
+    class RecordingPolicy(StrategyIntentPolicy):
+        def generate_strategy_intents(self, state, ctx, selected_strategies):
+            calls.append(tuple(selected_strategies))
+
+    strategy_book_store_for(account).policies = StrategyBookPolicies(
+        strategy_intent_by_alias={"custom": RecordingPolicy()},
+    )
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+
+    _generate_strategy_intents(account, ctx, expected_kind="group")
+
+    assert calls == [(strategy,)]
 
 
 def test_group_quantile_membership_ignores_products_without_current_price():

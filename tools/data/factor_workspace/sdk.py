@@ -52,6 +52,7 @@ AUTHOR_SDK_MODULES = (
         + "HierarchyConstraintPolicy = Callable[[Any, Any, Any], Any]\n"
         + "StrategyIntentPrecomputePolicy = Callable[[Any, list[Any]], Any]\n\n"
         + "class StrategyIntentPolicy:\n"
+        + "    def generate_strategy_intents(self, state: Any, ctx: Any, strategies: list[Any]) -> None: ...\n"
         + "    def precompute_strategy_intents(self, state: Any, ctx: Any, strategies: list[Any]) -> None: ...\n\n"
         + "@dataclass(frozen=True)\n"
         + "class LedgerConfig:\n"
