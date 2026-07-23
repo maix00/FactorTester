@@ -24,6 +24,7 @@ class FakeClient:
         self.continuation_preview = None
         self.continuation = None
         self.continuation_response = None
+        self.profile_research_branch = None
         self.agent_budget_call = None
         self.agent_invocation_call = None
         self.instance_call = None
@@ -167,6 +168,12 @@ class FakeClient:
             "work_package_id": "instance-v5",
             "graph_version": target_graph_version,
             "branches": [{"branch_id": "branch-v6"}],
+        }
+
+    def get_profile_research_branch(self, work_package_ref, branch_id):
+        return self.profile_research_branch or {
+            "work_package_ref": work_package_ref,
+            "branch_id": branch_id,
         }
 
     def load_agent_budget_period(self, agent_id):
@@ -868,6 +875,23 @@ def test_research_graph_continuation_retargets_local_profile_without_new_record(
             (profile_id, kwargs)
         ) or {"research_records": [{"record_id": "sgccs-work-package"}]},
     )
+    fake.profile_research_branch = {
+        "report_checkpoint": {"checkpoint_ref": "trace:continued"}
+    }
+    monkeypatch.setattr(
+        commands,
+        "continuation_narrative",
+        lambda carrier: {"carrier": carrier["checkpoint_ref"]},
+    )
+    monkeypatch.setattr(
+        commands,
+        "publish_research_checkpoint",
+        lambda **kwargs: {
+            "changed": True,
+            "checkpoint_ref": "trace:continued",
+            "artifact": {"artifact_ref": "artifact:continued"},
+        },
+    )
 
     result = CliRunner().invoke(cli, [
         "research-graph", "continue",
@@ -885,6 +909,12 @@ def test_research_graph_continuation_retargets_local_profile_without_new_record(
         "work_package_id": "sgccs-work-package",
         "target_instance_id": "physical-v7",
         "target_branch_id": "branch-v7",
+    }
+    assert payload["local_report_sync"] == {
+        "status": "published",
+        "changed": True,
+        "checkpoint_ref": "trace:continued",
+        "artifact_ref": "artifact:continued",
     }
     assert calls == [("maxa", {
         "agent_id": "research-maxa",

@@ -16,6 +16,9 @@ from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.publisher import (
     publish_research_checkpoint,
 )
+from tools.cli.release.research_reporting.continuation_narrative import (
+    continuation_narrative,
+)
 
 
 def _json(value) -> str:
@@ -688,6 +691,14 @@ def continue_graph_branch(
                 },
             }
         else:
+            report_sync = _publish_continuation_report(
+                client=client,
+                client_root=client_root,
+                profile_id=profile_id,
+                agent_id=agent_id,
+                work_package_id=work_package_id,
+                target_branch_id=target_branch_id,
+            )
             continuation = {
                 **continuation,
                 "local_profile_sync": {
@@ -696,8 +707,51 @@ def continue_graph_branch(
                     "target_instance_id": target_instance_id,
                     "target_branch_id": target_branch_id,
                 },
+                "local_report_sync": report_sync,
             }
     click.echo(_json(continuation))
+
+
+def _publish_continuation_report(
+    *,
+    client: FactorTesterClient,
+    client_root: Path,
+    profile_id: str,
+    agent_id: str,
+    work_package_id: str,
+    target_branch_id: str,
+) -> dict[str, object]:
+    try:
+        branch = client.get_profile_research_branch(
+            f"work-package:{work_package_id}", target_branch_id,
+        )
+        carrier = branch.get("report_checkpoint")
+        if not isinstance(carrier, dict):
+            raise ValueError("continuation report Carrier is unavailable")
+        published = publish_research_checkpoint(
+            client_root=client_root,
+            profile_id=profile_id,
+            agent_id=agent_id,
+            carrier=carrier,
+            narrative=continuation_narrative(carrier),
+        )
+    except (OSError, ValueError) as exc:
+        return {
+            "status": "required",
+            "error_code": (
+                "local_report_io_error"
+                if isinstance(exc, OSError)
+                else "local_report_validation_error"
+            ),
+            "message": str(exc),
+        }
+    artifact = published["artifact"]
+    return {
+        "status": "published",
+        "changed": published["changed"],
+        "checkpoint_ref": published["checkpoint_ref"],
+        "artifact_ref": artifact["artifact_ref"],
+    }
 
 
 @research_graph.command("advance")
