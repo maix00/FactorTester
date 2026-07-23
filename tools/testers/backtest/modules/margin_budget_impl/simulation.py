@@ -75,7 +75,12 @@ def _apply_quantity(state, ctx, component, quantity, positions, cash) -> float:
     candidate = copy(component.order)
     candidate.quantity = quantity
     prices = ctx.get(MarketDataModule.current_prices, {}) or {}
-    price = float(candidate.get("effective_price", prices[candidate.instrument]))
+    effective_price = candidate.get("effective_price")
+    price = float(
+        effective_price
+        if effective_price is not None
+        else prices[candidate.instrument]
+    )
     candidate.set("effective_price", price)
     candidate.set("fee_cost", estimate_signal_fee(
         state, ctx, component.strategy, component.ledger, candidate,

@@ -81,6 +81,36 @@ def test_fee_mode_zero_means_no_fee():
     assert order.get("fee_cost") == 0.0
 
 
+def test_fee_uses_effective_price_without_reading_sparse_execution_prices():
+    s = Strategy(alias="effective-price")
+    p = _product()
+    order = Order(
+        instrument=p,
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=10.0,
+        intent_quantity=10.0,
+        strategy=s,
+    )
+    order.set("effective_price", 12.0)
+    config = StrategyConfig(strategy=s, field_values={
+        EngineModule.engine_mode: "custom",
+        FeeModule.fee_mode: "fixed",
+        FeeModule.fixed_fee_rate: 0.01,
+    })
+    account = _account_with_ledger(s, config)
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]},
+    )
+    ctx.set(MarketDataModule.current_prices, {})
+    ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 1.0}})
+
+    _resolve_fee_cost(account, ctx)
+
+    assert order.get("fee_cost") == pytest.approx(10.0 * 12.0 * 0.01)
+
+
 def test_fee_mode_custom_uses_unified_product_field_overrides():
     s = Strategy(alias="S")
     p = _product()

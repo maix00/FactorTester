@@ -47,7 +47,12 @@ def apply_order_fill(state, ctx) -> None:
         ledger_config = state.ledger_config_for(ledger)
         positions = ledger.get(LedgerModule.positions, {})
         cash = required_cash_for_ledger(state, ledger)
-        price = float(order.get("effective_price", prices[order.instrument]))
+        effective_price = order.get("effective_price")
+        price = float(
+            effective_price
+            if effective_price is not None
+            else prices[order.instrument]
+        )
         fee = float(order.get("fee_cost", 0.0) or 0.0)
         cash_before = cash.to_major()
         margin_before = margin_reserved_major(ledger)
