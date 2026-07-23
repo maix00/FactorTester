@@ -49,7 +49,7 @@ def validate_report_submission(
     if submitted.get("schema_version") != 1:
         raise ValueError("report_submission schema_version must be 1")
     fragment_hash = _hash(submitted.get("fragment_hash"), "fragment_hash")
-    required = _required_subjects(
+    expected_bindings = expected_report_bindings(
         graph=graph,
         source_node=source_node,
         edge=edge,
@@ -57,6 +57,10 @@ def validate_report_submission(
         entry_assessments=entry_assessments,
         transition_evidence=transition_evidence,
     )
+    required = {
+        (item["report_requirement_id"], item["subject_ref"])
+        for item in expected_bindings
+    }
     reports = {
         str(item.get("report_requirement_id") or ""): item
         for item in graph.get("report_requirements") or []
@@ -99,6 +103,56 @@ def validate_report_submission(
     ):
         raise ValueError("report_submission exceeds 6000 bytes")
     return value
+
+
+def expected_report_bindings(
+    *,
+    graph: dict[str, Any],
+    source_node: dict[str, Any],
+    edge: dict[str, Any],
+    target_node: dict[str, Any],
+    entry_assessments: list[dict[str, Any]],
+    transition_evidence: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Return the exact dynamic report contract without accepting content."""
+    policy = graph.get("report_policy") or {}
+    if policy.get("enforcement") != "required":
+        return []
+    reports = {
+        str(item.get("report_requirement_id") or ""): item
+        for item in graph.get("report_requirements") or []
+    }
+    methods = graph.get("report_method_descriptors") or {}
+    values = []
+    for report_id, subject_ref in sorted(_required_subjects(
+        graph=graph,
+        source_node=source_node,
+        edge=edge,
+        target_node=target_node,
+        entry_assessments=entry_assessments,
+        transition_evidence=transition_evidence,
+    )):
+        report = reports.get(report_id)
+        if report is None:
+            raise ValueError(f"unknown report requirement: {report_id}")
+        subject_kind = str(
+            (report.get("subject_selector") or {}).get("kind") or ""
+        )
+        prefixes = _SUBJECT_PREFIXES.get(subject_kind)
+        if not prefixes or not subject_ref.startswith(prefixes):
+            raise ValueError(f"report subject does not match {report_id}")
+        method = methods.get(str(report.get("method_ref") or "")) or {}
+        allowed = list(method.get("allowed_content") or [])
+        if not allowed:
+            raise ValueError(
+                f"report method has no allowed content: {report_id}"
+            )
+        values.append({
+            "report_requirement_id": report_id,
+            "subject_ref": subject_ref,
+            "allowed_content": allowed,
+        })
+    return values
 
 
 def _required_subjects(

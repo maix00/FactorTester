@@ -6,6 +6,7 @@ from cli_anything.factortester_research.core.successor_graph import (
     build_successor_graph,
 )
 from server.services.research_graph.branch.report_coverage import (
+    expected_report_bindings,
     validate_report_submission,
 )
 from tools.cli.release.research_reporting.report_items import (
@@ -89,6 +90,29 @@ def test_successor_requires_exact_node_edge_and_target_entry_reports() -> None:
 
     assert value is not None
     assert len(value["items"]) == len(source["node_report_refs"]) + 2
+
+
+def test_expected_bindings_are_the_same_contract_used_by_validation() -> None:
+    graph, source, edge, target, assessments = _parts()
+    submitted = _submission(graph, source, edge, target, assessments)
+
+    expected = expected_report_bindings(
+        graph=graph,
+        source_node=source,
+        edge=edge,
+        target_node=target,
+        entry_assessments=assessments,
+        transition_evidence={},
+    )
+
+    assert {
+        (item["report_requirement_id"], item["subject_ref"])
+        for item in expected
+    } == {
+        (item["report_requirement_id"], item["subject_ref"])
+        for item in submitted["items"]
+    }
+    assert all(item["allowed_content"] for item in expected)
 
 
 def test_successor_report_coverage_lists_the_missing_binding() -> None:
