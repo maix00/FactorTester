@@ -14,6 +14,11 @@ from ..core.cycle import (
 )
 from ..core.evidence import persist_command_evidence
 from ..core.session import load_session, record_event, save_session
+from ..core.submission_contract import (
+    build_cycle_submission_contract,
+    validate_against_cycle_submission_contract,
+    validate_contract_for_current_packet,
+)
 from ..utils.factortester_backend import run_factortester
 from .common import echo_json
 
@@ -264,12 +269,28 @@ def cycle_continue(
     required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
+@click.option(
+    "--contract-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="可选：同时按 cycle prepare 生成的当前步骤合同校验。",
+)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
-def cycle_validate(evidence_file: Path, as_json: bool) -> None:
+def cycle_validate(
+    evidence_file: Path,
+    contract_file: Path | None,
+    as_json: bool,
+) -> None:
     """Validate local proposals without contacting the server."""
     evidence = _load_evidence(evidence_file)
     try:
         validation = validate_transition_evidence(evidence)
+        if contract_file is not None:
+            contract = _load_evidence(contract_file)
+            validation.update(
+                validate_against_cycle_submission_contract(
+                    evidence, contract,
+                )
+            )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     payload = {"valid": True, **validation}
@@ -281,6 +302,70 @@ def cycle_validate(evidence_file: Path, as_json: bool) -> None:
     )
 
 
+@cycle.command("prepare")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--edge-id", required=True)
+@click.option(
+    "--evidence-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="可选：从已有提案推导 reviewer task_ref 等动态要求。",
+)
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+def cycle_prepare(
+    instance_id: str,
+    branch_id: str,
+    edge_id: str,
+    evidence_file: Path | None,
+    output: Path,
+    as_json: bool,
+) -> None:
+    """Generate the exact local wire contract for one current candidate edge."""
+    try:
+        packet = validate_next_packet(_backend_json_result([
+            "research-graph", "next", instance_id, branch_id,
+        ]))
+        evidence = (
+            _load_evidence(evidence_file)
+            if evidence_file is not None else None
+        )
+        contract = build_cycle_submission_contract(
+            packet, edge_id=edge_id, evidence=evidence,
+        )
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(
+                contract, ensure_ascii=False, indent=2, sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "output": str(output),
+        "output_bytes": output.stat().st_size,
+        "edge_id": edge_id,
+        "from_node": contract["transition"]["from_node"],
+        "to_node": contract["transition"]["to_node"],
+        "reusable_obligation_count": len(
+            contract["reusable_refs"]["obligations"]
+        ),
+        "required_reviewer_task_refs": (
+            contract.get("derived_requirements") or {}
+        ).get("required_reviewer_task_refs", []),
+    }
+    if as_json:
+        echo_json(payload)
+        return
+    click.echo(f"cycle submission contract: {output}")
+    click.echo(f"edge: {edge_id}")
+
+
 @cycle.command("advance")
 @click.argument("instance_id")
 @click.argument("branch_id")
@@ -289,6 +374,14 @@ def cycle_validate(evidence_file: Path, as_json: bool) -> None:
     "--evidence-file",
     required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--contract-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help=(
+        "推荐：提交前按 cycle prepare 的当前步骤合同校验并确认未过期；"
+        "省略时保留旧版仅本地/服务器校验路径。"
+    ),
 )
 @click.option(
     "--target-capability-resolution-file",
@@ -304,6 +397,7 @@ def cycle_advance(
     branch_id: str,
     edge_id: str,
     evidence_file: Path,
+    contract_file: Path | None,
     target_capability_resolution_file: Path | None,
     acting_profile_ref: str,
     timeout: int,
@@ -313,6 +407,26 @@ def cycle_advance(
     evidence = _load_evidence(evidence_file)
     try:
         validation = validate_transition_evidence(evidence)
+        if contract_file is not None:
+            contract = _load_evidence(contract_file)
+            contract_edge = str(
+                (contract.get("transition") or {}).get("edge_id") or ""
+            )
+            if contract_edge != edge_id:
+                raise ValueError(
+                    "submission contract edge_id does not match --edge-id"
+                )
+            validation.update(
+                validate_against_cycle_submission_contract(
+                    evidence, contract,
+                )
+            )
+            current_packet = validate_next_packet(_backend_json_result([
+                "research-graph", "next", instance_id, branch_id,
+            ]))
+            validation.update(validate_contract_for_current_packet(
+                contract, current_packet, edge_id=edge_id,
+            ))
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     args = [
@@ -398,3 +512,8 @@ def _backend_json(
     if not isinstance(value, dict):
         raise click.ClickException("FactorTester JSON must be an object")
     return value
+
+
+def _backend_json_result(args: list[str]) -> dict[str, Any]:
+    result = run_factortester(args, timeout=60)
+    return _backend_json(result.returncode, result.stdout, result.stderr)
