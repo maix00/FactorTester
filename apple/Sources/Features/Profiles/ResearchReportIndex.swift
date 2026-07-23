@@ -66,14 +66,9 @@ enum ResearchReportIndex {
             throw ResearchReportIndexError.missingReference
         }
         return try await Task.detached {
-            guard let attributes = try FileManager.default.attributesOfItem(
-                atPath: url.path
-            ) as [FileAttributeKey: Any]?,
-            let size = attributes[.size] as? NSNumber,
-            size.intValue <= maximumBytes else {
-                throw ResearchReportIndexError.invalidContract
+            let data = try PersonalWorkspaceAccessStore.withAccess(to: url) {
+                try readVerifiedIndexData(url)
             }
-            let data = try Data(contentsOf: url)
             let document = try JSONDecoder().decode(
                 ResearchReportIndexDocument.self,
                 from: data
@@ -92,6 +87,17 @@ enum ResearchReportIndex {
             }
             return document.sections
         }.value
+    }
+
+    private static func readVerifiedIndexData(_ url: URL) throws -> Data {
+        guard let attributes = try FileManager.default.attributesOfItem(
+            atPath: url.path
+        ) as [FileAttributeKey: Any]?,
+        let size = attributes[.size] as? NSNumber,
+        size.intValue <= maximumBytes else {
+            throw ResearchReportIndexError.invalidContract
+        }
+        return try Data(contentsOf: url)
     }
 
     private static func fallback(

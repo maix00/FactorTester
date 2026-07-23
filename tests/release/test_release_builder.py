@@ -133,6 +133,16 @@ def test_in_app_update_refuses_a_different_designated_requirement() -> None:
     assert 'test "$new_requirement" = "$old_requirement"' in updater
 
 
+def test_report_index_reuses_the_persisted_workspace_access_scope() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "apple/Sources/Features/Profiles/ResearchReportIndex.swift"
+    ).read_text(encoding="utf-8")
+
+    assert "PersonalWorkspaceAccessStore.withAccess(to: url)" in source
+    assert "try readVerifiedIndexData(url)" in source
+
+
 def test_manifest_accepts_current_and_legacy_app_archive_names() -> None:
     assert _kind("FTClient.zip") == "macos-app"
     assert _kind("FactorTester-Client.zip") == "macos-app"
