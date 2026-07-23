@@ -91,3 +91,36 @@ def test_execution_gross_leverage_values_each_ledger_once_for_multiple_orders() 
 
     summary = ctx.get(MarginBudgetModule.execution_margin_summary)["private:multi"]
     assert summary["gross_leverage"] == pytest.approx(0.2)
+
+
+def test_execution_precheck_values_existing_positions_from_causal_close() -> None:
+    held = _product()
+    order_product = _product()
+    state, ledger, ctx, orders = _case("causal-close", [order_product], [1.0], 1_000.0)
+    ledger.set(LedgerModule.positions, {
+        held: ProductPosition(
+            quantity=1.0,
+            average_cost=90.0,
+            margin_reserved=DataMoney.from_major(
+                9.0, currency="CNY", use_minor_units=False,
+            ),
+        ),
+    })
+    ctx.set(MarketDataModule.current_historical_fields, {
+        held: {"VolumeMultiple": 1.0},
+        order_product: {"VolumeMultiple": 1.0},
+    })
+    # ORDER current_prices is the execution-basis map and intentionally has
+    # no row for the already-held product.  Existing equity must use causal
+    # close; settlement is present only to prove it is not consulted here.
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {held: 100.0, order_product: 100.0},
+        "settlement": {held: 999.0, order_product: 999.0},
+    })
+
+    MarginBudgetModule.constrain_execution_margin_utilization.compute(state, ctx)
+
+    assert orders[0].quantity == pytest.approx(1.0)
+    summary = ctx.get(MarginBudgetModule.execution_margin_summary)["private:causal-close"]
+    assert summary["equity"] > 1_000.0
+    assert summary["projected_utilization"] < 0.85
