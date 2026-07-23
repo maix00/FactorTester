@@ -58,17 +58,19 @@ class TermStructureStore:
         trading_day: Optional[Any] = None,
         columns: Optional[List[str]] = None,
     ) -> pd.DataFrame:
-        filters: list[tuple[str, str, Any]] = []
+        from tools.data.hub import DataHub
+
+        frame = DataHub.get_instance().load("term_structure", self.path)
+        mask = pd.Series(True, index=frame.index)
         if product:
-            filters.append((TERM_PRODUCT_COL, '==', product))
+            mask &= frame[TERM_PRODUCT_COL] == product
         if trading_day is not None:
             day = cast(pd.Timestamp, pd.Timestamp(trading_day)).normalize()
-            filters.append((TERM_TRADING_DAY_COL, '==', day))
-        return pd.read_parquet(
-            self.path,
-            filters=filters or None,
-            columns=columns,
-        )
+            mask &= pd.to_datetime(frame[TERM_TRADING_DAY_COL]).dt.normalize() == day
+        selected = frame.loc[mask]
+        if columns is not None:
+            selected = selected.loc[:, columns]
+        return selected.copy()
 
     def contract_pool(self, product: str, trading_day: Any, depth: Optional[int] = None) -> pd.DataFrame:
         df = self.load(product=product, trading_day=trading_day)
