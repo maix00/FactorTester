@@ -21,6 +21,42 @@ from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.services import research_runs
+from server.services.agent_flow.verified_usage import (
+    VerifiedProviderUsage,
+    clear_usage_receipt_verifiers,
+    register_usage_receipt_verifier,
+)
+from server.services.research_graph.shadow_tokens import shadow_token_contract
+
+
+class _E2EUsageVerifier:
+    """Test Provider adapter exercising the public receipt path."""
+
+    def verify(self, receipt: str, *, reservation: dict) -> VerifiedProviderUsage:
+        payload = json.loads(receipt)
+        expected = {
+            key: reservation[key]
+            for key in (
+                "invocation_id",
+                "agent_id",
+                "task_ref",
+                "runtime_id",
+                "model_id",
+                "lineage_hash",
+                "input_hash",
+            )
+        }
+        if payload.get("reservation") != expected:
+            raise ValueError("E2E usage receipt does not match reservation")
+        return VerifiedProviderUsage(
+            provider_id="e2e-provider",
+            provider_request_id=str(payload["provider_request_id"]),
+            input_tokens=int(payload["input_tokens"]),
+            output_tokens=int(payload["output_tokens"]),
+            cache_read_tokens=int(payload["cache_read_tokens"]),
+            provider_attestation=str(payload["provider_attestation"]),
+            launcher_attestation="verified-by:e2e-provider@1",
+        )
 
 
 def _installed_cli(name: str) -> list[str]:
@@ -91,6 +127,11 @@ def _real_server(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", database)
     monkeypatch.setattr(Settings, "CACHE_DIR", database.parent)
     monkeypatch.setenv("FLASK_SECRET_KEY", secrets.token_hex(32))
+    clear_usage_receipt_verifiers()
+    register_usage_receipt_verifier(
+        "e2e-provider",
+        _E2EUsageVerifier(),
+    )
     app = create_app()
     httpd = make_server("127.0.0.1", 0, app, threaded=True)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -101,6 +142,7 @@ def _real_server(
         httpd.shutdown()
         thread.join(timeout=10)
         httpd.server_close()
+        clear_usage_receipt_verifiers()
 
 
 def _commit_usage(
@@ -110,53 +152,96 @@ def _commit_usage(
     agent_id: str,
     input_tokens: int,
     output_tokens: int,
+    receipt_dir: Path,
+    task_ref: str = "",
+    lineage_hash: str = "",
+    input_hash: str = "",
+    verified: bool = False,
 ) -> str:
     principal_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
-    lineage_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    lineage_value = (
+        lineage_hash or hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+    )
+    reserve_args = [
+        "agent-flow",
+        "invocation",
+        "reserve",
+        agent_id,
+        "--role",
+        "researcher",
+        "--authority-scope",
+        "local_research",
+        "--purpose",
+        "record real-server E2E token usage",
+        "--runtime-id",
+        "e2e-runtime",
+        "--model-id",
+        "e2e-model",
+        "--max-input-tokens",
+        str(input_tokens),
+        "--max-output-tokens",
+        str(output_tokens),
+        "--agent-principal-hash",
+        principal_hash,
+        "--lineage-hash",
+        lineage_value,
+        "--idempotency-key",
+        f"e2e-usage-{uuid.uuid4().hex}",
+    ]
+    if task_ref:
+        reserve_args.extend(["--task-ref", task_ref])
+    if input_hash:
+        reserve_args.extend(["--input-hash", input_hash])
     invocation = _run_json(
         factortester,
-        [
-            "agent-flow",
-            "invocation",
-            "reserve",
-            agent_id,
-            "--role",
-            "researcher",
-            "--authority-scope",
-            "local_research",
-            "--purpose",
-            "record real-server E2E token usage",
-            "--runtime-id",
-            "e2e-runtime",
-            "--model-id",
-            "e2e-model",
-            "--max-input-tokens",
-            str(input_tokens),
-            "--max-output-tokens",
-            str(output_tokens),
-            "--agent-principal-hash",
-            principal_hash,
-            "--lineage-hash",
-            lineage_hash,
-            "--idempotency-key",
-            f"e2e-usage-{uuid.uuid4().hex}",
-        ],
+        reserve_args,
         env=env,
     )
-    settled = _run_json(
-        factortester,
-        [
-            "agent-flow",
-            "invocation",
-            "settle",
-            invocation["invocation_id"],
+    settle_args = [
+        "agent-flow",
+        "invocation",
+        "settle",
+        invocation["invocation_id"],
+    ]
+    if verified:
+        receipt_path = receipt_dir / f"{invocation['invocation_id']}.json"
+        receipt_path.write_text(
+            json.dumps({
+                "provider_request_id": f"e2e-{uuid.uuid4().hex}",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cache_read_tokens": 0,
+                "provider_attestation": "signed-e2e-usage",
+                "reservation": {
+                    "invocation_id": invocation["invocation_id"],
+                    "agent_id": agent_id,
+                    "task_ref": task_ref,
+                    "runtime_id": "e2e-runtime",
+                    "model_id": "e2e-model",
+                    "lineage_hash": lineage_value,
+                    "input_hash": input_hash,
+                },
+            }),
+            encoding="utf-8",
+        )
+        settle_args.extend([
+            "--provider-id",
+            "e2e-provider",
+            "--provider-receipt-file",
+            str(receipt_path),
+        ])
+    else:
+        settle_args.extend([
             "--input-tokens",
             str(input_tokens),
             "--output-tokens",
             str(output_tokens),
             "--provider-request-id",
             f"e2e-provider-request-{uuid.uuid4().hex}",
-        ],
+        ])
+    settled = _run_json(
+        factortester,
+        settle_args,
         env=env,
     )
     assert settled["status"] == "settled"
@@ -523,12 +608,27 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         assert resume["research"]["branch"]["branch_id"] == (
             shadow_branch_id
         )
+        token_contract = shadow_token_contract(
+            graph_id=graph["graph_id"],
+            version=graph["version"],
+            instance_id=shadow_instance["instance_id"],
+            branch_id=shadow_branch_id,
+            graph_run_id=graph_run["run_id"],
+            baseline_run_id=baseline_run["run_id"],
+            run_spec_hash=graph_run["run_spec_hash"],
+        )
+        graph_binding = token_contract["graph"]
         _commit_usage(
             factortester=factortester,
             env=env,
-            agent_id=f"instance:{shadow_instance['instance_id']}",
+            agent_id=graph_binding["agent_id"],
             input_tokens=70,
             output_tokens=10,
+            receipt_dir=tmp_path,
+            task_ref=graph_binding["task_ref"],
+            lineage_hash=token_contract["comparison_hash"],
+            input_hash=token_contract["input_hash"],
+            verified=True,
         )
         baseline_scope = f"research-run:{baseline_run['run_id']}"
         _run_json(
@@ -543,12 +643,18 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             ],
             env=env,
         )
+        baseline_binding = token_contract["baseline"]
         _commit_usage(
             factortester=factortester,
             env=env,
-            agent_id=baseline_scope,
+            agent_id=baseline_binding["agent_id"],
             input_tokens=90,
             output_tokens=10,
+            receipt_dir=tmp_path,
+            task_ref=baseline_binding["task_ref"],
+            lineage_hash=token_contract["comparison_hash"],
+            input_hash=token_contract["input_hash"],
+            verified=True,
         )
 
         validation = _run_json(
@@ -773,6 +879,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             agent_id=f"instance:{live_instance['instance_id']}",
             input_tokens=12,
             output_tokens=3,
+            receipt_dir=tmp_path,
         )
         target_resolution = _capability_resolution(
             factortester=factortester,
