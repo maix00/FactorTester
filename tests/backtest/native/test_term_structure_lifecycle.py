@@ -1426,6 +1426,13 @@ def test_rollover_notice_emits_close_and_open_orders_for_existing_position():
     account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     ledger = account.ledger_for_strategy(strategy)
     ledger.set(LedgerModule.positions, {old_contract: ProductPosition(quantity=3)})
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {
+            old_contract: [100.0],
+            new_contract: [101.0],
+        },
+        index=pd.DatetimeIndex([pd.Timestamp("2026-01-26 15:00")]),
+    )
 
     queue = EventQueue()
     order_events: list[EventDraft] = []
@@ -1460,6 +1467,86 @@ def test_rollover_notice_emits_close_and_open_orders_for_existing_position():
     ]
     assert orders[0].get("reason") == "term_structure_rollover_close"
     assert orders[1].get("reason") == "term_structure_rollover_open"
+
+
+def test_rollover_notice_does_not_open_contract_without_causal_price():
+    strategy = Strategy(alias="A")
+    product = _TwoContractTermProduct()
+    old_contract = _Contract("P2601.DCE")
+    new_contract = _Contract("P2602.DCE")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        ),
+    })
+    account.run_window_store.envelope = strategy_run_window_datetimes(
+        account.config_for(strategy)
+    )
+    account.ledger_for_strategy(strategy).set(
+        LedgerModule.positions,
+        {old_contract: ProductPosition(quantity=3)},
+    )
+    notice_ts = pd.Timestamp("2026-01-26 15:00")
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {
+            old_contract: [100.0, 99.0],
+            new_contract: [float("nan"), 101.0],
+        },
+        index=pd.DatetimeIndex([
+            notice_ts,
+            pd.Timestamp("2026-01-27 09:00"),
+        ]),
+    )
+
+    queue = EventQueue()
+    order_events: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.ORDER, lambda batch: order_events.extend(batch))
+    expand_ctx = FlowContext(
+        timestamp=None,
+        event_queue=queue,
+        active_strategies=frozenset({strategy}),
+    )
+    expand_ctx.set_for(
+        ProductSelectionModule.products,
+        strategy,
+        frozenset({product}),
+    )
+    _expand_term_structure(account, expand_ctx)
+    draft = EventDraft(
+        EventKind.LIFECYCLE_NOTICE,
+        notice_ts,
+        strategy,
+        payload={
+            "kind": "rollover",
+            "notice_type": "rollover",
+            "notice_reason": "date_before_expiry",
+            "product": "P.DCE",
+            "contract_object": old_contract,
+        },
+    )
+    ctx = FlowContext(
+        timestamp=notice_ts,
+        event_queue=queue,
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={strategy: [draft]},
+    )
+
+    _handle_rollover_notice(account, ctx)
+    queue.run_until_drained()
+
+    assert order_events == []
+    assert account.ledger_for_strategy(strategy).get(
+        LedgerModule.positions
+    )[old_contract].quantity == 3
 
 
 def test_rollover_day_window_uses_trading_axis_not_calendar_days():

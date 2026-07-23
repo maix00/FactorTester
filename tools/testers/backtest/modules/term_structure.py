@@ -415,11 +415,18 @@ def _handle_rollover_notice(state, ctx) -> None:
                 continue
             _record_term_structure_notice(state, payload)
             old_contract = payload.get("contract_object")
-            next_contract = _next_contract_object_for_notice(state, strategy, payload)
-            if old_contract is None or next_contract is None:
+            if old_contract is None:
                 continue
             held_contract, entry = _held_position_item_for_notice(positions, old_contract, payload)
             if held_contract is None:
+                continue
+            next_contract = _next_contract_object_for_notice(
+                state,
+                strategy,
+                payload,
+                timestamp=ctx.timestamp,
+            )
+            if next_contract is None:
                 continue
             held_key = _position_contract_key(held_contract, payload)
             if held_key in closed_contracts:
@@ -517,7 +524,13 @@ def _record_term_structure_notice(state, payload: dict[str, Any]) -> None:
     state.term_structure_store.record_notice(payload)
 
 
-def _next_contract_object_for_notice(state, strategy: Any, payload: dict[str, Any]) -> Any | None:
+def _next_contract_object_for_notice(
+    state,
+    strategy: Any,
+    payload: dict[str, Any],
+    *,
+    timestamp: Any,
+) -> Any | None:
     current = payload.get("contract_object")
     product_name = payload.get("product")
     metadata = list(state.term_structure_store.contract_metadata.get(strategy, ()))
@@ -530,8 +543,39 @@ def _next_contract_object_for_notice(state, strategy: Any, payload: dict[str, An
             continue
         if idx + 1 >= len(rows):
             return None
-        return rows[idx + 1].get("contract_object")
+        candidate = rows[idx + 1].get("contract_object")
+        if not _contract_has_causal_price(state, candidate, timestamp):
+            return None
+        return candidate
     return None
+
+
+def _contract_has_causal_price(
+    state: Any,
+    contract: Any,
+    timestamp: Any,
+) -> bool:
+    if contract is None or timestamp is None:
+        return False
+    for table in (_current_prices_table_for(state), _raw_prices_table_for(state)):
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        column = next(
+            (
+                candidate
+                for candidate in table.columns
+                if _contracts_match(candidate, contract)
+            ),
+            None,
+        )
+        if column is None:
+            continue
+        data_index = DataIndex(table.index)
+        aligned_timestamp = data_index.tz_align(pd.Timestamp(timestamp))
+        causal = table.loc[table.index <= aligned_timestamp, column]
+        if not causal.empty and bool(causal.notna().any()):
+            return True
+    return False
 
 
 def _held_position_item_for_notice(
