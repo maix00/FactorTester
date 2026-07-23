@@ -1,6 +1,7 @@
 """Order lifecycle stores and policies."""
 
 from .access import order_stores_for
+from .dependencies import activate_ready_dependents
 from .audit_store import OrderFlowStore
 from .finalize import record_order_lifecycle_state
 from .pending import default_pending_order_conflict_policy
@@ -13,6 +14,7 @@ from .store import OrderStore
 __all__ = [
     "OrderFlowStore",
     "OrderStore",
+    "activate_ready_dependents",
     "order_stores_for",
     "default_pending_order_conflict_policy",
     "create_order_attempt",

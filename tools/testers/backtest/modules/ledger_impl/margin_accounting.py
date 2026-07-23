@@ -6,6 +6,7 @@ from typing import Any
 
 from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.engines.native.position import ProductPosition
+from tools.testers.backtest.engines.native.order import OrderOffset
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.market_data import (
     contract_multiplier_from_fields,
@@ -25,6 +26,7 @@ def apply_margin_accounting_fill(
     quantity: float, price: float, fee_cost: float,
     historical_fields: dict, ledger_config=None,
     state: Any | None = None, timestamp: Any | None = None,
+    offset: OrderOffset = OrderOffset.AUTO,
 ) -> DataMoney:
     fields = historical_fields_for_product(historical_fields, product)
     multiplier = contract_multiplier_from_fields(
@@ -49,6 +51,7 @@ def apply_margin_accounting_fill(
             is_today=True if daily_mtm and _resolve_fee_mode(
                 strategy_config, ledger_config,
             ) in {"auto", "custom", "exact"} else None,
+            offset=offset,
         )
         if abs(new_quantity) <= 1e-12:
             new_quantity = 0.0

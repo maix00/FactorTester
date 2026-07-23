@@ -12,7 +12,7 @@ from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
 from tools.testers.backtest.engines.native.position import Lot, ProductPosition
 from tools.testers.backtest.engines.native.ledger import LedgerState, ledger_identity
-from tools.testers.backtest.engines.native.order import Order
+from tools.testers.backtest.engines.native.order import Order, OrderOffset
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.strategy_book import apply_order_sizing_policy, strategy_book_store_for
@@ -197,6 +197,52 @@ def test_fee_mode_auto_splits_close_today_and_yesterday_from_position_lots():
     assert order.get("fee_close_yesterday_quantity") == pytest.approx(1.0)
     assert order.get("fee_close_today_quantity") == pytest.approx(1.0)
     assert order.get("fee_cost") == pytest.approx(10.0 * 1.0 * 0.01 + 10.0 * 1.0 * 0.02)
+
+
+def test_explicit_close_today_offset_does_not_reclassify_from_position_snapshot():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=-1.0, intent_quantity=-1.0, strategy=s,
+        offset=OrderOffset.CLOSE_TODAY,
+    )
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "auto"})
+    account = _account_with_ledger(s, config)
+    account.ledger_for_strategy(s).set(LedgerModule.positions, {
+        p: ProductPosition(
+            quantity=1.0,
+            lots=deque([
+                Lot(quantity=1.0, entry_price=9.0, multiplier=1.0, is_today=False),
+            ]),
+        ),
+    })
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={
+            s: [EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)],
+        },
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        p: {
+            "OpenRatioByMoney": 0.0,
+            "OpenRatioByVolume": 0.0,
+            "CloseRatioByMoney": 0.01,
+            "CloseRatioByVolume": 0.0,
+            "CloseTodayRatioByMoney": 0.02,
+            "CloseTodayRatioByVolume": 0.0,
+            "VolumeMultiple": 1.0,
+        },
+    })
+
+    _resolve_fee_cost(account, ctx)
+
+    assert order.get("fee_close_today_quantity") == 1.0
+    assert order.get("fee_close_yesterday_quantity") == 0.0
+    assert order.get("fee_cost") == pytest.approx(0.2)
 
 
 @pytest.mark.parametrize("fee_mode", ["custom", "exact"])

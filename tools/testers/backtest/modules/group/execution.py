@@ -100,6 +100,10 @@ def schedule_order_execution(state, ctx) -> None:
         for order in ctx.get_for(OrderConstructModule.orders, strategy, []):
             if abs(float(getattr(order, "quantity", 0.0) or 0.0)) <= 1e-12 or order.get("reject_reason"):
                 continue
+            order.set("execution_price_basis", price_basis)
+            order.set("matching_model", matching_model)
+            if order.status is OrderStatus.BLOCKED:
+                continue
             schedule = resolve_execution_schedule(state, ctx, strategy, order.instrument)
             if schedule is None:
                 continue
@@ -119,8 +123,6 @@ def schedule_order_execution(state, ctx) -> None:
                 timestamp=execution_ts,
                 market_timestamp=price_ts,
             )
-            order.set("execution_price_basis", price_basis)
-            order.set("matching_model", matching_model)
             pending[key] = order
             drafts.append(EventDraft(EventKind.ORDER, execution_ts, strategy, attempt))
     if drafts:

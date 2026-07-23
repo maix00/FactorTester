@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from tools.testers.backtest.engines.native.position import ProductPosition
+from tools.testers.backtest.engines.native.order import OrderOffset
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.market_data import (
     contract_multiplier_from_fields,
@@ -19,6 +20,7 @@ def apply_cash_accounting_position_fill(
     positions: dict, strategy_config, product, *,
     quantity: float, price: float, historical_fields: dict,
     ledger_config=None, state: Any | None = None, timestamp: Any | None = None,
+    offset: OrderOffset = OrderOffset.AUTO,
 ) -> None:
     fields = historical_fields_for_product(historical_fields, product)
     multiplier = contract_multiplier_from_fields(
@@ -33,7 +35,10 @@ def apply_cash_accounting_position_fill(
         ledger_config=ledger_config,
     )
     if method in ("FIFO", "LIFO", "HIFO"):
-        apply_lot_fill(entry, method, quantity, price, multiplier, is_today=None)
+        apply_lot_fill(
+            entry, method, quantity, price, multiplier,
+            is_today=None, offset=offset,
+        )
         if abs(new_quantity) <= 1e-12:
             new_quantity = 0.0
     else:

@@ -60,14 +60,14 @@ def apply_order_fill(state, ctx) -> None:
                 cash, positions, config, order.instrument,
                 quantity=float(order.quantity), price=price, fee_cost=fee,
                 historical_fields=historical_fields, ledger_config=ledger_config,
-                state=state, timestamp=ctx.timestamp,
+                state=state, timestamp=ctx.timestamp, offset=order.offset,
             )
         else:
             apply_cash_accounting_position_fill(
                 positions, config, order.instrument,
                 quantity=float(order.quantity), price=price,
                 historical_fields=historical_fields, ledger_config=ledger_config,
-                state=state, timestamp=ctx.timestamp,
+                state=state, timestamp=ctx.timestamp, offset=order.offset,
             )
             notional = (
                 float(order.quantity) * price

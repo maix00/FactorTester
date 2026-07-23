@@ -13,6 +13,7 @@ from typing import Any, ClassVar, cast
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.engines.native.order import OrderOffset
 from tools.testers.backtest.modules.custom_product import custom_product_editor_definition
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.ledger_module import LedgerModule
@@ -237,14 +238,14 @@ def _market_fee_cost(
     multiplier = _number(fields.get("VolumeMultiple"), 1.0)
     quantity = float(order.quantity)
     current_quantity = float(getattr(position, "quantity", 0.0))
-    open_qty, close_qty = _split_open_close_quantity(quantity, current_quantity)
-    close_today_qty, close_yesterday_qty = _split_close_today_yesterday(
-        quantity,
-        position,
-        close_qty,
-        fee_mode,
-        cost_basis_method,
-    )
+    explicit = _explicit_offset_quantities(order)
+    if explicit is None:
+        open_qty, close_qty = _split_open_close_quantity(quantity, current_quantity)
+        close_today_qty, close_yesterday_qty = _split_close_today_yesterday(
+            quantity, position, close_qty, fee_mode, cost_basis_method,
+        )
+    else:
+        open_qty, close_qty, close_today_qty, close_yesterday_qty = explicit
     open_fee = _fee_part(
         open_qty,
         price=price,
@@ -272,6 +273,17 @@ def _market_fee_cost(
     order.set("fee_close_yesterday_quantity", close_yesterday_qty)
     order.set("fee_close_today", bool(close_today_qty and not close_yesterday_qty))
     return open_fee + close_yesterday_fee + close_today_fee
+
+
+def _explicit_offset_quantities(order):
+    quantity = abs(float(order.quantity))
+    if order.offset is OrderOffset.OPEN:
+        return quantity, 0.0, 0.0, 0.0
+    if order.offset is OrderOffset.CLOSE_TODAY:
+        return 0.0, quantity, quantity, 0.0
+    if order.offset is OrderOffset.CLOSE_YESTERDAY:
+        return 0.0, quantity, 0.0, quantity
+    return None
 
 
 def _split_open_close_quantity(quantity: float, current_quantity: float) -> tuple[float, float]:

@@ -15,6 +15,8 @@ def default_pending_order_conflict_policy(
 ) -> None:
     pending = state.order_store.pending_orders
     stale = pending.get((strategy, order.instrument))
+    if stale is not None and stale.order_group_id == order.order_group_id:
+        return
     if (
         stale is not None
         and stale.status == OrderStatus.SCHEDULED

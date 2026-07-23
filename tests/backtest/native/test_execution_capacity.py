@@ -12,12 +12,17 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.execution_capacity.matching import allocate_order_capacity
 from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
 from tools.testers.backtest.modules.ledger_module import _apply_order_fill
+from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.ledger_impl.order_checks import settlement_order
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_lifecycle import (
     create_order_attempt,
     finalize_and_retry_orders,
 )
+from tools.testers.backtest.modules.order_construction.decomposition import (
+    decompose_position_delta,
+)
+from tools.testers.backtest.engines.native.position import ProductPosition
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 from tools.data.types.data_money import DataMoney
@@ -178,3 +183,87 @@ def test_one_order_carries_partial_fills_across_completed_bars():
     assert [fill.quantity for fill in fills] == [3.0, 3.0, 3.0, 1.0]
     assert order.filled_quantity == 10.0
     assert order.remaining_quantity == 0.0
+
+
+def test_reversal_activates_open_only_after_close_settles():
+    timestamp = pd.Timestamp("2024-01-01 09:01")
+    strategy = Strategy(alias="reversal")
+    product = _product()
+    config = StrategyConfig(strategy=strategy, field_values={
+        OrderExecutionModule.matching_model: "bar_volume_limited",
+        VolumeCapacityMode.liquidity_mode: "volume_participation",
+        VolumeCapacityMode.participation_rate: 1.0,
+    })
+    state = BacktestRunState(strategy_configs={strategy: config})
+    state.market_data_store.volume_table = pd.DataFrame(
+        {product: [20.0]}, index=[timestamp],
+    )
+    ledger = state.ledger_for_strategy(strategy)
+    ledger.set(LedgerModule.positions, {
+        product: ProductPosition(quantity=10.0, average_cost=8.0),
+    })
+    set_cash_for_ledger_pool(
+        state, ledger,
+        DataMoney.from_major(1_000.0, currency="CNY", use_minor_units=False),
+    )
+    group, orders = decompose_position_delta(
+        strategy=strategy, product=product, timestamp=timestamp,
+        delta=-15.0, position=ledger.get(LedgerModule.positions)[product],
+        group_id="REV", parent_intent_id="INTENT",
+        order_ids=iter(("CLOSE", "OPEN")), cost_basis_method="WeightAverage",
+    )
+    close, opening = orders
+    state.order_store.register_group(group)
+    for order in orders:
+        state.order_store.register_order(order)
+        order.set("matching_model", "bar_volume_limited")
+        order.set("execution_price_basis", "close")
+    close_attempt = create_order_attempt(
+        state, close, timestamp=timestamp, market_timestamp=timestamp,
+    )
+    close_ctx, close_queue = _attempt_context(strategy, close_attempt, timestamp)
+    _settle_attempt(state, close_ctx, close, product)
+
+    queued = close_queue.snapshot_head()
+    assert len(queued) == 1
+    assert queued[0].payload.order_id == opening.order_id
+    assert close.status.value == "filled"
+
+    open_attempt = queued[0].payload
+    open_ctx, _ = _attempt_context(strategy, open_attempt, timestamp)
+    _settle_attempt(state, open_ctx, opening, product)
+
+    assert ledger.get(LedgerModule.positions)[product].quantity == -5.0
+    assert opening.status.value == "filled"
+    assert sum(
+        fill.quantity
+        for order_id in group.child_order_ids
+        for fill in state.order_store.fills_by_order[order_id]
+    ) == 15.0
+
+
+def _attempt_context(strategy, attempt, timestamp):
+    order = attempt.order
+    order.set("active_attempt_id", attempt.attempt_id)
+    order.set("active_market_timestamp", attempt.market_timestamp)
+    queue = EventQueue()
+    return FlowContext(
+        timestamp=timestamp,
+        event_queue=queue,
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={
+            strategy: [EventDraft(EventKind.ORDER, timestamp, strategy, attempt)],
+        },
+    ), queue
+
+
+def _settle_attempt(state, ctx, order, product):
+    ctx.set(MarketDataModule.current_prices, {product: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {"VolumeMultiple": 1.0},
+    })
+    allocate_order_capacity(state, ctx, VolumeCapacityMode, OrderExecutionModule)
+    order.set("effective_price", 10.0)
+    order.set("fee_cost", 0.0)
+    _apply_order_fill(state, ctx)
+    finalize_and_retry_orders(state, ctx, VolumeCapacityMode.retry_events)

@@ -13,6 +13,7 @@ from .values import float_or_none, timestamp_key
 @dataclass
 class OrderFlowStore:
     _next_id_by_strategy: dict[str, int] = field(default_factory=dict)
+    _next_group_by_strategy: dict[str, int] = field(default_factory=dict)
     records_by_strategy: dict[Any, list[dict[str, Any]]] = field(default_factory=dict)
     records_by_order: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
@@ -21,6 +22,12 @@ class OrderFlowStore:
         next_id = self._next_id_by_strategy.get(alias, 0) + 1
         self._next_id_by_strategy[alias] = next_id
         return f"{alias}-{timestamp_key(timestamp)}-{next_id}"
+
+    def next_group_id(self, strategy: Any, timestamp: Any) -> str:
+        alias = str(getattr(strategy, "alias", strategy))
+        next_id = self._next_group_by_strategy.get(alias, 0) + 1
+        self._next_group_by_strategy[alias] = next_id
+        return f"{alias}-{timestamp_key(timestamp)}-group-{next_id}"
 
     def record(
         self,

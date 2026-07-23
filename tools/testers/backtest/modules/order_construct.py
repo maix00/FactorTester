@@ -14,7 +14,6 @@ from typing import Any, ClassVar
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import (
@@ -25,6 +24,7 @@ from tools.testers.backtest.modules.market_data import (
 )
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.order_lifecycle import reconcile_target_delta
+from tools.testers.backtest.modules.order_construction.build import construct_orders
 from tools.testers.backtest.modules.runtime_info import (
     product_display,
     product_display_text,
@@ -98,7 +98,12 @@ class OrderConstructModule(ExecutableModule):
         compute=lambda state, ctx: _round_to_lot_sizes(state, ctx),
     )
     construct_orders: ClassVar[Flow] = Flow(
-        "construct_orders", inputs=(deltas,), outputs=(orders,),
+        "construct_orders",
+        inputs=(
+            deltas, LedgerModule.positions, TradingRuleModule.cost_basis_method,
+            TradingRuleModule.daily_mark_to_market_enabled,
+        ),
+        outputs=(orders,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=30, after=(round_order_quantity,),
         description="构造订单",
@@ -218,29 +223,7 @@ def _effective_lot_size(state, strategy, product, lot_sizes: dict) -> float | No
 
 
 def _construct_orders(state, ctx) -> None:
-    store = order_flow_store_for(state)
-    for strategy in ctx.active_strategies:
-        deltas = ctx.get_for(OrderConstructModule.deltas, strategy, {})
-        orders = []
-        for product in sorted(
-            deltas,
-            key=lambda item: str(getattr(item, "name", item)),
-        ):
-            quantity = deltas[product]
-            if quantity == 0:
-                continue
-            order = Order(
-                instrument=product,
-                timestamp=ctx.timestamp,
-                quantity=quantity,
-                intent_quantity=quantity,
-                strategy=strategy,
-                order_id=store.next_order_id(strategy, ctx.timestamp),
-            )
-            state.order_store.register_order(order)
-            store.record(order, step="construct_order", label="构造订单")
-            orders.append(order)
-        ctx.set_for(OrderConstructModule.orders, strategy, orders)
+    construct_orders(state, ctx, OrderConstructModule)
 
 
 def _record_untradable_target_skip(state, strategy, product, timestamp) -> None:

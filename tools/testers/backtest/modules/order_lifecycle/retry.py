@@ -15,6 +15,7 @@ from tools.testers.backtest.modules.market_data import (
 )
 
 from .finalize import record_order_lifecycle_state
+from .dependencies import activate_ready_dependents
 from .schedule import create_order_attempt
 
 
@@ -36,6 +37,7 @@ def finalize_and_retry_orders(state: Any, ctx: Any, retry_ref: Any) -> None:
                         market_timestamp=market_ts,
                     )
                     drafts.append(EventDraft(EventKind.ORDER, event_ts, strategy, attempt))
+    drafts.extend(activate_ready_dependents(state, ctx))
     if drafts:
         ctx.set(retry_ref, drafts)
     record_order_lifecycle_state(state, ctx)
