@@ -35,11 +35,6 @@ from server.services.research_graph.branch.requirement_preflight import (
 from server.services.research_graph.branch.entry_resolution import (
     initial_entry_resolution_frame,
 )
-from server.services.research_graph.branch.topology_preflight import (
-    assess_topology_continuation,
-    load_work_package_trace_footprint,
-    require_topology_continuation,
-)
 from server.services.research_graph.continuation_gate import (
     consume_continuation_gate,
 )
@@ -213,18 +208,6 @@ def _prepare(
             target_graph_version=target_graph_version,
             execution_mode=execution_mode,
         )
-        work_package_id = str(
-            source["work_package_id"] or source_instance_id
-        )
-        footprint = (
-            load_work_package_trace_footprint(
-                conn,
-                owner=owner,
-                work_package_id=work_package_id,
-            )
-            if int((target_graph or {}).get("schema_version") or 1) >= 2
-            else None
-        )
     if source_graph is None or target_graph is None:
         raise KeyError("source or target Graph version not found")
     if int(target_graph.get("parent_version") or 0) != int(
@@ -240,18 +223,10 @@ def _prepare(
         raise ValueError("Graph continuation requires a Research Cycle")
     source_identity = branch_identity(source)
     if int(target_graph.get("schema_version") or 1) >= 2:
-        assert footprint is not None
         if job_id:
             raise ValueError(
                 "same-node Graph continuation does not rebind Job evidence"
             )
-        preflight = assess_topology_continuation(
-            source_graph=source_graph,
-            target_graph=target_graph,
-            current_node=str(source["current_node"]),
-            footprint=footprint,
-        )
-        require_topology_continuation(preflight)
         continuation_mode = SAME_NODE_REENTRY_MODE
         target_node = str(source["current_node"])
         target_status = str(source["status"])
@@ -263,7 +238,6 @@ def _prepare(
     ):
         raise ValueError("Graph continuation source must be a paused gap")
     elif job_id:
-        preflight = None
         continuation_mode = JOB_EVIDENCE_MODE
         target_node = JOB_EVIDENCE_TARGET_NODE
         target_status = "running"
@@ -279,7 +253,6 @@ def _prepare(
         evidence_refs = ["evidence:" + envelope["envelope_hash"]]
         omitted_evidence_count = 0
     else:
-        preflight = None
         continuation_mode = PRE_TRIAL_CHECKPOINT_MODE
         target_node = PRE_TRIAL_TARGET_NODE
         target_status = "paused"
@@ -348,13 +321,6 @@ def _prepare(
             "job_evidence_hash": str(envelope["envelope_hash"]),
         })
     elif continuation_mode == SAME_NODE_REENTRY_MODE:
-        assert preflight is not None
-        descriptor["topology_preflight"] = {
-            "preflight_hash": preflight["preflight_hash"],
-            "footprint_node_count": preflight["footprint_node_count"],
-            "footprint_edge_count": preflight["footprint_edge_count"],
-            "reason": preflight["reason"],
-        }
         descriptor["requirement_preflight"] = (
             assess_requirement_continuation(
                 source_graph=source_graph,

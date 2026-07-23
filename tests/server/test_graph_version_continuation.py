@@ -524,7 +524,7 @@ def test_pretrial_continuation_preserves_paused_gap_without_job_evidence(
     }]
 
 
-def test_schema_v2_continuation_reenters_the_same_current_node(
+def test_schema_v2_continuation_checks_current_node_not_history_topology(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -532,6 +532,33 @@ def test_schema_v2_continuation_reenters_the_same_current_node(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
     _prepare(path)
     target = _upgrade_active_target_to_schema_v2(path)
+    historical = next(
+        node for node in target["nodes"]
+        if node["node_id"] == "job_evidence_ready"
+    )
+    historical["purpose"] = "A changed historical stage must not be replayed."
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            UPDATE research_graph_versions SET graph_json=?
+            WHERE graph_id='factor-research' AND version=2
+            """,
+            (orjson.dumps(target).decode(),),
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_trace (
+                trace_id, instance_id, branch_id, edge_id,
+                from_node, to_node, evidence_json, telemetry_json,
+                actor, created_at
+            ) VALUES (
+                'trace-historical', 'instance-1', 'branch-1',
+                'backtest__job_evidence_ready',
+                'authoritative_backtest', 'job_evidence_ready',
+                '{}', '{}', 'alice', 0.5
+            )
+            """
+        )
 
     preview = preview_graph_continuation(
         source_instance_id="instance-1",
@@ -547,9 +574,7 @@ def test_schema_v2_continuation_reenters_the_same_current_node(
     assert preview["descriptor"]["target_node"] == (
         "authoritative_backtest"
     )
-    assert preview["descriptor"]["topology_preflight"]["reason"] == (
-        "compatible_reentry"
-    )
+    assert "topology_preflight" not in preview["descriptor"]
     case_id = _approve(path, target_hash=preview["target_hash"])
     continued = continue_graph_branch(
         source_instance_id="instance-1",
@@ -758,9 +783,9 @@ def test_schema_v2_continuation_shadow_replay_rejects_tampered_preflight(
             (continued["instance_id"], branch["branch_id"]),
         ).fetchone()
         evidence = orjson.loads(trace["evidence_json"])
-        evidence["graph_continuation"]["topology_preflight"][
-            "footprint_node_count"
-        ] += 1
+        evidence["graph_continuation"]["requirement_preflight"][
+            "delta_hash"
+        ] = "0" * 64
         conn.execute(
             "UPDATE research_graph_trace SET evidence_json=? WHERE trace_id=?",
             (orjson.dumps(evidence).decode(), trace["trace_id"]),

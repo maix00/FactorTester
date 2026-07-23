@@ -15,10 +15,6 @@ from server.services.research_graph.branch.continuation_store import (
     PRE_TRIAL_TARGET_NODE,
     SAME_NODE_REENTRY_MODE,
 )
-from server.services.research_graph.branch.topology_preflight import (
-    assess_topology_continuation,
-    load_work_package_trace_footprint,
-)
 from server.services.research_graph.branch.requirement_preflight import (
     assess_requirement_continuation,
 )
@@ -347,38 +343,13 @@ def _continuation_bootstrap_valid(
             or "job_evidence_hash" in descriptor
         ):
             return False
-        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-            footprint = load_work_package_trace_footprint(
-                conn,
-                owner=str(runtime["owner"]),
-                work_package_id=str(
-                    source["work_package_id"]
-                    or descriptor.get("source_instance_id")
-                    or ""
-                ),
-            )
-        preflight = assess_topology_continuation(
-            source_graph=source_graph,
-            target_graph=graph,
-            current_node=str(source["current_node"]),
-            footprint=footprint,
-        )
-        declared_preflight = descriptor.get("topology_preflight")
-        expected_preflight = {
-            "preflight_hash": preflight["preflight_hash"],
-            "footprint_node_count": preflight["footprint_node_count"],
-            "footprint_edge_count": preflight["footprint_edge_count"],
-            "reason": preflight["reason"],
-        }
         expected_requirement_preflight = assess_requirement_continuation(
             source_graph=source_graph,
             target_graph=graph,
             target_node=str(source["current_node"]),
         )
         if (
-            not preflight["eligible"]
-            or declared_preflight != expected_preflight
-            or descriptor.get("requirement_preflight")
+            descriptor.get("requirement_preflight")
             != expected_requirement_preflight
         ):
             return False

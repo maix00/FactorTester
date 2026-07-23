@@ -2904,3 +2904,21 @@ schema-v2 校验器仍接受图内 `agent_packet_budget`。用户进一步确认
 
 验收覆盖 draft shadow 成功、同 draft live 失败、v2 内嵌预算失败、Profile 变化不改
 Graph hash、激活只晋升 continuation shadow、HTTP/CLI 模式透传和激活 SQL 上限。
+
+## Grill 183 — Graph 升级删除式简化
+
+用户指出当前实现把研究方法、运行配置、后端能力和单项研究变化都误当成 Graph
+升级。只有第一类属于 Graph canonical content。
+
+Graph continuation 因此只检查：
+
+1. exact target hash；
+2. 当前节点在目标 Graph 中仍存在；
+3. 当前节点 Entry Requirements 的新增或语义修订；
+4. 既有本地义务/Evidence 是否覆盖新增要求，由 Research Agent 在 re-entry 中判断。
+
+历史访问过的节点、边、数据契约、因子语义和 Trial 不参与 continuation eligibility，
+也不被重跑。升级仍表现为附属于当前节点的 re-entry 记录，而不是迁移节点。实现删除
+了 Work Package 全历史 topology footprint 查询及 replay 校验，因而同时减少一次
+数据库读取。生产激活的剩余 proposal/review/audit/authorization 对象是否全部折叠为
+一次 exact-hash 激活命令，继续按 Grill 183 的最后一个治理边界收口。
