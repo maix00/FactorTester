@@ -359,6 +359,66 @@ def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts(m
     assert rows[0]["details"]["fallback"] == "LocalCNFutures coverage inference"
 
 
+def test_coverage_lifecycle_inference_is_shared_across_strategies_and_notice_flows(monkeypatch):
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_live_lookup", lambda exchange, key: None)
+    from sources.LocalCNFutures import lifecycle
+
+    calls: list[str] = []
+    infer = lifecycle.infer_contract_end_from_coverage
+
+    def counting_infer(row, peer_rows, raw_prices):
+        calls.append(str(row.get("uid")))
+        return infer(row, peer_rows, raw_prices)
+
+    monkeypatch.setattr(lifecycle, "infer_contract_end_from_coverage", counting_infer)
+    strategies = (Strategy(alias="A"), Strategy(alias="B"))
+    product = _CoverageOnlyTwoContractTermProduct()
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                EngineModule.engine_mode: "auto",
+                DeliveryForceCloseModule.force_close_before_expiry: "2d",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        )
+        for strategy in strategies
+    })
+    account.run_window_store.envelope = strategy_run_window_datetimes(
+        account.config_for(strategies[0])
+    )
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-30 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-02-02 15:00", tz="Asia/Shanghai"),
+    ])
+    account.market_data_store.raw_prices_table = pd.DataFrame({
+        _Contract("P2601.DCE"): [1.0, 1.0, None],
+        _Contract("P2602.DCE"): [None, 2.0, 2.0],
+    }, index=idx)
+    ctx = FlowContext(
+        timestamp=None,
+        event_queue=EventQueue(),
+        active_strategies=frozenset(strategies),
+    )
+    for strategy in strategies:
+        ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    _register_force_close_notices(account, ctx)
+    _register_rollover_notices(account, ctx)
+
+    assert sorted(calls) == ["P2601.DCE", "P2602.DCE"]
+
+
 def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(monkeypatch):
     # exact mode has no authoritative source anywhere for this contract, so it
     # falls through to the same LocalCNFutures coverage inference as auto/custom
