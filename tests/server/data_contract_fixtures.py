@@ -9,6 +9,9 @@ import orjson
 from server.services.research_graph.branch.schema import (
     create_instance_branch_schema,
 )
+from server.services.research_graph.graph_objects import (
+    create_graph_object_schema,
+)
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
@@ -132,6 +135,7 @@ def initialize(path, *, obligation_status: str = "bounded") -> None:
     }
     with connect_sqlite(path) as conn:
         create_instance_branch_schema(conn)
+        create_graph_object_schema(conn)
         conn.execute(
             """
             CREATE TABLE research_graph_versions (

@@ -22,6 +22,7 @@ from server.services.research_graph.protocol import (
     MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES,
     MAX_AGENT_TRANSITION_BYTES,
     MAX_PERSISTED_TRACE_BYTES,
+    MAX_TRANSITION_EVIDENCE_BYTES,
     serialize_agent_transition_evidence,
     serialize_capability_resolution_submission,
     serialize_bounded_trace_evidence,
@@ -229,23 +230,29 @@ def test_context_keeps_many_obligation_aliases_inside_agent_budget(
 
 
 def test_context_transition_and_persisted_trace_have_distinct_budgets() -> None:
-    legitimate_delta = {"research_note": "x" * 8_500}
+    legitimate_delta = {"research_note": "x" * 23_868}
 
     assert MAX_AGENT_PACKET_BYTES < MAX_AGENT_TRANSITION_BYTES
-    assert MAX_AGENT_TRANSITION_BYTES < MAX_PERSISTED_TRACE_BYTES
+    assert MAX_AGENT_TRANSITION_BYTES == MAX_TRANSITION_EVIDENCE_BYTES
+    assert MAX_TRANSITION_EVIDENCE_BYTES == MAX_PERSISTED_TRACE_BYTES
     serialized_delta = serialize_agent_transition_evidence(legitimate_delta)
     assert len(serialized_delta.encode()) > MAX_AGENT_PACKET_BYTES
 
-    oversized_delta = {"research_note": "x" * MAX_AGENT_TRANSITION_BYTES}
+    oversized_delta = {
+        "research_note": "x" * MAX_TRANSITION_EVIDENCE_BYTES
+    }
     with pytest.raises(
         ValueError,
-        match=f"agent transition evidence exceeds {MAX_AGENT_TRANSITION_BYTES}",
+        match=(
+            "transition evidence transport exceeds "
+            f"{MAX_TRANSITION_EVIDENCE_BYTES}"
+        ),
     ):
         serialize_agent_transition_evidence(oversized_delta)
 
-    audit_payload = {"research_note": "x" * 20_000}
+    audit_payload = {"research_note": "x" * 30_000}
     serialized_trace = serialize_bounded_trace_evidence(audit_payload)
-    assert len(serialized_trace.encode()) > MAX_AGENT_TRANSITION_BYTES
+    assert len(serialized_trace.encode()) > MAX_AGENT_PACKET_BYTES
     assert len(serialized_trace.encode()) < MAX_PERSISTED_TRACE_BYTES
 
 

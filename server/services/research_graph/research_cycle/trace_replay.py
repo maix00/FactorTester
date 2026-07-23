@@ -16,6 +16,7 @@ def verify_research_cycle_trace(
     previous_trace_id: str,
     event: Any,
     projected_checkpoint: Any,
+    resolved_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Recompute one trace checkpoint without trusting its projection."""
     if not isinstance(event, dict) or event.get("schema_version") != 1:
@@ -38,9 +39,22 @@ def verify_research_cycle_trace(
         base = previous_checkpoint
     if event.get("checkpoint_before_hash") != base["projection_hash"]:
         raise ValueError("research_cycle checkpoint_before_hash mismatch")
-    events = event.get("events")
+    events = (
+        resolved_events
+        if resolved_events is not None
+        else event.get("events")
+    )
     if not isinstance(events, list):
         raise ValueError("research_cycle trace events must be an array")
+    if resolved_events is not None:
+        from server.services.research_graph.branch.trace_compaction import (
+            compact_research_cycle_event_receipts,
+        )
+
+        if event.get("event_receipts") != (
+            compact_research_cycle_event_receipts(events)
+        ):
+            raise ValueError("research_cycle event receipts mismatch")
     if previous_checkpoint is None and events:
         raise ValueError("research_cycle bootstrap cannot adjudicate events")
     recomputed = replay_research_cycle_events(

@@ -2958,7 +2958,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     with pytest.raises(
         ValueError,
         match=(
-            "agent transition evidence exceeds "
+            "transition evidence transport exceeds "
             f"{MAX_AGENT_TRANSITION_BYTES} bytes"
         ),
     ):

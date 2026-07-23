@@ -21,11 +21,14 @@ from server.services.research_graph.packet_budget import (
 # Compatibility name for provider-neutral startup packets and pre-v9 Graphs.
 # Schema-v2 Graphs always resolve a separately hashed runtime Budget Profile.
 MAX_AGENT_PACKET_BYTES = LEGACY_AGENT_PACKET_BYTES
-# A repeated Agent packet is a model-context budget.  A submitted transition
-# is a one-time structured delta and can legitimately contain one complete
-# obligation plus a TrialPlan; it must not inherit the repeated-context cap.
-# The persisted trace additionally retains server-created audit projections.
-MAX_AGENT_TRANSITION_BYTES = 12 * 1024
+# A repeated Agent packet is a model-context budget. A transition submission
+# is a one-time structured transport whose nested documents are independently
+# validated and later normalized into a bounded trace. It must not inherit a
+# model-context ceiling.
+MAX_TRANSITION_EVIDENCE_BYTES = 32 * 1024
+# Compatibility export for callers released before the transport boundary was
+# named independently from Agent context.
+MAX_AGENT_TRANSITION_BYTES = MAX_TRANSITION_EVIDENCE_BYTES
 MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES = 4096
 MAX_PERSISTED_TRACE_BYTES = 32 * 1024
 MAX_TRACE_EVIDENCE_BYTES = MAX_PERSISTED_TRACE_BYTES
@@ -170,10 +173,10 @@ def serialize_agent_transition_evidence(
         option=orjson.OPT_SORT_KEYS,
     )
     size = len(serialized)
-    if size > MAX_AGENT_TRANSITION_BYTES:
+    if size > MAX_TRANSITION_EVIDENCE_BYTES:
         raise ValueError(
-            "agent transition evidence exceeds "
-            f"{MAX_AGENT_TRANSITION_BYTES} bytes: {size}"
+            "transition evidence transport exceeds "
+            f"{MAX_TRANSITION_EVIDENCE_BYTES} bytes: {size}"
         )
     return serialized.decode()
 

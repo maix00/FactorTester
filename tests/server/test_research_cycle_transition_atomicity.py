@@ -14,6 +14,13 @@ from server.services.research_graph.research_cycle.adjudication import (
     validate_adjudication_decision,
     validate_adjudication_proposal,
 )
+from server.services.research_graph.graph_objects import (
+    create_graph_object_schema,
+    load_graph_objects,
+)
+from server.services.research_graph.research_cycle.trace_replay import (
+    verify_research_cycle_trace,
+)
 from tests.server.data_contract_fixtures import initialize
 from tools.data.sqlite.db import connect_sqlite
 
@@ -23,6 +30,8 @@ def _prepare(path, monkeypatch) -> dict:
     monkeypatch.setenv("AGENT_FLOW_DB_PATH", str(path.with_suffix(".agents")))
     agent_flow.clear_store_cache()
     initialize(path)
+    with connect_sqlite(path) as conn:
+        create_graph_object_schema(conn)
     checkpoint = _checkpoint()
     graph = {
         "graph_id": "factor-research",
@@ -239,6 +248,9 @@ class _FailTraceInsert:
             raise RuntimeError("injected trace insert failure")
         return self.conn.execute(sql, parameters)
 
+    def executemany(self, sql, parameters):
+        return self.conn.executemany(sql, parameters)
+
 
 def test_trace_insert_failure_rolls_back_paired_delta_and_branch_update(
     tmp_path,
@@ -267,6 +279,10 @@ def test_trace_insert_failure_rolls_back_paired_delta_and_branch_update(
         )
 
     assert _state(path) == before
+    with connect_sqlite(path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM research_graph_objects"
+        ).fetchone()[0] == 0
 
 
 def test_failed_identity_timing_guard_leaves_trace_and_checkpoint_unchanged(
@@ -293,3 +309,52 @@ def test_failed_identity_timing_guard_leaves_trace_and_checkpoint_unchanged(
         )
 
     assert _state(path) == before
+
+
+def test_successful_transition_colds_events_and_replays_exact_checkpoint(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "cold-events.sqlite"
+    checkpoint = _prepare(path, monkeypatch)
+    events, invocation_id = _adjudication_events()
+
+    result = transition.advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="verify-semantics",
+        evidence=_evidence(checkpoint, events, invocation_id),
+    )
+
+    trace_id = result["report_checkpoint"]["checkpoint_ref"].removeprefix(
+        "trace:"
+    )
+    with connect_sqlite(path) as conn:
+        row = conn.execute(
+            "SELECT evidence_json FROM research_graph_trace WHERE trace_id=?",
+            (trace_id,),
+        ).fetchone()
+        persisted = orjson.loads(row["evidence_json"])
+        cycle = persisted["research_cycle"]
+        assert "events" not in cycle
+        assert len(cycle["event_receipts"]) == 2
+        objects = load_graph_objects(
+            conn,
+            "alice",
+            "instance-1",
+            [cycle["events_ref"]],
+            expected_kinds={
+                cycle["events_ref"]: "research_cycle_event_bundle",
+            },
+        )
+    replayed = verify_research_cycle_trace(
+        previous_checkpoint=checkpoint,
+        previous_trace_id="trace-bootstrap",
+        event=cycle,
+        projected_checkpoint=persisted["research_cycle_checkpoint"],
+        resolved_events=objects[cycle["events_ref"]]["events"],
+    )
+
+    assert replayed == persisted["research_cycle_checkpoint"]
+    assert len(row["evidence_json"].encode()) < 32 * 1024

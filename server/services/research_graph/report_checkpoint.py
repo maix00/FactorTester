@@ -331,6 +331,11 @@ def research_cycle_deltas(
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     cycle = evidence.get("research_cycle")
     events = cycle.get("events") if isinstance(cycle, dict) else []
+    receipts = (
+        cycle.get("event_receipts")
+        if isinstance(cycle, dict)
+        else []
+    )
     obligation_changes: list[dict[str, str]] = []
     claim_changes: list[dict[str, str]] = []
     for event in events if isinstance(events, list) else []:
@@ -359,10 +364,46 @@ def research_cycle_deltas(
                     "from_state": bounded_text(item.get("from_state"), 48),
                     "to_state": bounded_text(item.get("to_state"), 48),
                 })
+    for receipt in receipts if isinstance(receipts, list) else []:
+        if not isinstance(receipt, dict):
+            continue
+        obligation_changes.extend(
+            _compact_cycle_deltas(
+                receipt.get("obligation_deltas"),
+                identifier="obligation_id",
+            )
+        )
+        claim_changes.extend(
+            _compact_cycle_deltas(
+                receipt.get("claim_deltas"),
+                identifier="claim_id",
+            )
+        )
     return (
         obligation_changes[:MAX_CARRIER_ITEMS],
         claim_changes[:MAX_CARRIER_ITEMS],
     )
+
+
+def _compact_cycle_deltas(
+    value: Any,
+    *,
+    identifier: str,
+) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        object_id = safe_identifier(item.get(identifier))
+        if object_id:
+            result.append({
+                identifier: object_id,
+                "from_state": bounded_text(item.get("from_state"), 48),
+                "to_state": bounded_text(item.get("to_state"), 48),
+            })
+    return result
 
 
 def trial_plan_refs(evidence: dict[str, Any]) -> list[str]:

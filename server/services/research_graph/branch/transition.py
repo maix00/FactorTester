@@ -39,6 +39,9 @@ from server.services.research_graph.branch.profile_identity import (
 from server.services.research_graph.branch.report_coverage import (
     validate_report_submission,
 )
+from server.services.research_graph.branch.trace_compaction import (
+    compact_transition_trace,
+)
 from server.services.research_graph.capability_resolution import (
     missing_required_capabilities,
     validate_resolution_against_node,
@@ -60,6 +63,9 @@ from server.services.research_graph.protocol import (
     serialize_agent_transition_evidence,
     serialize_capability_resolution_submission,
     serialize_bounded_trace_evidence,
+)
+from server.services.research_graph.graph_objects import (
+    insert_graph_objects,
 )
 from server.services.research_graph.report_checkpoint import (
     report_checkpoint_projection,
@@ -93,11 +99,17 @@ def advance_graph_branch(
     acting_profile_ref = optional_profile_ref(acting_profile_ref)
     if any(key in evidence for key in (
         "server_evidence", "report_lineage", "entry_resolution_delta",
+        "entry_requirement_assessments_ref",
+        "entry_requirement_assessment_receipts",
     )):
         raise ValueError(
-            "server_evidence, report_lineage, and entry_resolution_delta "
-            "are server-owned"
+            "trace projections and Graph object refs are server-owned"
         )
+    cycle_submission = evidence.get("research_cycle")
+    if isinstance(cycle_submission, dict) and any(
+        key in cycle_submission for key in ("events_ref", "event_receipts")
+    ):
+        raise ValueError("research_cycle cold-event fields are server-owned")
     evidence = validate_agent_evidence_payload(evidence)
     submitted_resolution = evidence.get("target_capability_resolution")
     if submitted_resolution is not None:
@@ -486,6 +498,11 @@ def advance_graph_branch(
                     "predecessor_checkpoint_ref": "",
                 }
         trace_evidence["report_lineage"] = report_lineage
+        trace_evidence, cold_objects = compact_transition_trace(
+            owner=owner,
+            instance_id=instance_id,
+            evidence=trace_evidence,
+        )
         trace_evidence_json = serialize_bounded_trace_evidence(trace_evidence)
         bounded_evidence_refs, omitted_evidence_count = (
             merge_bounded_evidence_refs(
@@ -495,6 +512,7 @@ def advance_graph_branch(
             )
         )
         now = time.time()
+        insert_graph_objects(conn, cold_objects)
         conn.execute(
             """
             UPDATE research_graph_branches

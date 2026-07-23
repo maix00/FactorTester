@@ -25,6 +25,10 @@ from server.services.research_graph.branch.entry_requirements import (
     compact_entry_requirements,
     requirement_detail,
 )
+from server.services.research_graph.branch.trace_compaction import (
+    ENTRY_ASSESSMENT_OBJECT_KIND,
+)
+from server.services.research_graph.graph_objects import load_graph_objects
 from server.services.research_graph.protocol import MAX_AGENT_PACKET_BYTES
 from tests.server.data_contract_fixtures import (
     checkpoint,
@@ -335,8 +339,31 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
             "SELECT evidence_json FROM research_graph_trace "
             "ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
-    trace = orjson.loads(row["evidence_json"])
-    assessment = trace["entry_requirement_assessments"][0]
+        trace = orjson.loads(row["evidence_json"])
+        assessment_ref = trace["entry_requirement_assessments_ref"]
+        objects = load_graph_objects(
+            conn,
+            "alice",
+            "instance-1",
+            [assessment_ref],
+            expected_kinds={
+                assessment_ref: ENTRY_ASSESSMENT_OBJECT_KIND,
+            },
+        )
+    assessment = objects[assessment_ref]["assessments"][0]
+    receipts = trace["entry_requirement_assessment_receipts"]
+    assert len(receipts) == 1
+    receipt = dict(receipts[0])
+    assert len(receipt.pop("assessment_hash")) == 64
+    assert receipt == {
+        "applicability_status": "applicable",
+        "coverage_decision": "map_existing",
+        "entry_effect_status": "pass_limited",
+        "limitation_refs": ["limitation:pit-unverified"],
+        "obligation_refs": ["obligation:obligation-data"],
+        "requirement_id": "data-availability.scope",
+        "requirement_revision": 1,
+    }
     assert assessment["coverage"]["decision"] == "map_existing"
     assert assessment["resolution"]["route"] == "cli_evidence"
     assert trace["entry_resolution_delta"]["assessed_requirement_ids"] == [

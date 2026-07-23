@@ -18,6 +18,10 @@ from server.services.research_graph.branch.continuation_store import (
 from server.services.research_graph.branch.requirement_preflight import (
     assess_requirement_continuation,
 )
+from server.services.research_graph.branch.trace_compaction import (
+    RESEARCH_CYCLE_EVENTS_OBJECT_KIND,
+)
+from server.services.research_graph.graph_objects import load_graph_objects
 from server.services.research_graph.protocol import json_hash
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
@@ -55,6 +59,32 @@ def replay_shadow_trace(
                 MAX_REPLAY_ROWS + 1,
             ),
         ).fetchall()
+        evidence_rows = [
+            orjson.loads(row["evidence_json"])
+            for row in rows
+        ]
+        event_refs = {
+            reference: RESEARCH_CYCLE_EVENTS_OBJECT_KIND
+            for evidence in evidence_rows
+            for reference in [_cycle_events_ref(evidence)]
+            if reference
+        }
+        try:
+            graph_objects = load_graph_objects(
+                conn,
+                str(runtime["owner"]),
+                str(runtime["instance_id"]),
+                event_refs,
+                expected_kinds=event_refs,
+            )
+        except (KeyError, ValueError, TypeError):
+            return _summary(
+                current=str(graph.get("entry_node") or ""),
+                expected=str(runtime["current_node"]),
+                path=[],
+                evidence_count=0,
+                status="invalid",
+            )
     if len(rows) > MAX_REPLAY_ROWS:
         raise ValueError("shadow replay trace exceeds bounded comparison rows")
     edges = {
@@ -70,8 +100,7 @@ def replay_shadow_trace(
     path: list[str] = []
     cycle_checkpoint: dict[str, Any] | None = None
     previous_trace_id = ""
-    for row in rows:
-        evidence = orjson.loads(row["evidence_json"])
+    for row, evidence in zip(rows, evidence_rows, strict=True):
         if not isinstance(evidence, dict):
             return _summary(
                 current=current,
@@ -118,6 +147,7 @@ def replay_shadow_trace(
                 evidence=evidence,
                 previous_checkpoint=None,
                 previous_trace_id="",
+                graph_objects=graph_objects,
             )
             if (
                 evidence.get("research_cycle") is not None
@@ -158,6 +188,7 @@ def replay_shadow_trace(
                 evidence=evidence,
                 previous_checkpoint=cycle_checkpoint,
                 previous_trace_id=previous_trace_id,
+                graph_objects=graph_objects,
             )
             if cycle_checkpoint is None:
                 return _summary(
@@ -355,6 +386,7 @@ def _cycle_from_evidence(
     evidence: dict[str, Any],
     previous_checkpoint: dict[str, Any] | None,
     previous_trace_id: str,
+    graph_objects: dict[str, dict[str, Any]],
 ) -> dict[str, Any] | None:
     continuation = evidence.get("graph_continuation")
     if previous_checkpoint is None and isinstance(continuation, dict):
@@ -388,9 +420,37 @@ def _cycle_from_evidence(
             projected_checkpoint=evidence.get(
                 "research_cycle_checkpoint"
             ),
+            resolved_events=_resolved_cycle_events(
+                evidence,
+                graph_objects,
+            ),
         )
     except ValueError:
         return None
+
+
+def _cycle_events_ref(evidence: Any) -> str:
+    cycle = evidence.get("research_cycle") if isinstance(evidence, dict) else None
+    if not isinstance(cycle, dict):
+        return ""
+    reference = cycle.get("events_ref")
+    return str(reference) if isinstance(reference, str) else ""
+
+
+def _resolved_cycle_events(
+    evidence: dict[str, Any],
+    graph_objects: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]] | None:
+    reference = _cycle_events_ref(evidence)
+    if not reference:
+        return None
+    value = graph_objects.get(reference)
+    events = value.get("events") if isinstance(value, dict) else None
+    if not isinstance(events, list) or not all(
+        isinstance(item, dict) for item in events
+    ):
+        raise ValueError("research cycle event bundle is invalid")
+    return events
 
 
 def _summary(
