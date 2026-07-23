@@ -169,6 +169,35 @@ def test_standalone_validators_accept_discovery_and_reject_identity(
     assert "Skill identity" in json.loads(rejected.stdout)["error"]
 
 
+def test_adjudication_validator_accepts_only_bounded_reclassification(
+    tmp_path: Path,
+) -> None:
+    proposal = _proposal()
+    proposal["schema_version"] = 2
+    proposal["recommended_action"] = "continue_execution"
+    proposal["obligation_delta"] = [{
+        "obligation_id": "obligation-existing",
+        "from_state": "open",
+        "to_state": "open",
+        "criterion_ref": "graph-requirement:data.required-fields",
+        "from_requirement_refs": ["other.unclassified"],
+        "to_requirement_refs": ["data.required-fields"],
+    }]
+    path = tmp_path / "reclassification.json"
+    path.write_text(json.dumps(proposal), encoding="utf-8")
+
+    accepted = _run("validate-adjudication-proposal.py", path)
+    assert accepted.returncode == 0, accepted.stdout
+
+    proposal["obligation_delta"][0]["obligation"] = {
+        "epistemic_question": "silently replaced"
+    }
+    path.write_text(json.dumps(proposal), encoding="utf-8")
+    rejected = _run("validate-adjudication-proposal.py", path)
+    assert rejected.returncode == 1
+    assert "replace" in json.loads(rejected.stdout)["error"]
+
+
 def test_obligation_validator_requires_full_absent_to_open_body(
     tmp_path: Path,
 ) -> None:

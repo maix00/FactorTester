@@ -241,6 +241,7 @@ def advance_graph_branch(
             update=cycle_update,
             previous_checkpoint=previous_cycle_checkpoint,
             latest_trace_id=str(branch_row["latest_trace_id"]),
+            requirement_catalog=graph.get("requirement_catalog"),
         )
         entry_attempt = assess_departure(
             graph=graph,

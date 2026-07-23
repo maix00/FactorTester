@@ -31,6 +31,7 @@ def prepare_research_cycle_trace(
     update: Any,
     previous_checkpoint: dict[str, Any] | None,
     latest_trace_id: str,
+    requirement_catalog: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Validate one update and return trace event plus current checkpoint."""
     if update is None:
@@ -75,6 +76,7 @@ def prepare_research_cycle_trace(
         base,
         events=events,
         expected_base_hash=expected_base_hash,
+        requirement_catalog=requirement_catalog,
     )
     trace_event = {
         "schema_version": 1,

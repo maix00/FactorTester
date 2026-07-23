@@ -177,13 +177,25 @@ def _compact_deltas(
     value: Any,
     *,
     identifier: str,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    return [{
-        key: str(item.get(key) or "")
-        for key in (identifier, "from_state", "to_state")
-    } for item in value if isinstance(item, dict)]
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        delta: dict[str, Any] = {
+            key: str(item.get(key) or "")
+            for key in (identifier, "from_state", "to_state")
+        }
+        for key in (
+            "from_requirement_refs",
+            "to_requirement_refs",
+        ):
+            if key in item:
+                delta[key] = _refs(item.get(key))
+        result.append(delta)
+    return result
 
 
 def _object_hash(value: Any, field: str) -> str:

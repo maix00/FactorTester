@@ -106,7 +106,8 @@ def validate_adjudication_proposal(
         value.get("claim_evidence_delta")
     )
     value["obligation_delta"] = _obligation_deltas(
-        value.get("obligation_delta")
+        value.get("obligation_delta"),
+        schema_version=schema_version,
     )
     _require_explicit_noop(
         value,
@@ -232,7 +233,11 @@ def _claim_deltas(value: Any) -> list[dict[str, Any]]:
     return value
 
 
-def _obligation_deltas(value: Any) -> list[dict[str, Any]]:
+def _obligation_deltas(
+    value: Any,
+    *,
+    schema_version: int,
+) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         raise ValueError("obligation_delta must be an array")
     for item in value:
@@ -243,6 +248,41 @@ def _obligation_deltas(value: Any) -> list[dict[str, Any]]:
         if item.get("to_state") not in _OBLIGATION_STATES:
             raise ValueError("invalid obligation delta to_state")
         required_text(item.get("criterion_ref"), field="criterion_ref")
+        mapping_fields = {
+            "from_requirement_refs",
+            "to_requirement_refs",
+        }
+        present = mapping_fields.intersection(item)
+        if present:
+            if schema_version != 2:
+                raise ValueError(
+                    "requirement_refs reclassification requires "
+                    "adjudication schema_version 2"
+                )
+            if present != mapping_fields:
+                raise ValueError(
+                    "requirement_refs reclassification requires both "
+                    "from_requirement_refs and to_requirement_refs"
+                )
+            if item["from_state"] == "absent":
+                raise ValueError(
+                    "requirement_refs reclassification requires an "
+                    "existing obligation"
+                )
+            if "obligation" in item:
+                raise ValueError(
+                    "requirement_refs reclassification cannot replace "
+                    "the obligation body"
+                )
+            string_array(
+                item.get("from_requirement_refs"),
+                field="from_requirement_refs",
+            )
+            string_array(
+                item.get("to_requirement_refs"),
+                field="to_requirement_refs",
+                non_empty=True,
+            )
     return value
 
 

@@ -90,6 +90,36 @@ def validate_adjudication(value: dict[str, Any]) -> dict[str, Any]:
             "criterion_ref",
         ):
             _text(item.get(field), f"obligation_delta.{field}")
+        mapping_fields = {
+            "from_requirement_refs",
+            "to_requirement_refs",
+        }
+        present = mapping_fields.intersection(item)
+        if present:
+            if schema_version != 2 or present != mapping_fields:
+                raise ValueError(
+                    "requirement_refs reclassification requires schema_version "
+                    "2 and both from/to arrays"
+                )
+            if item["from_state"] == "absent":
+                raise ValueError(
+                    "requirement_refs reclassification requires an existing "
+                    "obligation"
+                )
+            if "obligation" in item:
+                raise ValueError(
+                    "requirement_refs reclassification cannot replace the "
+                    "obligation body"
+                )
+            _refs(
+                item.get("from_requirement_refs"),
+                "obligation_delta.from_requirement_refs",
+            )
+            _refs(
+                item.get("to_requirement_refs"),
+                "obligation_delta.to_requirement_refs",
+                required=True,
+            )
     warrant = value.get("decision_warrant")
     if not isinstance(warrant, dict):
         raise ValueError("decision_warrant must be an object")

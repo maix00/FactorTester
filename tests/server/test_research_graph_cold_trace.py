@@ -216,3 +216,36 @@ def test_report_delta_projection_reads_compact_event_receipts() -> None:
         "from_state": "unknown",
         "to_state": "supported",
     }]
+
+
+def test_compact_receipt_keeps_obligation_requirement_reclassification(
+) -> None:
+    events = [{
+        "event_type": "adjudication_proposed",
+        "proposal": {
+            "proposal_id": "proposal-reclassify",
+            "proposal_hash": "b" * 64,
+            "recommended_action": "continue_execution",
+            "claim_evidence_delta": [],
+            "obligation_delta": [{
+                "obligation_id": "obligation-1",
+                "from_state": "open",
+                "to_state": "open",
+                "from_requirement_refs": ["other.unclassified"],
+                "to_requirement_refs": ["data.required-fields"],
+            }],
+        },
+    }]
+
+    receipts = compact_research_cycle_event_receipts(events)
+    obligations, _ = research_cycle_deltas({
+        "research_cycle": {"event_receipts": receipts},
+    })
+
+    assert obligations == [{
+        "obligation_id": "obligation-1",
+        "from_state": "open",
+        "to_state": "open",
+        "from_requirement_refs": ["other.unclassified"],
+        "to_requirement_refs": ["data.required-fields"],
+    }]

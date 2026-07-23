@@ -17,6 +17,7 @@ def verify_research_cycle_trace(
     event: Any,
     projected_checkpoint: Any,
     resolved_events: list[dict[str, Any]] | None = None,
+    requirement_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Recompute one trace checkpoint without trusting its projection."""
     if not isinstance(event, dict) or event.get("schema_version") != 1:
@@ -61,6 +62,7 @@ def verify_research_cycle_trace(
         base,
         events=events,
         expected_base_hash=base["projection_hash"],
+        requirement_catalog=requirement_catalog,
     )
     projected = validate_research_cycle_checkpoint(projected_checkpoint)
     if projected["projection_hash"] != recomputed["projection_hash"]:

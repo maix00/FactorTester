@@ -148,6 +148,7 @@ def replay_shadow_trace(
                 previous_checkpoint=None,
                 previous_trace_id="",
                 graph_objects=graph_objects,
+                requirement_catalog=graph.get("requirement_catalog"),
             )
             if (
                 evidence.get("research_cycle") is not None
@@ -189,6 +190,7 @@ def replay_shadow_trace(
                 previous_checkpoint=cycle_checkpoint,
                 previous_trace_id=previous_trace_id,
                 graph_objects=graph_objects,
+                requirement_catalog=graph.get("requirement_catalog"),
             )
             if cycle_checkpoint is None:
                 return _summary(
@@ -387,6 +389,7 @@ def _cycle_from_evidence(
     previous_checkpoint: dict[str, Any] | None,
     previous_trace_id: str,
     graph_objects: dict[str, dict[str, Any]],
+    requirement_catalog: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     continuation = evidence.get("graph_continuation")
     if previous_checkpoint is None and isinstance(continuation, dict):
@@ -424,6 +427,7 @@ def _cycle_from_evidence(
                 evidence,
                 graph_objects,
             ),
+            requirement_catalog=requirement_catalog,
         )
     except ValueError:
         return None

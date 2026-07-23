@@ -328,7 +328,7 @@ def cycle_projection(value: Any) -> dict[str, Any]:
 
 def research_cycle_deltas(
     evidence: dict[str, Any],
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     cycle = evidence.get("research_cycle")
     events = cycle.get("events") if isinstance(cycle, dict) else []
     receipts = (
@@ -336,7 +336,7 @@ def research_cycle_deltas(
         if isinstance(cycle, dict)
         else []
     )
-    obligation_changes: list[dict[str, str]] = []
+    obligation_changes: list[dict[str, Any]] = []
     claim_changes: list[dict[str, str]] = []
     for event in events if isinstance(events, list) else []:
         if not isinstance(event, dict):
@@ -349,11 +349,13 @@ def research_cycle_deltas(
                 continue
             identifier = safe_identifier(item.get("obligation_id"))
             if identifier:
-                obligation_changes.append({
+                change: dict[str, Any] = {
                     "obligation_id": identifier,
                     "from_state": bounded_text(item.get("from_state"), 48),
                     "to_state": bounded_text(item.get("to_state"), 48),
-                })
+                }
+                _project_requirement_ref_delta(item, change)
+                obligation_changes.append(change)
         for item in proposal.get("claim_evidence_delta") or []:
             if not isinstance(item, dict):
                 continue
@@ -389,21 +391,38 @@ def _compact_cycle_deltas(
     value: Any,
     *,
     identifier: str,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    result = []
+    result: list[dict[str, Any]] = []
     for item in value:
         if not isinstance(item, dict):
             continue
         object_id = safe_identifier(item.get(identifier))
         if object_id:
-            result.append({
+            change: dict[str, Any] = {
                 identifier: object_id,
                 "from_state": bounded_text(item.get("from_state"), 48),
                 "to_state": bounded_text(item.get("to_state"), 48),
-            })
+            }
+            if identifier == "obligation_id":
+                _project_requirement_ref_delta(item, change)
+            result.append(change)
     return result
+
+
+def _project_requirement_ref_delta(
+    source: dict[str, Any],
+    target: dict[str, Any],
+) -> None:
+    for key in ("from_requirement_refs", "to_requirement_refs"):
+        refs = source.get(key)
+        if isinstance(refs, list):
+            target[key] = [
+                bounded_text(item, 160)
+                for item in refs
+                if isinstance(item, str) and item
+            ]
 
 
 def trial_plan_refs(evidence: dict[str, Any]) -> list[str]:
