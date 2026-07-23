@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from server.services import agent_flow
+from server.services.research_graph.packet_calibration_binding import (
+    bind_packet_calibration,
+)
 from server.services.research_graph.packet_budget import graph_packet_budget
 from server.services.research_graph.protocol import json_hash
 
@@ -63,6 +66,7 @@ def derive_token_metrics(
     graph: dict[str, Any],
     context: dict[str, Any],
     context_latency_ms: float,
+    calibration_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     contract = shadow_token_contract(
         graph_id=graph_id,
@@ -121,16 +125,30 @@ def derive_token_metrics(
         )
     )
     packet_budget = graph_packet_budget(graph)
+    calibration = bind_packet_calibration(
+        graph=graph,
+        context=context,
+        packet_budget=packet_budget,
+        cohort=cohort,
+        request=calibration_request,
+    )
+    calibrated_context_ceiling = int(
+        (calibration.get("summary") or {}).get(
+            "agent_context_byte_ceiling",
+            packet_budget["ceiling_bytes"],
+        )
+    )
     return {
         "routine_context_bytes": int(context["context_bytes"]),
-        "routine_context_ceiling_bytes": int(packet_budget["ceiling_bytes"]),
+        "routine_context_ceiling_bytes": calibrated_context_ceiling,
         "routine_context_headroom_bytes": (
-            int(packet_budget["ceiling_bytes"])
+            calibrated_context_ceiling
             - int(context["context_bytes"])
         ),
         "routine_context_latency_ms": round(context_latency_ms, 3),
         "packet_budget_policy_ref": packet_budget["policy_ref"],
-        "packet_budget_calibration_status": packet_budget[
+        "packet_budget_policy_status": packet_budget["calibration_status"],
+        "packet_budget_calibration_status": calibration[
             "calibration_status"
         ],
         "full_graph_loaded_for_routine": any(
@@ -162,9 +180,8 @@ def derive_token_metrics(
             if provider_actual_comparison
             else "mixed_or_fallback"
         ),
+        "packet_calibration": calibration,
     }
-
-
 def _side_rows(
     rows: list[dict[str, Any]],
     *,
@@ -222,6 +239,12 @@ def token_failures(metrics: dict[str, Any]) -> list[str]:
         failures.append("packet_budget_calibration")
     if not metrics["provider_actual_token_comparison"]:
         failures.append("provider_actual_token_comparison")
+    calibration = metrics.get("packet_calibration") or {}
+    if calibration.get("calibration_status") not in {
+        "provider_verified",
+        "legacy_schema_exempt",
+    }:
+        failures.append("packet_calibration_receipt")
     if metrics["full_graph_loaded_for_routine"]:
         failures.append("full_graph_loaded_for_routine")
     for field in (

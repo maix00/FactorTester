@@ -26,6 +26,11 @@ from server.services.agent_flow.verified_usage import (
     clear_usage_receipt_verifiers,
     register_usage_receipt_verifier,
 )
+from server.services.research_graph.packet_calibration import (
+    VerifiedPacketCalibration,
+    clear_packet_calibration_receipt_verifiers,
+    register_packet_calibration_receipt_verifier,
+)
 from server.services.research_graph.shadow_tokens import shadow_token_contract
 
 
@@ -56,6 +61,45 @@ class _E2EUsageVerifier:
             cache_read_tokens=int(payload["cache_read_tokens"]),
             provider_attestation=str(payload["provider_attestation"]),
             launcher_attestation="verified-by:e2e-provider@1",
+        )
+
+
+class _E2EPacketCalibrationVerifier:
+    """Test adapter proving that validation consumes an opaque receipt."""
+
+    def verify(
+        self,
+        receipt: str,
+        *,
+        expected_identity: dict[str, str],
+    ) -> VerifiedPacketCalibration:
+        payload = json.loads(receipt)
+        return VerifiedPacketCalibration(
+            receipt_ref=str(payload["receipt_ref"]),
+            receipt_hash=hashlib.sha256(receipt.encode()).hexdigest(),
+            identity=expected_identity,
+            covered_anchor_refs=list(payload["covered_anchor_refs"]),
+            covered_packet_kinds=list(payload["covered_packet_kinds"]),
+            covered_scenarios=list(payload["covered_scenarios"]),
+            sample_count=int(payload["sample_count"]),
+            maximum_serialized_bytes=int(
+                payload["maximum_serialized_bytes"]
+            ),
+            agent_context_byte_ceiling=int(
+                payload["agent_context_byte_ceiling"]
+            ),
+            maximum_runtime_input_tokens=int(
+                payload["maximum_runtime_input_tokens"]
+            ),
+            runtime_input_token_ceiling=int(
+                payload["runtime_input_token_ceiling"]
+            ),
+            e2e_latency_p50_ms=float(payload["e2e_latency_p50_ms"]),
+            e2e_latency_p95_ms=float(payload["e2e_latency_p95_ms"]),
+            e2e_latency_p99_ms=float(payload["e2e_latency_p99_ms"]),
+            truncated_rate=float(payload["truncated_rate"]),
+            rejected_rate=float(payload["rejected_rate"]),
+            failed_rate=float(payload["failed_rate"]),
         )
 
 
@@ -128,9 +172,14 @@ def _real_server(
     monkeypatch.setattr(Settings, "CACHE_DIR", database.parent)
     monkeypatch.setenv("FLASK_SECRET_KEY", secrets.token_hex(32))
     clear_usage_receipt_verifiers()
+    clear_packet_calibration_receipt_verifiers()
     register_usage_receipt_verifier(
         "e2e-provider",
         _E2EUsageVerifier(),
+    )
+    register_packet_calibration_receipt_verifier(
+        "e2e-provider",
+        _E2EPacketCalibrationVerifier(),
     )
     app = create_app()
     httpd = make_server("127.0.0.1", 0, app, threaded=True)
@@ -143,6 +192,7 @@ def _real_server(
         thread.join(timeout=10)
         httpd.server_close()
         clear_usage_receipt_verifiers()
+        clear_packet_calibration_receipt_verifiers()
 
 
 def _commit_usage(
@@ -657,6 +707,39 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             verified=True,
         )
 
+        budget_coverage = graph["agent_packet_budget"]["coverage"]
+        packet_case_count = (
+            len(budget_coverage["required_anchor_refs"])
+            * len(budget_coverage["required_packet_kinds"])
+            * len(budget_coverage["required_scenarios"])
+        )
+        packet_receipt = tmp_path / "packet-calibration.receipt"
+        packet_receipt.write_text(
+            json.dumps({
+                "receipt_ref": "e2e:packet-calibration",
+                "covered_anchor_refs": (
+                    budget_coverage["required_anchor_refs"]
+                ),
+                "covered_packet_kinds": (
+                    budget_coverage["required_packet_kinds"]
+                ),
+                "covered_scenarios": (
+                    budget_coverage["required_scenarios"]
+                ),
+                "sample_count": packet_case_count,
+                "maximum_serialized_bytes": 6000,
+                "agent_context_byte_ceiling": 7000,
+                "maximum_runtime_input_tokens": 1800,
+                "runtime_input_token_ceiling": 2100,
+                "e2e_latency_p50_ms": 80,
+                "e2e_latency_p95_ms": 120,
+                "e2e_latency_p99_ms": 180,
+                "truncated_rate": 0,
+                "rejected_rate": 0,
+                "failed_rate": 0,
+            }),
+            encoding="utf-8",
+        )
         validation = _run_json(
             factortester,
             [
@@ -672,6 +755,14 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 shadow_branch_id,
                 "--baseline-run-id",
                 baseline_run["run_id"],
+                "--packet-calibration-provider-id",
+                "e2e-provider",
+                "--packet-tokenizer-id",
+                "e2e-tokenizer",
+                "--packet-tokenizer-revision",
+                "e2e-tokenizer@1",
+                "--packet-calibration-receipt-file",
+                str(packet_receipt),
             ],
             env=env,
         )
@@ -691,6 +782,12 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         )
         assert metrics["provider_actual_token_comparison"] is True
         assert metrics["token_authority"] == "provider_actual"
+        assert (
+            metrics["packet_calibration"]["calibration_status"]
+            == "provider_verified"
+        )
+        assert metrics["routine_context_ceiling_bytes"] == 7000
+        assert "opaque-provider-receipt" not in json.dumps(validation)
 
         grill_file = tmp_path / "grill.json"
         grill_file.write_text(

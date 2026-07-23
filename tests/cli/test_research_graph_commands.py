@@ -358,6 +358,37 @@ def test_research_graph_cli_requires_explicit_gate_evidence(
     )
 
 
+def test_research_graph_cli_forwards_opaque_packet_calibration_receipt(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    receipt = tmp_path / "packet-calibration.receipt"
+    receipt.write_text("opaque-provider-receipt", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "validate", "factor-research", "9",
+        "--proposal-id", "proposal-9",
+        "--routine-instance-id", "instance-9",
+        "--routine-branch-id", "branch-9",
+        "--baseline-run-id", "baseline-9",
+        "--packet-calibration-provider-id", "provider-a",
+        "--packet-tokenizer-id", "tokenizer-a",
+        "--packet-tokenizer-revision", "revision-a",
+        "--packet-calibration-receipt-file", str(receipt),
+    ])
+
+    assert result.exit_code == 0, result.output
+    evidence = fake.validation[2]
+    assert evidence["packet_calibration_receipt"] == {
+        "provider_id": "provider-a",
+        "tokenizer_id": "tokenizer-a",
+        "tokenizer_revision": "revision-a",
+        "receipt": "opaque-provider-receipt",
+    }
+
+
 def test_research_graph_start_consumes_node_local_capability_resolution(
     tmp_path,
     monkeypatch,

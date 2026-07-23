@@ -81,6 +81,13 @@ def active_graph(graph_id: str) -> None:
 @click.option("--routine-instance-id", required=True)
 @click.option("--routine-branch-id", required=True)
 @click.option("--baseline-run-id", required=True)
+@click.option("--packet-calibration-provider-id")
+@click.option("--packet-tokenizer-id")
+@click.option("--packet-tokenizer-revision")
+@click.option(
+    "--packet-calibration-receipt-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 def validate_graph(
     graph_id: str,
     version: int,
@@ -88,6 +95,10 @@ def validate_graph(
     routine_instance_id: str,
     routine_branch_id: str,
     baseline_run_id: str,
+    packet_calibration_provider_id: str | None,
+    packet_tokenizer_id: str | None,
+    packet_tokenizer_revision: str | None,
+    packet_calibration_receipt_file: Path | None,
 ) -> None:
     """让服务器从 canonical state 推导 replay、shadow 与 token 证据。"""
     evidence = {
@@ -97,6 +108,26 @@ def validate_graph(
             "baseline_run_id": baseline_run_id,
         },
     }
+    calibration_values = (
+        packet_calibration_provider_id,
+        packet_tokenizer_id,
+        packet_tokenizer_revision,
+        packet_calibration_receipt_file,
+    )
+    if any(value is not None for value in calibration_values):
+        if not all(value is not None for value in calibration_values):
+            raise click.UsageError(
+                "packet calibration provider, tokenizer identity, revision, "
+                "and receipt file must be supplied together"
+            )
+        evidence["packet_calibration_receipt"] = {
+            "provider_id": packet_calibration_provider_id,
+            "tokenizer_id": packet_tokenizer_id,
+            "tokenizer_revision": packet_tokenizer_revision,
+            "receipt": packet_calibration_receipt_file.read_text(
+                encoding="utf-8"
+            ),
+        }
     click.echo(_json(client_from_config().validate_research_graph(
         graph_id,
         version,

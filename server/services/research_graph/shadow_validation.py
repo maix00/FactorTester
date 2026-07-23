@@ -42,6 +42,7 @@ def derive_activation_evidence(
     routine_instance_id: str,
     routine_branch_id: str,
     baseline_run_id: str,
+    packet_calibration_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not all((
         routine_instance_id,
@@ -84,6 +85,7 @@ def derive_activation_evidence(
         graph=graph,
         context=context,
         context_latency_ms=context_latency_ms,
+        calibration_request=packet_calibration_request,
     )
     token_failure_codes = token_failures(token_metrics)
     capability_complete = not (context.get("open_gaps") or [])

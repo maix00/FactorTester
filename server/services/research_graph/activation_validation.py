@@ -62,6 +62,9 @@ def record_validation(
         routine_instance_id=str(refs.get("routine_instance_id") or ""),
         routine_branch_id=str(refs.get("routine_branch_id") or ""),
         baseline_run_id=str(refs.get("baseline_run_id") or ""),
+        packet_calibration_request=evidence.get(
+            "packet_calibration_receipt"
+        ),
     )
     evidence_value["shadow_comparison_refs"] = deepcopy(refs)
     validation_id = json_hash(evidence_value)

@@ -97,22 +97,35 @@ def _agent_packet_budget(
     edges: list[dict[str, Any]],
     system_gate_ids: list[str],
 ) -> dict[str, Any]:
-    """Bind v9 to its checked local-anchor inventory, not a magic constant."""
+    """Declare what v9 calibration must prove before activation."""
     return {
-        "schema_version": 1,
-        "policy_ref": "agent-packet-budget@factor-research-v9",
-        "ceiling_bytes": 6400,
-        "observed_max_packet_bytes": 5628,
-        "sample_count": len(nodes) + len(edges) + len(system_gate_ids),
-        "sampled_anchor_refs": [
-            *(f"node:{item['node_id']}" for item in nodes),
-            *(f"edge:{item['edge_id']}" for item in edges),
-            *(f"system_gate:{item}" for item in system_gate_ids),
-        ],
-        "activation_measurements": [
-            "provider_actual_token_comparison",
-            "server_packet_latency",
-        ],
+        "schema_version": 2,
+        "policy_ref": "agent-packet-budget@2",
+        "protocol_hard_ceiling_bytes": 16 * 1024,
+        "coverage": {
+            "required_anchor_refs": [
+                *(f"node:{item['node_id']}" for item in nodes),
+                *(f"edge:{item['edge_id']}" for item in edges),
+                *(f"system_gate:{item}" for item in system_gate_ids),
+            ],
+            "required_packet_kinds": ["context", "next"],
+            "required_scenarios": ["typical", "max_legal"],
+            "minimum_samples_per_case": 1,
+        },
+        "thresholds": {
+            "minimum_byte_headroom_bytes": 512,
+            "minimum_byte_headroom_ratio": 0.10,
+            "minimum_token_headroom_ratio": 0.10,
+            "maximum_e2e_latency_p95_ms": 5000.0,
+            "maximum_truncated_rate": 0.0,
+            "maximum_rejected_rate": 0.0,
+            "maximum_failed_rate": 0.0,
+        },
+        "calibration_receipt_contract_ref": (
+            "provider-verified-packet-calibration@1"
+        ),
+        "calibration_receipt_ref": "",
+        "calibration_receipt_hash": "",
     }
 
 

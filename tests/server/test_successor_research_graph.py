@@ -306,31 +306,9 @@ def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
     assert all(item["industry_principle_zh"] for item in payload["category_contexts"])
 
 
-def test_v9_packet_budget_matches_every_declared_local_anchor() -> None:
+def test_v9_packet_budget_declares_calibration_policy_not_static_results() -> None:
     graph = build_successor_graph()
     budget = graph["agent_packet_budget"]
-    measured: dict[str, int] = {}
-    option_by_kind = {
-        "node": "--node",
-        "edge": "--edge",
-        "system_gate": "--system-gate",
-    }
-
-    for anchor_ref in budget["sampled_anchor_refs"]:
-        anchor_kind, local_ref = anchor_ref.split(":", 1)
-        result = CliRunner().invoke(
-            cli,
-            [
-                "graph",
-                "requirements",
-                option_by_kind[anchor_kind],
-                local_ref,
-                "--json",
-            ],
-        )
-        assert result.exit_code == 0, (anchor_ref, result.output)
-        measured[anchor_ref] = len(result.output.encode())
-
     expected_refs = {
         *(f"node:{item['node_id']}" for item in graph["nodes"]),
         *(f"edge:{item['edge_id']}" for item in graph["edges"]),
@@ -339,10 +317,20 @@ def test_v9_packet_budget_matches_every_declared_local_anchor() -> None:
             for item in graph["system_transition_policies"]
         ),
     }
-    assert set(measured) == expected_refs
-    assert len(measured) == budget["sample_count"]
-    assert max(measured.values()) == budget["observed_max_packet_bytes"]
-    assert max(measured.values()) <= budget["ceiling_bytes"]
+    assert budget["schema_version"] == 2
+    assert set(budget["coverage"]["required_anchor_refs"]) == expected_refs
+    assert budget["coverage"]["required_packet_kinds"] == ["context", "next"]
+    assert budget["coverage"]["required_scenarios"] == [
+        "typical",
+        "max_legal",
+    ]
+    assert budget["calibration_receipt_contract_ref"] == (
+        "provider-verified-packet-calibration@1"
+    )
+    assert budget["calibration_receipt_ref"] == ""
+    assert budget["calibration_receipt_hash"] == ""
+    assert "ceiling_bytes" not in budget
+    assert "observed_max_packet_bytes" not in budget
 
 
 def test_trial_execution_packet_covers_strategy_and_market_rules() -> None:
