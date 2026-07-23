@@ -312,6 +312,66 @@ def test_serialize_event_execution_accepts_orderflow_trace_list():
     strategy = serialized["engine_result"]["comparison"]["strategies"][0]
     assert strategy["execution_trace_points"] == 2
     assert strategy["execution_trace_checksum"]
+    assert set(serialized["metrics"]) == {"A1"}
+    assert serialized["groups"][0]["metrics_key"] == "A1"
+
+
+def test_serialize_event_execution_keeps_duplicate_display_metrics_distinct():
+    owners = [
+        {
+            "group_id": group_id,
+            "group_name": "A1",
+            "group_index": 0,
+            "product_path_selection_id": "sel-1",
+            "factor_alias": factor_alias,
+            "is_ls": False,
+        }
+        for group_id, factor_alias in (("factor-a-a1", "FactorA"), ("factor-b-a1", "FactorB"))
+    ]
+    portfolios = {
+        "factor-a-a1": {
+            "equity_curve": {
+                "2026-01-01T09:01:00+08:00": 100.0,
+                "2026-01-01T09:02:00+08:00": 101.0,
+            },
+        },
+        "factor-b-a1": {
+            "equity_curve": {
+                "2026-01-01T09:01:00+08:00": 100.0,
+                "2026-01-01T09:02:00+08:00": 99.0,
+            },
+        },
+    }
+    settings = {
+        owner["group_id"]: {
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+        }
+        for owner in owners
+    }
+
+    serialized = group_module._serialize_event_execution(
+        {
+            "group_owner": owners,
+            "engine_result": {
+                "engine": "native",
+                "portfolios": portfolios,
+                "target_trace": {},
+                "strategy_diagnostics": {},
+            },
+        },
+        settings_by_group=settings,
+        evaluation_split=None,
+    )
+
+    assert set(serialized["metrics"]) == {"factor-a-a1", "factor-b-a1"}
+    assert [group["metrics_key"] for group in serialized["groups"]] == [
+        "factor-a-a1",
+        "factor-b-a1",
+    ]
+    assert serialized["metrics"]["factor-a-a1"]["Total Return"] > 0
+    assert serialized["metrics"]["factor-b-a1"]["Total Return"] < 0
 
 
 def test_event_order_flow_detail_filters_by_group_and_timestamp_ms():

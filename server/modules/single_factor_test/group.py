@@ -2313,7 +2313,22 @@ def _event_group_detail(
         or {}
     ).get(strategy_id) or {}
     display_name = str(owner.get("group_name") or strategy_id)
-    summary = (serialized.get("metrics") or {}).get(display_name) or {}
+    serialized_group = next(
+        (
+            group for group in serialized.get("groups") or ()
+            if str(group.get("group_id") or "") == strategy_id
+        ),
+        {},
+    )
+    metrics_key = str(
+        serialized_group.get("metrics_key") or strategy_id or display_name
+    )
+    serialized_metrics = serialized.get("metrics") or {}
+    summary = (
+        serialized_metrics.get(metrics_key)
+        or serialized_metrics.get(display_name)
+        or {}
+    )
     detail = build_group_detail(
         0,
         products_by_group,
