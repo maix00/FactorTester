@@ -116,6 +116,18 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("graph") or {})
 
+    def revise_unused_research_graph_draft(
+        self,
+        graph: dict[str, Any],
+    ) -> dict[str, Any]:
+        graph_id = str(graph.get("graph_id") or "")
+        version = int(graph.get("version") or 0)
+        data = self._expect_success(self.session.put(
+            f"/api/research-graphs/{graph_id}/versions/{version}/unused-draft",
+            {"graph": graph},
+        ))
+        return dict(data.get("graph") or {})
+
     def list_research_graph_versions(
         self,
         graph_id: str,

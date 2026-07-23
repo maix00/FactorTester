@@ -45,6 +45,9 @@ from server.services.research_graph.governance_workflow import (
     record_proposal,
     record_proposal_review,
 )
+from server.services.research_graph.draft_revision import (
+    revise_unused_draft,
+)
 from server.services.research_graph.protocol import (
     GraphActivationBlocked,
     GraphVersionConflict,
@@ -84,5 +87,6 @@ __all__ = [
     "record_proposal_review",
     "record_validation",
     "register_graph",
+    "revise_unused_draft",
     "rollback_active_graph",
 ]

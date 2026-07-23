@@ -43,6 +43,21 @@ def publish_graph(graph_file: Path) -> None:
     click.echo(_json(client_from_config().publish_research_graph(graph)))
 
 
+@research_graph.command("revise-unused-draft")
+@click.argument(
+    "graph_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def revise_unused_draft(graph_file: Path) -> None:
+    """原子修订从未激活、实例化或进入治理的 Draft Graph。"""
+    graph = json.loads(graph_file.read_text(encoding="utf-8"))
+    if not isinstance(graph, dict):
+        raise click.ClickException("graph must be a JSON object")
+    click.echo(_json(
+        client_from_config().revise_unused_research_graph_draft(graph)
+    ))
+
+
 @research_graph.command("versions")
 @click.argument("graph_id")
 def graph_versions(graph_id: str) -> None:

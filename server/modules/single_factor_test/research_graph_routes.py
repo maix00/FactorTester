@@ -7,6 +7,7 @@ from flask import jsonify, request
 from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs
 from server.services.session_runtime import require_user
+from tools.data.account_manage import get_account, is_super_admin_account
 
 
 @sft_bp.post("/api/research-graphs/versions")
@@ -29,6 +30,40 @@ def create_research_graph_version():
         ) else 400
         return jsonify({"success": False, "error": str(exc)}), status
     return jsonify({"success": True, "graph": graph}), 201
+
+
+@sft_bp.put(
+    "/api/research-graphs/<graph_id>/versions/<int:version>/unused-draft"
+)
+def revise_unused_research_graph_draft(graph_id: str, version: int):
+    actor = require_user()
+    if not is_super_admin_account(get_account(actor)):
+        return jsonify({
+            "success": False,
+            "error": "only a super administrator may revise an unused draft",
+        }), 403
+    data = request.get_json(silent=True) or {}
+    graph = data.get("graph")
+    if not isinstance(graph, dict):
+        return jsonify({
+            "success": False,
+            "error": "graph must be a JSON object",
+        }), 400
+    if (
+        str(graph.get("graph_id") or "") != graph_id
+        or int(graph.get("version") or 0) != version
+    ):
+        return jsonify({
+            "success": False,
+            "error": "draft revision route identity does not match graph",
+        }), 400
+    try:
+        graph = research_graphs.revise_unused_draft(graph, actor=actor)
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except (TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "graph": graph})
 
 
 @sft_bp.get("/api/research-graphs/<graph_id>/versions")

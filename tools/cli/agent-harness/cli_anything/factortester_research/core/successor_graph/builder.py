@@ -80,6 +80,13 @@ def build_successor_graph() -> dict[str, Any]:
 def _change_manifest() -> dict[str, Any]:
     return {
         "parent_version": 8,
+        "draft_revision": {
+            "replaces_content_hash": (
+                "66f977ae88bbd3b97d4eed0a1738b58"
+                "bee295deeaae9e2f90affa0c2f4587ae8"
+            ),
+            "reason_code": "independent_activation_review_blockers",
+        },
         "summary_zh": (
             "按研究生命周期重编主路径，并加入版本化义务、逐项报告和系统门合同。"
         ),
