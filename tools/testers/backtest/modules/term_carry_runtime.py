@@ -13,38 +13,40 @@ from tools.testers.backtest.modules.target import (
     PairedTargetWeightIntent,
     TargetStrategyModule,
 )
-from tools.testers.backtest.modules.carry_validation import validate_carry_config
+from tools.testers.backtest.modules.term_carry_validation import (
+    validate_term_carry_config,
+)
 
 
 @dataclass
-class CarryStrategyStore:
+class TermCarryStrategyStore:
     directions: dict[tuple[Any, Any], int] = field(default_factory=dict)
     targets: dict[tuple[Any, Any], dict[Any, float]] = field(default_factory=dict)
     contract_cache: dict[tuple[Any, Any, int], tuple[Any, ...]] = field(default_factory=dict)
 
 
-def carry_strategy_store_for(state) -> CarryStrategyStore:
-    store = getattr(state, "carry_strategy_store", None)
+def term_carry_strategy_store_for(state) -> TermCarryStrategyStore:
+    store = getattr(state, "term_carry_strategy_store", None)
     if store is None:
-        store = CarryStrategyStore()
-        setattr(state, "carry_strategy_store", store)
+        store = TermCarryStrategyStore()
+        setattr(state, "term_carry_strategy_store", store)
     return store
 
 
-def build_carry_targets(state, ctx, module) -> None:
+def build_term_carry_targets(state, ctx, module) -> None:
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
-        if config.get(TargetStrategyModule.strategy_kind) != "carry":
+        if config.get(TargetStrategyModule.strategy_kind) != "term_carry":
             continue
         signals = ctx.get_for(module._signal_value_ref, strategy, {}) or {}
         products = ctx.get_for(ProductSelectionModule.products, strategy, ())
         targets, diagnostics = _strategy_targets(
             state, ctx, module, strategy, config, signals, products,
         )
-        intent_id = f"carry:{strategy.alias}:{ctx.timestamp}"
+        intent_id = f"term-carry:{strategy.alias}:{ctx.timestamp}"
         intent = PairedTargetWeightIntent(
             targets,
-            reason="carry",
+            reason="term_carry",
             parent_intent_id=intent_id,
         )
         ctx.set_for(TargetStrategyModule.target_weights, strategy, targets)
@@ -54,7 +56,7 @@ def build_carry_targets(state, ctx, module) -> None:
 
 def _strategy_targets(state, ctx, module, strategy, config, signals, products):
     products = tuple(products)
-    store = carry_strategy_store_for(state)
+    store = term_carry_strategy_store_for(state)
     prices = ctx.get(MarketDataModule.current_prices, {}) or {}
     tradable = ctx.get(MarketDataModule.current_tradable_status, None)
     entry = abs(float(config.get(module.entry_threshold, 0.0)))
@@ -62,7 +64,7 @@ def _strategy_targets(state, ctx, module, strategy, config, signals, products):
     near_rank = int(config.get(module.near_rank, 0))
     far_rank = int(config.get(module.far_rank, 1))
     gross = float(config.get(module.gross_weight, 1.0))
-    validate_carry_config(
+    validate_term_carry_config(
         near_rank=near_rank,
         far_rank=far_rank,
         entry=entry,
@@ -130,7 +132,7 @@ def _finite_signal(value) -> float | None:
 
 
 def _ranked_contracts(state, product, timestamp, depth: int) -> tuple[Any, ...]:
-    store = carry_strategy_store_for(state)
+    store = term_carry_strategy_store_for(state)
     resolver = state.market_data_store.trading_day_resolver
     day = (
         resolver.resolve_trading_day(timestamp, instrument=str(product))

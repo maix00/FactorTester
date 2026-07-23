@@ -50,7 +50,7 @@ _TERM_STRUCTURE_FLOWS = {
 _GROUP_STRATEGY_FLOWS = {"group_quantile_membership"}
 _THRESHOLD_STRATEGY_FLOWS = {"threshold_signal_target"}
 _LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
-_CARRY_STRATEGY_FLOWS = {"carry_target"}
+_TERM_CARRY_STRATEGY_FLOWS = {"term_carry_target"}
 _DAILY_MARK_TO_MARKET_FLOWS = {
     "register_daily_mark_to_market_notices",
     "apply_daily_mark_to_market",
@@ -125,9 +125,9 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
         excluded |= (
             _GROUP_STRATEGY_FLOWS
             | _THRESHOLD_STRATEGY_FLOWS
-            | _CARRY_STRATEGY_FLOWS
+            | _TERM_CARRY_STRATEGY_FLOWS
         )
-    elif strategy_kind == "carry":
+    elif strategy_kind == "term_carry":
         excluded |= (
             _GROUP_STRATEGY_FLOWS
             | _THRESHOLD_STRATEGY_FLOWS
@@ -137,13 +137,13 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
         excluded |= (
             _GROUP_STRATEGY_FLOWS
             | _LONG_SHORT_STRATEGY_FLOWS
-            | _CARRY_STRATEGY_FLOWS
+            | _TERM_CARRY_STRATEGY_FLOWS
         )
     else:
         excluded |= (
             _THRESHOLD_STRATEGY_FLOWS
             | _LONG_SHORT_STRATEGY_FLOWS
-            | _CARRY_STRATEGY_FLOWS
+            | _TERM_CARRY_STRATEGY_FLOWS
         )
     return frozenset(names - excluded)
 

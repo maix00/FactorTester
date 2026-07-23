@@ -79,7 +79,7 @@ class TargetStrategyModule(ExecutableModule):
             options=(
                 ("group", "分组"),
                 ("threshold", "阈值"),
-                ("carry", "Carry"),
+                ("term_carry", "Term Carry"),
             ),
             chip_template="策略意图: {value}",
             tab_label="分组数量",
