@@ -134,8 +134,8 @@ def _change_manifest() -> dict[str, Any]:
         "parent_version": 8,
         "draft_revision": {
             "replaces_content_hash": (
-                "dae9053ada256a60e8d1a3a69a8ad304"
-                "9324d501c3da229df80c4054a47aef52"
+                "829f1ee2b9834631bc79fabcd6679200"
+                "ba98097c8a354e88562f0b2e57f1c807"
             ),
             "reason_code": "independent_activation_review_blockers",
         },
