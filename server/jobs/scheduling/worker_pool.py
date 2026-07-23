@@ -546,7 +546,8 @@ class LongLivedWorkerPool:
                 return False
             worker = self._workers[worker_id]
             worker.cancel_value.value = 1
-            worker.cancel_requested_at = time.monotonic()
+            if worker.cancel_requested_at is None:
+                worker.cancel_requested_at = time.monotonic()
             return True
 
     def resume_step(self, job_id: str, command: dict[str, Any]) -> bool:

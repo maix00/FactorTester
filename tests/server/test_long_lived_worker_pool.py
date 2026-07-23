@@ -208,6 +208,39 @@ def test_cooperative_cancel_keeps_worker_and_forced_cancel_replaces_it() -> None
     assert replacement["alive"] is True
 
 
+def test_repeated_cancel_does_not_restart_forced_cancel_grace_period() -> None:
+    with LongLivedWorkerPool(size=1, cancel_grace_seconds=0.05) as pool:
+        pool.submit(
+            job_id="forced",
+            runner_path=f"{RUNNERS}:uncooperative_runner",
+            payload={"seconds": 5},
+        )
+        _collect(
+            pool,
+            lambda rows: any(
+                item.get("type") == "task_started"
+                and item.get("job_id") == "forced"
+                for item in rows
+            ),
+        )
+
+        assert pool.request_cancel("forced") is True
+        deadline = time.monotonic() + 1.0
+        rows = []
+        while time.monotonic() < deadline:
+            time.sleep(0.01)
+            assert pool.request_cancel("forced") is True
+            rows.extend(pool.poll())
+            if any(item.get("type") == "worker_terminated" for item in rows):
+                break
+
+    assert any(
+        item.get("type") == "worker_terminated"
+        and item.get("job_id") == "forced"
+        for item in rows
+    )
+
+
 def test_crashed_worker_is_reported_and_replaced() -> None:
     with LongLivedWorkerPool(size=1) as pool:
         original_pid = pool.submit(
