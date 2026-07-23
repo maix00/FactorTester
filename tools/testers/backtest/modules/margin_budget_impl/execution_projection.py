@@ -20,7 +20,16 @@ def order_components(entries, positions) -> list[OrderComponent]:
 
 
 def pool_equity(state, ctx, entries, cash_major: float) -> float:
-    prices = ctx.get(MarketDataModule.current_prices, {}) or {}
+    # ORDER events expose ``current_prices`` using the requested execution
+    # basis (for example next open), which may contain only the instruments
+    # with an executable row at that future price timestamp.  Existing
+    # portfolio equity must instead use the causal current traded/close view;
+    # settlement prices belong exclusively to the DMTM flow.  The order's
+    # effective execution price is still used by ``_apply_quantity`` below for
+    # the incremental projection.
+    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
+    prices = snapshot.get("close") if isinstance(snapshot, dict) else None
+    prices = prices or ctx.get(MarketDataModule.current_prices, {}) or {}
     unique = {}
     for strategy, _order, ledger, _historical in entries:
         unique.setdefault(id(ledger), (strategy, ledger))
