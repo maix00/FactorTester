@@ -20,7 +20,7 @@ from cli_anything.factortester_research.core.reporting import (
     canonical_report_snapshot,
     render_branch_report,
 )
-from cli_anything.factortester_research.core.reporting import writer
+from cli_anything.factortester_research.core.reporting import generation, writer
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.local_profile_contracts import _research_artifact
 
@@ -219,7 +219,7 @@ def test_index_projects_sections_for_the_current_swift_reader(tmp_path) -> None:
 def test_checkpoint_section_navigation_retains_latest_bounded_window(
     tmp_path,
 ) -> None:
-    for index in range(writer.MAX_INDEX_SECTIONS + 2):
+    for index in range(writer.index.MAX_INDEX_SECTIONS + 2):
         snapshot = _snapshot()
         snapshot["sections"][0].update({
             "section_id": f"checkpoint-{index:04d}",
@@ -228,11 +228,11 @@ def test_checkpoint_section_navigation_retains_latest_bounded_window(
         result = render_branch_report(snapshot, workspace_root=tmp_path)
 
     value = json.loads(result["index_path"].read_text(encoding="utf-8"))
-    assert len(value["sections"]) == writer.MAX_INDEX_SECTIONS
+    assert len(value["sections"]) == writer.index.MAX_INDEX_SECTIONS
     assert value["omitted_section_count"] == 2
     assert value["sections"][0]["created_at"] == 2.0
     assert value["sections"][-1]["created_at"] == float(
-        writer.MAX_INDEX_SECTIONS + 1
+        writer.index.MAX_INDEX_SECTIONS + 1
     )
 
 
@@ -279,7 +279,7 @@ def test_concurrent_branches_merge_under_one_work_package_lock(
     second["sections"][0]["branch_ref"] = (
         "graph-branch:instance-trend:branch-trend"
     )
-    original_load = writer._load_index
+    original_load = writer.index.load_index
     state = {"active": 0, "maximum": 0}
     state_lock = threading.Lock()
 
@@ -294,7 +294,7 @@ def test_concurrent_branches_merge_under_one_work_package_lock(
             with state_lock:
                 state["active"] -= 1
 
-    monkeypatch.setattr(writer, "_load_index", observed_load)
+    monkeypatch.setattr(writer.index, "load_index", observed_load)
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(
             lambda value: render_branch_report(value, workspace_root=tmp_path),
@@ -330,14 +330,18 @@ def test_existing_index_rejects_unknown_fields_at_every_level(
 
 def test_existing_index_is_size_and_count_bounded_before_merge(tmp_path) -> None:
     first = render_branch_report(_snapshot(), workspace_root=tmp_path)
-    first["index_path"].write_bytes(b"x" * (writer.MAX_INDEX_BYTES + 1))
+    first["index_path"].write_bytes(
+        b"x" * (writer.index.MAX_INDEX_BYTES + 1)
+    )
 
     with pytest.raises(ValueError, match="exceeds .* bytes"):
         render_branch_report(_snapshot(), workspace_root=tmp_path)
 
     first = render_branch_report(_snapshot(), workspace_root=tmp_path / "other")
     index = json.loads(first["index_path"].read_text())
-    index["sections"] = index["sections"] * (writer.MAX_INDEX_SECTIONS + 1)
+    index["sections"] = index["sections"] * (
+        writer.index.MAX_INDEX_SECTIONS + 1
+    )
     first["index_path"].write_text(json.dumps(index))
     with pytest.raises(ValueError, match="bounded array"):
         render_branch_report(_snapshot(), workspace_root=tmp_path / "other")
@@ -464,7 +468,7 @@ def test_failed_atomic_replace_preserves_previous_complete_report(
     previous = first["path"].read_bytes()
     snapshot["sections"][0]["body"] = "Changed bounded state."
     monkeypatch.setattr(
-        writer.os,
+        generation.os,
         "replace",
         lambda *_args: (_ for _ in ()).throw(OSError("injected failure")),
     )
@@ -493,14 +497,14 @@ def test_failed_generation_publish_restores_all_three_old_files(
     }
     previous = {name: path.read_bytes() for name, path in targets.items()}
     snapshot["sections"][0]["body"] = "Changed bounded state."
-    real_replace = writer.os.replace
+    real_replace = generation.os.replace
 
     def fail_selected_replace(source, destination):
         if Path(destination) == targets[failed_target]:
             raise OSError(f"injected {failed_target} failure")
         return real_replace(source, destination)
 
-    monkeypatch.setattr(writer.os, "replace", fail_selected_replace)
+    monkeypatch.setattr(generation.os, "replace", fail_selected_replace)
 
     with pytest.raises(OSError, match=f"injected {failed_target} failure"):
         render_branch_report(snapshot, workspace_root=tmp_path)
