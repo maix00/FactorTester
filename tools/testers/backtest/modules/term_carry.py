@@ -21,18 +21,22 @@ class TermCarryStrategyModule(TargetStrategyModule):
     label: ClassVar[str] = "Term Carry"
 
     _signal_value_ref: ClassVar[FieldRef[Any]] = FactorSignalModule.signal_value
-    near_rank: ClassVar[FieldRef[int]] = FieldRef("term_carry_near_rank")
-    far_rank: ClassVar[FieldRef[int]] = FieldRef("term_carry_far_rank")
-    entry_threshold: ClassVar[FieldRef[float]] = FieldRef(
+    term_carry_near_rank: ClassVar[FieldRef[int]] = FieldRef(
+        "term_carry_near_rank",
+    )
+    term_carry_far_rank: ClassVar[FieldRef[int]] = FieldRef(
+        "term_carry_far_rank",
+    )
+    term_carry_entry_threshold: ClassVar[FieldRef[float]] = FieldRef(
         "term_carry_entry_threshold",
     )
-    exit_threshold: ClassVar[FieldRef[float]] = FieldRef(
+    term_carry_exit_threshold: ClassVar[FieldRef[float]] = FieldRef(
         "term_carry_exit_threshold",
     )
-    gross_weight: ClassVar[FieldRef[float]] = FieldRef(
+    term_carry_gross_weight: ClassVar[FieldRef[float]] = FieldRef(
         "term_carry_gross_weight",
     )
-    diagnostics: ClassVar[FieldRef[Any]] = FieldRef(
+    term_carry_diagnostics: ClassVar[FieldRef[Any]] = FieldRef(
         "term_carry_diagnostics",
     )
 
@@ -76,16 +80,16 @@ class TermCarryStrategyModule(TargetStrategyModule):
             MarketDataModule.current_prices,
             MarketDataModule.current_tradable_status,
             MarketDataModule.trading_day_resolver,
-            near_rank,
-            far_rank,
-            entry_threshold,
-            exit_threshold,
-            gross_weight,
+            term_carry_near_rank,
+            term_carry_far_rank,
+            term_carry_entry_threshold,
+            term_carry_exit_threshold,
+            term_carry_gross_weight,
         ),
         outputs=(
             TargetStrategyModule.target_weights,
             TargetStrategyModule.trade_intent,
-            diagnostics,
+            term_carry_diagnostics,
         ),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,

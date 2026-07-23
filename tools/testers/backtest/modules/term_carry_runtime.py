@@ -51,7 +51,7 @@ def build_term_carry_targets(state, ctx, module) -> None:
         )
         ctx.set_for(TargetStrategyModule.target_weights, strategy, targets)
         ctx.set_for(TargetStrategyModule.trade_intent, strategy, intent)
-        ctx.set_for(module.diagnostics, strategy, diagnostics)
+        ctx.set_for(module.term_carry_diagnostics, strategy, diagnostics)
 
 
 def _strategy_targets(state, ctx, module, strategy, config, signals, products):
@@ -59,11 +59,11 @@ def _strategy_targets(state, ctx, module, strategy, config, signals, products):
     store = term_carry_strategy_store_for(state)
     prices = ctx.get(MarketDataModule.current_prices, {}) or {}
     tradable = ctx.get(MarketDataModule.current_tradable_status, None)
-    entry = abs(float(config.get(module.entry_threshold, 0.0)))
-    exit_at = abs(float(config.get(module.exit_threshold, 0.0)))
-    near_rank = int(config.get(module.near_rank, 0))
-    far_rank = int(config.get(module.far_rank, 1))
-    gross = float(config.get(module.gross_weight, 1.0))
+    entry = abs(float(config.get(module.term_carry_entry_threshold, 0.0)))
+    exit_at = abs(float(config.get(module.term_carry_exit_threshold, 0.0)))
+    near_rank = int(config.get(module.term_carry_near_rank, 0))
+    far_rank = int(config.get(module.term_carry_far_rank, 1))
+    gross = float(config.get(module.term_carry_gross_weight, 1.0))
     validate_term_carry_config(
         near_rank=near_rank,
         far_rank=far_rank,
