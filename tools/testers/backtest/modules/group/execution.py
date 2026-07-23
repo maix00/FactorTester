@@ -14,6 +14,9 @@ from tools.testers.backtest.modules.order_lifecycle import (
     create_order_attempt,
     record_order_action,
 )
+from tools.testers.backtest.modules.order_lifecycle.offsets import (
+    reclassify_deferred_close_today,
+)
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 from tools.testers.backtest.modules.time_index_lookup import signal_timestamps
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
@@ -64,6 +67,12 @@ def schedule_order_execution(state, ctx) -> None:
             if schedule is None:
                 continue
             execution_ts, price_ts = schedule
+            reclassify_deferred_close_today(
+                order,
+                signal_timestamp=ctx.timestamp,
+                market_timestamp=price_ts,
+                trading_day_resolver=state.market_data_store.trading_day_resolver,
+            )
             apply_pending_conflict(
                 state, strategy, order, ctx.timestamp, pending, conflict,
             )
