@@ -34,9 +34,11 @@ _TRANSITION_FIELDS = {
     "evidence_refs", "trial_plan_refs", "obligation_refs", "claim_refs",
     "job_refs", "run_refs", "obligation_changes", "claim_changes",
     "delta_refs", "entry_resolution", "report_fragment_ref", "report_items",
+    "obligation_presentations", "evidence_presentations",
 }
 _TRANSITION_OPTIONAL_FIELDS = {
     "delta_refs", "entry_resolution", "report_fragment_ref", "report_items",
+    "obligation_presentations", "evidence_presentations",
 }
 _REPORT_ITEM_FIELDS = {
     "report_item_ref", "report_requirement_id", "subject_ref", "content_kind",
@@ -63,6 +65,10 @@ _OBLIGATION_FIELDS = {
 }
 _OBLIGATION_CHANGE_FIELDS = {"obligation_id", "from_state", "to_state"}
 _CLAIM_CHANGE_FIELDS = {"claim_id", "from_state", "to_state"}
+_OBLIGATION_PRESENTATION_FIELDS = {"obligation_ref", "question_summary"}
+_EVIDENCE_PRESENTATION_FIELDS = {
+    "evidence_ref", "title", "claim_summary",
+}
 
 
 def canonical_carrier(carrier: Any) -> dict[str, Any]:
@@ -203,6 +209,33 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
             safe_id(item[identifier_field], identifier_field)
             bounded_text(item["from_state"], "from_state")
             bounded_text(item["to_state"], "to_state")
+    transition["obligation_presentations"] = _objects(
+        transition.get("obligation_presentations", []),
+        _OBLIGATION_PRESENTATION_FIELDS,
+        "obligation_presentations",
+    )
+    for item in transition["obligation_presentations"]:
+        reference(item["obligation_ref"], "obligation_ref")
+        bounded_text(
+            item["question_summary"],
+            "question_summary",
+            maximum=240,
+        )
+    transition["evidence_presentations"] = _objects(
+        transition.get("evidence_presentations", []),
+        _EVIDENCE_PRESENTATION_FIELDS,
+        "evidence_presentations",
+    )
+    for item in transition["evidence_presentations"]:
+        reference(item["evidence_ref"], "evidence_ref")
+        if item["title"]:
+            bounded_text(item["title"], "title", maximum=160)
+        if item["claim_summary"]:
+            bounded_text(
+                item["claim_summary"],
+                "claim_summary",
+                maximum=240,
+            )
     if "entry_resolution" in transition:
         transition["entry_resolution"] = _entry_resolution(
             transition["entry_resolution"]
