@@ -181,6 +181,27 @@ def fake_server() -> Iterator[str]:
             etag="sha256:timeline",
         )
 
+    @app.get(
+        "/api/profile-research/<work_package_ref>/branches/<branch_id>/"
+        "checkpoints/<trace_id>/report-carrier"
+    )
+    def profile_research_report_carrier(
+        work_package_ref: str,
+        branch_id: str,
+        trace_id: str,
+    ):
+        assert session.get("username") == "alice"
+        assert work_package_ref == "work-package:instance-1"
+        assert branch_id == "branch-1"
+        assert trace_id == "trace-1"
+        return jsonify(
+            success=True,
+            schema_version=2,
+            work_package_ref=work_package_ref,
+            branch_ref="graph-branch:instance-1:branch-1",
+            checkpoint_ref="trace:trace-1",
+        )
+
     @app.get("/api/testers/modules")
     def modules():
         parent = request.args.get("parent")
@@ -285,6 +306,11 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         limit=11,
         after="timeline-cursor",
     )["items"] == [{"step_ref": "trace:trace-1"}]
+    assert client.get_profile_research_report_carrier(
+        "work-package:instance-1",
+        "branch-1",
+        "trace-1",
+    )["checkpoint_ref"] == "trace:trace-1"
     assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
     assert client.data_availability(

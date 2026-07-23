@@ -635,6 +635,27 @@ def test_graph_upgrade_remains_one_work_package_and_one_hypothesis_timeline(
         "trace:trace-000001",
         "trace:trace-000000",
     ]
+    historical = service.get_report_checkpoint(
+        owner="alice",
+        work_package_ref="work-package:instance-a",
+        branch_id="branch-v8",
+        trace_id="trace-000002",
+    )
+    assert historical["graph_ref"] == "factor-research@v6"
+    assert historical["branch_ref"] == (
+        "graph-branch:instance-a:branch-0000"
+    )
+    assert historical["checkpoint_ref"] == "trace:trace-000002"
+    with pytest.raises(
+        ValueError,
+        match="no complete Research Cycle checkpoint",
+    ):
+        service.get_report_checkpoint(
+            owner="alice",
+            work_package_ref="work-package:instance-a",
+            branch_id="branch-v8",
+            trace_id="trace-v8-1",
+        )
 
 
 def test_projection_exposes_server_profile_ownership_and_trace_actor(
@@ -1022,6 +1043,66 @@ def test_list_detail_and_timeline_are_bounded_source_free_and_keyset_paged(
     assert len(orjson.dumps(timeline)) < 64 * 1024
 
 
+def test_historical_report_carrier_is_one_exact_read_without_head_changes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "historical-carrier.sqlite"
+    _seed(path)
+    statements: list[str] = []
+    real_connect = connect_sqlite
+
+    def traced_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(projection_service, "connect_sqlite", traced_connect)
+    service = _service(path, monkeypatch)
+    with connect_sqlite(path) as conn:
+        before = dict(conn.execute(
+            "SELECT latest_trace_id, updated_at FROM research_graph_branches "
+            "WHERE instance_id='instance-a' AND branch_id='branch-0000'"
+        ).fetchone())
+
+    carrier = service.get_report_checkpoint(
+        owner="alice",
+        work_package_ref="work-package:instance-a",
+        branch_id="branch-0000",
+        trace_id="trace-000002",
+    )
+
+    assert carrier["checkpoint_ref"] == "trace:trace-000002"
+    assert carrier["graph_ref"] == "factor-research@v6"
+    assert carrier["latest_transition"]["created_at"] == 1002.0
+    assert carrier["evidence_refs"] == ["artifact:evidence-2"]
+    normalized = [
+        " ".join(statement.upper().split())
+        for statement in statements
+    ]
+    assert sum(item.startswith("SELECT ") for item in normalized) == 1
+    assert not any(item.startswith((
+        "INSERT ",
+        "UPDATE ",
+        "DELETE ",
+        "REPLACE ",
+    )) for item in normalized)
+    with connect_sqlite(path) as conn:
+        after = dict(conn.execute(
+            "SELECT latest_trace_id, updated_at FROM research_graph_branches "
+            "WHERE instance_id='instance-a' AND branch_id='branch-0000'"
+        ).fetchone())
+    assert after == before
+
+    with pytest.raises(KeyError):
+        service.get_report_checkpoint(
+            owner="bob",
+            work_package_ref="work-package:instance-a",
+            branch_id="branch-0000",
+            trace_id="trace-000002",
+        )
+
+
 def test_projection_uses_one_read_and_owner_scope_returns_not_found(
     tmp_path,
     monkeypatch,
@@ -1189,12 +1270,19 @@ def test_authenticated_routes_emit_etag_and_honor_conditional_reads(
         "/api/profile-research/"
         "work-package:instance-a/branches/branch-0000"
     )
+    carrier = app_client.get(
+        "/api/profile-research/"
+        "work-package:instance-a/branches/branch-0000/"
+        "checkpoints/trace-000002/report-carrier"
+    )
     assert detail.status_code == 200
     assert len(detail.get_json()["branches"]) == 3
     assert branch.status_code == 200
     assert branch.get_json()["branch_ref"].endswith(":branch-0000")
     assert timeline.status_code == 200
     assert len(timeline.get_json()["items"]) == 3
+    assert carrier.status_code == 200
+    assert carrier.get_json()["checkpoint_ref"] == "trace:trace-000002"
 
 
 def test_routes_fail_closed_for_other_owner_and_invalid_paging(

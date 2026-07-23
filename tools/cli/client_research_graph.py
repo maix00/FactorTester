@@ -63,6 +63,18 @@ class ResearchGraphClientMixin(ClientMixinBase):
             f"/api/profile-research/{work_package_ref}/branches/{branch_id}"
         ))
 
+    def get_profile_research_report_carrier(
+        self,
+        work_package_ref: str,
+        branch_id: str,
+        trace_id: str,
+    ) -> dict[str, Any]:
+        """Read one trusted historical Carrier without changing research state."""
+        return self._expect_success(self.session.get(
+            f"/api/profile-research/{work_package_ref}/branches/{branch_id}/"
+            f"checkpoints/{trace_id}/report-carrier"
+        ))
+
     def list_profile_research_branch_timeline(
         self,
         work_package_ref: str,

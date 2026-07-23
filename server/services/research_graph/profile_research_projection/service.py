@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import orjson
 import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
+
+from server.services.research_graph.report_checkpoint import (
+    report_checkpoint_projection,
+)
 
 from .branch import branch_projection
 from .queries import (
@@ -18,6 +23,7 @@ from .queries import (
     WORK_PACKAGE_DETAIL_SQL,
     WORK_PACKAGE_TIMELINE_AFTER_SQL,
     WORK_PACKAGE_TIMELINE_FIRST_SQL,
+    REPORT_CHECKPOINT_SQL,
 )
 from .refs import (
     _identifier,
@@ -307,3 +313,51 @@ class ProfileResearchProjection:
             "items": items,
             "next_cursor": next_cursor,
         })
+
+    def get_report_checkpoint(
+        self,
+        *,
+        owner: str,
+        work_package_ref: str,
+        branch_id: str,
+        trace_id: str,
+    ) -> dict[str, Any]:
+        """Read one immutable historical Carrier without touching current heads."""
+        work_package_id = parse_work_package_ref(work_package_ref)
+        branch_id = _identifier(branch_id, field="branch_id")
+        trace_id = _identifier(trace_id, field="trace_id")
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            row = conn.execute(
+                REPORT_CHECKPOINT_SQL,
+                (branch_id, trace_id, owner, work_package_id),
+            ).fetchone()
+        if row is None:
+            raise KeyError("historical report checkpoint not found")
+        evidence = orjson.loads(row["evidence_json"] or "{}")
+        checkpoint = evidence.get("research_cycle_checkpoint")
+        if not isinstance(checkpoint, dict):
+            raise ValueError(
+                "historical trace has no complete Research Cycle checkpoint"
+            )
+        carrier = report_checkpoint_projection(
+            instance_id=str(row["trace_instance_id"]),
+            work_package_id=str(row["work_package_id"]),
+            branch_id=str(row["trace_branch_id"]),
+            workspace_id=str(row["workspace_id"]),
+            graph_id=str(row["graph_id"]),
+            graph_version=int(row["graph_version"]),
+            title=str(row["label"]),
+            product_group=str(row["product_group"]),
+            current_node=str(row["to_node"]),
+            status=str(row["branch_status"]),
+            trace_id=str(row["trace_id"]),
+            edge_id=str(row["edge_id"]),
+            from_node=str(row["from_node"]),
+            created_at=float(row["trace_created_at"]),
+            checkpoint=checkpoint,
+            trace_evidence=evidence,
+            evidence_refs=evidence.get("evidence_refs") or [],
+        )
+        if carrier is None:
+            raise ValueError("historical trace cannot produce a report Carrier")
+        return bounded_projection(carrier)

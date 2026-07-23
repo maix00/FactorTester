@@ -146,3 +146,24 @@ def list_profile_research_branch_timeline(
     except (KeyError, TypeError, ValueError) as exc:
         return _error(exc)
     return _response(payload)
+
+
+@sft_bp.get(
+    "/api/profile-research/<work_package_ref>/branches/<branch_id>/"
+    "checkpoints/<trace_id>/report-carrier"
+)
+def get_profile_research_report_carrier(
+    work_package_ref: str,
+    branch_id: str,
+    trace_id: str,
+):
+    try:
+        payload = _projection.get_report_checkpoint(
+            owner=require_user(),
+            work_package_ref=work_package_ref,
+            branch_id=branch_id,
+            trace_id=trace_id,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return _error(exc)
+    return _response(payload)

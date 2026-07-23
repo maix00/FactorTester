@@ -6,6 +6,7 @@ from .detail import (
     WORK_PACKAGE_DETAIL_SQL,
 )
 from .listing import LIST_AFTER_SQL, LIST_FIRST_SQL
+from .checkpoint import REPORT_CHECKPOINT_SQL
 from .timeline import (
     TIMELINE_AFTER_SQL,
     TIMELINE_FIRST_SQL,
