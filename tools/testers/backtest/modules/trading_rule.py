@@ -782,6 +782,9 @@ def _settlement_price_for_product(
         field_value = _positive_number_or_none(fields.get(field_name))
         if field_value is not None:
             return field_value, field_name
+    fallback = _positive_number_or_none(_lookup_product_value(close_prices, product))
+    if fallback is not None:
+        return fallback, "close"
     if require_exact:
         context = _settlement_missing_context(
             timestamp=timestamp,
@@ -789,9 +792,6 @@ def _settlement_price_for_product(
             source=source,
         )
         raise KeyError(f"exact daily mark-to-market requires settlement price for {product}{context}")
-    fallback = _positive_number_or_none(_lookup_product_value(close_prices, product))
-    if fallback is not None:
-        return fallback, "close"
     raise KeyError(f"daily mark-to-market requires price for {product}")
 
 

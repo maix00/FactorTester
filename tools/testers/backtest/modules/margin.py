@@ -369,7 +369,9 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
             quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
             if abs(quantity) <= 1e-12:
                 continue
-            required = _required_margin_for_position(state, ctx, ledger_config, product, quantity)
+            required = _required_margin_for_position(
+                state, ctx, ledger_config, product, entry,
+            )
             reserved = _entry_margin_major(entry)
             requirements[product] = required
             total_required += required
@@ -494,7 +496,9 @@ def _liquidation_orders_for_deficit(
         quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
         if abs(quantity) <= 1e-12:
             continue
-        required = _required_margin_for_position(state, ctx, ledger_config, product, quantity)
+        required = _required_margin_for_position(
+            state, ctx, ledger_config, product, entry,
+        )
         if required <= 0:
             continue
         candidates.append((required, product, entry, quantity, required / max(abs(quantity), 1e-12)))
@@ -522,13 +526,20 @@ def _liquidation_orders_for_deficit(
     return orders
 
 
-def _required_margin_for_position(state: Any, ctx: Any, ledger_config: Any, product: Any, quantity: float) -> float:
+def _required_margin_for_position(
+    state: Any,
+    ctx: Any,
+    ledger_config: Any,
+    product: Any,
+    entry: Any,
+) -> float:
     from tools.testers.backtest.modules.market_data import MarketDataModule, contract_multiplier_from_fields, historical_fields_for_product
     from tools.testers.backtest.modules.ledger_module import _market_margin_ratio
 
     historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
     fields = historical_fields_for_product(historical_fields, product)
-    price = _margin_requirement_price(ctx, product)
+    quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
+    price = _position_margin_basis_price(entry, product)
     multiplier = contract_multiplier_from_fields(
         historical_fields,
         product,
@@ -540,20 +551,21 @@ def _required_margin_for_position(state: Any, ctx: Any, ledger_config: Any, prod
     return abs(quantity) * price * multiplier * ratio
 
 
-def _margin_requirement_price(ctx: Any, product: Any) -> float:
-    from tools.testers.backtest.modules.market_data import MarketDataModule
+def _position_margin_basis_price(entry: Any, product: Any) -> float:
+    """Return the actual transaction basis carried by an open position.
 
-    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
-    for field in ("settlement", "close"):
-        mapping = snapshot.get(field) or {}
-        price = _positive_finite_price_or_none(_lookup_product_value(mapping, product))
-        if price is not None:
-            return price
-    prices = ctx.get(MarketDataModule.current_prices, {}) or {}
-    price = _positive_finite_price_or_none(_lookup_product_value(prices, product))
-    if price is None:
-        raise KeyError(f"margin requirement requires current price for {product}")
-    return price
+    Margin accounting freezes each fill using its final execution price
+    (including slippage).  A later margin-ratio check may change the required
+    ratio, but must not silently replace that transaction basis with a market
+    close or settlement snapshot.  DMTM owns settlement and resets lots to the
+    settlement price explicitly, so the same position basis remains sufficient
+    after daily settlement.
+    """
+    from tools.testers.backtest.modules.ledger_impl.margin_ratios import (
+        position_margin_basis_price,
+    )
+
+    return position_margin_basis_price(entry, product)
 
 
 def _positive_finite_price_or_none(value: Any) -> float | None:

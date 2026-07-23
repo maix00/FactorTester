@@ -23,6 +23,7 @@ from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.cash_pool import CashPoolModule, cash_for_ledger, set_cash_for_ledger_pool
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
@@ -35,6 +36,9 @@ from tools.testers.backtest.modules.trading_rule import (
 from tools.testers.backtest.modules.margin import (
     MarginModule, _apply_margin_requirement_change, _handle_margin_liquidation_notice,
     _resolve_margin_mode, _resolve_margin_ratio, product_uses_margin_accounting,
+)
+from tools.testers.backtest.modules.margin_risk.utilization import (
+    _pool_valuation_prices,
 )
 
 
@@ -543,7 +547,7 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 12.0, False)]
 
 
-def test_exact_daily_mark_to_market_missing_settlement_at_notice_raises():
+def test_exact_daily_mark_to_market_missing_settlement_falls_back_and_warns():
     product = _product()
     strategy = Strategy(alias="S")
     config = StrategyConfig(
@@ -579,8 +583,16 @@ def test_exact_daily_mark_to_market_missing_settlement_at_notice_raises():
         }
     })
 
-    with pytest.raises(KeyError, match="exact daily mark-to-market requires settlement price"):
-        _apply_daily_mark_to_market(account, ctx)
+    _apply_daily_mark_to_market(account, ctx)
+
+    entry = ledger.get(_positions_ref())[product]
+    assert entry.settlement_price == pytest.approx(12.0)
+    rows = [
+        row for row in account.runtime_info_rows
+        if row.get("code") == "daily_mark_to_market_price_fallback"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["details"]["fallback"] == "close"
 
 
 def test_non_dmtm_ledger_event_does_not_apply_daily_mark_to_market_or_require_settlement():
@@ -896,7 +908,7 @@ def test_daily_mark_to_market_records_settlement_close_fallback_interval():
     assert details["end"].startswith("2026-03-11")
 
 
-def test_exact_daily_mark_to_market_missing_settlement_reports_event_context():
+def test_exact_daily_mark_to_market_missing_all_prices_reports_event_context():
     product = _product()
 
     with pytest.raises(KeyError) as exc:
@@ -904,7 +916,7 @@ def test_exact_daily_mark_to_market_missing_settlement_reports_event_context():
             product,
             {},
             {},
-            {product: 12.0},
+            {},
             require_exact=True,
             timestamp=pd.Timestamp("2024-02-23 00:00:00.000000001", tz="Asia/Shanghai"),
             trading_day="2024-02-22",
@@ -1291,10 +1303,10 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
 
     queue.run_until_drained()
 
-    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(13.8)
-    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(2.0)
-    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(13.8)
+    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(20.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(9.8)
+    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(20.0 / 12.0)
+    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(9.8)
     assert captured_orders
     order = captured_orders[0].payload
     assert order.instrument is product
@@ -1460,15 +1472,15 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
     entry = ledger.get(_positions_ref())[product]
     assert _cash_major(state, ledger) == pytest.approx(0.0)
     assert entry.margin_reserved.to_major() == pytest.approx(12.0)
-    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(13.8)
-    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(2.0)
-    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(13.8)
+    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(20.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(9.8)
+    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(20.0 / 12.0)
+    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(9.8)
     assert queue.pending_count_by_kind(EventKind.TRADE_INTENT) == 1
     assert queue.pending_count_by_kind(EventKind.ORDER) == 0
 
 
-def test_margin_requirement_uses_close_when_settlement_exists_only_for_another_contract():
+def test_margin_requirement_uses_position_fill_basis_not_market_snapshot_price():
     product = _product()
     other_product = _product()
     strategy = Strategy(alias="S")
@@ -1500,10 +1512,10 @@ def test_margin_requirement_uses_close_when_settlement_exists_only_for_another_c
             )],
         },
     )
-    # Settlement is sparse across contract lifecycles.  A settlement observed
-    # for another contract must not hide this held contract's causal close.
+    # Margin was opened at 10.  Neither a later close nor a settlement from
+    # another contract may rewrite the actual fill basis used for margin.
     ctx.set(MarketDataModule.current_market_snapshot, {
-        "settlement": {other_product: 9.0},
+        "settlement": {product: 99.0, other_product: 9.0},
         "close": {product: 12.0},
     })
     ctx.set(MarketDataModule.current_historical_fields, {
@@ -1517,9 +1529,12 @@ def test_margin_requirement_uses_close_when_settlement_exists_only_for_another_c
 
     entry = ledger.get(_positions_ref())[product]
     assert entry.margin_reserved is not None
-    assert entry.margin_reserved.to_major() == pytest.approx(24.0)
-    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
-    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(24.0 / 102.0)
+    assert entry.margin_reserved.to_major() == pytest.approx(20.0)
+    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(20.0)
+    assert _pool_valuation_prices(
+        ctx, [ledger], LedgerModule, MarketDataModule,
+    ) == {product: 12.0}
+    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(20.0 / 102.0)
 
 
 def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_layer():
@@ -1619,7 +1634,7 @@ def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
     entry = ledger.get(_positions_ref())[product]
     assert _cash_major(state, ledger) == pytest.approx(15.0)
     assert entry.margin_reserved.to_major() == pytest.approx(17.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(7.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(3.0)
 
 
 def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode_does_not_need_split():

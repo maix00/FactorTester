@@ -504,8 +504,8 @@ def test_margin_recalculation_uses_remaining_position_side_not_order_side():
 
     entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
     assert entry.quantity == pytest.approx(6.0)
-    assert entry.margin_reserved.to_major() == pytest.approx(6.0 * 110.0 * 0.10)
-    assert _cash_major(account, s) == pytest.approx(999_974.0)
+    assert entry.margin_reserved.to_major() == pytest.approx(6.0 * 100.0 * 0.10)
+    assert _cash_major(account, s) == pytest.approx(999_980.0)
 
 
 def test_auto_margin_mode_cash_accounts_products_without_margin_rules():

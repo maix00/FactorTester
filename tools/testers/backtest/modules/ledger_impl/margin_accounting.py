@@ -18,7 +18,11 @@ from tools.testers.backtest.modules.trading_rule import (
 )
 
 from .cost_basis import apply_lot_fill, same_direction, sign, weighted_average_cost
-from .margin_ratios import entry_margin_major, resolved_margin_ratio_for_position_after_fill
+from .margin_ratios import (
+    entry_margin_major,
+    position_margin_basis_price,
+    resolved_margin_ratio_for_position_after_fill,
+)
 
 
 def apply_margin_accounting_fill(
@@ -62,10 +66,15 @@ def apply_margin_accounting_fill(
         )
         entry.average_cost = new_cost
     entry.quantity = int(round(new_quantity)) if isinstance(entry.quantity, int) else new_quantity
+    basis_price = (
+        position_margin_basis_price(entry, product)
+        if abs(new_quantity) > 1e-12
+        else price
+    )
     after_margin = (
-        abs(new_quantity) * price * multiplier
+        abs(new_quantity) * basis_price * multiplier
         * resolved_margin_ratio_for_position_after_fill(
-            strategy_config, fields, new_quantity, price, multiplier, ledger_config,
+            strategy_config, fields, new_quantity, basis_price, multiplier, ledger_config,
         )
     )
     entry.margin_reserved = DataMoney.from_major(

@@ -55,6 +55,43 @@ def entry_margin_major(entry) -> float:
     return float(entry.margin_reserved.to_major())
 
 
+def position_margin_basis_price(entry, product: object | None = None) -> float:
+    """Return the execution basis retained by the remaining open position."""
+    lots = getattr(entry, "lots", None)
+    if lots:
+        weighted = [
+            (
+                abs(float(getattr(lot, "quantity", 0.0) or 0.0)),
+                positive_number_or_none(getattr(lot, "entry_price", None)),
+            )
+            for lot in lots
+        ]
+        total = sum(quantity for quantity, price in weighted if price is not None)
+        if total > 1e-12:
+            return sum(
+                quantity * float(price)
+                for quantity, price in weighted
+                if price is not None
+            ) / total
+    average_cost = positive_number_or_none(getattr(entry, "average_cost", None))
+    if average_cost is not None:
+        return average_cost
+    # DMTM explicitly writes this field after consuming settlement.  Reading
+    # the position state here does not make margin checks settlement consumers.
+    settlement_basis = positive_number_or_none(
+        getattr(entry, "settlement_price", None),
+    )
+    if settlement_basis is not None:
+        return settlement_basis
+    suffix = "" if product is None else f" for {product}"
+    raise KeyError(f"margin requirement requires an executed position basis{suffix}")
+
+
+def positive_number_or_none(value: object) -> float | None:
+    number = number_or_none(value)
+    return number if number is not None and number > 0.0 else None
+
+
 def number_or_none(value: object) -> float | None:
     try:
         return None if value is None else float(cast(Any, value))

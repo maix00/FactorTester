@@ -43,8 +43,7 @@ def margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tu
         )) - cash_major
         item_required = required if item is ledger else sum(
             _required_margin_for_position(
-                state, ctx, state.ledger_config_for(item), product,
-                float(getattr(position, "quantity", 0.0) or 0.0),
+                state, ctx, state.ledger_config_for(item), product, position,
             )
             for product, position in item.get(LedgerModule.positions, {}).items()
             if abs(float(getattr(position, "quantity", 0.0) or 0.0)) > 1e-12
@@ -63,19 +62,16 @@ def margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tu
 
 
 def _pool_valuation_prices(ctx, ledgers, ledger_module, market_data_module) -> dict:
-    """Resolve only held products, preferring a valid settlement per product.
+    """Resolve the latest causal traded-price view for held products.
 
-    Settlement snapshots are sparse around listings and rollovers.  Selecting
-    the entire settlement mapping whenever it is non-empty can therefore hide
-    a causal close for another held contract.  This bounded lookup is O(held
-    positions), does not scan market tables, and preserves fail-fast behavior
-    by omitting products that have no causal valuation in any current view.
+    Settlement belongs exclusively to the DMTM flow.  Margin utilization is a
+    non-settlement risk check, so a settlement snapshot must never override
+    the causal close/current traded-price view here.
     """
     from tools.testers.backtest.modules.trading_rule import _lookup_product_value
 
     snapshot = ctx.get(market_data_module.current_market_snapshot, {}) or {}
     sources = (
-        snapshot.get("settlement") or {},
         snapshot.get("close") or {},
         ctx.get(market_data_module.current_prices, {}) or {},
     )
