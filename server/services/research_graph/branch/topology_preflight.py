@@ -132,6 +132,7 @@ def _items_by_id(value: Any, field: str) -> dict[str, dict[str, Any]]:
 def _node_identity(node: dict[str, Any]) -> bytes:
     return orjson.dumps({
         "node_id": node.get("node_id"),
+        "kind": node.get("kind"),
         "stage": node.get("stage"),
         "purpose": node.get("purpose"),
     }, option=orjson.OPT_SORT_KEYS)

@@ -27,7 +27,10 @@ NODE_SPECS = {
         "validation",
         "Reconcile the financial mechanism with factor source or AST, expression operators, numerical invariants, and signal timing.",
     ),
-    "validation_design": ("validation", "冻结义务、对照、信息边界和 Evidence Actions。"),
+    "validation_design": (
+        "validation",
+        "Freeze selection, holdout, slice, and multiple-testing design.",
+    ),
     "trial_execution": ("execution", "一次只执行当前获准的 Evidence Action。"),
     "result_audit": ("audit", "裁决 admitted Evidence 对义务、Claim 和目标的影响。"),
     "research_decision": ("decision", "决定下一试验、修订或有边界暂停。"),
@@ -55,6 +58,13 @@ NODE_REQUIREMENTS = {
         "hypothesis_validity.alternative_explanations",
         "hypothesis_validity.boundary_conditions",
         "hypothesis_validity.derived_incremental_mechanism",
+        "hypothesis_validity.risk_transfer_and_compensation",
+        "hypothesis_validity.fundamental_supply_demand_and_carry",
+        "hypothesis_validity.behavioral_channel",
+        "hypothesis_validity.participant_incentives",
+        "hypothesis_validity.information_diffusion",
+        "hypothesis_validity.liquidity_inventory_and_impact",
+        "hypothesis_validity.institutional_and_contract_rules",
     ],
     "capability_resolution": ["other.unclassified_material_question"],
     "data_contract": [
@@ -64,6 +74,7 @@ NODE_REQUIREMENTS = {
         "data.required_fields",
         "data.point_in_time_semantics",
         "data.provenance_permission_version",
+        "data.quality_and_continuity",
     ],
     "factor_semantics": [
         "factor_semantics.expression_identity",
@@ -72,6 +83,11 @@ NODE_REQUIREMENTS = {
         "factor_semantics.alternatives_and_falsifiers",
         "factor_semantics.parameterization_and_derivation",
         "factor_semantics.conditioning_semantics",
+        "factor_semantics.risk_transfer_and_fundamentals",
+        "factor_semantics.behavioral_mechanism",
+        "factor_semantics.participant_ecology",
+        "factor_semantics.microstructure_channel",
+        "factor_semantics.boundary_conditions",
     ],
     "validation_design": [
         "trial_design_validity.target_contrast",
@@ -86,13 +102,18 @@ NODE_REQUIREMENTS = {
         "trial_design_validity.replication_structure",
         "trial_design_validity.adaptation_and_ledger",
         "trial_design_validity.stop_and_reopen_rule",
-        "strategy_design.signal_schedule",
     ],
     "trial_execution": [
         "trial_design_validity.controlled_variable_isolation",
         "strategy_design.signal_schedule",
+        "strategy_design.strategy_conditioning",
+        "strategy_design.position_and_rebalance",
+        "strategy_design.session_policy",
         "market_execution_accounting.session_calendar",
+        "market_execution_accounting.contract_lifecycle",
+        "market_execution_accounting.order_and_fill",
         "market_execution_accounting.cost_margin_and_settlement",
+        "market_execution_accounting.backtest_live_consistency",
     ],
     "result_audit": [
         "statistical_validity.estimand_and_metric",
@@ -175,6 +196,7 @@ def build_nodes() -> list[dict[str, Any]]:
     return [
         {
             "node_id": node_id,
+            "kind": kind,
             "purpose": purpose,
             "enforcement": "deterministic",
             "required_capabilities": required_operations.get(node_id, []),
@@ -189,7 +211,7 @@ def build_nodes() -> list[dict[str, Any]]:
                 ),
             ],
         }
-        for node_id, (_, purpose) in NODE_SPECS.items()
+        for node_id, (kind, purpose) in NODE_SPECS.items()
     ]
 
 

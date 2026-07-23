@@ -52,13 +52,29 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
         "research-methodology.impact",
     } == operations
     assert operations <= set(first["capability_descriptors"])
+    catalog_requirements = {
+        item["requirement_id"]
+        for item in first["requirement_catalog"]["requirements"]
+    }
+    entry_requirements = {
+        requirement_id
+        for node in first["nodes"]
+        for requirement_id in node["entry_requirement_refs"]
+    }
+    assert entry_requirements == catalog_requirements
 
 
 def test_successor_graph_removes_fixed_method_states() -> None:
     graph = build_successor_graph()
-    node_ids = {item["node_id"] for item in graph["nodes"]}
+    nodes = {
+        item["node_id"]: item
+        for item in graph["nodes"]
+    }
+    node_ids = set(nodes)
 
     assert "trial_execution" in node_ids
+    assert nodes["trial_execution"]["kind"] == "execution"
+    assert nodes["capability_gap"]["kind"] == "capability_gap"
     assert "cheap_factor_diagnostics" not in node_ids
     assert "statistical_robustness" not in node_ids
     assert "authoritative_backtest" not in node_ids
@@ -170,6 +186,29 @@ def test_successor_allows_early_reentry_but_rejects_deleted_method_history() -> 
     assert method_history["missing_nodes"] == ["cheap_factor_diagnostics"]
 
 
+def test_topology_preflight_rejects_a_visited_node_kind_change() -> None:
+    source = build_draft_graph()
+    target = build_successor_graph()
+    target_node = next(
+        item for item in target["nodes"]
+        if item["node_id"] == "factor_semantics"
+    )
+    target_node["kind"] = "research"
+
+    result = assess_topology_continuation(
+        source_graph=source,
+        target_graph=target,
+        current_node="factor_semantics",
+        footprint={
+            "node_ids": ["factor_semantics"],
+            "edge_ids": [],
+        },
+    )
+
+    assert result["eligible"] is False
+    assert result["redefined_nodes"] == ["factor_semantics"]
+
+
 def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
     result = CliRunner().invoke(
         cli,
@@ -185,14 +224,45 @@ def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["anchor_ref"] == "validation_design"
-    assert len(payload["requirements"]) == 13
+    assert len(payload["requirements"]) == 12
     assert len(result.output.encode()) < 6000
     assert {item["category_id"] for item in payload["category_contexts"]} == {
-        "strategy_design",
         "trial_design_validity",
     }
     assert all(item["industry_basis_refs"] for item in payload["category_contexts"])
     assert all(item["industry_principle_zh"] for item in payload["category_contexts"])
+
+
+def test_trial_execution_packet_covers_strategy_and_market_rules() -> None:
+    result = CliRunner().invoke(
+        cli,
+        [
+            "graph",
+            "requirements",
+            "--node",
+            "trial_execution",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    requirement_ids = {
+        item["requirement_id"]
+        for item in payload["requirements"]
+    }
+    assert {
+        "strategy_design.signal_schedule",
+        "strategy_design.strategy_conditioning",
+        "strategy_design.position_and_rebalance",
+        "strategy_design.session_policy",
+        "market_execution_accounting.session_calendar",
+        "market_execution_accounting.contract_lifecycle",
+        "market_execution_accounting.order_and_fill",
+        "market_execution_accounting.cost_margin_and_settlement",
+        "market_execution_accounting.backtest_live_consistency",
+    } <= requirement_ids
+    assert len(result.output.encode()) < 6000
 
 
 def test_successor_source_cli_lazy_loads_one_auditable_reference() -> None:
