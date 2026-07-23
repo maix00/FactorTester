@@ -16,7 +16,7 @@ from tools.testers.backtest.modules.margin import _resolve_margin_mode, product_
 from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger, ledger_for_strategy_product
 from tools.testers.backtest.modules.target import TargetStrategyModule, TargetWeightIntent
 
-from .models import PoolSettings, TargetItem
+from .models import PoolSettings, TargetItem, settings_for_pool
 
 
 def collect_target_items(
@@ -64,10 +64,8 @@ def collect_target_items(
                 equity=equity, weight=weight, margin_ratio=float(ratio), margin_enabled=enabled,
             ))
             if pool_id not in seen_pools:
-                settings[pool_id].append(PoolSettings(
-                    target=float(config.get(MarginBudgetModule.target_margin_utilization, 0.80)),
-                    maximum=float(config.get(MarginBudgetModule.max_margin_utilization, 0.85)),
-                    tolerance=float(config.get(MarginBudgetModule.margin_utilization_tolerance, 0.01)),
+                settings[pool_id].append(settings_for_pool(
+                    state, pool_id, config, MarginBudgetModule,
                 ))
                 seen_pools.add(pool_id)
     return items, settings

@@ -359,6 +359,9 @@ class StrategyBook:
             initial_capital_major=_optional_float(resolved_settings.get("initial_capital_major")),
             base_currency=_optional_str(resolved_settings.get("base_currency")),
             currency_conversion_fee_rate=_optional_float(resolved_settings.get("currency_conversion_fee_rate")),
+            target_margin_utilization=_optional_float(resolved_settings.get("target_margin_utilization")),
+            max_margin_utilization=_optional_float(resolved_settings.get("max_margin_utilization")),
+            margin_utilization_tolerance=_optional_float(resolved_settings.get("margin_utilization_tolerance")),
         )
 
     def ledger_ids_for_strategy(self, state: object, strategy: object) -> tuple[str, ...]:
@@ -766,6 +769,9 @@ def _cash_pool_config_from_payload(raw: Any) -> CashPoolConfig:
         initial_capital_major=_optional_float(raw.get("initial_capital_major")),
         base_currency=_optional_str(raw.get("base_currency")),
         currency_conversion_fee_rate=_optional_float(raw.get("currency_conversion_fee_rate")),
+        target_margin_utilization=_optional_float(raw.get("target_margin_utilization")),
+        max_margin_utilization=_optional_float(raw.get("max_margin_utilization")),
+        margin_utilization_tolerance=_optional_float(raw.get("margin_utilization_tolerance")),
     )
 
 

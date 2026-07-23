@@ -44,3 +44,24 @@ def require_one_pool_setting(
             f"{sorted(unique)!r}"
         )
     return values[0]
+
+
+def settings_for_pool(state, pool_id: str, config: Any, module: Any) -> PoolSettings:
+    from tools.testers.backtest.modules.cash_pool import cash_pool_store_for
+
+    pool = cash_pool_store_for(state).config_by_pool.get(str(pool_id))
+    return PoolSettings(
+        target=float(
+            getattr(pool, "target_margin_utilization", None)
+            or config.get(module.target_margin_utilization, 0.80)
+        ),
+        maximum=float(
+            getattr(pool, "max_margin_utilization", None)
+            or config.get(module.max_margin_utilization, 0.85)
+        ),
+        tolerance=float(
+            getattr(pool, "margin_utilization_tolerance", None)
+            if getattr(pool, "margin_utilization_tolerance", None) is not None
+            else config.get(module.margin_utilization_tolerance, 0.01)
+        ),
+    )

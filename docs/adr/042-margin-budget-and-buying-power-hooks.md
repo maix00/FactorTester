@@ -49,8 +49,10 @@ groups every participating strategy and ledger by cash-pool identity and makes
 one decision for the whole pool.
 
 For each target product it resolves the historical long/short margin rule at
-the causal signal timestamp. With raw target notional `N_i` and margin ratio
-`m_i`:
+the causal signal timestamp. A product that is not margin-accounted uses
+`m_i = 1.0`, even when it shares a portfolio with margin-accounted products;
+its full notional therefore participates in the weighted capital requirement.
+With raw target notional `N_i` and margin ratio `m_i`:
 
 ```text
 raw projected margin = sum(abs(N_i) * m_i)
@@ -127,6 +129,8 @@ artifacts, and step mode consume the same fields.
 
 - Equal-notional allocation remains equal after margin-budget scaling.
 - Equal-margin allocation produces equal projected margin contributions.
+- Mixed cash and margin products give cash products a `1.0` margin ratio in
+  the portfolio-weighted calculation.
 - Initial projected utilization is within configured tolerance of 80%, unless
   whole-lot rounding or unavailable buying power is explicitly reported.
 - Two strategies sharing a cash pool consume one combined target and maximum.

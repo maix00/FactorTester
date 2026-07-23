@@ -40,12 +40,7 @@ class MarginBudgetDecision:
 def default_margin_budget_policy(request: MarginBudgetRequest) -> MarginBudgetDecision:
     _validate_request(request)
     target_margin = request.equity * request.target_utilization
-    if request.raw_projected_margin <= 1e-12:
-        scale = 1.0
-        reason = "no_margin_target"
-    else:
-        scale = target_margin / request.raw_projected_margin
-        reason = "target_margin_budget"
+    scale = target_margin / request.raw_projected_margin
     projected = request.raw_projected_margin * scale
     gross = request.raw_gross_notional * scale
     weighted = (
@@ -64,7 +59,7 @@ def default_margin_budget_policy(request: MarginBudgetRequest) -> MarginBudgetDe
         projected_utilization=projected / request.equity,
         max_utilization=request.max_utilization,
         tolerance=request.tolerance,
-        reason_code=reason,
+        reason_code="target_margin_budget",
         diagnostics={
             "raw_gross_notional": request.raw_gross_notional,
             "raw_projected_margin": request.raw_projected_margin,
@@ -103,6 +98,8 @@ def _validate_request(request: MarginBudgetRequest) -> None:
         raise ValueError("margin utilization tolerance must be non-negative")
     if request.raw_gross_notional < 0 or request.raw_projected_margin < 0:
         raise ValueError("projected notional and margin must be non-negative")
+    if request.raw_projected_margin <= 1e-12:
+        raise ValueError("margin-enabled target requires positive projected margin")
 
 
 def _finite(value: float) -> bool:

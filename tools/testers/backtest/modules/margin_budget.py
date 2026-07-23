@@ -11,8 +11,13 @@ from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.target import TargetStrategyModule
+from tools.testers.backtest.modules.fee import FeeModule
+from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
+from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 
 from .margin_budget_impl.runtime import apply_target_margin_budget
+from .margin_budget_impl.execution import enforce_execution_margin_limit
 
 
 class MarginBudgetModule(ExecutableModule):
@@ -30,6 +35,9 @@ class MarginBudgetModule(ExecutableModule):
     weighted_margin_ratio: ClassVar[FieldRef[Any]] = FieldRef("weighted_margin_ratio")
     target_scale: ClassVar[FieldRef[Any]] = FieldRef("target_scale")
     gross_leverage: ClassVar[FieldRef[Any]] = FieldRef("gross_leverage")
+    execution_margin_summary: ClassVar[FieldRef[Any]] = FieldRef("execution_margin_summary")
+    rounding_error: ClassVar[FieldRef[Any]] = FieldRef("rounding_error")
+    hard_limit_headroom: ClassVar[FieldRef[Any]] = FieldRef("hard_limit_headroom")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "target_margin_utilization": FieldDefinition(
@@ -57,6 +65,9 @@ class MarginBudgetModule(ExecutableModule):
         "weighted_margin_ratio": FieldDefinition(public=False),
         "target_scale": FieldDefinition(public=False),
         "gross_leverage": FieldDefinition(public=False),
+        "execution_margin_summary": FieldDefinition(public=False, display_value_kind="margin_budget_table"),
+        "rounding_error": FieldDefinition(public=False),
+        "hard_limit_headroom": FieldDefinition(public=False),
     }
 
     apply_target_margin_budget: ClassVar[Flow] = Flow(
@@ -64,7 +75,8 @@ class MarginBudgetModule(ExecutableModule):
         inputs=(
             TargetStrategyModule.trade_intent, TargetStrategyModule.target_weights,
             LedgerModule.equity, MarketDataModule.current_prices,
-            MarketDataModule.current_historical_fields, MarginModule.margin_mode,
+            MarketDataModule.current_historical_fields, EngineModule.engine_mode,
+            MarginModule.margin_mode,
             MarginModule.fixed_margin_ratio, target_margin_utilization,
             max_margin_utilization, margin_utilization_tolerance,
         ),
@@ -78,4 +90,31 @@ class MarginBudgetModule(ExecutableModule):
         compute=lambda state, ctx: apply_target_margin_budget(state, ctx),
     )
 
-    flows: ClassVar[tuple[Flow, ...]] = (apply_target_margin_budget,)
+    constrain_execution_margin_utilization: ClassVar[Flow] = Flow(
+        "constrain_execution_margin_utilization",
+        inputs=(
+            MarketDataModule.current_prices, MarketDataModule.current_market_snapshot,
+            MarketDataModule.current_historical_fields, EngineModule.engine_mode,
+            MarginModule.margin_mode, MarginModule.fixed_margin_ratio,
+            target_margin_utilization, max_margin_utilization,
+            margin_utilization_tolerance, FeeModule.fee_mode,
+            FeeModule.fixed_fee_rate, TradingRuleModule.accounting_mode,
+            TradingRuleModule.cost_basis_method,
+            TradingRuleModule.daily_mark_to_market_enabled,
+            TradingRuleModule.use_int_position,
+            OrderConstructModule.quantity_rounding_policy,
+        ),
+        outputs=(
+            execution_margin_summary, cash_pool_equity, projected_margin,
+            gross_leverage, rounding_error, hard_limit_headroom,
+        ),
+        phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=9,
+        description="按现金池保证金利用率硬上限调整增仓",
+        event_payload_inputs=("order",),
+        compute=lambda state, ctx: enforce_execution_margin_limit(state, ctx),
+    )
+
+    flows: ClassVar[tuple[Flow, ...]] = (
+        apply_target_margin_budget,
+        constrain_execution_margin_utilization,
+    )

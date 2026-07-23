@@ -550,6 +550,29 @@ def test_factor_role_values_render_one_compact_row_per_role() -> None:
     assert "AP.CZC" not in output and "CJ.CZC" not in output
 
 
+def test_margin_budget_step_transposes_one_pool_and_reports_gross_leverage() -> None:
+    from tools.cli.step import render_step_event
+
+    output = "\n".join(render_step_event({
+        "flow_id": "apply_target_margin_budget", "inputs": [], "outputs": [],
+        "output_changes": [{
+            "field": "MarginBudgetModule.margin_budget_summary", "before": None,
+            "after": {"private:A1": {
+                "equity": 100_000_000, "target_margin": 80_000_000,
+                "projected_margin": 80_000_000, "weighted_margin_ratio": 0.125,
+                "scale": 6.4, "gross_leverage": 6.4,
+                "projected_utilization": 0.8, "max_utilization": 0.85,
+            }},
+        }],
+    }))
+
+    assert "指标" in output and "数值" in output
+    assert "总名义杠杆" in output and "6.4" in output
+    assert "预计保证金利用率" in output and "保证金硬上限" in output
+    assert "step-field" in output
+    assert '"raw_gross_notional"' not in output
+
+
 def test_large_target_weight_map_keeps_directional_summary_and_samples() -> None:
     from tools.cli.step import render_step_event
 

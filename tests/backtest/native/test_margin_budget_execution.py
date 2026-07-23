@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import uuid
+
+import pandas as pd
+import pytest
+
+from tools.data.types.data_money import DataMoney
+from tools.products.Product import Product
+from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.ledger import ledger_identity
+from tools.testers.backtest.engines.native.order import Order
+from tools.testers.backtest.engines.native.position import ProductPosition
+from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
+from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.margin_budget import MarginBudgetModule
+from tools.testers.backtest.modules.market_data import MarketDataModule
+
+
+def _product() -> Product:
+    return Product(name=f"P-{uuid.uuid4().hex}", point_value=1, currency="CNY")
+
+
+def _case(alias: str, products: list[Product], quantities: list[float], cash: float):
+    strategy = Strategy(alias=alias)
+    state = BacktestRunState(strategy_configs={strategy: StrategyConfig(strategy=strategy)})
+    ledger = state.ledger_for_strategy(strategy)
+    state.ledger_configs[ledger_identity(f"private:{alias}")] = LedgerConfig(
+        fee_mode="zero", margin_mode="fixed", fixed_margin_ratio=0.10,
+    )
+    set_cash_for_ledger_pool(state, ledger, DataMoney.from_major(
+        cash, currency="CNY", use_minor_units=False,
+    ))
+    drafts = []
+    for product, quantity in zip(products, quantities, strict=True):
+        order = Order(
+            instrument=product, timestamp=pd.Timestamp("2025-01-02"),
+            quantity=quantity, intent_quantity=quantity, strategy=strategy,
+        )
+        order.set("effective_price", 100.0)
+        order.set("fee_cost", 0.0)
+        drafts.append(EventDraft(EventKind.ORDER, order.timestamp, strategy, order))
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2025-01-02"), event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}), drafts_by_strategy={strategy: drafts},
+    )
+    ctx.set(MarketDataModule.current_prices, {product: 100.0 for product in products})
+    ctx.set_for(MarketDataModule.current_historical_fields, strategy, {
+        product: {"VolumeMultiple": 1.0} for product in products
+    })
+    return state, ledger, ctx, [draft.payload for draft in drafts]
+
+
+def test_execution_hard_limit_scales_only_margin_increasing_quantity() -> None:
+    product = _product()
+    state, ledger, ctx, orders = _case("limit", [product], [100.0], 1_000.0)
+    ledger.set(LedgerModule.positions, {product: ProductPosition(quantity=0.0)})
+
+    MarginBudgetModule.constrain_execution_margin_utilization.compute(state, ctx)
+
+    assert orders[0].quantity == pytest.approx(85.0)
+    summary = ctx.get(MarginBudgetModule.execution_margin_summary)["private:limit"]
+    assert summary["projected_utilization"] == pytest.approx(0.85)
+    assert summary["gross_leverage"] == pytest.approx(8.5)
+
+
+def test_execution_hard_limit_preserves_close_before_scaling_flip() -> None:
+    product = _product()
+    state, ledger, ctx, orders = _case("flip", [product], [-110.0], 900.0)
+    ledger.set(LedgerModule.positions, {product: ProductPosition(
+        quantity=10.0, average_cost=100.0,
+        margin_reserved=DataMoney.from_major(100.0, currency="CNY", use_minor_units=False),
+    )})
+
+    MarginBudgetModule.constrain_execution_margin_utilization.compute(state, ctx)
+
+    assert orders[0].quantity == pytest.approx(-95.0)
+    assert abs(orders[0].quantity) >= 10.0
+
+
+def test_execution_gross_leverage_values_each_ledger_once_for_multiple_orders() -> None:
+    products = [_product(), _product()]
+    state, ledger, ctx, _orders = _case("multi", products, [1.0, 1.0], 1_000.0)
+    ledger.set(LedgerModule.positions, {})
+
+    MarginBudgetModule.constrain_execution_margin_utilization.compute(state, ctx)
+
+    summary = ctx.get(MarginBudgetModule.execution_margin_summary)["private:multi"]
+    assert summary["gross_leverage"] == pytest.approx(0.2)

@@ -8,6 +8,7 @@ from typing import Any
 
 import click
 
+from . import margin_budget
 from .values import route_label, scalar, table_from_mappings
 
 
@@ -15,6 +16,9 @@ MAP_FIELDS = (".target_weights", ".raw_deltas", ".sized_deltas", ".deltas", ".si
 
 
 def render_rows(field: str, rows: list[Mapping[str, Any]], *, indent: str) -> list[str] | None:
+    margin_lines = margin_budget.render_rows(field, rows, indent=indent)
+    if margin_lines is not None:
+        return margin_lines
     if field.endswith(".trade_intent"):
         return _trade_intents(rows, indent=indent)
     if field.endswith(".factor_role_values"):

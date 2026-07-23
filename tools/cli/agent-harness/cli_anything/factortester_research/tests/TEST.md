@@ -5,6 +5,22 @@ FactorTester backend. A successful process exit is insufficient: tests inspect
 the session, graph, capability, evidence, HTTP, RunSpec, ResearchRun, Job, and
 artifact contracts produced by the workflow.
 
+## Margin-budget step acceptance
+
+- A one-pool margin target step renders a transposed metric/value table with
+  equity, target/projected margin, weighted margin ratio, scale, utilization,
+  hard maximum, gross leverage, rounding error, and headroom.
+- Several cash pools render one compact row per pool instead of nested JSON.
+- Compact output contains no per-product dump and points to `step-field` for
+  the complete request/decision payload.
+- JSON and `step-field` remain lossless; the compact human projection does not
+  delete or rewrite the serialized margin-budget fields.
+- `factortester margin-budget show/configure` reads and revision-updates the
+  real workspace; it validates `0 < target <= max < 1` and exposes that margin
+  mode defaults to 0.80/0.85 while disabled margin leaves weights unscaled.
+- The CLI-Anything command delegates exactly to the installed `factortester`
+  executable and does not reimplement workspace or validation semantics.
+
 ## Strategy intent factor-role refinement
 
 - `factortester strategy-intent describe` reads the registered group-test
@@ -425,3 +441,27 @@ The public CLI updates one local server binding, manages compact workspace
 references, derives truthful Agent readiness, and downgrades a planning Agent
 when its workspace is removed. These operations use the existing atomic local
 Profile JSON store and perform no server/database write.
+
+### Margin budget and step audit
+
+Last run: 2026-07-23
+
+```text
+PYTHONPATH="$PWD" conda run -n GTHT pytest -q \
+  tests/backtest/native/test_margin_budget*.py \
+  tests/backtest/native/test_gold_standard_accounting.py
+
+21 passed in 0.55s
+
+PYTHONPATH="$PWD" conda run -n GTHT pytest -q \
+  tools/cli/agent-harness/cli_anything/factortester_research/tests/test_real_server_e2e.py \
+  -k strategy_intent_cli_round_trips_real_workspace
+
+1 passed, 1 deselected in 2.75s
+```
+
+The scheduler assertion reads `gross_leverage` from the actual step record;
+the HTTP round trip verifies margin-budget configure/show against a real
+workspace. The broader backtest/server/CLI suite completed with 1,335 passes,
+1 skip, and the same three branch-baseline failures recorded outside this
+feature.

@@ -308,11 +308,21 @@ def test_strategy_intent_cli_round_trips_real_workspace(
             "--role", "sizing=Size", "--allocation-policy", "factor_sizing", "--json",
         ], env=env)
         shown = _run_json(harness, ["strategy-intent", "show", "--group", "A1", "--json"], env=env)
+        margin_configured = _run_json(harness, [
+            "margin-budget", "configure", "A1",
+            "--target", "0.78", "--max", "0.84", "--tolerance", "0.005", "--json",
+        ], env=env)
+        margin_shown = _run_json(harness, [
+            "margin-budget", "show", "--group", "A1", "--json",
+        ], env=env)
 
         assert configured["revision"] == 3
         assert shown["strategies"][0]["factor_role_bindings"] == {
             "screen": "Gate", "sizing": "Size",
         }
+        assert margin_configured["revision"] == 4
+        assert margin_shown["strategies"][0]["target_margin_utilization"] == 0.78
+        assert margin_shown["strategies"][0]["max_margin_utilization"] == 0.84
 
 
 def test_installed_clis_drive_real_server_active_graph_e2e(
