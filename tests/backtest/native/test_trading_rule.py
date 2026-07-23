@@ -1258,8 +1258,19 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
 
     event_time = pd.Timestamp("2026-03-10 15:00:00.000000002", tz="Asia/Shanghai")
     market_time = event_time - pd.Timedelta(nanoseconds=2)
-    close = pd.DataFrame({product: [12.0]}, index=pd.DatetimeIndex([market_time]))
+    next_market_time = market_time + pd.Timedelta(minutes=1)
+    close = pd.DataFrame(
+        {product: [12.0, 12.5]},
+        index=pd.DatetimeIndex([market_time, next_market_time]),
+    )
     account.market_data_store.current_prices_table = close
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame(
+            {product: [11.5, 12.25]},
+            index=pd.DatetimeIndex([market_time, next_market_time]),
+        ),
+        "close": close,
+    }
     account.market_data_store.historical_field_names = (
         "VolumeMultiple",
         "LongMarginRatioByMoney",
@@ -1308,9 +1319,17 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
     assert ledger.get(MarginModule.margin_utilization) == pytest.approx(20.0 / 12.0)
     assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(9.8)
     assert captured_orders
-    order = captured_orders[0].payload
+    attempt = captured_orders[0].payload
+    order = attempt.order
+    assert captured_orders[0].timestamp == market_time + pd.Timedelta(microseconds=1)
+    assert attempt.market_timestamp == next_market_time
+    assert attempt.attempt_id
+    assert account.order_store.attempts_by_id[attempt.attempt_id] is attempt
+    assert account.order_store.orders_by_id[order.order_id] is order
+    assert order.get("active_attempt_id", "") == ""
     assert order.instrument is product
     assert order.quantity < 0
+    assert order.get("execution_price_basis") == "open"
     assert order.get("liquidation_reason") == "margin_deficit"
 
 
@@ -1559,6 +1578,18 @@ def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_la
         liquidation_target_buffer=0.0,
     )
     event_time = pd.Timestamp("2026-03-10 15:00:00.000000003", tz="Asia/Shanghai")
+    market_time = event_time.floor("min")
+    next_market_time = market_time + pd.Timedelta(minutes=1)
+    state.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [12.0, 12.5]},
+        index=pd.DatetimeIndex([market_time, next_market_time]),
+    )
+    state.market_data_store.market_price_tables = {
+        "open": pd.DataFrame(
+            {product: [11.5, 12.25]},
+            index=pd.DatetimeIndex([market_time, next_market_time]),
+        ),
+    }
     queue = EventQueue()
     ctx = FlowContext(
         timestamp=event_time,
@@ -1584,6 +1615,7 @@ def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_la
     _handle_margin_liquidation_notice(state, ctx)
 
     assert queue.pending_count_by_kind(EventKind.ORDER) == 1
+    assert len(state.order_store.attempts_by_id) == 1
 
 
 def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():

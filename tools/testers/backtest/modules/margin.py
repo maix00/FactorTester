@@ -454,8 +454,13 @@ def _margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> t
 
 
 def _handle_margin_liquidation_notice(state: Any, ctx: Any) -> None:
-    from tools.testers.backtest.engines.native.order import Order
+    from tools.testers.backtest.modules.group.execution_schedule import (
+        resolve_next_execution_opportunity,
+    )
     from tools.testers.backtest.modules.ledger_module import LedgerModule
+    from tools.testers.backtest.modules.order_lifecycle import (
+        create_order_attempt,
+    )
 
     for ledger, payload in _ledger_payloads(state, ctx, kind="margin_liquidation"):
         deficit = float(payload.get("deficit") or ledger.get(MarginModule.margin_deficit, 0.0) or 0.0)
@@ -467,16 +472,34 @@ def _handle_margin_liquidation_notice(state: Any, ctx: Any) -> None:
         positions = ledger.get(LedgerModule.positions, {})
         orders = _liquidation_orders_for_deficit(state, ctx, ledger, owner, positions, deficit)
         if orders:
-            ctx.set(MarginModule.margin_liquidation_orders, [
-                EventDraft(
-                    EventKind.ORDER,
-                    cast(pd.Timestamp, ctx.timestamp) + pd.Timedelta(nanoseconds=1),
-                    strategy=owner,
-                    payload=order,
-                    ledger=ledger.ledger,
+            drafts: list[EventDraft] = []
+            for order in orders:
+                schedule = resolve_next_execution_opportunity(
+                    state,
+                    owner,
+                    order.instrument,
+                    after_timestamp=cast(pd.Timestamp, ctx.timestamp),
                 )
-                for order in orders
-            ])
+                if schedule is None:
+                    continue
+                event_ts, market_ts, basis, model = schedule
+                order.set("execution_price_basis", basis)
+                order.set("matching_model", model)
+                attempt = create_order_attempt(
+                    state,
+                    order,
+                    timestamp=event_ts,
+                    market_timestamp=market_ts,
+                )
+                drafts.append(EventDraft(
+                    EventKind.ORDER,
+                    event_ts,
+                    strategy=owner,
+                    payload=attempt,
+                    ledger=ledger.ledger,
+                ))
+            if drafts:
+                ctx.set(MarginModule.margin_liquidation_orders, drafts)
 
 
 def _liquidation_orders_for_deficit(

@@ -74,6 +74,43 @@ def resolve_execution_timestamp(
     return schedule[0]
 
 
+def resolve_next_execution_opportunity(
+    state,
+    strategy,
+    product: Any,
+    *,
+    after_timestamp: pd.Timestamp,
+) -> tuple[pd.Timestamp, pd.Timestamp, str, str] | None:
+    """Find the first causally executable bar strictly after an event."""
+    config = state.config_for(strategy)
+    model = effective_matching_model(
+        config,
+        OrderExecutionModule.matching_model,
+        VolumeCapacityMode.liquidity_mode,
+    )
+    basis = execution_basis(config, model)
+    table = price_table(state, basis)
+    if table is None:
+        return None
+    index = price_index(table, product, signal_timestamps)
+    price_pos = int(index.searchsorted(after_timestamp, side="right"))
+    if price_pos >= len(index):
+        return None
+    price_ts = cast(pd.Timestamp, index[price_pos])
+    event_ts = bar_price_visibility_timestamp(
+        index,
+        price_pos=price_pos,
+        basis=basis,
+        config=config,
+        bar_freq=resolved_bar_frequency_for_strategy(state, strategy),
+    )
+    if event_ts <= after_timestamp:
+        raise ValueError(
+            "next execution opportunity must be after the triggering event"
+        )
+    return event_ts, price_ts, basis, model
+
+
 def execution_basis(config, model: str) -> str:
     ref = (
         OrderExecutionModule.volume_execution_price_basis
