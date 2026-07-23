@@ -121,6 +121,7 @@ def assemble_snapshot(
 ) -> dict[str, Any]:
     value = deepcopy(base)
     value["sections"] = []
+    assets: dict[str, dict[str, Any]] = {}
     for fragment in fragments:
         for section in fragment["sections"]:
             projected = deepcopy(section)
@@ -130,6 +131,16 @@ def assemble_snapshot(
             projected["checkpoint_ref"] = fragment["checkpoint_ref"]
             projected["branch_ref"] = fragment["branch_ref"]
             value["sections"].append(projected)
+            for block in projected.get("blocks", []):
+                if block.get("kind") != "figure":
+                    continue
+                asset = deepcopy(block["asset"])
+                asset_ref = asset["asset_ref"]
+                existing = assets.get(asset_ref)
+                if existing is not None and existing != asset:
+                    raise ValueError("research journal figure conflicts")
+                assets[asset_ref] = asset
+    value["assets"] = list(assets.values())
     value["evidence_refs"] = list(dict.fromkeys(
         ref for fragment in fragments for ref in fragment["evidence_refs"]
     ))[:64]

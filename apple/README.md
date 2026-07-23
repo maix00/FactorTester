@@ -55,6 +55,19 @@ xcodegen generate
 
 > `FactorTester-Client.xcodeproj` 是生成物（已 gitignore）。改了 `project.yml` 后重新 `xcodegen generate`。
 
+## macOS 测试与工作区授权
+
+macOS hosted tests 和 UI tests 会启动使用 `com.gtht.client` 的应用宿主。
+必须通过持久的 `FTClient Beta Release` identity 运行：
+
+```bash
+./scripts/test-macos-signed.sh
+```
+
+不要为这两类测试传入 `CODE_SIGNING_ALLOWED=NO`。无签名宿主会被 macOS
+视为另一个应用，导致已经保存的个人工作区 Documents 授权再次弹出。
+测试脚本会在缺少持久 identity 时直接失败，不会降级成 ad-hoc 或无签名宿主。
+
 ## 构建可安装版本
 
 ### macOS

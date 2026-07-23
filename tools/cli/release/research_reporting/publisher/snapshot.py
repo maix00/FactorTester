@@ -25,6 +25,7 @@ def report_snapshot(
         carrier["checkpoint_ref"].encode("utf-8")
     ).hexdigest()[:16]
     sections = []
+    assets: dict[str, dict[str, Any]] = {}
     for section in narrative["sections"]:
         links = list(section["links"])
         links.append({
@@ -46,6 +47,16 @@ def report_snapshot(
         if narrative["schema_version"] in {2, 3}:
             projected["body"] = section.get("body", "")
             projected["blocks"] = deepcopy(section["blocks"])
+            for block in section["blocks"]:
+                if block["kind"] != "figure":
+                    continue
+                asset = deepcopy(block["asset"])
+                asset_ref = asset["asset_ref"]
+                existing = assets.get(asset_ref)
+                if existing is not None and existing != asset:
+                    raise ValueError("report figure descriptor conflicts")
+                assets[asset_ref] = asset
+                projected["asset_refs"].append(asset_ref)
         else:
             projected["body"] = section["body"]
         if narrative["schema_version"] == 3:
@@ -71,7 +82,7 @@ def report_snapshot(
         "factor_family_versions": list(factor_family_versions),
         "evidence_refs": checkpoint_refs,
         "sections": sections,
-        "assets": [],
+        "assets": list(assets.values()),
         "gaps": ([{
             "gap_ref": "report-gap:omitted-evidence",
             "reason": (

@@ -73,7 +73,7 @@ def stage_report_asset(
         changed = publish_generation([
             ("report_asset", target, raw),
         ])["report_asset"]
-    return {
+    asset = {
         "asset_ref": f"report-asset:sha256:{digest}",
         "content_hash": digest,
         "media_type": media_type,
@@ -82,7 +82,46 @@ def stage_report_asset(
         "alt_text": _bounded_text(alt_text, "alt_text", allow_empty=True),
         "availability": "available",
         "provenance_refs": _references(provenance_refs),
-        "changed": bool(changed),
+    }
+    return {"asset": asset, "changed": bool(changed)}
+
+
+def canonical_asset_descriptor(value: Any) -> dict[str, Any]:
+    """Validate the source-free descriptor embedded in a figure block."""
+    fields = {
+        "asset_ref", "content_hash", "media_type", "filename", "caption",
+        "alt_text", "availability", "provenance_refs",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("report figure asset fields are invalid")
+    digest = str(value["content_hash"])
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("report figure content hash is invalid")
+    media_type = str(value["media_type"])
+    extension = _MEDIA_EXTENSIONS.get(media_type)
+    if extension is None:
+        raise ValueError("report figure media type is unsupported")
+    filename = str(value["filename"])
+    if filename != f"{digest}{extension}":
+        raise ValueError("report figure filename is not content-addressed")
+    asset_ref = str(value["asset_ref"])
+    if asset_ref != f"report-asset:sha256:{digest}":
+        raise ValueError("report figure asset reference is invalid")
+    if value["availability"] != "available":
+        raise ValueError("report figure must be locally available")
+    return {
+        "asset_ref": asset_ref,
+        "content_hash": digest,
+        "media_type": media_type,
+        "filename": filename,
+        "caption": _bounded_text(
+            value["caption"], "caption", allow_empty=False,
+        ),
+        "alt_text": _bounded_text(
+            value["alt_text"], "alt_text", allow_empty=True,
+        ),
+        "availability": "available",
+        "provenance_refs": _references(value["provenance_refs"]),
     }
 
 
@@ -102,6 +141,19 @@ def verify_staged_asset(
         raise ValueError("staged report asset hash mismatch")
     if descriptor["media_type"] == "image/svg+xml":
         _validate_passive_svg(raw)
+
+
+def verify_snapshot_assets(
+    workspace_root: Path,
+    work_package_id: str,
+    assets: list[dict[str, Any]],
+) -> None:
+    for descriptor in assets:
+        verify_staged_asset(
+            workspace_root,
+            work_package_id,
+            canonical_asset_descriptor(descriptor),
+        )
 
 
 def _read_regular_file(path: Path) -> bytes:

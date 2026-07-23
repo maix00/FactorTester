@@ -14,6 +14,7 @@ from .identity import (
     safe_id,
 )
 from ..report_items import report_fragment_hash, report_item_hash
+from ..assets import canonical_asset_descriptor
 
 
 MAX_NARRATIVE_BYTES = 64 * 1024
@@ -266,6 +267,26 @@ def _canonical_blocks(
                 used=used_report_bindings,
             ))
             continue
+        if kind == "figure" and set(block) == {
+            "kind", "asset", "link_ids",
+        }:
+            refs = block["link_ids"]
+            _validate_link_ids(
+                refs, declared_link_ids, used_link_ids, "figure",
+            )
+            blocks.append(_bind_report_item(
+                {
+                    "kind": kind,
+                    "asset": canonical_asset_descriptor(block["asset"]),
+                    "link_ids": list(refs),
+                },
+                report_binding=report_binding,
+                report_timing=report_timing,
+                recorded_at=recorded_at,
+                expected=expected_report_items,
+                used=used_report_bindings,
+            ))
+            continue
         if kind == "paragraph" and set(block) in (
             {"kind", "text"}, {"kind", "text", "link_ids"}
         ):
@@ -371,6 +392,7 @@ def _bind_report_item(
         "list": "list",
         "table": "table",
         "math": "figure",
+        "figure": "figure",
     }[content["kind"]]
     if expected_item["content_kind"] != content_kind:
         raise ValueError("narrative report content kind does not match Carrier")

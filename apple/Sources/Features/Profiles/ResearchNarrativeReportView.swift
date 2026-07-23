@@ -311,6 +311,29 @@ struct ResearchNarrativeReportView: View {
                     }
                 }
             }
+        case "figure":
+            if let asset = block.asset, let reportRef = artifact?.localRef {
+                VStack(alignment: .leading, spacing: 8) {
+                    ResearchReportImageView(
+                        asset: asset,
+                        reportRef: reportRef
+                    )
+                    HStack(spacing: 6) {
+                        ForEach(auditLinks(in: section).filter {
+                            block.linkIDs.contains($0.linkID)
+                        }) { link in
+                            auditChip(link, section: section)
+                        }
+                    }
+                }
+            } else {
+                Label(
+                    "本条图像缺少可信的本地报告引用。",
+                    systemImage: "photo.badge.exclamationmark"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
         case "paragraph":
             reportParagraph(
                 block.text ?? "",

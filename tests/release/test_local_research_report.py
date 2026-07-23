@@ -290,14 +290,16 @@ def test_stages_content_addressed_passive_report_image_once(
         provenance_refs=["job:job-1", "evidence:job-attempt-1"],
     )
 
+    first_asset = first["asset"]
     target = (
         Path(store.load("maxa")["workspace_root"])
-        / "research" / "sgccs-review" / "assets" / first["filename"]
+        / "research" / "sgccs-review" / "assets"
+        / first_asset["filename"]
     )
     assert first["changed"] is True
     assert second["changed"] is False
-    assert first["asset_ref"] == (
-        f"report-asset:sha256:{first['content_hash']}"
+    assert first_asset["asset_ref"] == (
+        f"report-asset:sha256:{first_asset['content_hash']}"
     )
     assert target.read_bytes() == source.read_bytes()
 
@@ -323,6 +325,92 @@ def test_rejects_active_or_external_report_svg(tmp_path: Path) -> None:
             alt_text="",
             provenance_refs=["job:job-1"],
         )
+
+
+def test_checkpoint_embeds_staged_curve_in_markdown_and_journal(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = _profile(root)
+    source = tmp_path / "curve.svg"
+    source.write_bytes(
+        b'<svg xmlns="http://www.w3.org/2000/svg">'
+        b"<title>equity</title><path d=\"M0 0L10 10\"/></svg>"
+    )
+    staged = stage_report_asset(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        work_package_ref="work-package:sgccs-review",
+        source_path=source,
+        media_type="image/svg+xml",
+        caption="净值曲线与回撤",
+        alt_text="SgCCS 回测净值曲线与回撤",
+        provenance_refs=["job:job-1", "evidence:job-attempt-1"],
+    )
+    carrier = _carrier()
+    base = _narrative(carrier)
+    links = base["sections"][0]["links"]
+    result_links = [
+        item for item in links
+        if item["kind"] in {"evidence", "job", "run"}
+    ]
+    figure_links = [
+        item for item in links
+        if item["kind"] not in {"evidence", "job", "run"}
+    ]
+    narrative = {
+        "schema_version": 2,
+        "language": "zh-Hans",
+        "title": "因子研究报告",
+        "sections": [{
+            "section_id": "backtest-result",
+            "title": "回测结果",
+            "blocks": [
+                {
+                    "kind": "table",
+                    "columns": ["对象", "结果"],
+                    "rows": [{
+                        "cells": [item["kind"], "已生成"],
+                        "link_ids": [item["link_id"]],
+                    } for item in result_links],
+                    "result_kind": "backtest",
+                },
+                {
+                    "kind": "figure",
+                    "asset": staged["asset"],
+                    "link_ids": [
+                        item["link_id"] for item in figure_links
+                    ],
+                },
+            ],
+            "links": links,
+        }],
+    }
+
+    result = publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        narrative=narrative,
+    )
+
+    workspace = Path(store.load("maxa")["workspace_root"])
+    report = Path(result["artifact"]["local_ref"].removeprefix("file://"))
+    journal = Path(result["artifact"]["journal_ref"].removeprefix("file://"))
+    report_text = report.read_text(encoding="utf-8")
+    journal_value = json.loads(journal.read_text(encoding="utf-8"))
+    assert (
+        f"../../assets/{staged['asset']['filename']}" in report_text
+    )
+    figure = journal_value["checkpoints"][0]["sections"][0]["blocks"][1]
+    assert figure["kind"] == "figure"
+    assert figure["asset"] == staged["asset"]
+    assert (
+        workspace / "research" / "sgccs-review" / "assets"
+        / staged["asset"]["filename"]
+    ).is_file()
 
 
 def test_historical_backfill_stages_without_moving_local_head_and_finalizes_once(

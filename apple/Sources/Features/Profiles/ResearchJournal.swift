@@ -166,13 +166,14 @@ struct ResearchJournalBlock: Decodable {
     let text: String?
     let latex: String?
     let fallback: String?
+    let asset: ResearchJournalAsset?
     let linkIDs: [String]
     let columns: [String]
     let rows: [ResearchJournalRow]
     let reportTiming: ResearchOccurrenceTiming?
 
     enum CodingKeys: String, CodingKey {
-        case kind, text, latex, fallback, columns, rows
+        case kind, text, latex, fallback, asset, columns, rows
         case linkIDs = "link_ids"
         case reportTiming = "report_timing"
     }
@@ -183,6 +184,10 @@ struct ResearchJournalBlock: Decodable {
         text = try container.decodeIfPresent(String.self, forKey: .text)
         latex = try container.decodeIfPresent(String.self, forKey: .latex)
         fallback = try container.decodeIfPresent(String.self, forKey: .fallback)
+        asset = try container.decodeIfPresent(
+            ResearchJournalAsset.self,
+            forKey: .asset
+        )
         linkIDs = try container.decodeIfPresent(
             [String].self, forKey: .linkIDs
         ) ?? []
@@ -198,6 +203,27 @@ struct ResearchJournalBlock: Decodable {
             ResearchOccurrenceTiming.self,
             forKey: .reportTiming
         )
+    }
+}
+
+struct ResearchJournalAsset: Decodable, Equatable {
+    let assetRef: String
+    let contentHash: String
+    let mediaType: String
+    let filename: String
+    let caption: String
+    let altText: String
+    let availability: String
+    let provenanceRefs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case assetRef = "asset_ref"
+        case contentHash = "content_hash"
+        case mediaType = "media_type"
+        case filename, caption
+        case altText = "alt_text"
+        case availability
+        case provenanceRefs = "provenance_refs"
     }
 }
 
@@ -555,6 +581,16 @@ enum ResearchJournalLoader {
                       Set(block.linkIDs).isSubset(of: linkIDs) else {
                     throw ResearchJournalError.invalidContract
                 }
+            case "figure":
+                guard block.text == nil, block.latex == nil,
+                      block.fallback == nil,
+                      let asset = block.asset,
+                      validateAsset(asset),
+                      block.columns.isEmpty, block.rows.isEmpty,
+                      !block.linkIDs.isEmpty,
+                      Set(block.linkIDs).isSubset(of: linkIDs) else {
+                    throw ResearchJournalError.invalidContract
+                }
             case "list":
                 guard block.text == nil, block.columns.isEmpty,
                       !block.rows.isEmpty, block.rows.count <= 64 else {
@@ -590,6 +626,29 @@ enum ResearchJournalLoader {
         // it as a standalone audit chip below the prose. Every inline
         // reference must resolve, but a valid checkpoint/evidence link does
         // not need to be forced into an unrelated sentence or table row.
+    }
+
+    private static func validateAsset(
+        _ asset: ResearchJournalAsset
+    ) -> Bool {
+        let extensions = [
+            "image/svg+xml": "svg",
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "image/webp": "webp",
+        ]
+        guard let pathExtension = extensions[asset.mediaType],
+              isSHA256(asset.contentHash),
+              asset.assetRef
+                == "report-asset:sha256:\(asset.contentHash)",
+              asset.filename
+                == "\(asset.contentHash).\(pathExtension)",
+              asset.availability == "available",
+              !asset.caption.isEmpty,
+              asset.provenanceRefs.count <= 16 else {
+            return false
+        }
+        return true
     }
 
     private static func validateTiming(

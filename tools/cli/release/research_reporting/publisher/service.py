@@ -8,6 +8,7 @@ from typing import Any
 
 from ...local_profile import LocalProfileStore
 from ..journal import build_fragment, content_hash
+from ..assets import verify_snapshot_assets
 from ..writer import render_branch_report
 from .carrier import canonical_carrier
 from .identity import (
@@ -102,6 +103,11 @@ def publish_research_checkpoint(
         branch_id=branch_id,
         factor_family_versions=record["factor_family_versions"],
         scope_identity=scope_identity,
+    )
+    verify_snapshot_assets(
+        Path(profile["workspace_root"]),
+        work_package_id,
+        snapshot["assets"],
     )
     fragment = build_fragment(
         checkpoint_ref=value["checkpoint_ref"],

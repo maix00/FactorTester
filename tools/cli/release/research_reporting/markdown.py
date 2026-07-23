@@ -70,6 +70,9 @@ def _block_lines(blocks: list[dict[str, Any]]) -> list[str]:
         elif block["kind"] == "list":
             lines.extend(f"- {row['text']}" for row in block["rows"])
             lines.append("")
+        elif block["kind"] == "figure":
+            # The section asset projection below renders the image once.
+            continue
         else:
             columns = block["columns"]
             lines.extend([

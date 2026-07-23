@@ -13,6 +13,7 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
+from .assets import canonical_asset_descriptor
 
 # A checkpoint carrier stays small, while the local human report is cumulative.
 # These bounds cap disk and parsing cost without truncating ordinary long-running
@@ -219,6 +220,22 @@ def _canonical_blocks(
                     field="section.math.fallback",
                     maximum=4000,
                 ),
+                "link_ids": list(refs),
+            }, report_binding, report_timing, recorded_at))
+            used_link_ids.update(refs)
+            continue
+        if kind == "figure" and set(block) == {
+            "kind", "asset", "link_ids",
+        }:
+            refs = block["link_ids"]
+            if (
+                not isinstance(refs, list) or not refs or len(refs) > 16
+                or any(ref not in link_ids for ref in refs)
+            ):
+                raise ValueError("section figure links are invalid")
+            blocks.append(_with_report_binding({
+                "kind": kind,
+                "asset": canonical_asset_descriptor(block["asset"]),
                 "link_ids": list(refs),
             }, report_binding, report_timing, recorded_at))
             used_link_ids.update(refs)
