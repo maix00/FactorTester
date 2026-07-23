@@ -71,7 +71,7 @@ def insert_continuation(
             instance_id, work_package_id, owner, created_by_profile_ref,
             current_owner_profile_ref, graph_id, graph_version, product_group,
             workspace_id, mode, shadow_run_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', '', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)
         """,
         (
             instance_id,
@@ -83,6 +83,7 @@ def insert_continuation(
             prepared["target_graph_version"],
             prepared["product_group"],
             prepared["workspace_id"],
+            prepared["execution_mode"],
             now,
         ),
     )

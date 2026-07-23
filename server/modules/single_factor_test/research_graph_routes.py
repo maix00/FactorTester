@@ -352,6 +352,7 @@ def preview_research_graph_continuation(instance_id: str, branch_id: str):
                 data.get("target_graph_version") or 0
             ),
             job_id=str(data.get("job_id") or ""),
+            execution_mode=str(data.get("execution_mode") or "live"),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
@@ -381,6 +382,7 @@ def continue_research_graph_branch(instance_id: str, branch_id: str):
             human_authorization_id=str(
                 data.get("human_authorization_id") or ""
             ),
+            execution_mode=str(data.get("execution_mode") or "live"),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404

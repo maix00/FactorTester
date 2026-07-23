@@ -129,12 +129,20 @@ def cycle_requirement(
     default="",
     help="Bound Job; omit only for a paused pre-TrialPlan branch.",
 )
+@click.option(
+    "--mode",
+    "execution_mode",
+    type=click.Choice(["live", "shadow"]),
+    default="live",
+    show_default=True,
+)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 def cycle_continuation_preview(
     instance_id: str,
     branch_id: str,
     target_version: int,
     job_id: str,
+    execution_mode: str,
     as_json: bool,
 ) -> None:
     """Read the exact continuation hash without changing any state."""
@@ -145,6 +153,8 @@ def cycle_continuation_preview(
         branch_id,
         "--target-version",
         str(target_version),
+        "--mode",
+        execution_mode,
     ]
     if job_id:
         arguments.extend(["--job-id", job_id])
@@ -169,6 +179,13 @@ def cycle_continuation_preview(
     default="",
     help="Bound Job; omit only for a paused pre-TrialPlan branch.",
 )
+@click.option(
+    "--mode",
+    "execution_mode",
+    type=click.Choice(["live", "shadow"]),
+    default="live",
+    show_default=True,
+)
 @click.option("--expected-target-hash", required=True)
 @click.option("--human-authorization-id", required=True)
 @click.option("--timeout", default=120, show_default=True, type=int)
@@ -180,6 +197,7 @@ def cycle_continue(
     branch_id: str,
     target_version: int,
     job_id: str,
+    execution_mode: str,
     expected_target_hash: str,
     human_authorization_id: str,
     timeout: int,
@@ -197,6 +215,8 @@ def cycle_continue(
         expected_target_hash,
         "--human-authorization-id",
         human_authorization_id,
+        "--mode",
+        execution_mode,
     ]
     if job_id:
         arguments.extend(["--job-id", job_id])

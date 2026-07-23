@@ -129,12 +129,14 @@ class FakeClient:
         *,
         target_graph_version,
         job_id,
+        execution_mode="live",
     ):
         self.continuation_preview = (
             instance_id,
             branch_id,
             target_graph_version,
             job_id,
+            execution_mode,
         )
         return {
             "action": "continue_graph_branch",
@@ -151,6 +153,7 @@ class FakeClient:
         job_id,
         expected_target_hash,
         human_authorization_id,
+        execution_mode="live",
     ):
         self.continuation = (
             instance_id,
@@ -159,6 +162,7 @@ class FakeClient:
             job_id,
             expected_target_hash,
             human_authorization_id,
+            execution_mode,
         )
         return self.continuation_response or {
             "instance_id": "instance-v6",
@@ -792,10 +796,11 @@ def test_research_graph_continuation_is_previewed_then_exactly_authorized(
     assert preview.exit_code == 0
     assert continued.exit_code == 0
     assert fake.continuation_preview == (
-        "instance-v5", "branch-v5", 6, "job-1",
+        "instance-v5", "branch-v5", 6, "job-1", "live",
     )
     assert fake.continuation == (
         "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "gate-146",
+        "live",
     )
 
 
@@ -881,11 +886,30 @@ def test_research_graph_pretrial_continuation_omits_job_id(
     assert preview.exit_code == 0
     assert continued.exit_code == 0
     assert fake.continuation_preview == (
-        "instance-v6", "branch-v6", 7, "",
+        "instance-v6", "branch-v6", 7, "", "live",
     )
     assert fake.continuation == (
         "instance-v6", "branch-v6", 7, "", "c" * 64,
-        "gate-pretrial",
+        "gate-pretrial", "live",
+    )
+
+
+def test_research_graph_continuation_forwards_explicit_shadow_mode(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "continuation-preview",
+        "instance-v8", "branch-v8",
+        "--target-version", "9",
+        "--mode", "shadow",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.continuation_preview == (
+        "instance-v8", "branch-v8", 9, "", "shadow",
     )
 
 

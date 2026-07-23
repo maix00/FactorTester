@@ -311,6 +311,22 @@ def test_v9_graph_does_not_embed_runtime_packet_budget() -> None:
     assert "agent_packet_budget" not in graph
 
 
+def test_runtime_budget_change_does_not_change_v9_graph_hash(
+    monkeypatch,
+) -> None:
+    from server.services.research_graph.packet_budget import graph_packet_budget
+
+    graph = build_successor_graph()
+    graph_hash = graph["content_hash"]
+    monkeypatch.setenv("GTHT_AGENT_PACKET_CEILING_BYTES", "7000")
+    first = graph_packet_budget(graph)
+    monkeypatch.setenv("GTHT_AGENT_PACKET_CEILING_BYTES", "8000")
+    second = graph_packet_budget(graph)
+
+    assert first["profile_hash"] != second["profile_hash"]
+    assert graph["content_hash"] == graph_hash
+
+
 def test_trial_execution_packet_covers_strategy_and_market_rules() -> None:
     result = CliRunner().invoke(
         cli,

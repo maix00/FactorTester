@@ -529,11 +529,19 @@ def handoff_graph_branch(
     default="",
     help="已绑定 Job；暂停于 TrialPlan 前的分支可省略。",
 )
+@click.option(
+    "--mode",
+    "execution_mode",
+    type=click.Choice(["live", "shadow"]),
+    default="live",
+    show_default=True,
+)
 def preview_graph_continuation(
     instance_id: str,
     branch_id: str,
     target_version: int,
     job_id: str,
+    execution_mode: str,
 ) -> None:
     """计算跨版本 continuation 的精确授权哈希；不修改服务器状态。"""
     click.echo(_json(
@@ -542,6 +550,7 @@ def preview_graph_continuation(
             branch_id,
             target_graph_version=target_version,
             job_id=job_id,
+            execution_mode=execution_mode,
         )
     ))
 
@@ -554,6 +563,13 @@ def preview_graph_continuation(
     "--job-id",
     default="",
     help="已绑定 Job；暂停于 TrialPlan 前的分支可省略。",
+)
+@click.option(
+    "--mode",
+    "execution_mode",
+    type=click.Choice(["live", "shadow"]),
+    default="live",
+    show_default=True,
 )
 @click.option("--expected-target-hash", required=True)
 @click.option("--human-authorization-id", required=True)
@@ -568,6 +584,7 @@ def continue_graph_branch(
     branch_id: str,
     target_version: int,
     job_id: str,
+    execution_mode: str,
     expected_target_hash: str,
     human_authorization_id: str,
     profile_id: str | None,
@@ -592,6 +609,7 @@ def continue_graph_branch(
             job_id=job_id,
             expected_target_hash=expected_target_hash,
             human_authorization_id=human_authorization_id,
+            execution_mode=execution_mode,
         )
     if profile_id and agent_id:
         assert client_root is not None

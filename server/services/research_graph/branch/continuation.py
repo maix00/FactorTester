@@ -59,6 +59,7 @@ def preview_graph_continuation(
     owner: str,
     target_graph_version: int,
     job_id: str,
+    execution_mode: str = "live",
 ) -> dict[str, Any]:
     """Return the exact, content-addressed effect an approval Gate must bind."""
     prepared = _prepare(
@@ -67,6 +68,7 @@ def preview_graph_continuation(
         owner=owner,
         target_graph_version=target_graph_version,
         job_id=job_id,
+        execution_mode=execution_mode,
     )
     return {
         "action": "continue_graph_branch",
@@ -84,6 +86,7 @@ def continue_graph_branch(
     job_id: str,
     expected_target_hash: str,
     human_authorization_id: str,
+    execution_mode: str = "live",
 ) -> dict[str, Any]:
     """Create one immutable version instance inside the same Work Package."""
     prepared = _prepare(
@@ -92,6 +95,7 @@ def continue_graph_branch(
         owner=owner,
         target_graph_version=target_graph_version,
         job_id=job_id,
+        execution_mode=execution_mode,
     )
     if expected_target_hash != prepared["target_hash"]:
         raise ValueError("Graph continuation target hash is stale")
@@ -120,17 +124,12 @@ def continue_graph_branch(
             )
         if branch_identity(source) != prepared["source_identity"]:
             raise ValueError("Graph continuation source identity is stale")
-        active = conn.execute(
-            """
-            SELECT version FROM active_research_graphs WHERE graph_id=?
-            """,
-            (prepared["graph_id"],),
-        ).fetchone()
-        if (
-            active is None
-            or int(active["version"]) != int(target_graph_version)
-        ):
-            raise ValueError("Graph continuation target is not active")
+        _require_execution_target(
+            conn,
+            graph_id=prepared["graph_id"],
+            target_graph_version=target_graph_version,
+            execution_mode=execution_mode,
+        )
         consume_continuation_gate(
             conn,
             owner_user_id=owner,
@@ -167,7 +166,7 @@ def continue_graph_branch(
         "graph_version": int(target_graph_version),
         "product_group": prepared["product_group"],
         "workspace_id": prepared["workspace_id"],
-        "mode": "live",
+        "mode": execution_mode,
         "shadow_run_id": "",
         "branches": [branch],
         "created_at": now,
@@ -181,7 +180,9 @@ def _prepare(
     owner: str,
     target_graph_version: int,
     job_id: str,
+    execution_mode: str,
 ) -> dict[str, Any]:
+    execution_mode = _normalize_execution_mode(execution_mode)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         source = load_instance_branch_with_latest_trace(
             conn,
@@ -206,10 +207,12 @@ def _prepare(
             graph_id=str(source["graph_id"]),
             version=int(target_graph_version),
         )
-        active = conn.execute(
-            "SELECT version FROM active_research_graphs WHERE graph_id=?",
-            (str(source["graph_id"]),),
-        ).fetchone()
+        _require_execution_target(
+            conn,
+            graph_id=str(source["graph_id"]),
+            target_graph_version=target_graph_version,
+            execution_mode=execution_mode,
+        )
         work_package_id = str(
             source["work_package_id"] or source_instance_id
         )
@@ -224,11 +227,6 @@ def _prepare(
         )
     if source_graph is None or target_graph is None:
         raise KeyError("source or target Graph version not found")
-    if (
-        active is None
-        or int(active["version"]) != int(target_graph_version)
-    ):
-        raise ValueError("Graph continuation target is not active")
     if int(target_graph.get("parent_version") or 0) != int(
         source["graph_version"]
     ):
@@ -318,6 +316,8 @@ def _prepare(
         "source_checkpoint_hash": str(checkpoint["projection_hash"]),
         "target_graph_version": int(target_graph_version),
         "target_graph_hash": str(target_graph["content_hash"]),
+        "target_graph_lifecycle": str(target_graph["lifecycle"]),
+        "execution_mode": execution_mode,
         "budget_profile_ref": str(
             budget_profile.get("profile_ref")
             or budget_profile.get("policy_ref")
@@ -390,6 +390,7 @@ def _prepare(
         ),
         "target_graph_version": int(target_graph_version),
         "target_graph_hash": str(target_graph["content_hash"]),
+        "execution_mode": execution_mode,
         "current_trial_plan_hash": str(
             source["current_trial_plan_hash"]
         ),
@@ -440,3 +441,31 @@ def _hash(value: dict[str, Any]) -> str:
     return hashlib.sha256(
         orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
     ).hexdigest()
+
+
+def _normalize_execution_mode(value: str) -> str:
+    mode = str(value or "live").strip().lower()
+    if mode not in {"live", "shadow"}:
+        raise ValueError("Graph continuation mode must be live or shadow")
+    return mode
+
+
+def _require_execution_target(
+    conn: Any,
+    *,
+    graph_id: str,
+    target_graph_version: int,
+    execution_mode: str,
+) -> None:
+    mode = _normalize_execution_mode(execution_mode)
+    if mode == "shadow":
+        return
+    active = conn.execute(
+        "SELECT version FROM active_research_graphs WHERE graph_id=?",
+        (graph_id,),
+    ).fetchone()
+    if (
+        active is None
+        or int(active["version"]) != int(target_graph_version)
+    ):
+        raise ValueError("Graph continuation target is not active")

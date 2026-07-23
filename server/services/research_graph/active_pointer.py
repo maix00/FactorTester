@@ -93,7 +93,17 @@ def activate_graph(
             """,
             (graph_id, int(source_version), actor, now),
         )
-    return _with_pointer(
+        promoted = conn.execute(
+            """
+            UPDATE research_graph_instances
+            SET mode='live'
+            WHERE graph_id=? AND graph_version=?
+              AND mode='shadow' AND shadow_run_id=''
+            """,
+            (graph_id, int(source_version)),
+        )
+        promoted_count = int(promoted.rowcount)
+    result = _with_pointer(
         source,
         {
             "version": int(source_version),
@@ -101,6 +111,8 @@ def activate_graph(
             "activated_at": now,
         },
     )
+    result["promoted_continuation_count"] = promoted_count
+    return result
 
 
 def rollback_active_graph(

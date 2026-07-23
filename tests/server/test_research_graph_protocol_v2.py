@@ -127,6 +127,20 @@ def test_server_accepts_the_shared_schema_v2_graph_contract() -> None:
     assert len(first["content_hash"]) == 64
 
 
+def test_server_rejects_schema_v2_graph_embedded_runtime_budget() -> None:
+    graph = _minimal_graph_v2()
+    graph["agent_packet_budget"] = {
+        "schema_version": 2,
+        "protocol_hard_ceiling_bytes": 6400,
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="schema-v2 Graph must not embed agent_packet_budget",
+    ):
+        validate_graph(graph)
+
+
 def test_server_rejects_a_schema_v2_report_without_semantic_binding() -> None:
     graph = _minimal_graph_v2()
     graph["report_requirements"][0].pop("requirement_ref")

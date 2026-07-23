@@ -50,6 +50,7 @@ def _install_active_target(
     path,
     *,
     capability_gap_requires_classification: bool = False,
+    activate: bool = True,
 ) -> dict:
     target = deepcopy(_graph())
     target.update({
@@ -86,22 +87,27 @@ def _install_active_target(
                 orjson.dumps(target).decode(),
             ),
         )
-        conn.execute(
-            """
-            INSERT INTO active_research_graphs (
-                graph_id, version, activated_by, activated_at
-            ) VALUES ('factor-research', 2, 'alice', 2)
-            ON CONFLICT(graph_id) DO UPDATE SET
-                version=excluded.version,
-                activated_by=excluded.activated_by,
-                activated_at=excluded.activated_at
-            """
-        )
+        if activate:
+            conn.execute(
+                """
+                INSERT INTO active_research_graphs (
+                    graph_id, version, activated_by, activated_at
+                ) VALUES ('factor-research', 2, 'alice', 2)
+                ON CONFLICT(graph_id) DO UPDATE SET
+                    version=excluded.version,
+                    activated_by=excluded.activated_by,
+                    activated_at=excluded.activated_at
+                """
+            )
     return target
 
 
-def _upgrade_active_target_to_schema_v2(path) -> dict:
-    target = _install_active_target(path)
+def _upgrade_active_target_to_schema_v2(
+    path,
+    *,
+    activate: bool = True,
+) -> dict:
+    target = _install_active_target(path, activate=activate)
     target["schema_version"] = 2
     target["content_hash"] = "9" * 64
     with connect_sqlite(path) as conn:
@@ -578,6 +584,53 @@ def test_schema_v2_continuation_reenters_the_same_current_node(
     assert runtime is not None
     replay = replay_shadow_trace(graph=target, runtime=runtime)
     assert replay["passed"] is True, replay
+
+
+def test_draft_target_allows_shadow_but_rejects_live_continuation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    target = _upgrade_active_target_to_schema_v2(path, activate=False)
+
+    with pytest.raises(
+        ValueError,
+        match="Graph continuation target is not active",
+    ):
+        preview_graph_continuation(
+            source_instance_id="instance-1",
+            source_branch_id="branch-1",
+            owner="alice",
+            target_graph_version=2,
+            job_id="",
+            execution_mode="live",
+        )
+
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+        execution_mode="shadow",
+    )
+
+    assert preview["descriptor"]["execution_mode"] == "shadow"
+    assert preview["descriptor"]["target_graph_lifecycle"] == "draft"
+    case_id = _approve(path, target_hash=preview["target_hash"])
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+        expected_target_hash=preview["target_hash"],
+        human_authorization_id=case_id,
+        execution_mode="shadow",
+    )
+    assert continued["mode"] == "shadow"
 
 
 def test_schema_v2_continuation_previews_only_material_requirement_changes(

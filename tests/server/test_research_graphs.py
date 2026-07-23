@@ -1083,6 +1083,7 @@ def test_graph_continuation_routes_preserve_exact_target(
             "job_id": "job-1",
             "expected_target_hash": "c" * 64,
             "human_authorization_id": "gate-146",
+            "execution_mode": "live",
         },
     )
 
@@ -1095,6 +1096,7 @@ def test_graph_continuation_routes_preserve_exact_target(
             "owner": "alice",
             "target_graph_version": 6,
             "job_id": "job-1",
+            "execution_mode": "live",
         }),
         ("continue", {
             "source_instance_id": "instance-v5",
@@ -1104,6 +1106,7 @@ def test_graph_continuation_routes_preserve_exact_target(
             "job_id": "job-1",
             "expected_target_hash": "c" * 64,
             "human_authorization_id": "gate-146",
+            "execution_mode": "live",
         }),
     ]
 
@@ -1480,6 +1483,37 @@ def test_activation_requires_exact_one_time_human_authorization(
         "consume_activation",
         consume_activation,
     )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner,
+                created_by_profile_ref, current_owner_profile_ref,
+                graph_id, graph_version, product_group, workspace_id,
+                mode, shadow_run_id, created_at
+            ) VALUES (
+                'draft-continuation', 'work-package-1', 'alice',
+                'profile:maxa', 'profile:maxa',
+                'factor-research', 2, 'neutral', 'workspace-1',
+                'shadow', '', 1
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner,
+                created_by_profile_ref, current_owner_profile_ref,
+                graph_id, graph_version, product_group, workspace_id,
+                mode, shadow_run_id, created_at
+            ) VALUES (
+                'activation-shadow', 'shadow-package', 'alice',
+                'profile:server', 'profile:server',
+                'factor-research', 2, 'neutral', 'workspace-1',
+                'shadow', 'run-shadow-1', 1
+            )
+            """
+        )
     active = research_graphs.activate_graph(
         graph_id="factor-research",
         source_version=2,
@@ -1488,6 +1522,7 @@ def test_activation_requires_exact_one_time_human_authorization(
     )
     assert active["lifecycle"] == "draft"
     assert active["active_pointer"]["version"] == 2
+    assert active["promoted_continuation_count"] == 1
     with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         gate = conn.execute(
             """
@@ -1497,8 +1532,18 @@ def test_activation_requires_exact_one_time_human_authorization(
             """,
             (authorization["authorization_id"],),
         ).fetchone()
+        modes = dict(conn.execute(
+            """
+            SELECT instance_id, mode FROM research_graph_instances
+            WHERE instance_id IN ('draft-continuation', 'activation-shadow')
+            """
+        ).fetchall())
     assert gate["status"] == "resolved"
     assert gate["latest_result_ref"].startswith("active-graph:")
+    assert modes == {
+        "draft-continuation": "live",
+        "activation-shadow": "shadow",
+    }
 
 
 def test_human_authorization_rejects_mismatched_conversation(
@@ -1611,7 +1656,7 @@ def test_activation_gate_hot_path_is_one_transaction_with_bounded_sql(
     assert active["lifecycle"] == "draft"
     assert active["active_pointer"]["version"] == 2
     assert len(reads) <= 2
-    assert len(writes) == 2
+    assert len(writes) == 3
     assert not any(
         "MAX(VERSION)" in statement
         or "INSERT INTO RESEARCH_GRAPH_VERSIONS" in statement

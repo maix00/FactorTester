@@ -19,7 +19,7 @@ from server.services.research_graph.packet_budget import (
 
 
 # Compatibility name for provider-neutral startup packets and pre-v9 Graphs.
-# A schema-v2 Graph may carry a separately calibrated packet budget.
+# Schema-v2 Graphs always resolve a separately hashed runtime Budget Profile.
 MAX_AGENT_PACKET_BYTES = LEGACY_AGENT_PACKET_BYTES
 # A repeated Agent packet is a model-context budget.  A submitted transition
 # is a one-time structured delta and can legitimately contain one complete
@@ -92,6 +92,13 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("graph version must be positive")
     if str(protocol_value.get("research_semantics") or "") != "product_neutral":
         raise ValueError("research graph must declare product_neutral semantics")
+    if (
+        int(protocol_value.get("schema_version") or 1) >= 2
+        and "agent_packet_budget" in protocol_value
+    ):
+        raise ValueError(
+            "schema-v2 Graph must not embed agent_packet_budget"
+        )
     if "agent_packet_budget" in protocol_value:
         validate_graph_packet_budget(protocol_value["agent_packet_budget"])
     actual_hash = graph_content_hash(protocol_value)
