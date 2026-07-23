@@ -537,7 +537,10 @@ struct ResearchNarrativeReportView: View {
     private func readableAuditLinks(
         in section: ResearchJournalSection
     ) -> [ResearchJournalLink] {
-        let step = steps.first { $0.stepRef == section.auditCheckpointRef }
+        let step = ResearchJournalPresentation.obligationSnapshotStep(
+            for: section,
+            steps: steps
+        )
         return auditLinks(in: section).filter { link in
             link.kind != "evidence"
                 || ResearchJournalPresentation.hasReadableEvidencePresentation(
@@ -702,9 +705,10 @@ struct ResearchNarrativeReportView: View {
     private func obligationRows(
         in section: ResearchJournalSection
     ) -> [ResearchObligationTableRow] {
-        let step = steps.first {
-            $0.stepRef == section.auditCheckpointRef
-        }
+        let step = ResearchJournalPresentation.obligationSnapshotStep(
+            for: section,
+            steps: steps
+        )
         return ResearchJournalPresentation.obligationRows(
             links: section.links,
             checkpointObligationRefs: step?.obligationRefs,
@@ -722,8 +726,11 @@ struct ResearchNarrativeReportView: View {
     private func stageObligationRows(
         in section: ResearchJournalSection
     ) -> ResearchStageObligationRows {
-        guard let index = orderedSteps.firstIndex(where: {
-            $0.stepRef == section.checkpointRef
+        guard let snapshot = ResearchJournalPresentation.obligationSnapshotStep(
+            for: section,
+            steps: orderedSteps
+        ), let index = orderedSteps.firstIndex(where: {
+            $0.stepRef == snapshot.stepRef
         }) else {
             return ResearchStageObligationRows(
                 active: obligationRows(in: section), inherited: []
@@ -748,7 +755,7 @@ struct ResearchNarrativeReportView: View {
     private func transitionStep(
         for section: ResearchJournalSection
     ) -> ResearchTransitionStep? {
-        steps.first { $0.stepRef == section.auditCheckpointRef }
+        steps.first { $0.stepRef == section.checkpointRef }
     }
 
     private func loadReport() async {

@@ -581,6 +581,8 @@ struct ResearchStateChange: Decodable, Identifiable {
     let objectID: String
     let fromState: String
     let toState: String
+    let fromRequirementRefs: [String]
+    let toRequirementRefs: [String]
     var id: String { "\(objectID):\(fromState):\(toState)" }
 
     init(from decoder: Decoder) throws {
@@ -602,6 +604,14 @@ struct ResearchStateChange: Decodable, Identifiable {
             String.self,
             forKey: DynamicCodingKey("to_state")
         )
+        fromRequirementRefs = try values.decodeIfPresent(
+            [String].self,
+            forKey: DynamicCodingKey("from_requirement_refs")
+        ) ?? []
+        toRequirementRefs = try values.decodeIfPresent(
+            [String].self,
+            forKey: DynamicCodingKey("to_requirement_refs")
+        ) ?? []
     }
 }
 

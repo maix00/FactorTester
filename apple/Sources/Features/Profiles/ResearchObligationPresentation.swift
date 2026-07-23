@@ -17,6 +17,23 @@ struct ResearchStageObligationRows {
 }
 
 extension ResearchJournalPresentation {
+    /// A report carrier is not a Research Cycle state. Select the immutable
+    /// transition snapshot that existed when the section was recorded, while
+    /// keeping the section's semantic chapter and physical audit checkpoint
+    /// as separate identities.
+    static func obligationSnapshotStep(
+        for section: ResearchJournalSection,
+        steps: [ResearchTransitionStep]
+    ) -> ResearchTransitionStep? {
+        let eligible = steps.filter { $0.createdAt <= section.createdAt }
+        guard let latestTime = eligible.map(\.createdAt).max() else {
+            return nil
+        }
+        let latest = eligible.filter { $0.createdAt == latestTime }
+        guard latest.count == 1 else { return nil }
+        return latest[0]
+    }
+
     static func readableObligationQuestion(_ value: String?) -> String {
         chineseText(value) ?? "义务描述缺失"
     }
@@ -100,9 +117,8 @@ extension ResearchJournalPresentation {
                     }
                     ?? readableObligationQuestion(nil),
                 materiality: materialityLabel(obligation?.materiality),
-                change: change.map {
-                    "\(statusLabel($0.fromState)) → \(statusLabel($0.toState))"
-                } ?? "本步骤未变化",
+                change: change.map(obligationChangeLabel)
+                    ?? "本步骤未变化",
                 currentStatus: statusLabel(
                     statusOverrides[objectID]
                         ?? change?.toState
@@ -111,6 +127,19 @@ extension ResearchJournalPresentation {
                 )
             )
         }
+    }
+
+    private static func obligationChangeLabel(
+        _ change: ResearchStateChange
+    ) -> String {
+        if change.fromState != change.toState {
+            return "\(statusLabel(change.fromState)) → "
+                + statusLabel(change.toState)
+        }
+        if change.fromRequirementRefs != change.toRequirementRefs {
+            return "义务分类已更新"
+        }
+        return "义务内容已更新"
     }
 
     static func obligationStatuses(

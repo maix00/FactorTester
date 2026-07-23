@@ -375,6 +375,149 @@ final class ResearchJournalTests: XCTestCase {
         ])
     }
 
+    func testMaxAObligationsRemainTraceableAcrossLateReportSections()
+        throws
+    {
+        let carried = [
+            ("semantic", "经济语义与因果时序是否成立？"),
+            ("data", "数据是否覆盖拟议试验？"),
+            ("incremental", "是否提供可复现的增量价值？"),
+            ("transport", "效果能否跨环境迁移？"),
+            ("cost", "成本与执行约束后是否仍有效？"),
+            ("schedule", "跨交易日信号调度如何规定？"),
+        ]
+        let added = [
+            ("parameter", "固定中心价格参数化后的语义是否明确？"),
+            ("candidate", "派生候选的经济语义是否逐项明确？"),
+            ("comparison", "派生候选是否提供可归因的增量？"),
+        ]
+        func refs(_ values: [(String, String)]) -> String {
+            values.map { "\"obligation:\($0.0)\"" }
+                .joined(separator: ",")
+        }
+        func presentations(_ values: [(String, String)]) -> String {
+            values.map {
+                """
+                {"obligation_ref":"obligation:\($0.0)",
+                 "question_summary":"\($0.1)"}
+                """
+            }.joined(separator: ",")
+        }
+        let steps = try JSONDecoder().decode(
+            [ResearchTransitionStep].self,
+            from: Data(
+                """
+                [
+                  {"step_ref":"trace:v9-continuation",
+                   "edge_ref":"graph-edge:__graph_continuation__",
+                   "from_node":"factor_semantics",
+                   "to_node":"factor_semantics","created_at":100,
+                   "evidence_refs":[],"trial_plan_refs":[],
+                   "obligation_refs":[\(refs(carried))],
+                   "claim_refs":[],"job_refs":[],"run_refs":[],
+                   "obligation_changes":[],"claim_changes":[],
+                   "obligation_presentations":[\(presentations(carried))]},
+                  {"step_ref":"trace:semantic-complete",
+                   "edge_ref":"graph-edge:factor_semantics__validation_design",
+                   "from_node":"factor_semantics",
+                   "to_node":"validation_design","created_at":200,
+                   "evidence_refs":[],"trial_plan_refs":[],
+                   "obligation_refs":[\(refs(carried + added))],
+                   "claim_refs":[],"job_refs":[],"run_refs":[],
+                   "obligation_changes":[
+                     {"obligation_id":"parameter","from_state":"absent",
+                      "to_state":"open"},
+                     {"obligation_id":"candidate","from_state":"absent",
+                      "to_state":"open"},
+                     {"obligation_id":"comparison","from_state":"absent",
+                      "to_state":"open"}],
+                   "claim_changes":[],
+                   "obligation_presentations":[
+                     \(presentations(carried + added))
+                   ]}
+                ]
+                """.utf8
+            )
+        )
+        let continuationSection = ResearchJournalSection(
+            sectionID: "continuation",
+            sectionRef: "report-section:continuation",
+            title: "v8 到 v9 的义务承接",
+            body: "",
+            blocks: [],
+            links: [],
+            checkpointRef: "trace:v9-continuation",
+            auditCheckpointRef: "report-checkpoint:continuation",
+            createdAt: 150
+        )
+        let semanticSection = ResearchJournalSection(
+            sectionID: "semantic-complete",
+            sectionRef: "report-section:semantic-complete",
+            title: "因子语义阶段完成了什么",
+            body: "",
+            blocks: [],
+            links: [],
+            checkpointRef: "trace:semantic-complete",
+            auditCheckpointRef: "report-checkpoint:semantic-complete",
+            createdAt: 250
+        )
+        let sgcpsSection = ResearchJournalSection(
+            sectionID: "sgcps-carry",
+            sectionRef: "report-section:sgcps-carry",
+            title: "旧 SgCPSVol 条件化语义义务的承接",
+            body: "",
+            blocks: [],
+            links: [],
+            checkpointRef: "trace:v9-continuation",
+            auditCheckpointRef: "report-checkpoint:sgcps-carry",
+            createdAt: 260
+        )
+
+        let continuation = try XCTUnwrap(
+            ResearchJournalPresentation.obligationSnapshotStep(
+                for: continuationSection, steps: steps
+            )
+        )
+        XCTAssertEqual(continuation.obligationRefs.count, 6)
+        XCTAssertEqual(continuation.obligationPresentations?.count, 6)
+
+        for section in [semanticSection, sgcpsSection] {
+            let snapshot = try XCTUnwrap(
+                ResearchJournalPresentation.obligationSnapshotStep(
+                    for: section, steps: steps
+                )
+            )
+            let rows = ResearchJournalPresentation.obligationRows(
+                links: [],
+                checkpointObligationRefs: snapshot.obligationRefs,
+                obligations: [],
+                obligationPresentations:
+                    snapshot.obligationPresentations ?? [],
+                changes: snapshot.obligationChanges
+            )
+            let groups = ResearchJournalPresentation.stageObligationRows(
+                rows: rows,
+                currentRefs: snapshot.obligationRefs,
+                previousRefs: continuation.obligationRefs,
+                changes: snapshot.obligationChanges
+            )
+
+            XCTAssertEqual(rows.count, 9)
+            XCTAssertEqual(groups.active.count, 3)
+            XCTAssertEqual(groups.inherited.count, 6)
+            XCTAssertFalse(rows.contains { $0.question == "义务描述缺失" })
+            XCTAssertEqual(
+                Set(groups.inherited.map {
+                    $0.obligationLink.targetRef
+                }),
+                Set(carried.map { "obligation:\($0.0)" })
+            )
+            XCTAssertTrue(groups.active.allSatisfy {
+                $0.change != "本步骤未变化"
+            })
+        }
+    }
+
     func testObligationAndDeltaBecomeOneChineseTableRow() throws {
         let links = try JSONDecoder().decode(
             [ResearchJournalLink].self,
@@ -417,6 +560,38 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(rows[0].currentStatus, "已收敛")
         XCTAssertEqual(rows[0].obligationLink.linkID, "coverage")
         XCTAssertEqual(rows[0].deltaLink?.linkID, "coverage-change")
+    }
+
+    func testRequirementReclassificationIsReportedAsARealChange() throws {
+        let obligations = try decodeObligations(
+            """
+            [{"obligation_ref":"obligation:semantic","status":"open",
+              "materiality":"high","question_summary":"经济语义是否成立？"}]
+            """
+        )
+        let changes = try JSONDecoder().decode(
+            [ResearchStateChange].self,
+            from: Data(
+                """
+                [{"obligation_id":"semantic",
+                  "from_state":"open","to_state":"open",
+                  "from_requirement_refs":[],
+                  "to_requirement_refs":[
+                    "factor_semantics.timing_and_causality"
+                  ]}]
+                """.utf8
+            )
+        )
+
+        let rows = ResearchJournalPresentation.obligationRows(
+            links: [],
+            checkpointObligationRefs: ["obligation:semantic"],
+            obligations: obligations,
+            changes: changes
+        )
+
+        XCTAssertEqual(rows.first?.change, "义务分类已更新")
+        XCTAssertNotEqual(rows.first?.change, "本步骤未变化")
     }
 
     func testCheckpointRowsUseAllRefsAndPersistedChineseQuestions() throws {
