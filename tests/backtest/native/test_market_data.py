@@ -535,6 +535,55 @@ def test_ledger_event_minimal_snapshot_matches_settlement_and_close_only():
     assert "lower_limit" not in ledger
 
 
+def test_margin_liquidation_trade_intent_uses_ledger_minimal_snapshot():
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 15:00", tz="Asia/Shanghai")
+    ledger = ledger_identity("risk-book")
+    account = BacktestRunState()
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [11.0]}, index=[timestamp]
+    )
+    account.market_data_store.volume_table = pd.DataFrame(
+        {product: [100.0]}, index=[timestamp]
+    )
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0]}, index=[timestamp]),
+        "close": pd.DataFrame({product: [11.0]}, index=[timestamp]),
+        "upper_limit": pd.DataFrame({product: [12.0]}, index=[timestamp]),
+        "lower_limit": pd.DataFrame({product: [9.0]}, index=[timestamp]),
+        "settlement": pd.DataFrame({product: [99.0]}, index=[timestamp]),
+    }
+    account.market_data_store.factor_field_tables = {
+        "FACTOR": pd.DataFrame({product: [7.0]}, index=[timestamp]),
+    }
+    draft = EventDraft(
+        EventKind.TRADE_INTENT,
+        timestamp,
+        payload={
+            "kind": "margin_liquidation",
+            "ledger_id": ledger.name,
+            "deficit": 12.0,
+        },
+        ledger=ledger,
+    )
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        event_kind=EventKind.TRADE_INTENT,
+        active_ledgers=frozenset({ledger}),
+        drafts_by_ledger={ledger: [draft]},
+    )
+
+    _set_current_market_snapshot(account, ctx)
+    snapshot = ctx.get(MarketDataModule.current_market_snapshot)
+
+    assert snapshot == {
+        "close": {product: 11.0},
+        "settlement": {product: 99.0},
+    }
+    assert ctx.get(MarketDataModule.current_prices) == {product: 11.0}
+
+
 def test_bar_open_event_uses_target_index_key_not_visible_timestamp():
     product = object()
     idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min", tz="Asia/Shanghai")
