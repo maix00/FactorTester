@@ -2674,6 +2674,12 @@ continuation preflight → TrialPlan actions/admission → 标准化报告/UI �
   或研究报告；确定性生成 Markdown/PDF 的运行时间同样不进入正文，避免相同研究事实因
   重新渲染而改变 canonical bytes。
 
+checkpoint 级 `research_occurred_at` 是该研究步骤/节点访问的默认发生时间；同一
+checkpoint 内绑定到具体 `report_requirement_id + subject_ref` 的报告块可以用独立
+`report_timing.occurred_at` 表示该条内容在 Agent 对话中形成的时间。报告条目未覆盖时
+继承 checkpoint 时间。两者都只改变本地 immutable narrative/fragment hash，不参与
+Graph 排序、幂等主键或研究 freshness。
+
 旧 v1/v2 narrative 没有 `occurred_at` 时，显示层可回退到 `recorded_at`，但必须标注为
 “登记时间/发生时间未单独记录”。补登记通过独立 CLI action 读取可信历史 Carrier 和来源
 引用，向原 Work Package/branch 插入缺失的 immutable report fragment 并重建本地 journal、
@@ -2692,6 +2698,19 @@ Work Package 的旧派生产物，再从可信根重建，不能修改旧 fragme
 重建中间阶段把 REPORT 暂时回退到历史 HEAD。历史 fragments 先 stage，最后只以当前
 可信 HEAD 原子生成 JOURNAL/INDEX/REPORT；Profile/branch/Work Package 的 head 与
 语义时间字段保持不变。
+
+最终 shadow acceptance 必须由用户显式把测试研究切换到 v9，并以 Codex 对话
+「MaxA (2)」作为历史来源恢复真实实验记录和中文逐条报告。来源引用、节点发生时间、
+报告条目发生时间、Trial/Job/Evidence 绑定均须可复核；不得另造替代实验、用迁移日志
+冒充研究报告，或因恢复而产生第二个 Work Package。恢复完成后再从 v9 当前可信 HEAD
+继续 shadow research。
+
+若对话记录缺少完成报告所需的服务器交互、Job receipt、统计结果或 artifact，必须在
+恢复期间真实调用服务器补跑；新运行保留新的 Job/Run/Evidence 身份和当前可信记录时间，
+并在报告中逐条标记为“为补齐历史记录而复跑”，不得回填成旧时间。是否复跑由证据完整性、
+v9 entry requirements 和研究义务决定，不机械重复所有既有测试。必要的统计结果表、
+equity curve、分组单调性或其他能实质支持判断的图像须生成内容寻址 artifact，嵌入中文
+报告并绑定对应 Trial/Job/Evidence；历史 fragment 回填与当前 v9 正常 transition 必须分开。
 
 ## 13. Graph 版本 UI 与历史存储
 
