@@ -66,9 +66,9 @@ final class ClientReleaseController: ObservableObject {
     }
 
     func checkAtLaunch() async {
-        guard automaticallyUpdates else { return }
         await refresh(force: false)
-        guard let resolved,
+        guard automaticallyUpdates,
+              let resolved,
               VersionOrder.isNewerRelease(
                 version: resolved.manifest.version,
                 build: resolved.manifest.build,
@@ -76,6 +76,16 @@ final class ClientReleaseController: ObservableObject {
                 build: Int(installedBuild) ?? 0
               ), pendingUpdate == nil else { return }
         await update()
+    }
+
+    var hasAvailableUpdate: Bool {
+        guard let resolved else { return false }
+        return VersionOrder.isNewerRelease(
+            version: resolved.manifest.version,
+            build: resolved.manifest.build,
+            thanVersion: installedVersion,
+            build: Int(installedBuild) ?? 0
+        )
     }
 
     func update() async {
