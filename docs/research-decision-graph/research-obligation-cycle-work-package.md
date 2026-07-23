@@ -2,7 +2,7 @@
 
 Status: implementation in progress. The original Grill 143 Batches 0–5 are
 complete, but the former “Batch 6 next” handoff is superseded by the narrower
-canonical sequence in Grill 179.48–179.49. Remaining gates include the final
+canonical sequence in Grill 179.48–179.50. Remaining gates include the final
 obligation catalog/resolvers, report-coverage enforcement, lifecycle cleanup,
 historical-time backfill, v1–v3 restoration, and real-factor shadow acceptance.
 
@@ -98,9 +98,10 @@ another open-ended design interview:
    provider-neutral resolver, CLI action, report contract and activation proof;
 3. user acceptance objectives and criteria are not yet a first-class bounded
    Contract projection and therefore cannot prevent silent closure;
-4. `docs/agents/server-maintenance.md` is a useful private contract, but the
-   progressively loaded Server Maintenance Skill accepted in Grill 178.2 has
-   not been packaged or validated;
+4. the private progressively loaded Server Maintenance Skill accepted in
+   Grill 178.2 is now packaged under `server/skills/server-maintenance/`;
+   its Graph, backend and database references exist, but that completion does
+   not satisfy the separate resolver, lifecycle or release gates;
 5. continuation, Evidence admission and report coverage have protocol tests,
    but still need final-catalog end-to-end validation, a real under-6000-byte
    current-anchor packet and complete FTClient bound-item presentation;
@@ -113,8 +114,10 @@ another open-ended design interview:
 8. public-client clean-machine installation, repository confidentiality split,
    stable `main` release, download/reinstall/rollback and remote cleanup gates
    remain release work outside the semantic Graph runtime;
-9. issue-143 is not complete. No issue-143 merge, final historical recovery or
-   research rerun may begin until its margin semantics are finished and
+9. issue-143 is not complete. The current issue-141 worktree nevertheless
+   contains merge commit `fef5b000`, which integrates the unfinished
+   issue-143 branch. This is not acceptance evidence: final historical
+   recovery and research reruns remain forbidden until margin semantics are
    independently verified on the production runtime path.
 
 These gates retain the canonical implementation order: finish provider-neutral
@@ -122,6 +125,351 @@ contracts and resolvers; publish and validate v9; restore history and lifecycle
 maintenance; wait for and integrate issue-143; rerun and recover `MaxA (2)`;
 then perform public-client release acceptance. Each independently reversible
 batch is tested and committed before the next.
+
+## Full proposal implementation audit (2026-07-23)
+
+This audit reread the detailed proposal, its user correction, later
+supersession and current production path for every numbered Grill decision.
+It does not infer completion from an `Accepted` or `closed` label.
+
+Status codes:
+
+- **C** — the final semantics are implemented on the current runtime path and
+  have focused deterministic tests;
+- **P** — meaningful implementation exists, but one or more promised owners,
+  surfaces, integrations or acceptance tests are missing;
+- **D** — the result is still chiefly a documented protocol or draft;
+- **S** — the proposal was explicitly superseded, withdrawn or is an
+  operating rule rather than a feature;
+- **X** — current code or records contradict the final accepted semantics;
+- **B** — final acceptance is blocked by the unfinished issue-143 accounting
+  work even if local components exist.
+
+The read-only production check found `factor-research@v8` active and only
+versions v4–v8 stored. The successor v9 is not published. Therefore a v9
+schema or unit test is never counted as current production completion.
+
+### Grill 48–76
+
+| ID | Status | Detailed commitment checked and current result |
+|---:|:---:|---|
+| 48 | P | Maintenance Case and exact gap/recovery gates exist; mandatory platform-work-to-release-receipt-to-single-wake is not closed. |
+| 49 | P | New-lineage and holdout guards exist; there is no end-to-end proof that post-result enrichment cannot consume an exposed confirmation sample. |
+| 50 | D | No Provisional Memory repetition/industry-rule threshold promotes a path proposal; replay, shadow and audit infrastructure alone do not implement it. |
+| 51 | D | No bounded mechanism-ranked conditioning-candidate generator or ablation scheduler exists. |
+| 52 | P | Factor/strategy roles can express part of the distinction; the required main-only, interaction, stability and cost ablation flow is absent. |
+| 53 | D | No four-tier, scope-aware candidate eligibility projection or ranking surface exists. |
+| 54 | C | `$Rev` is handled as configuration-level direction negation, not evidence or a component factor. |
+| 55 | D | Hard exclusions versus soft ranking are guidance, not an enforced candidate resolver contract. |
+| 56 | D | Candidate-discovery exit has no enforced broader-search-or-reason report field. |
+| 57 | D | No point-in-time `MarketStateSnapshot` owner or open state-definition registry exists. |
+| 58 | P/B | Exact factor/RunSpec/Trial/Job identity checks and evidence reuse exist; accounting-change impact and required real reruns remain incomplete and blocked. |
+| 59 | P | Maintenance routing exists; deterministic generalization triggers over provisional experience do not. |
+| 60 | C | Branch Graph pinning, immutable continuation, same-node re-entry and preservation of running work are implemented and tested. |
+| 61 | P | Composition and structural identity exist; no resolver proves that a composed implementation exactly satisfies a missing semantic capability. |
+| 62 | P | `FactorParam` and source-free revision manifests exist; semantic version allocation, classification and full lineage do not. |
+| 63 | S | The aligned-signal/raw-expression dual-mode proposal was superseded by 65. |
+| 64 | S | Shared aligned/raw DAG semantics were moved to strategy/execution by 65. |
+| 65 | P | Raw `FactorParam` composition and final family alignment exist; serialized nested resolution and execution-sharing acceptance are incomplete. |
+| 66 | P | Strategy roles and RunSpec hashes distinguish configurations; there is no canonical factor versus factor-plus-strategy evidence-class contract. |
+| 67 | X | Required `FactorExpr.tanh()` and public typed `where` are absent; raw nesting lacks the full promised version/timing/incremental acceptance. |
+| 68 | S | The nested one-operator directory proposal was withdrawn by 72. |
+| 69 | P | Workspace/Pyright checks exist, but the full operator import/catalog/hash/LaTeX/batch/incremental snapshot suite does not. |
+| 70 | P | Planning receives a compact scope packet, but recommendation, user confirmation and enforced Research scope escalation are not a complete flow. |
+| 71 | P | External factors can be marked experimental; ordinary local post-run source-free registration with role, result and failure evidence is not unified. |
+| 72 | X | `WhereOp` is defined in both `conditional.py` and `composite.py`, violating the accepted sole-owner contract; typed SDK `where` is also absent. |
+| 73 | P | Profile worktrees isolate Agents and hashes support reuse; sibling similarity and logical-duplicate consolidation are missing. |
+| 74 | P | Source authorization boundaries exist; immutable `FactorRef@commit` import plus lineage receipt is missing. |
+| 75 | D | Research-completion-to-Planning recommendation and user reprioritization are not implemented. |
+| 76 | P | Role-specific packets are bounded; the complete promised candidate, market, Pyright and backend-receipt contents are not present. |
+
+### Grill 77–113
+
+| ID | Status | Detailed commitment checked and current result |
+|---:|:---:|---|
+| 77 | X | The final Research Cycle checkpoint is canonical in server trace, contrary to the older “full checkpoint stays local” wording; Grill 143 refined the model but 77 was never marked superseded. |
+| 78 | P | Graph/Trial/Run hashes and durable transitions exist; the full local append-log cadence and resume verification contract is incomplete. |
+| 79 | P | Only dependent branches pause and gap recovery exists; event-driven verified auto-resume is missing. |
+| 80 | D | No persistent GoalSpec/event watcher exists; an SSE heartbeat is not this feature. |
+| 81 | D | Provider-neutral GoalSpec and provider adapters are absent. |
+| 82 | P | Maintenance Cases and the Maintenance Skill exist; the zero-token Standing Monitor/Goal does not. |
+| 83 | D | Workspace Research Objective and bounded Planning Cycle Goal do not exist as contracts. |
+| 84 | D | No Work-Package-bound Research Goal state machine exists. |
+| 85 | D | No event-first Agent watcher with sparse heartbeat fallback exists. |
+| 86 | D | No runtime-neutral Codex detection/optional Goal adapter/fallback flow exists. |
+| 87 | D | No compact Goal drafting and accept/edit/refuse flow exists. |
+| 88 | P | Stable Agent ID and invocation telemetry exist; original-dialog wake and event-hash deduplication do not. |
+| 89 | P | Packet budgets, reservations and token comparison exist; Goal/wake dedupe and full with-Graph versus without-Graph acceptance do not. |
+| 90 | P | Some unchanged reads and duplicate Maintenance actions are zero-write and statement-tested; no complete watcher WAL/lock/latency benchmark exists. |
+| 91 | P | Risk levels suppress routine reviewers in packet policy; no complete execution orchestrator/review-hash reuse path exists. |
+| 92 | C | Agent Flow, Active Graph and Maintenance ownership are separated and exchange bounded references. |
+| 93 | C | There is one factor-research Graph; Planning and Maintenance remain lightweight non-Graph workflows. |
+| 94 | P | Planning exposes scope fields, but recommendation, human confirmation receipt and new-primary escalation are incomplete. |
+| 95 | D | `targeted_research` and `open_discovery` modes have no runtime schema or CLI. |
+| 96 | D | Capability gaps are separated from factor rejection, but discovery-candidate-to-independent-branch/trial lifecycle is absent. |
+| 97 | S | The standalone candidate-discovery node was absorbed by later hypothesis/factor-improvement topology. |
+| 98 | D | No deterministic exact-candidate short circuit or candidate-search cache exists. |
+| 99 | D | No `MarketStateSnapshot` implementation exists. |
+| 100 | P | Skill loading is progressive; the full candidate search ladder, stopping evidence and broader-search report are absent. |
+| 101 | S/C | Grill 143 replaced the original factor-status vocabulary with scoped Research Claims; the refined Claim protocol is implemented. |
+| 102 | P/B | Claim, Trial and catalog objects can express the criteria; product-specific thresholding and real post-margin acceptance remain incomplete. |
+| 103 | P | Results preserve immutable identities; there is no complete defect-impact classifier or UI classification. |
+| 104 | D | No semantic-version allocator, deterministic change classifier or metadata-revision workflow implements the accepted matrix. |
+| 105 | P | Server manifests are source-free; semantic version allocation and temporary-source deletion receipts are incomplete. |
+| 106 | P | Formula/DAG leakage is avoided; the promised anonymous integration relationship contract is not complete. |
+| 107 | P | Local Profile source and private server maintenance are separated by convention and Skill; end-to-end technical access enforcement is incomplete. |
+| 108 | P | Capability descriptions and hashes exist; the full source-free capability-gap contract with domains, timing and counterexamples is not enforced. |
+| 109 | D | Planning does not yet generate one recommendation plus bounded alternatives, cost, gaps and completion criteria. |
+| 110 | D | No deterministic interruption-decision contract enforces the agreed user-contact boundary. |
+| 111 | P | Maintenance Case, Gate, role packet and private Skill exist; release-receipt-to-single-research-wake is incomplete. |
+| 112 | S | The original method-heavy topology is superseded by the successor stable-state topology. |
+| 113 | C | Current-node and triggered-condition capability resolution is implemented; future-node gaps do not block the current branch. |
+
+### Grill 114–143
+
+| ID | Status | Detailed commitment checked and current result |
+|---:|:---:|---|
+| 114 | D | Scratch-versus-executed candidate preregistration is not enforced because candidate discovery modes are absent. |
+| 115 | D | Immutable `attempt_count` and `outcome_examined_count` do not exist. |
+| 116 | P/X | Skill-neutral descriptions and a local use ledger exist; the full description-search-to-approval-to-execution audit loop is unproven, and the canonical Research Obligation Skill currently differs from its packaged CLI copy. |
+| 117 | P | Detailed records were reconstructed; the compact index was stale at 142 and is corrected by this audit. |
+| 118 | P | Work Package, Graph and Agent Flow authority boundaries are substantially implemented, but later lifecycle work superseded parts of the original object-count wording. |
+| 119 | C | TrialPlan is versioned, branch-specific and required by Run/result binding without universal metric thresholds. |
+| 120 | C | Compact immutable TrialPlan identity, hash, role, comparison and evidence-action binding are implemented. |
+| 121 | P | Deterministic validation exists; conditional Statistical Reviewer invocation/reuse is not a complete runtime path. |
+| 122 | C | TrialPlan-to-ResearchRun-to-Job/Evidence binding is implemented and tested. |
+| 123 | S | The independent JobEvidenceReceipt/EvidenceEnvelope persistence proposal was withdrawn by 124. |
+| 124 | C | Evidence is projected from JobAttempt/artifact/assurance and stored in existing trace; no duplicate receipt owner was added. |
+| 125 | P | TrialPlan v5, Evidence Actions and checkpoints exist; full production research acceptance is pending. |
+| 126 | P | Owner boundaries and replay are implemented, but the full obligation cycle is not closed. |
+| 127 | P | Server/CLI per-Agent token limits work; FTClient cannot configure them. |
+| 128 | P | Configure/reset/reserve/settle work; FTClient lacks task usage, remaining budget and reset UI. |
+| 129 | P | Atomic reservation and exhaustion behavior exist; low-cost event wake after budget revision is incomplete. |
+| 130 | D/P | Bounded backend reads exist; the promised lazy task-usage UI does not. |
+| 131 | C | Provider-neutral actual/fallback/cache-aware accounting and charging policy are implemented. |
+| 132 | C | AgentBudgetPeriod and AgentInvocation are the two Agent Flow owners. |
+| 133 | P | Bounded context-cost categories are persisted; FTClient invocation detail does not display them. |
+| 134 | P | Server/local ownership policy exists; FTClient lacks the local usage store and merged view. |
+| 135 | D/P | Telemetry exists; deterministic anomaly deduplication and optimization-proposal flow do not. |
+| 136 | C | Provider-neutral role-specific small resume packets are implemented. |
+| 137 | P | Capability descriptions and local Skill ledger exist; complete compatible-content reuse without rediscovery is not proven. |
+| 138 | C | Deterministic terminal assurance is embedded in JobAttempt and reviewer escalation is anomaly-only. |
+| 139 | C | Anomalous attempts remain immutable and Maintenance disposition controls eligibility without branch pause writes. |
+| 140 | P | One MaintenanceCase table supports dedupe/claim/status/Gates; exact affected-research wake is incomplete. |
+| 141 | P | Retention and exact-hash trust are substantially implemented; complete atomic cross-owner Profile/budget/checkpoint transfer is not. |
+| 142 | S/P | The old six-Graph-owner count was superseded by canonical Work Package lifecycle; Agent Flow still retains its two owners. |
+| 143 | P/X/B | Core Claim/Obligation/Evidence/Adjudication/closure protocols and Skill exist; real resolvers, user objectives, v9, history recovery and shadow research remain incomplete, and the canonical/packaged Skill copies have drifted. |
+
+### Grill 144–176
+
+| ID | Status | Detailed commitment checked and current result |
+|---:|:---:|---|
+| 144 | C/S | The v8 `job_evidence_ready` separation was implemented and tested; successor v9 intentionally replaces that method-heavy topology. |
+| 145 | C/S | v8 blocked closure and recovery without a new resume object were implemented; successor topology later refines the path. |
+| 146 | C | Immutable exact-hash cross-version continuation is implemented. |
+| 147 | P | Major/sidebar/settings layout exists; localization and final visual-state acceptance are incomplete. |
+| 148 | P | Profile factor worktree and `research/` roots are separated; one-time removal of every obsolete layout is not fully proven. |
+| 149 | P | Work Package/branch journals and reports exist; historical continuity and complete MaxA reconstruction remain incomplete. |
+| 150 | P | Server availability, bundles and Tiger support exist; end-to-end source ownership and UI management remain incomplete. |
+| 151 | X | FTClient has no Data Sources major shortcut/page despite the accepted requirement. |
+| 152 | P/X | Local Profile/worktree creation exists, but not the promised server-reserved atomic initialization; metadata-only state can still be presented too optimistically. |
+| 153 | D/P | No stable CLI business-action ID manifest proves parity for every FTClient mutation/query. |
+| 154 | P/X | Work Packages open as research views, but Profile screens still embed a full research view instead of the intended compact attribution/navigation boundary. |
+| 155 | P | Profile handoff, trace and UI projection exist; full report/checkpoint acceptance remains. |
+| 156 | D/P | Profile hard-delete fails closed; complete archive/restore/delete-plan lifecycle is not implemented. |
+| 157 | X | Factor Library is still an embedded server Web page, not the accepted native CLI-backed Local/Server aggregate. |
+| 158 | D/P | No complete Git-like factor lineage navigator and composable filter system exists. |
+| 159 | D/P | Category/tag overlays and classification provenance are incomplete. |
+| 160 | D | Identity/classification adjudication and full version/parameter/applicability/evidence navigation are absent. |
+| 161 | D | Exact-hash Draft promotion through Agent approval and CLI integration is absent. |
+| 162 | P | Chinese structured reports, obligations, formulas, figures and coverage exist; full MaxA history and visual/E2E acceptance remain open. |
+| 163 | P | FTClient does not edit source, as required; recommended values/descriptions/classification/sync surfaces are incomplete. |
+| 164 | D | Version-scoped device-local recommended research defaults are not implemented. |
+| 165 | S/P | One Work Package aggregates branches, but the later canonical lifecycle added a table contrary to the earlier no-new-object wording; the later decision supersedes it. |
+| 166 | D/P | Server-authoritative Profile archive/delete plan and clean-worktree release are incomplete. |
+| 167 | P | Git worktrees and shared canonical workspace exist; semantic promotion/version lineage is incomplete. |
+| 168 | X | FTClient has no agreed local SQLite owner for preferences, outbox and bounded caches. |
+| 169 | D/P | Local staging is recoverable; server reservation-to-local-verify-to-activation is not an atomic two-phase Profile flow. |
+| 170 | D | Metadata-only, persistent private source sync and one-Run transient upload modes are absent. |
+| 171 | X | No generated stable action manifest and shared UI/CLI conformance vectors exist. |
+| 172 | P | The principal/Profile layout is largely unified; proof that no old root can be recreated or referenced remains incomplete. |
+| 173 | D | User canonical-version and Profile Draft sync behavior depends on unimplemented promotion/source-sync capabilities. |
+| 174 | S/C | The CRDT/event-table proposal was explicitly rejected and correctly not implemented. |
+| 175 | D | Device-local shared recommended parameters are absent. |
+| 176 | S | This is an operating rule for first-principles/Occam decisions, not a runtime feature. |
+
+### Grill 177 detailed proposals
+
+| ID | Status | Detailed commitment checked and current result |
+|---:|:---:|---|
+| 177.1 | P | Deterministic expression facts are separated from Agent-created obligations in the Skill and protocol; the real SgCCS-to-SgCPS research adjudication is not complete. |
+| 177.2 | C | Fixed `ColumnRef` discovery reuses the validated expression and emits a source-free bounded summary. |
+| 177.3 | C/P | Existing `custom_factors describe --json` returns `column_refs` without a new object/command; some manifest paths sort the result instead of preserving first appearance for every factor. |
+| 177.4 | C/P | The existing obligation-discovery Skill instructs semantic, unit, direction, timing and parameterization review; end-to-end Graph acceptance remains pending. |
+| 177.5 | P | Local source-first and explicit authorized `--source-code` loading exist; complete cross-owner source-visibility acceptance is not proven. |
+| 177.6 | C | `factor_semantics` has a reviewed recovery edge to `factor_improvement_required` without a new node or table. |
+| 177.7 | D/P | Work Package candidate scope versus branch execution scope is documented, but derived-family scope/lineage and multiplicity behavior are not a complete runtime contract. |
+| 177.8 | D/P | SgCPS local proposals describe strict-generalization migration and paired equivalence; no canonical focus-migration service or accepted numerical equivalence exists. |
+| 177.9 | C | The bounded `validation_design` recovery edge exists and does not require a fabricated TrialPlan. |
+| 177.10 | D/P | Old Job/Evidence preservation exists generally; exact special-case Claim-scope migration with inherited exposure/ledger is not implemented. |
+
+The detailed record previously used `SgCCSParam` after the family had been
+renamed. This audit corrects the canonical name to `SgCPS` while retaining the
+initial name as historical provenance.
+
+### Grill 178 detailed proposals
+
+| ID | Status | Detailed commitment checked and current result |
+|---:|:---:|---|
+| 178.1 | C | Publish, activate and explicit branch continuation are separate CLI/server operations; continuation does not rerun ordinary research stages. |
+| 178.2 | C | A private progressively loaded Server Maintenance Skill is packaged with bounded Graph/backend/database references and validation tests. |
+| 178.3 | C | Existing production branches remain pinned; explicit continuation preserves the same current node and derives a node-attached re-entry frame. |
+| 178.4 | C | The server computes cumulative source-to-target change and topology impact in one deterministic preflight rather than invoking an Agent per version. |
+| 178.5 | P | Successor v9 contains a Change Manifest and hashes; it is still a draft and has not passed publication/activation acceptance. |
+| 178.6 | P | Category/subcategory/concrete-obligation separation exists in the successor catalog and Research Cycle; current production v8 does not enforce the final catalog. |
+| 178.7 | P | Entry coverage decisions, reuse receipts and `other` exist in pieces; full migration reclassification and semantic matching are incomplete. |
+| 178.8 | P | Continuation emits a system trace and re-entry frame; exact evidence qualification and complete Chinese report projection need final v9 acceptance. |
+| 178.9 | P | Evidence qualification is scoped, but the full `Research Claim × changed Entry Requirement` eligibility relation is not implemented end to end. |
+| 178.10 | P | TrialPlan and closure can represent blocked work; no complete runtime guarantee creates the next informative Trial whenever a test entry is blocked. |
+| 178.11 | P | Versioned Report Methods and per-anchor requirements exist in successor v9; active v8 does not require them. |
+| 178.12 | P | Transition report coverage is enforced for declaring graphs and FTClient renders bound items; pre-transition preparation, complete UI and production v9 are pending. |
+| 178.13 | P | Historical stage/finalize backfill is fail-closed and idempotent; exact invalid-journal archive/rebuild, legacy-root and complete invariance/HEAD tests remain. |
+| 178.14 | C/P | Successor report requirements bind real requirement subcategories and no fake report obligation is created; final production/UI acceptance is pending. |
+| 178.15 | C/P | The successor uses category `data` and node `data_contract`; real provider resolvers are incomplete. |
+| 178.16 | P | The catalog contains Chinese questions, selection/evidence/insufficiency/basis/report metadata; real resolver behavior and Agent applicability decisions are not enforced. |
+| 178.17 | D/X | FTClient has no Graph version browser, and server history still contains only v4–v8; v1–v3 are not restored. |
+
+### Grill 179.1–179.25
+
+| ID | Status | Detailed commitment checked and current result |
+|---:|:---:|---|
+| 179.1 | S | `research_intent` as an obligation category was later removed by 179.16 and retained only in the Decision Contract. |
+| 179.2 | P | Family/instance/derived-family distinctions inform manifests and catalog text; full identity/classification/lineage adjudication is incomplete. |
+| 179.3 | S/P | The name and contents were refined into `trial_design_validity`; TrialPlan v5 implements part of the final contract. |
+| 179.4 | P | Methods are Evidence Actions rather than stable obligation IDs in v9, but factual statistical resolvers are missing. |
+| 179.5 | P/B | Strategy and external market/accounting categories are separate in v9; schedule/accounting resolvers and verified issue-143 behavior are incomplete. |
+| 179.6 | S/C | This category proposal was refined into the Evidence Qualification/Admission Gate, whose core deterministic protocol is implemented. |
+| 179.7 | P | Research Cycle adjudicates scoped Claims and next actions rather than “factor pass”; user objectives and real v9 closure acceptance are missing. |
+| 179.8 | S/C | Capability was later removed from the obligation catalog; successor coordination nodes and Maintenance ownership reflect the correction. |
+| 179.9 | P/X | One MaintenanceCase owner exists, but it stores bounded refs and `latest_result_ref`, not the promised typed `result_json/result_hash` task result contract. |
+| 179.10 | P | `other.unclassified_material_question` exists in v9; local searchable temporary obligations and complete audit/UI behavior are absent. |
+| 179.11 | D | No complete `catalog_change_proposal` Maintenance Case adapter and review/publication flow exists. |
+| 179.12 | D/P | Entry gates compact ordinary requirements; no full related-`other` obligation index and mandatory review path exists. |
+| 179.13 | P | EntryResolutionFrame and capability/data detours exist; `other` first-action classification and exact return behavior are incomplete. |
+| 179.14 | S/P | The intermediate category list was repeatedly refined; only the final seven-plus-`other` v9 draft should be implemented. |
+| 179.15 | D/X | Catalog fields declare resolver capabilities and CLI templates, but templates call `requirement-detail`, which reads descriptions rather than resolving facts; activation hard constraint is unmet. |
+| 179.16 | P | Final `hypothesis_validity` questions are in the catalog; Decision Contract initialization and factual mechanism resolver are missing. |
+| 179.17 | D/P | Industry evidence and product-neutral principles are documented; product/region/venue/effective-date profiles and resolvers are incomplete. |
+| 179.18 | D/P | Catalog text acts as a guide, but runtime does not force the Agent to make a reasoned applicability decision for every triggered subcategory. |
+| 179.19 | D | No enforced per-subcategory `obligation_discovery_decision`, first-resolution action and first-Trial selection contract exists. |
+| 179.20 | D/P | The Skill instructs open-ended first-principles discovery; Trial feasibility over real data/capabilities is not a complete admission gate. |
+| 179.21 | C/P | Capability is outside the obligation catalog and has separate Binding/Gap/Maintenance routing; end-to-end resolver coverage is incomplete. |
+| 179.22 | C/P | Evidence Qualification is a system gate, not an obligation category; final v9/report acceptance remains. |
+| 179.23 | C/P | EvidenceAdmissionGate and TrialPlan Evidence Action binding are implemented and tested; the active v8 path does not use the final successor topology. |
+| 179.24 | P | Compact requirement detail and exact reuse helpers exist; the CLI cannot yet run every real resolver or return the complete minimal decision packet. |
+| 179.25 | P | Exact Evidence Action reuse exists; cross-Work-Package obligation-adjudication reuse under requirement revisions is incomplete. |
+
+### Grill 179.26–179.50
+
+| ID | Status | Detailed commitment checked and current result |
+|---:|:---:|---|
+| 179.26 | D/P | CLI measurement/snapshot/projection identity is documented; resolver modules and uniformly qualified Evidence outputs do not exist. |
+| 179.27 | D | Catalog descriptors do not declare the required freshness policy, invalidation keys or refresh cost for each resolver. |
+| 179.28 | D/P | Six statistical questions are catalogued; Bootstrap/DSR/PBO and other factual resolver capabilities remain largely absent. |
+| 179.29 | P | Capability-gap routing and deterministic equity-curve SVG/receipt generation exist; missing statistical/backend capabilities and full report admission remain. |
+| 179.30 | P | Current Jobs preserve a bounded curve artifact and do not persist full point sequences; historical exact-recovery/reproducibility orchestration is incomplete. |
+| 179.31 | P/X | A provider-neutral availability service, local bundle inspection and Tiger connector exist; it does not resolve all `data.*` subcategories or UI ownership, and its two-stage field-check guidance exists only in the packaged Skill copy. |
+| 179.32 | X | `DataFreq` itself remains temporal, but Tiger availability writes `"frequency": "L2"` instead of orthogonal `sampling_mode/frequency/market_depth`, directly violating the accepted contract. |
+| 179.33 | P | Revision identity, `column_refs`, tree and LaTeX support exist; unified Chinese semantic/unit/domain/timing resolvers are incomplete. |
+| 179.34 | P | The Agent can inspect expression structure, but stable paths, units, scale, timing/lookback and parameterization-delta verification are incomplete. |
+| 179.35 | P | TrialPlan v5 adds primary action/comparison/checkpoint semantics; several design matrices and resolvers remain artifact-level plans rather than implemented facts. |
+| 179.36 | D/P | Hypothesis questions and Skill guidance exist; no factual, source-bound mechanism-chain resolver or enforced report answer exists. |
+| 179.37 | P | Industry sources are indexed and embedded as catalog refs; report items do not consistently prove which source/principle was actually applied. |
+| 179.38 | P/B | Schedule diagnostics, strategy-intent and margin/accounting code exist; unified resolver/report projection and independent issue-143 verification are incomplete. |
+| 179.39 | D | `UserAcceptanceObligation` is not implemented as a first-class Decision Contract projection. |
+| 179.40 | D | User objective criteria do not yet gate Planning, Trial results, closure and reopening across the existing Graph. |
+| 179.41 | P | Successor v9 removes fixed IC/bootstrap nodes and moves methods into Evidence Actions; it is not published or accepted on real research. |
+| 179.42 | S | The proposal to add a skip edge to the old topology was withdrawn and correctly must not be implemented. |
+| 179.43 | S | This was a point-in-time production inventory used to decide compatibility, not a new runtime feature. |
+| 179.44 | P | Work Packages support active/archive/recently-deleted/restore; retention-aware exact purge and full UI acceptance are missing. |
+| 179.45 | P | The stable-state successor topology is built as v9 draft; production remains on v8. |
+| 179.45a | P | Capability coordination states remain outside the obligation catalog in the draft; real resolver/Maintenance return acceptance is incomplete. |
+| 179.46 | C/P | Ordered Evidence Actions, one-action execution checkpoints, admission and result-audit return are implemented; full successor-Graph E2E is pending. |
+| 179.47 | P | Production Work Package owner rows were explicitly backfilled 17/17; exact purge, orphan migration and read-path benchmarks remain. |
+| 179.48 | P/B | The implementation order and final semantics are recorded; v9 activation, real resolvers, user objectives, history and shadow research remain open. |
+| 179.49 | P | `occurred_at` versus trusted `recorded_at` and historical stage/finalize exist; invalid-journal archive/rebuild and real `MaxA (2)` restoration remain. |
+| 179.50 | P/B | Frozen Run configuration lazy detail, offline MathJax formula rendering and content-addressed equity images exist; the complete MaxA report and post-issue-143 reruns do not. |
+
+### Confirmed cross-decision semantic drift
+
+1. **Unfinished issue-143 is already merged into this worktree.** Commit
+   `fef5b000` cannot be treated as a passed gate. The user explicitly states
+   issue-143 is unfinished, so every affected accounting result remains
+   ineligible for final shadow acceptance.
+2. **Production versus draft is blurred.** The server is still on v8 and
+   stores v4–v8 only. v9 catalog, report rules and successor topology are
+   implementation candidates, not active research behavior.
+3. **Operator ownership contradicts Grill 67/72.** There is no `tanh`, no
+   public typed `where`, and two `WhereOp` classes.
+4. **Data depth is encoded as frequency in Tiger.** This contradicts the
+   accepted orthogonal `DataFreq`/sampling/depth model.
+5. **The Research Obligation Skill is stale.** Its trial-synthesis reference
+   still tells the Agent to return TrialPlan schema v4 while the canonical
+   server protocol is v5 with Evidence Actions.
+6. **Older checkpoint ownership wording is stale.** Grill 77 says the full
+   checkpoint is local, while the later accepted Research Cycle uses the
+   server trace as the canonical bounded replay owner.
+7. **Major FTClient contracts are absent.** Data Sources, native aggregated
+   Factor Library, Graph browser, token usage/settings, local SQLite, source
+   sync modes and stable business-action manifest are not complete.
+8. **“Closed Grill” was mistaken for “completed implementation.”** The former
+   audit wording is replaced by this per-proposal matrix; closing a semantic
+   question only means no further product choice is required.
+9. **Canonical and packaged Research Obligation Skills differ.** The packaged
+   `obligation-discovery.md` contains the two-stage data/field-coverage gate
+   that is absent from the canonical Skill. The repository's own copy-parity
+   test fails, so Agent behavior currently depends on the Skill load path.
+
+### Dependency-ordered remaining implementation
+
+This is the execution order derived from the detailed audit, not a new product
+design. Unaffected work may continue, while accounting-dependent research
+acceptance remains blocked until issue-143 is independently verified.
+
+1. **Repair trust and semantic drift first.** Reconcile the canonical and
+   packaged Research Obligation Skills, update TrialPlan v4 guidance to v5,
+   restore the orthogonal Tiger sampling/frequency/depth contract, remove
+   duplicate `WhereOp` ownership, implement the accepted typed `where`/`tanh`
+   surface, and mark the older checkpoint-ownership decision as superseded.
+   These are correctness defects in contracts an Agent may already consume.
+2. **Finish the v9 deterministic contract before activation.** Implement real
+   provider-neutral resolvers and CLI evidence operations for every active
+   requirement subcategory, add bounded user acceptance
+   objective/criteria, complete report preparation/coverage and prove the
+   current-anchor packet budget. A catalog description or
+   `requirement-detail` lookup is not a resolver.
+3. **Publish and activate v9 only after its gates pass.** Validate cumulative
+   continuation and re-entry against the final catalog/topology. Existing
+   research remains pinned unless the user explicitly requests a version
+   change; activation alone never migrates a Work Package.
+4. **Restore history and finish lifecycle maintenance.** Restore exact v1–v3,
+   add retention-aware exact-manifest purge/orphan checks and finish invalid
+   historical-journal archive/rebuild plus invariance/current-HEAD tests.
+5. **Complete the missing FTClient/CLI parity surfaces.** Add the Graph browser,
+   Data Sources, native Local/Server Factor Library, token budget/usage,
+   device-local SQLite preferences/outbox/cache, source-sync modes,
+   recommended values and generated business-action conformance manifest.
+   Every UI operation must remain available through the CLI.
+6. **Complete the planning and long-running Agent flow.** Add bounded targeted
+   versus open discovery, candidate eligibility/search/exhaustion, user scope
+   confirmation, interruption decisions and provider-neutral Goal/watch
+   behavior without adding routine reviewer or polling token cost.
+7. **Perform accounting-dependent acceptance last.** Do not treat merge
+   `fef5b000` as verification. After issue-143 is complete, independently
+   validate the production margin/accounting path, rerun affected Trials under
+   new identities, recover the complete `MaxA (2)` Chinese report, then run
+   SgCPS and trend-family shadow acceptance with result tables and necessary
+   content-addressed figures.
 
 ## Protocol package
 

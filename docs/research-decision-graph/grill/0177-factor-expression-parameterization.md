@@ -10,7 +10,9 @@ hard-coded checklist item. It is not runtime Agent context.
 
 `SgCCS` fixes adjusted close as the centre-price input of a rolling high/low
 range. Source inspection showed that the input can be represented by a
-`FactorParam`, producing the independent candidate family `SgCCSParam`.
+`FactorParam`, producing an independent candidate initially called
+`SgCCSParam` and subsequently renamed to the canonical family name `SgCPS`
+(`Signal Centered Price Strength`).
 The default `P=CA` candidate has deterministic expression-tree equivalence to
 the original family, but numerical pointwise equivalence and research validity
 remain unproven.
@@ -42,7 +44,7 @@ identifiers, and arbitrary Cartesian substitutions are rejected. Coupled
 inputs such as a high/low range must be considered as a coherent definition
 rather than independent column swaps when their semantics require it.
 
-`SgCCSParam` is a candidate implementation produced in response to the
+`SgCPS` is a candidate implementation produced in response to the
 question. Its existence neither proves that the obligation was necessary nor
 discharges it. Default structural equivalence is implementation evidence only;
 it is not numerical equivalence or alpha evidence.
@@ -56,7 +58,7 @@ it is not numerical equivalence or alpha evidence.
   scope, and discharge criterion;
 - coupled price inputs are not silently expanded into an unconstrained
   Cartesian parameter grid;
-- `SgCCS` and `SgCCSParam` retain independent factor-family lineage;
+- `SgCCS` and `SgCPS` retain independent factor-family lineage;
 - default-expression equivalence cannot be reported as factor validity.
 
 ## 177.2 — Compact deterministic expression fact
@@ -127,7 +129,7 @@ inspection.
 **Acceptance evidence.**
 
 - `SgCCS` reports `column_refs` containing `CA`, `HA`, and `LA`;
-- `SgCCSParam` reports fixed `HA` and `LA` ColumnRefs while its existing
+- `SgCPS` reports fixed `HA` and `LA` ColumnRefs while its existing
   parameter metadata reports `P` as a `FactorParam` with default `CA`;
 - extraction preserves first appearance, removes duplicates, and does not
   confuse `ParamRef` with `ColumnRef`;
@@ -151,7 +153,7 @@ duplicate the same source, Claim, obligation, and review boundary.
 **User response.** Accepted, with clarification that the Agent must see the
 factor's original expression at this step, check it for economic errors, and
 consider whether its `ColumnRef` inputs should become `FactorParam`, as in the
-`SgCCS` to `SgCCSParam` candidate change.
+`SgCCS` to `SgCPS` candidate change.
 
 **Final resolution.** Do not add a capability, Skill, graph node, or universal
 parameterization checklist. During source-accessible factor-semantics review,
@@ -163,7 +165,7 @@ economically coherent parameterized alternative that could change the bounded
 decision. Only a material, falsifiable question with an observable discharge
 path becomes a Verification Obligation.
 
-A semantics-changing implementation such as `SgCCSParam` retains independent
+A semantics-changing implementation such as `SgCPS` retains independent
 factor-family/version lineage. Its default equivalence with `SgCCS` is tested
 separately; creating the family does not discharge economic or empirical
 obligations.
@@ -178,7 +180,7 @@ obligations.
   or merely technically expressible;
 - a semantics-changing candidate receives independent lineage and trial-ledger
   identity;
-- SgCCS/SgCCSParam is covered as an end-to-end acceptance scenario without
+- SgCCS/SgCPS is covered as an end-to-end acceptance scenario without
   treating default structural equivalence as alpha evidence.
 
 ## 177.5 — Original-expression loading and source authority
@@ -224,7 +226,7 @@ bug repair preserving the declared economic meaning creates an immutable child
 version in the same family. A compatible enhancement may remain a same-family
 version. A change to prediction target, mechanism, input domain, trading role,
 output interpretation, or a candidate that remains independently meaningful
-creates a derived family with explicit lineage. `SgCCSParam` therefore remains
+creates a derived family with explicit lineage. `SgCPS` therefore remains
 an independent family derived from `SgCCS`; neither source path nor evidence is
 overwritten.
 

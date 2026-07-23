@@ -1,6 +1,8 @@
 # Grill 179 — v8 义务分类与逐节点/逐边报告映射
 
-Status: closed; Grill 179.1–179.49 accepted/revised, with the canonical handoff in 179.48 and the historical-time addendum in 179.49.
+Status: closed; Grill 179.1–179.50 accepted/revised, with the canonical
+handoff in 179.48, the historical-time addendum in 179.49, and the
+run-configuration/formula/equity-curve projection in 179.50.
 
 > **Implementation warning:** Sections 3–8 below preserve the initial proposal and are
 > not a canonical implementation map. Grill 179.1–179.40 subsequently renamed or

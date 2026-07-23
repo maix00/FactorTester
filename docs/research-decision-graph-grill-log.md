@@ -19,8 +19,8 @@ Provenance:
 - branch: `codex/issue-123-research-decision-graph`
 - working plan: `docs/research-decision-graph-plan.md`
 - first continuously emitted question number: `48`
-- latest accepted question in this revision: `142`
-- latest discussed question in this revision: `142`
+- latest accepted question in this revision: `179.50`
+- latest discussed question in this revision: `179.50`
 
 The discussion before question 48 was not emitted with stable per-question
 numbers. It is therefore recorded as a pre-numbering phase rather than being
@@ -32,6 +32,9 @@ Detailed records:
 - [questions 48–72](research-decision-graph/grill/0048-0072.md)
 - [questions 73–93](research-decision-graph/grill/0073-0093.md)
 - [questions 94 onward](research-decision-graph/grill/0094-current.md)
+- [factor-expression parameterization, 177](research-decision-graph/grill/0177-factor-expression-parameterization.md)
+- [Graph version governance, 178](research-decision-graph/grill/0178-graph-version-governance.md)
+- [successor obligation/report map, 179](research-decision-graph/grill/0179-v8-obligation-report-map.md)
 - [Research Decision Governance language](research-decision-graph/CONTEXT.md)
 
 This index gives final dispositions for fast lookup. The detailed records are
