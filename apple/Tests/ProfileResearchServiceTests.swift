@@ -1164,6 +1164,24 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         XCTAssertEqual(transport.eventCount, 0)
     }
 
+    func testInitialCheckpointRefreshesProfileWhenPhysicalBranchIsNew() async {
+        let transport = FakeProjectionTransport(
+            responses: fixtureResponses(
+                detailRefresh: #"{"mode":"stopped","terminal":true}"#
+            )
+        )
+        var checkpoints: [String] = []
+        let controller = makeController(
+            transport: transport,
+            onCheckpointChange: { checkpoints.append($0) }
+        )
+
+        await controller.loadSelectedWorkspace()
+        await controller.observeSelectedResearch()
+
+        XCTAssertEqual(checkpoints, ["trace:t"])
+    }
+
     func testSSEEventRefreshesThenTerminalStops() async throws {
         let initial = fixtureResponses(
             detailRefresh:

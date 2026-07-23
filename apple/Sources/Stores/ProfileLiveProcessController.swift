@@ -278,8 +278,7 @@ final class ProfileLiveProcessController: ObservableObject {
 
     private func publishCheckpointChange(_ checkpointRef: String?) {
         guard let checkpointRef, !checkpointRef.isEmpty else { return }
-        if let observedCheckpointRef,
-           observedCheckpointRef != checkpointRef {
+        if observedCheckpointRef != checkpointRef {
             onCheckpointChange(checkpointRef)
         }
         observedCheckpointRef = checkpointRef
