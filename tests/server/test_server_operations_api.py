@@ -188,6 +188,28 @@ def test_super_admin_can_submit_one_predefined_instance_action(
     assert observed == [("worktree-opaque", "restart")]
 
 
+def test_super_admin_can_submit_explicit_force_stop(monkeypatch) -> None:
+    observed = []
+    monkeypatch.setattr(
+        "server.server_operations.manager_action",
+        lambda instance_id, action: observed.append((instance_id, action))
+        or {
+            "instance_id": instance_id,
+            "action": action,
+            "submitted": True,
+        },
+    )
+    client = _client(monkeypatch, role="super_admin")
+
+    response = client.post(
+        "/admin/api/server-instances/worktree-opaque/actions",
+        json={"action": "force_stop"},
+    )
+
+    assert response.status_code == 200
+    assert observed == [("worktree-opaque", "force_stop")]
+
+
 def test_server_operations_api_rejects_unknown_actions_before_manager_call(
     monkeypatch,
 ) -> None:

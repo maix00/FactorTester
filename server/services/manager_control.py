@@ -63,6 +63,7 @@ def manager_action(
             "start": "/start",
             "stop": "/stop",
             "restart": "/restart-bundle",
+            "force_stop": "/force-stop",
         }
     route = routes.get(action)
     if route is None:
@@ -88,10 +89,10 @@ def _worktree_summary(item: dict[str, Any]) -> dict[str, Any]:
     port_in_use = bool(item.get("port_in_use"))
     if api_running and daemon_running:
         status = "running"
-        allowed_actions = ["stop", "restart"]
+        allowed_actions = ["stop", "restart", "force_stop"]
     elif api_running or daemon_running:
         status = "degraded"
-        allowed_actions = ["stop", "restart"]
+        allowed_actions = ["stop", "restart", "force_stop"]
     elif port_in_use:
         status = "occupied"
         allowed_actions = []

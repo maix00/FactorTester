@@ -105,7 +105,8 @@
           const allowed = new Set(item.allowed_actions || []);
           const stateLabel = item.status || 'stopped';
           const restart = item.kind === 'factortester' ? `<button data-action="restart" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('restart') ? '' : 'disabled'}>重启</button>` : '';
-          return `<tr><td><div class="primary">${escapeHTML(item.label || item.instance_id)}</div><div class="secondary">${escapeHTML(item.branch || item.kind)}</div></td><td>${escapeHTML(item.port)}</td><td>${status(stateLabel)}</td><td><div class="actions"><button class="primary-action" data-action="start" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('start') ? '' : 'disabled'}>启动</button><button data-action="stop" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('stop') ? '' : 'disabled'}>停止</button>${restart}</div></td></tr>`;
+          const forceStop = item.kind === 'factortester' ? `<button data-action="force_stop" data-confirm="强制停止会中断正在运行的研究任务，确定继续吗？" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('force_stop') ? '' : 'disabled'}>强制停止</button>` : '';
+          return `<tr><td><div class="primary">${escapeHTML(item.label || item.instance_id)}</div><div class="secondary">${escapeHTML(item.branch || item.kind)}</div></td><td>${escapeHTML(item.port)}</td><td>${status(stateLabel)}</td><td><div class="actions"><button class="primary-action" data-action="start" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('start') ? '' : 'disabled'}>启动</button><button data-action="stop" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('stop') ? '' : 'disabled'}>停止</button>${restart}${forceStop}</div></td></tr>`;
         }).join('')}</tbody></table></div>` : '<div class="empty">没有可管理的实例</div>';
         target.querySelectorAll('button[data-action]').forEach(button => button.addEventListener('click', () => runAction(button)));
       } catch (error) {
@@ -113,6 +114,7 @@
       }
     }
     async function runAction(button) {
+      if (button.dataset.confirm && !window.confirm(button.dataset.confirm)) return;
       button.disabled = true;
       try {
         const value = await jsonRequest(`/admin/api/server-instances/${encodeURIComponent(button.dataset.id)}/actions`, {

@@ -16,7 +16,9 @@ from tools.data.account_manage import get_account, is_super_admin_account
 
 
 server_operations_bp = Blueprint("server_operations", __name__, url_prefix="/admin")
-_ALLOWED_ACTIONS = frozenset({"start", "stop", "restart"})
+_ALLOWED_ACTIONS = frozenset({
+    "start", "stop", "restart", "force_stop",
+})
 
 
 def _require_super_admin():
