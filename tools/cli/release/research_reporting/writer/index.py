@@ -11,6 +11,8 @@ import re
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+from ...report_link_kinds import REPORT_LINK_KINDS
+
 
 MAX_INDEX_BYTES = 512 * 1024
 MAX_INDEX_BRANCHES = 100
@@ -42,12 +44,6 @@ _LINK_FIELDS = {"link_id", "kind", "target_ref", "section_ref"}
 _LINK_FIELDS_WITH_LABEL = {
     "link_id", "kind", "target_ref", "section_ref", "label",
 }
-_LINK_KINDS = {
-    "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-    "job", "run", "delta", "profile_handoff", "report_section",
-}
-
-
 class ReportTarget(Protocol):
     """Render one canonical snapshot without external I/O."""
 
@@ -237,7 +233,7 @@ def _validate_section(
         if link_id in link_ids:
             raise ValueError("report index link_id must be unique per section")
         link_ids.add(link_id)
-        if link["kind"] not in _LINK_KINDS:
+        if link["kind"] not in REPORT_LINK_KINDS:
             raise ValueError("report index link kind is invalid")
         _reference(link["target_ref"], "target_ref")
         if "label" in link:

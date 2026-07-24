@@ -641,6 +641,87 @@ def test_current_node_maxa_projection_updates_real_journal_index_and_report(
     assert replay["changed"] is False
 
 
+def test_current_node_report_preserves_typed_run_spec_link(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+    )
+    binding = {
+        "report_requirement_id": "maxa.validation-design.runspec",
+        "subject_ref": "node:validation_design",
+    }
+    run_spec_ref = "runspec:" + "e" * 64
+    content = {
+        "kind": "list",
+        "rows": [{
+            "text": "首批样本内 IC 运行配置已经冻结。",
+            "link_ids": ["runspec-1"],
+        }],
+    }
+    item_hash = report_item_hash(
+        **binding,
+        content_kind="list",
+        content=content,
+    )
+    local_item = {
+        **binding,
+        "title_zh": "首批运行配置",
+        "content_kind": "list",
+        "item_hash": item_hash,
+        "content": content,
+        "content_zh": ["首批样本内 IC 运行配置已经冻结。"],
+        "links": [{
+            "link_id": "runspec-1",
+            "kind": "run_spec",
+            "target_ref": run_spec_ref,
+            "label": "样本内 IC · 日盘 RunSpec",
+        }],
+        "report_binding": binding,
+    }
+    projected = [{
+        key: local_item[key]
+        for key in (
+            "report_requirement_id", "subject_ref",
+            "content_kind", "item_hash",
+        )
+    }]
+
+    publish_current_node_report_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        projection={
+            "report_submission": {
+                "schema_version": 1,
+                "fragment_hash": report_fragment_hash(projected),
+                "items": projected,
+            },
+            "local_report_items": [local_item],
+        },
+    )
+
+    package = root / "profile-root" / "research" / "sgccs-review"
+    journal = json.loads((
+        package / "branches" / "branch-sgccs" / "LOGICAL_JOURNAL.json"
+    ).read_text(encoding="utf-8"))
+    index = json.loads((package / "INDEX.json").read_text(encoding="utf-8"))
+    assert journal["checkpoints"][-1]["sections"][0]["links"][0] == {
+        "link_id": "runspec-1",
+        "kind": "run_spec",
+        "target_ref": run_spec_ref,
+        "label": "样本内 IC · 日盘 RunSpec",
+    }
+    assert index["sections"][-1]["links"][0]["kind"] == "run_spec"
+
+
 def test_current_node_report_preserves_substantive_historical_revisions(
     tmp_path: Path,
 ) -> None:

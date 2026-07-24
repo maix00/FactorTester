@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 import re
 from typing import Any
+
+from .report_link_kinds import REPORT_LINK_KINDS
 from urllib.parse import urlparse
 
 
@@ -307,10 +309,7 @@ def _deep_link(value: Any) -> dict[str, str]:
     }:
         raise ValueError("research deep link fields are invalid")
     kind = _text(value.get("kind"), "deep_link.kind")
-    if kind not in {
-        "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-        "job", "run", "delta", "profile_handoff", "report_section",
-    }:
+    if kind not in REPORT_LINK_KINDS:
         raise ValueError("research deep link kind is unsupported")
     result = {
         key: _text(value.get(key), f"deep_link.{key}")

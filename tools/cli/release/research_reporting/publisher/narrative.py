@@ -13,6 +13,7 @@ from .identity import (
     reference,
     safe_id,
 )
+from ...report_link_kinds import REPORT_LINK_KINDS
 from ..report_items import report_fragment_hash, report_item_hash
 from ..assets import canonical_asset_descriptor
 
@@ -32,10 +33,6 @@ _SECTION_FIELDS_V2_WITH_BODY = {
 _SECTION_SEMANTIC_FIELDS = {"chapter_ref", "section_role"}
 _LINK_FIELDS = {"link_id", "kind", "target_ref"}
 _LINK_FIELDS_WITH_LABEL = {"link_id", "kind", "target_ref", "label"}
-_LINK_KINDS = {
-    "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-    "job", "run", "delta", "profile_handoff", "report_section",
-}
 _RESULT_NODES = {
     "job_evidence_ready", "statistical_robustness", "result_audit",
     "ic", "factor_evaluation", "backtest", "robustness",
@@ -114,7 +111,7 @@ def canonical_narrative(
                 frozenset(_LINK_FIELDS), frozenset(_LINK_FIELDS_WITH_LABEL),
             }:
                 raise ValueError("local narrative link fields are invalid")
-            if link["kind"] not in _LINK_KINDS:
+            if link["kind"] not in REPORT_LINK_KINDS:
                 raise ValueError("local narrative link kind is invalid")
             link_id = safe_id(link["link_id"], "narrative.link_id")
             if link_id in link_ids:

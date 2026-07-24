@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .assets import canonical_asset_descriptor
+from ..report_link_kinds import REPORT_LINK_KINDS
 
 # A checkpoint carrier stays small, while the local human report is cumulative.
 # These bounds cap disk and parsing cost without truncating ordinary long-running
@@ -27,10 +28,6 @@ _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _LOCAL_PATH_IN_TEXT = re.compile(
     r'''(?:^|[\s"'`(\[=:])(?:~[/\\]|[A-Za-z]:[/\\]|/(?!/))'''
 )
-_LINK_KINDS = {
-    "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-    "job", "run", "run_spec", "delta", "profile_handoff", "report_section",
-}
 _RESULT_KINDS = {"ic", "factor_evaluation", "backtest", "robustness"}
 _PROHIBITED_KEYS = {
     "credentials",
@@ -452,7 +449,7 @@ def _canonical_links(value: Any) -> list[dict[str, str]]:
             raise ValueError("section.link_id must be unique")
         seen_ids.add(link_id)
         kind = item["kind"]
-        if kind not in _LINK_KINDS:
+        if kind not in REPORT_LINK_KINDS:
             raise ValueError("section link kind is invalid")
         target_ref = _bounded_text(
             item["target_ref"],
