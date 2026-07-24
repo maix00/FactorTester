@@ -617,6 +617,10 @@ class Handler(BaseHTTPRequestHandler):
             ]
             json_response(self, {
                 "worktrees": data,
+                "manager": {
+                    "loopback_ip": "127.0.0.1",
+                    "lan_ip": _lan_ip(),
+                },
                 "vibe_trading": {
                     "instance_id": "service-vibe-trading",
                     "port": VIBE_TRADING_PORT,

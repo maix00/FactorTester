@@ -40,6 +40,10 @@ def test_manager_snapshot_uses_loopback_bearer_and_projects_safe_fields(
                 "port_in_use": True,
                 "path": "/Users/private/source",
             }],
+            "manager": {
+                "loopback_ip": "127.0.0.1",
+                "lan_ip": "192.168.1.25",
+            },
             "vibe_trading": {
                 "instance_id": "service-vibe-trading",
                 "port": 7899,
@@ -61,8 +65,9 @@ def test_manager_snapshot_uses_loopback_bearer_and_projects_safe_fields(
     ]
     assert value["instances"][0]["status"] == "running"
     assert value["instances"][0]["allowed_actions"] == [
-        "stop", "restart", "force_stop",
+        "stop", "restart", "restart_api", "restart_bundle", "force_stop",
     ]
+    assert value["addresses"]["lan_ip"] == "192.168.1.25"
     assert value["instances"][1]["status"] == "occupied"
     assert value["instances"][1]["allowed_actions"] == []
     assert "/Users/" not in json.dumps(value)
@@ -125,9 +130,15 @@ def test_manager_action_rejects_an_action_not_allowed_by_current_state(
 @pytest.mark.parametrize(
     ("api", "daemon", "port", "status", "actions"),
     [
-        (True, True, True, "running", ["stop", "restart", "force_stop"]),
-        (True, False, True, "degraded", ["stop", "restart", "force_stop"]),
-        (False, True, False, "degraded", ["stop", "restart", "force_stop"]),
+        (True, True, True, "running", [
+            "stop", "restart", "restart_api", "restart_bundle", "force_stop",
+        ]),
+        (True, False, True, "degraded", [
+            "stop", "restart", "restart_api", "restart_bundle", "force_stop",
+        ]),
+        (False, True, False, "degraded", [
+            "stop", "restart", "restart_api", "restart_bundle", "force_stop",
+        ]),
         (False, False, True, "occupied", []),
         (False, False, False, "stopped", ["start"]),
     ],

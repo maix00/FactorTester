@@ -17,7 +17,8 @@ from tools.data.account_manage import get_account, is_super_admin_account
 
 server_operations_bp = Blueprint("server_operations", __name__, url_prefix="/admin")
 _ALLOWED_ACTIONS = frozenset({
-    "start", "stop", "restart", "force_stop",
+    "start", "stop", "restart", "restart_api", "restart_bundle",
+    "force_stop",
 })
 
 

@@ -36,7 +36,17 @@ def manager_snapshot(*, timeout: float = 3.0) -> dict[str, Any]:
             "status": "running" if running else "occupied" if occupied else "stopped",
             "allowed_actions": ["stop"] if running else [] if occupied else ["start"],
         })
-    return {"instances": instances}
+    manager = payload.get("manager")
+    addresses = {
+        "loopback_ip": "127.0.0.1",
+        "lan_ip": "",
+    }
+    if isinstance(manager, dict):
+        addresses["loopback_ip"] = str(
+            manager.get("loopback_ip") or "127.0.0.1"
+        )
+        addresses["lan_ip"] = str(manager.get("lan_ip") or "")
+    return {"instances": instances, "addresses": addresses}
 
 
 def manager_action(
@@ -63,6 +73,8 @@ def manager_action(
             "start": "/start",
             "stop": "/stop",
             "restart": "/restart-bundle",
+            "restart_api": "/restart-api",
+            "restart_bundle": "/restart-bundle",
             "force_stop": "/force-stop",
         }
     route = routes.get(action)
@@ -89,10 +101,16 @@ def _worktree_summary(item: dict[str, Any]) -> dict[str, Any]:
     port_in_use = bool(item.get("port_in_use"))
     if api_running and daemon_running:
         status = "running"
-        allowed_actions = ["stop", "restart", "force_stop"]
+        allowed_actions = [
+            "stop", "restart", "restart_api", "restart_bundle",
+            "force_stop",
+        ]
     elif api_running or daemon_running:
         status = "degraded"
-        allowed_actions = ["stop", "restart", "force_stop"]
+        allowed_actions = [
+            "stop", "restart", "restart_api", "restart_bundle",
+            "force_stop",
+        ]
     elif port_in_use:
         status = "occupied"
         allowed_actions = []
