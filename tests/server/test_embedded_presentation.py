@@ -88,3 +88,13 @@ def test_standalone_only_links_on_special_pages_are_hidden_when_embedded() -> No
     ):
         assert "返回首页" in _render(template, embedded=False)
         assert "返回首页" not in _render(template, embedded=True)
+
+
+def test_server_operations_keep_polling_after_async_process_action() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "templates/server_operations.html"
+    ).read_text(encoding="utf-8")
+
+    assert "操作处理中" in source
+    assert "[500, 1500, 3500, 7000, 11000]" in source
