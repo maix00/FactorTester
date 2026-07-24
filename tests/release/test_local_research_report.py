@@ -2871,3 +2871,80 @@ def test_checkpoint_publish_rejects_unsafe_scope_before_report_write(
         )
 
     assert not (root / "profile-root" / "research").exists()
+
+
+def test_current_node_items_persist_one_semantic_node_chapter(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    publish_research_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+    )
+    local_items = []
+    submitted = []
+    for index, subject in enumerate(("obligation:semantic", "obligation:timing")):
+        binding = {
+            "report_requirement_id": (
+                "report.requirement.factor_semantics.timing_and_causality"
+            ),
+            "subject_ref": subject,
+        }
+        link_id = f"fact-{index}"
+        content = {
+            "kind": "list",
+            "rows": [{
+                "text": f"第 {index + 1} 项因果语义已经核对。",
+                "link_ids": [link_id],
+            }],
+        }
+        item_hash = report_item_hash(
+            **binding, content_kind="list", content=content,
+        )
+        submitted.append({
+            **binding, "content_kind": "list", "item_hash": item_hash,
+        })
+        local_items.append({
+            **binding,
+            "title_zh": "因子时序与因果语义",
+            "chapter_ref": "node:factor_semantics",
+            "content_kind": "list",
+            "item_hash": item_hash,
+            "content": content,
+            "content_zh": [f"第 {index + 1} 项因果语义已经核对。"],
+            "links": [{
+                "link_id": link_id,
+                "kind": "evidence",
+                "target_ref": f"evidence:semantic-{index}",
+                "label": f"因果语义证据 {index + 1}",
+            }],
+            "report_binding": binding,
+        })
+    publish_current_node_report_checkpoint(
+        client_root=root,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier,
+        projection={
+            "report_submission": {
+                "schema_version": 1,
+                "fragment_hash": report_fragment_hash(submitted),
+                "items": submitted,
+            },
+            "local_report_items": local_items,
+        },
+    )
+
+    journal = json.loads((
+        root / "profile-root" / "research" / "sgccs-review"
+        / "branches" / "branch-sgccs" / "JOURNAL.json"
+    ).read_text(encoding="utf-8"))
+    latest = journal["checkpoints"][-1]
+    assert len(latest["sections"]) == 1
+    assert latest["sections"][0]["chapter_ref"] == "node:factor_semantics"
+    assert latest["sections"][0]["section_role"] == "node_report_items"
+    assert len(latest["sections"][0]["blocks"]) == 2

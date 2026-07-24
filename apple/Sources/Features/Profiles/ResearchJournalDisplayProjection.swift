@@ -23,7 +23,6 @@ extension ResearchJournalPresentation {
             }
         )
         var result: [ResearchJournalSection] = []
-        var fingerprintIndexes: [String: Int] = [:]
         let checkpointNodeAnchors = checkpointNodeAnchors(in: verified)
         for section in verified {
             let physicalDisplayRef = displayCheckpointRef(
@@ -40,18 +39,11 @@ extension ResearchJournalPresentation {
                 section,
                 checkpointRef: displayCheckpointRef,
                 displayKind: pureMigrationRefs.contains(section.checkpointRef)
-                    ? "graph_continuation" : "research"
+                    ? "graph_continuation" : "research",
+                chapterRef: section.chapterRef ?? transitions.first {
+                    $0.stepRef == section.checkpointRef
+                }.map { "node:\($0.toNode)" }
             )
-            let fingerprint = "\(displayCheckpointRef)|"
-                + contentFingerprint(section)
-            if let index = fingerprintIndexes[fingerprint] {
-                result[index] = sectionWithMergedLinks(
-                    result[index],
-                    projected.links
-                )
-                continue
-            }
-            fingerprintIndexes[fingerprint] = result.count
             result.append(projected)
         }
         return result
@@ -197,27 +189,11 @@ extension ResearchJournalPresentation {
             || identity.contains("研究图切换")
     }
 
-    private static func contentFingerprint(
-        _ section: ResearchJournalSection
-    ) -> String {
-        let blocks = section.blocks.map { block in
-            [
-                block.kind,
-                block.text ?? "",
-                block.latex ?? "",
-                block.fallback ?? "",
-                block.rows.map {
-                    ($0.text ?? "") + "|" + $0.cells.joined(separator: "|")
-                }.joined(separator: "\n"),
-            ].joined(separator: "\u{1f}")
-        }.joined(separator: "\u{1e}")
-        return section.body + "\u{1d}" + blocks
-    }
-
     private static func sectionWithReadableTitle(
         _ section: ResearchJournalSection,
         checkpointRef: String,
-        displayKind: String
+        displayKind: String,
+        chapterRef: String?
     ) -> ResearchJournalSection {
         var title = section.title
         if section.title.range(
@@ -248,7 +224,9 @@ extension ResearchJournalPresentation {
             researchOccurredAt: section.researchOccurredAt,
             timeBasis: section.timeBasis,
             timeSourceRefs: section.timeSourceRefs,
-            displayKind: displayKind
+            displayKind: displayKind,
+            chapterRef: chapterRef,
+            sectionRole: section.sectionRole
         )
     }
 
@@ -267,33 +245,4 @@ extension ResearchJournalPresentation {
         return title
     }
 
-    private static func sectionWithMergedLinks(
-        _ section: ResearchJournalSection,
-        _ additional: [ResearchJournalLink]
-    ) -> ResearchJournalSection {
-        let links = (section.links + additional).reduce(
-            into: [ResearchJournalLink]()
-        ) { result, link in
-            if !result.contains(where: { $0.linkID == link.linkID }) {
-                result.append(link)
-            }
-        }
-        return ResearchJournalSection(
-            sectionID: section.sectionID,
-            sectionRef: section.sectionRef,
-            title: section.title,
-            body: section.body,
-            blocks: section.blocks,
-            links: links,
-            checkpointRef: section.checkpointRef,
-            auditCheckpointRef: section.auditCheckpointRef,
-            createdAt: section.createdAt,
-            graphRef: section.graphRef,
-            branchRef: section.branchRef,
-            researchOccurredAt: section.researchOccurredAt,
-            timeBasis: section.timeBasis,
-            timeSourceRefs: section.timeSourceRefs,
-            displayKind: section.displayKind
-        )
-    }
 }

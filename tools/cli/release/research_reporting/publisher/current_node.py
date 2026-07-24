@@ -12,6 +12,7 @@ from typing import Any
 from ...local_profile import LocalProfileStore
 from ..journal import load_fragments
 from .carrier import MAX_ITEMS as MAX_CARRIER_ITEMS
+from .section_binding import item_chapter_ref, section_role
 from .service import publish_research_checkpoint
 
 
@@ -89,7 +90,11 @@ def publish_current_node_report_checkpoint(
         profile_id=profile_id,
         agent_id=agent_id,
         carrier=synthetic,
-        narrative=_narrative(ordered, recorded_at=recorded_at),
+        narrative=_narrative(
+            ordered,
+            recorded_at=recorded_at,
+            current_node=str(carrier.get("current_node") or ""),
+        ),
         local_reference_allowlist=tuple(item_refs[MAX_CARRIER_ITEMS:]),
     )
     return {
@@ -192,29 +197,70 @@ def _current_node_carrier(
 
 
 def _narrative(
-    items: list[dict[str, Any]], *, recorded_at: float,
+    items: list[dict[str, Any]], *, recorded_at: float, current_node: str,
 ) -> dict[str, Any]:
+    grouped: dict[str, list[list[dict[str, Any]]]] = {}
+    for item in items:
+        chapter_ref = item_chapter_ref(item, current_node=current_node)
+        chunks = grouped.setdefault(chapter_ref, [[]])
+        candidate_link_ids = {
+            str(link.get("link_id") or "")
+            for link in item.get("links") or []
+        }
+        occupied = {
+            str(link.get("link_id") or "")
+            for existing in chunks[-1]
+            for link in existing.get("links") or []
+        }
+        if (
+            len(chunks[-1]) >= MAX_CARRIER_ITEMS
+            or occupied.intersection(candidate_link_ids)
+        ):
+            chunks.append([])
+        chunks[-1].append(item)
     sections = []
-    for item_index, item in enumerate(items):
-        content = deepcopy(item["content"])
-        content["report_binding"] = deepcopy(item["report_binding"])
-        stable_key = hashlib.sha256(
-            json.dumps(
-                {
-                    "report_requirement_id": item["report_requirement_id"],
-                    "subject_ref": item["subject_ref"],
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()[:16]
-        sections.append({
-            "section_id": f"current-node-{stable_key}",
-            "title": _report_title(item, item_index=item_index),
-            "blocks": [content],
-            "links": deepcopy(item.get("links") or []),
-        })
+    for chapter_index, (chapter_ref, chunks) in enumerate(grouped.items()):
+        for chunk_index, chapter_items in enumerate(chunks):
+            blocks = []
+            links = []
+            for item in chapter_items:
+                content = deepcopy(item["content"])
+                content["report_binding"] = deepcopy(item["report_binding"])
+                blocks.append(content)
+                links.extend(deepcopy(item.get("links") or []))
+            stable_key = hashlib.sha256(
+                json.dumps(
+                    {
+                        "chapter_ref": chapter_ref,
+                        "items": [
+                            {
+                                "report_requirement_id": item[
+                                    "report_requirement_id"
+                                ],
+                                "subject_ref": item["subject_ref"],
+                            }
+                            for item in chapter_items
+                        ],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()[:16]
+            sections.append({
+                "section_id": f"current-node-{stable_key}",
+                "title": _chapter_title(
+                    chapter_items,
+                    chapter_index=chapter_index,
+                ),
+                "chapter_ref": chapter_ref,
+                "section_role": (
+                    section_role(chapter_items)
+                    if chunk_index == 0 else "node_report_items"
+                ),
+                "blocks": blocks,
+                "links": links,
+            })
     return {
         "schema_version": 3,
         "language": "zh-Hans",
@@ -242,3 +288,19 @@ def _report_title(item: dict[str, Any], *, item_index: int) -> str:
         if first:
             return first
     return f"当前节点研究记录 {item_index + 1}"
+
+
+def _chapter_title(
+    items: list[dict[str, Any]], *, chapter_index: int,
+) -> str:
+    node_actions = [
+        item for item in items
+        if str(item.get("report_requirement_id") or "").startswith(
+            "report.node."
+        )
+        and str(item.get("report_requirement_id") or "").endswith(".action")
+    ]
+    return _report_title(
+        (node_actions or items)[0],
+        item_index=chapter_index,
+    )

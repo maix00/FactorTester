@@ -17,6 +17,87 @@ struct ResearchStageObligationRows {
 }
 
 extension ResearchJournalPresentation {
+    static func chapterStartIndexes(
+        _ sections: [ResearchJournalSection]
+    ) -> Set<Int> {
+        var seen = Set<String>()
+        return Set(sections.indices.filter {
+            seen.insert(chapterRef(for: sections[$0])).inserted
+        })
+    }
+
+    static func auditCheckpointStartIndexes(
+        _ sections: [ResearchJournalSection]
+    ) -> Set<Int> {
+        var seen = Set<String>()
+        return Set(sections.indices.filter {
+            seen.insert(sections[$0].auditCheckpointRef).inserted
+        })
+    }
+
+    static func obligationChangeOwners(
+        _ sections: [ResearchJournalSection]
+    ) -> [String: Set<String>] {
+        var claimed = Set<String>()
+        var result: [String: Set<String>] = [:]
+        for section in sections {
+            for obligationID in boundObligationIDs(in: section) {
+                let identity = "\(section.auditCheckpointRef)|\(obligationID)"
+                guard claimed.insert(identity).inserted else { continue }
+                result[section.sectionRef, default: []].insert(obligationID)
+            }
+        }
+        return result
+    }
+
+    static func chapterRef(for section: ResearchJournalSection) -> String {
+        if let value = section.chapterRef, value.hasPrefix("node:") {
+            return value
+        }
+        for block in section.blocks {
+            guard let binding = block.reportBinding else { continue }
+            if binding.subjectRef.hasPrefix("node:") {
+                return binding.subjectRef
+            }
+            if binding.reportRequirementID.hasPrefix("report.node.") {
+                let suffix = binding.reportRequirementID.dropFirst(
+                    "report.node.".count
+                )
+                if let nodeID = suffix.split(separator: ".").first {
+                    return "node:\(nodeID)"
+                }
+            }
+            if binding.reportRequirementID.hasPrefix("report.edge.") {
+                let edgeID = binding.reportRequirementID.dropFirst(
+                    "report.edge.".count
+                )
+                if let source = edgeID.split(separator: "__").first {
+                    return "node:\(source)"
+                }
+            }
+            if binding.reportRequirementID.hasPrefix("report.requirement.") {
+                let requirement = binding.reportRequirementID.dropFirst(
+                    "report.requirement.".count
+                )
+                if let category = requirement.split(separator: ".").first,
+                   let node = legacyRequirementHomeNodes[String(category)] {
+                    return "node:\(node)"
+                }
+            }
+        }
+        return "checkpoint:\(section.checkpointRef)"
+    }
+
+    static func boundObligationIDs(
+        in section: ResearchJournalSection
+    ) -> Set<String> {
+        Set(section.blocks.compactMap { block in
+            guard let subject = block.reportBinding?.subjectRef,
+                  subject.hasPrefix("obligation:") else { return nil }
+            return obligationObjectID(subject)
+        })
+    }
+
     /// A report carrier is not a Research Cycle state. Select the immutable
     /// transition snapshot that existed when the section was recorded, while
     /// keeping the section's semantic chapter and physical audit checkpoint
@@ -178,7 +259,18 @@ extension ResearchJournalPresentation {
     }
 }
 
-private func obligationObjectID(_ reference: String) -> String {
+private let legacyRequirementHomeNodes = [
+    "hypothesis_validity": "hypothesis_preregistration",
+    "data": "data_contract",
+    "factor_semantics": "factor_semantics",
+    "trial_design_validity": "validation_design",
+    "statistical_validity": "result_audit",
+    "strategy_design": "validation_design",
+    "market_execution_accounting": "trial_execution",
+    "other": "research_decision",
+]
+
+func obligationObjectID(_ reference: String) -> String {
     reference.split(separator: ":").last.map(String.init) ?? reference
 }
 

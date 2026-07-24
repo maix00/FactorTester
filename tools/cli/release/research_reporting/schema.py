@@ -123,6 +123,22 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
             "links": _canonical_links(item.get("links", [])),
             "created_at": item.get("created_at", 0.0),
         }
+        if "chapter_ref" in item or "section_role" in item:
+            chapter_ref = item.get("chapter_ref")
+            section_role = item.get("section_role")
+            if (
+                not isinstance(chapter_ref, str)
+                or not chapter_ref.startswith("node:")
+                or not isinstance(section_role, str)
+            ):
+                raise ValueError("section semantic binding is invalid")
+            _safe_id(
+                chapter_ref.removeprefix("node:"),
+                field="section.chapter_ref",
+            )
+            _safe_id(section_role, field="section.section_role")
+            section["chapter_ref"] = chapter_ref
+            section["section_role"] = section_role
         if "checkpoint_ref" in item or "branch_ref" in item:
             checkpoint_ref = item.get("checkpoint_ref")
             branch_ref = item.get("branch_ref")

@@ -81,13 +81,18 @@ struct ResearchNarrativeReportView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 64)
                     } else {
+                        let chapterStarts = ResearchJournalPresentation
+                            .chapterStartIndexes(sections)
+                        let changeOwners = ResearchJournalPresentation
+                            .obligationChangeOwners(sections)
                         ForEach(Array(sections.enumerated()), id: \.element.id) {
                             index, section in
                             positionedSection(
                                 section,
-                                compact: index > 0
-                                    && sections[index - 1].checkpointRef
-                                        == section.checkpointRef
+                                firstInChapter: chapterStarts.contains(index),
+                                ownedChangeIDs: changeOwners[
+                                    section.sectionRef
+                                ] ?? []
                             )
                         }
                     }
@@ -165,7 +170,8 @@ struct ResearchNarrativeReportView: View {
 
     private func narrativeSection(
         _ section: ResearchJournalSection,
-        compact: Bool = false,
+        firstInChapter: Bool,
+        ownedChangeIDs: Set<String>,
         titleOverride: String? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -177,7 +183,7 @@ struct ResearchNarrativeReportView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.indigo)
             }
-            if !compact {
+            if firstInChapter {
                 HStack(spacing: 8) {
                     Text(stageLabel(for: section))
                         .font(.caption.weight(.semibold))
@@ -208,8 +214,13 @@ struct ResearchNarrativeReportView: View {
                 .foregroundStyle(.tertiary)
             }
 
+            if firstInChapter {
+                Text(stageLabel(for: section))
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
             Text(titleOverride ?? section.title)
-                .font(compact ? .headline : .title2.weight(.semibold))
+                .font(.headline)
                 .foregroundStyle(.primary)
             if !section.body.isEmpty {
                 reportParagraph(section.body, linkIDs: [], section: section)
@@ -238,11 +249,22 @@ struct ResearchNarrativeReportView: View {
                 }
             }
 
-            if let entryResolution = transitionStep(for: section)?.entryResolution {
+            if firstInChapter,
+               let entryResolution = entryResolutionForChapter(section),
+               entryResolution.reason != "graph_continuation" {
+                ResearchEntryResolutionView(value: entryResolution)
+            } else if section.sectionRole == "upgrade_reentry",
+                      let entryResolution = transitionStep(
+                        for: section
+                      )?.entryResolution {
                 ResearchEntryResolutionView(value: entryResolution)
             }
 
-            obligationTable(section)
+            obligationTable(
+                section,
+                showInherited: firstInChapter,
+                ownedChangeIDs: ownedChangeIDs
+            )
 
             if !readableUnboundLinks(in: section).isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -275,7 +297,7 @@ struct ResearchNarrativeReportView: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             }
-            Divider().padding(.top, compact ? 8 : 18)
+            Divider().padding(.top, firstInChapter ? 18 : 8)
         }
         .padding(.horizontal, section.displayKind == "graph_continuation" ? 14 : 0)
         .padding(.top, section.displayKind == "graph_continuation" ? 12 : 0)
@@ -284,7 +306,7 @@ struct ResearchNarrativeReportView: View {
                 ? Color.indigo.opacity(0.06) : Color.clear,
             in: RoundedRectangle(cornerRadius: 10)
         )
-        .padding(.bottom, compact ? 12 : 24)
+        .padding(.bottom, firstInChapter ? 24 : 12)
         .contentShape(Rectangle())
         .onTapGesture {
             selectedCheckpointRef = section.checkpointRef
@@ -294,12 +316,14 @@ struct ResearchNarrativeReportView: View {
 
     private func positionedSection(
         _ section: ResearchJournalSection,
-        compact: Bool = false,
+        firstInChapter: Bool,
+        ownedChangeIDs: Set<String>,
         titleOverride: String? = nil
     ) -> some View {
         narrativeSection(
             section,
-            compact: compact,
+            firstInChapter: firstInChapter,
+            ownedChangeIDs: ownedChangeIDs,
             titleOverride: titleOverride
         )
             .id(section.sectionRef)
@@ -601,21 +625,23 @@ struct ResearchNarrativeReportView: View {
 
     @ViewBuilder
     private func obligationTable(
-        _ section: ResearchJournalSection
+        _ section: ResearchJournalSection,
+        showInherited: Bool,
+        ownedChangeIDs: Set<String>
     ) -> some View {
-        let groups = stageObligationRows(in: section)
-        if !groups.active.isEmpty || !groups.inherited.isEmpty {
+        let groups = stageObligationRows(
+            in: section,
+            showInherited: showInherited,
+            ownedChangeIDs: ownedChangeIDs
+        )
+        if !groups.active.isEmpty || (showInherited && !groups.inherited.isEmpty) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("本阶段新增或变化的研究义务")
-                    .font(.headline)
-                if groups.active.isEmpty {
-                    Text("本阶段没有新增义务，也没有义务状态发生变化。")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else {
+                if !groups.active.isEmpty {
+                    Text("本小节新增或变化的研究义务")
+                        .font(.headline)
                     obligationRowsTable(groups.active, section: section)
                 }
-                if !groups.inherited.isEmpty {
+                if showInherited && !groups.inherited.isEmpty {
                     DisclosureGroup("沿用义务（\(groups.inherited.count)）") {
                         obligationRowsTable(
                             groups.inherited,
@@ -724,7 +750,9 @@ struct ResearchNarrativeReportView: View {
     }
 
     private func stageObligationRows(
-        in section: ResearchJournalSection
+        in section: ResearchJournalSection,
+        showInherited: Bool,
+        ownedChangeIDs: Set<String>
     ) -> ResearchStageObligationRows {
         guard let snapshot = ResearchJournalPresentation.obligationSnapshotStep(
             for: section,
@@ -732,19 +760,45 @@ struct ResearchNarrativeReportView: View {
         ), let index = orderedSteps.firstIndex(where: {
             $0.stepRef == snapshot.stepRef
         }) else {
+            let rows = obligationRows(in: section)
             return ResearchStageObligationRows(
-                active: obligationRows(in: section), inherited: []
+                active: rows.filter {
+                    ownedChangeIDs.contains(obligationObjectID(
+                        $0.obligationLink.targetRef
+                    ))
+                },
+                inherited: []
             )
         }
         let step = orderedSteps[index]
         let previousRefs = index > 0
             ? orderedSteps[index - 1].obligationRefs : nil
-        return ResearchJournalPresentation.stageObligationRows(
+        let groups = ResearchJournalPresentation.stageObligationRows(
             rows: obligationRows(in: section),
             currentRefs: step.obligationRefs,
             previousRefs: previousRefs,
             changes: step.obligationChanges
         )
+        return ResearchStageObligationRows(
+            active: groups.active.filter {
+                ownedChangeIDs.contains(obligationObjectID(
+                    $0.obligationLink.targetRef
+                ))
+            },
+            inherited: showInherited ? groups.inherited : []
+        )
+    }
+
+    private func entryResolutionForChapter(
+        _ section: ResearchJournalSection
+    ) -> ResearchEntryResolutionDelta? {
+        let chapterRef = ResearchJournalPresentation.chapterRef(for: section)
+        let nodeID = chapterRef.hasPrefix("node:")
+            ? String(chapterRef.dropFirst("node:".count)) : ""
+        return orderedSteps.first {
+            $0.toNode == nodeID
+                && $0.entryResolution?.reason != "graph_continuation"
+        }?.entryResolution
     }
 
     private func stageLabel(for section: ResearchJournalSection) -> String {

@@ -42,6 +42,9 @@ def validate_entry_assessment_document(
             by_id[requirement_id],
             factor_facts=value.get("factor_facts"),
         )
+        report_input["chapter_ref"] = (
+            "node:" + str((value.get("context") or {}).get("node_id") or "")
+        )
         normalized.append(assessment)
         local_items.extend(build_report_items(**report_input))
     report_projection = [

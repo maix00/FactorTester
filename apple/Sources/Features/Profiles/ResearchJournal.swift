@@ -77,6 +77,8 @@ struct ResearchJournalSection: Decodable, Identifiable {
     let timeBasis: String?
     let timeSourceRefs: [String]
     let displayKind: String
+    let chapterRef: String?
+    let sectionRole: String?
 
     var id: String { sectionRef }
 
@@ -86,6 +88,8 @@ struct ResearchJournalSection: Decodable, Identifiable {
         case researchOccurredAt = "research_occurred_at"
         case timeBasis = "time_basis"
         case timeSourceRefs = "time_source_refs"
+        case chapterRef = "chapter_ref"
+        case sectionRole = "section_role"
     }
 
     init(from decoder: Decoder) throws {
@@ -107,6 +111,12 @@ struct ResearchJournalSection: Decodable, Identifiable {
             [String].self,
             forKey: .timeSourceRefs
         ) ?? []
+        chapterRef = try container.decodeIfPresent(
+            String.self, forKey: .chapterRef
+        )
+        sectionRole = try container.decodeIfPresent(
+            String.self, forKey: .sectionRole
+        )
         sectionRef = ""
         checkpointRef = ""
         auditCheckpointRef = ""
@@ -131,7 +141,9 @@ struct ResearchJournalSection: Decodable, Identifiable {
         researchOccurredAt: Double? = nil,
         timeBasis: String? = nil,
         timeSourceRefs: [String] = [],
-        displayKind: String = "research"
+        displayKind: String = "research",
+        chapterRef: String? = nil,
+        sectionRole: String? = nil
     ) {
         self.sectionID = sectionID
         self.sectionRef = sectionRef
@@ -148,6 +160,8 @@ struct ResearchJournalSection: Decodable, Identifiable {
         self.timeBasis = timeBasis
         self.timeSourceRefs = timeSourceRefs
         self.displayKind = displayKind
+        self.chapterRef = chapterRef
+        self.sectionRole = sectionRole
     }
 
     func bound(
@@ -169,7 +183,9 @@ struct ResearchJournalSection: Decodable, Identifiable {
             researchOccurredAt: researchOccurredAt,
             timeBasis: timeBasis,
             timeSourceRefs: timeSourceRefs,
-            displayKind: displayKind
+            displayKind: displayKind,
+            chapterRef: chapterRef,
+            sectionRole: sectionRole
         )
     }
 }

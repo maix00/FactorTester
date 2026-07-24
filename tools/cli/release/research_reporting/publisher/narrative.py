@@ -29,6 +29,7 @@ _SECTION_FIELDS_V2 = {"section_id", "title", "blocks", "links"}
 _SECTION_FIELDS_V2_WITH_BODY = {
     "section_id", "title", "body", "blocks", "links",
 }
+_SECTION_SEMANTIC_FIELDS = {"chapter_ref", "section_role"}
 _LINK_FIELDS = {"link_id", "kind", "target_ref"}
 _LINK_FIELDS_WITH_LABEL = {"link_id", "kind", "target_ref", "label"}
 _LINK_KINDS = {
@@ -88,9 +89,14 @@ def canonical_narrative(
     used_report_bindings: set[tuple[str, str]] = set()
     for item in sections:
         fields = set(item) if isinstance(item, dict) else set()
-        expected_fields = (
+        base_section_fields = (
             (_SECTION_FIELDS_V2, _SECTION_FIELDS_V2_WITH_BODY)
             if schema_version in {2, 3} else (_SECTION_FIELDS_V1,)
+        )
+        expected_fields = tuple(
+            candidate
+            for base in base_section_fields
+            for candidate in (base, base | _SECTION_SEMANTIC_FIELDS)
         )
         if fields not in expected_fields:
             raise ValueError("local narrative section fields are invalid")
@@ -131,6 +137,16 @@ def canonical_narrative(
             "title": chinese_text(item["title"], "narrative.section.title"),
             "links": projected_links,
         }
+        if _SECTION_SEMANTIC_FIELDS.issubset(fields):
+            chapter_ref = reference(
+                item["chapter_ref"], "narrative.section.chapter_ref"
+            )
+            if not chapter_ref.startswith("node:"):
+                raise ValueError("section.chapter_ref must identify a node")
+            section["chapter_ref"] = chapter_ref
+            section["section_role"] = safe_id(
+                item["section_role"], "narrative.section.section_role"
+            )
         if schema_version in {2, 3}:
             if "body" in item:
                 section["body"] = _zh_body(item["body"])

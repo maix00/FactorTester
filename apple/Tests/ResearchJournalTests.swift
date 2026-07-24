@@ -190,6 +190,62 @@ final class ResearchJournalTests: XCTestCase {
         )
     }
 
+    func testPersistedChapterBindingProducesOneNodeChapterAndOneUpgradeReview()
+        throws
+    {
+        let sections = [
+            ResearchJournalSection(
+                sectionID: "upgrade",
+                sectionRef: "section:upgrade",
+                title: "图版本升级",
+                body: "",
+                blocks: [],
+                links: [],
+                checkpointRef: "trace:upgrade",
+                createdAt: 1,
+                chapterRef: "node:factor_semantics",
+                sectionRole: "upgrade_reentry"
+            ),
+            ResearchJournalSection(
+                sectionID: "semantics-a",
+                sectionRef: "section:semantics-a",
+                title: "公式语义",
+                body: "",
+                blocks: [],
+                links: [],
+                checkpointRef: "trace:semantics",
+                createdAt: 2,
+                chapterRef: "node:factor_semantics",
+                sectionRole: "node_report_items"
+            ),
+            ResearchJournalSection(
+                sectionID: "design",
+                sectionRef: "section:design",
+                title: "验证设计",
+                body: "",
+                blocks: [],
+                links: [],
+                checkpointRef: "trace:design",
+                createdAt: 3,
+                chapterRef: "node:validation_design",
+                sectionRole: "node_entry"
+            ),
+        ]
+
+        XCTAssertEqual(
+            ResearchJournalPresentation.chapterStartIndexes(sections),
+            [0, 2]
+        )
+        XCTAssertEqual(
+            sections.filter { $0.sectionRole == "upgrade_reentry" }.count,
+            1
+        )
+        XCTAssertEqual(
+            ResearchJournalPresentation.auditCheckpointStartIndexes(sections),
+            [0, 1, 2]
+        )
+    }
+
     func testAuditChipUsesChineseLabelInsteadOfStableReference() throws {
         let link = try JSONDecoder().decode(
             ResearchJournalLink.self,
@@ -717,7 +773,7 @@ final class ResearchJournalTests: XCTestCase {
         ))
     }
 
-    func testDisplayProjectionHidesPureGraphMigrationAndDeduplicatesBindings()
+    func testDisplayProjectionHidesMigrationWithoutDroppingDistinctBindings()
         throws
     {
         let document = try JSONDecoder().decode(
@@ -863,21 +919,25 @@ final class ResearchJournalTests: XCTestCase {
             indexedBy: index
         )
 
-        XCTAssertEqual(sections.count, 3)
+        XCTAssertEqual(sections.count, 4)
         XCTAssertEqual(sections[0].title, "因子公式的经济含义已经逐项核对")
         XCTAssertEqual(
             sections[0].blocks[0].reportBinding?.subjectRef,
             "obligation:first"
         )
-        XCTAssertEqual(sections[1].displayKind, "graph_continuation")
-        XCTAssertEqual(sections[1].checkpointRef, "trace:research")
+        XCTAssertEqual(
+            sections[1].blocks[0].reportBinding?.subjectRef,
+            "obligation:second"
+        )
+        XCTAssertEqual(sections[2].displayKind, "graph_continuation")
+        XCTAssertEqual(sections[2].checkpointRef, "trace:research")
         XCTAssertFalse(sections.contains {
             $0.checkpointRef == "trace:migration"
         })
-        XCTAssertEqual(sections[2].title, "参数化与派生因子")
-        XCTAssertEqual(sections[2].checkpointRef, "trace:research")
+        XCTAssertEqual(sections[3].title, "参数化与派生因子")
+        XCTAssertEqual(sections[3].checkpointRef, "trace:research")
         XCTAssertTrue(
-            sections[2].auditCheckpointRef.hasPrefix("report-checkpoint:")
+            sections[3].auditCheckpointRef.hasPrefix("report-checkpoint:")
         )
     }
 
@@ -984,6 +1044,18 @@ final class ResearchJournalTests: XCTestCase {
             $0.checkpointRef
                 == "trace:f0b356d4d98142a6be80fad91f3bd2d8"
         }.contains { ["entry", "action"].contains($0.sectionID) })
+        XCTAssertEqual(
+            ResearchJournalPresentation.chapterStartIndexes(sections),
+            [0, 1]
+        )
+        XCTAssertEqual(
+            ResearchJournalPresentation.chapterRef(for: sections[0]),
+            "node:factor_semantics"
+        )
+        XCTAssertTrue(sections.dropFirst().allSatisfy {
+            ResearchJournalPresentation.chapterRef(for: $0)
+                == "node:validation_design"
+        })
     }
 
     func testMaxARequirementBindingsUseHomeNodeAndCheckpointAnchor()

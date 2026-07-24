@@ -19,6 +19,7 @@ def build_report_items(
     obligation_refs: list[str],
     fallback_fact_refs: list[str],
     action: dict[str, str],
+    chapter_ref: str,
 ) -> list[dict[str, Any]]:
     report = object_field(item, "report", prefix)
     report_id = str(report.get("report_requirement_id") or "").strip()
@@ -74,6 +75,7 @@ def build_report_items(
             content=content,
             chinese_rows=chinese_rows,
             links=links,
+            chapter_ref=chapter_ref,
         )
         for subject in subjects
     ]
@@ -87,6 +89,7 @@ def _report_item(
     content: dict[str, Any],
     chinese_rows: list[str],
     links: list[dict[str, str]],
+    chapter_ref: str,
 ) -> dict[str, Any]:
     return {
         "report_requirement_id": report_id,
@@ -110,6 +113,7 @@ def _report_item(
             "report_requirement_id": report_id,
             "subject_ref": subject,
         },
+        "chapter_ref": chapter_ref,
     }
 
 

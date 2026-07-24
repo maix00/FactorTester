@@ -45,6 +45,9 @@ def report_snapshot(
             "links": links,
             "created_at": transition["created_at"],
         }
+        if "chapter_ref" in section:
+            projected["chapter_ref"] = section["chapter_ref"]
+            projected["section_role"] = section["section_role"]
         if narrative["schema_version"] in {2, 3}:
             projected["body"] = section.get("body", "")
             projected["blocks"] = deepcopy(section["blocks"])

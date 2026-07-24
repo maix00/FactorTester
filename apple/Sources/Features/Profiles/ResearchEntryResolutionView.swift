@@ -58,28 +58,32 @@ struct ResearchEntryResolutionView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                if value.reason == "graph_continuation" {
+                    Text("这里只列出本次图版本变化触及的要求；既有研究结论和未变化义务不会重复汇报。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                itemGroup(groups.reviewed, tint: .blue)
+                itemGroup(groups.referenceOnly, tint: .orange)
+                itemGroup(groups.unresolved, tint: .red)
+                if !groups.reused.isEmpty {
+                    DisclosureGroup("沿用既有验证（\(groups.reused.count)）") {
+                        itemGroup(groups.reused, tint: .secondary)
+                            .padding(.top, 6)
+                    }
+                    .font(.caption.weight(.medium))
+                }
+            }
+            .padding(.top, 8)
+        } label: {
             HStack(spacing: 7) {
                 Image(systemName: value.reason == "graph_continuation"
                     ? "arrow.triangle.branch" : "checkmark.shield")
                 Text(value.reason == "graph_continuation"
                     ? "图版本升级准入审查" : "节点准入审查")
                     .font(.subheadline.weight(.semibold))
-            }
-            if value.reason == "graph_continuation" {
-                Text("这里只列出本次图版本变化触及的要求；既有研究结论和未变化义务不会重复汇报。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            itemGroup(groups.reviewed, tint: .blue)
-            itemGroup(groups.referenceOnly, tint: .orange)
-            itemGroup(groups.unresolved, tint: .red)
-            if !groups.reused.isEmpty {
-                DisclosureGroup("沿用既有验证（\(groups.reused.count)）") {
-                    itemGroup(groups.reused, tint: .secondary)
-                        .padding(.top, 6)
-                }
-                .font(.caption.weight(.medium))
             }
         }
         .padding(12)

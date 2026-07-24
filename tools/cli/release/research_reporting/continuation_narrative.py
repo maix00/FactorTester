@@ -26,6 +26,8 @@ def continuation_narrative(carrier: dict[str, Any]) -> dict[str, Any]:
         "sections": [{
             "section_id": "graph-continuation-reentry",
             "title": "研究图切换与当前节点重新进入",
+            "chapter_ref": f"node:{carrier['current_node']}",
+            "section_role": "upgrade_reentry",
             "blocks": [
                 {
                     "kind": "paragraph",
