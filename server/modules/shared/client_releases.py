@@ -13,6 +13,7 @@ import stat
 from flask import Response, current_app, request
 
 from server.services.client_release_channels import (
+    load_beta_sparkle_appcast,
     load_client_release_channel,
 )
 
@@ -61,6 +62,28 @@ def client_release_channel(channel: str):
         response = Response(raw, content_type="application/json")
     response.set_etag(etag, weak=False)
     response.headers["Cache-Control"] = "public, max-age=60"
+    return response
+
+
+@shared_bp.get("/api/client/releases/beta.xml")
+def client_release_beta_appcast():
+    try:
+        raw, etag = load_beta_sparkle_appcast(
+            release_manifest_root(),
+            public_key=trusted_release_public_key("beta"),
+        )
+    except FileNotFoundError:
+        return {"success": False, "error": "release channel not found"}, 404
+    except (OSError, ValueError):
+        current_app.logger.exception("invalid Sparkle Beta appcast")
+        return {"success": False, "error": "release channel unavailable"}, 503
+    if request.if_none_match.contains(etag):
+        response = Response(status=304)
+    else:
+        response = Response(raw, content_type="application/rss+xml")
+    response.set_etag(etag, weak=False)
+    response.headers["Cache-Control"] = "public, max-age=60"
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 
