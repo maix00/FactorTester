@@ -16,6 +16,7 @@ from tools.cli.release.profile import (
 from tools.cli.release.transaction import ClientReleaseStore
 from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.locations import default_client_root, validate_client_root
+from tools.cli.release.app_update import update_application
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_profile import client_profile
 from tools.cli.commands.client_research import client_research
@@ -168,6 +169,30 @@ def check_update(profile: Path, as_json: bool) -> None:
     click.echo(
         f"version={update.version} build={update.build} "
         f"channel={update.channel} source={source} signature=verified"
+    )
+
+
+@client_release.command("update-app")
+@click.option(
+    "--profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def update_app(profile: Path, as_json: bool) -> None:
+    """Download, verify, atomically replace, and launch FTClient.app."""
+    _, update, _ = load_update_inputs(profile)
+    support = (
+        Path.home() / "Library/Application Support/FactorTester"
+    )
+    _echo(
+        update_application(
+            update,
+            application=Path("/Applications/FTClient.app"),
+            support_root=support,
+        ),
+        as_json,
     )
 
 

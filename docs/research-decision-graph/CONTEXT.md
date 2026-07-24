@@ -207,6 +207,22 @@ day and night arms, without creating additional workspaces. Its source
 configuration and revision remain auditable.
 _Avoid_: Mutable workspace configuration, cross-workspace execution carrier
 
+**Beta Release Publisher**:
+The server-side release authority exposed as one command. It builds from the
+selected source revision, reuses a verified content-addressed runtime cache,
+signs and packages FTClient, publishes the immutable digest-addressed asset,
+then atomically switches the signed beta manifest. It never installs or updates
+an application in `/Applications`.
+_Avoid_: Client updater, local app installer, unsigned or mutable release asset
+
+**Client App Updater**:
+The client-side update authority exposed as one command. It consumes a verified
+channel update contract, downloads and verifies the DMG, checks continuity with
+the installed signing identity, stages and atomically replaces
+`/Applications/FTClient.app`, launches it, and records rollback provenance. It
+never builds, signs, or publishes a release.
+_Avoid_: Release publisher, initial DMG installation, server build authority
+
 **Agent Flow**:
 The runtime-neutral orchestration layer for Agent identity, goals, Work
 Packages, checkpoints, watchers, budgets, Git coordination, and routing.

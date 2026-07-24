@@ -10,6 +10,18 @@ No server source checkout, database driver, or local backtest engine is needed.
 
 ## Install and update
 
+Release operations intentionally have two authorities:
+
+- Publisher: `python -m script.release.beta ...` builds from a clean commit,
+  reuses the content-addressed frozen runtime when CLI inputs are unchanged,
+  signs the app and DMG, publishes the immutable beta asset, and atomically
+  switches `beta.json`. It never reads or writes `/Applications`.
+- Client: `factortester client update-app --profile PROFILE` consumes only the
+  channel's verified update contract, downloads and verifies the DMG, stages
+  and atomically replaces `/Applications/FTClient.app`, then launches and
+  records a receipt. It never builds, signs, or publishes releases. Rollback
+  copies live under Application Support, not Applications.
+
 For the normal macOS installation experience, download
 `FactorTester-Client.dmg` from the public GitHub Release, open it, and drag
 `FTClient.app` to Applications. On first launch, the signed client safely

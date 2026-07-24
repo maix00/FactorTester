@@ -5,12 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from hashlib import sha256
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import venv
 import zipfile
+from uuid import uuid4
 
 
 DEPENDENCIES = (
@@ -23,6 +25,44 @@ DEPENDENCIES = (
 )
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
+RUNTIME_CACHE_SCHEMA = 1
+
+
+def runtime_input_digest(repo: Path) -> str:
+    """Hash only inputs which can change the frozen CLI runtime."""
+    digest = sha256()
+    digest.update(f"schema={RUNTIME_CACHE_SCHEMA}\n".encode())
+    digest.update(f"python={sys.version_info[:3]}\n".encode())
+    digest.update(f"pyinstaller={PYINSTALLER_VERSION}\n".encode())
+    digest.update(f"pyright={PYRIGHT_VERSION}\n".encode())
+    digest.update(("\n".join(DEPENDENCIES) + "\n").encode())
+    roots = (
+        repo / "tools/cli/pyproject.toml",
+        repo / "tools/cli/tools",
+        repo / "tools/cli/agent-harness/pyproject.toml",
+        repo / "tools/cli/agent-harness/cli_anything",
+        repo / "client-adapters/vibe-trading/adapter.json",
+        repo / "client-adapters/vibe-trading/build_archive.py",
+        repo / "client-adapters/vibe-trading/bin",
+    )
+    for root in roots:
+        paths = [root] if root.is_file() else sorted(root.rglob("*"))
+        for path in paths:
+            if not path.is_file() or any(
+                part in {
+                    "__pycache__", "build", "dist", ".pytest_cache",
+                    "tests", "docs",
+                }
+                or part.endswith(".egg-info")
+                or part.startswith(".git")
+                for part in path.parts
+            ):
+                continue
+            relative = path.relative_to(repo).as_posix()
+            digest.update(relative.encode() + b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def build_python_assets(repo: Path, output: Path) -> list[Path]:
@@ -115,11 +155,29 @@ def embed_client_runtime(
     *,
     version: str,
     source_revision: str,
+    cache_dir: Path | None = None,
 ) -> Path:
     """Embed a provider-neutral CLI runtime and approved adapters in the app."""
     resources = app / "Contents" / "Resources" / "FactorTester"
     if resources.exists():
         shutil.rmtree(resources)
+    cache_key = runtime_input_digest(repo)
+    cached = cache_dir / cache_key if cache_dir is not None else None
+    if cached is not None and _valid_runtime_cache(cached, cache_key):
+        shutil.copytree(cached, resources)
+        (resources / ".runtime-cache.json").unlink()
+        return _write_runtime_receipt(
+            resources, version=version, source_revision=source_revision,
+            cache_key=cache_key,
+        )
+    if cached is not None and cached.exists():
+        quarantine = cached.with_name(f".{cached.name}.corrupt-{uuid4().hex}")
+        try:
+            cached.rename(quarantine)
+            shutil.rmtree(quarantine)
+        except FileNotFoundError:
+            pass
+
     bin_dir = resources / "bin"
     adapter_dir = resources / "adapters"
     bin_dir.mkdir(parents=True)
@@ -199,15 +257,38 @@ def embed_client_runtime(
             check=True,
         )
 
+    if cached is not None:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        staging = cached.with_name(f".{cached.name}.staging-{uuid4().hex}")
+        shutil.copytree(resources, staging)
+        _write_cache_descriptor(staging, cache_key)
+        try:
+            staging.rename(cached)
+        except FileExistsError:
+            shutil.rmtree(staging)
+    return _write_runtime_receipt(
+        resources, version=version, source_revision=source_revision,
+        cache_key=cache_key,
+    )
+
+
+def _write_runtime_receipt(
+    resources: Path,
+    *,
+    version: str,
+    source_revision: str,
+    cache_key: str,
+) -> Path:
     files = {
         str(path.relative_to(resources)): sha256(path.read_bytes()).hexdigest()
         for path in sorted(resources.rglob("*"))
-        if path.is_file()
+        if path.is_file() and path.name != "bundle-receipt.json"
     }
     receipt = {
         "schema_version": 1,
         "version": version,
         "source_revision": source_revision,
+        "runtime_input_sha256": cache_key,
         "files": files,
     }
     receipt_path = resources / "bundle-receipt.json"
@@ -221,6 +302,46 @@ def embed_client_runtime(
         encoding="utf-8",
     )
     return receipt_path
+
+
+def _runtime_payload_hashes(resources: Path) -> dict[str, str]:
+    return {
+        str(path.relative_to(resources)): sha256(path.read_bytes()).hexdigest()
+        for path in sorted(resources.rglob("*"))
+        if path.is_file()
+        and path.name not in {"bundle-receipt.json", ".runtime-cache.json"}
+    }
+
+
+def _write_cache_descriptor(resources: Path, cache_key: str) -> None:
+    descriptor = resources / ".runtime-cache.json"
+    descriptor.write_text(json.dumps({
+        "schema_version": RUNTIME_CACHE_SCHEMA,
+        "runtime_input_sha256": cache_key,
+        "files": _runtime_payload_hashes(resources),
+    }, sort_keys=True, separators=(",", ":")) + "\n")
+    with descriptor.open("rb") as stream:
+        os.fsync(stream.fileno())
+
+
+def _valid_runtime_cache(resources: Path, cache_key: str) -> bool:
+    required = (
+        resources / "bin/factortester",
+        resources / "bin/cli-anything-factortester-research",
+        resources / "adapters/vibe-trading-adapter.zip",
+        resources / ".runtime-cache.json",
+    )
+    if not all(path.is_file() for path in required):
+        return False
+    try:
+        value = json.loads(required[-1].read_text())
+    except (OSError, ValueError):
+        return False
+    return (
+        value.get("schema_version") == RUNTIME_CACHE_SCHEMA
+        and value.get("runtime_input_sha256") == cache_key
+        and value.get("files") == _runtime_payload_hashes(resources)
+    )
 
 
 def _nodejs_wheel_binary(environment: Path) -> Path:
