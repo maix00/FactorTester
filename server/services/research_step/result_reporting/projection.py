@@ -6,17 +6,33 @@ from typing import Any
 from tools.cli.release.research_reporting.report_items import (
     report_fragment_hash, report_item_hash,
 )
+from .labels import (
+    action_alias as _action_alias,
+    analysis_alias as _analysis_alias,
+    criterion_alias as _criterion_alias,
+    disposition_alias as _disposition_alias,
+    obligation_alias as _obligation_alias,
+    obligation_state_alias as _obligation_state_alias,
+    role_alias as _role_alias,
+    route_alias as _route_alias,
+    scope_alias as _scope_alias,
+    status_alias as _status_alias,
+)
 from .metrics import metric_rows
 
 
 def build_result_report_projection(
     *, action: dict[str, Any], plan_hash: str,
     rows: list[dict[str, Any]], receipt: dict[str, Any] | None,
+    presentations: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    presentations = presentations or {}
     action_id = _action_ref(action["action_id"])
     action_key = action_id.removeprefix("action:")
     result_links = _result_links(rows)
-    audit_links = _audit_links(action, plan_hash, receipt)
+    audit_links = _audit_links(
+        action, plan_hash, receipt, presentations=presentations,
+    )
     local = [
         _item(
             "report.node.trial_execution.action", action_id,
@@ -26,7 +42,10 @@ def build_result_report_projection(
         _item(
             "report.node.trial_execution.action", f"audit:{action_key}",
             f"审计与义务变化 · {_action_alias(action_id)}", "list",
-            _audit_list(receipt, audit_links), audit_links,
+            _audit_list(
+                receipt, audit_links, presentations=presentations,
+            ),
+            audit_links,
         ),
     ]
     compact = [{
@@ -88,16 +107,21 @@ def _result_links(rows):
     return values
 
 
-def _audit_links(action, plan_hash, receipt):
+def _audit_links(action, plan_hash, receipt, *, presentations):
     values = [{
         "link_id": "trial-plan", "kind": "trial_plan",
         "target_ref": f"trial-plan:sha256:{plan_hash}",
         "label": "当前试验计划",
     }]
+    evidence_presentations = presentations.get("evidence") or {}
     for index, ref in enumerate(action.get("output_evidence_refs") or [], 1):
+        presentation = evidence_presentations.get(str(ref)) or {}
+        label = str(presentation.get("alias_zh") or "结果证据")
+        summary = str(presentation.get("summary_zh") or "")
         values.append({
             "link_id": f"evidence-{index}", "kind": "evidence",
-            "target_ref": str(ref), "label": f"JobAttempt 证据 · {index}",
+            "target_ref": str(ref),
+            "label": f"{label} · {summary}"[:160] if summary else label[:160],
         })
     obligation_ids = (
         [
@@ -109,11 +133,16 @@ def _audit_links(action, plan_hash, receipt):
     normalized_ids = dict.fromkeys(
         str(raw).removeprefix("obligation:") for raw in obligation_ids
     )
+    obligation_presentations = presentations.get("obligations") or {}
     for index, obligation_id in enumerate(normalized_ids, 1):
+        reference = f"obligation:{obligation_id}"
+        presentation = obligation_presentations.get(reference) or {}
         values.append({
             "link_id": f"obligation-{index}", "kind": "obligation",
-            "target_ref": f"obligation:{obligation_id}",
-            "label": _obligation_alias(obligation_id),
+            "target_ref": reference,
+            "label": _obligation_alias(
+                obligation_id, presentation=presentation,
+            ),
         })
     return values
 
@@ -150,7 +179,7 @@ def _result_table(rows):
     }
 
 
-def _audit_list(receipt, links):
+def _audit_list(receipt, links, *, presentations):
     if receipt is None:
         return {"kind": "list", "rows": [{
             "text": (
@@ -162,8 +191,8 @@ def _audit_list(receipt, links):
     proposal, decision = receipt["proposal"], receipt["decision"]
     rows = [{
         "text": (
-            f"审计结论：{decision['disposition']}；"
-            f"后续路径：{proposal['recommended_action']}。"
+            f"审计结论：{_disposition_alias(decision['disposition'])}；"
+            f"后续路径：{_route_alias(proposal['recommended_action'])}。"
         ),
         "link_ids": [
             "trial-plan",
@@ -171,74 +200,17 @@ def _audit_list(receipt, links):
         ],
     }]
     by_ref = {item["target_ref"]: item["link_id"] for item in links}
+    obligation_presentations = presentations.get("obligations") or {}
     for delta in proposal.get("obligation_delta") or []:
         obligation_id = str(delta["obligation_id"]).removeprefix("obligation:")
         ref = f"obligation:{obligation_id}"
         rows.append({
             "text": (
-                f"{_obligation_alias(obligation_id)}："
-                f"{delta.get('from_state')} → {delta.get('to_state')}；"
-                f"判定标准：{delta['criterion_ref']}"
+                f"{_obligation_alias(obligation_id, presentation=obligation_presentations.get(ref))}："
+                f"{_obligation_state_alias(delta.get('from_state'))} → "
+                f"{_obligation_state_alias(delta.get('to_state'))}；"
+                f"判定标准：{_criterion_alias(delta['criterion_ref'])}"
             )[:500],
             "link_ids": [by_ref[ref]] if ref in by_ref else [],
         })
     return {"kind": "list", "rows": rows}
-
-
-def _obligation_alias(value):
-    aliases = {
-        "predictive-validity": "预测有效性义务",
-        "cost-survival": "交易成本后存活义务",
-        "out-of-sample": "样本外有效性义务",
-        "data-availability": "数据可用性义务",
-    }
-    return aliases.get(value, "研究义务（点击查看完整定义）")
-
-
-def _action_alias(value):
-    text = str(value or "").lower()
-    if "ic" in text:
-        return "样本内 IC 检验"
-    if any(key in text for key in ("historical-fee", "fee-aware", "net")):
-        return "历史手续费回测"
-    if any(key in text for key in ("gross", "no-fee", "fee-free")):
-        return "无手续费回测"
-    if "backtest" in text:
-        return "回测检验"
-    return "当前证据检验"
-
-
-def _analysis_alias(value):
-    return {
-        "ic": "截面 IC 检验",
-        "backtest": "策略回测",
-        "factor_evaluation": "因子评价",
-        "robustness": "稳健性检验",
-    }.get(str(value or ""), "研究检验")
-
-
-def _role_alias(value):
-    return {
-        "candidate": "候选方案",
-        "baseline": "基准方案",
-        "control": "对照方案",
-        "primary": "主要方案",
-    }.get(str(value or ""), "试验方案")
-
-
-def _status_alias(value):
-    return {
-        "succeeded": "已成功",
-        "failed": "失败",
-        "cancelled": "已取消",
-        "running": "运行中",
-    }.get(str(value or ""), "状态已记录")
-
-
-def _scope_alias(row):
-    alias = str(row.get("run_spec_alias_zh") or "")
-    if "夜盘" in alias:
-        return "夜盘"
-    if "日盘" in alias:
-        return "日盘"
-    return "既定产品范围"

@@ -165,7 +165,7 @@ def test_result_subject_package_migration_is_complete_and_idempotent(
         package / "branches" / "branch-sgccs" / "REPORT.md"
     ).read_text()
     assert "旧版检查点未保留完整裁决" not in report
-    assert "审计结论：accepted" in report
+    assert "审计结论：已接受" in report
 
     replay = migrate_result_subject_package(
         package_root=package, branch_id="branch-sgccs",

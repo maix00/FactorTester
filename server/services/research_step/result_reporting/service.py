@@ -24,6 +24,7 @@ from server.services.research_report_presentations import run_spec_presentation
 from tools.data.sqlite.db import connect_sqlite
 
 from .projection import build_result_report_projection
+from .presentations import result_presentations
 
 
 def load_result_report_projection(
@@ -70,19 +71,28 @@ def load_result_report_projection(
         receipt = load_action_adjudication_receipt(
             conn, instance_id, branch_id, contract["trial_plan_hash"], action_id,
         )
-    evidence_refs = (
-        set(receipt["proposal"]["evidence_refs"]) if receipt
-        else set(contract["checkpoint"]["current_action_output_evidence_refs"])
-    )
-    projected = _admitted_rows(
-        rows, artifacts=artifacts, evidence_refs=evidence_refs,
-    )
-    if not projected:
-        raise ValueError("Evidence Action has no authoritative JobAttempt")
-    if {row["run_spec_hash"] for row in projected} != set(
-        action["run_spec_hashes"]
-    ):
-        raise ValueError("admitted JobAttempt RunSpec set is incomplete")
+        evidence_refs = (
+            set(receipt["proposal"]["evidence_refs"]) if receipt
+            else set(
+                contract["checkpoint"]["current_action_output_evidence_refs"]
+            )
+        )
+        projected = _admitted_rows(
+            rows, artifacts=artifacts, evidence_refs=evidence_refs,
+        )
+        if not projected:
+            raise ValueError("Evidence Action has no authoritative JobAttempt")
+        if {row["run_spec_hash"] for row in projected} != set(
+            action["run_spec_hashes"]
+        ):
+            raise ValueError("admitted JobAttempt RunSpec set is incomplete")
+        presentations = result_presentations(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            rows=projected,
+            receipt=receipt,
+        )
     report_action = deepcopy(action)
     report_action["output_evidence_refs"] = (
         list(receipt["proposal"]["evidence_refs"]) if receipt
@@ -93,7 +103,7 @@ def load_result_report_projection(
     )
     value = build_result_report_projection(
         action=report_action, plan_hash=contract["trial_plan_hash"],
-        rows=projected, receipt=receipt,
+        rows=projected, receipt=receipt, presentations=presentations,
     )
     return {
         **value, "instance_id": instance_id, "branch_id": branch_id,

@@ -94,7 +94,9 @@ def test_projection_reports_authoritative_obligation_delta():
                 "obligation_id": "predictive-validity",
                 "from_state": "open",
                 "to_state": "bounded",
-                "criterion_ref": "criterion:ic-support",
+                "criterion_ref": (
+                    "criterion:2024-day-night-cross-sectional-ic-reviewed"
+                ),
             }],
         },
         "decision": {"disposition": "accepted"},
@@ -105,12 +107,34 @@ def test_projection_reports_authoritative_obligation_delta():
         plan_hash="c" * 64,
         rows=[_row()],
         receipt=receipt,
+        presentations={
+            "obligations": {
+                "obligation:predictive-validity": {
+                    "alias_zh": "样本内截面 IC 是否提供可复现的预测信息？",
+                },
+            },
+            "evidence": {
+                "evidence:" + "a" * 64: {
+                    "alias_zh": "日盘截面 IC 结果",
+                    "summary_zh": "IC 均值 0.031；t 统计量 2.1",
+                },
+            },
+        },
     )
 
     rows = value["local_report_items"][1]["content"]["rows"]
-    assert "accepted" in rows[0]["text"]
-    assert "open → bounded" in rows[1]["text"]
+    assert rows[0]["text"] == "审计结论：已接受；后续路径：进入下一试验阶段。"
+    assert "样本内截面 IC 是否提供可复现的预测信息？" in rows[1]["text"]
+    assert "待处理 → 已限定" in rows[1]["text"]
+    assert "2024 年日盘与夜盘截面 IC 结果已审阅" in rows[1]["text"]
     assert rows[1]["link_ids"] == ["obligation-1"]
+    links = value["local_report_items"][1]["links"]
+    assert next(
+        item for item in links if item["kind"] == "evidence"
+    )["label"] == "日盘截面 IC 结果 · IC 均值 0.031；t 统计量 2.1"
+    assert next(
+        item for item in links if item["kind"] == "obligation"
+    )["label"] == "样本内截面 IC 是否提供可复现的预测信息？"
 
 
 def test_projection_keeps_bounded_backtest_group_metrics():

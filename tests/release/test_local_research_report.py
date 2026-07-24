@@ -802,7 +802,7 @@ def test_result_receipt_append_does_not_repeat_existing_result_item(
         package / "branches" / "branch-sgccs" / "REPORT.md"
     ).read_text(encoding="utf-8")
     assert "旧版检查点未保留完整裁决" not in report
-    assert "审计结论：accepted" in report
+    assert "审计结论：已接受" in report
     assert first["checkpoint_ref"] == second["checkpoint_ref"]
     assert second["local_revision_receipt"]["changed"] is True
     assert second["report_submission"] == after_receipt["report_submission"]
