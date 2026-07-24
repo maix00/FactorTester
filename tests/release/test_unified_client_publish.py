@@ -10,6 +10,7 @@ import pytest
 
 from script.release import publish
 from tools.cli.commands.client_release import client_release
+from tools.cli.release import app_update_control
 
 
 def _appcast(
@@ -131,5 +132,61 @@ def test_public_cli_exposes_explicit_app_update_state_machine() -> None:
     result = runner.invoke(client_release, ["app-update", "--help"])
 
     assert result.exit_code == 0
-    for command in ("check", "stage", "apply"):
+    for command in ("check", "download", "restart"):
         assert command in result.output
+
+
+def test_cli_update_actions_only_dispatch_to_ftclient_sparkle(
+    monkeypatch,
+) -> None:
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        app_update_control.subprocess,
+        "run",
+        lambda command, **_kwargs: commands.append(command),
+    )
+
+    result = app_update_control.dispatch_app_update("download")
+
+    assert commands == [
+        ["open", "factortester://app-update?action=download"]
+    ]
+    assert result["handler"] == "FTClient/Sparkle"
+
+
+def test_all_channels_require_the_existing_shared_signing_identity(
+    tmp_path: Path,
+) -> None:
+    common = {
+        "channel": "beta",
+        "version": "1.2.3",
+        "build": 42,
+        "source_revision": "a" * 40,
+        "output": tmp_path / "output",
+        "signing_identity": "Different Release Identity",
+        "sparkle_public_key": "public",
+        "sparkle_generate_appcast": tmp_path / "generate_appcast",
+        "legacy_private_key": tmp_path / "private.pem",
+        "legacy_public_key": tmp_path / "public.pem",
+        "server_origin": "https://factor.example",
+        "release_root": tmp_path / "published",
+        "notary_profile": "factortester-notary",
+    }
+    with pytest.raises(ValueError, match="existing shared"):
+        publish.release_client(**common)
+
+
+def test_shared_signing_identity_is_pinned_by_certificate_fingerprint(
+    monkeypatch,
+) -> None:
+    fingerprint = publish.SHARED_SIGNING_CERTIFICATE_SHA1
+    monkeypatch.setattr(
+        publish.subprocess,
+        "check_output",
+        lambda *_args, **_kwargs: (
+            f'  1) {fingerprint} "FTClient Beta Release"\n'
+            "     1 valid identities found\n"
+        ),
+    )
+
+    assert publish._shared_signing_certificate() == fingerprint

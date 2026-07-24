@@ -15,27 +15,28 @@ Release operations intentionally have two authorities:
 - Publisher: `factortester client release --channel stable|beta ...` performs
   the common clean-checkout, build, runtime embedding, inside-out signing, DMG,
   Sparkle appcast, compatibility manifest, publication, remote read-back, and
-  receipt pipeline. Main additionally requires notarization and becomes public
-  only after all GitHub draft assets exist. Beta writes immutable assets before
-  switching its appcast and compatibility pointers. It never installs an app.
+  receipt pipeline. Main becomes public only after all GitHub draft assets
+  exist. Beta writes immutable assets before switching its appcast and
+  compatibility pointers. It never installs an app.
 - Client: FTClient's thin SwiftUI update panel delegates discovery, EdDSA
   verification, download, extraction, post-exit replacement, and relaunch to
   Sparkle. It displays one primary action at a time: check, download, or restart.
   It never builds, signs, notarizes, or publishes a release.
 
-The old ECDSA JSON manifests and Python updater remain for one compatibility
-window:
+There is only one application updater. CLI actions launch or contact FTClient
+through its registered URL scheme; FTClient then delegates to Sparkle:
 
 ```bash
-factortester client app-update check --profile client-profile.json
-factortester client app-update stage --profile client-profile.json
-factortester client app-update apply
+factortester client app-update check
+factortester client app-update download
+factortester client app-update restart
 ```
 
-`stage` does not quit or replace FTClient. `apply` accepts only the persisted
-candidate whose tree digest and signing requirement still match its pending
-receipt. Existing `check-update` and `update-app` commands remain aliases for
-older automation; new macOS UI work must not extend the legacy installer.
+The CLI never downloads, mounts, verifies, copies, or replaces the application.
+`update-app` remains a temporary command-name alias for the Sparkle `download`
+action; it is not a second implementation. The read-only legacy
+`check-update` JSON command remains available for automation during the
+manifest compatibility window.
 
 For the normal macOS installation experience, download
 `FactorTester-Client.dmg` from the public GitHub Release, open it, and drag
@@ -52,21 +53,24 @@ research can start immediately. Main reads GitHub's `appcast.xml`; Beta reads
 the configured FactorTester server's `/api/client/releases/beta.xml`. A channel
 cannot be changed while an update session is active.
 
-Every distributed build must use the same persistent code-signing identity for
-its channel. An ad-hoc signature is intentionally rejected by the release
-builder because its designated requirement is tied to a changing binary hash;
-macOS would otherwise ask for Documents access again after each update. Beta
-may use a persistent trusted development identity. Main uses a Developer ID
-Application identity and notarization. The signing identity is passed explicitly
-with `--signing-identity` and no private key is stored in the repository.
+Every distributed Main and Beta build currently uses the same persistent
+self-signed identity (`FTClient Beta Release`, certificate SHA-1
+`E6F25D4B158C8FA4AE585E9C374AE9FAC7AFC81A`), bundle identifier, and Sparkle
+public key. The public certificate fingerprint is pinned so a different
+self-signed certificate with the same display name is rejected. Renaming or
+replacing that certificate would change the designated requirement and can
+make macOS request Documents, Keychain, Automation, or other privacy
+permissions again. Channel selection changes only the feed and release
+eligibility; it never changes the app identity. Sparkle's EdDSA signature is
+the archive authenticity boundary. A future Developer ID transition is a
+separate, explicit identity migration; it must not happen implicitly during a
+Main publication.
 
 Sparkle verifies the appcast's EdDSA enclosure signature before accepting the
 archive and uses its updater/helper processes for safe replacement after the
-main app exits. The app's own UI never accepts an arbitrary local path. Main
-artifacts are Developer ID signed, notarized, and stapled; Beta may use the
-configured persistent test identity. `SUPublicEDKey` is embedded at build time
-and private Sparkle or Apple signing material is never stored in the app,
-profile, log, or release receipt.
+main app exits. The app's own UI never accepts an arbitrary local path.
+`SUPublicEDKey` is embedded at build time and private Sparkle signing material
+is never stored in the app, profile, log, or release receipt.
 
 During the compatibility window, CLI discovery also supports the compact signed
 `stable.json` or `beta.json` manifest. Main and Beta have separate authoritative

@@ -10,10 +10,8 @@ final class ClientReleaseController: ObservableObject {
     @Published private(set) var compatible: Bool?
     @Published private(set) var healthy: Bool?
     @Published private(set) var signatureText = L10n.text("检查中…")
-    @Published private(set) var canRollback = false
     @Published private(set) var isWorking = false
     @Published private(set) var lastChecked: Date?
-    @Published private(set) var pendingUpdate: PendingApplicationUpdate?
     @Published private(set) var sparkleUpdateReady = false
     @Published var lastError: String?
     @Published var channel: String {
@@ -27,8 +25,8 @@ final class ClientReleaseController: ObservableObject {
         }
     }
 
-    private let store = AppUpdateStore()
     private let defaults: UserDefaults
+    private var pendingExternalAction: String?
     private lazy var sparkle = SparkleUpdateCoordinator(
         feedURL: { [weak self] in self?.sparkleFeedURL },
         event: { [weak self] event in self?.handleSparkle(event) }
@@ -41,13 +39,6 @@ final class ClientReleaseController: ObservableObject {
         channel = defaults.string(forKey: Keys.channel) ?? "stable"
         automaticallyUpdates = defaults.object(forKey: Keys.automatic) as? Bool ?? false
         lastChecked = defaults.object(forKey: Keys.lastChecked) as? Date
-        let pending = store.loadPendingApplication()
-        if pending?.version == installedVersion {
-            store.clearPendingApplication()
-            pendingUpdate = nil
-        } else {
-            pendingUpdate = pending
-        }
         sparkle.automaticallyChecksForUpdates = true
         sparkle.automaticallyDownloadsUpdates = automaticallyUpdates
     }
@@ -77,57 +68,45 @@ final class ClientReleaseController: ObservableObject {
     }
 
     func restartToApply() async {
-        if sparkleUpdateReady {
-            sparkle.installAndRelaunch()
-            return
-        }
-        guard let pendingUpdate else {
+        guard sparkleUpdateReady else {
             lastError = L10n.text("当前没有已准备好的更新。")
             return
         }
-        do {
-            try PendingApplicationUpdater.launch(
-                pending: pendingUpdate,
-                currentBundle: Bundle.main.bundleURL
-            )
-        } catch {
-            lastError = error.localizedDescription
-        }
+        sparkle.installAndRelaunch()
     }
 
-    func rollback() async {
-        guard let installer = store.previousInstaller(
-            excluding: [installedVersion, latestVersion]
-        ) else {
-            lastError = L10n.text("没有可用的上一版已验证 DMG。")
+    func handleUpdateCommand(_ url: URL) {
+        guard url.scheme == "factortester",
+              url.host == "app-update",
+              let components = URLComponents(
+                url: url,
+                resolvingAgainstBaseURL: false
+              ),
+              let action = components.queryItems?.first(
+                where: { $0.name == "action" }
+              )?.value else {
+            lastError = L10n.text("忽略了无效的更新命令。")
             return
         }
-        do {
-            let inspection = try await AppInstallerInspector.inspect(installer)
-            guard inspection.bundleID == "com.gtht.client" else {
-                throw AppUpdateError.bundleIdentityMismatch
+        switch action {
+        case "check":
+            sparkle.checkForUpdates()
+        case "download":
+            if hasAvailableUpdate {
+                sparkle.downloadAvailableUpdate()
+            } else {
+                pendingExternalAction = action
+                sparkle.checkForUpdates()
             }
-            let staged = self.store.root
-                .appendingPathComponent("pending")
-                .appendingPathComponent(inspection.version)
-                .appendingPathComponent("FTClient.app")
-            let stagedApp = try await AppInstallerInspector.stage(
-                installer,
-                at: staged,
-                expected: inspection
-            )
-            pendingUpdate = try store.savePendingApplication(
-                version: inspection.version,
-                build: inspection.build,
-                channel: "rollback",
-                appURL: stagedApp,
-                sha256: try AppUpdateStore.sha256(installer)
-            )
-            lastError = L10n.text(
-                "上一版已准备好。请点击‘重启更新’完成回滚。"
-            )
-        } catch {
-            lastError = error.localizedDescription
+        case "restart":
+            if isUpdateReady {
+                sparkle.installAndRelaunch()
+            } else {
+                pendingExternalAction = action
+                sparkle.checkForUpdates()
+            }
+        default:
+            lastError = L10n.text("忽略了无效的更新命令。")
         }
     }
 
@@ -137,11 +116,11 @@ final class ClientReleaseController: ObservableObject {
     }
 
     var isUpdateReady: Bool {
-        sparkleUpdateReady || pendingUpdate != nil
+        sparkleUpdateReady
     }
 
     var pendingVersion: String? {
-        sparkleUpdateReady ? latestVersion : pendingUpdate?.version
+        sparkleUpdateReady ? latestVersion : nil
     }
 
     private var sparkleFeedURL: URL? {
@@ -165,6 +144,10 @@ final class ClientReleaseController: ObservableObject {
             latestVersion = version
             sparkleUpdateReady = false
             compatible = true
+            if pendingExternalAction == "download" {
+                pendingExternalAction = nil
+                sparkle.downloadAvailableUpdate()
+            }
         case let .downloading(version):
             isWorking = true
             latestVersion = version
@@ -173,15 +156,21 @@ final class ClientReleaseController: ObservableObject {
             latestVersion = version
             sparkleUpdateReady = true
             lastError = L10n.text("更新已下载并验证，可在方便时重启。")
+            if pendingExternalAction == "restart" {
+                pendingExternalAction = nil
+                sparkle.installAndRelaunch()
+            }
         case .current:
             isWorking = false
             latestVersion = ""
             sparkleUpdateReady = false
             compatible = true
+            pendingExternalAction = nil
         case let .failed(message):
             isWorking = false
             compatible = false
             lastError = message
+            pendingExternalAction = nil
         }
         let now = Date()
         lastChecked = now

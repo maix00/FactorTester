@@ -3,13 +3,11 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
-import subprocess
 
 import pytest
 
 from script.release import assets, beta
 from script.release.beta import DEFAULT_IDENTITY, publish_beta_files
-from tools.cli.release import app_update
 
 
 def _runtime_repo(root: Path) -> Path:
@@ -123,27 +121,6 @@ def test_manifest_failure_keeps_old_channel_but_retains_safe_asset(
     assert len(list((root / "assets/beta").glob("*.dmg"))) == 1
 
 
-def test_publisher_behavior_never_calls_client_installer(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    called = False
-
-    def forbidden(*_args, **_kwargs):
-        nonlocal called
-        called = True
-        raise AssertionError("publisher invoked client installer")
-
-    monkeypatch.setattr(app_update, "atomic_replace_application", forbidden)
-    dmg = tmp_path / "release.dmg"
-    dmg.write_bytes(b"publisher only")
-    publish_beta_files(
-        dmg=dmg,
-        manifest={"schema_version": 1},
-        release_root=tmp_path / "channel",
-    )
-    assert called is False
-
-
 def test_beta_release_identity_is_stable_and_not_adhoc() -> None:
     assert DEFAULT_IDENTITY == "FTClient Beta Release"
     assert DEFAULT_IDENTITY != "-"
@@ -154,13 +131,13 @@ def test_beta_release_identity_is_stable_and_not_adhoc() -> None:
     assert "update_application" not in publisher
 
 
-def test_client_updater_has_no_build_sign_or_publish_authority() -> None:
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "tools/cli/release/app_update.py"
-    ).read_text()
-    for forbidden in ("xcodebuild", "xcodegen", "--sign", "beta.json"):
-        assert forbidden not in source
+def test_cli_has_no_second_application_updater() -> None:
+    root = Path(__file__).resolve().parents[2] / "tools/cli/release"
+    assert not (root / "app_update.py").exists()
+    control = (root / "app_update_control.py").read_text()
+    assert 'subprocess.run(["open", url]' in control
+    for forbidden in ("hdiutil", "codesign", "copytree", "/Applications"):
+        assert forbidden not in control
 
 
 def test_incomplete_or_corrupt_runtime_cache_is_rejected(tmp_path: Path) -> None:
@@ -177,170 +154,3 @@ def test_incomplete_or_corrupt_runtime_cache_is_rejected(tmp_path: Path) -> None
     assets._write_cache_descriptor(cached, "a" * 64)
     cli.write_bytes(b"corrupt")
     assert assets._valid_runtime_cache(cached, "a" * 64) is False
-
-
-def test_update_requires_an_existing_app_with_same_identity(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    candidate = tmp_path / "candidate.app"
-    candidate.mkdir()
-    with pytest.raises(ValueError, match="initial install"):
-        app_update._require_installed_identity(
-            candidate, tmp_path / "Applications/FTClient.app"
-        )
-    installed = tmp_path / "Applications/FTClient.app"
-    installed.mkdir(parents=True)
-    requirements = {
-        candidate: "designated => anchor candidate",
-        installed: "designated => anchor installed",
-    }
-    monkeypatch.setattr(
-        app_update, "_designated_requirement", requirements.__getitem__,
-    )
-    with pytest.raises(ValueError, match="identity differs"):
-        app_update._require_installed_identity(candidate, installed)
-
-
-def test_designated_requirement_ignores_executable_path(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    app = tmp_path / "mounted/FTClient.app"
-    expected = 'designated => identifier "com.gtht.client" and anchor trusted'
-
-    def fake_run(*_args, **_kwargs):
-        return subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="",
-            stderr=f"Executable={app}/Contents/MacOS/FTClient\n{expected}\n",
-        )
-
-    monkeypatch.setattr(app_update.subprocess, "run", fake_run)
-
-    assert app_update._designated_requirement(app) == expected
-
-
-def test_runtime_preflight_requires_both_commands_and_adapter(
-    tmp_path: Path,
-) -> None:
-    app = tmp_path / "FTClient.app"
-    root = app / "Contents/Resources/FactorTester"
-    cli = root / "bin/factortester"
-    cli.parent.mkdir(parents=True)
-    cli.write_bytes(b"cli")
-    cli.chmod(0o755)
-    receipt = root / "bundle-receipt.json"
-    receipt.write_text(json.dumps({
-        "files": {"bin/factortester": sha256(b"cli").hexdigest()}
-    }))
-    with pytest.raises(ValueError, match="incomplete"):
-        app_update._validate_embedded_runtime(app)
-
-
-def test_staged_update_rejects_changed_candidate(tmp_path: Path) -> None:
-    support = tmp_path / "support"
-    pending = support / "pending-app-update"
-    candidate = _fake_app(pending, b"verified")
-    receipt = {
-        "schema_version": 1,
-        "state": "ready",
-        "candidate": "FTClient.app",
-        "candidate_tree_sha256": app_update._directory_digest(candidate),
-    }
-    (pending / "pending.json").write_text(json.dumps(receipt))
-    (
-        candidate / "Contents/Resources/FactorTester/bin/factortester"
-    ).write_bytes(b"changed")
-
-    with pytest.raises(ValueError, match="changed after verification"):
-        app_update.apply_staged_application_update(
-            application=tmp_path / "Applications/FTClient.app",
-            support_root=support,
-        )
-
-
-def test_staged_update_receipt_cannot_escape_support_root(
-    tmp_path: Path,
-) -> None:
-    support = tmp_path / "support"
-    pending = support / "pending-app-update"
-    pending.mkdir(parents=True)
-    (pending / "pending.json").write_text(json.dumps({
-        "schema_version": 1,
-        "state": "ready",
-        "candidate": "../outside.app",
-        "candidate_tree_sha256": "0" * 64,
-    }))
-
-    with pytest.raises(ValueError, match="receipt is invalid"):
-        app_update.apply_staged_application_update(
-            application=tmp_path / "Applications/FTClient.app",
-            support_root=support,
-        )
-
-
-def _fake_app(root: Path, payload: bytes) -> Path:
-    app = root / "FTClient.app"
-    for relative in (
-        "Contents/Info.plist",
-        "Contents/Resources/FactorTester/bundle-receipt.json",
-        "Contents/Resources/FactorTester/bin/factortester",
-    ):
-        path = app / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(payload)
-    return app
-
-
-def test_client_atomic_replace_rolls_back_and_keeps_backup_outside_applications(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    applications = tmp_path / "Applications"
-    installed = _fake_app(applications, b"old")
-    candidate = _fake_app(tmp_path / "download", b"new")
-    backup_root = tmp_path / "Application Support/backups"
-    calls = 0
-
-    def verify(_source, _target):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise ValueError("post-install verification failed")
-
-    monkeypatch.setattr(app_update, "_verify_same_app", verify)
-    with pytest.raises(ValueError, match="post-install"):
-        app_update.atomic_replace_application(
-            candidate, application=installed, backup_root=backup_root,
-        )
-
-    assert (
-        installed / "Contents/Resources/FactorTester/bin/factortester"
-    ).read_bytes() == b"old"
-    assert not list(applications.glob(".*.staging-*"))
-    assert not list(applications.glob("*backup*"))
-
-
-def test_client_replace_behavior_never_calls_signer_or_publisher(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    monkeypatch.setattr(app_update, "_verify_same_app", lambda *_: None)
-    monkeypatch.setattr(
-        beta, "_sign_embedded_app",
-        lambda *_args, **_kwargs: pytest.fail("client invoked signer"),
-    )
-    monkeypatch.setattr(
-        beta, "publish_beta_files",
-        lambda *_args, **_kwargs: pytest.fail("client invoked publisher"),
-    )
-    installed = _fake_app(tmp_path / "Applications", b"old")
-    candidate = _fake_app(tmp_path / "download", b"new")
-    backup = app_update.atomic_replace_application(
-        candidate,
-        application=installed,
-        backup_root=tmp_path / "Application Support/backups",
-    )
-    assert backup is not None
-    assert (
-        installed / "Contents/Resources/FactorTester/bin/factortester"
-    ).read_bytes() == b"new"

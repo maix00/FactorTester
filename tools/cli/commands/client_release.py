@@ -16,11 +16,7 @@ from tools.cli.release.profile import (
 from tools.cli.release.transaction import ClientReleaseStore
 from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.locations import default_client_root, validate_client_root
-from tools.cli.release.app_update import (
-    apply_staged_application_update,
-    stage_application_update,
-    update_application,
-)
+from tools.cli.release.app_update_control import dispatch_app_update
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_profile import client_profile
 from tools.cli.commands.client_research import client_research
@@ -49,51 +45,31 @@ client_release.add_command(client_research)
 
 @client_release.group("app-update")
 def app_update() -> None:
-    """Check, stage, or apply an FTClient application update."""
+    """Control FTClient's single Sparkle application updater."""
 
 
 @app_update.command("check")
-@click.option(
-    "--profile",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    required=True,
-)
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
-def app_update_check(profile: Path, as_json: bool) -> None:
-    """Check the selected authoritative channel without downloading."""
-    check_update.callback(profile=profile, as_json=as_json)
+def app_update_check(as_json: bool) -> None:
+    """Ask FTClient/Sparkle to check its selected channel."""
+    _echo(dispatch_app_update("check"), as_json)
 
 
-@app_update.command("stage")
-@click.option(
-    "--profile",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    required=True,
-)
+@app_update.command("download")
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
-def app_update_stage(profile: Path, as_json: bool) -> None:
-    """Download and verify an update without quitting FTClient."""
-    _, update, _ = load_update_inputs(profile)
-    result = stage_application_update(
-        update,
-        application=Path("/Applications/FTClient.app"),
-        support_root=Path.home() / "Library/Application Support/FactorTester",
-    )
-    _echo(result, as_json)
+def app_update_download(as_json: bool) -> None:
+    """Ask FTClient/Sparkle to download and prepare its available update."""
+    _echo(dispatch_app_update("download"), as_json)
 
 
-@app_update.command("apply")
+@app_update.command("restart")
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
-def app_update_apply(as_json: bool) -> None:
-    """Apply only the previously verified pending update and relaunch."""
-    result = apply_staged_application_update(
-        application=Path("/Applications/FTClient.app"),
-        support_root=Path.home() / "Library/Application Support/FactorTester",
-    )
-    _echo(result, as_json)
+def app_update_restart(as_json: bool) -> None:
+    """Ask Sparkle to install the prepared update and relaunch FTClient."""
+    _echo(dispatch_app_update("restart"), as_json)
 
 
 @client_release.command("release")
@@ -102,7 +78,11 @@ def app_update_apply(as_json: bool) -> None:
 @click.option("--build", type=click.IntRange(min=1), required=True)
 @click.option("--source-revision", required=True)
 @click.option("--output", type=click.Path(path_type=Path), required=True)
-@click.option("--signing-identity", required=True)
+@click.option(
+    "--signing-identity",
+    default="FTClient Beta Release",
+    show_default=True,
+)
 @click.option("--sparkle-public-key", required=True)
 @click.option(
     "--sparkle-generate-appcast",
@@ -277,19 +257,8 @@ def check_update(profile: Path, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
 def update_app(profile: Path, as_json: bool) -> None:
-    """Download, verify, atomically replace, and launch FTClient.app."""
-    _, update, _ = load_update_inputs(profile)
-    support = (
-        Path.home() / "Library/Application Support/FactorTester"
-    )
-    _echo(
-        update_application(
-            update,
-            application=Path("/Applications/FTClient.app"),
-            support_root=support,
-        ),
-        as_json,
-    )
+    """Compatibility alias: ask FTClient/Sparkle to download the update."""
+    _echo(dispatch_app_update("download"), as_json)
 
 
 @client_release.command("rollback")

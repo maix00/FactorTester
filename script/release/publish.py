@@ -32,6 +32,8 @@ from script.release.update_manifest import (
 
 
 CHANNELS = {"stable", "beta"}
+SHARED_SIGNING_IDENTITY = "FTClient Beta Release"
+SHARED_SIGNING_CERTIFICATE_SHA1 = "E6F25D4B158C8FA4AE585E9C374AE9FAC7AFC81A"
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class PublishedRelease:
     build: int
     source_revision: str
     dmg_sha256: str
+    signing_certificate_sha1: str
     asset_url: str
     appcast_url: str
     legacy_manifest_url: str
@@ -71,10 +74,14 @@ def release_client(
         raise ValueError("release channel must be stable or beta")
     if not sparkle_public_key.strip():
         raise ValueError("Sparkle public key is required")
+    if signing_identity != SHARED_SIGNING_IDENTITY:
+        raise ValueError(
+            "Main and Beta must use the existing shared FTClient signing "
+            "identity"
+        )
+    signing_identity = _shared_signing_certificate()
     if channel == "beta" and (server_origin is None or release_root is None):
         raise ValueError("Beta requires server origin and release root")
-    if channel == "stable" and not notary_profile:
-        raise ValueError("Main releases must be notarized")
     _validate_source_checkout(REPO, source_revision)
     if output.exists():
         raise ValueError(f"release output already exists: {output}")
@@ -199,6 +206,7 @@ def release_client(
             build=build,
             source_revision=source_revision,
             dmg_sha256=digest,
+            signing_certificate_sha1=SHARED_SIGNING_CERTIFICATE_SHA1,
             asset_url=download_url,
             appcast_url=appcast_url,
             legacy_manifest_url=legacy_url,
@@ -374,6 +382,24 @@ def _fsync(path: Path) -> None:
         os.fsync(stream.fileno())
 
 
+def _shared_signing_certificate() -> str:
+    output = subprocess.check_output(
+        ["security", "find-identity", "-v", "-p", "codesigning"],
+        text=True,
+    )
+    matches = [
+        line.split()[1].upper()
+        for line in output.splitlines()
+        if f'"{SHARED_SIGNING_IDENTITY}"' in line
+    ]
+    if matches != [SHARED_SIGNING_CERTIFICATE_SHA1]:
+        raise ValueError(
+            "the Keychain does not contain exactly the pinned FTClient "
+            "signing certificate"
+        )
+    return SHARED_SIGNING_CERTIFICATE_SHA1
+
+
 def _notarize_app(app: Path, profile: str) -> None:
     archive = app.with_suffix(".zip")
     subprocess.run(
@@ -423,7 +449,10 @@ def main() -> None:
     parser.add_argument("--build", type=int, required=True)
     parser.add_argument("--source-revision", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--signing-identity", required=True)
+    parser.add_argument(
+        "--signing-identity",
+        default=SHARED_SIGNING_IDENTITY,
+    )
     parser.add_argument("--sparkle-public-key", required=True)
     parser.add_argument("--sparkle-generate-appcast", type=Path, required=True)
     parser.add_argument("--legacy-private-key", type=Path, required=True)

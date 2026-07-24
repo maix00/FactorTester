@@ -90,6 +90,10 @@ targets:
         LSMinimumSystemVersion: "13.0"
         NSDocumentsFolderUsageDescription: FTClient 需要读取你在个人工作区中生成的中文研究报告；不会因此上传因子源码。
         SUPublicEDKey: $(SPARKLE_PUBLIC_ED_KEY)
+        CFBundleURLTypes:
+          - CFBundleURLName: com.gtht.client.app-update
+            CFBundleURLSchemes:
+              - factortester
         <<: *ats
 
   FactorTester-ClientTests:

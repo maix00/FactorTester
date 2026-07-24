@@ -132,11 +132,6 @@ struct ClientReleaseSettingsView: View {
                             )
                         )
                     }
-                    if controller.canRollback {
-                        Button("准备上一版") {
-                            Task { await controller.rollback() }
-                        }
-                    }
                 }
                 .padding(.top, 8)
             }
