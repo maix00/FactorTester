@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -45,8 +46,21 @@ def manager_snapshot(*, timeout: float = 3.0) -> dict[str, Any]:
         addresses["loopback_ip"] = str(
             manager.get("loopback_ip") or "127.0.0.1"
         )
-        addresses["lan_ip"] = str(manager.get("lan_ip") or "")
+        addresses["lan_ip"] = str(
+            manager.get("lan_ip") or _local_lan_ip()
+        )
+    elif not addresses["lan_ip"]:
+        addresses["lan_ip"] = _local_lan_ip()
     return {"instances": instances, "addresses": addresses}
+
+
+def _local_lan_ip() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 1))
+            return str(probe.getsockname()[0])
+    except OSError:
+        return ""
 
 
 def manager_action(
