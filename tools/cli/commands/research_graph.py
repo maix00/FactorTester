@@ -595,6 +595,42 @@ def apply_trial_execution_action(
     ))
 
 
+@research_graph.command("trial-plan-revise")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--expected-latest-trace-id", required=True)
+@click.option("--expected-checkpoint-hash", required=True)
+@click.option("--expected-trial-plan-hash", required=True)
+@click.option(
+    "--trial-plan-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--acting-profile-ref", default="")
+def revise_unused_trial_plan(
+    instance_id: str,
+    branch_id: str,
+    expected_latest_trace_id: str,
+    expected_checkpoint_hash: str,
+    expected_trial_plan_hash: str,
+    trial_plan_file: Path,
+    acting_profile_ref: str,
+) -> None:
+    """无 Run、Job 或 Evidence 时以一个显式子 TrialPlan 重置 Action。"""
+    plan = json.loads(trial_plan_file.read_text(encoding="utf-8"))
+    if not isinstance(plan, dict):
+        raise click.ClickException("TrialPlan must be a JSON object")
+    click.echo(_json(client_from_config().revise_trial_plan(
+        instance_id,
+        branch_id,
+        expected_latest_trace_id=expected_latest_trace_id,
+        expected_checkpoint_hash=expected_checkpoint_hash,
+        expected_trial_plan_hash=expected_trial_plan_hash,
+        trial_plan=plan,
+        acting_profile_ref=acting_profile_ref,
+    )))
+
+
 @research_graph.command("trial-binding")
 @click.argument("instance_id")
 @click.argument("branch_id")

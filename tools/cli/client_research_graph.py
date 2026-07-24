@@ -583,6 +583,30 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("trial_binding") or {})
 
+    def revise_trial_plan(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        expected_latest_trace_id: str,
+        expected_checkpoint_hash: str,
+        expected_trial_plan_hash: str,
+        trial_plan: dict[str, Any],
+        acting_profile_ref: str = "",
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/trial-plan/revisions",
+            {
+                "expected_latest_trace_id": expected_latest_trace_id,
+                "expected_checkpoint_hash": expected_checkpoint_hash,
+                "expected_trial_plan_hash": expected_trial_plan_hash,
+                "trial_plan": trial_plan,
+                "acting_profile_ref": acting_profile_ref,
+            },
+        ))
+        return dict(data.get("revision") or {})
+
     def advance_research_graph_branch(
         self,
         instance_id: str,

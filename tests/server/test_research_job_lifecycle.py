@@ -526,6 +526,20 @@ def test_configuration_snapshot_copies_owned_source_into_target_workspace(
     assert [item["snapshot_id"] for item in listed] == [
         snapshot["snapshot_id"]
     ]
+    preview = client.post("/api/runs/preview", json={
+        "workspace_id": target_workspace["workspace_id"],
+        "configuration_snapshot_id": snapshot["snapshot_id"],
+        "configuration_snapshot_revision": 1,
+        "analyses": ["ic"],
+    })
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    run_spec = preview.get_json()["report_projection"]["run_spec"][
+        "complete_parameters"
+    ]
+    assert run_spec["workspace_id"] == target_workspace["workspace_id"]
+    assert run_spec["configuration_snapshot"]["source_provenance"][
+        "workspace_id"
+    ] == source_workspace["workspace_id"]
 
 
 def test_run_revalidates_and_freezes_external_factor_artifact(client, monkeypatch) -> None:

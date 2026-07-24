@@ -54,6 +54,41 @@ def initial_execution_checkpoint(
         raise ValueError("TrialPlan hash does not match execution checkpoint")
     if plan["version"] != 1 or plan["parent_trial_plan_hash"] is not None:
         raise ValueError("initial execution checkpoint requires plan version 1")
+    return _new_execution_checkpoint(plan, execution_node=execution_node)
+
+
+def revised_execution_checkpoint(
+    *,
+    trial_plan: dict[str, Any],
+    expected_trial_plan_hash: str,
+    previous_trial_plan_hash: str,
+    previous_version: int,
+    execution_node: str,
+) -> dict[str, Any]:
+    """Reset an unused Action cursor onto one explicit child TrialPlan."""
+    plan = canonical_trial_plan(trial_plan)
+    actual_hash = trial_plan_hash(plan)
+    if sha256_field(
+        expected_trial_plan_hash,
+        "expected_trial_plan_hash",
+    ) != actual_hash:
+        raise ValueError("TrialPlan hash does not match execution checkpoint")
+    parent = sha256_field(
+        previous_trial_plan_hash,
+        "previous_trial_plan_hash",
+    )
+    if plan["parent_trial_plan_hash"] != parent:
+        raise ValueError("revised TrialPlan must name the current plan as parent")
+    if plan["version"] != previous_version + 1:
+        raise ValueError("revised TrialPlan version must increment by one")
+    return _new_execution_checkpoint(plan, execution_node=execution_node)
+
+
+def _new_execution_checkpoint(
+    plan: dict[str, Any],
+    *,
+    execution_node: str,
+) -> dict[str, Any]:
     action = plan["evidence_actions"][0]
     value = {
         "schema_version": 3,

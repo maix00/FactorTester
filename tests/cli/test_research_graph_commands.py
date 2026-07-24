@@ -28,10 +28,23 @@ class FakeClient:
         self.agent_budget_call = None
         self.agent_invocation_call = None
         self.instance_call = None
+        self.trial_plan_revision = None
 
     def publish_research_graph(self, graph):
         self.published = graph
         return graph
+
+    def revise_trial_plan(
+        self,
+        instance_id,
+        branch_id,
+        **kwargs,
+    ):
+        self.trial_plan_revision = (instance_id, branch_id, kwargs)
+        return {
+            "operation": "revise_unused_trial_plan",
+            "trial_plan_hash": "b" * 64,
+        }
 
     def list_research_graph_versions(self, graph_id):
         return [{"graph_id": graph_id, "version": 2, "lifecycle": "draft"}]
@@ -1371,3 +1384,36 @@ def test_agent_flow_client_is_a_thin_http_adapter() -> None:
             {},
         ),
     ]
+
+
+def test_trial_plan_revise_forwards_exact_cas_and_body(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    plan = {"schema_version": 5, "trial_plan_id": "plan-1"}
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "trial-plan-revise", "instance-1", "branch-1",
+        "--expected-latest-trace-id", "trace-1",
+        "--expected-checkpoint-hash", "a" * 64,
+        "--expected-trial-plan-hash", "c" * 64,
+        "--trial-plan-file", str(path),
+        "--acting-profile-ref", "profile:maxa",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.trial_plan_revision == (
+        "instance-1",
+        "branch-1",
+        {
+            "expected_latest_trace_id": "trace-1",
+            "expected_checkpoint_hash": "a" * 64,
+            "expected_trial_plan_hash": "c" * 64,
+            "trial_plan": plan,
+            "acting_profile_ref": "profile:maxa",
+        },
+    )
