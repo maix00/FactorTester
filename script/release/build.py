@@ -84,12 +84,20 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
         ):
             signables.append(path)
     signables.sort(key=lambda path: len(path.parts), reverse=True)
+    runtime_bin = app / "Contents/Resources/FactorTester/bin"
+    entitlements = str(
+        REPO / "apple/Resources/macOS/FactorTester-Client.entitlements"
+    )
     for path in signables:
+        command = [
+            "codesign", "--force", "--sign", signing_identity,
+            "--options", "runtime", timestamp,
+        ]
+        if path.is_relative_to(runtime_bin):
+            command.extend(["--entitlements", entitlements])
+        command.append(str(path))
         subprocess.run(
-            [
-                "codesign", "--force", "--sign", signing_identity,
-                "--options", "runtime", timestamp, str(path),
-            ],
+            command,
             check=True,
             capture_output=True,
         )
@@ -100,8 +108,7 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
         [
             "codesign", "--force", "--sign", signing_identity,
             "--options", "runtime", timestamp,
-            "--entitlements",
-            str(REPO / "apple/Resources/macOS/FactorTester-Client.entitlements"),
+            "--entitlements", entitlements,
             str(app),
         ],
         check=True,
