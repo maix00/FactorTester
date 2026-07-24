@@ -78,6 +78,8 @@ def test_beta_sparkle_appcast_is_verified_cacheable_and_conditional(
         routes, "trusted_release_public_key", lambda _channel: public
     )
     app = Flask(__name__)
+    app.secret_key = "test-secret"
+    app.register_blueprint(auth_bp)
     app.register_blueprint(shared_bp)
     client = app.test_client()
 
