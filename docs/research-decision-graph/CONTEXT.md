@@ -188,6 +188,25 @@ _Avoid_: Ex-post regime label, candidate whitelist
 
 ### Orchestration
 
+**Research Workspace**:
+The stable user/Profile research space that owns configurations, RunSpecs,
+ResearchRuns, and JobAttempts. Day/night sessions, fees, frequency, sample
+scope, and other execution alternatives are not separate workspaces.
+_Avoid_: One workspace per RunSpec, scenario, or Trial arm
+
+**Workspace Configuration**:
+The editable configuration used to author and preview research inputs inside
+one Research Workspace. Editing it does not rewrite an already frozen Run
+Configuration Snapshot or RunSpec.
+_Avoid_: Immutable RunSpec, reusable template, second workspace
+
+**Run Configuration Snapshot**:
+An immutable, content-addressed capture of one Workspace Configuration inside
+the same Research Workspace. A Trial Plan may bind several snapshots, such as
+day and night arms, without creating additional workspaces. Its source
+configuration and revision remain auditable.
+_Avoid_: Mutable workspace configuration, cross-workspace execution carrier
+
 **Agent Flow**:
 The runtime-neutral orchestration layer for Agent identity, goals, Work
 Packages, checkpoints, watchers, budgets, Git coordination, and routing.
@@ -460,6 +479,15 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   sample stage, one comparison-arm trial role, and one comparison identity,
   which its JobAttempts inherit. Submission outside the plan-bound execution
   node fails closed.
+- Multiple day/night, fee, frequency, or sample-scope arms remain in the same
+  Research Workspace. Each arm freezes a Run Configuration Snapshot and
+  RunSpec; none may use a temporary workspace as an execution carrier.
+- A Trial Plan whose input identities are invalid may be superseded within the
+  same Hypothesis Branch only before any Run, JobAttempt, Evidence, or sample
+  exposure exists. The replacement preserves the research contract,
+  methodology, obligations, design, stage policy, old plan, and trace; it may
+  change only the invalid configuration/RunSpec/action-input identities and
+  starts from a new unreleased execution checkpoint.
 - A factor revision crosses the server-owned new-hypothesis edge before the
   old current-plan binding is released. The old TrialPlan and exposure remain
   immutable; a replacement plan begins a new identity at version 1.
