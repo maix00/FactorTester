@@ -424,6 +424,7 @@ enum ResearchJournalPresentation {
         case "evidence": return "\(section)研究证据"
         case "job": return "\(section)计算任务"
         case "run": return "\(section)试验结果"
+        case "run_spec": return "\(section)运行配置预览"
         case "delta": return "\(section)状态变化"
         case "profile_handoff": return "\(section)研究转接"
         case "report_section": return "\(section)报告章节"
@@ -486,7 +487,8 @@ enum ResearchJournalLoader {
     static let maximumLinksPerSection = 50
     private static let linkKinds: Set<String> = [
         "checkpoint", "trial_plan", "obligation", "claim", "evidence",
-        "job", "run", "delta", "profile_handoff", "report_section",
+        "job", "run", "run_spec", "delta", "profile_handoff",
+        "report_section",
     ]
 
     static func load(

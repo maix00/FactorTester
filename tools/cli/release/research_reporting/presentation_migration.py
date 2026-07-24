@@ -273,6 +273,50 @@ def migrate_factor_meta_parameter_markup(
     return changes, replacement_count
 
 
+def migrate_run_spec_preview_links(
+    *, package_root: Path,
+) -> list[dict[str, str]]:
+    """Give unsubmitted RunSpec previews their truthful local object kind.
+
+    A preview hash is not a persisted ResearchRun and must not be presented as
+    Evidence.  Submitted runs are reported separately as ``run:<run_id>`` and
+    lazily expose their canonical ``run_spec_json``.
+    """
+    changes: list[dict[str, str]] = []
+    for sections_root in sorted(package_root.glob("branches/*/sections")):
+        for fragment in load_fragments(sections_root):
+            candidate = deepcopy(fragment)
+            replacements = 0
+            for section in candidate["sections"]:
+                for link in section.get("links", []):
+                    target = str(link.get("target_ref") or "")
+                    if (
+                        target.startswith("runspec:")
+                        and link.get("kind") == "evidence"
+                    ):
+                        link["kind"] = "run_spec"
+                        label = str(link.get("label") or "").strip()
+                        if label and "预览" not in label:
+                            link["label"] = f"{label} 预览"
+                        replacements += 1
+            if not replacements:
+                continue
+            before = str(candidate.pop("section_hash"))
+            candidate["section_hash"] = content_hash(candidate)
+            after = candidate["section_hash"]
+            target = sections_root / f"{after}.json"
+            target.write_bytes(fragment_payload(candidate))
+            (sections_root / f"{before}.json").unlink()
+            changes.append({
+                "branch_id": sections_root.parent.name,
+                "checkpoint_ref": candidate["checkpoint_ref"],
+                "before_hash": before,
+                "after_hash": after,
+                "replacement_count": str(replacements),
+            })
+    return changes
+
+
 def _markup_value(value: Any) -> tuple[Any, int]:
     if isinstance(value, str):
         return _FACTOR_META_PARAMETER.sub(r"`$\1`", value), len(

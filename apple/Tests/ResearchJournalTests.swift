@@ -347,29 +347,23 @@ final class ResearchJournalTests: XCTestCase {
         )
     }
 
-    func testEvidenceChipUsesTrustedJournalChineseLabelWhenServerPresentationIsAbsent() throws {
+    func testRunSpecPreviewChipUsesItsOwnKindAndReadableLabel() throws {
         let link = try JSONDecoder().decode(
             ResearchJournalLink.self,
             from: Data(
                 """
-                {"link_id":"runspec","kind":"evidence","target_ref":"runspec:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","label":"样本内 IC · 日盘 RunSpec"}
+                {"link_id":"runspec","kind":"run_spec","target_ref":"runspec:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","label":"样本内 IC · 日盘 RunSpec 预览"}
                 """.utf8
             )
         )
 
-        XCTAssertTrue(
-            ResearchJournalPresentation.hasReadableEvidencePresentation(
-                link,
-                in: []
-            )
-        )
         XCTAssertEqual(
             ResearchJournalPresentation.chipLabel(
                 link,
                 sectionTitle: "验证设计",
                 obligations: []
             ),
-            "证据 · 样本内 IC · 日盘 RunSpec"
+            "运行配置预览 · 样本内 IC · 日盘 RunSpec 预览"
         )
     }
 

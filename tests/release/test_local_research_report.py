@@ -21,8 +21,12 @@ from tools.cli.release.research_reporting.report_items import (
     report_item_hash,
 )
 from tools.cli.release.research_reporting.assets import stage_report_asset
+from tools.cli.release.research_reporting.audit_objects import (
+    stage_run_spec_preview,
+)
 from tools.cli.release.research_reporting.presentation_migration import (
     migrate_factor_meta_parameter_markup,
+    migrate_run_spec_preview_links,
     migrate_trace_evidence_rows,
 )
 from tools.cli.release.research_reporting.placeholder_migration import (
@@ -303,6 +307,93 @@ def test_factor_meta_parameter_markup_migration_is_idempotent(tmp_path: Path):
     assert changes[0]["after_section_hash"] == migrated["section_hash"]
     assert replay_changes == []
     assert replay_count == 0
+
+
+def test_run_spec_preview_link_migration_removes_evidence_workaround(
+    tmp_path: Path,
+) -> None:
+    run_hash = "e" * 64
+    section = {
+        "section_id": "validation-design",
+        "title": "首批运行配置",
+        "body": "",
+        "evidence_refs": [f"runspec:{run_hash}"],
+        "asset_refs": [],
+        "links": [{
+            "link_id": "runspec-1",
+            "kind": "evidence",
+            "target_ref": f"runspec:{run_hash}",
+            "label": "样本内 IC · 日盘 RunSpec",
+        }],
+        "created_at": 1.0,
+    }
+    fragment = build_fragment(
+        checkpoint_ref="trace:checkpoint-1",
+        created_at=1.0,
+        carrier_hash="1" * 64,
+        narrative_hash="2" * 64,
+        sections=[section],
+        evidence_refs=[f"runspec:{run_hash}"],
+        gaps=[],
+        lineage={"status": "root", "predecessor_checkpoint_ref": ""},
+        graph_ref="factor-research@v9",
+        branch_ref="graph-branch:instance:branch",
+        edge_ref="graph-edge:validation_design",
+    )
+    root = tmp_path / "package"
+    path = root / "branches" / "branch" / "sections"
+    path.mkdir(parents=True)
+    (path / f"{fragment['section_hash']}.json").write_bytes(
+        fragment_payload(fragment)
+    )
+
+    changes = migrate_run_spec_preview_links(package_root=root)
+    replay = migrate_run_spec_preview_links(package_root=root)
+    link = load_fragments(path)[0]["sections"][0]["links"][0]
+
+    assert len(changes) == 1
+    assert changes[0]["replacement_count"] == "1"
+    assert link["kind"] == "run_spec"
+    assert link["label"] == "样本内 IC · 日盘 RunSpec 预览"
+    assert replay == []
+
+
+def test_run_spec_preview_detail_is_content_addressed_and_hash_checked(
+    tmp_path: Path,
+) -> None:
+    run_spec = {
+        "run_spec_version": 2,
+        "analyses": ["ic"],
+        "configuration": {"shared": {}, "analyses": {"ic": {}}},
+    }
+    run_hash = hashlib.sha256(json.dumps(
+        run_spec, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    target = stage_run_spec_preview(
+        package_root=tmp_path / "research" / "package",
+        branch_id="branch",
+        presentation={
+            "schema_version": 1,
+            "object_kind": "run_spec",
+            "run_spec_hash": run_hash,
+            "run_spec_version": 2,
+            "alias_zh": "截面 IC · 日盘",
+            "summary_zh": "2024 年样本内截面 IC",
+            "complete_parameters": run_spec,
+        },
+    )
+    value = json.loads(target.read_text())
+    assert target.name == f"{run_hash}.json"
+    assert value["complete_parameters"] == run_spec
+    assert '"run_spec_version": 2' in value["complete_parameters_json"]
+
+    value["run_spec_hash"] = "f" * 64
+    with pytest.raises(ValueError, match="hash"):
+        stage_run_spec_preview(
+            package_root=tmp_path / "research" / "package",
+            branch_id="branch",
+            presentation=value,
+        )
 
 
 def test_ordinary_checkpoint_does_not_require_untouched_cycle_snapshot(

@@ -46,6 +46,7 @@ struct ResearchNarrativeReportView: View {
                 steps: steps,
                 cache: auditCache,
                 cacheNamespace: auditCacheNamespace,
+                journalRef: artifact?.journalRef ?? "",
                 loadObject: loadAuditObject
             )
         }
@@ -982,6 +983,7 @@ private struct ResearchAuditPopover: View {
     let steps: [ResearchTransitionStep]
     let cache: ResearchAuditObjectCache
     let cacheNamespace: String
+    let journalRef: String
     let loadObject: (String) async throws -> ResearchAuditObjectPayload
 
     @State private var object: ResearchAuditObjectPayload?
@@ -1223,8 +1225,11 @@ private struct ResearchAuditPopover: View {
                 .controlSize(.small)
         } else {
             Text(
-                "此记录的中文摘要已显示在上方；当前检查点未提供更细的对象投影。"
-                    + "技术引用仍保留在下方，供审计和重放使用。"
+                selection.link.kind == "run_spec"
+                    ? "这是尚未提交的 RunSpec 预览。它只有预览哈希，不是可审计的冻结运行对象；"
+                        + "提交后会由 Run chip 展示完整冻结配置。"
+                    : "此记录的中文摘要已显示在上方；当前检查点未提供更细的对象投影。"
+                        + "技术引用仍保留在下方，供审计和重放使用。"
             )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1280,6 +1285,20 @@ private struct ResearchAuditPopover: View {
     private func loadSelectedObject() async {
         object = nil
         error = nil
+        if selection.link.kind == "run_spec" {
+            do {
+                object = try await cache.loadLocalRunSpec(
+                    namespace: cacheNamespace,
+                    journalRef: journalRef,
+                    targetRef: selection.link.targetRef
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                self.error = "无法读取该 RunSpec 预览：\(error.localizedDescription)"
+            }
+            return
+        }
         guard let objectHref else { return }
         do {
             object = try await cache.load(
@@ -1333,6 +1352,7 @@ enum ResearchDisplayText {
         case "evidence": return "证据"
         case "job": return "计算任务"
         case "run": return "试验运行"
+        case "run_spec": return "运行配置预览"
         case "delta": return "状态变化"
         case "profile_handoff": return "研究转接"
         default: return "审计对象"
@@ -1348,6 +1368,7 @@ enum ResearchDisplayText {
         case "evidence": return "说明本步骤取得的结果、指标、产物、限制和冲突。"
         case "job": return "说明后端计算任务的状态、输入规范和可追溯结果。"
         case "run": return "说明一次试验运行的范围、状态和结果产物。"
+        case "run_spec": return "说明尚未提交的运行配置预览；提交后由试验运行提供完整冻结配置。"
         case "delta": return "说明证据为何使研究义务或主张发生状态变化。"
         case "profile_handoff": return "说明研究由谁转接、转接了哪些范围与检查点。"
         default: return "说明本步骤正文所引用的可审计研究对象。"
@@ -1398,7 +1419,7 @@ private func chipIcon(_ kind: String) -> String {
     case "obligation": return "questionmark.circle"
     case "claim": return "checkmark.seal"
     case "evidence": return "doc.text.magnifyingglass"
-    case "job", "run": return "gearshape.2"
+    case "job", "run", "run_spec": return "gearshape.2"
     case "delta": return "arrow.left.arrow.right"
     case "profile_handoff": return "person.2.arrow.trianglehead.counterclockwise"
     default: return "point.3.connected.trianglepath.dotted"
