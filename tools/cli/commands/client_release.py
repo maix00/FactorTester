@@ -43,6 +43,49 @@ client_release.add_command(client_profile)
 client_release.add_command(client_research)
 
 
+@client_release.command("release")
+@click.option("--channel", type=click.Choice(["stable", "beta"]), required=True)
+@click.option("--version", required=True)
+@click.option("--build", type=click.IntRange(min=1), required=True)
+@click.option("--source-revision", required=True)
+@click.option("--output", type=click.Path(path_type=Path), required=True)
+@click.option("--signing-identity", required=True)
+@click.option("--sparkle-public-key", required=True)
+@click.option(
+    "--sparkle-generate-appcast",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+@click.option(
+    "--legacy-private-key",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+@click.option(
+    "--legacy-public-key",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+@click.option("--server-origin")
+@click.option("--release-root", type=click.Path(path_type=Path))
+@click.option(
+    "--github-repository",
+    default="maix00/FactorTester-Client",
+    show_default=True,
+)
+@click.option("--cache-dir", type=click.Path(path_type=Path))
+@click.option("--minimum-client", default="0.1.0", show_default=True)
+@click.option("--mandatory", is_flag=True)
+@click.option("--notary-profile")
+@friendly_errors
+def publish_release(**options) -> None:
+    """Build, sign, notarize, publish, and read back Main or Beta."""
+    from script.release.publish import release_client
+
+    receipt = release_client(**options)
+    click.echo(json.dumps(receipt.__dict__, ensure_ascii=False, indent=2))
+
+
 @client_release.command("activate-bundle", hidden=True)
 @click.option(
     "--bundle-resources",
