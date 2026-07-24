@@ -13,17 +13,18 @@ def build_result_report_projection(
     *, action: dict[str, Any], plan_hash: str,
     rows: list[dict[str, Any]], receipt: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    action_id = str(action["action_id"])
+    action_id = _action_ref(action["action_id"])
+    action_key = action_id.removeprefix("action:")
     result_links = _result_links(rows)
     audit_links = _audit_links(action, plan_hash, receipt)
     local = [
         _item(
-            "report.node.trial_execution.action", f"action:{action_id}",
+            "report.node.trial_execution.action", action_id,
             f"试验结果 · {_action_alias(action_id)}", "table",
             _result_table(rows), result_links,
         ),
         _item(
-            "report.node.trial_execution.action", f"audit:{action_id}",
+            "report.node.trial_execution.action", f"audit:{action_key}",
             f"审计与义务变化 · {_action_alias(action_id)}", "list",
             _audit_list(receipt, audit_links), audit_links,
         ),
@@ -43,6 +44,15 @@ def build_result_report_projection(
         },
         "local_report_items": local,
     }
+
+
+def _action_ref(value):
+    key = str(value or "").strip()
+    while key.startswith("action:"):
+        key = key.removeprefix("action:")
+    if not key:
+        raise ValueError("Evidence Action ID is empty")
+    return f"action:{key}"
 
 
 def _item(requirement, subject, title, kind, content, links):

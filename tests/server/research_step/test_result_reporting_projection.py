@@ -65,6 +65,27 @@ def test_projection_keeps_typed_links_and_bounded_scalar_results():
     assert "不可恢复" in items[1]["content"]["rows"][0]["text"]
 
 
+def test_projection_does_not_repeat_prefixed_action_subject():
+    value = build_result_report_projection(
+        action={
+            **_action(),
+            "action_id": "action:in-sample-ic",
+        },
+        plan_hash="c" * 64,
+        rows=[_row()],
+        receipt=None,
+    )
+
+    assert value["action_id"] == "action:in-sample-ic"
+    assert [
+        item["subject_ref"] for item in value["local_report_items"]
+    ] == ["action:in-sample-ic", "audit:in-sample-ic"]
+    assert all(
+        "action:action:" not in item["subject_ref"]
+        for item in value["local_report_items"]
+    )
+
+
 def test_projection_reports_authoritative_obligation_delta():
     receipt = {
         "proposal": {
