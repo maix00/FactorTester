@@ -31,7 +31,7 @@ struct ClientReleaseSettingsView: View {
                 }
             }
         }
-        .frame(width: 720, height: 620)
+        .frame(width: 640, height: 480)
         .background(.regularMaterial)
         .task { await controller.refresh() }
     }
@@ -58,96 +58,155 @@ struct ClientReleaseSettingsView: View {
     }
 
     private var updatePanel: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                ClientReleaseStatusCard(controller: controller)
-                GroupBox("更新策略") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Picker("渠道", selection: $controller.channel) {
-                            Text("Main · GitHub").tag("stable")
-                            Text("Beta · 服务器").tag("beta")
-                        }
-                        .pickerStyle(.segmented)
-                        Toggle(
-                            "自动下载当前渠道更新（Beta / 稳定版）",
-                            isOn: $controller.automaticallyUpdates
-                        )
-                        Text("下载完成后不会自动替换正在运行的 App；左下角‘设置’旁会提示‘重启更新’。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let checked = controller.lastChecked {
-                            LabeledContent(
-                                "最后检查",
-                                value: checked.formatted(
-                                    date: .abbreviated, time: .shortened
-                                )
-                            )
-                        }
-                    }
-                    .padding(8)
-                }
-                GroupBox("安全状态") {
-                    LabeledContent("App 签名", value: controller.signatureText)
-                        .padding(8)
-                }
-                GroupBox("更新来源") {
-                    LabeledContent(
-                        controller.channel == "beta" ? "Beta" : "Main",
-                        value: controller.channel == "beta"
-                            ? "当前 FactorTester 服务器"
-                            : "GitHub · maix00/FactorTester-Client"
-                    )
-                    .padding(8)
-                    Text(controller.channel == "beta"
-                        ? "Beta 仅从当前服务器获取，并使用独立的 Beta 信任密钥验证；不会回退到 GitHub。"
-                        : "Main 仅从 GitHub 的签名发布清单获取；不会回退到服务器 Beta。")
-                        .font(.caption)
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 14) {
+                Image(systemName: statusIcon)
+                    .font(.system(size: 30))
+                    .foregroundStyle(statusTint)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(statusTitle)
+                        .font(.title3.weight(.semibold))
+                    Text(statusSubtitle)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 8)
                 }
-                if let message = controller.lastError {
-                    Label(message, systemImage: "info.circle.fill")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                }
-                HStack {
-                    Button("检查更新") {
-                        Task { await controller.refresh() }
-                    }
-                    Spacer()
-                    Button("准备上一版并重启") {
-                        Task { await controller.rollback() }
-                    }
-                    .disabled(!controller.canRollback)
-                    Button("下载并准备更新") {
-                        Task { await controller.update() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .disabled(controller.isWorking)
-                if let pending = controller.pendingUpdate {
-                    GroupBox("已准备好的更新") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label(
-                                "\(pending.version) · \(pending.channel == "beta" ? "Beta" : "Main")",
-                                systemImage: "arrow.down.app.fill"
-                            )
-                            Text("更新包已通过校验，重启后自动切换；当前研究任务不会被后台强制中断。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Button("重启应用更新") {
-                                Task { await controller.restartToApply() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                    }
+                Spacer()
+                if controller.isWorking {
+                    ProgressView()
+                        .controlSize(.small)
                 }
             }
-            .padding(24)
+
+            Picker("更新渠道", selection: $controller.channel) {
+                Text("Main").tag("stable")
+                Text("Beta").tag("beta")
+            }
+            .pickerStyle(.segmented)
+
+            Toggle(
+                "自动下载更新",
+                isOn: $controller.automaticallyUpdates
+            )
+
+            if let message = controller.lastError {
+                Label(message, systemImage: "info.circle")
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(
+                        Color.blue.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: 9)
+                    )
+            }
+
+            Button(action: primaryAction) {
+                Label(primaryTitle, systemImage: primaryIcon)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(controller.isWorking)
+
+            DisclosureGroup("更新详情") {
+                VStack(alignment: .leading, spacing: 10) {
+                    LabeledContent("当前版本", value: installedVersion)
+                    if !controller.latestVersion.isEmpty {
+                        LabeledContent(
+                            "可用版本",
+                            value: controller.latestVersion
+                        )
+                    }
+                    LabeledContent("来源", value: sourceLabel)
+                    LabeledContent("签名", value: controller.signatureText)
+                    if let checked = controller.lastChecked {
+                        LabeledContent(
+                            "最后检查",
+                            value: checked.formatted(
+                                date: .abbreviated,
+                                time: .shortened
+                            )
+                        )
+                    }
+                    if controller.canRollback {
+                        Button("准备上一版") {
+                            Task { await controller.rollback() }
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            }
+            .font(.callout)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var installedVersion: String {
+        controller.installedVersion.isEmpty
+            ? L10n.text("未知") : controller.installedVersion
+    }
+
+    private var statusTitle: String {
+        if controller.pendingUpdate != nil {
+            return L10n.text("更新已准备好")
+        }
+        if controller.hasAvailableUpdate {
+            return L10n.text("发现新版本")
+        }
+        if controller.isWorking {
+            return L10n.text("正在检查更新")
+        }
+        return L10n.text("FTClient 已是最新状态")
+    }
+
+    private var statusSubtitle: String {
+        if let pending = controller.pendingUpdate {
+            return L10n.text("\(pending.version) 将在重启后安装")
+        }
+        if controller.hasAvailableUpdate {
+            return L10n.text("\(controller.latestVersion) 可以下载")
+        }
+        return L10n.text("当前版本 \(installedVersion)")
+    }
+
+    private var statusIcon: String {
+        if controller.pendingUpdate != nil { return "arrow.clockwise.circle.fill" }
+        if controller.hasAvailableUpdate { return "arrow.down.circle.fill" }
+        return "checkmark.circle.fill"
+    }
+
+    private var statusTint: Color {
+        controller.pendingUpdate != nil || controller.hasAvailableUpdate
+            ? .accentColor : .green
+    }
+
+    private var primaryTitle: String {
+        if controller.pendingUpdate != nil { return L10n.text("重启并更新") }
+        if controller.hasAvailableUpdate { return L10n.text("下载更新") }
+        return L10n.text("检查更新")
+    }
+
+    private var primaryIcon: String {
+        if controller.pendingUpdate != nil { return "arrow.clockwise" }
+        if controller.hasAvailableUpdate { return "arrow.down" }
+        return "arrow.triangle.2.circlepath"
+    }
+
+    private var sourceLabel: String {
+        controller.channel == "beta"
+            ? L10n.text("Beta · FactorTester 服务器")
+            : L10n.text("Main · GitHub")
+    }
+
+    private func primaryAction() {
+        Task {
+            if controller.pendingUpdate != nil {
+                await controller.restartToApply()
+            } else if controller.hasAvailableUpdate {
+                await controller.update()
+            } else {
+                await controller.refresh()
+            }
         }
     }
 }

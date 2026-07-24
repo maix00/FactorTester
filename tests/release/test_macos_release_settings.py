@@ -57,15 +57,14 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     )
     for label in ("当前版本", "可用版本", "运行状态"):
         assert label in status
-    for label in ("更新来源", "客户端更新", "下载并准备更新"):
+    for label in ("更新详情", "客户端更新", "下载更新", "重启并更新"):
         assert label in view
     for label in (
-        "Main · GitHub", "Beta · 服务器", "最后检查",
-        "自动下载当前渠道更新",
+        'Text("Main")', 'Text("Beta")', "最后检查", "自动下载更新",
     ):
         assert label in view
-    assert "不会回退到 GitHub" in view
-    assert "不会回退到服务器 Beta" in view
+    assert "ClientReleaseStatusCard" not in view
+    assert view.count(".buttonStyle(.borderedProminent)") == 1
     assert "checkAtLaunch" in app and "Task {" in app
     assert "runtimeActivationError" in app
     assert "try? await BundledRuntimeActivator.run()" not in app
@@ -92,6 +91,23 @@ def test_macos_info_plist_uses_project_version_settings() -> None:
 
     assert "CFBundleShortVersionString: $(MARKETING_VERSION)" in project
     assert "CFBundleVersion: $(CURRENT_PROJECT_VERSION)" in project
+
+
+def test_macos_pins_sparkle_and_embeds_one_update_trust_anchor() -> None:
+    project = (ROOT / "apple" / "project.yml").read_text(
+        encoding="utf-8"
+    )
+    coordinator = (
+        SOURCES / "Features" / "Updates" / "SparkleUpdateCoordinator.swift"
+    ).read_text(encoding="utf-8")
+
+    assert "https://github.com/sparkle-project/Sparkle" in project
+    assert 'exactVersion: "2.9.2"' in project
+    assert "package: Sparkle" in project
+    assert "SUPublicEDKey" in project
+    assert "SPUStandardUpdaterController" in coordinator
+    assert "feedURLString(for updater: SPUUpdater)" in coordinator
+    assert "setFeedURL" not in coordinator
 
 
 def test_apple_project_generation_and_new_swift_syntax(tmp_path: Path) -> None:
