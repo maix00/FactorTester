@@ -15,6 +15,7 @@ from tools.cli.release.update_channel import (
     MAX_UPDATE_MANIFEST_BYTES,
     validate_update_manifest,
 )
+from script.release.sparkle import is_secure_release_url
 
 MAX_SPARKLE_APPCAST_BYTES = 1024 * 1024
 SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
@@ -115,8 +116,7 @@ def load_beta_sparkle_appcast(
     expected_url = str(legacy.get("dmg_url") or "")
     expected_digest = str(legacy.get("sha256") or "")
     if (
-        parsed.scheme != "https"
-        or not parsed.netloc
+        not is_secure_release_url(url)
         or url != expected_url
         or parsed.path != (
             "/api/client/releases/assets/beta/"

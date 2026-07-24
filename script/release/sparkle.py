@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 from pathlib import Path
 import shutil
 import subprocess
@@ -25,6 +26,24 @@ class SparkleAppcast:
     download_url: str
 
 
+def is_secure_release_url(url: str) -> bool:
+    """Require HTTPS except for the existing local Beta server."""
+    split = urlsplit(url)
+    if not split.netloc:
+        return False
+    if split.scheme == "https":
+        return True
+    if split.scheme != "http":
+        return False
+    hostname = split.hostname or ""
+    if hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
 def generate_sparkle_appcast(
     *,
     archive: Path,
@@ -42,9 +61,10 @@ def generate_sparkle_appcast(
         raise ValueError("Sparkle update archive does not exist")
     if not tool.is_file() or not tool.stat().st_mode & 0o111:
         raise ValueError("Sparkle generate_appcast tool is not executable")
-    split = urlsplit(download_url)
-    if split.scheme != "https" or not split.netloc:
-        raise ValueError("Sparkle download URL must use HTTPS")
+    if not is_secure_release_url(download_url):
+        raise ValueError(
+            "Sparkle download URL must use HTTPS or loopback HTTP"
+        )
 
     with tempfile.TemporaryDirectory(
         prefix="factortester-sparkle-appcast-"

@@ -8,6 +8,7 @@ import pytest
 from script.release.sparkle import (
     SparkleAppcast,
     generate_sparkle_appcast,
+    is_secure_release_url,
     validate_sparkle_appcast,
 )
 
@@ -89,3 +90,21 @@ def test_appcast_rejects_wrong_release_identity(tmp_path: Path) -> None:
             channel="stable",
             download_url="https://example.test/FactorTester-Client.dmg",
         )
+
+
+def test_release_url_allows_loopback_http_but_not_public_http() -> None:
+    assert is_secure_release_url(
+        "http://127.0.0.1:8141/api/client/releases/beta.xml"
+    )
+    assert is_secure_release_url(
+        "http://localhost:8141/api/client/releases/beta.xml"
+    )
+    assert is_secure_release_url(
+        "http://[::1]:8141/api/client/releases/beta.xml"
+    )
+    assert is_secure_release_url(
+        "https://factor.example/api/client/releases/beta.xml"
+    )
+    assert not is_secure_release_url(
+        "http://factor.example/api/client/releases/beta.xml"
+    )

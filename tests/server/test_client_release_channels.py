@@ -56,7 +56,7 @@ def test_beta_sparkle_appcast_is_verified_cacheable_and_conditional(
     actual = dmg.with_name(f"{actual_digest}.dmg")
     dmg.rename(actual)
     dmg_url = (
-        "https://factor.example/api/client/releases/assets/beta/"
+        "http://127.0.0.1:8141/api/client/releases/assets/beta/"
         f"{actual.name}"
     )
     manifest = create_update_manifest(
