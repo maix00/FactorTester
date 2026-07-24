@@ -547,7 +547,18 @@ def _register_daily_mark_to_market_notices(state: Any, ctx: Any) -> None:
 
 
 def _daily_mark_to_market_notice_table(state: Any) -> Any:
-    from tools.testers.backtest.modules.market_data import current_prices_table_for, market_price_tables_for
+    from tools.testers.backtest.modules.market_data import (
+        current_prices_table_for,
+        dmtm_event_table_for,
+        market_price_tables_for,
+    )
+
+    # DMTM must use the source trading-day/event axis.  The causal price table
+    # is flattened to timestamps and therefore cannot distinguish a night bar
+    # from the following day session belonging to the same trading day.
+    event_table = dmtm_event_table_for(state)
+    if event_table is not None and not getattr(event_table, "empty", True):
+        return event_table
 
     tables = market_price_tables_for(state)
     if isinstance(tables, Mapping):

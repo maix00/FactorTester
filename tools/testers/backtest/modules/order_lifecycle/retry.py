@@ -16,6 +16,7 @@ from tools.testers.backtest.modules.market_data import (
 
 from .finalize import record_order_lifecycle_state
 from .dependencies import activate_ready_dependents
+from .offsets import reclassify_deferred_close_today
 from .schedule import create_order_attempt
 
 
@@ -30,6 +31,19 @@ def finalize_and_retry_orders(state: Any, ctx: Any, retry_ref: Any) -> None:
                     state.order_store.remove_from_live_indexes(order)
                 else:
                     event_ts, market_ts = schedule
+                    # A volume-limited order can carry an unfilled remainder
+                    # across a trading-day boundary. Its original
+                    # CLOSE_TODAY offset then no longer matches the lot age;
+                    # apply the same correction used on first dispatch.
+                    previous_market_ts = order.get(
+                        "active_market_timestamp", order.get("price_timestamp")
+                    )
+                    reclassify_deferred_close_today(
+                        order,
+                        signal_timestamp=previous_market_ts,
+                        market_timestamp=market_ts,
+                        trading_day_resolver=state.market_data_store.trading_day_resolver,
+                    )
                     attempt = create_order_attempt(
                         state,
                         order,

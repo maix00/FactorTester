@@ -76,6 +76,7 @@ class MarketDataStore:
         "historical_field_policy",
         "historical_field_names",
         "historical_field_frames",
+        "dmtm_event_table",
     })
 
     raw_input: dict[str, Any] = field(default_factory=dict)
@@ -92,6 +93,7 @@ class MarketDataStore:
     market_price_tables: dict[str, Any] = field(default_factory=dict)
     factor_field_tables: dict[str, Any] = field(default_factory=dict)
     volume_table: Any = None
+    dmtm_event_table: Any = None
     included_products: frozenset[Any] | None = None
     historical_field_provider: Any = None
     trading_day_resolver: Any = None
@@ -152,6 +154,7 @@ class MarketDataStore:
             self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
             self.historical_field_names = tuple(raw.get("historical_field_names", ()))
             self.volume_table = raw.get("volume")
+            self.dmtm_event_table = raw.get("dmtm_event_table")
         self.market_snapshot_cache.clear()
         self.table_values_cache.clear()
         self.historical_fields_cache.clear()
@@ -171,6 +174,7 @@ class MarketDataStore:
             }
             self.market_price_tables = raw.get("price_tables") or {"close": raw_prices}
             self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+            self.dmtm_event_table = raw.get("dmtm_event_table")
 
     def publish_historical_field_policy(self, policy: str) -> None:
         with self._unguarded_write():
@@ -552,6 +556,10 @@ def current_prices_table_for(state):
 
 def volume_table_for(state):
     return market_data_store_for(state).volume_table
+
+
+def dmtm_event_table_for(state):
+    return market_data_store_for(state).dmtm_event_table
 
 
 def market_price_tables_for(state) -> dict[str, Any]:
@@ -1393,6 +1401,10 @@ def _load_raw_market_data(state, ctx) -> None:
         "included_products": tuple(series_by_product.keys()),
         "excluded_out_of_range_products": tuple(store.excluded_out_of_range),
         "volume": volume,
+        "dmtm_event_table": _dmtm_event_table_from_mapping(
+            trading_day_mapping,
+            timezone=event_timezone,
+        ),
     }
     _publish_raw_market_data(state, ctx, raw)
 
@@ -1490,6 +1502,35 @@ def _trading_day_mapping_from_market_data(frame: pd.DataFrame) -> dict[pd.Timest
             ts = ts.tz_localize(None)
         mapping[ts] = pd.Timestamp(cast(Any, day)).normalize()
     return mapping
+
+
+def _dmtm_event_table_from_mapping(
+    mapping: Mapping[pd.Timestamp, pd.Timestamp],
+    *,
+    timezone: str | None,
+) -> pd.DataFrame | None:
+    """Build an index-only table that retains the source trading-day axis.
+
+    Causal price tables intentionally flatten their MultiIndex to event time.
+    DMTM cannot group that flattened index by calendar date because a night
+    event and the following day session can belong to one exchange day.  The
+    source mapping is already collected while loading the market data, so keep
+    it as a small private table for ledger-event scheduling.
+    """
+    if not mapping:
+        return None
+    rows = sorted(mapping.items(), key=lambda item: item[0])
+    timestamps = pd.DatetimeIndex([item[0] for item in rows])
+    if timezone:
+        timestamps = timestamps.tz_localize(timezone)
+    trading_days = pd.DatetimeIndex([
+        pd.Timestamp(item[1]).normalize() for item in rows
+    ])
+    index = pd.MultiIndex.from_arrays(
+        [trading_days, timestamps],
+        names=["DAY1", "MIN1"],
+    )
+    return pd.DataFrame({"_DMTM_EVENT": 1.0}, index=index)
 
 
 def _unpack_market_data_load_plan_item(plan_item: Any) -> tuple[Any, Any, Any | None]:

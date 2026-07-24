@@ -486,6 +486,54 @@ def test_daily_mark_to_market_notice_uses_market_close_table_not_intraday_signal
     assert captured[0].timestamp == pd.Timestamp("2025-12-31 15:00:00.000000001", tz="Asia/Shanghai")
 
 
+def test_daily_mark_to_market_notice_prefers_source_trading_day_event_axis():
+    strategy = Strategy(alias="S")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"register_daily_mark_to_market_notices"}),
+            field_values={
+                EngineModule.engine_mode: "auto",
+                TradingRuleModule.accounting_mode: "Auto",
+            },
+        )
+    })
+    trading_days = pd.DatetimeIndex(["2026-03-10"] * 3)
+    event_times = pd.DatetimeIndex([
+        pd.Timestamp("2026-03-09 21:00:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-03-10 09:01:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-03-10 15:00:00", tz="Asia/Shanghai"),
+    ])
+    account.market_data_store.dmtm_event_table = pd.DataFrame(
+        {"_DMTM_EVENT": [1.0, 1.0, 1.0]},
+        index=pd.MultiIndex.from_arrays(
+            [trading_days, event_times], names=["DAY1", "MIN1"]
+        ),
+    )
+    # The flattened close table has a later calendar timestamp at 23:00;
+    # DMTM must ignore that lossy grouping and use the source DAY1 axis.
+    account.market_data_store.market_price_tables = {
+        "close": pd.DataFrame(
+            {"P1": [10.0, 11.0, 12.0]},
+            index=pd.DatetimeIndex([
+                pd.Timestamp("2026-03-09 21:00:00", tz="Asia/Shanghai"),
+                pd.Timestamp("2026-03-10 09:01:00", tz="Asia/Shanghai"),
+                pd.Timestamp("2026-03-10 23:00:00", tz="Asia/Shanghai"),
+            ]),
+        )
+    }
+    queue = EventQueue()
+    captured = []
+    queue.set_dispatcher(EventKind.LEDGER, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+
+    _register_daily_mark_to_market_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert len(captured) == 1
+    assert captured[0].timestamp == pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai")
+
+
 def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     product = _product()
     strategy = Strategy(alias="S")
