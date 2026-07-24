@@ -722,6 +722,108 @@ def test_current_node_report_preserves_typed_run_spec_link(
     assert index["sections"][-1]["links"][0]["kind"] == "run_spec"
 
 
+def test_result_receipt_append_does_not_repeat_existing_result_item(
+    tmp_path: Path,
+) -> None:
+    from server.services.research_step.result_reporting.projection import (
+        build_result_report_projection,
+    )
+
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    carrier["current_node"] = "trial_execution"
+    carrier["latest_transition"]["from_node"] = "trial_execution"
+    carrier["latest_transition"]["to_node"] = "trial_execution"
+    publish_research_checkpoint(
+        client_root=root, profile_id="maxa",
+        agent_id="research-maxa", carrier=carrier,
+    )
+    package = root / "profile-root" / "research" / "sgccs-review"
+    protocol = package / "protocol"
+    protocol.mkdir()
+    (protocol / "bootstrap-evidence.json").write_text(json.dumps({
+        "identity_refs": {"methodology_hash": "1" * 64},
+    }))
+    action = {
+        "action_id": "action:in-sample-ic",
+        "output_evidence_refs": ["evidence:" + "a" * 64],
+    }
+    rows = [{
+        "index": 1, "run_id": "run-1", "job_id": "job-1",
+        "kind": "ic", "status": "succeeded",
+        "trial_role": "candidate", "run_spec_hash": "c" * 64,
+        "run_spec_alias_zh": "截面 IC · 日盘",
+        "result_summary": {"mean": 0.031},
+    }]
+    before_receipt = build_result_report_projection(
+        action=action, plan_hash="b" * 64, rows=rows, receipt=None,
+    )
+    first = publish_current_node_report_checkpoint(
+        client_root=root, profile_id="maxa",
+        agent_id="research-maxa", carrier=carrier,
+        projection=before_receipt,
+    )
+    after_receipt = build_result_report_projection(
+        action=action, plan_hash="b" * 64, rows=rows,
+        receipt={
+            "proposal": {
+                "recommended_action": "advance_trial_stage",
+                "obligation_delta": [],
+            },
+            "decision": {"disposition": "accepted"},
+        },
+    )
+    second = publish_current_node_report_checkpoint(
+        client_root=root, profile_id="maxa",
+        agent_id="research-maxa", carrier=carrier,
+        projection=after_receipt,
+    )
+
+    journal = json.loads((
+        package / "branches" / "branch-sgccs" / "JOURNAL.json"
+    ).read_text(encoding="utf-8"))
+    bindings = [
+        block["report_binding"]
+        for checkpoint in journal["checkpoints"]
+        for section in checkpoint["sections"]
+        for block in section.get("blocks") or []
+        if "report_binding" in block
+    ]
+    assert sum(
+        item["subject_ref"] == "action:in-sample-ic"
+        for item in bindings
+    ) == 1
+    assert sum(
+        item["subject_ref"] == "audit:in-sample-ic"
+        for item in bindings
+    ) == 1
+    report = (
+        package / "branches" / "branch-sgccs" / "REPORT.md"
+    ).read_text(encoding="utf-8")
+    assert "旧版检查点未保留完整裁决" not in report
+    assert "审计结论：accepted" in report
+    assert first["checkpoint_ref"] == second["checkpoint_ref"]
+    assert second["local_revision_receipt"]["changed"] is True
+    assert second["report_submission"] == after_receipt["report_submission"]
+    assert second["journal_artifact_ref"].startswith(
+        "journal-artifact:sha256:"
+    )
+    fragment_count = len(list(
+        (package / "branches" / "branch-sgccs" / "sections").glob("*.json")
+    ))
+    replay = publish_current_node_report_checkpoint(
+        client_root=root, profile_id="maxa",
+        agent_id="research-maxa", carrier=carrier,
+        projection=after_receipt,
+    )
+    assert replay["changed"] is False
+    assert replay["report_submission"] == after_receipt["report_submission"]
+    assert len(list(
+        (package / "branches" / "branch-sgccs" / "sections").glob("*.json")
+    )) == fragment_count
+
+
 def test_authoritative_result_projection_publishes_all_typed_links(
     tmp_path: Path,
 ) -> None:

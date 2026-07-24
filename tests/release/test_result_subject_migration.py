@@ -59,6 +59,32 @@ def test_result_subject_package_migration_is_complete_and_idempotent(
         agent_id="research-maxa", carrier=carrier,
         projection=projection,
     )
+    corrected = build_result_report_projection(
+        action={
+            "action_id": "action:in-sample-ic",
+            "output_evidence_refs": ["evidence:" + "a" * 64],
+        },
+        plan_hash="b" * 64,
+        rows=[{
+            "index": 1, "run_id": "run-1", "job_id": "job-1",
+            "kind": "ic", "status": "succeeded",
+            "trial_role": "candidate", "run_spec_hash": "c" * 64,
+            "run_spec_alias_zh": "截面 IC · 日盘",
+            "result_summary": {"mean": 0.031},
+        }],
+        receipt={
+            "proposal": {
+                "recommended_action": "advance_trial_stage",
+                "obligation_delta": [],
+            },
+            "decision": {"disposition": "accepted"},
+        },
+    )
+    publish_current_node_report_checkpoint(
+        client_root=root, profile_id="maxa",
+        agent_id="research-maxa", carrier=carrier,
+        projection=corrected,
+    )
     package = root / "profile-root" / "research" / "sgccs-review"
     protocol = package / "protocol"
     protocol.mkdir()
@@ -82,7 +108,8 @@ def test_result_subject_package_migration_is_complete_and_idempotent(
     )
 
     assert receipt["mode"] == "applied"
-    assert receipt["changed_fragment_count"] == 1
+    assert receipt["changed_fragment_count"] >= 1
+    assert receipt["deduplication"]["changed"] is True
     assert all(not path.exists() for path in old_paths)
     assert all(
         "action:action:" not in path.read_text()
@@ -114,6 +141,31 @@ def test_result_subject_package_migration_is_complete_and_idempotent(
     assert not (
         package / "migrations" / "result-action-subject-v1.backup.zip"
     ).exists()
+    fragments = [
+        json.loads(path.read_text()) for path in section_root.glob("*.json")
+    ]
+    result_bindings = [
+        block["report_binding"]
+        for fragment in fragments
+        for section in fragment["sections"]
+        for block in section.get("blocks") or []
+        if (
+            isinstance(block.get("report_binding"), dict)
+            and block["report_binding"]["report_requirement_id"]
+            == "report.node.trial_execution.action"
+        )
+    ]
+    assert [
+        item["subject_ref"] for item in result_bindings
+    ].count("action:in-sample-ic") == 1
+    assert [
+        item["subject_ref"] for item in result_bindings
+    ].count("audit:in-sample-ic") == 1
+    report = (
+        package / "branches" / "branch-sgccs" / "REPORT.md"
+    ).read_text()
+    assert "旧版检查点未保留完整裁决" not in report
+    assert "审计结论：accepted" in report
 
     replay = migrate_result_subject_package(
         package_root=package, branch_id="branch-sgccs",

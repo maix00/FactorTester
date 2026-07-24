@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 from .journal import content_hash, validate_fragment_sequence
+from .publisher.result_revision import revise_result_items
 from .report_items import report_fragment_hash, report_item_hash
 
 _REQUIREMENT = "report.node.trial_execution.action"
@@ -73,13 +74,31 @@ def migrate_result_action_subjects(
                 f"report-fragment:sha256:{after_fragment}",
             "items": item_changes,
         })
+    values, deduplication = revise_result_items(
+        values, _latest_result_items(values),
+    )
+    final = {
+        item["checkpoint_ref"]: item for item in values
+    }
+    for change in changes:
+        fragment = final.get(change["checkpoint_ref"])
+        change["after_section_hash"] = (
+            fragment["section_hash"] if fragment else ""
+        )
+        change["after_narrative_hash"] = (
+            fragment["narrative_hash"] if fragment else ""
+        )
     validate_fragment_sequence(values)
+    changed_checkpoints = {
+        item["checkpoint_ref"] for item in changes
+    }.union(deduplication["changed_checkpoint_refs"])
     return values, {
         "schema_version": 1,
         "migration": "result-action-subject-v1",
-        "changed": bool(changes),
-        "changed_fragment_count": len(changes),
+        "changed": bool(changes or deduplication["changed"]),
+        "changed_fragment_count": len(changed_checkpoints),
         "changes": changes,
+        "deduplication": deduplication,
     }
 
 
@@ -148,3 +167,37 @@ def _rehash_section_id(section):
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode()).hexdigest()[:16]
     section["section_id"] = f"current-node-{stable}"
+
+
+def _latest_result_items(
+    fragments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    values: dict[tuple[str, str], dict[str, Any]] = {}
+    for fragment in fragments:
+        for section in fragment["sections"]:
+            for block in section.get("blocks") or []:
+                binding = block.get("report_binding")
+                if (
+                    not isinstance(binding, dict)
+                    or binding.get("report_requirement_id") != _REQUIREMENT
+                ):
+                    continue
+                key = (
+                    str(binding["report_requirement_id"]),
+                    str(binding["subject_ref"]),
+                )
+                values[key] = {
+                    "report_requirement_id": key[0],
+                    "subject_ref": key[1],
+                    "item_hash": str(
+                        binding["report_item_ref"]
+                    ).removeprefix("report-item:sha256:"),
+                    "content": {
+                        name: deepcopy(value)
+                        for name, value in block.items()
+                        if name not in {"report_binding", "report_timing"}
+                    },
+                    "links": deepcopy(section.get("links") or []),
+                    "title_zh": str(section.get("title") or ""),
+                }
+    return list(values.values())
