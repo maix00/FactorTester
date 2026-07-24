@@ -16,7 +16,7 @@ from tools.cli.release.profile import (
 from tools.cli.release.transaction import ClientReleaseStore
 from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.locations import default_client_root, validate_client_root
-from tools.cli.release.app_update import update_application
+from tools.cli.release.app_update_control import dispatch_app_update
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_profile import client_profile
 from tools.cli.commands.client_research import client_research
@@ -41,6 +41,82 @@ def client_release() -> None:
 client_release.add_command(client_adapter)
 client_release.add_command(client_profile)
 client_release.add_command(client_research)
+
+
+@client_release.group("app-update")
+def app_update() -> None:
+    """Control FTClient's single Sparkle application updater."""
+
+
+@app_update.command("check")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def app_update_check(as_json: bool) -> None:
+    """Ask FTClient/Sparkle to check its selected channel."""
+    _echo(dispatch_app_update("check"), as_json)
+
+
+@app_update.command("download")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def app_update_download(as_json: bool) -> None:
+    """Ask FTClient/Sparkle to download and prepare its available update."""
+    _echo(dispatch_app_update("download"), as_json)
+
+
+@app_update.command("restart")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def app_update_restart(as_json: bool) -> None:
+    """Ask Sparkle to install the prepared update and relaunch FTClient."""
+    _echo(dispatch_app_update("restart"), as_json)
+
+
+@client_release.command("release")
+@click.option("--channel", type=click.Choice(["stable", "beta"]), required=True)
+@click.option("--version", required=True)
+@click.option("--build", type=click.IntRange(min=1), required=True)
+@click.option("--source-revision", required=True)
+@click.option("--output", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--signing-identity",
+    default="FTClient Beta Release",
+    show_default=True,
+)
+@click.option("--sparkle-public-key", required=True)
+@click.option(
+    "--sparkle-generate-appcast",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+@click.option(
+    "--legacy-private-key",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+@click.option(
+    "--legacy-public-key",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+@click.option("--server-origin")
+@click.option("--release-root", type=click.Path(path_type=Path))
+@click.option(
+    "--github-repository",
+    default="maix00/FactorTester-Client",
+    show_default=True,
+)
+@click.option("--cache-dir", type=click.Path(path_type=Path))
+@click.option("--minimum-client", default="0.1.0", show_default=True)
+@click.option("--mandatory", is_flag=True)
+@click.option("--notary-profile")
+@friendly_errors
+def publish_release(**options) -> None:
+    """Build, sign, notarize, publish, and read back Main or Beta."""
+    from script.release.publish import release_client
+
+    receipt = release_client(**options)
+    click.echo(json.dumps(receipt.__dict__, ensure_ascii=False, indent=2))
 
 
 @client_release.command("activate-bundle", hidden=True)
@@ -181,19 +257,8 @@ def check_update(profile: Path, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
 def update_app(profile: Path, as_json: bool) -> None:
-    """Download, verify, atomically replace, and launch FTClient.app."""
-    _, update, _ = load_update_inputs(profile)
-    support = (
-        Path.home() / "Library/Application Support/FactorTester"
-    )
-    _echo(
-        update_application(
-            update,
-            application=Path("/Applications/FTClient.app"),
-            support_root=support,
-        ),
-        as_json,
-    )
+    """Compatibility alias: ask FTClient/Sparkle to download the update."""
+    _echo(dispatch_app_update("download"), as_json)
 
 
 @client_release.command("rollback")

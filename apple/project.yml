@@ -14,6 +14,11 @@ settings:
     DEVELOPMENT_TEAM: ""              # 填入你的 Apple Developer Team ID（自签名调试可留空）
     CODE_SIGN_STYLE: Automatic
 
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: "2.9.2"
+
 # 自签名服务器支持：放行任意加载，让 WKWebView 与 URLSession 都能连上
 # 自签名 https / 局域网 IP / http。两端共用同一段 ATS。
 .ats: &ats
@@ -51,6 +56,8 @@ targets:
     sources:
       - path: Sources
       - path: Resources/Shared
+    dependencies:
+      - package: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client
@@ -82,6 +89,11 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: "13.0"
         NSDocumentsFolderUsageDescription: FTClient 需要读取你在个人工作区中生成的中文研究报告；不会因此上传因子源码。
+        SUPublicEDKey: $(SPARKLE_PUBLIC_ED_KEY)
+        CFBundleURLTypes:
+          - CFBundleURLName: com.gtht.client.app-update
+            CFBundleURLSchemes:
+              - factortester
         <<: *ats
 
   FactorTester-ClientTests:

@@ -54,6 +54,9 @@ struct FactorTesterClientApp: App {
             } message: {
                 Text(runtimeActivationError ?? "")
             }
+            .onOpenURL { url in
+                updates.handleUpdateCommand(url)
+            }
             #if os(macOS)
             .task {
                 Task { await updates.checkAtLaunch() }

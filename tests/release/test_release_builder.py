@@ -168,17 +168,6 @@ def test_xcode_macos_target_uses_the_same_stable_signing_identity() -> None:
     assert "- FactorTester-ClientUITests" in ui_scheme
 
 
-def test_in_app_update_refuses_a_different_designated_requirement() -> None:
-    updater = (
-        Path(__file__).resolve().parents[2]
-        / "apple/Sources/Features/Updates/PendingApplicationUpdater.swift"
-    ).read_text(encoding="utf-8")
-
-    assert 'codesign -dr - "$temporary"' in updater
-    assert 'codesign -dr - "$target"' in updater
-    assert 'test "$new_requirement" = "$old_requirement"' in updater
-
-
 def test_report_index_reuses_the_persisted_workspace_access_scope() -> None:
     source = (
         Path(__file__).resolve().parents[2]
@@ -276,11 +265,14 @@ def test_embedded_app_is_resigned_and_verified_before_packaging(
 
     assert commands == [
         [
-            "codesign", "--force", "--deep", "--sign",
+            "codesign", "--force", "--sign",
             "FTClient Beta Release", "--options", "runtime",
             "--timestamp=none", str(app),
         ],
-        ["codesign", "--verify", "--deep", "--strict", str(app)],
+        [
+            "codesign", "--verify", "--strict",
+            "--all-architectures", str(app),
+        ],
         ["codesign", "-d", "-r-", str(app)],
     ]
 

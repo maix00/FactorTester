@@ -74,7 +74,7 @@ struct ClientSidebar: View {
 
     @ViewBuilder
     private var updateAction: some View {
-        if releaseController.pendingUpdate != nil {
+        if releaseController.isUpdateReady {
             Button {
                 Task { await releaseController.restartToApply() }
             } label: {

@@ -12,15 +12,31 @@ No server source checkout, database driver, or local backtest engine is needed.
 
 Release operations intentionally have two authorities:
 
-- Publisher: `python -m script.release.beta ...` builds from a clean commit,
-  reuses the content-addressed frozen runtime when CLI inputs are unchanged,
-  signs the app and DMG, publishes the immutable beta asset, and atomically
-  switches `beta.json`. It never reads or writes `/Applications`.
-- Client: `factortester client update-app --profile PROFILE` consumes only the
-  channel's verified update contract, downloads and verifies the DMG, stages
-  and atomically replaces `/Applications/FTClient.app`, then launches and
-  records a receipt. It never builds, signs, or publishes releases. Rollback
-  copies live under Application Support, not Applications.
+- Publisher: `factortester client release --channel stable|beta ...` performs
+  the common clean-checkout, build, runtime embedding, inside-out signing, DMG,
+  Sparkle appcast, compatibility manifest, publication, remote read-back, and
+  receipt pipeline. Main becomes public only after all GitHub draft assets
+  exist. Beta writes immutable assets before switching its appcast and
+  compatibility pointers. It never installs an app.
+- Client: FTClient's thin SwiftUI update panel delegates discovery, EdDSA
+  verification, download, extraction, post-exit replacement, and relaunch to
+  Sparkle. It displays one primary action at a time: check, download, or restart.
+  It never builds, signs, notarizes, or publishes a release.
+
+There is only one application updater. CLI actions launch or contact FTClient
+through its registered URL scheme; FTClient then delegates to Sparkle:
+
+```bash
+factortester client app-update check
+factortester client app-update download
+factortester client app-update restart
+```
+
+The CLI never downloads, mounts, verifies, copies, or replaces the application.
+`update-app` remains a temporary command-name alias for the Sparkle `download`
+action; it is not a second implementation. The read-only legacy
+`check-update` JSON command remains available for automation during the
+manifest compatibility window.
 
 For the normal macOS installation experience, download
 `FactorTester-Client.dmg` from the public GitHub Release, open it, and drag
@@ -31,29 +47,34 @@ this DMG. The CLI, research Harness, their Python runtime dependencies, and
 approved adapters live inside the signed app Resources and are covered by an
 internal hash receipt; users do not download those components separately.
 
-The updater supports stable and beta channels. Its launch check is optional,
-throttled to one request per six hours, and runs separately from runtime
-activation so research can start immediately.
+The updater supports Main and Beta channels. Its launch check is throttled to
+one request per six hours and runs separately from runtime activation so
+research can start immediately. Main reads GitHub's `appcast.xml`; Beta reads
+the configured FactorTester server's `/api/client/releases/beta.xml`. A channel
+cannot be changed while an update session is active.
 
-Every distributed build must use the same persistent code-signing identity for
-its channel. An ad-hoc signature is intentionally rejected by the release
-builder because its designated requirement is tied to a changing binary hash;
-macOS would otherwise ask for Documents access again after each update. Beta
-may use a persistent trusted development identity. Main uses a Developer ID
-Application identity and notarization. The signing identity is passed explicitly
-with `--signing-identity` and no private key is stored in the repository.
+Every distributed Main and Beta build currently uses the same persistent
+self-signed identity (`FTClient Beta Release`, certificate SHA-1
+`E6F25D4B158C8FA4AE585E9C374AE9FAC7AFC81A`), bundle identifier, and Sparkle
+public key. The public certificate fingerprint is pinned so a different
+self-signed certificate with the same display name is rejected. Renaming or
+replacing that certificate would change the designated requirement and can
+make macOS request Documents, Keychain, Automation, or other privacy
+permissions again. Channel selection changes only the feed and release
+eligibility; it never changes the app identity. Sparkle's EdDSA signature is
+the archive authenticity boundary. A future Developer ID transition is a
+separate, explicit identity migration; it must not happen implicitly during a
+Main publication.
 
-Before mounting a downloaded image, FTClient verifies its signed SHA-256. It
-then mounts the verified image read-only and checks the embedded app's bundle
-ID, version, build, code signature and notarization status. Current development releases without Developer ID and notarization may
-only be downloaded and presented as a DMG. FTClient never silently replaces
-the running app or describes that handoff as automatic installation. The
-installer protocol is intentionally narrow so a future notarized helper or
-Sparkle adapter can implement replacement without changing manifest trust.
+Sparkle verifies the appcast's EdDSA enclosure signature before accepting the
+archive and uses its updater/helper processes for safe replacement after the
+main app exits. The app's own UI never accepts an arbitrary local path.
+`SUPublicEDKey` is embedded at build time and private Sparkle signing material
+is never stored in the app, profile, log, or release receipt.
 
-Update discovery uses a compact signed `stable.json` or `beta.json` manifest.
-Main and Beta have separate authoritative sources and separate packaged trust
-anchors. Main reads only
+During the compatibility window, CLI discovery also supports the compact signed
+`stable.json` or `beta.json` manifest. Main and Beta have separate authoritative
+sources and legacy trust anchors. Main reads only
 `https://github.com/maix00/FactorTester-Client/releases/latest/download/stable.json`.
 Beta reads only `beta.json` from the currently configured FactorTester server.
 Beta DMGs use their complete SHA-256 as the filename under

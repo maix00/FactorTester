@@ -20,6 +20,143 @@ from tests.release.test_update_channel_manifest import _keys
 from tools.cli.release.update_channel import resolve_update_manifest
 
 
+def _write_beta_appcast(
+    path: Path,
+    *,
+    dmg_url: str,
+    channel: str = "beta",
+    signature: str = "sparkle-signature",
+) -> bytes:
+    raw = f"""<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <item>
+      <sparkle:version>7</sparkle:version>
+      <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
+      <sparkle:channel>{channel}</sparkle:channel>
+      <enclosure url="{dmg_url}" sparkle:edSignature="{signature}" />
+    </item>
+  </channel>
+</rss>
+""".encode()
+    path.write_bytes(raw)
+    return raw
+
+
+def test_beta_sparkle_appcast_is_verified_cacheable_and_conditional(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    private, public = _keys(tmp_path / "keys")
+    root = tmp_path / "channels"
+    dmg = root / "assets/beta" / ("a" * 64 + ".dmg")
+    dmg.parent.mkdir(parents=True)
+    dmg.write_bytes(b"installer")
+    actual_digest = sha256(dmg.read_bytes()).hexdigest()
+    actual = dmg.with_name(f"{actual_digest}.dmg")
+    dmg.rename(actual)
+    dmg_url = (
+        "https://factor.example/api/client/releases/assets/beta/"
+        f"{actual.name}"
+    )
+    manifest = create_update_manifest(
+        version="2.0.0",
+        build=7,
+        channel="beta",
+        dmg=actual,
+        dmg_url=dmg_url,
+        minimum_client="1.2.0",
+        mandatory=False,
+        published_at="2026-07-20T12:00:00Z",
+        private_key=private,
+        public_key=public,
+    )
+    write_update_manifest(root / "beta.json", manifest)
+    raw = _write_beta_appcast(root / "beta.xml", dmg_url=dmg_url)
+    monkeypatch.setattr(routes, "release_manifest_root", lambda: root)
+    monkeypatch.setattr(
+        routes, "trusted_release_public_key", lambda _channel: public
+    )
+    app = Flask(__name__)
+    app.register_blueprint(shared_bp)
+    client = app.test_client()
+
+    response = client.get("/api/client/releases/beta.xml")
+    assert response.status_code == 200
+    assert response.data == raw
+    assert response.mimetype == "application/rss+xml"
+    assert response.headers["Cache-Control"] == "public, max-age=60"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    cached = client.get(
+        "/api/client/releases/beta.xml",
+        headers={"If-None-Match": response.headers["ETag"]},
+    )
+    assert cached.status_code == 304
+    assert cached.data == b""
+
+
+def test_beta_sparkle_appcast_fails_closed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    private, public = _keys(tmp_path / "keys")
+    root = tmp_path / "channels"
+    root.mkdir()
+    dmg = tmp_path / "installer.dmg"
+    dmg.write_bytes(b"installer")
+    digest = sha256(dmg.read_bytes()).hexdigest()
+    dmg_url = (
+        "https://factor.example/api/client/releases/assets/beta/"
+        f"{digest}.dmg"
+    )
+    manifest = create_update_manifest(
+        version="2.0.0",
+        build=7,
+        channel="beta",
+        dmg=dmg,
+        dmg_url=dmg_url,
+        minimum_client="1.2.0",
+        mandatory=False,
+        published_at="2026-07-20T12:00:00Z",
+        private_key=private,
+        public_key=public,
+    )
+    write_update_manifest(root / "beta.json", manifest)
+    monkeypatch.setattr(routes, "release_manifest_root", lambda: root)
+    monkeypatch.setattr(
+        routes, "trusted_release_public_key", lambda _channel: public
+    )
+    app = Flask(__name__)
+    app.register_blueprint(shared_bp)
+    client = app.test_client()
+    appcast = root / "beta.xml"
+
+    assert client.get("/api/client/releases/beta.xml").status_code == 404
+    assert client.get("/api/client/releases/stable.xml").status_code == 404
+    appcast.write_text("<not-xml")
+    assert client.get("/api/client/releases/beta.xml").status_code == 503
+    appcast.write_bytes(b"x" * (1024 * 1024 + 1))
+    assert client.get("/api/client/releases/beta.xml").status_code == 503
+    _write_beta_appcast(
+        appcast,
+        dmg_url=dmg_url,
+        channel="stable",
+    )
+    assert client.get("/api/client/releases/beta.xml").status_code == 503
+    _write_beta_appcast(appcast, dmg_url=dmg_url, signature="")
+    assert client.get("/api/client/releases/beta.xml").status_code == 503
+    _write_beta_appcast(
+        appcast,
+        dmg_url="https://factor.example/wrong.dmg",
+    )
+    assert client.get("/api/client/releases/beta.xml").status_code == 503
+    target = root / "real-beta.xml"
+    _write_beta_appcast(target, dmg_url=dmg_url)
+    appcast.unlink()
+    appcast.symlink_to(target)
+    assert client.get("/api/client/releases/beta.xml").status_code == 503
+
+
 def test_beta_release_channel_is_static_cacheable_and_conditional(
     tmp_path: Path,
     monkeypatch,
