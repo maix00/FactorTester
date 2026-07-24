@@ -18,6 +18,9 @@ from tools.cli.release.research_reporting.publisher import (
     stage_historical_research_checkpoint,
 )
 from tools.cli.release.research_reporting.assets import stage_report_asset
+from tools.cli.commands.client_research_migration import (
+    migrate_result_subjects,
+)
 
 
 def _echo_json(value: dict) -> None:
@@ -32,6 +35,9 @@ def _echo_json(value: dict) -> None:
 @click.group("research")
 def client_research() -> None:
     """Inspect Work Packages and their Hypothesis Branches."""
+
+
+client_research.add_command(migrate_result_subjects)
 
 
 @client_research.group("asset")
