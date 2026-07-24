@@ -42,6 +42,37 @@ class ResearchClientMixin(ClientMixinBase):
         ))
         return dict(data.get("configuration") or {})
 
+    def create_configuration_snapshot(
+        self,
+        workspace_id: str,
+        *,
+        source_workspace_id: str,
+        source_configuration_id: str,
+        source_configuration_revision: int,
+        name: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/workspaces/{workspace_id}/configuration-snapshots",
+            {
+                "source_workspace_id": source_workspace_id,
+                "source_configuration_id": source_configuration_id,
+                "source_configuration_revision": (
+                    source_configuration_revision
+                ),
+                "name": name,
+            },
+        ))
+        return dict(data.get("snapshot") or {})
+
+    def list_configuration_snapshots(
+        self,
+        workspace_id: str,
+    ) -> list[dict[str, Any]]:
+        data = self._expect_success(self.session.get(
+            f"/api/workspaces/{workspace_id}/configuration-snapshots"
+        ))
+        return list(data.get("snapshots") or [])
+
     def validate_external_factor_artifact(
         self,
         manifest_path: str,
@@ -104,20 +135,28 @@ class ResearchClientMixin(ClientMixinBase):
     def submit_run(
         self,
         workspace_id: str,
-        configuration_revision: int,
+        configuration_revision: int | None,
         *,
         analyses: list[str],
         retention_mode: str = "summary",
         step_mode: bool = False,
         trial_binding: dict[str, Any] | None = None,
+        configuration_snapshot_id: str = "",
+        configuration_snapshot_revision: int | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "workspace_id": workspace_id,
-            "configuration_revision": configuration_revision,
             "analyses": analyses,
             "retention_mode": retention_mode,
             "step_mode": bool(step_mode),
         }
+        if configuration_snapshot_id:
+            payload["configuration_snapshot_id"] = configuration_snapshot_id
+            payload["configuration_snapshot_revision"] = (
+                configuration_snapshot_revision
+            )
+        else:
+            payload["configuration_revision"] = configuration_revision
         if trial_binding is not None:
             payload["trial_binding"] = trial_binding
         return self._expect_success(self.session.post("/api/runs", payload))
@@ -125,20 +164,28 @@ class ResearchClientMixin(ClientMixinBase):
     def preview_run(
         self,
         workspace_id: str,
-        configuration_revision: int,
+        configuration_revision: int | None,
         *,
         analyses: list[str],
         retention_mode: str = "summary",
         step_mode: bool = False,
+        configuration_snapshot_id: str = "",
+        configuration_snapshot_revision: int | None = None,
     ) -> dict[str, Any]:
         """Derive the exact frozen RunSpec identity without creating a run."""
         payload = {
             "workspace_id": workspace_id,
-            "configuration_revision": configuration_revision,
             "analyses": analyses,
             "retention_mode": retention_mode,
             "step_mode": bool(step_mode),
         }
+        if configuration_snapshot_id:
+            payload["configuration_snapshot_id"] = configuration_snapshot_id
+            payload["configuration_snapshot_revision"] = (
+                configuration_snapshot_revision
+            )
+        else:
+            payload["configuration_revision"] = configuration_revision
         return self._expect_success(
             self.session.post("/api/runs/preview", payload)
         )

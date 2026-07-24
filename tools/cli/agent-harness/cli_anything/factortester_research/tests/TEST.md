@@ -277,6 +277,13 @@ engine curves. Summary retention produces no such research artifact.
 They also verify that `run preview` derives the exact immutable RunSpec hash
 through the same server-side freeze path without creating a ResearchRun or Job,
 so an Agent can preregister a TrialPlan before submission.
+Run Configuration Snapshot tests keep one Research Workspace while freezing
+multiple immutable configuration choices below it. They verify snapshot
+creation from the current mutable configuration, byte-stable identity and
+source provenance, explicit preview/submit selection, identical preview and
+submit RunSpec hashes, and rejection of cross-owner, cross-workspace, deleted,
+or stale snapshot identities. The existing mutable workspace configuration and
+template revision semantics remain unchanged.
 Capability-resolution tests verify that registered, approved, whole-bundle
 fingerprint-valid Skill implementations may be bound without rediscovery but
 cannot self-authorize execution: a local conversation grant is required before

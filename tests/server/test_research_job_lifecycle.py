@@ -10,7 +10,12 @@ import settings as Settings
 from server.modules.single_factor_test import sft_bp
 from server.jobs.models import SchedulingEntitlement
 from server.jobs.repository import JobRepository
-from server.services import research_configurations, research_runs, research_workspaces
+from server.services import (
+    research_configuration_snapshots,
+    research_configurations,
+    research_runs,
+    research_workspaces,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -337,6 +342,190 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     assert preview_payload["configuration_fingerprint"] == (
         run["run_spec"]["configuration_fingerprint"]
     )
+
+
+def test_configuration_snapshot_preview_and_submit_freeze_same_runspec(
+    client,
+) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace, n="10d"))
+    source = workspace["configuration"]
+    response = client.post(
+        f"/api/workspaces/{workspace['workspace_id']}/"
+        "configuration-snapshots",
+        json={
+            "source_workspace_id": workspace["workspace_id"],
+            "source_configuration_id": source["configuration_id"],
+            "source_configuration_revision": source["revision"],
+            "name": "day-session",
+        },
+    )
+    assert response.status_code == 201
+    snapshot = response.get_json()["snapshot"]
+    _update(client, workspace, _payload(workspace, n="20d"))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_snapshot_id": snapshot["snapshot_id"],
+        "configuration_snapshot_revision": snapshot["snapshot_revision"],
+        "analyses": ["ic"],
+        "retention_mode": "summary",
+        "step_mode": False,
+    }
+
+    preview = client.post("/api/runs/preview", json=request_payload)
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    preview_value = preview.get_json()
+    assert preview_value["configuration_snapshot"] == {
+        "snapshot_id": snapshot["snapshot_id"],
+        "snapshot_revision": 1,
+        "fingerprint": snapshot["fingerprint"],
+        "source_provenance": snapshot["source_provenance"],
+    }
+
+    submitted = client.post("/api/runs", json=request_payload)
+    assert submitted.status_code == 202, submitted.get_data(as_text=True)
+    run = submitted.get_json()["run"]
+    assert run["run_spec_hash"] == preview_value["run_spec_hash"]
+    assert run["configuration_id"] == snapshot["snapshot_id"]
+    assert run["configuration_revision"] == 1
+    assert run["run_spec"]["configuration"]["analyses"]["ic"][
+        "factor_configs"
+    ] == [{"N": "10d"}]
+
+
+def test_configuration_snapshot_rejects_wrong_scope_stale_or_deleted(
+    client,
+) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    source = workspace["configuration"]
+    snapshot = client.post(
+        f"/api/workspaces/{workspace['workspace_id']}/"
+        "configuration-snapshots",
+        json={
+            "source_configuration_id": source["configuration_id"],
+            "source_configuration_revision": source["revision"],
+            "name": "frozen",
+        },
+    ).get_json()["snapshot"]
+    other = _create_workspace(client)
+    base = {
+        "configuration_snapshot_id": snapshot["snapshot_id"],
+        "configuration_snapshot_revision": 1,
+        "analyses": ["ic"],
+    }
+    assert client.post("/api/runs/preview", json={
+        **base,
+        "workspace_id": other["workspace_id"],
+    }).status_code == 404
+    assert client.post("/api/runs/preview", json={
+        **base,
+        "workspace_id": workspace["workspace_id"],
+        "configuration_snapshot_revision": 2,
+    }).status_code == 409
+
+    with client.session_transaction() as session:
+        session["username"] = "bob"
+    assert client.post("/api/runs/preview", json={
+        **base,
+        "workspace_id": workspace["workspace_id"],
+    }).status_code == 404
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            "UPDATE research_configuration_snapshots "
+            "SET deleted_at=1 WHERE snapshot_id=?",
+            (snapshot["snapshot_id"],),
+        )
+    assert client.post("/api/runs/preview", json={
+        **base,
+        "workspace_id": workspace["workspace_id"],
+    }).status_code == 404
+
+
+def test_configuration_snapshot_selection_adds_one_select(
+    client,
+    monkeypatch,
+) -> None:
+    workspace = _create_workspace(client)
+    source = workspace["configuration"]
+    snapshot = client.post(
+        f"/api/workspaces/{workspace['workspace_id']}/"
+        "configuration-snapshots",
+        json={
+            "source_configuration_id": source["configuration_id"],
+            "source_configuration_revision": source["revision"],
+            "name": "one-read",
+        },
+    ).get_json()["snapshot"]
+    statements: list[str] = []
+    real_connect = research_configuration_snapshots.connect_sqlite
+
+    def traced_connect(path):
+        conn = real_connect(path)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(
+        research_configuration_snapshots,
+        "connect_sqlite",
+        traced_connect,
+    )
+    loaded = research_configuration_snapshots.load_snapshot(
+        owner="alice",
+        workspace_id=workspace["workspace_id"],
+        snapshot_id=snapshot["snapshot_id"],
+        expected_revision=1,
+    )
+    assert loaded["snapshot_id"] == snapshot["snapshot_id"]
+    statements = [
+        statement for statement in statements
+        if statement.lstrip().upper().startswith(
+            ("SELECT", "INSERT", "UPDATE", "DELETE", "CREATE")
+        )
+    ]
+    assert len(statements) == 1
+    assert statements[0].lstrip().upper().startswith("SELECT")
+
+
+def test_configuration_snapshot_copies_owned_source_into_target_workspace(
+    client,
+) -> None:
+    source_workspace = _create_workspace(client)
+    _update(
+        client,
+        source_workspace,
+        _payload(source_workspace, n="30d"),
+    )
+    target_workspace = _create_workspace(client)
+    source = source_workspace["configuration"]
+    response = client.post(
+        f"/api/workspaces/{target_workspace['workspace_id']}/"
+        "configuration-snapshots",
+        json={
+            "source_workspace_id": source_workspace["workspace_id"],
+            "source_configuration_id": source["configuration_id"],
+            "source_configuration_revision": source["revision"],
+            "name": "night-session",
+        },
+    )
+    assert response.status_code == 201
+    snapshot = response.get_json()["snapshot"]
+    assert snapshot["workspace_id"] == target_workspace["workspace_id"]
+    assert snapshot["source_provenance"]["workspace_id"] == (
+        source_workspace["workspace_id"]
+    )
+    assert snapshot["payload"]["analyses"]["ic"]["factor_configs"] == [
+        {"N": "30d"}
+    ]
+    listed = client.get(
+        f"/api/workspaces/{target_workspace['workspace_id']}/"
+        "configuration-snapshots"
+    ).get_json()["snapshots"]
+    assert [item["snapshot_id"] for item in listed] == [
+        snapshot["snapshot_id"]
+    ]
 
 
 def test_run_revalidates_and_freezes_external_factor_artifact(client, monkeypatch) -> None:

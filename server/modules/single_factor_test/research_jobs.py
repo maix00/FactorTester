@@ -14,6 +14,7 @@ from server.services import (
     external_factor_artifacts,
     factor_revisions,
     research_configurations,
+    research_configuration_snapshots,
     research_runs,
     research_workspaces,
 )
@@ -50,12 +51,6 @@ class _RunRequestError(ValueError):
 
 def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     workspace_id = str(data.get("workspace_id") or "").strip()
-    try:
-        configuration_revision = int(data.get("configuration_revision"))
-    except (TypeError, ValueError) as exc:
-        raise _RunRequestError(
-            "configuration_revision is required"
-        ) from exc
     analyses = data.get("analyses")
     if not isinstance(analyses, list) or not analyses:
         raise _RunRequestError("analyses must be a non-empty list")
@@ -71,21 +66,59 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         raise _RunRequestError(
             "step mode requires exactly one backtest analysis"
         )
-    configuration = research_configurations.load_workspace_configuration(
-        workspace_id=workspace_id,
-        owner=owner,
-    )
-    if configuration is None:
-        raise _RunRequestError(
-            "workspace configuration not found",
-            status_code=404,
+    snapshot_id = str(data.get("configuration_snapshot_id") or "").strip()
+    snapshot_revision = data.get("configuration_snapshot_revision")
+    if snapshot_id:
+        try:
+            configuration = research_configuration_snapshots.load_snapshot(
+                owner=owner,
+                workspace_id=workspace_id,
+                snapshot_id=snapshot_id,
+                expected_revision=int(snapshot_revision),
+            )
+        except TypeError as exc:
+            raise _RunRequestError(
+                "configuration_snapshot_revision is required"
+            ) from exc
+        except KeyError as exc:
+            raise _RunRequestError(str(exc), status_code=404) from exc
+        except ValueError as exc:
+            raise _RunRequestError(str(exc), status_code=409) from exc
+        configuration = {
+            "configuration_id": configuration["snapshot_id"],
+            "revision": configuration["snapshot_revision"],
+            "payload": configuration["payload"],
+            "fingerprint": configuration["fingerprint"],
+            "snapshot": configuration,
+        }
+    else:
+        if snapshot_revision is not None:
+            raise _RunRequestError(
+                "configuration_snapshot_id is required"
+            )
+        try:
+            configuration_revision = int(
+                data.get("configuration_revision")
+            )
+        except (TypeError, ValueError) as exc:
+            raise _RunRequestError(
+                "configuration_revision is required"
+            ) from exc
+        configuration = research_configurations.load_workspace_configuration(
+            workspace_id=workspace_id,
+            owner=owner,
         )
-    if configuration["revision"] != configuration_revision:
-        raise _RunRequestError(
-            "configuration revision changed",
-            status_code=409,
-            details={"current_revision": configuration["revision"]},
-        )
+        if configuration is None:
+            raise _RunRequestError(
+                "workspace configuration not found",
+                status_code=404,
+            )
+        if configuration["revision"] != configuration_revision:
+            raise _RunRequestError(
+                "configuration revision changed",
+                status_code=409,
+                details={"current_revision": configuration["revision"]},
+            )
     missing = [
         kind for kind in analyses
         if not isinstance(
@@ -123,6 +156,16 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "step_mode": step_mode,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    snapshot = configuration.get("snapshot")
+    if isinstance(snapshot, dict):
+        run_spec["configuration_snapshot"] = {
+            "snapshot_id": snapshot["snapshot_id"],
+            "snapshot_revision": snapshot["snapshot_revision"],
+            "fingerprint": snapshot["fingerprint"],
+            "source_provenance": deepcopy(
+                snapshot["source_provenance"]
+            ),
+        }
     return {
         "workspace_id": workspace_id,
         "configuration": configuration,
@@ -560,6 +603,9 @@ def preview_research_run():
         "configuration_id": configuration["configuration_id"],
         "configuration_revision": configuration["revision"],
         "configuration_fingerprint": configuration["fingerprint"],
+        "configuration_snapshot": deepcopy(
+            run_spec.get("configuration_snapshot")
+        ),
         "analyses": prepared["analyses"],
         "retention_mode": prepared["retention_mode"],
         "step_mode": prepared["step_mode"],

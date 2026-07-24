@@ -32,9 +32,19 @@ class FakeClient:
         retention_mode,
         step_mode,
         trial_binding=None,
+        configuration_snapshot_id="",
+        configuration_snapshot_revision=None,
     ):
-        assert (workspace_id, configuration_revision) == ("workspace-1", 2)
+        assert workspace_id == "workspace-1"
+        if configuration_snapshot_id:
+            assert configuration_revision is None
+        else:
+            assert configuration_revision == 2
         self.trial_binding = trial_binding
+        self.snapshot_selection = (
+            configuration_snapshot_id,
+            configuration_snapshot_revision,
+        )
         return {
             "run_id": "run-1",
             "jobs": [{"job_id": f"job-{kind}", "kind": kind, "status": "queued"} for kind in analyses],
@@ -48,6 +58,23 @@ class FakeClient:
 
     def save_configuration_template(self, workspace_id, *, name):
         return {"configuration_id": "template-1", "name": name}
+
+    def create_configuration_snapshot(self, workspace_id, **kwargs):
+        self.snapshot_create = (workspace_id, kwargs)
+        return {
+            "snapshot_id": "snapshot-1",
+            "workspace_id": workspace_id,
+            "snapshot_revision": 1,
+            "name": kwargs["name"],
+        }
+
+    def list_configuration_snapshots(self, workspace_id):
+        return [{
+            "snapshot_id": "snapshot-1",
+            "workspace_id": workspace_id,
+            "snapshot_revision": 1,
+            "name": "Day",
+        }]
 
     def load_configuration_template(self, workspace_id, *, expected_revision, configuration_id):
         assert (workspace_id, expected_revision, configuration_id) == ("workspace-1", 1, "template-1")
@@ -828,6 +855,49 @@ def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
 
     assert submitted.exit_code == 0, submitted.output
     assert fake.trial_binding == binding
+
+
+def test_snapshot_cli_creates_lists_and_selects_explicit_snapshot(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config",
+        lambda: fake,
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        ["workspace", "create", "--factor-family", "MmRet"],
+    ).exit_code == 0
+    created = runner.invoke(cli, [
+        "workspace", "snapshot-create", "Day",
+        "--source-workspace-id", "source-workspace",
+        "--source-configuration-id", "source-config",
+        "--source-revision", "3",
+    ])
+    listed = runner.invoke(cli, ["workspace", "snapshot-list"])
+    submitted = runner.invoke(cli, [
+        "run", "submit", "--analysis", "ic",
+        "--configuration-snapshot-id", "snapshot-1",
+        "--configuration-snapshot-revision", "1",
+    ])
+
+    assert created.exit_code == 0, created.output
+    assert listed.exit_code == 0, listed.output
+    assert submitted.exit_code == 0, submitted.output
+    assert fake.snapshot_create == (
+        "workspace-1",
+        {
+            "source_workspace_id": "source-workspace",
+            "source_configuration_id": "source-config",
+            "source_configuration_revision": 3,
+            "name": "Day",
+        },
+    )
+    assert fake.snapshot_selection == ("snapshot-1", 1)
 
 
 def test_run_submit_json_preserves_server_report_projection(

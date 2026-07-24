@@ -212,6 +212,40 @@ def workspace_load_template(configuration_id: str) -> None:
     )
 
 
+@workspace.command("snapshot-create")
+@click.argument("name")
+@click.option("--source-workspace-id", required=True)
+@click.option("--source-configuration-id", required=True)
+@click.option("--source-revision", required=True, type=click.IntRange(min=1))
+@friendly_errors
+def workspace_snapshot_create(
+    name: str,
+    source_workspace_id: str,
+    source_configuration_id: str,
+    source_revision: int,
+) -> None:
+    state = _require_workspace()
+    value = client_from_config().create_configuration_snapshot(
+        state.workspace_id,
+        source_workspace_id=source_workspace_id,
+        source_configuration_id=source_configuration_id,
+        source_configuration_revision=source_revision,
+        name=name,
+    )
+    click.echo(_json(value))
+
+
+@workspace.command("snapshot-list")
+@friendly_errors
+def workspace_snapshot_list() -> None:
+    state = _require_workspace()
+    click.echo(_json(
+        client_from_config().list_configuration_snapshots(
+            state.workspace_id
+        )
+    ))
+
+
 @click.group("run")
 def run() -> None:
     """Submit and inspect immutable research runs."""
@@ -222,6 +256,11 @@ def run() -> None:
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
 ]), required=True)
 @click.option("--retain-full", is_flag=True, help="预览完整结果保留模式。")
+@click.option("--configuration-snapshot-id", default="")
+@click.option(
+    "--configuration-snapshot-revision",
+    type=click.IntRange(min=1),
+)
 @click.option(
     "--step",
     "step_mode",
@@ -232,16 +271,33 @@ def run() -> None:
 def run_preview(
     analyses: tuple[str, ...],
     retain_full: bool,
+    configuration_snapshot_id: str,
+    configuration_snapshot_revision: int | None,
     step_mode: bool,
 ) -> None:
     """Preview the exact frozen RunSpec identity without creating state."""
     state = _require_workspace()
+    snapshot_options = (
+        {
+            "configuration_snapshot_id": configuration_snapshot_id,
+            "configuration_snapshot_revision": (
+                configuration_snapshot_revision
+            ),
+        }
+        if configuration_snapshot_id
+        else {}
+    )
     result = client_from_config().preview_run(
         state.workspace_id,
-        state.configuration_revision,
+        (
+            None
+            if configuration_snapshot_id
+            else state.configuration_revision
+        ),
         analyses=list(analyses),
         retention_mode="full" if retain_full else "summary",
         step_mode=step_mode,
+        **snapshot_options,
     )
     click.echo(_json(result))
 
@@ -251,6 +307,11 @@ def run_preview(
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
 ]), required=True)
 @click.option("--retain-full", is_flag=True, help="在服务器配额内保留完整曲线和明细。")
+@click.option("--configuration-snapshot-id", default="")
+@click.option(
+    "--configuration-snapshot-revision",
+    type=click.IntRange(min=1),
+)
 @click.option("--step", "step_mode", is_flag=True, help="逐 flow 暂停，仅支持单个 backtest。")
 @click.option(
     "--trial-binding-file",
@@ -267,6 +328,8 @@ def run_preview(
 def run_submit(
     analyses: tuple[str, ...],
     retain_full: bool,
+    configuration_snapshot_id: str,
+    configuration_snapshot_revision: int | None,
     step_mode: bool,
     trial_binding_file: Path | None,
     as_json: bool,
@@ -281,13 +344,28 @@ def run_submit(
             raise click.ClickException(
                 "trial binding JSON must be an object"
             )
+    snapshot_options = (
+        {
+            "configuration_snapshot_id": configuration_snapshot_id,
+            "configuration_snapshot_revision": (
+                configuration_snapshot_revision
+            ),
+        }
+        if configuration_snapshot_id
+        else {}
+    )
     result = client_from_config().submit_run(
         state.workspace_id,
-        state.configuration_revision,
+        (
+            None
+            if configuration_snapshot_id
+            else state.configuration_revision
+        ),
         analyses=list(analyses),
         retention_mode="full" if retain_full else "summary",
         step_mode=step_mode,
         trial_binding=trial_binding,
+        **snapshot_options,
     )
     if as_json:
         click.echo(_json(result))

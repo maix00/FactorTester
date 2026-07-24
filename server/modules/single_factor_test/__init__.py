@@ -12,6 +12,7 @@ from . import (  # noqa: E402, F401
     backtest_jobs,
     backtest_settings,
     category_routes,
+    configuration_snapshot_routes,
     group,
     ic,
     page,
