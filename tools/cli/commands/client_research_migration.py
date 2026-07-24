@@ -10,9 +10,6 @@ import click
 from tools.cli.core.errors import friendly_errors
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
-from tools.cli.release.research_reporting.result_subject_apply import (
-    migrate_result_subject_package,
-)
 
 
 @click.command("migrate-result-subjects")
@@ -31,6 +28,10 @@ def migrate_result_subjects(
     branch_id: str, release_profile: Path | None, apply_changes: bool,
 ) -> None:
     """Normalize duplicated Action prefixes in historical result reports."""
+    from tools.cli.release.research_reporting.result_subject_apply import (
+        migrate_result_subject_package,
+    )
+
     client_root = load_profile_root(release_profile)
     profile = LocalProfileStore(client_root).load(profile_id)
     package = (
