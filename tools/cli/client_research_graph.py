@@ -499,6 +499,36 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("checkpoint") or {})
 
+    def get_result_report_projection(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        action_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/result-report-projection",
+            query={"action_id": action_id},
+        ))
+        return dict(data.get("projection") or {})
+
+    def backfill_result_audit(
+        self, instance_id: str, branch_id: str, *,
+        audited_checkpoint: dict[str, Any],
+        proposal: dict[str, Any], decision: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/result-audit-backfills",
+            {
+                "audited_checkpoint": audited_checkpoint,
+                "proposal": proposal,
+                "decision": decision,
+            },
+        ))
+        return dict(data.get("receipt") or {})
+
     def get_research_cycle_object(
         self,
         instance_id: str,

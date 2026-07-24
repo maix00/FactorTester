@@ -89,7 +89,7 @@ def test_submitted_run_spec_is_described_as_server_frozen_provenance():
     )
 
     assert projection["target_ref"] == "run:run-1"
-    assert "服务器接受的运行后冻结配置" in projection["summary_zh"]
+    assert "服务器接受后的冻结配置" in projection["summary_zh"]
 
 
 def test_batch_key_rejects_same_dates_when_execution_semantics_differ():

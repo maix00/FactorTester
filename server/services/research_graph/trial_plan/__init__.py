@@ -4,6 +4,11 @@ from .binding import (
     normalize_run_binding,
     validate_branch_binding,
 )
+from .adjudication_receipts import (
+    backfill_action_adjudication_receipt,
+    ensure_action_adjudication_receipt_table,
+    load_action_adjudication_receipt,
+)
 from .contract import (
     TRIAL_PLAN_SCHEMA_VERSION,
     canonical_trial_plan,
@@ -43,11 +48,14 @@ __all__ = [
     "advance_trial_stage",
     "advance_after_audit",
     "admit_current_action",
+    "backfill_action_adjudication_receipt",
     "audit_current_action",
     "reuse_exact_action_evidence",
     "agent_action_summary",
     "canonical_trial_plan",
     "initial_execution_checkpoint",
+    "ensure_action_adjudication_receipt_table",
+    "load_action_adjudication_receipt",
     "normalize_run_binding",
     "prepare_trial_plan_evidence",
     "project_trial_plan_stage",

@@ -722,6 +722,70 @@ def test_current_node_report_preserves_typed_run_spec_link(
     assert index["sections"][-1]["links"][0]["kind"] == "run_spec"
 
 
+def test_authoritative_result_projection_publishes_all_typed_links(
+    tmp_path: Path,
+) -> None:
+    from server.services.research_step.result_reporting.projection import (
+        build_result_report_projection,
+    )
+
+    root = tmp_path / "client-support"
+    _profile(root)
+    carrier = _carrier()
+    publish_research_checkpoint(
+        client_root=root, profile_id="maxa", agent_id="research-maxa",
+        carrier=carrier,
+    )
+    projection = build_result_report_projection(
+        action={
+            "action_id": "action:ic",
+            "obligation_refs": ["predictive-validity"],
+            "output_evidence_refs": ["evidence:" + "a" * 64],
+        },
+        plan_hash="c" * 64,
+        rows=[{
+            "index": 1, "run_id": "run-1", "job_id": "job-1",
+            "kind": "ic", "status": "succeeded", "trial_role": "candidate",
+            "run_spec_hash": "b" * 64, "run_spec_alias_zh": "截面 IC · 日盘",
+            "result_summary": {
+                "ic_stats": {
+                    "columns": ["index", "SgCPS"],
+                    "rows": [{"index": "mean", "SgCPS": 0.031}],
+                },
+            },
+        }],
+        receipt={
+            "proposal": {
+                "recommended_action": "advance_trial_stage",
+                "evidence_refs": ["evidence:" + "a" * 64],
+                "obligation_delta": [{
+                    "obligation_id": "predictive-validity",
+                    "from_state": "open", "to_state": "bounded",
+                    "criterion_ref": "criterion:ic-support",
+                }],
+            },
+            "decision": {"disposition": "accepted"},
+        },
+    )
+
+    publish_current_node_report_checkpoint(
+        client_root=root, profile_id="maxa", agent_id="research-maxa",
+        carrier=carrier, projection=projection,
+    )
+
+    journal = json.loads((
+        root / "profile-root" / "research" / "sgccs-review" / "branches"
+        / "branch-sgccs" / "LOGICAL_JOURNAL.json"
+    ).read_text(encoding="utf-8"))
+    links = [
+        link for section in journal["checkpoints"][-1]["sections"]
+        for link in section["links"]
+    ]
+    assert {link["kind"] for link in links} >= {
+        "trial_plan", "run_spec", "run", "job", "evidence", "obligation",
+    }
+
+
 def test_current_node_report_preserves_substantive_historical_revisions(
     tmp_path: Path,
 ) -> None:

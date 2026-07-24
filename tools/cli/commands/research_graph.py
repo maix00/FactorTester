@@ -745,6 +745,12 @@ def checkpoint_current_report(
     }))
 
 
+from tools.cli.commands.research_result_report import (
+    register_research_result_report_commands,
+)
+register_research_result_report_commands(research_graph)
+
+
 @research_graph.command("fork")
 @click.argument("instance_id")
 @click.argument("branch_id")

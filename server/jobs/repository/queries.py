@@ -242,7 +242,8 @@ class JobQueryImplementation:
         return row is not None
 
     @staticmethod
-    def _record(row: sqlite3.Row | None) -> JobRecord | None:
+    def record_from_row(row: sqlite3.Row | None) -> JobRecord | None:
+        """Map one repository-owned query row to its public JobRecord."""
         if row is None:
             return None
         return JobRecord(
@@ -285,3 +286,5 @@ class JobQueryImplementation:
             finished_at=row["finished_at"],
             updated_at=float(row["updated_at"]),
         )
+
+    _record = record_from_row

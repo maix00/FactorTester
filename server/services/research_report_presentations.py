@@ -51,7 +51,7 @@ def run_spec_presentation(
         "summary_zh": (
             f"{alias}；"
             + (
-                "服务器接受的运行后冻结配置"
+                "服务器接受后的冻结配置"
                 if run_id else "运行前拟提交配置"
             )
             + f" r{int(run_spec.get('configuration_revision') or 0)}"

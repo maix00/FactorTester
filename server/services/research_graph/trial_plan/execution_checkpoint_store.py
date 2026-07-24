@@ -8,6 +8,9 @@ from typing import Any
 import orjson
 
 from .contract import trial_plan_hash
+from .adjudication_receipts import (
+    backfill_action_adjudication_receipt,
+)
 from .evidence_admission import admit_current_action
 from .evidence_reuse import reuse_exact_action_evidence
 from .execution_checkpoint import (
@@ -92,6 +95,16 @@ def apply_execution_checkpoint_operation(
         raw_current=raw_current,
         serialized_checkpoint=serialized,
     )
+    if operation == "audit":
+        outcome["adjudication_receipt"] = backfill_action_adjudication_receipt(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            trial_plan=trial_plan,
+            checkpoint=checkpoint,
+            proposal=(payload or {})["proposal"],
+            decision=(payload or {})["decision"],
+        )
     return {**outcome, "checkpoint": checkpoint}
 
 

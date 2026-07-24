@@ -133,3 +133,46 @@ def test_batches_append_history_and_failure_does_not_advance(
         assert conn.execute(
             "SELECT current_node FROM research_graph_branches"
         ).fetchone()[0] == "research"
+
+
+def test_authoritative_action_result_submission_is_accepted(
+    tmp_path, monkeypatch,
+):
+    from server.services.research_step.result_reporting.projection import (
+        build_result_report_projection,
+    )
+
+    path = tmp_path / "result-report.db"
+    _seed(path, monkeypatch)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE research_graph_branches "
+            "SET current_node='trial_execution'"
+        )
+    projection = build_result_report_projection(
+        action={
+            "action_id": "action:ic",
+            "obligation_refs": [],
+            "output_evidence_refs": ["evidence:" + "a" * 64],
+        },
+        plan_hash="b" * 64,
+        rows=[{
+            "index": 1, "run_id": "run-1", "job_id": "job-1",
+            "kind": "ic", "status": "succeeded", "trial_role": "candidate",
+            "run_spec_hash": "c" * 64, "run_spec_alias_zh": "截面 IC · 日盘",
+            "result_summary": {"mean_ic": 0.031},
+        }],
+        receipt=None,
+    )
+
+    receipt = append_current_report_checkpoint(
+        instance_id="instance-1", branch_id="branch-1", owner="owner-1",
+        node_id="trial_execution",
+        report_submission=projection["report_submission"],
+        journal_artifact_ref="journal-artifact:sha256:" + "d" * 64,
+    )
+
+    assert len(receipt["coverage"]) == 2
+    assert {
+        item["report_requirement_id"] for item in receipt["coverage"]
+    } == {"report.node.trial_execution.action"}
