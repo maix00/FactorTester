@@ -46,7 +46,7 @@ def build_release(
         raise ValueError("macOS app build must be a positive integer")
     output.mkdir(parents=True)
     app = output / ".staging" / "FTClient.app"
-    shutil.copytree(source_app, app)
+    shutil.copytree(source_app, app, symlinks=True)
     embed_client_runtime(
         REPO,
         app,

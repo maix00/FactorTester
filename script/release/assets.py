@@ -128,7 +128,7 @@ def build_installer_dmg(app: Path, output: Path) -> Path:
         prefix="factortester-installer-"
     ) as raw:
         root = Path(raw)
-        shutil.copytree(app, root / app.name)
+        shutil.copytree(app, root / app.name, symlinks=True)
         (root / "Applications").symlink_to("/Applications")
         subprocess.run(
             [

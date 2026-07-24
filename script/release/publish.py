@@ -113,7 +113,7 @@ def release_client(
         )
         source = REPO / "apple/build/Build/Products/Release/FTClient.app"
         app = staging / "FTClient.app"
-        shutil.copytree(source, app)
+        shutil.copytree(source, app, symlinks=True)
         embed_client_runtime(
             REPO,
             app,

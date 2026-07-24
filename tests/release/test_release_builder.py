@@ -442,6 +442,12 @@ def test_installer_dmg_contains_app_and_applications_link(
     app = tmp_path / "FTClient.app"
     (app / "Contents").mkdir(parents=True)
     (app / "Contents/Info.plist").write_text("<plist/>")
+    versions = app / "Contents/Frameworks/Sparkle.framework/Versions/B"
+    versions.mkdir(parents=True)
+    (versions / "Sparkle").write_bytes(b"framework")
+    (app / "Contents/Frameworks/Sparkle.framework/Sparkle").symlink_to(
+        "Versions/B/Sparkle"
+    )
     image = build_installer_dmg(
         app,
         tmp_path / "FactorTester-Client.dmg",
@@ -466,6 +472,10 @@ def test_installer_dmg_contains_app_and_applications_link(
     try:
         assert (mount / "FTClient.app").is_dir()
         assert (mount / "Applications").is_symlink()
+        assert (
+            mount
+            / "FTClient.app/Contents/Frameworks/Sparkle.framework/Sparkle"
+        ).is_symlink()
     finally:
         subprocess.run(
             ["hdiutil", "detach", str(mount)],

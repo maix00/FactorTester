@@ -95,7 +95,7 @@ def release_beta(
     if str(info.get("CFBundleVersion")) != str(build):
         raise ValueError("release build does not match the macOS app")
     staged = output / ".staging" / "FTClient.app"
-    shutil.copytree(source, staged)
+    shutil.copytree(source, staged, symlinks=True)
     embed_client_runtime(
         REPO, staged, version=f"bundle-b{build}-r{source_revision}",
         source_revision=source_revision, cache_dir=cache_dir,
