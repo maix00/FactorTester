@@ -555,6 +555,113 @@ def get_research_cycle_object(
     return jsonify({"success": True, "object": value})
 
 
+@sft_bp.get(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/trial-execution-checkpoint"
+)
+def get_trial_execution_checkpoint(instance_id: str, branch_id: str):
+    from server.services.research_graph.trial_plan.execution_checkpoint_api import (
+        load_execution_checkpoint_contract,
+    )
+
+    try:
+        value = load_execution_checkpoint_contract(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "execution": value})
+
+
+@sft_bp.post(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/trial-execution-checkpoint/operations"
+)
+def operate_trial_execution_checkpoint(instance_id: str, branch_id: str):
+    from server.services.research_graph.trial_plan.execution_checkpoint_api import (
+        operate_execution_checkpoint,
+    )
+
+    data = request.get_json(silent=True) or {}
+    try:
+        value = operate_execution_checkpoint(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+            expected_latest_trace_id=str(
+                data.get("expected_latest_trace_id") or ""
+            ),
+            expected_checkpoint_hash=str(
+                data.get("expected_checkpoint_hash") or ""
+            ),
+            operation=str(data.get("operation") or ""),
+            payload=data.get("payload"),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "result": value})
+
+
+@sft_bp.post(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/trial-execution-checkpoint/recover"
+)
+def recover_trial_execution_checkpoint(instance_id: str, branch_id: str):
+    from server.services.research_graph.trial_plan.execution_checkpoint_api import (
+        recover_missing_execution_checkpoint,
+    )
+
+    data = request.get_json(silent=True) or {}
+    try:
+        value = recover_missing_execution_checkpoint(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+            expected_latest_trace_id=str(
+                data.get("expected_latest_trace_id") or ""
+            ),
+            expected_execution_node=str(
+                data.get("expected_execution_node") or ""
+            ),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "recovery": value})
+
+
+@sft_bp.get(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/trial-execution-binding"
+)
+def get_trial_execution_binding(instance_id: str, branch_id: str):
+    from server.services.research_graph.trial_plan.execution_checkpoint_api import (
+        current_action_trial_binding,
+    )
+
+    try:
+        value = current_action_trial_binding(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+            run_spec_hash=str(request.args.get("run_spec_hash") or ""),
+            trial_role=str(request.args.get("trial_role") or ""),
+            comparison_id=str(request.args.get("comparison_id") or ""),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "trial_binding": value})
+
+
 @sft_bp.post(
     "/api/research-graph-instances/<instance_id>/branches/<branch_id>/advance"
 )

@@ -75,6 +75,9 @@ from server.services.research_graph.trial_plan.transition import (
     validate_trial_plan_cycle_binding,
     validate_trial_plan_transition,
 )
+from server.services.research_graph.trial_plan.execution_checkpoint import (
+    initial_execution_checkpoint,
+)
 from server.services.research_graph.trial_plan.stage_projection import (
     advance_trial_stage,
     project_trial_plan_stage,
@@ -426,15 +429,27 @@ def advance_graph_branch(
             {} if starts_new_hypothesis else current_stage_projection
         )
         if has_trial_plan_body:
-            projected_stage = project_trial_plan_stage(
-                trial_plan=prepared_evidence["trial_plan"],
-                trial_plan_hash=projected_trial_plan_hash,
-                current_trial_plan_hash=str(
-                    branch_row["current_trial_plan_hash"]
-                ),
-                current_projection=current_stage_projection,
-                execution_node=target_id,
-            )
+            trial_plan = prepared_evidence["trial_plan"]
+            if trial_plan["schema_version"] == 5:
+                if current_stage_projection:
+                    raise ValueError(
+                        "initial TrialPlan v5 requires an empty execution checkpoint"
+                    )
+                projected_stage = initial_execution_checkpoint(
+                    trial_plan=trial_plan,
+                    expected_trial_plan_hash=projected_trial_plan_hash,
+                    execution_node=target_id,
+                )
+            else:
+                projected_stage = project_trial_plan_stage(
+                    trial_plan=trial_plan,
+                    trial_plan_hash=projected_trial_plan_hash,
+                    current_trial_plan_hash=str(
+                        branch_row["current_trial_plan_hash"]
+                    ),
+                    current_projection=current_stage_projection,
+                    execution_node=target_id,
+                )
         if route_action == "advance_trial_stage":
             projected_stage = advance_trial_stage(
                 current_stage_projection

@@ -506,6 +506,139 @@ def show_current_graph_requirement(
     )))
 
 
+@research_graph.command("trial-checkpoint")
+@click.argument("instance_id")
+@click.argument("branch_id")
+def show_trial_execution_checkpoint(
+    instance_id: str,
+    branch_id: str,
+) -> None:
+    """读取当前 Evidence Action、CAS 身份和服务器操作合同。"""
+    click.echo(_json(
+        client_from_config().get_trial_execution_checkpoint(
+            instance_id,
+            branch_id,
+        )
+    ))
+
+
+@research_graph.command("trial-checkpoint-recover")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--expected-latest-trace-id", required=True)
+@click.option("--expected-execution-node", required=True)
+def recover_trial_execution_checkpoint(
+    instance_id: str,
+    branch_id: str,
+    expected_latest_trace_id: str,
+    expected_execution_node: str,
+) -> None:
+    """确定性恢复历史 v5 plan 遗漏的空 execution checkpoint。"""
+    click.echo(_json(
+        client_from_config().recover_trial_execution_checkpoint(
+            instance_id,
+            branch_id,
+            expected_latest_trace_id=expected_latest_trace_id,
+            expected_execution_node=expected_execution_node,
+        )
+    ))
+
+
+@research_graph.command("trial-action")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.argument(
+    "operation",
+    type=click.Choice([
+        "release",
+        "mark_running",
+        "mark_evidence_ready",
+        "mark_blocked",
+        "mark_failed",
+        "retry",
+        "admit",
+        "audit",
+        "advance",
+    ]),
+)
+@click.option("--expected-latest-trace-id", required=True)
+@click.option("--expected-checkpoint-hash", required=True)
+@click.option(
+    "--payload-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def apply_trial_execution_action(
+    instance_id: str,
+    branch_id: str,
+    operation: str,
+    expected_latest_trace_id: str,
+    expected_checkpoint_hash: str,
+    payload_file: Path | None,
+) -> None:
+    """以 checkpoint 返回的精确合同执行一个 CAS 操作。"""
+    payload = (
+        json.loads(payload_file.read_text(encoding="utf-8"))
+        if payload_file is not None
+        else {}
+    )
+    if not isinstance(payload, dict):
+        raise click.ClickException("operation payload must be a JSON object")
+    click.echo(_json(
+        client_from_config().operate_trial_execution_checkpoint(
+            instance_id,
+            branch_id,
+            expected_latest_trace_id=expected_latest_trace_id,
+            expected_checkpoint_hash=expected_checkpoint_hash,
+            operation=operation,
+            payload=payload,
+        )
+    ))
+
+
+@research_graph.command("trial-binding")
+@click.argument("instance_id")
+@click.argument("branch_id")
+@click.option("--run-spec-hash", required=True)
+@click.option("--trial-role", required=True)
+@click.option("--comparison-id", required=True)
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+def write_trial_execution_binding(
+    instance_id: str,
+    branch_id: str,
+    run_spec_hash: str,
+    trial_role: str,
+    comparison_id: str,
+    output: Path,
+) -> None:
+    """生成当前 released action 的 canonical ``run submit`` binding。"""
+    binding = client_from_config().get_trial_execution_binding(
+        instance_id,
+        branch_id,
+        run_spec_hash=run_spec_hash,
+        trial_role=trial_role,
+        comparison_id=comparison_id,
+    )
+    encoded = json.dumps(
+        binding,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n"
+    output.write_text(encoded, encoding="utf-8")
+    click.echo(_json({
+        "output": str(output),
+        "trial_plan_hash": binding.get("trial_plan_hash"),
+        "evidence_action_id": binding.get("evidence_action_id"),
+        "expected_checkpoint_hash": binding.get(
+            "expected_checkpoint_hash"
+        ),
+    }))
+
+
 @research_graph.command("checkpoint-report")
 @click.argument("instance_id")
 @click.argument("branch_id")

@@ -512,6 +512,77 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("object") or {})
 
+    def get_trial_execution_checkpoint(
+        self,
+        instance_id: str,
+        branch_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/trial-execution-checkpoint"
+        ))
+        return dict(data.get("execution") or {})
+
+    def operate_trial_execution_checkpoint(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        expected_latest_trace_id: str,
+        expected_checkpoint_hash: str,
+        operation: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/trial-execution-checkpoint/operations",
+            {
+                "expected_latest_trace_id": expected_latest_trace_id,
+                "expected_checkpoint_hash": expected_checkpoint_hash,
+                "operation": operation,
+                "payload": payload or {},
+            },
+        ))
+        return dict(data.get("result") or {})
+
+    def recover_trial_execution_checkpoint(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        expected_latest_trace_id: str,
+        expected_execution_node: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/trial-execution-checkpoint/recover",
+            {
+                "expected_latest_trace_id": expected_latest_trace_id,
+                "expected_execution_node": expected_execution_node,
+            },
+        ))
+        return dict(data.get("recovery") or {})
+
+    def get_trial_execution_binding(
+        self,
+        instance_id: str,
+        branch_id: str,
+        *,
+        run_spec_hash: str,
+        trial_role: str,
+        comparison_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graph-instances/{instance_id}"
+            f"/branches/{branch_id}/trial-execution-binding",
+            query={
+                "run_spec_hash": run_spec_hash,
+                "trial_role": trial_role,
+                "comparison_id": comparison_id,
+            },
+        ))
+        return dict(data.get("trial_binding") or {})
+
     def advance_research_graph_branch(
         self,
         instance_id: str,
