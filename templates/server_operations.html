@@ -110,8 +110,8 @@
         target.innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>实例</th><th>访问地址</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map(item => {
           const allowed = new Set(item.allowed_actions || []);
           const stateLabel = item.status || 'stopped';
-          const restartAPI = item.kind === 'factortester' ? `<button data-action="restart_api" title="只重启网页和接口，后台任务继续运行" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('restart_api') ? '' : 'disabled'}>重启网页服务</button>` : '';
-          const restartBundle = item.kind === 'factortester' ? `<button data-action="restart_bundle" title="等待当前任务完成，再重启网页、调度器和执行器" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('restart_bundle') ? '' : 'disabled'}>重启全部服务</button>` : '';
+          const restartAPI = item.kind === 'factortester' ? `<button data-action="restart_api" title="立即重启网页与接口，后台任务继续运行" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('restart_api') ? '' : 'disabled'}>重启网页</button>` : '';
+          const restartBundle = item.kind === 'factortester' ? `<button data-action="restart_bundle" title="等待当前任务完成，再自动重启全部服务" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('restart_bundle') ? '' : 'disabled'}>排队重启</button>` : '';
           const forceStop = item.kind === 'factortester' ? `<button data-action="force_stop" data-confirm="强制停止会中断正在运行的研究任务，确定继续吗？" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('force_stop') ? '' : 'disabled'}>强制停止</button>` : '';
           const localURL = `http://${loopback}:${item.port}/`;
           const lanURL = addresses.lan_ip ? `http://${addresses.lan_ip}:${item.port}/` : '';
