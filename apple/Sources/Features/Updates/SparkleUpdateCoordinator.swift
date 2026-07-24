@@ -2,24 +2,41 @@
 import Foundation
 import Sparkle
 
-/// Owns Sparkle's updater while the existing release UI is migrated.
-///
-/// Feed selection is supplied through the delegate on every request. We do
-/// avoid Sparkle's deprecated persisted feed setter because a stale
-/// user default could silently move a Main client onto the Beta feed.
+enum SparkleUpdateEvent {
+    case checking
+    case found(version: String)
+    case downloading(version: String)
+    case ready(version: String)
+    case current
+    case failed(String)
+}
+
+/// Thin product-facing adapter. Sparkle owns network verification, extraction,
+/// installation, rollback-on-failure, termination, and relaunch.
 @MainActor
 final class SparkleUpdateCoordinator: NSObject, SPUUpdaterDelegate {
     private let feedURL: () -> URL?
-    private lazy var updaterController = SPUStandardUpdaterController(
-        startingUpdater: true,
-        updaterDelegate: self,
-        userDriverDelegate: nil
+    private let event: (SparkleUpdateEvent) -> Void
+    private lazy var userDriver = SparkleUpdateUserDriver(event: event)
+    private lazy var updater = SPUUpdater(
+        hostBundle: .main,
+        applicationBundle: .main,
+        userDriver: userDriver,
+        delegate: self
     )
 
-    init(feedURL: @escaping () -> URL?) {
+    init(
+        feedURL: @escaping () -> URL?,
+        event: @escaping (SparkleUpdateEvent) -> Void
+    ) {
         self.feedURL = feedURL
+        self.event = event
         super.init()
-        _ = updaterController
+        do {
+            try updater.start()
+        } catch {
+            event(.failed(error.localizedDescription))
+        }
     }
 
     func feedURLString(for updater: SPUUpdater) -> String? {
@@ -27,21 +44,147 @@ final class SparkleUpdateCoordinator: NSObject, SPUUpdaterDelegate {
     }
 
     func checkForUpdates() {
-        updaterController.checkForUpdates(nil)
+        event(.checking)
+        updater.checkForUpdates()
     }
 
     func checkForUpdatesInBackground() {
-        updaterController.updater.checkForUpdatesInBackground()
+        updater.checkForUpdatesInBackground()
+    }
+
+    func downloadAvailableUpdate() {
+        userDriver.downloadAvailableUpdate()
+    }
+
+    func installAndRelaunch() {
+        userDriver.installAndRelaunch()
     }
 
     var automaticallyChecksForUpdates: Bool {
-        get { updaterController.updater.automaticallyChecksForUpdates }
-        set { updaterController.updater.automaticallyChecksForUpdates = newValue }
+        get { updater.automaticallyChecksForUpdates }
+        set { updater.automaticallyChecksForUpdates = newValue }
     }
 
     var automaticallyDownloadsUpdates: Bool {
-        get { updaterController.updater.automaticallyDownloadsUpdates }
-        set { updaterController.updater.automaticallyDownloadsUpdates = newValue }
+        get { updater.automaticallyDownloadsUpdates }
+        set { updater.automaticallyDownloadsUpdates = newValue }
+    }
+}
+
+@MainActor
+private final class SparkleUpdateUserDriver: NSObject, SPUUserDriver {
+    private let event: (SparkleUpdateEvent) -> Void
+    private var version = ""
+    private var downloadReply: ((SPUUserUpdateChoice) -> Void)?
+    private var installReply: ((SPUUserUpdateChoice) -> Void)?
+
+    init(event: @escaping (SparkleUpdateEvent) -> Void) {
+        self.event = event
+    }
+
+    func show(
+        _ request: SPUUpdatePermissionRequest,
+        reply: @escaping (SUUpdatePermissionResponse) -> Void
+    ) {
+        reply(SUUpdatePermissionResponse(
+            automaticUpdateChecks: true,
+            automaticUpdateDownloading: false,
+            sendSystemProfile: false
+        ))
+    }
+
+    func showUserInitiatedUpdateCheck(
+        cancellation: @escaping () -> Void
+    ) {
+        event(.checking)
+    }
+
+    func showUpdateFound(
+        with appcastItem: SUAppcastItem,
+        state: SPUUserUpdateState,
+        reply: @escaping (SPUUserUpdateChoice) -> Void
+    ) {
+        version = appcastItem.displayVersionString
+        if state.stage == .downloaded {
+            downloadReply = reply
+            reply(.install)
+        } else if state.stage == .installing {
+            installReply = reply
+            event(.ready(version: version))
+        } else {
+            downloadReply = reply
+            event(.found(version: version))
+        }
+    }
+
+    func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
+
+    func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
+
+    func showUpdateNotFoundWithError(
+        _ error: Error,
+        acknowledgement: @escaping () -> Void
+    ) {
+        event(.current)
+        acknowledgement()
+    }
+
+    func showUpdaterError(
+        _ error: Error,
+        acknowledgement: @escaping () -> Void
+    ) {
+        event(.failed(error.localizedDescription))
+        acknowledgement()
+    }
+
+    func showDownloadInitiated(cancellation: @escaping () -> Void) {
+        event(.downloading(version: version))
+    }
+
+    func showDownloadDidReceiveExpectedContentLength(
+        _ expectedContentLength: UInt64
+    ) {}
+
+    func showDownloadDidReceiveData(ofLength length: UInt64) {}
+
+    func showDownloadDidStartExtractingUpdate() {}
+
+    func showExtractionReceivedProgress(_ progress: Double) {}
+
+    func showReady(
+        toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void
+    ) {
+        installReply = reply
+        event(.ready(version: version))
+    }
+
+    func showInstallingUpdate(
+        withApplicationTerminated applicationTerminated: Bool,
+        retryTerminatingApplication: @escaping () -> Void
+    ) {}
+
+    func showUpdateInstalledAndRelaunched(
+        _ relaunched: Bool,
+        acknowledgement: @escaping () -> Void
+    ) {
+        acknowledgement()
+    }
+
+    func dismissUpdateInstallation() {
+        downloadReply = nil
+        installReply = nil
+    }
+
+    func downloadAvailableUpdate() {
+        let reply = downloadReply
+        downloadReply = nil
+        reply?(.install)
+    }
+
+    func installAndRelaunch() {
+        let reply = installReply
+        installReply = nil
+        reply?(.install)
     }
 }
 #endif

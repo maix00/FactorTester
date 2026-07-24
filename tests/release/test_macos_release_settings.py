@@ -52,9 +52,8 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert "prefix(2)" in store
     assert "NSWorkspace.shared.open" in installer
     assert "replaceItemAt" not in controller
-    assert controller.index("AppUpdateStore.sha256") < controller.index(
-        "AppInstallerInspector.inspect"
-    )
+    assert "URLSession.shared.download" not in controller
+    assert "SparkleUpdateCoordinator" in controller
     for label in ("当前版本", "可用版本", "运行状态"):
         assert label in status
     for label in ("更新详情", "客户端更新", "下载更新", "重启并更新"):
@@ -105,7 +104,10 @@ def test_macos_pins_sparkle_and_embeds_one_update_trust_anchor() -> None:
     assert 'exactVersion: "2.9.2"' in project
     assert "package: Sparkle" in project
     assert "SUPublicEDKey" in project
-    assert "SPUStandardUpdaterController" in coordinator
+    assert "SPUUpdater(" in coordinator
+    assert "SPUUserDriver" in coordinator
+    assert "downloadAvailableUpdate" in coordinator
+    assert "installAndRelaunch" in coordinator
     assert "feedURLString(for updater: SPUUpdater)" in coordinator
     assert "setFeedURL" not in coordinator
 

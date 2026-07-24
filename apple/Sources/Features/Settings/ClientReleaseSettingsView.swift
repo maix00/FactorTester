@@ -82,6 +82,11 @@ struct ClientReleaseSettingsView: View {
                 Text("Beta").tag("beta")
             }
             .pickerStyle(.segmented)
+            .disabled(
+                controller.isWorking
+                    || controller.hasAvailableUpdate
+                    || controller.isUpdateReady
+            )
 
             Toggle(
                 "自动下载更新",
@@ -147,7 +152,7 @@ struct ClientReleaseSettingsView: View {
     }
 
     private var statusTitle: String {
-        if controller.pendingUpdate != nil {
+        if controller.isUpdateReady {
             return L10n.text("更新已准备好")
         }
         if controller.hasAvailableUpdate {
@@ -160,8 +165,8 @@ struct ClientReleaseSettingsView: View {
     }
 
     private var statusSubtitle: String {
-        if let pending = controller.pendingUpdate {
-            return L10n.text("\(pending.version) 将在重启后安装")
+        if let pendingVersion = controller.pendingVersion {
+            return L10n.text("\(pendingVersion) 将在重启后安装")
         }
         if controller.hasAvailableUpdate {
             return L10n.text("\(controller.latestVersion) 可以下载")
@@ -170,24 +175,24 @@ struct ClientReleaseSettingsView: View {
     }
 
     private var statusIcon: String {
-        if controller.pendingUpdate != nil { return "arrow.clockwise.circle.fill" }
+        if controller.isUpdateReady { return "arrow.clockwise.circle.fill" }
         if controller.hasAvailableUpdate { return "arrow.down.circle.fill" }
         return "checkmark.circle.fill"
     }
 
     private var statusTint: Color {
-        controller.pendingUpdate != nil || controller.hasAvailableUpdate
+        controller.isUpdateReady || controller.hasAvailableUpdate
             ? .accentColor : .green
     }
 
     private var primaryTitle: String {
-        if controller.pendingUpdate != nil { return L10n.text("重启并更新") }
+        if controller.isUpdateReady { return L10n.text("重启并更新") }
         if controller.hasAvailableUpdate { return L10n.text("下载更新") }
         return L10n.text("检查更新")
     }
 
     private var primaryIcon: String {
-        if controller.pendingUpdate != nil { return "arrow.clockwise" }
+        if controller.isUpdateReady { return "arrow.clockwise" }
         if controller.hasAvailableUpdate { return "arrow.down" }
         return "arrow.triangle.2.circlepath"
     }
@@ -200,7 +205,7 @@ struct ClientReleaseSettingsView: View {
 
     private func primaryAction() {
         Task {
-            if controller.pendingUpdate != nil {
+            if controller.isUpdateReady {
                 await controller.restartToApply()
             } else if controller.hasAvailableUpdate {
                 await controller.update()
