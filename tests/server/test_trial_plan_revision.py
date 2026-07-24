@@ -13,6 +13,9 @@ from server.services.research_graph.trial_plan import (
     initial_execution_checkpoint,
     trial_plan_hash,
 )
+from server.services.research_graph.trial_plan.execution_checkpoint_contract import (
+    seal_checkpoint,
+)
 from server.services.research_graph.trial_plan.revision import (
     revise_current_trial_plan,
 )
@@ -145,6 +148,41 @@ def test_running_action_without_results_can_supersede_plan(
     assert evidence["trial_plan"]["parent_trial_plan_hash"] == (
         trial_plan_hash(trial_plan_v5())
     )
+
+
+def test_blocked_action_without_results_resets_to_unreleased(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "trial-plan-revision-blocked.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    checkpoint, revised = _seed(path)
+    blocked = deepcopy(checkpoint)
+    blocked["current_action_status"] = "blocked"
+    blocked.pop("projection_hash")
+    blocked = seal_checkpoint(blocked)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            UPDATE research_graph_branches
+            SET trial_stage_projection_json=?
+            WHERE instance_id='instance-1' AND branch_id='branch-1'
+            """,
+            (orjson.dumps(blocked).decode(),),
+        )
+
+    result = revise_current_trial_plan(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        expected_latest_trace_id="trace-plan",
+        expected_checkpoint_hash=blocked["projection_hash"],
+        expected_trial_plan_hash=trial_plan_hash(trial_plan_v5()),
+        trial_plan=revised,
+    )
+
+    assert result["checkpoint"]["current_action_status"] == "unreleased"
+    assert result["checkpoint"]["current_action_output_evidence_refs"] == []
 
 
 def test_trial_plan_revision_rejects_any_bound_run(

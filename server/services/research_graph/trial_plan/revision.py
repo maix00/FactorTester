@@ -39,7 +39,7 @@ def revise_current_trial_plan(
     trial_plan: dict[str, Any],
     acting_profile_ref: str = "",
 ) -> dict[str, Any]:
-    """Supersede only a current Action that has produced no durable result."""
+    """Supersede a result-free Action, resetting even pre-Run blocked to unreleased."""
     replacement = canonical_trial_plan(trial_plan)
     replacement_hash = trial_plan_hash(replacement)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -166,7 +166,7 @@ def _require_unused_action(
     checkpoint: dict[str, Any],
 ) -> None:
     if checkpoint["current_action_status"] not in {
-        "unreleased", "released", "running",
+        "unreleased", "released", "running", "blocked",
     }:
         raise ValueError("TrialPlan revision requires an unused current Action")
     if checkpoint["current_action_output_evidence_refs"]:
