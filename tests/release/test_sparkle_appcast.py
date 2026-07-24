@@ -31,14 +31,16 @@ def test_generate_appcast_uses_keychain_tool_without_plaintext_key(
 
     def run(command, **kwargs):
         calls.append(command)
-        generated = Path(command[-1]) / "appcast.xml"
+        root = Path(command[-1])
+        assert (root / "release-sha.dmg").read_bytes() == b"dmg"
+        generated = root / "appcast.xml"
         generated.write_text(
             """<?xml version="1.0" encoding="utf-8"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
  version="2.0"><channel><item><title>0.2.0</title>
 <sparkle:version>4</sparkle:version>
 <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
-<enclosure url="https://example.test/FactorTester-Client.dmg"
+<enclosure url="https://example.test/release-sha.dmg"
  sparkle:edSignature="signed" length="3"
  type="application/octet-stream"/></item></channel></rss>
 """,
@@ -51,7 +53,7 @@ def test_generate_appcast_uses_keychain_tool_without_plaintext_key(
         archive=archive,
         output=output,
         tool=tool,
-        download_url="https://example.test/FactorTester-Client.dmg",
+        download_url="https://example.test/release-sha.dmg",
         version="0.2.0",
         build=4,
         channel="stable",
@@ -62,7 +64,7 @@ def test_generate_appcast_uses_keychain_tool_without_plaintext_key(
         version="0.2.0",
         build=4,
         channel="stable",
-        download_url="https://example.test/FactorTester-Client.dmg",
+        download_url="https://example.test/release-sha.dmg",
     )
     flattened = " ".join(calls[0])
     assert "--ed-key-file" not in flattened

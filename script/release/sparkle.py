@@ -66,11 +66,17 @@ def generate_sparkle_appcast(
             "Sparkle download URL must use HTTPS or loopback HTTP"
         )
 
+    target_name = Path(urlsplit(download_url).path).name
+    if not target_name or target_name in {".", ".."}:
+        raise ValueError("Sparkle download URL has no archive name")
+
     with tempfile.TemporaryDirectory(
         prefix="factortester-sparkle-appcast-"
     ) as raw:
         root = Path(raw)
-        staged = root / archive.name
+        # generate_appcast constructs the enclosure URL from the prefix and the
+        # staged filename. Preserve the content-addressed public filename.
+        staged = root / target_name
         shutil.copy2(archive, staged)
         command = [
             str(tool),
