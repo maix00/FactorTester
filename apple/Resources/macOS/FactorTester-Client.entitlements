@@ -6,5 +6,9 @@
          因此首版不启用 App Sandbox；Hardened Runtime 仍由 project.yml 开启。 -->
     <key>com.apple.security.network.client</key>
     <true/>
+    <!-- Self-signed Beta builds have no Team ID. Allow the equally signed
+         Sparkle framework to load under hardened runtime. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
 </dict>
 </plist>

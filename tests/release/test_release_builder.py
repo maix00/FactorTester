@@ -267,7 +267,12 @@ def test_embedded_app_is_resigned_and_verified_before_packaging(
         [
             "codesign", "--force", "--sign",
             "FTClient Beta Release", "--options", "runtime",
-            "--timestamp=none", str(app),
+            "--timestamp=none", "--entitlements",
+            str(
+                release_build.REPO
+                / "apple/Resources/macOS/FactorTester-Client.entitlements"
+            ),
+            str(app),
         ],
         [
             "codesign", "--verify", "--strict",

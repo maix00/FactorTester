@@ -99,7 +99,10 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
     subprocess.run(
         [
             "codesign", "--force", "--sign", signing_identity,
-            "--options", "runtime", timestamp, str(app),
+            "--options", "runtime", timestamp,
+            "--entitlements",
+            str(REPO / "apple/Resources/macOS/FactorTester-Client.entitlements"),
+            str(app),
         ],
         check=True,
         capture_output=True,
