@@ -226,7 +226,12 @@ def _designated_requirement(app: Path) -> str:
         ["codesign", "-d", "-r-", str(app)],
         check=True, capture_output=True, text=True,
     )
-    return ((result.stdout or "") + (result.stderr or "")).strip()
+    output = (result.stdout or "") + (result.stderr or "")
+    for line in output.splitlines():
+        requirement = line.strip()
+        if requirement.startswith("designated =>"):
+            return requirement
+    return ""
 
 
 def _require_installed_identity(

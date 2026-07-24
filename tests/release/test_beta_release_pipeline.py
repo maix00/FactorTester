@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -198,6 +199,25 @@ def test_update_requires_an_existing_app_with_same_identity(
     )
     with pytest.raises(ValueError, match="identity differs"):
         app_update._require_installed_identity(candidate, installed)
+
+
+def test_designated_requirement_ignores_executable_path(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    app = tmp_path / "mounted/FTClient.app"
+    expected = 'designated => identifier "com.gtht.client" and anchor trusted'
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="",
+            stderr=f"Executable={app}/Contents/MacOS/FTClient\n{expected}\n",
+        )
+
+    monkeypatch.setattr(app_update.subprocess, "run", fake_run)
+
+    assert app_update._designated_requirement(app) == expected
 
 
 def test_runtime_preflight_requires_both_commands_and_adapter(
