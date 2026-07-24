@@ -17,6 +17,141 @@ from uuid import uuid4
 from tools.cli.release.update_channel import ValidatedUpdateManifest
 
 
+def stage_application_update(
+    update: ValidatedUpdateManifest,
+    *,
+    application: Path,
+    support_root: Path,
+) -> dict:
+    """Download and verify an update without quitting or replacing FTClient."""
+    pending_root = support_root / "pending-app-update"
+    staging = support_root / f".pending-app-update-{uuid4().hex}"
+    support_root.mkdir(parents=True, exist_ok=True)
+    staging.mkdir()
+    try:
+        dmg = staging / "update.dmg"
+        with urlopen(update.dmg_url, timeout=60) as response, dmg.open("wb") as out:
+            shutil.copyfileobj(response, out)
+        if _file_hash(dmg) != update.dmg_sha256:
+            raise ValueError("downloaded DMG does not match signed manifest")
+        mount = staging / "mount"
+        mount.mkdir()
+        subprocess.run(
+            [
+                "hdiutil", "attach", "-readonly", "-nobrowse",
+                "-mountpoint", str(mount), str(dmg),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        try:
+            source = mount / "FTClient.app"
+            _verify_candidate(source, update)
+            candidate_requirement, installed_requirement = (
+                _require_installed_identity(source, application)
+            )
+            candidate = staging / "FTClient.app"
+            shutil.copytree(source, candidate)
+            _verify_same_app(source, candidate)
+        finally:
+            subprocess.run(
+                ["hdiutil", "detach", str(mount)],
+                check=True,
+                capture_output=True,
+            )
+            shutil.rmtree(mount, ignore_errors=True)
+        dmg.unlink()
+        receipt = {
+            "schema_version": 1,
+            "state": "ready",
+            "version": update.version,
+            "build": update.build,
+            "channel": update.channel,
+            "dmg_sha256": update.dmg_sha256,
+            "manifest_hash": update.manifest_hash,
+            "candidate_tree_sha256": _directory_digest(candidate),
+            "candidate_requirement": candidate_requirement,
+            "installed_requirement": installed_requirement,
+            "candidate": "FTClient.app",
+        }
+        (staging / "pending.json").write_text(
+            json.dumps(receipt, sort_keys=True, indent=2) + "\n"
+        )
+        if pending_root.exists():
+            shutil.rmtree(pending_root)
+        staging.rename(pending_root)
+        return receipt
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def apply_staged_application_update(
+    *,
+    application: Path,
+    support_root: Path,
+) -> dict:
+    """Apply only the verified candidate named by the pending receipt."""
+    pending_root = (support_root / "pending-app-update").resolve()
+    receipt_path = pending_root / "pending.json"
+    try:
+        pending = json.loads(receipt_path.read_text())
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError("verified pending app update is missing") from exc
+    candidate = (pending_root / str(pending.get("candidate") or "")).resolve()
+    if (
+        pending.get("schema_version") != 1
+        or pending.get("state") != "ready"
+        or candidate.parent != pending_root
+        or candidate.is_symlink()
+        or not candidate.is_dir()
+    ):
+        raise ValueError("pending app update receipt is invalid")
+    if _directory_digest(candidate) != pending.get("candidate_tree_sha256"):
+        raise ValueError("pending app update changed after verification")
+    candidate_requirement, installed_requirement = _require_installed_identity(
+        candidate, application
+    )
+    if (
+        candidate_requirement != pending.get("candidate_requirement")
+        or installed_requirement != pending.get("installed_requirement")
+    ):
+        raise ValueError("pending app update signing identity is stale")
+    prior = _app_identity(application)
+    _quit_application()
+    backup = atomic_replace_application(
+        candidate,
+        application=application,
+        backup_root=support_root / "release-backups",
+    )
+    try:
+        subprocess.run(["open", "-n", str(application)], check=True)
+        if not _wait_for_process(running=True, timeout=10):
+            raise RuntimeError("updated FTClient failed to launch")
+    except Exception:
+        if backup is not None and backup.exists():
+            failed = application.with_name(f".{application.name}.failed-{os.getpid()}")
+            application.rename(failed)
+            backup.rename(application)
+            shutil.rmtree(failed)
+            subprocess.run(["open", "-n", str(application)], check=False)
+        raise
+    result = {
+        **pending,
+        "state": "applied",
+        "application": str(application),
+        "backup": str(backup) if backup else None,
+        "prior": {
+            "version": prior["CFBundleShortVersionString"],
+            "build": prior["CFBundleVersion"],
+        },
+    }
+    receipt = support_root / "app-update-receipt.json"
+    receipt.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
+    shutil.rmtree(pending_root)
+    return result
+
+
 def update_application(
     update: ValidatedUpdateManifest,
     *,
@@ -253,4 +388,20 @@ def _file_hash(path: Path) -> str:
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _directory_digest(root: Path) -> str:
+    digest = sha256()
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise ValueError("pending app update contains a symbolic link")
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix().encode()
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
     return digest.hexdigest()

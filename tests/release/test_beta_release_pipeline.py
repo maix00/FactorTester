@@ -237,6 +237,48 @@ def test_runtime_preflight_requires_both_commands_and_adapter(
         app_update._validate_embedded_runtime(app)
 
 
+def test_staged_update_rejects_changed_candidate(tmp_path: Path) -> None:
+    support = tmp_path / "support"
+    pending = support / "pending-app-update"
+    candidate = _fake_app(pending, b"verified")
+    receipt = {
+        "schema_version": 1,
+        "state": "ready",
+        "candidate": "FTClient.app",
+        "candidate_tree_sha256": app_update._directory_digest(candidate),
+    }
+    (pending / "pending.json").write_text(json.dumps(receipt))
+    (
+        candidate / "Contents/Resources/FactorTester/bin/factortester"
+    ).write_bytes(b"changed")
+
+    with pytest.raises(ValueError, match="changed after verification"):
+        app_update.apply_staged_application_update(
+            application=tmp_path / "Applications/FTClient.app",
+            support_root=support,
+        )
+
+
+def test_staged_update_receipt_cannot_escape_support_root(
+    tmp_path: Path,
+) -> None:
+    support = tmp_path / "support"
+    pending = support / "pending-app-update"
+    pending.mkdir(parents=True)
+    (pending / "pending.json").write_text(json.dumps({
+        "schema_version": 1,
+        "state": "ready",
+        "candidate": "../outside.app",
+        "candidate_tree_sha256": "0" * 64,
+    }))
+
+    with pytest.raises(ValueError, match="receipt is invalid"):
+        app_update.apply_staged_application_update(
+            application=tmp_path / "Applications/FTClient.app",
+            support_root=support,
+        )
+
+
 def _fake_app(root: Path, payload: bytes) -> Path:
     app = root / "FTClient.app"
     for relative in (

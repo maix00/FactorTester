@@ -123,3 +123,13 @@ def test_public_cli_exposes_one_main_beta_release_command() -> None:
     assert "--channel [stable|beta]" in result.output
     assert "--sparkle-generate-appcast" in result.output
     assert "--notary-profile" in result.output
+
+
+def test_public_cli_exposes_explicit_app_update_state_machine() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(client_release, ["app-update", "--help"])
+
+    assert result.exit_code == 0
+    for command in ("check", "stage", "apply"):
+        assert command in result.output
