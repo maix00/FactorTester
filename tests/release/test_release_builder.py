@@ -276,11 +276,14 @@ def test_embedded_app_is_resigned_and_verified_before_packaging(
 
     assert commands == [
         [
-            "codesign", "--force", "--deep", "--sign",
+            "codesign", "--force", "--sign",
             "FTClient Beta Release", "--options", "runtime",
             "--timestamp=none", str(app),
         ],
-        ["codesign", "--verify", "--deep", "--strict", str(app)],
+        [
+            "codesign", "--verify", "--strict",
+            "--all-architectures", str(app),
+        ],
         ["codesign", "-d", "-r-", str(app)],
     ]
 

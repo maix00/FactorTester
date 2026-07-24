@@ -110,6 +110,16 @@ def test_macos_pins_sparkle_and_embeds_one_update_trust_anchor() -> None:
     assert "setFeedURL" not in coordinator
 
 
+def test_release_signing_is_inside_out_without_codesign_deep() -> None:
+    source = (ROOT / "script" / "release" / "build.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"--deep"' not in source
+    assert "signables.sort" in source
+    assert '"--all-architectures"' in source
+
+
 def test_apple_project_generation_and_new_swift_syntax(tmp_path: Path) -> None:
     subprocess.run(
         [

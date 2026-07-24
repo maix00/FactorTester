@@ -60,7 +60,7 @@ def build_release(
 
 
 def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
-    """Sign a release with an identity stable across application updates."""
+    """Sign nested code from the inside out with one stable identity."""
     if not signing_identity or signing_identity.strip() == "-":
         raise ValueError(
             "a stable signing identity is required; ad-hoc signatures "
@@ -71,16 +71,29 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
         if signing_identity.startswith("Developer ID Application")
         else "--timestamp=none"
     )
+    signables: list[Path] = []
+    for path in app.rglob("*"):
+        if path.is_symlink():
+            continue
+        if path.is_dir() and path.suffix in {".app", ".xpc", ".framework"}:
+            signables.append(path)
+        elif path.is_file() and (
+            path.suffix in {".dylib", ".so"}
+            or _is_mach_o(path)
+        ):
+            signables.append(path)
+    signables.sort(key=lambda path: len(path.parts), reverse=True)
+    for path in [*signables, app]:
+        subprocess.run(
+            [
+                "codesign", "--force", "--sign", signing_identity,
+                "--options", "runtime", timestamp, str(path),
+            ],
+            check=True,
+            capture_output=True,
+        )
     subprocess.run(
-        [
-            "codesign", "--force", "--deep", "--sign", signing_identity,
-            "--options", "runtime", timestamp, str(app),
-        ],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["codesign", "--verify", "--deep", "--strict", str(app)],
+        ["codesign", "--verify", "--strict", "--all-architectures", str(app)],
         check=True,
         capture_output=True,
     )
@@ -95,6 +108,16 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
         raise ValueError(
             "release signature does not have a stable designated requirement"
         )
+
+
+def _is_mach_o(path: Path) -> bool:
+    result = subprocess.run(
+        ["/usr/bin/file", "--brief", str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return "Mach-O" in result.stdout
 
 
 def _validate_source_checkout(repo: Path, source_revision: str) -> None:
