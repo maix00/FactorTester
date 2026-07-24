@@ -1055,7 +1055,8 @@ private struct ResearchAuditPopover: View {
                     .font(.headline)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let summary = object.summaryZH, !summary.isEmpty {
+            if selection.link.kind != "run_spec",
+               let summary = object.summaryZH, !summary.isEmpty {
                 Text(summary)
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1179,33 +1180,18 @@ private struct ResearchAuditPopover: View {
                 LabeledContent("RunSpec 协议", value: String(version))
             }
             if let runSpec = object.runSpecJSON, !runSpec.isEmpty {
-                DisclosureGroup("完整冻结运行配置") {
-                    ScrollView([.horizontal, .vertical]) {
-                        Text(runSpec)
-                            .font(.caption.monospaced())
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: 320)
-                    .padding(.top, 8)
-                }
+                ResearchRunSpecConfigurationView(
+                    phase: .frozen,
+                    configurationJSON: runSpec
+                )
             }
             if object.runSpecJSON == nil,
                let parameters = object.completeParametersJSON,
                !parameters.isEmpty {
-                DisclosureGroup("完整冻结参数") {
-                    ScrollView([.horizontal, .vertical]) {
-                        Text(parameters)
-                            .font(.caption.monospaced())
-                            .textSelection(.enabled)
-                            .frame(
-                                maxWidth: .infinity,
-                                alignment: .leading
-                            )
-                    }
-                    .frame(maxHeight: 320)
-                    .padding(.top, 8)
-                }
+                ResearchRunSpecConfigurationView(
+                    phase: .proposed,
+                    configurationJSON: parameters
+                )
             }
             referenceValues("指标引用", object.metricRefs ?? [])
             referenceValues("产物引用", object.artifactRefs ?? [])
@@ -1226,8 +1212,8 @@ private struct ResearchAuditPopover: View {
         } else {
             Text(
                 selection.link.kind == "run_spec"
-                    ? "这是尚未提交的 RunSpec 预览。它只有预览哈希，不是可审计的冻结运行对象；"
-                        + "提交后会由 Run chip 展示完整冻结配置。"
+                    ? "该运行前配置对象暂时无法读取。"
+                        + "正常记录必须同时保存完整拟提交配置与 RunSpec 哈希，不能只保留哈希。"
                     : "此记录的中文摘要已显示在上方；当前检查点未提供更细的对象投影。"
                         + "技术引用仍保留在下方，供审计和重放使用。"
             )
@@ -1295,7 +1281,7 @@ private struct ResearchAuditPopover: View {
             } catch is CancellationError {
                 return
             } catch {
-                self.error = "无法读取该 RunSpec 预览：\(error.localizedDescription)"
+                self.error = "无法读取该运行前配置：\(error.localizedDescription)"
             }
             return
         }
@@ -1351,8 +1337,8 @@ enum ResearchDisplayText {
         case "claim": return "证据状态"
         case "evidence": return "证据"
         case "job": return "计算任务"
-        case "run": return "试验运行"
-        case "run_spec": return "运行配置预览"
+        case "run": return "试验运行（含冻结配置）"
+        case "run_spec": return "运行前配置"
         case "delta": return "状态变化"
         case "profile_handoff": return "研究转接"
         default: return "审计对象"
@@ -1367,8 +1353,12 @@ enum ResearchDisplayText {
         case "claim": return "说明当前研究主张获得了什么程度的证据支持。"
         case "evidence": return "说明本步骤取得的结果、指标、产物、限制和冲突。"
         case "job": return "说明后端计算任务的状态、输入规范和可追溯结果。"
-        case "run": return "说明一次试验运行的范围、状态和结果产物。"
-        case "run_spec": return "说明尚未提交的运行配置预览；提交后由试验运行提供完整冻结配置。"
+        case "run":
+            return "说明服务器实际接受并执行的冻结配置；"
+                + "它是结果证据的来源与身份依据，不是统计结果本身。"
+        case "run_spec":
+            return "说明运行前拟提交的完整配置、RunSpec 哈希和可审计提交合同，"
+                + "用于事前审查及提交前后配置一致性核对。"
         case "delta": return "说明证据为何使研究义务或主张发生状态变化。"
         case "profile_handoff": return "说明研究由谁转接、转接了哪些范围与检查点。"
         default: return "说明本步骤正文所引用的可审计研究对象。"

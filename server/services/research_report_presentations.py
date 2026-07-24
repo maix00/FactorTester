@@ -49,7 +49,12 @@ def run_spec_presentation(
         "target_ref": target_ref,
         "alias_zh": alias[:240],
         "summary_zh": (
-            f"{alias}；冻结配置 r{int(run_spec.get('configuration_revision') or 0)}"
+            f"{alias}；"
+            + (
+                "服务器接受的运行后冻结配置"
+                if run_id else "运行前拟提交配置"
+            )
+            + f" r{int(run_spec.get('configuration_revision') or 0)}"
         )[:500],
         "run_spec_hash": run_spec_hash,
         "run_spec_version": int(run_spec.get("run_spec_version") or 0),

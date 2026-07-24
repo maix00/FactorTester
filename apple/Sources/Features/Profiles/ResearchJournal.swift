@@ -356,6 +356,12 @@ enum ResearchJournalPresentation {
             )
                 ?? obligationSummary(for: link, in: obligations)
                 ?? "义务描述缺失"
+        } else if link.kind == "run_spec" {
+            summary = link.label.flatMap(runSpecAlias)
+                ?? contextualSummary(
+                    for: link.kind,
+                    sectionTitle: sectionTitle
+                )
         } else {
             summary = link.label.flatMap(displayAlias)
                 ?? contextualSummary(
@@ -423,8 +429,8 @@ enum ResearchJournalPresentation {
         case "claim": return "\(section)研究主张"
         case "evidence": return "\(section)研究证据"
         case "job": return "\(section)计算任务"
-        case "run": return "\(section)试验结果"
-        case "run_spec": return "\(section)运行配置预览"
+        case "run": return "\(section)试验运行及服务器冻结配置"
+        case "run_spec": return "\(section)拟提交的完整配置"
         case "delta": return "\(section)状态变化"
         case "profile_handoff": return "\(section)研究转接"
         case "report_section": return "\(section)报告章节"
@@ -439,6 +445,12 @@ enum ResearchJournalPresentation {
             options: [.regularExpression, .caseInsensitive]
         ) != nil
         return opaque ? nil : text
+    }
+
+    private static func runSpecAlias(_ value: String) -> String? {
+        displayAlias(value)?
+            .replacingOccurrences(of: "RunSpec 预览", with: "运行前配置")
+            .replacingOccurrences(of: "运行配置预览", with: "运行前配置")
     }
 
     private static func chineseSummary(_ value: String) -> String? {

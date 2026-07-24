@@ -78,6 +78,18 @@ def test_maxa_six_run_specs_get_readable_chips_and_complete_parameters():
         assert "SgCPS" in projection["alias_zh"]
         assert projection["complete_parameters"]["run_spec_version"] == 2
         assert projection["complete_parameters_json"].startswith("{")
+        assert "运行前拟提交配置" in projection["summary_zh"]
+
+
+def test_submitted_run_spec_is_described_as_server_frozen_provenance():
+    projection = run_spec_presentation(
+        _spec(analysis="ic", session="day", fee_mode="none"),
+        run_spec_hash="a" * 64,
+        run_id="run-1",
+    )
+
+    assert projection["target_ref"] == "run:run-1"
+    assert "服务器接受的运行后冻结配置" in projection["summary_zh"]
 
 
 def test_batch_key_rejects_same_dates_when_execution_semantics_differ():

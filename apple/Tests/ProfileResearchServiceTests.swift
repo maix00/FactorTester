@@ -535,6 +535,74 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertEqual(cache.cachedObjectCount, 2)
     }
 
+    @MainActor
+    func testLocalRunSpecUsesJournalSiblingPathAndCachesCompleteObject()
+        async throws
+    {
+        let hash = "9b2ce2de36bfbce1b3d0b3a95f307caa0620bd6d369457f5cf69cd1b122207ee"
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let branch = root.appendingPathComponent("branches/b", isDirectory: true)
+        let journal = branch.appendingPathComponent("LOGICAL_JOURNAL.json")
+        let object = branch
+            .appendingPathComponent("objects/run_spec", isDirectory: true)
+            .appendingPathComponent(hash + ".json")
+        try FileManager.default.createDirectory(
+            at: object.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("{}".utf8).write(to: journal)
+        try Data(
+            """
+            {"schema_version":1,"object_kind":"run_spec",
+             "run_spec_hash":"\(hash)","run_spec_version":2,
+             "alias_zh":"样本内 IC · 日盘",
+             "complete_parameters_json":"{\\n  \\"analyses\\": [\\"ic\\"]\\n}"}
+            """.utf8
+        ).write(to: object)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let resolved = try ResearchAuditObjectCache.localRunSpecObjectURL(
+            journalRef: journal.absoluteString,
+            targetRef: "runspec:\(hash)"
+        )
+        XCTAssertEqual(resolved.standardizedFileURL, object.standardizedFileURL)
+
+        let cache = ResearchAuditObjectCache()
+        let first = try await cache.loadLocalRunSpec(
+            namespace: "maxa|local",
+            journalRef: journal.absoluteString,
+            targetRef: "runspec:\(hash)"
+        )
+        XCTAssertTrue(first.completeParametersJSON?.contains("analyses") == true)
+        try FileManager.default.removeItem(at: object)
+        let second = try await cache.loadLocalRunSpec(
+            namespace: "maxa|local",
+            journalRef: journal.absoluteString,
+            targetRef: "runspec:\(hash)"
+        )
+        XCTAssertEqual(second.runSpecHash, hash)
+        XCTAssertEqual(cache.cachedObjectCount, 1)
+    }
+
+    @MainActor
+    func testLocalRunSpecRejectsHashOnlyPresentation() throws {
+        let hash = String(repeating: "b", count: 64)
+        let data = Data(
+            """
+            {"schema_version":1,"object_kind":"run_spec",
+             "run_spec_hash":"\(hash)","run_spec_version":2}
+            """.utf8
+        )
+
+        XCTAssertThrowsError(
+            try ResearchAuditObjectCache.decodeLocalRunSpec(
+                data,
+                targetRef: "runspec:\(hash)"
+            )
+        )
+    }
+
     func testWorkPackageDecodesAuthoritativeBranchLineage() throws {
         let detail = try JSONDecoder().decode(
             ProfileResearchWorkPackageDetail.self,

@@ -291,7 +291,7 @@ final class ResearchJournalTests: XCTestCase {
                 sectionTitle: "回测结果",
                 obligations: []
             ),
-            "试验运行 · 回测结果试验结果"
+            "试验运行（含冻结配置） · 回测结果试验运行及服务器冻结配置"
         )
     }
 
@@ -363,7 +363,27 @@ final class ResearchJournalTests: XCTestCase {
                 sectionTitle: "验证设计",
                 obligations: []
             ),
-            "运行配置预览 · 样本内 IC · 日盘 RunSpec 预览"
+            "运行前配置 · 样本内 IC · 日盘 运行前配置"
+        )
+    }
+
+    func testRunChipNamesFrozenConfigurationInsteadOfStatisticalEvidence() throws {
+        let link = try JSONDecoder().decode(
+            ResearchJournalLink.self,
+            from: Data(
+                """
+                {"link_id":"run","kind":"run","target_ref":"run:opaque-id","label":"样本内 IC · 日盘"}
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            ResearchJournalPresentation.chipLabel(
+                link,
+                sectionTitle: "验证设计",
+                obligations: []
+            ),
+            "试验运行（含冻结配置） · 样本内 IC · 日盘"
         )
     }
 
