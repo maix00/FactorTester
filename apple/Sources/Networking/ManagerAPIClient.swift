@@ -1,0 +1,100 @@
+import Foundation
+
+struct ManagerWorktree: Identifiable {
+    let instanceId: String
+    let label: String
+    let branch: String
+    let port: Int
+    let running: Bool
+    let daemonRunning: Bool
+    let portInUse: Bool
+
+    var id: String { instanceId }
+
+    init(json: [String: Any]) {
+        instanceId = json["instance_id"] as? String ?? ""
+        label = json["label"] as? String ?? instanceId
+        branch = json["branch"] as? String ?? ""
+        port = json["port"] as? Int ?? 0
+        running = json["running"] as? Bool ?? false
+        daemonRunning = json["daemon_running"] as? Bool ?? false
+        portInUse = json["port_in_use"] as? Bool ?? false
+    }
+}
+
+protocol ManagerSessionAPI {
+    func login(username: String, password: String) async throws
+    func restoreSession() async throws -> Bool
+    func logout() async
+}
+
+enum ManagerAction: String {
+    case start
+    case stop
+    case restartWeb = "restart-web"
+    case restartAll = "restart-all"
+    case forceStop = "force-stop"
+}
+
+final class ManagerCLIClient: ManagerSessionAPI {
+    static let shared = ManagerCLIClient()
+
+    private var executable: String { ClientCLIResolution.executable() }
+
+    func configure(scheme: String, host: String, port: String) async throws {
+        _ = try await ReleaseCommand.runObject([
+            "manager", "configure",
+            "--scheme", scheme,
+            "--host", host,
+            "--port", port,
+            "--json",
+        ], executable: executable)
+    }
+
+    func login(username: String, password: String) async throws {
+        _ = try await ReleaseCommand.runObject([
+            "manager", "login",
+            "--username", username,
+            "--credentials-stdin",
+            "--json",
+        ], executable: executable, stdinJSON: [
+            "username": username,
+            "password": password,
+        ])
+    }
+
+    func restoreSession() async throws -> Bool {
+        _ = try await ReleaseCommand.runObject([
+            "manager", "status", "--json",
+        ], executable: executable)
+        return true
+    }
+
+    func logout() async {
+        _ = try? await ReleaseCommand.runObject([
+            "manager", "logout", "--json",
+        ], executable: executable)
+    }
+
+    func worktrees() async throws -> [ManagerWorktree] {
+        let value = try await ReleaseCommand.runObject([
+            "manager", "list", "--json",
+        ], executable: executable)
+        return (value["worktrees"] as? [[String: Any]] ?? []).map(
+            ManagerWorktree.init(json:)
+        )
+    }
+
+    func perform(_ action: ManagerAction, instanceID: String) async throws {
+        var arguments = [
+            "manager", action.rawValue, instanceID, "--json",
+        ]
+        if action == .forceStop {
+            arguments.append("--yes")
+        }
+        _ = try await ReleaseCommand.runObject(
+            arguments,
+            executable: executable
+        )
+    }
+}

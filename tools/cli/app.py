@@ -18,6 +18,7 @@ from tools.cli.commands.job_orders import register_job_order_commands
 from tools.cli.commands.research import external_factor, job, run, workspace
 from tools.cli.commands.research_graph import research_graph
 from tools.cli.modules.registry import register_cli_modules
+from tools.cli.manager.commands import manager
 
 
 @click.group()
@@ -61,6 +62,7 @@ cli.add_command(job)
 register_job_order_commands(job)
 cli.add_command(agent_flow)
 cli.add_command(research_graph)
+cli.add_command(manager)
 register_cli_modules(cli)
 
 

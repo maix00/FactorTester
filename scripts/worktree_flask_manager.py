@@ -84,6 +84,31 @@ class ManagerState:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.secret_path = self.log_dir.parent / "flask-secret.key"
         self.capability_path = self.log_dir.parent / "manager-capability.key"
+        self._sessions: dict[str, tuple[str, float]] = {}
+        self._session_lock = threading.Lock()
+
+    def login(self, username: str, password: str) -> tuple[str, str]:
+        principal = _authenticate_manager_user(username, password)
+        token = secrets.token_urlsafe(32)
+        with self._session_lock:
+            self._sessions[token] = (principal, time.time() + 12 * 60 * 60)
+        return token, principal
+
+    def session_principal(self, token: str) -> str | None:
+        now = time.time()
+        with self._session_lock:
+            session = self._sessions.get(token)
+            if session is None:
+                return None
+            principal, expires_at = session
+            if expires_at <= now:
+                self._sessions.pop(token, None)
+                return None
+            return principal
+
+    def logout(self, token: str) -> None:
+        with self._session_lock:
+            self._sessions.pop(token, None)
 
     def submit_action(self, operation, label: str) -> None:
         """Run one already-authorized operation after its HTTP receipt."""
@@ -431,6 +456,45 @@ def _lan_ip() -> str:
         return "localhost"
 
 
+def _authenticate_manager_user(username: str, password: str) -> str:
+    from tools.data.account_manage import (
+        accounts_lock,
+        is_super_admin_account,
+        load_accounts,
+        verify_password,
+    )
+
+    username = str(username or "").strip()
+    password = str(password or "")
+    if not username or not password:
+        raise ValueError("username and password are required")
+    with accounts_lock:
+        accounts = load_accounts()
+    account = next(
+        (item for item in accounts if item.get("username") == username),
+        None,
+    )
+    if account is None:
+        matches = [
+            item for item in accounts
+            if item.get("alias", item.get("username")) == username
+        ]
+        if len(matches) == 1:
+            account = matches[0]
+    if (
+        account is None
+        or not verify_password(
+            password,
+            str(account.get("salt") or ""),
+            str(account.get("hash") or ""),
+        )
+    ):
+        raise PermissionError("invalid username or password")
+    if not is_super_admin_account(account):
+        raise PermissionError("manager access requires super administrator")
+    return str(account["username"])
+
+
 def safe_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in value) or "worktree"
 
@@ -566,8 +630,10 @@ class Handler(BaseHTTPRequestHandler):
     state: ManagerState
 
     def _is_loopback_client(self) -> bool:
+        forwarded = self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+        candidate = forwarded or self.client_address[0]
         try:
-            return ipaddress.ip_address(self.client_address[0]).is_loopback
+            return ipaddress.ip_address(candidate).is_loopback
         except ValueError:
             return False
 
@@ -579,12 +645,28 @@ class Handler(BaseHTTPRequestHandler):
         return bool(origin and host and origin == f"http://{host}")
 
     def _has_capability(self) -> bool:
-        scheme, _, supplied = self.headers.get("Authorization", "").partition(" ")
+        supplied = self._bearer_token()
         return (
-            scheme.lower() == "bearer"
-            and bool(supplied)
+            bool(supplied)
             and hmac.compare_digest(supplied, self.state.capability_token())
         )
+
+    def _bearer_token(self) -> str:
+        scheme, _, supplied = self.headers.get("Authorization", "").partition(" ")
+        return supplied if scheme.lower() == "bearer" else ""
+
+    def _has_ui_session(self) -> bool:
+        forwarded_proto = self.headers.get(
+            "X-Forwarded-Proto", ""
+        ).split(",", 1)[0].strip().lower()
+        secure_transport = self._is_loopback_client() or forwarded_proto == "https"
+        return (
+            secure_transport
+            and self.state.session_principal(self._bearer_token()) is not None
+        )
+
+    def _has_api_authorization(self) -> bool:
+        return self._has_capability() or self._has_ui_session()
 
     def _require_capability(self) -> bool:
         if self._has_capability():
@@ -600,8 +682,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/session":
+            principal = self.state.session_principal(self._bearer_token())
+            if principal is None:
+                self._require_capability()
+                return
+            json_response(self, {
+                "success": True,
+                "username": principal,
+                "role": "super_admin",
+            })
+            return
         if parsed.path == "/api/worktrees":
-            if not self._require_capability():
+            if not self._has_api_authorization():
+                self._require_capability()
                 return
             data = [
                 {
@@ -632,7 +726,14 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path != "/":
             self.send_error(404)
             return
-        if not (self._is_loopback_client() or self._require_capability()):
+        if not self._is_loopback_client():
+            json_response(self, {
+                "success": False,
+                "error": (
+                    "Manager Web only supports localhost; "
+                    "use an authenticated FTClient or CLI session"
+                ),
+            }, 403)
             return
         message = parse_qs(parsed.query).get("message", [""])[0]
         body = page(self.state, message)
@@ -643,6 +744,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        if self.path == "/auth/login":
+            self._login()
+            return
+        if self.path == "/auth/logout":
+            token = self._bearer_token()
+            if self.state.session_principal(token) is None:
+                self._require_capability()
+                return
+            self.state.logout(token)
+            json_response(self, {"success": True})
+            return
         actions = {
             "/vibe/start",
             "/vibe/stop",
@@ -656,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         if not (
-            self._has_capability()
+            self._has_api_authorization()
             or self._is_same_origin_browser_action()
         ):
             self._require_capability()
@@ -698,6 +810,49 @@ class Handler(BaseHTTPRequestHandler):
             "success": True,
             "instance_id": instance_id,
             "message": message,
+        })
+
+    def _login(self) -> None:
+        forwarded_proto = self.headers.get(
+            "X-Forwarded-Proto", ""
+        ).split(",", 1)[0].strip().lower()
+        if not self._is_loopback_client() and forwarded_proto != "https":
+            json_response(self, {
+                "success": False,
+                "error": "remote Manager login requires HTTPS",
+            }, 400)
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0 or length > 16 * 1024:
+            json_response(self, {
+                "success": False,
+                "error": "invalid login request",
+            }, 400)
+            return
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            token, principal = self.state.login(
+                str(payload.get("username") or ""),
+                str(payload.get("password") or ""),
+            )
+        except (ValueError, TypeError, json.JSONDecodeError):
+            json_response(self, {
+                "success": False,
+                "error": "invalid login request",
+            }, 400)
+            return
+        except PermissionError as exc:
+            json_response(self, {
+                "success": False,
+                "error": str(exc),
+            }, 403)
+            return
+        json_response(self, {
+            "success": True,
+            "username": principal,
+            "role": "super_admin",
+            "token": token,
+            "expires_in": 12 * 60 * 60,
         })
 
     def _resolve_operation(self, instance_id: str):

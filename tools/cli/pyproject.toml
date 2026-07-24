@@ -23,6 +23,7 @@ packages = [
   "tools.cli",
   "tools.cli.commands",
   "tools.cli.core",
+  "tools.cli.manager",
   "tools.cli.modules",
   "tools.cli.modules.custom_factors",
   "tools.cli.modules.products",
@@ -38,6 +39,7 @@ packages = [
 "tools.cli" = "."
 "tools.cli.commands" = "commands"
 "tools.cli.core" = "core"
+"tools.cli.manager" = "manager"
 "tools.cli.modules" = "modules"
 "tools.cli.modules.custom_factors" = "modules/custom_factors"
 "tools.cli.modules.products" = "modules/products"

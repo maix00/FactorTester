@@ -7,17 +7,21 @@ final class SessionStore: ObservableObject {
     typealias ClientSessionBridge = @MainActor (String) async -> Bool
 
     @Published private(set) var user: UserInfo?
+    @Published private(set) var isManagerLoggedIn = false
     @Published private(set) var isWorking = false
     @Published var lastError: String?
 
     private let api: any SessionAPI
+    private let managerAPI: any ManagerSessionAPI
     private let bridgeOverride: ClientSessionBridge?
 
     init(
         api: any SessionAPI = APIClient.shared,
+        managerAPI: any ManagerSessionAPI = ManagerCLIClient.shared,
         bridge: ClientSessionBridge? = nil
     ) {
         self.api = api
+        self.managerAPI = managerAPI
         bridgeOverride = bridge
     }
 
@@ -26,8 +30,17 @@ final class SessionStore: ObservableObject {
 
     /// 启动 / 设置变更后刷新当前登录态。
     func refresh() async {
-        do { user = try await api.me() }
-        catch { user = nil }
+        do {
+            user = try await api.me()
+            if role == "super_admin" {
+                isManagerLoggedIn = (try? await managerAPI.restoreSession()) == true
+            } else {
+                isManagerLoggedIn = false
+            }
+        } catch {
+            user = nil
+            isManagerLoggedIn = false
+        }
     }
 
     func login(username: String, password: String) async -> Bool {
@@ -40,7 +53,9 @@ final class SessionStore: ObservableObject {
             )
             if resp.success {
                 return await completeAuthentication(
-                    principalRef: resp.username ?? username
+                    principalRef: resp.username ?? username,
+                    username: username,
+                    password: password
                 )
             } else {
                 lastError = resp.error ?? L10n.text("登录失败")
@@ -99,7 +114,9 @@ final class SessionStore: ObservableObject {
             )
             if resp.success {
                 return await completeAuthentication(
-                    principalRef: resp.username ?? username
+                    principalRef: resp.username ?? username,
+                    username: username,
+                    password: password
                 )
             } else {
                 lastError = resp.error ?? L10n.text("注册失败")
@@ -111,7 +128,11 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    private func completeAuthentication(principalRef: String) async -> Bool {
+    private func completeAuthentication(
+        principalRef: String,
+        username: String,
+        password: String
+    ) async -> Bool {
         do {
             try await api.setKeepLogin(true)
         } catch {
@@ -124,9 +145,25 @@ final class SessionStore: ObservableObject {
             lastError = L10n.text("登录状态未能确认，请重新登录。")
             return false
         }
+        if role == "super_admin" {
+            do {
+                try await managerAPI.login(username: username, password: password)
+                isManagerLoggedIn = true
+            } catch {
+                try? await api.logout()
+                user = nil
+                isManagerLoggedIn = false
+                lastError = L10n.text("Manager 登录失败：") + error.localizedDescription
+                return false
+            }
+        } else {
+            isManagerLoggedIn = false
+        }
         guard await bridgeClientSession(principalRef: principalRef) else {
             try? await api.logout()
+            await managerAPI.logout()
             user = nil
+            isManagerLoggedIn = false
             return false
         }
         return true
@@ -134,11 +171,14 @@ final class SessionStore: ObservableObject {
 
     func logout() async {
         user = nil
+        isManagerLoggedIn = false
         let api = api
+        let managerAPI = managerAPI
         let serverURL = ServerConfig.shared.baseURL?.absoluteString
         let executable = ClientCLIResolution.executable()
         Task {
             try? await api.logout()
+            await managerAPI.logout()
             if let serverURL {
                 _ = try? await ReleaseCommand.runObject([
                     "client", "profile", "clear-ui-session",

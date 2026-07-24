@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeDashboardView: View {
     let modules: [Module]
+    let showManager: Bool
     let isLoading: Bool
     let loadError: String?
     let openModule: (Module) -> Void
@@ -35,6 +36,13 @@ struct HomeDashboardView: View {
                         description: "账户、安全、产品组与因子库授权",
                         systemImage: "person.crop.circle"
                     ) { openTab(.account) }
+                    if showManager {
+                        DashboardShortcutCard(
+                            title: "服务器管理",
+                            description: "查看端口状态并控制本机服务",
+                            systemImage: "server.rack"
+                        ) { openTab(.manager) }
+                    }
                     ForEach(modules) { module in
                         ModuleCard(module: module) {
                             openModule(module)

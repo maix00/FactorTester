@@ -48,7 +48,10 @@ struct HomeView: View {
 
     private var dashboard: some View {
         HomeDashboardView(
-            modules: registry.visibleModules(forRole: session.role),
+            modules: registry.visibleModules(forRole: session.role).filter {
+                $0.id != "server_operations"
+            },
+            showManager: session.role == "super_admin",
             isLoading: registry.isLoading,
             loadError: registry.loadError,
             openModule: tap,

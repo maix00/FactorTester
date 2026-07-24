@@ -85,6 +85,17 @@ struct ClientTabView: View {
             AccountCenterView(open: open)
         case .settings:
             ClientSettingsHub(open: open)
+        case .manager:
+            if session.role == "super_admin" && session.isManagerLoggedIn {
+                ManagerView()
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "lock.shield").font(.largeTitle)
+                    Text("服务器管理不可用").font(.headline)
+                    Text("需要超级管理员登录 Manager。")
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 

@@ -93,6 +93,87 @@ def test_worktree_api_requires_shared_bearer_token(tmp_path, monkeypatch) -> Non
             assert response.status == 200
 
 
+def test_manager_login_issues_ui_session_for_api_access(
+    tmp_path, monkeypatch
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state.capability_path.write_text("internal-capability", encoding="ascii")
+    monkeypatch.setattr(state, "worktrees", lambda: [])
+    monkeypatch.setattr(
+        manager,
+        "_authenticate_manager_user",
+        lambda username, password: (
+            "root@1"
+            if (username, password) == ("root", "secret")
+            else (_ for _ in ()).throw(PermissionError("invalid"))
+        ),
+    )
+
+    with _running_manager(state) as base_url:
+        login = Request(
+            f"{base_url}/auth/login",
+            data=json.dumps({
+                "username": "root",
+                "password": "secret",
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(login) as response:
+            session = json.loads(response.read())
+        request = Request(
+            f"{base_url}/api/worktrees",
+            headers={"Authorization": f"Bearer {session['token']}"},
+        )
+        with urlopen(request) as response:
+            assert response.status == 200
+
+    assert session["username"] == "root@1"
+    assert session["role"] == "super_admin"
+
+
+def test_remote_browser_page_is_rejected_even_before_login(
+    tmp_path, monkeypatch
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state.capability_path.write_text("test-capability", encoding="ascii")
+    monkeypatch.setattr(
+        manager.Handler,
+        "_is_loopback_client",
+        lambda _self: False,
+    )
+
+    with _running_manager(state) as base_url:
+        with pytest.raises(HTTPError) as denied:
+            urlopen(f"{base_url}/")
+
+    assert denied.value.code == 403
+    assert "only supports localhost" in denied.value.read().decode()
+
+
+def test_remote_ui_login_requires_https(tmp_path, monkeypatch) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state.capability_path.write_text("test-capability", encoding="ascii")
+    monkeypatch.setattr(
+        manager.Handler,
+        "_is_loopback_client",
+        lambda _self: False,
+    )
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/auth/login",
+            data=b'{"username":"root","password":"secret"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as denied:
+            urlopen(request)
+
+    assert denied.value.code == 400
+    assert "requires HTTPS" in denied.value.read().decode()
+
+
 def test_capability_token_is_created_atomically_with_owner_only_mode(
     tmp_path, monkeypatch
 ) -> None:

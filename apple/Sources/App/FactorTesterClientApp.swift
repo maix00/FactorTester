@@ -13,6 +13,7 @@ enum AppRuntimePolicy {
 struct FactorTesterClientApp: App {
     @AppStorage("client.language") private var language = AppLanguage.system.rawValue
     @StateObject private var config = ServerConfig.shared
+    @StateObject private var managerConfig = ManagerConfig.shared
     @StateObject private var session = SessionStore()
     @StateObject private var registry = ModuleRegistry()
     @StateObject private var updates = ClientReleaseController()
@@ -34,6 +35,7 @@ struct FactorTesterClientApp: App {
     private var productionRoot: some View {
         RootView()
             .environmentObject(config)
+            .environmentObject(managerConfig)
             .environmentObject(session)
             .environmentObject(registry)
             .environmentObject(updates)

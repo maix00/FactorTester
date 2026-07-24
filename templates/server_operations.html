@@ -107,16 +107,13 @@
         document.getElementById('server-addresses').textContent =
           `本机 IP：${loopback} · 局域网 IP：${lan}`;
         document.getElementById('instance-count').textContent = `${rows.length} 个实例`;
-        target.innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>实例</th><th>访问地址</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map(item => {
+        target.innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>实例</th><th>端口</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map(item => {
           const allowed = new Set(item.allowed_actions || []);
           const stateLabel = item.status || 'stopped';
           const restartAPI = item.kind === 'factortester' ? `<button data-action="restart_api" title="立即重启网页与接口，后台任务继续运行" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('restart_api') ? '' : 'disabled'}>重启网页</button>` : '';
           const restartBundle = item.kind === 'factortester' ? `<button data-action="restart_bundle" title="等待当前任务完成，再自动重启全部服务" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('restart_bundle') ? '' : 'disabled'}>排队重启</button>` : '';
           const forceStop = item.kind === 'factortester' ? `<button data-action="force_stop" data-confirm="强制停止会中断正在运行的研究任务，确定继续吗？" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('force_stop') ? '' : 'disabled'}>强制停止</button>` : '';
-          const localURL = `http://${loopback}:${item.port}/`;
-          const lanURL = addresses.lan_ip ? `http://${addresses.lan_ip}:${item.port}/` : '';
-          const links = `<a href="${escapeHTML(localURL)}" target="_blank">${escapeHTML(localURL)}</a>${lanURL ? `<div class="secondary"><a href="${escapeHTML(lanURL)}" target="_blank">${escapeHTML(lanURL)}</a></div>` : ''}`;
-          return `<tr><td><div class="primary">${escapeHTML(item.label || item.instance_id)}</div><div class="secondary">${escapeHTML(item.branch || item.kind)}</div></td><td>${links}</td><td>${status(stateLabel)}</td><td><div class="actions"><button class="primary-action" data-action="start" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('start') ? '' : 'disabled'}>启动</button><button data-action="stop" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('stop') ? '' : 'disabled'}>停止</button>${restartAPI}${restartBundle}${forceStop}</div></td></tr>`;
+          return `<tr><td><div class="primary">${escapeHTML(item.label || item.instance_id)}</div><div class="secondary">${escapeHTML(item.branch || item.kind)}</div></td><td>${escapeHTML(item.port)}</td><td>${status(stateLabel)}</td><td><div class="actions"><button class="primary-action" data-action="start" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('start') ? '' : 'disabled'}>启动</button><button data-action="stop" data-id="${escapeHTML(item.instance_id)}" ${allowed.has('stop') ? '' : 'disabled'}>停止</button>${restartAPI}${restartBundle}${forceStop}</div></td></tr>`;
         }).join('')}</tbody></table></div>` : '<div class="empty">没有可管理的实例</div>';
         target.querySelectorAll('button[data-action]').forEach(button => button.addEventListener('click', () => runAction(button)));
       } catch (error) {

@@ -11,6 +11,7 @@ enum ClientTabContent {
     case profile(id: String)
     case account
     case settings
+    case manager
 }
 
 struct ClientTab: Identifiable {
@@ -102,6 +103,13 @@ struct ClientTab: Identifiable {
         title: "设置",
         systemImage: "gearshape",
         content: .settings
+    )
+
+    static let manager = ClientTab(
+        id: "manager",
+        title: "服务器管理",
+        systemImage: "server.rack",
+        content: .manager
     )
 
     static let factorLibrary = ClientTab.web(

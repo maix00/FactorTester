@@ -2,12 +2,16 @@ import SwiftUI
 
 struct ServerSettingsView: View {
     @EnvironmentObject var config: ServerConfig
+    @EnvironmentObject var managerConfig: ManagerConfig
     @Environment(\.dismiss) private var dismiss
     var isInitialSetup = false
 
     @State private var scheme = "http"
     @State private var host = "127.0.0.1"
     @State private var port = "8000"
+    @State private var managerScheme = "http"
+    @State private var managerHost = "127.0.0.1"
+    @State private var managerPort = "7998"
     @State private var testResult: String?
     @State private var testing = false
     @State private var showAdvanced = false
@@ -17,6 +21,7 @@ struct ServerSettingsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 connectionCard
+                managerConnectionCard
                 HStack {
                     Button("测试连接") { Task { await test() } }
                         .disabled(testing || host.isEmpty)
@@ -30,8 +35,7 @@ struct ServerSettingsView: View {
                     }
                     Spacer()
                     Button("保存连接") {
-                        config.save(scheme: scheme, host: host, port: port)
-                        if isInitialSetup { dismiss() }
+                        Task { await saveConnections() }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(host.isEmpty)
@@ -44,6 +48,9 @@ struct ServerSettingsView: View {
             scheme = config.scheme
             host = config.host.isEmpty ? "127.0.0.1" : config.host
             port = config.port.isEmpty ? "8000" : config.port
+            managerScheme = managerConfig.scheme
+            managerHost = managerConfig.host.isEmpty ? "127.0.0.1" : managerConfig.host
+            managerPort = managerConfig.port.isEmpty ? "7998" : managerConfig.port
         }
     }
 
@@ -57,7 +64,7 @@ struct ServerSettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(isInitialSetup ? "连接 FactorTester" : "服务器")
                     .font(.largeTitle.weight(.semibold))
-                Text("默认连接本机服务；远程与 HTTPS 选项在高级设置中。")
+                Text("分别配置业务服务和 Manager 的主机与端口。")
                     .foregroundStyle(.secondary)
             }
         }
@@ -66,12 +73,6 @@ struct ServerSettingsView: View {
     private var connectionCard: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 14) {
-                LabeledContent("默认地址") {
-                    Text("http://127.0.0.1:8000")
-                        .font(.body.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-                Divider()
                 DisclosureGroup("高级服务器设置", isExpanded: $showAdvanced) {
                     VStack(spacing: 12) {
                         Picker("协议", selection: $scheme) {
@@ -93,6 +94,25 @@ struct ServerSettingsView: View {
         }
     }
 
+    private var managerConnectionCard: some View {
+        GroupBox("Manager") {
+            VStack(spacing: 12) {
+                Picker("协议", selection: $managerScheme) {
+                    Text("HTTP").tag("http")
+                    Text("HTTPS").tag("https")
+                }
+                .pickerStyle(.segmented)
+                TextField("主机或 IP", text: $managerHost)
+                    .autocorrectionDisabled()
+                TextField("Manager 端口", text: $managerPort)
+                Text("非本机 Manager 必须使用 HTTPS；登录凭据与业务服务一致。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+        }
+    }
+
     private func test() async {
         testing = true
         testResult = nil
@@ -106,6 +126,26 @@ struct ServerSettingsView: View {
                 (error as? APIError)?.errorDescription
                     ?? error.localizedDescription
             )
+        }
+    }
+
+    private func saveConnections() async {
+        config.save(scheme: scheme, host: host, port: port)
+        managerConfig.save(
+            scheme: managerScheme,
+            host: managerHost,
+            port: managerPort
+        )
+        do {
+            try await ManagerCLIClient.shared.configure(
+                scheme: managerScheme,
+                host: managerHost,
+                port: managerPort
+            )
+            testResult = "✓ 已保存"
+            if isInitialSetup { dismiss() }
+        } catch {
+            testResult = "✗ " + error.localizedDescription
         }
     }
 }
