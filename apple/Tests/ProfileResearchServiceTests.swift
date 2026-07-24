@@ -1251,7 +1251,7 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         await controller.loadSelectedWorkspace()
         await controller.observeSelectedResearch()
 
-        XCTAssertEqual(checkpoints, ["trace:t"])
+        XCTAssertEqual(checkpoints, ["trace:s"])
     }
 
     func testSSEEventRefreshesThenTerminalStops() async throws {
@@ -1322,7 +1322,7 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
             transport.requests[5].value(forHTTPHeaderField: "If-None-Match"),
             "\"work-package-v1\""
         )
-        XCTAssertEqual(checkpoints, ["trace:changed"])
+        XCTAssertEqual(checkpoints, ["trace:s", "trace:changed"])
     }
 
     func testSSEEndingBeforeTerminalFallsBackToBoundedConditionalRefresh() async {
