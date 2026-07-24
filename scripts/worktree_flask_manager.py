@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import hmac
 import html
+import ipaddress
 import json
 import os
 import re
@@ -564,6 +565,19 @@ def page(state: ManagerState, message: str = "") -> bytes:
 class Handler(BaseHTTPRequestHandler):
     state: ManagerState
 
+    def _is_loopback_client(self) -> bool:
+        try:
+            return ipaddress.ip_address(self.client_address[0]).is_loopback
+        except ValueError:
+            return False
+
+    def _is_same_origin_browser_action(self) -> bool:
+        if not self._is_loopback_client():
+            return False
+        origin = self.headers.get("Origin", "").rstrip("/")
+        host = self.headers.get("Host", "").strip()
+        return bool(origin and host and origin == f"http://{host}")
+
     def _has_capability(self) -> bool:
         scheme, _, supplied = self.headers.get("Authorization", "").partition(" ")
         return (
@@ -614,7 +628,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path != "/":
             self.send_error(404)
             return
-        if not self._require_capability():
+        if not (self._is_loopback_client() or self._require_capability()):
             return
         message = parse_qs(parsed.query).get("message", [""])[0]
         body = page(self.state, message)
@@ -637,7 +651,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path not in actions:
             self.send_error(404)
             return
-        if not self._require_capability():
+        if not (
+            self._has_capability()
+            or self._is_same_origin_browser_action()
+        ):
+            self._require_capability()
             return
         length = int(self.headers.get("Content-Length", "0"))
         params = parse_qs(self.rfile.read(length).decode("utf-8"))

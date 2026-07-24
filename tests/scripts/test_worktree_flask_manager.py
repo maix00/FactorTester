@@ -325,7 +325,7 @@ def test_mutation_error_does_not_disclose_managed_path(tmp_path, monkeypatch) ->
     assert str(source) not in raw
 
 
-def test_manager_page_requires_capability_and_does_not_leak_paths(
+def test_manager_page_allows_loopback_browser_without_leaking_paths(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
@@ -342,15 +342,7 @@ def test_manager_page_requires_capability_and_does_not_leak_paths(
     monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
 
     with _running_manager(state) as base_url:
-        with pytest.raises(HTTPError) as denied:
-            urlopen(f"{base_url}/")
-        assert denied.value.code == 401
-
-        request = Request(
-            f"{base_url}/",
-            headers={"Authorization": "Bearer test-capability"},
-        )
-        with urlopen(request) as response:
+        with urlopen(f"{base_url}/") as response:
             body = response.read().decode("utf-8")
 
     assert str(source) not in body
@@ -358,6 +350,45 @@ def test_manager_page_requires_capability_and_does_not_leak_paths(
     assert 'name="path"' not in body
     assert 'name="port"' not in body
     assert 'name="instance_id"' in body
+
+
+def test_loopback_browser_can_submit_same_origin_action(
+    tmp_path, monkeypatch
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state.capability_path.write_text("test-capability", encoding="ascii")
+    source = tmp_path / "private" / "issue-141"
+    worktree = manager.Worktree(
+        path=source,
+        branch="fix/issue-141-secure-manager",
+        head="abcdef12",
+        label="fix/issue-141-secure-manager",
+        port=8141,
+    )
+    monkeypatch.setattr(state, "worktrees", lambda: [worktree])
+    called = []
+    monkeypatch.setattr(
+        state,
+        "start",
+        lambda path, port: called.append((path, port)) or "started",
+    )
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/start",
+            data=urlencode({
+                "instance_id": state.instance_id(worktree),
+            }).encode(),
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": base_url,
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            assert response.status == 200
+
+    assert called == [(source, 8141)]
 
 
 @pytest.mark.parametrize("branch", ["main", "master"])
