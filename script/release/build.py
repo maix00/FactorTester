@@ -12,6 +12,7 @@ import subprocess
 from script.release.assets import (
     embed_client_runtime,
     build_installer_dmg,
+    refresh_runtime_receipt,
 )
 
 
@@ -83,7 +84,7 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
         ):
             signables.append(path)
     signables.sort(key=lambda path: len(path.parts), reverse=True)
-    for path in [*signables, app]:
+    for path in signables:
         subprocess.run(
             [
                 "codesign", "--force", "--sign", signing_identity,
@@ -92,6 +93,17 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
             check=True,
             capture_output=True,
         )
+    runtime_resources = app / "Contents/Resources/FactorTester"
+    if (runtime_resources / "bundle-receipt.json").is_file():
+        refresh_runtime_receipt(runtime_resources)
+    subprocess.run(
+        [
+            "codesign", "--force", "--sign", signing_identity,
+            "--options", "runtime", timestamp, str(app),
+        ],
+        check=True,
+        capture_output=True,
+    )
     subprocess.run(
         ["codesign", "--verify", "--strict", "--all-architectures", str(app)],
         check=True,

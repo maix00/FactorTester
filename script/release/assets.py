@@ -304,6 +304,18 @@ def _write_runtime_receipt(
     return receipt_path
 
 
+def refresh_runtime_receipt(resources: Path) -> Path:
+    """Re-hash an embedded runtime after its Mach-O files are signed."""
+    receipt_path = resources / "bundle-receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    return _write_runtime_receipt(
+        resources,
+        version=str(receipt["version"]),
+        source_revision=str(receipt["source_revision"]),
+        cache_key=str(receipt["runtime_input_sha256"]),
+    )
+
+
 def _runtime_payload_hashes(resources: Path) -> dict[str, str]:
     return {
         str(path.relative_to(resources)): sha256(path.read_bytes()).hexdigest()
