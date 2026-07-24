@@ -98,3 +98,5 @@ def test_server_operations_keep_polling_after_async_process_action() -> None:
 
     assert "操作处理中" in source
     assert "[500, 1500, 3500, 7000, 11000]" in source
+    assert "当前页面随后断开是正常现象" in source
+    assert "正在停止" in source
