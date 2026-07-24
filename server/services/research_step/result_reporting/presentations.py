@@ -85,8 +85,8 @@ def _obligation_presentations(
 
 
 def _evidence_presentation(row: dict[str, Any]) -> dict[str, str]:
-    alias = str(row.get("run_spec_alias_zh") or "既定运行范围")
-    label = f"{_analysis_alias(row.get('kind'))} 结果 · {alias}"
+    scope = _scope_alias(row.get("run_spec_alias_zh"))
+    label = f"{scope} · {_analysis_alias(row.get('kind'))} 结果"
     metrics = _summary_metrics(row)
     summary = "；".join(
         f"{_short_metric_label(metric)} {value}" for metric, value in metrics
@@ -132,3 +132,12 @@ def _analysis_alias(value: Any) -> str:
         "factor_evaluation": "因子评价",
         "robustness": "稳健性检验",
     }.get(str(value or ""), "研究检验")
+
+
+def _scope_alias(value: Any) -> str:
+    alias = str(value or "")
+    if "夜盘" in alias:
+        return "夜盘"
+    if "日盘" in alias:
+        return "日盘"
+    return "既定运行范围"

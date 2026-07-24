@@ -1,3 +1,8 @@
+import sqlite3
+
+from server.services.research_step.result_reporting.presentations import (
+    result_presentations,
+)
 from server.services.research_step.result_reporting.projection import (
     build_result_report_projection,
 )
@@ -131,10 +136,33 @@ def test_projection_reports_authoritative_obligation_delta():
     links = value["local_report_items"][1]["links"]
     assert next(
         item for item in links if item["kind"] == "evidence"
-    )["label"] == "日盘截面 IC 结果 · IC 均值 0.031；t 统计量 2.1"
+    )["label"] == "日盘截面 IC 结果"
     assert next(
         item for item in links if item["kind"] == "obligation"
     )["label"] == "样本内截面 IC 是否提供可复现的预测信息？"
+
+
+def test_evidence_chip_label_stays_bounded_with_long_factor_alias():
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    presentation = result_presentations(
+        connection,
+        instance_id="instance-1",
+        branch_id="branch-1",
+        rows=[{
+            **_row(),
+            "evidence_ref": "evidence:" + "a" * 64,
+            "run_spec_alias_zh": (
+                "截面 IC · 夜盘 · " + "超长因子参数说明" * 100
+            ),
+        }],
+        receipt=None,
+    )["evidence"]["evidence:" + "a" * 64]
+
+    assert presentation["alias_zh"] == "夜盘 · 截面 IC 结果"
+    assert len(presentation["alias_zh"].encode("utf-8")) <= 160
+    assert "IC 均值 0.031" in presentation["summary_zh"]
+    assert "t 统计量 2.1" in presentation["summary_zh"]
 
 
 def test_projection_keeps_bounded_backtest_group_metrics():

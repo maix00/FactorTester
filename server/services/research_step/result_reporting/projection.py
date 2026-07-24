@@ -117,11 +117,10 @@ def _audit_links(action, plan_hash, receipt, *, presentations):
     for index, ref in enumerate(action.get("output_evidence_refs") or [], 1):
         presentation = evidence_presentations.get(str(ref)) or {}
         label = str(presentation.get("alias_zh") or "结果证据")
-        summary = str(presentation.get("summary_zh") or "")
         values.append({
             "link_id": f"evidence-{index}", "kind": "evidence",
             "target_ref": str(ref),
-            "label": f"{label} · {summary}"[:160] if summary else label[:160],
+            "label": label,
         })
     obligation_ids = (
         [
