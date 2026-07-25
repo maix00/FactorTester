@@ -20,7 +20,12 @@ from typing import Any
 from uuid import uuid4
 
 from script.release.assets import build_installer_dmg, embed_client_runtime
-from script.release.build import REPO, _sign_embedded_app, _validate_source_checkout
+from script.release.build import (
+    REPO,
+    _sign_embedded_app,
+    _validate_source_checkout,
+    validate_embedded_sparkle_key,
+)
 from script.release.sparkle import (
     generate_sparkle_appcast,
     validate_sparkle_appcast,
@@ -121,6 +126,7 @@ def release_client(
         source = REPO / "apple/build/Build/Products/Release/FTClient.app"
         app = staging / "FTClient.app"
         shutil.copytree(source, app, symlinks=True)
+        validate_embedded_sparkle_key(app, expected=sparkle_public_key)
         embed_client_runtime(
             REPO,
             app,

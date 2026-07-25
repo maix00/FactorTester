@@ -40,6 +40,7 @@ def build_release(
         raise ValueError(f"macOS application is incomplete: {source_app}")
     with (source_app / "Contents" / "Info.plist").open("rb") as stream:
         app_identity = plistlib.load(stream)
+    validate_embedded_sparkle_key(source_app)
     if app_identity.get("CFBundleShortVersionString") != version:
         raise ValueError("release version does not match the macOS app")
     build = str(app_identity.get("CFBundleVersion") or "")
@@ -58,6 +59,30 @@ def build_release(
     dmg = build_installer_dmg(app, output / "FactorTester-Client.dmg")
     shutil.rmtree(output / ".staging")
     return dmg
+
+
+def validate_embedded_sparkle_key(
+    app: Path,
+    *,
+    expected: str | None = None,
+) -> None:
+    """Reject an appcast-incompatible bundle before it can be published.
+
+    Sparkle reads ``SUPublicEDKey`` from the installed app.  A missing or
+    empty value makes the client fail its update check even when the server
+    appcast is valid, so this is a release invariant rather than a runtime
+    warning.
+    """
+    info_path = app / "Contents" / "Info.plist"
+    if not info_path.is_file():
+        raise ValueError(f"macOS application is missing Info.plist: {app}")
+    with info_path.open("rb") as stream:
+        info = plistlib.load(stream)
+    actual = str(info.get("SUPublicEDKey") or "").strip()
+    if not actual:
+        raise ValueError("release app embeds an empty SUPublicEDKey")
+    if expected is not None and actual != expected.strip():
+        raise ValueError("release app embeds a different SUPublicEDKey")
 
 
 def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:

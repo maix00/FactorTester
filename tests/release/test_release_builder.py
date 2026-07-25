@@ -16,7 +16,7 @@ from script.release.assets import (
 )
 from script.release import build as release_build
 from script.release import embed_runtime as runtime_refresh
-from script.release.build import build_release
+from script.release.build import build_release, validate_embedded_sparkle_key
 from script.release.manifest import _kind, create_manifest
 from tools.cli.release.app_archive import install_macos_app
 from tools.cli.release.contracts import validate_release_manifest
@@ -58,6 +58,31 @@ def test_manifest_builder_signs_explicit_assets(tmp_path: Path) -> None:
 
 def test_release_builder_requires_public_source_revision() -> None:
     assert "source_revision" in build_release.__annotations__
+
+
+def test_release_builder_rejects_missing_sparkle_public_key(tmp_path: Path) -> None:
+    app = tmp_path / "FTClient.app"
+    info = app / "Contents"
+    info.mkdir(parents=True)
+    (info / "Info.plist").write_bytes(
+        plistlib.dumps({"CFBundleIdentifier": "com.example.FTClient"})
+    )
+    with pytest.raises(ValueError, match="empty SUPublicEDKey"):
+        validate_embedded_sparkle_key(app)
+
+
+def test_release_builder_checks_the_expected_sparkle_public_key(
+    tmp_path: Path,
+) -> None:
+    app = tmp_path / "FTClient.app"
+    info = app / "Contents"
+    info.mkdir(parents=True)
+    (info / "Info.plist").write_bytes(
+        plistlib.dumps({"SUPublicEDKey": "trusted-key"})
+    )
+    validate_embedded_sparkle_key(app, expected="trusted-key")
+    with pytest.raises(ValueError, match="different SUPublicEDKey"):
+        validate_embedded_sparkle_key(app, expected="other-key")
 
 
 def test_local_build_script_uses_installed_app_identity() -> None:
@@ -216,6 +241,7 @@ def test_release_builder_exposes_only_one_dmg(
         plistlib.dump({
             "CFBundleShortVersionString": "0.2.0",
             "CFBundleVersion": "4",
+            "SUPublicEDKey": "test-key",
         }, stream)
     monkeypatch.setattr(release_build, "REPO", repo)
     monkeypatch.setattr(
@@ -352,6 +378,7 @@ def test_release_builder_rejects_app_version_or_revision_reuse_inputs(
         plistlib.dump({
             "CFBundleShortVersionString": "0.2.0",
             "CFBundleVersion": "4",
+            "SUPublicEDKey": "test-key",
         }, stream)
     monkeypatch.setattr(release_build, "REPO", repo)
     monkeypatch.setattr(
