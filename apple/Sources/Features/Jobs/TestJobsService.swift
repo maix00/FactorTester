@@ -253,11 +253,15 @@ final class TestJobsService {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let archive = root.appendingPathComponent(".job-\(jobID)-artifacts.zip")
         try? FileManager.default.removeItem(at: archive)
+        // Remove the ZIP left by the previous client once a new extraction
+        // succeeds; the task directory should contain the usable files only.
+        let legacyArchive = root.appendingPathComponent("job-\(jobID)-artifacts.zip")
         try data.write(to: archive, options: .atomic)
 #if os(macOS)
         do {
             try extractArchive(archive, into: root)
             try FileManager.default.removeItem(at: archive)
+            try? FileManager.default.removeItem(at: legacyArchive)
         } catch {
             // Keep the temporary archive when extraction fails so the user can
             // recover it instead of silently losing the downloaded bytes.
