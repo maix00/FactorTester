@@ -94,6 +94,16 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     ).read_bytes() == b"cached executable"
 
 
+def test_runtime_receipt_rejects_short_source_revision(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="full 40-character Git revision"):
+        assets.embed_client_runtime(
+            tmp_path / "repo",
+            tmp_path / "FTClient.app",
+            version="bundle-b1-rshort",
+            source_revision="fb35e13c",
+        )
+
+
 def test_beta_publish_writes_digest_asset_before_atomic_manifest(
     tmp_path: Path,
 ) -> None:

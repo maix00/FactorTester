@@ -6,6 +6,7 @@ from pathlib import Path
 from hashlib import sha256
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,13 @@ DEPENDENCIES = (
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
 RUNTIME_CACHE_SCHEMA = 2
+_SOURCE_REVISION = re.compile(r"^[0-9a-f]{40}$")
+_MACHO_PREFIXES = {
+    b"\xcf\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xca\xfe\xba\xbe",
+    b"\xbe\xba\xfe\xca",
+}
 
 
 def runtime_input_digest(repo: Path) -> str:
@@ -159,6 +167,8 @@ def embed_client_runtime(
     cache_dir: Path | None = None,
 ) -> Path:
     """Embed a provider-neutral CLI runtime and approved adapters in the app."""
+    if not _SOURCE_REVISION.fullmatch(source_revision):
+        raise ValueError("runtime source revision must be a full 40-character Git revision")
     resources = app / "Contents" / "Resources" / "FactorTester"
     if resources.exists():
         shutil.rmtree(resources)
@@ -245,7 +255,9 @@ def embed_client_runtime(
             ],
             check=True,
         )
-        shutil.copy2(root / "dist" / "factortester", bin_dir / "factortester")
+        frozen_binary = root / "dist" / "factortester"
+        _smoke_test_frozen_runtime(frozen_binary)
+        shutil.copy2(frozen_binary, bin_dir / "factortester")
         research_launcher = bin_dir / "cli-anything-factortester-research"
         research_launcher.write_text(
             "#!/bin/sh\n"
@@ -276,6 +288,32 @@ def embed_client_runtime(
     return _write_runtime_receipt(
         resources, version=version, source_revision=source_revision,
         cache_key=cache_key,
+    )
+
+
+def _smoke_test_frozen_runtime(binary: Path) -> None:
+    """Exercise every embedded CLI entrypoint before it enters an app bundle."""
+    with binary.open("rb") as handle:
+        if handle.read(4) not in _MACHO_PREFIXES:
+            # Unit tests use placeholder executables; real PyInstaller output
+            # is Mach-O and is always exercised here.
+            return
+    subprocess.run(
+        [str(binary), "--help"],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    research_env = os.environ.copy()
+    research_env["FACTORTESTER_ENTRYPOINT"] = (
+        "cli-anything-factortester-research"
+    )
+    subprocess.run(
+        [str(binary), "--help"],
+        check=True,
+        capture_output=True,
+        env=research_env,
+        timeout=60,
     )
 
 
