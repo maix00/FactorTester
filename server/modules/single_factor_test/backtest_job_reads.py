@@ -101,6 +101,34 @@ def _submission_context(job) -> dict[str, object]:
     }
 
 
+def _public_job_spec(job) -> dict[str, object]:
+    """Return the stored spec without credentials/internal owner markers."""
+    spec = dict(job.job_spec) if isinstance(job.job_spec, dict) else {}
+    for key in ("run_token", "_owner", "password", "secret", "api_key"):
+        spec.pop(key, None)
+    return spec
+
+
+def _compatibility(job) -> dict[str, object]:
+    run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
+    version = run_spec.get("run_spec_version") if isinstance(run_spec, dict) else None
+    missing = [
+        field for field, value in (
+            ("job_spec", job.job_spec),
+            ("execution_plan", job.execution_plan),
+            ("result_summary", job.result_summary),
+        ) if value is None or value == {}
+    ]
+    return {
+        "source": "research_jobs",
+        "stored_format": str(version or "legacy-read-through"),
+        "migration": "read-through",
+        "original_fields_available": True,
+        "missing_fields": missing,
+        "note": "历史任务保留原始 job_spec；当前接口只对外隐藏凭证字段并补齐兼容投影。",
+    }
+
+
 def _list_research_binding(job_repository, job, owner: str) -> dict[str, str]:
     binding = job_research_binding(job)
     detail = job_repository.load_detail(job.job_id, owner=owner)
@@ -156,15 +184,31 @@ def get_test_job(job_id: str):
     if error:
         return error
     job = detail["job"]
-    return jsonify({
+    try:
+        declarations = output_declarations(job.job_spec.get("output_requests") or ())
+    except Exception as exc:
+        declarations = []
+        declaration_error = f"{type(exc).__name__}: {exc}"
+    else:
+        declaration_error = None
+    try:
+        evidence = job_evidence(detail)
+    except Exception as exc:
+        evidence = None
+        evidence_error = f"{type(exc).__name__}: {exc}"
+    else:
+        evidence_error = None
+    payload = {
         "success": True,
         **job.summary(pinned=detail["pinned"]),
         "execution_plan": job.execution_plan,
+        "job_spec": _public_job_spec(job),
+        "compatibility": _compatibility(job),
         "result_summary": job.result_summary,
         "error": job.error,
         "run_spec_hash": job.run_spec_hash,
         "output_requests": list(job.job_spec.get("output_requests") or ()),
-        "output_declarations": output_declarations(job.job_spec.get("output_requests") or ()),
+        "output_declarations": declarations,
         "configuration": (
             job.job_spec.get("run_spec", {}).get("configuration")
             if isinstance(job.job_spec.get("run_spec"), dict)
@@ -176,9 +220,13 @@ def get_test_job(job_id: str):
             | (detail.get("graph_binding") or {})
         ),
         "submission_context": _submission_context(job),
-        "evidence": job_evidence(detail),
+        "evidence": evidence,
         **job_urls(job.job_id),
-    })
+    }
+    warnings = [item for item in (declaration_error, evidence_error) if item]
+    if warnings:
+        payload["detail_warning"] = "；".join(warnings)
+    return jsonify(payload)
 
 
 @sft_bp.get("/api/jobs/<job_id>/stream")
@@ -269,13 +317,23 @@ def get_test_job_result(job_id: str):
     if error:
         return error
     job = detail["job"]
+    try:
+        evidence = job_evidence(detail)
+    except Exception as exc:
+        evidence = None
+        evidence_warning = f"{type(exc).__name__}: {exc}"
+    else:
+        evidence_warning = None
     base = {
         "job_id": job.job_id,
         "kind": job.kind,
         "run_id": job.run_id,
         "status": job.status.value,
-        "evidence": job_evidence(detail),
+        "evidence": evidence,
+        "compatibility": _compatibility(job),
     }
+    if evidence_warning:
+        base["detail_warning"] = evidence_warning
     if job.status is JobStatus.SUCCEEDED:
         return jsonify({
             "success": True,

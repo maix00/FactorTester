@@ -36,6 +36,7 @@ struct LoginView: View {
                         Task { await submit() }
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     .disabled(
                         session.isWorking || username.isEmpty || password.isEmpty
                     )

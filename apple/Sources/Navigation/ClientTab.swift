@@ -12,6 +12,7 @@ enum ClientTabContent {
     case account
     case settings
     case manager
+    case jobs
 }
 
 struct ClientTab: Identifiable {
@@ -64,6 +65,13 @@ struct ClientTab: Identifiable {
         title: "研究",
         systemImage: "chart.xyaxis.line",
         content: .research
+    )
+
+    static let jobs = ClientTab(
+        id: "jobs",
+        title: "测试任务",
+        systemImage: "checklist",
+        content: .jobs
     )
 
     static func workPackage(_ item: ResearchDirectoryItem) -> ClientTab {
@@ -130,7 +138,7 @@ struct ClientTab: Identifiable {
 
     var isPinnedLauncher: Bool {
         [
-            "home", "research", "web:factor-library", "web:products",
+            "home", "research", "jobs", "web:factor-library", "web:products",
             "profiles", "account", "settings",
         ].contains(id)
     }

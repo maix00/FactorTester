@@ -12,6 +12,7 @@ struct ClientSidebar: View {
             Section("功能入口") {
                 launcher(.home)
                 launcher(.research)
+                launcher(.jobs)
                 launcher(.factorLibrary)
                 launcher(.products)
                 launcher(.profiles)

@@ -72,10 +72,23 @@ def require_job(job_id: str):
 
 
 def require_job_detail(job_id: str):
-    detail = repository().load_detail(
-        job_id,
-        owner=require_user(),
-    )
+    try:
+        detail = repository().load_detail(
+            job_id,
+            owner=require_user(),
+        )
+    except Exception as exc:
+        # Historical rows can contain optional data written by older clients.
+        # Return JSON so the Swift client can keep the list row open and show
+        # the actual server-side reason instead of crashing on an HTML 500.
+        return None, (
+            jsonify({
+                "success": False,
+                "error": "任务详情读取失败",
+                "detail": f"{type(exc).__name__}: {exc}",
+            }),
+            500,
+        )
     if detail is not None:
         error = _port_error(detail["job"])
         if error:

@@ -47,11 +47,37 @@ final class APIClient: NSObject {
             req.httpBody = try JSONSerialization.data(withJSONObject: json)
         }
         do {
-            let (data, _) = try await session.data(for: req)
+            let (data, response) = try await session.data(for: req)
+            guard let http = response as? HTTPURLResponse else {
+                throw APIError.transport("服务器没有返回有效的 HTTP 响应")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let detail = Self.responseMessage(data) ?? "HTTP \(http.statusCode)"
+                if http.statusCode == 401 || http.statusCode == 403 {
+                    throw APIError.unauthorized(detail)
+                }
+                throw APIError.server("HTTP \(http.statusCode)：\(detail)")
+            }
             return data
+        } catch let error as APIError {
+            throw error
         } catch {
             throw APIError.transport(error.localizedDescription)
         }
+    }
+
+    private static func responseMessage(_ data: Data) -> String? {
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for key in ["error", "message", "detail"] {
+                if let value = object[key] as? String, !value.isEmpty {
+                    return value
+                }
+            }
+        }
+        guard let text = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return nil }
+        return String(text.prefix(800))
     }
 
     // ── 认证 ──────────────────────────────────────────────────────────────

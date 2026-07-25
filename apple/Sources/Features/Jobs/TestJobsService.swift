@@ -1,5 +1,15 @@
 import Foundation
 
+struct TestJobsRequestError: LocalizedError {
+    let statusCode: Int?
+    let responseText: String
+
+    var errorDescription: String? {
+        if let statusCode { return "任务服务器返回错误（HTTP \(statusCode)）：\(responseText)" }
+        return responseText
+    }
+}
+
 struct TestJob: Identifiable, Hashable {
     let id: String
     let kind: String
@@ -41,7 +51,6 @@ struct TestJobDetail {
     let chartPoints: [TestJobChartPoint]
     let priceResultData: Data?
     let artifacts: [TestJobArtifact]
-    let missingInformation: [String]
 }
 
 struct TestJobChartPoint: Identifiable {
@@ -85,8 +94,13 @@ final class TestJobsService {
         fallbackJob: TestJob? = nil
     ) async throws -> TestJobDetail {
         let encoded = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
-        let detail = try await request(path: "/api/jobs/\(encoded)", port: port)
-        var missingInformation: [String] = []
+        let detail: [String: Any]
+        do {
+            detail = try await request(path: "/api/jobs/\(encoded)", port: port)
+        } catch {
+            guard fallbackJob != nil else { throw error }
+            detail = [:]
+        }
         let artifacts: [String: Any]
         do {
             artifacts = try await request(path: "/api/jobs/\(encoded)/artifacts", port: port)
@@ -94,7 +108,6 @@ final class TestJobsService {
             // Older jobs may not have retained artifact metadata.  The job
             // itself is still useful and must remain openable.
             artifacts = ["artifacts": []]
-            missingInformation.append("生成物列表不可用（旧任务可能未保留生成物）")
         }
         let result: Any?
         do {
@@ -102,10 +115,6 @@ final class TestJobsService {
             result = resultJSON["result"] ?? detail["result_summary"]
         } catch {
             result = detail["result_summary"]
-            missingInformation.append("结果明细不可用，以下显示任务保存的结果摘要")
-        }
-        if result == nil {
-            missingInformation.append("任务没有保存结果数据")
         }
         let rows = previewRows(result)
         let job = makeJob(detail, fallback: fallbackJob ?? TestJob(
@@ -131,7 +140,6 @@ final class TestJobsService {
             chartPoints: chartPoints(rows),
             priceResultData: result.flatMap { try? JSONSerialization.data(withJSONObject: $0) },
             artifacts: (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact),
-            missingInformation: missingInformation
         )
     }
 
@@ -159,17 +167,26 @@ final class TestJobsService {
     private func request(path: String, method: String = "GET", port: Int? = nil) async throws -> [String: Any] {
         let data = try await requestData(path: path, method: method, port: port)
         guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw NSError(domain: "TestJobs", code: 1, userInfo: [NSLocalizedDescriptionKey: "服务器返回格式无效"])
+            throw TestJobsRequestError(statusCode: nil, responseText: "服务器返回格式无效")
         }
         if let success = value["success"] as? Bool, !success {
-            throw NSError(domain: "TestJobs", code: 2, userInfo: [NSLocalizedDescriptionKey: value["error"] as? String ?? "任务请求失败"])
+            let message = value["error"] as? String
+                ?? value["message"] as? String
+                ?? value["detail"] as? String
+                ?? "任务请求失败"
+            let detail = value["detail"] as? String
+            let responseText = detail.map { message == $0 ? message : "\(message)：\($0)" } ?? message
+            throw TestJobsRequestError(
+                statusCode: nil,
+                responseText: responseText
+            )
         }
         return value
     }
 
     private func requestData(path: String, method: String = "GET", port: Int? = nil) async throws -> Data {
         guard var url = ServerConfig.shared.url(forPath: path) else {
-            throw NSError(domain: "TestJobs", code: 3, userInfo: [NSLocalizedDescriptionKey: "尚未配置服务器"])
+            throw TestJobsRequestError(statusCode: nil, responseText: "尚未配置服务器")
         }
         if let port, port > 0, port != Int(ServerConfig.shared.port) {
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -182,10 +199,27 @@ final class TestJobsService {
         request.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
         request.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw NSError(domain: "TestJobs", code: 4, userInfo: [NSLocalizedDescriptionKey: "任务服务器返回错误"])
+        guard let http = response as? HTTPURLResponse else {
+            throw TestJobsRequestError(statusCode: nil, responseText: "服务器没有返回有效的 HTTP 响应")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw TestJobsRequestError(
+                statusCode: http.statusCode,
+                responseText: Self.responseText(data) ?? "HTTP \(http.statusCode)"
+            )
         }
         return data
+    }
+
+    private static func responseText(_ data: Data) -> String? {
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for key in ["error", "message", "detail"] {
+                if let value = object[key] as? String, !value.isEmpty { return value }
+            }
+        }
+        guard let text = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return String(text.prefix(2_000))
     }
 
     private func makeJob(_ value: [String: Any], fallback: TestJob? = nil) -> TestJob {
@@ -226,10 +260,13 @@ final class TestJobsService {
     }
 
     private func prettyJSON(_ value: Any?) -> String {
-        guard let value else { return "—" }
+        guard let value else { return "" }
         guard JSONSerialization.isValidJSONObject(value),
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
               let text = String(data: data, encoding: .utf8) else { return String(describing: value) }
+        if text.count > 20_000 {
+            return String(text.prefix(20_000)) + "\n…（内容过长，已截断；请下载生成物查看完整内容）"
+        }
         return text
     }
 
@@ -237,7 +274,8 @@ final class TestJobsService {
         let candidates = (value as? [String: Any])?.values.compactMap { $0 as? [[String: Any]] } ?? []
         return (candidates.first ?? []).prefix(100).map { row in
             row.reduce(into: [String: String]()) { result, pair in
-                result[pair.key] = String(describing: pair.value)
+                let value = String(describing: pair.value)
+                result[pair.key] = value.count > 500 ? String(value.prefix(500)) + "…" : value
             }
         }
     }
@@ -246,8 +284,8 @@ final class TestJobsService {
         let key = rows.first?.keys.first(where: { $0.lowercased().contains("equity") || $0.lowercased().contains("return") })
         guard let key else { return [] }
         return rows.enumerated().compactMap { index, row in
-            guard let value = Double(row[key] ?? "") else { return nil }
-            return TestJobChartPoint(id: index, label: row["timestamp"] ?? "(index + 1)", value: value)
+            guard let value = Double(row[key] ?? ""), value.isFinite else { return nil }
+            return TestJobChartPoint(id: index, label: row["timestamp"] ?? String(index + 1), value: value)
         }
     }
 }

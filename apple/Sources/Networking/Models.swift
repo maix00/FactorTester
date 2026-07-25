@@ -11,6 +11,21 @@ struct UserInfo: Codable, Equatable {
     var isDeveloper: Bool
     var keepLogin: Bool
 
+    init(
+        username: String?, alias: String? = nil, role: String? = nil,
+        organizationId: String? = nil, organizationName: String? = nil,
+        isAdmin: Bool = false, isDeveloper: Bool = false, keepLogin: Bool = true
+    ) {
+        self.username = username
+        self.alias = alias
+        self.role = role
+        self.organizationId = organizationId
+        self.organizationName = organizationName
+        self.isAdmin = isAdmin
+        self.isDeveloper = isDeveloper
+        self.keepLogin = keepLogin
+    }
+
     enum CodingKeys: String, CodingKey {
         case username, alias, role
         case organizationId = "organization_id"
@@ -72,6 +87,7 @@ struct ActionResponse: Codable {
 
 enum APIError: LocalizedError {
     case notConfigured
+    case unauthorized(String)
     case server(String)
     case transport(String)
 
@@ -79,6 +95,7 @@ enum APIError: LocalizedError {
         switch self {
         case .notConfigured:
             return L10n.text("尚未配置服务器地址，请先在设置中填写。")
+        case .unauthorized(let m): return m
         case .server(let m): return m
         case .transport(let m): return m
         }

@@ -14,7 +14,14 @@ from ..states import JobStatus
 
 
 def _loads(value: str | None, default: Any = None) -> Any:
-    return orjson.loads(value) if value else default
+    if not value:
+        return default
+    try:
+        return orjson.loads(value)
+    except (orjson.JSONDecodeError, TypeError, ValueError):
+        # A legacy job must remain inspectable even when one optional JSON
+        # column was truncated or written by an older schema.
+        return default
 
 
 class JobQueryImplementation:
@@ -269,7 +276,11 @@ class JobQueryImplementation:
             service_port=int(row["service_port"] or 0),
             source_revision=str(row["source_revision"] or ""),
             runner_path=str(row["runner_path"] or ""),
-            job_spec=dict(_loads(row["job_spec_json"], {})),
+            job_spec=(
+                _loads(row["job_spec_json"], {})
+                if isinstance(_loads(row["job_spec_json"], {}), dict)
+                else {}
+            ),
             job_spec_hash=str(row["job_spec_hash"]),
             run_spec_hash=str(row["run_spec_hash"] or ""),
             worker_pid=row["worker_pid"],
@@ -281,9 +292,21 @@ class JobQueryImplementation:
             ),
             execution_plan=_loads(row["execution_plan_json"]),
             execution_plan_hash=str(row["execution_plan_hash"] or ""),
-            plan_notices=list(_loads(row["plan_notices_json"], [])),
-            result_summary=_loads(row["result_summary_json"]),
-            error=_loads(row["error_json"]),
+            plan_notices=(
+                _loads(row["plan_notices_json"], [])
+                if isinstance(_loads(row["plan_notices_json"], []), list)
+                else []
+            ),
+            result_summary=(
+                _loads(row["result_summary_json"])
+                if isinstance(_loads(row["result_summary_json"]), dict)
+                else None
+            ),
+            error=(
+                _loads(row["error_json"])
+                if isinstance(_loads(row["error_json"]), dict)
+                else None
+            ),
             terminal_assurance=TerminalAssuranceSummary.from_dict(
                 _loads(row["terminal_assurance_json"])
             ),

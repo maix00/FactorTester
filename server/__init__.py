@@ -10,6 +10,7 @@ import sys, os
 from datetime import timedelta
 from flask import Flask
 from server.services.sqlite_web_mount import mount_sqlite_web
+from server.services.session_secret import load_session_secret
 
 
 def create_app() -> Flask:
@@ -30,11 +31,8 @@ def create_app() -> Flask:
         static_folder=os.path.join(root, 'static'),
     )
 
-    # 每次生成新的密钥（不持久化）
-    secret_key = os.environ.get('FLASK_SECRET_KEY')
-    if not secret_key:
-        secret_key = os.urandom(24)
-    app.secret_key = secret_key
+    # 持久化 secret，避免服务器重启或客户端更新导致所有会话失效。
+    app.secret_key = load_session_secret()
     app.permanent_session_lifetime = timedelta(days=30)
     app.json.ensure_ascii = False
 

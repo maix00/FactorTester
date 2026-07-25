@@ -34,15 +34,21 @@ class JobDetailQueryImplementation:
         if record is None:
             return None
         trial_binding = _trial_binding(row)
+        try:
+            active_artifacts = orjson.loads(
+                row["detail_artifacts_json"] or "[]"
+            )
+        except (orjson.JSONDecodeError, TypeError, ValueError):
+            active_artifacts = []
+        if not isinstance(active_artifacts, list):
+            active_artifacts = []
         return {
             "job": record,
             "pinned": bool(row["detail_pinned"]),
             "trial_binding": trial_binding,
             "graph_binding": _graph_binding(row, trial_binding),
             "identity_refs": _identity_refs(row, trial_binding),
-            "active_artifacts": orjson.loads(
-                row["detail_artifacts_json"] or "[]"
-            ),
+            "active_artifacts": active_artifacts,
         }
 
 

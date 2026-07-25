@@ -114,6 +114,8 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     assert not target.exists()
     assert job.status_code == 200
     assert job.get_json()["status"] == "succeeded"
+    assert job.get_json()["compatibility"]["source"] == "research_jobs"
+    assert job.get_json()["job_spec"]["run_spec"]["workspace_id"] == "workspace-1"
     assert job.get_json()["has_terminal_assurance"] is True
     assert "terminal_assurance" not in job.get_json()
     assert (

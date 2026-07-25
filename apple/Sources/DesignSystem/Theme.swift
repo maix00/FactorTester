@@ -26,3 +26,33 @@ enum Theme {
         #endif
     }
 }
+
+struct SettingsPageHeader: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.largeTitle.weight(.semibold))
+            Text(subtitle).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct SettingsCard<Content: View>: View {
+    let title: String?
+    @ViewBuilder let content: () -> Content
+
+    init(_ title: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.content = content
+    }
+
+    var body: some View {
+        GroupBox {
+            content().padding(8)
+        } label: {
+            if let title { Text(title).font(.headline) }
+        }
+    }
+}

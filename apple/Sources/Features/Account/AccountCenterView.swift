@@ -16,7 +16,7 @@ struct AccountCenterView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text(section.title).font(.largeTitle.weight(.semibold))
+                    SettingsPageHeader(title: section.title, subtitle: section.subtitle)
                     content
                 }
                 .padding(24)
@@ -87,6 +87,15 @@ private enum AccountSection: String, CaseIterable, Identifiable {
         case .security: return "lock.shield"
         case .productGroups: return "shippingbox"
         case .factorGrants: return "books.vertical"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .account: return "查看当前身份、机构与登录状态。"
+        case .security: return "修改密码并管理登录安全。"
+        case .productGroups: return "管理研究与回测可用的产品范围。"
+        case .factorGrants: return "管理个人因子库与 Profile 初始化授权。"
         }
     }
 }

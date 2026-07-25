@@ -11,7 +11,10 @@ struct PersonalWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                header
+                SettingsPageHeader(
+                    title: "个人工作区",
+                    subtitle: "一个用户目录、一份 canonical 因子库，以及按 Profile 隔离的研究现场。"
+                )
                 workspaceLayoutSection
                 Divider()
                 reportAccessSection
@@ -28,14 +31,6 @@ struct PersonalWorkspaceView: View {
         .task {
             guard authorizedRoot != nil else { return }
             await controller.refresh(principal: session.user?.username ?? "")
-        }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("个人工作区").font(.largeTitle.weight(.semibold))
-            Text("一个用户目录、一份 canonical 因子库，以及按 Profile 隔离的研究现场。")
-                .foregroundStyle(.secondary)
         }
     }
 

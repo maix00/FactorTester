@@ -160,18 +160,6 @@ struct TestJobsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("测试任务详情").font(.title2.bold())
                     Text("\(detail.job.id) · \(statusLabel(detail.job.status)) · 端口 \(detail.job.port) · Profile \(detail.job.profile)").foregroundStyle(.secondary)
-                    if !detail.missingInformation.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("部分历史信息不可用").font(.headline)
-                            ForEach(detail.missingInformation, id: \.self) { message in
-                                Label(message, systemImage: "info.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(10)
-                        .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                    }
                     HStack {
                         Button("刷新详情") { Task { await controller.select(detail.job) } }
                         Button("清空生成物", role: .destructive) { Task { await controller.clear(detail.job) } }
@@ -235,7 +223,7 @@ struct TestJobsView: View {
                 .frame(height: 180)
             }
             if let first = detail.previewRows.first {
-                let columns = first.keys.sorted()
+                let columns = first.keys.sorted().prefix(24)
                 ScrollView(.horizontal) {
                     Grid(horizontalSpacing: 12, verticalSpacing: 6) {
                         GridRow { ForEach(columns, id: \.self) { Text($0).font(.caption.bold()) } }

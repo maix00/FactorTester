@@ -29,18 +29,46 @@ final class SessionStore: ObservableObject {
     var role: String? { user?.role }
 
     /// 启动 / 设置变更后刷新当前登录态。
-    func refresh() async {
+    @discardableResult
+    func refresh() async -> Bool {
         do {
-            user = try await api.me()
+            let refreshed = try await api.me()
+            user = refreshed
             if role == "super_admin" {
                 isManagerLoggedIn = (try? await managerAPI.restoreSession()) == true
             } else {
                 isManagerLoggedIn = false
             }
+            if !refreshed.isLoggedIn { isManagerLoggedIn = false }
+            return refreshed.isLoggedIn
+        } catch let error as APIError {
+            if case .unauthorized = error {
+                user = nil
+                isManagerLoggedIn = false
+            } else {
+                lastError = error.localizedDescription
+            }
+            return isLoggedIn
         } catch {
+            // 网络抖动、服务器升级或详情接口故障不应被解释成登出。
+            lastError = error.localizedDescription
+            return isLoggedIn
+        }
+    }
+
+    private func seedUser(from response: AuthResponse, fallbackUsername: String) {
+        user = UserInfo(
+            username: response.username ?? fallbackUsername,
+            alias: response.alias,
+            role: response.role,
+            isAdmin: response.isAdmin ?? false,
+            keepLogin: true
+        )
+    }
+
+    private func clearAuthentication() {
             user = nil
             isManagerLoggedIn = false
-        }
     }
 
     func login(username: String, password: String) async -> Bool {
@@ -52,6 +80,7 @@ final class SessionStore: ObservableObject {
                 password: password
             )
             if resp.success {
+                seedUser(from: resp, fallbackUsername: username)
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
                     username: username,
@@ -113,6 +142,7 @@ final class SessionStore: ObservableObject {
                 organizationId: organizationId
             )
             if resp.success {
+                seedUser(from: resp, fallbackUsername: username)
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
                     username: username,
@@ -136,12 +166,12 @@ final class SessionStore: ObservableObject {
         do {
             try await api.setKeepLogin(true)
         } catch {
-            user = nil
+            clearAuthentication()
             lastError = error.localizedDescription
             return false
         }
-        await refresh()
-        guard isLoggedIn else {
+        let refreshed = await refresh()
+        guard refreshed && isLoggedIn else {
             lastError = L10n.text("登录状态未能确认，请重新登录。")
             return false
         }
