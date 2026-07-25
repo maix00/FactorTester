@@ -494,6 +494,64 @@ def test_primary_branch_uses_fixed_port_8000(tmp_path, monkeypatch, branch) -> N
     assert result[0].port == 8000
 
 
+def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monkeypatch) -> None:
+    detached = tmp_path / "detached"
+    detached.mkdir()
+    porcelain = (
+        f"worktree {tmp_path}\n"
+        "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
+        "branch refs/heads/main\n\n"
+        f"worktree {detached}\n"
+        "HEAD 689e141e78c90d5cbb6d7b96e236919056db7525\n"
+        "detached\n\n"
+    )
+    commands = []
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: porcelain,
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command),
+    )
+    state = manager.ManagerState(tmp_path, "python")
+
+    removed = state.cleanup_detached_worktrees()
+
+    assert removed == [detached.resolve()]
+    assert commands[0][:4] == ["git", "worktree", "remove", "--force"]
+    assert commands[1] == ["git", "worktree", "prune", "--expire", "now"]
+
+
+def test_cleanup_detached_worktrees_leaves_missing_paths_to_prune(tmp_path, monkeypatch) -> None:
+    missing = tmp_path / "missing-detached"
+    porcelain = (
+        f"worktree {tmp_path}\n"
+        "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
+        "branch refs/heads/main\n\n"
+        f"worktree {missing}\n"
+        "HEAD 689e141e78c90d5cbb6d7b96e236919056db7525\n"
+        "detached\n\n"
+    )
+    commands = []
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: porcelain,
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command),
+    )
+    state = manager.ManagerState(tmp_path, "python")
+
+    assert state.cleanup_detached_worktrees() == []
+    assert commands == [["git", "worktree", "prune", "--expire", "now"]]
+
+
 def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkeypatch) -> None:
     (tmp_path / "start_server.py").write_text("", encoding="ascii")
     (tmp_path / "scripts").mkdir()

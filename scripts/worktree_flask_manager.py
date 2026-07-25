@@ -142,7 +142,7 @@ class ManagerState:
             raise RuntimeError("manager capability token is empty")
         return value
 
-    def worktrees(self) -> list[Worktree]:
+    def _worktree_entries(self) -> list[dict[str, str]]:
         out = subprocess.check_output(
             ["git", "worktree", "list", "--porcelain"],
             cwd=self.repo,
@@ -160,6 +160,52 @@ class ManagerState:
             cur[key] = value
         if cur:
             entries.append(cur)
+        return entries
+
+    def cleanup_detached_worktrees(self) -> list[Path]:
+        """Remove disposable detached worktrees and prune stale metadata."""
+        try:
+            entries = self._worktree_entries()
+        except (OSError, subprocess.CalledProcessError):
+            return []
+        removed: list[Path] = []
+        for entry in entries:
+            if entry.get("branch"):
+                continue
+            raw_path = entry.get("worktree")
+            if not raw_path:
+                continue
+            worktree_path = Path(raw_path).resolve()
+            if worktree_path == self.repo:
+                continue
+            bundle = self.processes.get(self.key(worktree_path))
+            if bundle and (
+                bundle.api.poll() is None or bundle.daemon.poll() is None
+            ):
+                continue
+            if worktree_path.exists():
+                subprocess.run(
+                    [
+                        "git", "worktree", "remove", "--force", "--",
+                        str(worktree_path),
+                    ],
+                    cwd=self.repo,
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                removed.append(worktree_path)
+        subprocess.run(
+            ["git", "worktree", "prune", "--expire", "now"],
+            cwd=self.repo,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return removed
+
+    def worktrees(self) -> list[Worktree]:
+        entries = self._worktree_entries()
 
         result: list[Worktree] = []
         for entry in entries:
@@ -891,6 +937,9 @@ def main() -> int:
     args = parser.parse_args()
 
     Handler.state = ManagerState(Path(args.repo), args.python)
+    removed = Handler.state.cleanup_detached_worktrees()
+    if removed:
+        print(f"Removed {len(removed)} detached worktree(s)")
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://localhost:{args.port}/"
     print(f"Worktree Flask manager running at {url}")
