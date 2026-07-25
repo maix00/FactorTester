@@ -39,6 +39,8 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert "ClientSidebar" in home
     assert "openTab: open" in home
     assert "approval" not in view.lower()
+    assert 'Window("FTClient", id: "main")' in app
+    assert "WindowGroup" in app
 
 
 def test_macos_info_plist_uses_project_version_settings() -> None:

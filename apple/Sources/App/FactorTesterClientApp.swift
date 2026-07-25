@@ -20,20 +20,26 @@ struct FactorTesterClientApp: App {
     @State private var runtimeActivationError: String?
 
     var body: some Scene {
-        WindowGroup {
-            if AppRuntimePolicy.shouldLoadUserState() {
-                productionRoot
-            } else {
-                Color.clear
-            }
-        }
         #if os(macOS)
+        Window("FTClient", id: "main") {
+            productionRoot
+        }
         .defaultSize(width: 1000, height: 720)
+        #else
+        WindowGroup {
+            productionRoot
+        }
         #endif
     }
 
     private var productionRoot: some View {
-        RootView()
+        Group {
+            if AppRuntimePolicy.shouldLoadUserState() {
+                RootView()
+            } else {
+                Color.clear
+            }
+        }
             .environmentObject(config)
             .environmentObject(managerConfig)
             .environmentObject(session)
