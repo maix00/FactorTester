@@ -42,6 +42,14 @@ def test_runtime_cache_key_ignores_swift_and_changes_for_cli(tmp_path: Path) -> 
     assert assets.runtime_input_digest(repo) != first
 
 
+def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
+    source = (Path(__file__).resolve().parents[2] / "script/release/assets.py").read_text()
+    assert "RUNTIME_CACHE_SCHEMA = 2" in source
+    assert "FACTORTESTER_ENTRYPOINT" in source
+    assert "research_launcher.write_text" in source
+    assert "shutil.copy2(\n            bin_dir / \"factortester\"" not in source
+
+
 def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     tmp_path: Path,
     monkeypatch,

@@ -150,14 +150,19 @@ def _verify_source_identity(path: Path) -> None:
     if not mode & stat.S_IXUSR:
         raise ValueError(f"bundle runtime command is not executable: {path.name}")
     with path.open("rb") as handle:
-        magic = handle.read(4)
-    if magic not in {
+        prefix = handle.read(4)
+    if prefix in {
         b"\xcf\xfa\xed\xfe",
         b"\xfe\xed\xfa\xcf",
         b"\xca\xfe\xba\xbe",
         b"\xbe\xba\xfe\xca",
     }:
-        raise ValueError(f"bundle runtime command is not Mach-O: {path.name}")
+        return
+    if prefix == b"#!":
+        return
+    raise ValueError(
+        f"bundle runtime command is neither Mach-O nor executable script: {path.name}"
+    )
 
 
 def _stage_commands(

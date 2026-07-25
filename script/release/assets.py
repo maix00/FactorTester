@@ -25,7 +25,7 @@ DEPENDENCIES = (
 )
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
-RUNTIME_CACHE_SCHEMA = 1
+RUNTIME_CACHE_SCHEMA = 2
 
 
 def runtime_input_digest(repo: Path) -> str:
@@ -207,9 +207,10 @@ def embed_client_runtime(
         node_binary = _nodejs_wheel_binary(environment)
         bootstrap = root / "factortester_runtime.py"
         bootstrap.write_text(
+            "import os\n"
             "from pathlib import Path\n"
             "import sys\n"
-            "entry = Path(sys.argv[0]).name\n"
+            "entry = os.environ.get(\"FACTORTESTER_ENTRYPOINT\", Path(sys.argv[0]).name)\n"
             "if entry == 'cli-anything-factortester-research':\n"
             "    from cli_anything.factortester_research.factortester_research_cli import cli\n"
             "else:\n"
@@ -244,10 +245,15 @@ def embed_client_runtime(
             check=True,
         )
         shutil.copy2(root / "dist" / "factortester", bin_dir / "factortester")
-        shutil.copy2(
-            bin_dir / "factortester",
-            bin_dir / "cli-anything-factortester-research",
+        research_launcher = bin_dir / "cli-anything-factortester-research"
+        research_launcher.write_text(
+            "#!/bin/sh\n"
+            "set -eu\n"
+            "script_dir=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n"
+            "FACTORTESTER_ENTRYPOINT=cli-anything-factortester-research \\\nexec \"$script_dir/factortester\" \"$@\"\n",
+            encoding="utf-8",
         )
+        research_launcher.chmod(0o755)
         subprocess.run(
             [
                 sys.executable,
