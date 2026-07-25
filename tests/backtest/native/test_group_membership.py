@@ -317,14 +317,15 @@ def test_precomputed_target_intents_match_event_membership_and_skip_event_sort(m
     assert set(event_ctx.get_for(GroupMembershipModule.target_weights, s_bottom)) == {products[0], products[1]}
 
 
-def test_precomputed_buy_and_hold_waits_for_first_non_empty_masked_target():
+def test_precomputed_incremental_buy_and_hold_waits_and_adds_masked_targets():
     products = [_product() for _ in range(4)]
-    idx = pd.date_range("2024-01-01 09:00", periods=3, freq="min")
+    idx = pd.date_range("2024-01-01 09:00", periods=4, freq="min")
     signal_table = pd.DataFrame(
         [
-            [0.0, 3.0, 2.0, 1.0],  # masked product not in top bucket
-            [3.0, 2.0, 1.0, 0.0],  # masked product enters top bucket
-            [0.0, 3.0, 2.0, 1.0],  # buy-and-hold must keep the established target
+            [0.0, 1.0, 3.0, 2.0],  # no masked product in top bucket
+            [3.0, 0.0, 2.0, 1.0],  # first masked product enters
+            [0.0, 1.0, 3.0, 2.0],  # first masked product remains held
+            [1.0, 3.0, 2.0, 0.0],  # second masked product enters later
         ],
         index=idx,
         columns=products,
@@ -336,13 +337,13 @@ def test_precomputed_buy_and_hold_waits_for_first_non_empty_masked_target():
         field_values={
             GroupMembershipModule.split_count: 2,
             GroupMembershipModule.group_index: 0,
-            GroupMembershipModule.position_policy: "buy_and_hold",
-            GroupMembershipModule.product_mask_names: (products[0].name,),
+            GroupMembershipModule.position_policy: "incremental_buy_and_hold_fixed_leverage",
+            GroupMembershipModule.product_mask_names: (products[0].name, products[1].name),
         },
     )
     account = BacktestRunState(strategy_configs={strategy: config})
     account.market_data_store.current_prices_table = pd.DataFrame(
-        {product: [10.0, 10.0, 10.0] for product in products},
+        {product: [10.0, 10.0, 10.0, 10.0] for product in products},
         index=idx,
     )
     account.factor_signal_store.put_precomputed_table("schedule", signal_table)
@@ -355,6 +356,9 @@ def test_precomputed_buy_and_hold_waits_for_first_non_empty_masked_target():
     assert table[idx[0]].weights == {}
     assert table[idx[1]].weights == {products[0]: pytest.approx(1.0)}
     assert table[idx[2]].weights == {products[0]: pytest.approx(1.0)}
+    assert table[idx[3]].weights == {
+        products[0]: pytest.approx(0.5), products[1]: pytest.approx(0.5),
+    }
 
 
 def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):

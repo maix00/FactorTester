@@ -11,7 +11,6 @@ from tools.testers.backtest.engines.native.fields import (
 )
 from tools.testers.backtest.modules.order_construction.build import construct_orders
 from tools.testers.backtest.modules.order_construction.diagnostics import (
-    existing_interval as _existing_untradable_target_skip_interval,
     record_untradable_target_skip as _record_untradable_target_skip,
 )
 from tools.testers.backtest.modules.order_construction.flows import (

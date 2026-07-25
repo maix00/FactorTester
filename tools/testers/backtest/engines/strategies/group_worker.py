@@ -47,11 +47,19 @@ def build_group_target_weight_payload(
     ):
         targets = {}
         previous = None
+        locked: set[int] = set()
         for row_index, timestamp in enumerate(timestamps[:-1]):
             current = membership[row_index, group_index]
             should_emit = previous is None or not np.array_equal(current, previous)
             if should_emit:
                 selected = np.flatnonzero(current)
+                if position_policy == "incremental_buy_and_hold_fixed_leverage":
+                    newcomers = set(selected) - locked
+                    if locked and not newcomers:
+                        previous = current
+                        continue
+                    locked.update(selected)
+                    selected = sorted(locked)
                 if len(selected):
                     weight = 1.0 / len(selected)
                     targets[timestamp.isoformat()] = {

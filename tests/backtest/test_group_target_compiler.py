@@ -59,6 +59,35 @@ def test_group_target_compiler_applies_per_strategy_policies_causally() -> None:
     assert set(hold["targets"][index[0].isoformat()].values()) == {0.5}
 
 
+def test_incremental_hold_waits_then_adds_new_members_without_releasing_old_ones() -> None:
+    index = pd.date_range("2026-01-01", periods=4, freq="D")
+    membership = np.asarray([
+        [[False, True, True]],
+        [[True, False, True]],
+        [[False, True, True]],
+        [[True, True, False]],
+    ])
+    payload = compile_group_target_payload(
+        timestamps=index,
+        instruments=("masked-a", "masked-b", "other"),
+        membership=membership,
+        prices=np.full((4, 3), 100.0),
+        strategy_configs=({
+            "strategy_id": "incremental",
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "incremental_buy_and_hold_fixed_leverage",
+        },),
+        initial_cash=1_000_000,
+    )
+
+    targets = payload["strategies"][0]["targets"]
+    assert targets[index[0].isoformat()] == {"masked-b": 0.5, "other": 0.5}
+    assert targets[index[1].isoformat()] == {"masked-a": 1 / 3, "masked-b": 1 / 3, "other": 1 / 3}
+    assert index[2].isoformat() not in targets
+    assert index[3].isoformat() not in targets
+
+
 def test_equal_margin_is_explicitly_distinct_from_equal_notional() -> None:
     index = pd.date_range("2026-01-01", periods=2, freq="D")
     membership = np.ones((2, 2, 2), dtype=bool)

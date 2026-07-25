@@ -30,9 +30,12 @@ def compute_group_target_weights(
     from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 
     config = state.config_for(strategy)
-    reuse = reuse_buy_and_hold_target(
-        config.get(GroupMembershipModule.position_policy, "rebalance_to_target"), established,
+    position_policy = config.get(
+        GroupMembershipModule.position_policy, "rebalance_to_target",
     )
+    reuse = reuse_buy_and_hold_target(position_policy, established)
+    if position_policy == "incremental_buy_and_hold_fixed_leverage":
+        reuse = None
     if reuse is not None:
         return reuse[0], last_membership, reuse[1]
     trigger = config.get(GroupMembershipModule.rebalance_trigger, "on_factor_signal")
@@ -74,6 +77,25 @@ def compute_group_target_weights(
     if mask:
         allowed = {str(name) for name in mask}
         members = frozenset(product for product in members if product_name(product) in allowed)
+    if position_policy == "incremental_buy_and_hold_fixed_leverage":
+        locked = frozenset(established or {})
+        newcomers = frozenset(product for product in members if product not in locked)
+        if established is None:
+            if not members:
+                return {}, members, "incremental_buy_and_hold_waiting_for_membership"
+            return (
+                allocate_weights(state, ctx, strategy, members),
+                members,
+                "incremental_buy_and_hold_initial_membership",
+            )
+        if not newcomers:
+            return established, locked, "incremental_buy_and_hold_established_target"
+        combined = frozenset(locked | set(newcomers))
+        return (
+            allocate_weights(state, ctx, strategy, combined),
+            combined,
+            "incremental_buy_and_hold_add_members",
+        )
     reuse = reuse_unchanged_membership_target(
         trigger, members, last_membership, established,
     )

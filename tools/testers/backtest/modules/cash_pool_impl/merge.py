@@ -17,11 +17,11 @@ def validate_margin_budget(config: CashPoolConfig, *, cash_pool_id: str) -> None
         return
     target = float(
         config.target_margin_utilization
-        if config.target_margin_utilization is not None else 0.80
+        if config.target_margin_utilization is not None else 0.40
     )
     maximum = float(
         config.max_margin_utilization
-        if config.max_margin_utilization is not None else 0.85
+        if config.max_margin_utilization is not None else 0.50
     )
     tolerance = float(
         config.margin_utilization_tolerance

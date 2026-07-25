@@ -6,6 +6,7 @@ from tools.testers.backtest.modules.runtime_info import (
     product_display,
     product_display_text,
     record_runtime_info,
+    runtime_interval_state,
 )
 
 
@@ -16,12 +17,9 @@ def record_untradable_target_skip(state, strategy, product, timestamp) -> None:
     reason = "缺少有效可交易价格或被可交易状态过滤"
     aggregation_key = f"{strategy_name}|{product_info['name']}|{reason}"
     ts_text = str(timestamp)
-    start, end, count, seen = existing_interval(state, aggregation_key)
-    start = min(start, ts_text) if start else ts_text
-    end = max(end, ts_text) if end else ts_text
-    if ts_text not in seen:
-        seen.add(ts_text)
-        count += 1
+    start, end, count, last_timestamp = runtime_interval_state(
+        state, "order_target_skipped_untradable", aggregation_key, ts_text,
+    )
     details = {
         "strategy": strategy_name,
         "product": product_info["name"],
@@ -31,7 +29,7 @@ def record_untradable_target_skip(state, strategy, product, timestamp) -> None:
         "end": end,
         "timestamp": end,
         "count": count,
-        "_seen_timestamps": sorted(seen),
+        "last_timestamp": last_timestamp,
     }
     record_runtime_info(
         state, code="order_target_skipped_untradable", type="订单",
@@ -43,31 +41,3 @@ def record_untradable_target_skip(state, strategy, product, timestamp) -> None:
         ),
         details=details, aggregation_key=aggregation_key,
     )
-
-
-def existing_interval(
-    state, aggregation_key: str,
-) -> tuple[str | None, str | None, int, set[str]]:
-    rows = getattr(state, "runtime_info_rows", None)
-    if not isinstance(rows, list):
-        return None, None, 0, set()
-    for row in rows:
-        if not (
-            isinstance(row, dict)
-            and row.get("code") == "order_target_skipped_untradable"
-            and row.get("aggregation_key") == aggregation_key
-        ):
-            continue
-        details = row.get("details") if isinstance(row.get("details"), dict) else {}
-        seen_raw = details.get("_seen_timestamps")
-        seen = (
-            {str(value) for value in seen_raw}
-            if isinstance(seen_raw, (list, tuple, set))
-            else ({str(details["start"])} if details.get("start") else set())
-        )
-        return (
-            str(details.get("start")) if details.get("start") else None,
-            str(details.get("end")) if details.get("end") else None,
-            int(details.get("count") or 0), seen,
-        )
-    return None, None, 0, set()

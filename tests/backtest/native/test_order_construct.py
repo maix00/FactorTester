@@ -223,6 +223,7 @@ def test_basic_size_order_aggregates_repeated_untradable_target_warnings():
 
     for timestamp in (
         pd.Timestamp("2024-01-01 09:01"),
+        pd.Timestamp("2024-01-01 09:01"),
         pd.Timestamp("2024-01-01 09:02"),
     ):
         ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), active_strategies=frozenset({s}))
@@ -240,6 +241,8 @@ def test_basic_size_order_aggregates_repeated_untradable_target_warnings():
     assert rows[0]["details"]["count"] == 2
     assert rows[0]["details"]["start"] == "2024-01-01 09:01:00"
     assert rows[0]["details"]["end"] == "2024-01-01 09:02:00"
+    assert rows[0]["details"]["last_timestamp"] == "2024-01-01 09:02:00"
+    assert "_seen_timestamps" not in rows[0]["details"]
     assert len(account.runtime_info_sink.events) == 1
 
 

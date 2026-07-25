@@ -19,7 +19,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
-        "position_policy", "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
+        "position_policy", "term_carry_strategy", "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
@@ -29,7 +29,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation",
-        "rebalance_trigger", "position_policy",
+        "rebalance_trigger", "position_policy", "term_carry_strategy",
         "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
@@ -110,8 +110,8 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
         "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
     }
-    assert index["defaults"]["target_margin_utilization"]["value"] == 0.80
-    assert index["defaults"]["max_margin_utilization"]["value"] == 0.85
+    assert index["defaults"]["target_margin_utilization"]["value"] == 0.40
+    assert index["defaults"]["max_margin_utilization"]["value"] == 0.50
     assert index["defaults"]["target_margin_utilization"]["visible_when"] == {
         "margin_mode": ["auto", "exact", "custom", "fixed"],
     }

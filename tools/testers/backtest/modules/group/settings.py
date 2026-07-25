@@ -27,7 +27,7 @@ def group_policy_fields() -> dict[str, FieldDefinition]:
         ),
         "position_policy": FieldDefinition(
             public=True, label="持仓", default="rebalance_to_target", control_template="select",
-            tab="position_policy", options=(("rebalance_to_target", "按目标调仓"), ("buy_and_hold", "买入持有")),
+            tab="position_policy", options=(("rebalance_to_target", "按目标调仓"), ("buy_and_hold", "买入持有"), ("incremental_buy_and_hold_fixed_leverage", "增量式 Hold（固定杠杆）")),
             chip_template="持仓: {value}", tab_label="持仓政策", tab_order=80,
         ),
         "rebalance_trigger": FieldDefinition(

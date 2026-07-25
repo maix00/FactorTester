@@ -40,32 +40,50 @@ def migrate_package(
     if not apply or not receipt["changed"]:
         receipt["mode"] = "dry_run" if not apply else "already_applied"
         return receipt
-    receipt["mode"] = "applied"
+    return apply_migrated_package(
+        package_root=package_root, branch_id=branch_id,
+        fragments=migrated, receipt=receipt,
+        migration_slug="superseded-report-placeholders-v1",
+        product_group=product_group, current_node=current_node,
+        client_root=client_root, profile_id=profile_id, agent_id=agent_id,
+    )
 
+
+def apply_migrated_package(
+    *, package_root: Path, branch_id: str,
+    fragments: list[dict[str, Any]], receipt: dict[str, Any],
+    migration_slug: str, product_group: str, current_node: str,
+    client_root: Path | None = None, profile_id: str = "",
+    agent_id: str = "", retain_superseded_inputs: bool = True,
+) -> dict[str, Any]:
+    """Atomically replace one package with already-validated fragments."""
+    receipt["mode"] = "applied"
     parent = package_root.parent
     stage = Path(tempfile.mkdtemp(
-        prefix=f".{package_root.name}.placeholder-new-", dir=parent,
+        prefix=f".{package_root.name}.{migration_slug}-new-", dir=parent,
     ))
-    backup = parent / f".{package_root.name}.placeholder-backup"
+    backup = parent / f".{package_root.name}.{migration_slug}-backup"
     if backup.exists():
         shutil.rmtree(stage)
-        raise ValueError("placeholder migration backup already exists")
+        raise ValueError("report migration backup already exists")
     try:
         shutil.copytree(package_root, stage / package_root.name)
         staged_package = stage / package_root.name
-        _backup_inputs(
-            source=package_root,
-            target=staged_package / "migrations"
-            / "superseded-report-placeholders-v1.backup.zip",
-            branch_id=branch_id,
-        )
+        if retain_superseded_inputs:
+            _backup_inputs(
+                source=package_root,
+                target=staged_package / "migrations"
+                / f"{migration_slug}.backup.zip",
+                branch_id=branch_id,
+            )
         _publish_migrated_package(
             package_root=staged_package,
             branch_id=branch_id,
-            fragments=migrated,
+            fragments=fragments,
             product_group=product_group,
             current_node=current_node,
             receipt=receipt,
+            receipt_filename=f"{migration_slug}.receipt.json",
         )
         os.replace(package_root, backup)
         try:
@@ -157,9 +175,10 @@ def _backup_inputs(*, source: Path, target: Path, branch_id: str) -> None:
 def _publish_migrated_package(
     *, package_root: Path, branch_id: str,
     fragments: list[dict[str, Any]], product_group: str,
-    current_node: str, receipt: dict[str, Any],
+    current_node: str, receipt: dict[str, Any], receipt_filename: str,
 ) -> None:
     branch_root = package_root / "branches" / branch_id
+    before_hashes = _projection_hashes(package_root, branch_id)
     sections_root = branch_root / "sections"
     shutil.rmtree(sections_root)
     sections_root.mkdir(parents=True)
@@ -253,13 +272,35 @@ def _publish_migrated_package(
     package_root.joinpath("REPORT.md").write_bytes(
         render_work_package_report(rebuilt_index)
     )
+    receipt["projection_hashes"] = {
+        key: {"before": before_hashes[key], "after": value}
+        for key, value in _projection_hashes(
+            package_root, branch_id,
+        ).items()
+    }
     migrations = package_root / "migrations"
     migrations.mkdir(exist_ok=True)
-    migrations.joinpath("superseded-report-placeholders-v1.receipt.json"
-                        ).write_text(
+    migrations.joinpath(receipt_filename).write_text(
         json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True)
         + "\n", encoding="utf-8",
     )
+
+
+def _projection_hashes(package_root: Path, branch_id: str) -> dict[str, str]:
+    paths = {
+        "index": package_root / "INDEX.json",
+        "work_package_report": package_root / "REPORT.md",
+        "physical_journal":
+            package_root / "branches" / branch_id / "JOURNAL.json",
+        "logical_journal":
+            package_root / "branches" / branch_id / "LOGICAL_JOURNAL.json",
+        "branch_report":
+            package_root / "branches" / branch_id / "REPORT.md",
+    }
+    return {
+        key: hashlib.sha256(path.read_bytes()).hexdigest()
+        for key, path in paths.items()
+    }
 
 
 def _authoritative_methodology_hash(package_root: Path) -> str:

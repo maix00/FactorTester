@@ -62,10 +62,10 @@ def test_execution_hard_limit_scales_only_margin_increasing_quantity() -> None:
 
     MarginBudgetModule.constrain_execution_margin_utilization.compute(state, ctx)
 
-    assert orders[0].quantity == pytest.approx(85.0)
+    assert orders[0].quantity == pytest.approx(50.0)
     summary = ctx.get(MarginBudgetModule.execution_margin_summary)["private:limit"]
-    assert summary["projected_utilization"] == pytest.approx(0.85)
-    assert summary["gross_leverage"] == pytest.approx(8.5)
+    assert summary["projected_utilization"] == pytest.approx(0.50)
+    assert summary["gross_leverage"] == pytest.approx(5.0)
 
 
 def test_execution_hard_limit_preserves_close_before_scaling_flip() -> None:
@@ -78,7 +78,7 @@ def test_execution_hard_limit_preserves_close_before_scaling_flip() -> None:
 
     MarginBudgetModule.constrain_execution_margin_utilization.compute(state, ctx)
 
-    assert orders[0].quantity == pytest.approx(-95.0)
+    assert orders[0].quantity == pytest.approx(-60.0)
     assert abs(orders[0].quantity) >= 10.0
 
 
@@ -123,4 +123,4 @@ def test_execution_precheck_values_existing_positions_from_causal_close() -> Non
     assert orders[0].quantity == pytest.approx(1.0)
     summary = ctx.get(MarginBudgetModule.execution_margin_summary)["private:causal-close"]
     assert summary["equity"] > 1_000.0
-    assert summary["projected_utilization"] < 0.85
+    assert summary["projected_utilization"] < 0.50
