@@ -81,7 +81,7 @@ struct ServerSettingsView: View {
             SettingsSectionCard("FactorTester 服务端口") {
                 SettingsRow(
                     title: "服务端口",
-                    description: "留空表示自动端口，当前自动选择的 \(automaticPortText)"
+                    description: "可填写固定端口；留空时由 Manager 自动选择可用端口"
                 ) {
                     HStack(spacing: 8) {
                         SettingsEditableText(
