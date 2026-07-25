@@ -19,15 +19,7 @@ struct PersonalWorkspaceView: View {
             subtitle: "用户目录、canonical 因子库，以及按 Profile 隔离的研究现场。",
             systemImage: "folder.badge.person.crop"
         ) {
-            workspaceLayoutSection
-            if let openProfiles {
-                profileWorkspaceSection(openProfiles: openProfiles)
-            }
-            canonicalSection
-            if let error = controller.error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-            }
+            workspaceSection
         }
         .overlay { if controller.isWorking { ProgressView() } }
         .task {
@@ -36,8 +28,8 @@ struct PersonalWorkspaceView: View {
         }
     }
 
-    private var workspaceLayoutSection: some View {
-        SettingsSectionCard("工作区路径") {
+    private var workspaceSection: some View {
+        SettingsSectionCard("个人工作区") {
             SettingsRow(
                 title: "用户根目录 / 本地研究目录",
                 description: "本地研究报告读取目录；应用更新后授权仍然保留。"
@@ -62,6 +54,30 @@ struct PersonalWorkspaceView: View {
             SettingsRow(title: "Profile 根目录", description: "各个研究现场的独立 worktree。") {
                 pathValue("\(userRoot)/profiles")
             }
+            if let openProfiles {
+                Divider()
+                SettingsRow(
+                    title: "研究现场",
+                    description: "Profile、实时研究步骤、Trial Plan、义务与报告。"
+                ) {
+                    Button("打开 Profiles", action: openProfiles)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            Divider()
+            if let current = controller.current {
+                SettingsRow(title: "canonical 因子库所有者", description: "服务器确认的当前因子库所有者。") {
+                    Text(current.ownerRef).foregroundStyle(.secondary)
+                }
+                Divider()
+                SettingsRow(title: "canonical 因子库路径", description: current.repositoryRef) {
+                    pathValue(current.path)
+                }
+            } else {
+                Text("尚未读取当前用户的 canonical 因子库。")
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+            }
             if let accessError {
                 Divider()
                 Text(accessError)
@@ -85,36 +101,6 @@ struct PersonalWorkspaceView: View {
             .foregroundStyle(.secondary)
             .lineLimit(2)
             .multilineTextAlignment(.trailing)
-    }
-
-    private var canonicalSection: some View {
-        SettingsSectionCard("当前 canonical 因子库") {
-            if let current = controller.current {
-                SettingsRow(title: "当前用户", description: "服务器确认的因子库所有者。") {
-                    Text(current.ownerRef).foregroundStyle(.secondary)
-                }
-                Divider()
-                SettingsRow(title: "因子库路径", description: current.repositoryRef) {
-                    pathValue(current.path)
-                }
-            } else {
-                Text("尚未读取当前用户的 canonical 因子库。")
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
-            }
-        }
-    }
-
-    private func profileWorkspaceSection(openProfiles: @escaping () -> Void) -> some View {
-        SettingsSectionCard("Profile 与研究工作区") {
-            SettingsRow(
-                title: "研究现场",
-                description: "Profile、实时研究步骤、Trial Plan、义务与报告。"
-            ) {
-                Button("打开 Profiles", action: openProfiles)
-                    .buttonStyle(.borderedProminent)
-            }
-        }
     }
 
     private func chooseWorkspace() {
