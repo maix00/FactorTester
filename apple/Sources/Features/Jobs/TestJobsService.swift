@@ -25,7 +25,16 @@ struct TestJobDetail {
     let outputRequests: [String]
     let configurationText: String
     let researchBindingText: String
+    let resultText: String
+    let previewRows: [[String: String]]
+    let chartPoints: [TestJobChartPoint]
     let artifacts: [TestJobArtifact]
+}
+
+struct TestJobChartPoint: Identifiable {
+    let id: Int
+    let label: String
+    let value: Double
 }
 
 final class TestJobsService {
@@ -45,8 +54,11 @@ final class TestJobsService {
         let encoded = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
         async let detailJSON = request(path: "/api/jobs/\(encoded)", port: port)
         async let artifactsJSON = request(path: "/api/jobs/\(encoded)/artifacts", port: port)
+        async let resultJSON = request(path: "/api/jobs/\(encoded)/result", port: port)
         let detail = try await detailJSON
         let artifacts = try await artifactsJSON
+        let result = (try? await resultJSON)?["result"] ?? detail["result_summary"]
+        let rows = previewRows(result)
         let job = makeJob(detail)
         return TestJobDetail(
             job: job,
@@ -54,6 +66,9 @@ final class TestJobsService {
             outputRequests: detail["output_requests"] as? [String] ?? [],
             configurationText: prettyJSON(detail["configuration"]),
             researchBindingText: prettyJSON(detail["research_binding"]),
+            resultText: prettyJSON(result),
+            previewRows: rows,
+            chartPoints: chartPoints(rows),
             artifacts: (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact)
         )
     }
@@ -140,5 +155,23 @@ final class TestJobsService {
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
               let text = String(data: data, encoding: .utf8) else { return String(describing: value) }
         return text
+    }
+
+    private func previewRows(_ value: Any?) -> [[String: String]] {
+        let candidates = (value as? [String: Any])?.values.compactMap { $0 as? [[String: Any]] } ?? []
+        return (candidates.first ?? []).prefix(100).map { row in
+            row.reduce(into: [String: String]()) { result, pair in
+                result[pair.key] = String(describing: pair.value)
+            }
+        }
+    }
+
+    private func chartPoints(_ rows: [[String: String]]) -> [TestJobChartPoint] {
+        let key = rows.first?.keys.first(where: { $0.lowercased().contains("equity") || $0.lowercased().contains("return") })
+        guard let key else { return [] }
+        return rows.enumerated().compactMap { index, row in
+            guard let value = Double(row[key] ?? "") else { return nil }
+            return TestJobChartPoint(id: index, label: row["timestamp"] ?? "(index + 1)", value: value)
+        }
     }
 }

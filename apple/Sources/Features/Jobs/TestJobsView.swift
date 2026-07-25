@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 @MainActor
 final class TestJobsController: ObservableObject {
@@ -110,6 +111,7 @@ struct TestJobsView: View {
                     disclosure("配置", detail.configurationText)
                     disclosure("输出声明", detail.outputRequests.joined(separator: "\n"))
                     disclosure("研究绑定", detail.researchBindingText)
+                    resultPreview(detail)
                     Text("生成物").font(.headline)
                     ForEach(detail.artifacts.filter { $0.state == "active" }) { artifact in
                         HStack {
@@ -130,6 +132,34 @@ struct TestJobsView: View {
 
     private func disclosure(_ title: String, _ value: String) -> some View {
         DisclosureGroup(title) { Text(value).font(.system(.body, design: .monospaced)).textSelection(.enabled).padding(.top, 6) }
+    }
+
+    @ViewBuilder
+    private func resultPreview(_ detail: TestJobDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("结果预览").font(.headline)
+            if !detail.chartPoints.isEmpty {
+                Chart(detail.chartPoints) { point in
+                    LineMark(x: .value("时点", point.id), y: .value("数值", point.value))
+                }
+                .frame(height: 180)
+            }
+            if let first = detail.previewRows.first {
+                let columns = first.keys.sorted()
+                ScrollView(.horizontal) {
+                    Grid(horizontalSpacing: 12, verticalSpacing: 6) {
+                        GridRow { ForEach(columns, id: \.self) { Text($0).font(.caption.bold()) } }
+                        ForEach(detail.previewRows.prefix(30).indices, id: \.self) { index in
+                            GridRow { ForEach(columns, id: \.self) { Text(detail.previewRows[index][$0] ?? "—").font(.caption) } }
+                        }
+                    }
+                    .padding(8)
+                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+                }
+            } else {
+                Text(detail.resultText).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+            }
+        }
     }
 
     private func emptyState(_ title: String) -> some View {
