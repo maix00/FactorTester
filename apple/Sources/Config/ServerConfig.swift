@@ -33,7 +33,7 @@ final class ServerConfig: ObservableObject {
         let d = UserDefaults.standard
         scheme = d.string(forKey: Keys.scheme) ?? "http"
         host   = d.string(forKey: Keys.host) ?? "127.0.0.1"
-        port   = d.string(forKey: Keys.port) ?? "8000"
+        port   = d.string(forKey: Keys.port) ?? ""
     }
 
     /// 是否已填写过有效服务器地址。
