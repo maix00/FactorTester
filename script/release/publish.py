@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Any
 from uuid import uuid4
 
 from script.release.assets import build_installer_dmg, embed_client_runtime
@@ -68,6 +69,8 @@ def release_client(
     minimum_client: str = "0.1.0",
     mandatory: bool = False,
     notary_profile: str | None = None,
+    previous_archive: Path | None = None,
+    previous_appcast: Path | None = None,
 ) -> PublishedRelease:
     """Build, sign, optionally notarize, publish, and read back one release."""
     if channel not in CHANNELS:
@@ -144,8 +147,20 @@ def release_client(
             appcast_url = f"{base}/appcast.xml"
             legacy_url = f"{base}/stable.json"
 
+        if channel == "beta" and previous_archive is None:
+            previous = _discover_previous_beta_release(release_root)
+            if previous is not None:
+                previous_archive, previous_archive_url, previous_appcast = previous
+            else:
+                previous_archive_url = None
+        elif previous_archive is not None:
+            previous_archive_url = None
+        else:
+            previous_archive_url = None
+        delta_output = output / "deltas"
+
         appcast = output / "appcast.xml"
-        generate_sparkle_appcast(
+        generated_appcast = generate_sparkle_appcast(
             archive=dmg,
             output=appcast,
             tool=sparkle_generate_appcast,
@@ -153,6 +168,10 @@ def release_client(
             version=version,
             build=build,
             channel=channel,
+            previous_archive=previous_archive,
+            previous_archive_url=previous_archive_url,
+            previous_appcast=previous_appcast,
+            delta_output=delta_output,
         )
         manifest = create_update_manifest(
             version=version,
@@ -183,6 +202,7 @@ def release_client(
                 appcast=appcast,
                 legacy_manifest=manifest,
                 release_root=release_root,  # type: ignore[arg-type]
+                deltas=generated_appcast.delta_paths,
             )
         else:
             publish_main_github(
@@ -192,6 +212,7 @@ def release_client(
                 dmg=dmg,
                 appcast=appcast,
                 legacy_manifest_path=legacy_path,
+                deltas=generated_appcast.delta_paths,
             )
 
         for url, expected in (
@@ -200,6 +221,9 @@ def release_client(
             (legacy_url, legacy_path),
         ):
             verify_remote_bytes(url, expected)
+        delta_prefix = download_url.rsplit("/", 1)[0] + "/"
+        for delta in generated_appcast.delta_paths:
+            verify_remote_bytes(delta_prefix + delta.name, delta)
         receipt = PublishedRelease(
             channel=channel,
             version=version,
@@ -227,12 +251,18 @@ def publish_beta_directory(
     appcast: Path,
     legacy_manifest: dict,
     release_root: Path,
+    deltas: tuple[Path, ...] = (),
 ) -> tuple[Path, Path, Path]:
     """Commit immutable payloads first, then switch both channel pointers."""
     digest = sha256(dmg.read_bytes()).hexdigest()
     asset = release_root / "assets" / "beta" / f"{digest}.dmg"
     asset.parent.mkdir(parents=True, exist_ok=True)
     _copy_immutable(dmg, asset, expected_sha256=digest)
+    for delta in deltas:
+        _copy_immutable(
+            delta,
+            release_root / "assets" / "beta" / delta.name,
+        )
 
     versioned_appcast = (
         release_root / "appcasts" / "beta" / f"{digest}.xml"
@@ -256,6 +286,31 @@ def publish_beta_directory(
     return asset, appcast_pointer, legacy_pointer
 
 
+def _discover_previous_beta_release(
+    release_root: Path | None,
+) -> tuple[Path, str, Path | None] | None:
+    if release_root is None:
+        return None
+    manifest_path = release_root / "beta.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest: dict[str, Any] = json.loads(
+            manifest_path.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("previous Beta manifest is invalid") from exc
+    digest = str(manifest.get("sha256") or "")
+    archive_url = str(manifest.get("dmg_url") or "")
+    if not digest or not archive_url:
+        raise ValueError("previous Beta manifest lacks archive identity")
+    archive = release_root / "assets" / "beta" / f"{digest}.dmg"
+    if not archive.is_file():
+        raise ValueError("previous Beta archive is missing")
+    appcast = release_root / "beta.xml"
+    return archive, archive_url, appcast if appcast.is_file() else None
+
+
 def publish_main_github(
     *,
     repository: str,
@@ -264,6 +319,7 @@ def publish_main_github(
     dmg: Path,
     appcast: Path,
     legacy_manifest_path: Path,
+    deltas: tuple[Path, ...] = (),
     prerelease: bool = False,
 ) -> None:
     """Upload a complete draft release before exposing its channel pointers."""
@@ -273,6 +329,7 @@ def publish_main_github(
         "--title", title,
         "--draft",
         str(dmg),
+        *(str(delta) for delta in deltas),
         f"{appcast}#appcast.xml",
         f"{legacy_manifest_path}#stable.json",
     ]

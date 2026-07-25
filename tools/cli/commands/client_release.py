@@ -128,6 +128,16 @@ def app_update_restart(as_json: bool) -> None:
 @click.option("--minimum-client", default="0.1.0", show_default=True)
 @click.option("--mandatory", is_flag=True)
 @click.option("--notary-profile")
+@click.option(
+    "--previous-archive",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Previous app archive used to create a Sparkle delta.",
+)
+@click.option(
+    "--previous-appcast",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Previous appcast to update when creating a Sparkle delta.",
+)
 @friendly_errors
 def publish_release(**options) -> None:
     """Build, sign, notarize, publish, and read back Main or Beta."""

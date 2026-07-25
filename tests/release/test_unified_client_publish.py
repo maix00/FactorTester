@@ -54,17 +54,21 @@ def test_beta_publishes_sparkle_and_legacy_pointers_last(
         url=f"https://factor.example/assets/beta/{digest}.dmg",
     )
     root = tmp_path / "published"
+    delta = tmp_path / "delta.sha256.delta"
+    delta.write_bytes(b"delta")
 
     asset, xml_pointer, json_pointer = publish.publish_beta_directory(
         dmg=dmg,
         appcast=appcast,
         legacy_manifest={"schema_version": 1, "sha256": digest},
         release_root=root,
+        deltas=(delta,),
     )
 
     assert asset == root / "assets/beta" / f"{digest}.dmg"
     assert xml_pointer.read_bytes() == appcast.read_bytes()
     assert json.loads(json_pointer.read_text())["sha256"] == digest
+    assert (root / "assets/beta/delta.sha256.delta").read_bytes() == b"delta"
     assert not list(root.rglob("*.staging-*"))
 
 
