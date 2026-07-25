@@ -81,12 +81,12 @@ struct ServerSettingsView: View {
             SettingsSectionCard("FactorTester 服务端口") {
                 SettingsRow(
                     title: "服务端口",
-                    description: "留空表示自动端口，当前自动使用 \(automaticPortText)"
+                    description: "留空表示自动端口，当前自动选择的 \(automaticPortText)"
                 ) {
                     HStack(spacing: 8) {
                         SettingsEditableText(
                             value: $port,
-                            placeholder: "空值（自动使用 \(automaticPortText)）",
+                            placeholder: "空值（自动选择的 \(automaticPortText)）",
                             onCommit: { Task { await synchronizeManagerConfiguration() } }
                         )
                         SettingsRefreshButton(isWorking: discoveringPorts) {
@@ -118,7 +118,7 @@ struct ServerSettingsView: View {
     }
 
     private var automaticPortText: String {
-        availablePorts.first.map(String.init) ?? "Manager 选择"
+        availablePorts.first.map { "\($0) 端口" } ?? "端口尚未返回"
     }
 
     @MainActor
