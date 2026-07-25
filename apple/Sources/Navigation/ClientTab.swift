@@ -100,7 +100,7 @@ struct ClientTab: Identifiable {
 
     static let accountSettings = ClientTab(
         id: "account-settings",
-        title: "用户名/登录",
+        title: "设置",
         systemImage: "person.crop.circle",
         content: .accountSettings
     )

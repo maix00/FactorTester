@@ -70,29 +70,25 @@ private struct SettingsLanguageView: View {
         AppLanguage.system.rawValue
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                SettingsPageHeader(
-                    title: "语言",
-                    subtitle: "选择 FTClient 的界面语言。"
-                )
-                GroupBox("界面语言") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Picker("语言", selection: $language) {
-                            Text("跟随系统").tag(AppLanguage.system.rawValue)
-                            Text("简体中文")
-                                .tag(AppLanguage.simplifiedChinese.rawValue)
-                            Text("English").tag(AppLanguage.english.rawValue)
-                        }
-                        .pickerStyle(.segmented)
-                        Text("JSON、状态值与 API 协议不会随界面语言改变。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        SettingsPageShell(
+            title: "语言",
+            subtitle: "选择 FTClient 的界面语言。",
+            systemImage: "globe"
+        ) {
+            SettingsSectionCard("界面语言") {
+                SettingsRow(
+                    title: "显示语言",
+                    description: "JSON、状态值与 API 协议不会随界面语言改变。"
+                ) {
+                    Picker("语言", selection: $language) {
+                        Text("跟随系统").tag(AppLanguage.system.rawValue)
+                        Text("简体中文").tag(AppLanguage.simplifiedChinese.rawValue)
+                        Text("English").tag(AppLanguage.english.rawValue)
                     }
-                    .padding(8)
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
             }
-            .padding(24)
         }
     }
 }

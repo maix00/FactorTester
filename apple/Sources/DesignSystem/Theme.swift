@@ -30,12 +30,137 @@ enum Theme {
 struct SettingsPageHeader: View {
     let title: String
     let subtitle: String
+    let systemImage: String?
+
+    init(title: String, subtitle: String, systemImage: String? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.largeTitle.weight(.semibold))
-            Text(subtitle).foregroundStyle(.secondary)
+        HStack(spacing: 16) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(.tint)
+                    .frame(width: 56, height: 56)
+                    .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.largeTitle.weight(.semibold))
+                Text(subtitle).foregroundStyle(.secondary)
+            }
         }
+    }
+}
+
+struct SettingsPageShell<Content: View>: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    @ViewBuilder let content: () -> Content
+
+    init(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.content = content
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                SettingsPageHeader(
+                    title: title,
+                    subtitle: subtitle,
+                    systemImage: systemImage
+                )
+                content()
+            }
+            .frame(maxWidth: 680, alignment: .leading)
+            .padding(28)
+        }
+    }
+}
+
+struct SettingsRow<Control: View>: View {
+    let title: String
+    let description: String
+    @ViewBuilder let control: () -> Control
+
+    init(
+        title: String,
+        description: String,
+        @ViewBuilder control: @escaping () -> Control
+    ) {
+        self.title = title
+        self.description = description
+        self.control = control
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 18) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.medium))
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            control()
+                .frame(minWidth: 180, alignment: .trailing)
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+struct SettingsSectionCard<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    init(_ title: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.content = content
+    }
+
+    var body: some View {
+        SettingsCard(title) {
+            VStack(alignment: .leading, spacing: 0) {
+                content()
+            }
+        }
+    }
+}
+
+struct SettingsRefreshButton: View {
+    let title: String
+    let isWorking: Bool
+    let action: () -> Void
+
+    init(_ title: String = "刷新", isWorking: Bool = false, action: @escaping () -> Void) {
+        self.title = title
+        self.isWorking = isWorking
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            if isWorking {
+                ProgressView().controlSize(.small)
+            } else {
+                Label(title, systemImage: "arrow.clockwise")
+            }
+        }
+        .buttonStyle(.bordered)
+        .disabled(isWorking)
     }
 }
 

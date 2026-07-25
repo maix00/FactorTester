@@ -13,16 +13,12 @@ struct ClientReleaseSettingsView: View {
     var body: some View {
         Group {
             if embedded {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        SettingsPageHeader(
-                            title: "客户端更新",
-                            subtitle: "管理 Main / Beta 客户端版本、下载与更新策略。"
-                        )
-                        updatePanel
-                    }
-                    .padding(24)
-                    .frame(maxWidth: 760, alignment: .leading)
+                SettingsPageShell(
+                    title: "客户端更新",
+                    subtitle: "管理 Main / Beta 客户端版本、下载与更新策略。",
+                    systemImage: "arrow.down.app"
+                ) {
+                    updatePanel
                 }
             } else {
                 VStack(spacing: 0) {
@@ -69,86 +65,72 @@ struct ClientReleaseSettingsView: View {
     }
 
     private var updatePanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 14) {
-                Image(systemName: statusIcon)
-                    .font(.system(size: 30))
-                    .foregroundStyle(statusTint)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(statusTitle)
-                        .font(.title3.weight(.semibold))
-                    Text(statusSubtitle)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsSectionCard("更新状态") {
+                SettingsRow(title: statusTitle, description: statusSubtitle) {
+                    Image(systemName: statusIcon)
+                        .foregroundStyle(statusTint)
                 }
-                Spacer()
-                if controller.isWorking {
-                    ProgressView()
-                        .controlSize(.small)
+                Divider()
+                SettingsRow(title: "更新渠道", description: "选择接收 Main 或 Beta 客户端。") {
+                    Picker("更新渠道", selection: $controller.channel) {
+                        Text("Main").tag("stable")
+                        Text("Beta").tag("beta")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .disabled(controller.isWorking || controller.hasAvailableUpdate || controller.isUpdateReady)
                 }
-            }
-
-            Picker("更新渠道", selection: $controller.channel) {
-                Text("Main").tag("stable")
-                Text("Beta").tag("beta")
-            }
-            .pickerStyle(.segmented)
-            .disabled(
-                controller.isWorking
-                    || controller.hasAvailableUpdate
-                    || controller.isUpdateReady
-            )
-
-            Toggle(
-                "自动下载更新",
-                isOn: $controller.automaticallyUpdates
-            )
-
-            if let message = controller.lastError {
-                Label(message, systemImage: "info.circle")
-                    .font(.callout)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(
-                        Color.blue.opacity(0.08),
-                        in: RoundedRectangle(cornerRadius: 9)
-                    )
-            }
-
-            Button(action: primaryAction) {
-                Label(primaryTitle, systemImage: primaryIcon)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(controller.isWorking)
-
-            DisclosureGroup("更新详情") {
-                VStack(alignment: .leading, spacing: 10) {
-                    LabeledContent("当前版本", value: installedVersion)
-                    if !controller.latestVersion.isEmpty {
-                        LabeledContent(
-                            "可用版本",
-                            value: controller.latestVersion
-                        )
+                Divider()
+                SettingsRow(title: "自动下载", description: "发现新版本后自动准备更新。") {
+                    Toggle("自动下载更新", isOn: $controller.automaticallyUpdates)
+                        .labelsHidden()
+                }
+                if let message = controller.lastError {
+                    Divider()
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.vertical, 6)
+                }
+                HStack {
+                    Spacer()
+                    Button(action: primaryAction) {
+                        Label(primaryTitle, systemImage: primaryIcon)
                     }
-                    LabeledContent("来源", value: sourceLabel)
-                    LabeledContent("签名", value: controller.signatureText)
-                    if let checked = controller.lastChecked {
-                        LabeledContent(
-                            "最后检查",
-                            value: checked.formatted(
-                                date: .abbreviated,
-                                time: .shortened
-                            )
-                        )
-                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(controller.isWorking)
                 }
                 .padding(.top, 8)
             }
-            .font(.callout)
+
+            SettingsSectionCard("版本详情") {
+                SettingsRow(title: "当前版本", description: "本机已安装版本。") {
+                    Text(installedVersion).foregroundStyle(.secondary)
+                }
+                if !controller.latestVersion.isEmpty {
+                    Divider()
+                    SettingsRow(title: "可用版本", description: "服务器返回的最新版本。") {
+                        Text(controller.latestVersion).foregroundStyle(.secondary)
+                    }
+                }
+                Divider()
+                SettingsRow(title: "更新来源", description: "当前渠道的发布源。") {
+                    Text(sourceLabel).foregroundStyle(.secondary)
+                }
+                Divider()
+                SettingsRow(title: "签名", description: "发布包签名状态。") {
+                    Text(controller.signatureText).foregroundStyle(.secondary)
+                }
+                if let checked = controller.lastChecked {
+                    Divider()
+                    SettingsRow(title: "最后检查", description: "最近一次检查更新时间。") {
+                        Text(checked.formatted(date: .abbreviated, time: .shortened))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private var installedVersion: String {

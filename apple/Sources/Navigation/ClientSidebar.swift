@@ -106,7 +106,7 @@ struct ClientSidebar: View {
     }
 
     private var accountTitle: String {
-        session.user?.username.flatMap { $0.isEmpty ? nil : $0 } ?? "登录"
+        session.user?.username.flatMap { $0.isEmpty ? nil : $0 } ?? "设置"
     }
 
     private func updateIcon(_ systemImage: String, color: Color) -> some View {

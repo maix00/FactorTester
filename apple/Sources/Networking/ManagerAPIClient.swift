@@ -85,6 +85,27 @@ final class ManagerCLIClient: ManagerSessionAPI {
         )
     }
 
+    /// Manager 的服务顺序是端口发现的唯一来源；客户端不维护手工端口列表。
+    /// main/feat 优先，其余运行中的服务按 Manager 返回的端口稳定排序。
+    func availableServicePorts() async throws -> [Int] {
+        let items = try await worktrees().filter { item in
+            item.running && (1...65535).contains(item.port)
+        }
+        return items.sorted { lhs, rhs in
+            let left = servicePriority(lhs)
+            let right = servicePriority(rhs)
+            if left != right { return left < right }
+            return lhs.port < rhs.port
+        }.map(\.port)
+    }
+
+    private func servicePriority(_ item: ManagerWorktree) -> Int {
+        let text = "\(item.label) \(item.branch)".lowercased()
+        if text.contains("main") { return 0 }
+        if text.contains("feat") { return 1 }
+        return 2
+    }
+
     func perform(_ action: ManagerAction, instanceID: String) async throws {
         var arguments = [
             "manager", action.rawValue, instanceID, "--json",

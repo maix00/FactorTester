@@ -17,6 +17,7 @@ struct SettingsSidebar: View {
         }
         .listStyle(.sidebar)
         .frame(width: 210)
+        .layoutPriority(1)
         .fixedSize(horizontal: true, vertical: false)
     }
 }

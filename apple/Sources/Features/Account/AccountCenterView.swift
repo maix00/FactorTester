@@ -8,65 +8,162 @@ struct AccountCenterView: View {
     }
 }
 
+private enum AccountPanel: String, CaseIterable, Identifiable {
+    case session, register, password
+    var id: String { rawValue }
+}
+
 struct AccountSettingsView: View {
     @EnvironmentObject private var session: SessionStore
-    @State private var showLogin = false
+    @State private var panel: AccountPanel = .session
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                SettingsPageHeader(
-                    title: "账户",
-                    subtitle: "查看当前登录身份，并在这里管理账户安全。"
-                )
-                AccountIdentityCard(showLogin: { showLogin = true })
-                PasswordChangeCard()
-            }
-            .padding(24)
-            .frame(maxWidth: 760, alignment: .leading)
-        }
-        .sheet(isPresented: $showLogin) {
-            LoginView { _ in showLogin = false }
-                .environmentObject(session)
-        }
-    }
+        SettingsPageShell(
+            title: "账户",
+            subtitle: "登录账户、账户身份与安全设置。",
+            systemImage: "person.text.rectangle"
+        ) {
+            SettingsSectionCard("账户操作") {
+                SettingsRow(
+                    title: "登录账户",
+                    description: session.isLoggedIn
+                        ? "当前已登录，可在这里登出或切换账户。"
+                        : "尚未登录；登录后可访问研究工作区和测试任务。"
+                ) {
+                    Picker("账户操作", selection: $panel) {
+                        Text(session.isLoggedIn ? "登出" : "登入")
+                            .tag(AccountPanel.session)
+                        Text("注册").tag(AccountPanel.register)
+                        Text("修改密码").tag(AccountPanel.password)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
 
-}
+                Divider()
 
-private struct AccountIdentityCard: View {
-    @EnvironmentObject private var session: SessionStore
-    let showLogin: () -> Void
-
-    var body: some View {
-        GroupBox {
-            if session.isLoggedIn, let user = session.user {
-                VStack(spacing: 10) {
-                    LabeledContent("用户名", value: user.username ?? "—")
-                    LabeledContent("角色", value: user.role ?? "—")
-                    LabeledContent("机构", value: user.organizationName ?? "—")
-                    Divider()
-                    Button("退出登录", role: .destructive) {
-                        Task { await session.logout() }
+                Group {
+                    switch panel {
+                    case .session:
+                        SessionPanel()
+                    case .register:
+                        RegisterPanel()
+                    case .password:
+                        PasswordPanel()
                     }
                 }
-                .padding(8)
-            } else {
-                VStack(alignment: .leading, spacing: 14) {
-                    Label(
-                        "当前未登录",
-                        systemImage: "person.crop.circle.badge.xmark"
-                    )
-                    .foregroundStyle(.secondary)
-                    Button("登录 / 注册", action: showLogin)
-                        .buttonStyle(.borderedProminent)
+                .padding(.vertical, 8)
+            }
+
+            SettingsSectionCard("账户身份") {
+                SettingsRow(title: "用户名", description: "当前登录账户。") {
+                    Text(session.user?.username ?? "—")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .padding(24)
+                Divider()
+                SettingsRow(title: "用户角色", description: "由服务器分配，客户端不能修改。") {
+                    Text(session.user?.role ?? "—")
+                        .foregroundStyle(.secondary)
+                }
+                Divider()
+                SettingsRow(title: "用户组织", description: "账户所属组织，由服务器管理。") {
+                    Text(session.user?.organizationName ?? "—")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .onChange(of: session.isLoggedIn) { _ in
+            panel = .session
+        }
+    }
+}
+
+private struct SessionPanel: View {
+    @EnvironmentObject private var session: SessionStore
+    @State private var username = ""
+    @State private var password = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if session.isLoggedIn {
+                HStack {
+                    Label("已登录", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Button("登出", role: .destructive) {
+                        Task { await session.logout() }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                TextField("用户名", text: $username)
+                    .textContentType(.username)
+                SecureField("密码", text: $password)
+                    .textContentType(.password)
+                HStack {
+                    Spacer()
+                    Button("登录") {
+                        Task { _ = await session.login(username: username, password: password) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(session.isWorking || username.isEmpty || password.isEmpty)
+                }
+                if let error = session.lastError {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
             }
         }
     }
 }
 
-private struct PasswordChangeCard: View {
+private struct RegisterPanel: View {
+    @EnvironmentObject private var session: SessionStore
+    @State private var username = ""
+    @State private var password = ""
+    @State private var organization = ""
+    @State private var organizations: [Organization] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("用户名", text: $username)
+            if organizations.isEmpty {
+                TextField("组织 ID", text: $organization)
+            } else {
+                Picker("组织", selection: $organization) {
+                    ForEach(organizations) { item in
+                        Text(item.name).tag(item.id)
+                    }
+                }
+            }
+            SecureField("密码（至少 6 位）", text: $password)
+            HStack {
+                Spacer()
+                Button("注册") {
+                    Task {
+                        _ = await session.register(
+                            username: username,
+                            password: password,
+                            organizationId: organization
+                        )
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(session.isWorking || username.isEmpty || password.count < 6)
+            }
+            if let error = session.lastError {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .task {
+            organizations = (try? await APIClient.shared.organizations()) ?? []
+            organization = organizations.first?.id ?? organization
+        }
+    }
+}
+
+private struct PasswordPanel: View {
     @EnvironmentObject private var session: SessionStore
     @State private var current = ""
     @State private var new = ""
@@ -76,22 +173,24 @@ private struct PasswordChangeCard: View {
     @State private var succeeded = false
 
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            if !session.isLoggedIn {
+                Text("请先登录账户，再修改密码。")
+                    .foregroundStyle(.secondary)
+            } else {
                 SecureField("当前密码", text: $current)
                 SecureField("新密码（至少 6 位）", text: $new)
                 SecureField("确认新密码", text: $confirmation)
                 if let message {
-                    Text(message).foregroundStyle(succeeded ? .green : .red)
+                    Text(message).font(.caption).foregroundStyle(succeeded ? .green : .red)
                 }
-                Button("更新密码") { Task { await submit() } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(
-                        working || current.isEmpty || new.count < 6
-                            || confirmation.isEmpty
-                    )
+                HStack {
+                    Spacer()
+                    Button("更新密码") { Task { await submit() } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(working || current.isEmpty || new.count < 6 || confirmation.isEmpty)
+                }
             }
-            .padding(8)
         }
     }
 
@@ -105,7 +204,8 @@ private struct PasswordChangeCard: View {
         defer { working = false }
         do {
             let response = try await APIClient.shared.changePassword(
-                currentPassword: current, newPassword: new
+                currentPassword: current,
+                newPassword: new
             )
             succeeded = response.success
             message = response.success ? "密码已更新" : response.error
@@ -114,8 +214,7 @@ private struct PasswordChangeCard: View {
                 current = ""; new = ""; confirmation = ""
             }
         } catch {
-            message = (error as? APIError)?.errorDescription
-                ?? error.localizedDescription
+            message = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
     }
 }

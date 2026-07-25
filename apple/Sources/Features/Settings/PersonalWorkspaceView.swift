@@ -14,26 +14,21 @@ struct PersonalWorkspaceView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                SettingsPageHeader(
-                    title: "个人工作区",
-                    subtitle: "一个用户目录、一份 canonical 因子库，以及按 Profile 隔离的研究现场。"
-                )
-                workspaceLayoutSection
-                if let openProfiles {
-                    profileWorkspaceSection(openProfiles: openProfiles)
-                }
-                Divider()
-                reportAccessSection
-                Divider()
-                canonicalSection
-                if let error = controller.error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                }
+        SettingsPageShell(
+            title: "个人工作区",
+            subtitle: "用户目录、canonical 因子库，以及按 Profile 隔离的研究现场。",
+            systemImage: "folder.badge.person.crop"
+        ) {
+            workspaceLayoutSection
+            if let openProfiles {
+                profileWorkspaceSection(openProfiles: openProfiles)
             }
-            .padding(24)
+            reportAccessSection
+            canonicalSection
+            if let error = controller.error {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            }
         }
         .overlay { if controller.isWorking { ProgressView() } }
         .task {
@@ -51,15 +46,18 @@ struct PersonalWorkspaceView: View {
     }
 
     private var workspaceLayoutSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("用户目录结构")
-                .font(.title3.weight(.semibold))
-            pathText("用户根目录", userRoot)
-            pathText("唯一 canonical 因子库", suggestedPath)
-            pathText("Profile 根目录", "\(userRoot)/profiles")
-            Text("每个 Profile 只链接 canonical repo 的独立 worktree；不会复制第二份因子库。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        SettingsSectionCard("目录结构") {
+            SettingsRow(title: "用户根目录", description: "当前账户的本地研究目录。") {
+                pathValue(userRoot)
+            }
+            Divider()
+            SettingsRow(title: "canonical 因子库", description: "所有 Profile 共用的唯一因子库。") {
+                pathValue(suggestedPath)
+            }
+            Divider()
+            SettingsRow(title: "Profile 根目录", description: "各个研究现场的独立 worktree。") {
+                pathValue("\(userRoot)/profiles")
+            }
         }
     }
 
@@ -81,78 +79,77 @@ struct PersonalWorkspaceView: View {
         }
     }
 
+    private func pathValue(_ value: String) -> some View {
+        Text(value)
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .multilineTextAlignment(.trailing)
+    }
+
     private var canonicalSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("当前 canonical 因子库")
-                .font(.title3.weight(.semibold))
+        SettingsSectionCard("当前 canonical 因子库") {
             if let current = controller.current {
-                pathText("当前用户", current.ownerRef)
-                pathText("因子库路径", current.path)
-                Text(current.repositoryRef)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                SettingsRow(title: "当前用户", description: "服务器确认的因子库所有者。") {
+                    Text(current.ownerRef).foregroundStyle(.secondary)
+                }
+                Divider()
+                SettingsRow(title: "因子库路径", description: current.repositoryRef) {
+                    pathValue(current.path)
+                }
             } else {
                 Text("尚未读取当前用户的 canonical 因子库。")
                     .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
             }
         }
     }
 
     private func profileWorkspaceSection(openProfiles: @escaping () -> Void) -> some View {
-        GroupBox("Profile 与研究工作区") {
-            HStack(spacing: 16) {
-                Image(systemName: "person.2.crop.square.stack")
-                    .font(.title2)
-                    .foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("在 Profiles 中管理独立研究现场")
-                        .font(.headline)
-                    Text("Profile、实时研究步骤、Trial Plan、义务与报告不属于账户设置。")
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+        SettingsSectionCard("Profile 与研究工作区") {
+            SettingsRow(
+                title: "研究现场",
+                description: "Profile、实时研究步骤、Trial Plan、义务与报告。"
+            ) {
                 Button("打开 Profiles", action: openProfiles)
                     .buttonStyle(.borderedProminent)
             }
-            .padding(8)
         }
     }
 
     private var reportAccessSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("本地研究报告")
-                .font(.title3.weight(.semibold))
+        SettingsSectionCard("本地研究报告") {
+            SettingsRow(
+                title: "目录授权",
+                description: "只在本机读取中文研究报告，不上传因子源码。"
+            ) {
+                if authorizedRoot == nil {
+                    Text("未授权").foregroundStyle(.secondary)
+                } else {
+                    Text("已启用").foregroundStyle(.green)
+                }
+            }
             if let authorizedRoot {
-                Label("已启用", systemImage: "checkmark.circle.fill")
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.green)
-                Text("FTClient 会持续读取该目录中的中文研究报告；应用更新后无需重新授权，也不会因此上传因子源码。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                pathText("正在读取", authorizedRoot)
-            } else {
-                Text("首次选择当前用户目录后，FTClient 会在本机读取其中的中文研究报告；不会因此上传因子源码。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Text("尚未选择个人工作区。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                Divider()
+                SettingsRow(title: "正在读取", description: "应用更新后授权仍然保留。") {
+                    pathValue(authorizedRoot)
+                }
             }
             if let accessError {
                 Text(accessError)
                     .font(.caption)
                     .foregroundStyle(.red)
+                    .padding(.vertical, 6)
             }
-            if authorizedRoot == nil {
-                Button("选择用户目录…") {
-                    chooseWorkspace()
+            HStack {
+                Spacer()
+                if authorizedRoot == nil {
+                    Button("选择用户目录…") { chooseWorkspace() }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("更改用户目录…") { chooseWorkspace() }
+                        .buttonStyle(.bordered)
                 }
-                .buttonStyle(.borderedProminent)
-            } else {
-                Button("更改用户目录…") {
-                    chooseWorkspace()
-                }
-                .buttonStyle(.bordered)
             }
         }
     }
