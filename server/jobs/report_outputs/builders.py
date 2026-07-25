@@ -34,7 +34,27 @@ def build_report_artifacts(result, *, source=None, requested=()):
 def series_reports(name, series, title):
     receipt = {"schema_version": 1, "artifact_kind": name,
                "series": [{"label": item["label"], "points": len(item["values"])} for item in series]}
-    payload = {"schema_version": 1, "artifact_kind": name, "series": series}
+    payload_series = series
+    if name == "equity_curve":
+        payload_series = []
+        for item in series:
+            peak = float("-inf")
+            historical_max = 0.0
+            current_drawdowns = []
+            historical_drawdowns = []
+            for value in item["values"]:
+                peak = max(peak, value)
+                current = value / peak - 1.0 if peak else 0.0
+                historical_max = min(historical_max, current)
+                current_drawdowns.append(round(current, 12))
+                historical_drawdowns.append(round(historical_max, 12))
+            payload_series.append({
+                **item,
+                "drawdown": current_drawdowns,
+                "max_drawdown": historical_drawdowns,
+            })
+        receipt["drawdown_definition"] = "historical_maximum_drawdown_through_each_point"
+    payload = {"schema_version": 1, "artifact_kind": name, "series": payload_series}
     initial_value = 0.0 if name == "returns_over_time" else (
         series[0]["values"][0] if series and series[0].get("values") else None
     )
