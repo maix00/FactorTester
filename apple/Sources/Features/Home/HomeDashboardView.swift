@@ -32,10 +32,10 @@ struct HomeDashboardView: View {
                         systemImage: "person.2.crop.square.stack"
                     ) { openTab(.profiles) }
                     DashboardShortcutCard(
-                        title: "个人中心",
-                        description: "账户、安全、产品组与因子库授权",
+                        title: "用户名/登录",
+                        description: "账户、安全、工作区与客户端设置",
                         systemImage: "person.crop.circle"
-                    ) { openTab(.account) }
+                    ) { openTab(.accountSettings) }
                     if showManager {
                         DashboardShortcutCard(
                             title: "服务器管理",

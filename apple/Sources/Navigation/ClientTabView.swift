@@ -83,9 +83,7 @@ struct ClientTabView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        case .account:
-            AccountCenterView(open: open)
-        case .settings:
+        case .accountSettings:
             ClientSettingsHub(open: open)
         case .manager:
             if session.role == "super_admin" && session.isManagerLoggedIn {

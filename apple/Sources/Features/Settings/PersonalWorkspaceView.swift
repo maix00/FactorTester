@@ -2,11 +2,16 @@ import AppKit
 import SwiftUI
 
 struct PersonalWorkspaceView: View {
+    let openProfiles: (() -> Void)?
     @EnvironmentObject private var session: SessionStore
     @StateObject private var controller = PersonalWorkspaceController()
     @State private var authorizedRoot =
         PersonalWorkspaceAccessStore.authorizedRootPath
     @State private var accessError: String?
+
+    init(openProfiles: (() -> Void)? = nil) {
+        self.openProfiles = openProfiles
+    }
 
     var body: some View {
         ScrollView {
@@ -16,6 +21,9 @@ struct PersonalWorkspaceView: View {
                     subtitle: "一个用户目录、一份 canonical 因子库，以及按 Profile 隔离的研究现场。"
                 )
                 workspaceLayoutSection
+                if let openProfiles {
+                    profileWorkspaceSection(openProfiles: openProfiles)
+                }
                 Divider()
                 reportAccessSection
                 Divider()
@@ -87,6 +95,26 @@ struct PersonalWorkspaceView: View {
                 Text("尚未读取当前用户的 canonical 因子库。")
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func profileWorkspaceSection(openProfiles: @escaping () -> Void) -> some View {
+        GroupBox("Profile 与研究工作区") {
+            HStack(spacing: 16) {
+                Image(systemName: "person.2.crop.square.stack")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("在 Profiles 中管理独立研究现场")
+                        .font(.headline)
+                    Text("Profile、实时研究步骤、Trial Plan、义务与报告不属于账户设置。")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("打开 Profiles", action: openProfiles)
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(8)
         }
     }
 

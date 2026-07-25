@@ -1,11 +1,13 @@
 import SwiftUI
 
 struct ClientSidebar: View {
+    @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var releaseController: ClientReleaseController
     @Binding var selection: String
     let openTabs: [ClientTab]
     let open: (ClientTab) -> Void
     let close: (ClientTab) -> Void
+    @State private var showRestartPrompt = false
 
     var body: some View {
         List(selection: $selection) {
@@ -30,10 +32,17 @@ struct ClientSidebar: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 Divider()
-                bottomLauncher(.account)
-                bottomLauncher(.settings)
+                bottomLauncher(.accountSettings)
             }
             .padding(.vertical, 6)
+        }
+        .alert("更新已准备好", isPresented: $showRestartPrompt) {
+            Button("稍后", role: .cancel) {}
+            Button("重启并更新") {
+                Task { await releaseController.restartToApply() }
+            }
+        } message: {
+            Text("更新已下载并验证，重启 FTClient 后完成安装。")
         }
         .frame(minWidth: 210)
     }
@@ -52,13 +61,13 @@ struct ClientSidebar: View {
     private func bottomLauncher(_ tab: ClientTab) -> some View {
         HStack(spacing: 6) {
             Button { open(tab) } label: {
-                Label(tab.title, systemImage: tab.systemImage)
+                Label(tab.id == ClientTab.accountSettings.id ? accountTitle : tab.title, systemImage: tab.systemImage)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            if tab.id == ClientTab.settings.id {
+            if tab.id == ClientTab.accountSettings.id {
                 updateAction
             }
         }
@@ -77,35 +86,35 @@ struct ClientSidebar: View {
     private var updateAction: some View {
         if releaseController.isUpdateReady {
             Button {
-                Task { await releaseController.restartToApply() }
+                showRestartPrompt = true
             } label: {
-                updateBadge("重启更新", color: .orange)
+                updateIcon("arrow.clockwise.circle.fill", color: .orange)
             }
             .buttonStyle(.plain)
-            .help("重启 FTClient 并完成更新")
+            .help("更新已准备好；重启后安装")
             .accessibilityIdentifier("sidebar.update.restart")
-        } else if releaseController.isWorking {
-            updateBadge("正在准备", color: .secondary)
-                .accessibilityIdentifier("sidebar.update.preparing")
         } else if releaseController.hasAvailableUpdate {
             Button {
                 Task { await releaseController.update() }
             } label: {
-                updateBadge("有新版本", color: .blue)
+                updateIcon("arrow.down.circle.fill", color: .blue)
             }
             .buttonStyle(.plain)
-            .help("下载并准备 \(releaseController.latestVersion)")
+            .help("有更新：下载并准备 \(releaseController.latestVersion)")
             .accessibilityIdentifier("sidebar.update.available")
         }
     }
 
-    private func updateBadge(_ title: String, color: Color) -> some View {
-        Text(title)
-            .font(.caption2.weight(.semibold))
+    private var accountTitle: String {
+        session.user?.username.flatMap { $0.isEmpty ? nil : $0 } ?? "登录"
+    }
+
+    private func updateIcon(_ systemImage: String, color: Color) -> some View {
+        Image(systemName: systemImage)
+            .font(.callout.weight(.semibold))
             .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.12), in: Capsule())
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
     }
 
     private func openedRow(_ tab: ClientTab) -> some View {

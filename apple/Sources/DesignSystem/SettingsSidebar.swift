@@ -16,6 +16,7 @@ struct SettingsSidebar: View {
                 .tag(item.id)
         }
         .listStyle(.sidebar)
-        .frame(minWidth: 190, idealWidth: 210, maxWidth: 240)
+        .frame(width: 210)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }

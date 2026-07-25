@@ -1,34 +1,29 @@
 import SwiftUI
 
 struct AccountCenterView: View {
-    @EnvironmentObject private var session: SessionStore
     let open: (ClientTab) -> Void
-    @State private var sectionID = AccountSection.account.id
+
+    var body: some View {
+        AccountSettingsView()
+    }
+}
+
+struct AccountSettingsView: View {
+    @EnvironmentObject private var session: SessionStore
     @State private var showLogin = false
 
     var body: some View {
-        HSplitView {
-            SettingsSidebar(
-                selection: $sectionID,
-                items: AccountSection.allCases.map {
-                    SettingsSidebarItem(
-                        id: $0.id,
-                        title: $0.title,
-                        systemImage: $0.systemImage
-                    )
-                }
-            )
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    let section = AccountSection(rawValue: sectionID) ?? .account
-                    SettingsPageHeader(title: section.title, subtitle: section.subtitle)
-                    content
-                }
-                .padding(24)
-                .frame(maxWidth: 760, alignment: .leading)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsPageHeader(
+                    title: "账户",
+                    subtitle: "查看当前登录身份，并在这里管理账户安全。"
+                )
+                AccountIdentityCard(showLogin: { showLogin = true })
+                PasswordChangeCard()
             }
-            .frame(maxWidth: .infinity)
+            .padding(24)
+            .frame(maxWidth: 760, alignment: .leading)
         }
         .sheet(isPresented: $showLogin) {
             LoginView { _ in showLogin = false }
@@ -36,74 +31,6 @@ struct AccountCenterView: View {
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch AccountSection(rawValue: sectionID) ?? .account {
-        case .account:
-            AccountIdentityCard(showLogin: { showLogin = true })
-        case .security:
-            PasswordChangeCard()
-        case .productGroups:
-            resource(
-                "管理研究与回测可用的产品范围",
-                "shippingbox",
-                .products
-            )
-        case .factorGrants:
-            resource(
-                "管理个人因子库与 Profile 初始化授权",
-                "books.vertical",
-                .factorLibrary
-            )
-        }
-    }
-
-    private func resource(
-        _ description: String,
-        _ image: String,
-        _ destination: ClientTab
-    ) -> some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 14) {
-                Label(description, systemImage: image)
-                    .font(.headline)
-                Button("打开管理页面") { open(destination) }
-                    .buttonStyle(.borderedProminent)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
-        }
-    }
-}
-
-private enum AccountSection: String, CaseIterable, Identifiable {
-    case account, security, productGroups, factorGrants
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .account: return "账户"
-        case .security: return "安全"
-        case .productGroups: return "产品组"
-        case .factorGrants: return "因子库授权"
-        }
-    }
-    var systemImage: String {
-        switch self {
-        case .account: return "person.text.rectangle"
-        case .security: return "lock.shield"
-        case .productGroups: return "shippingbox"
-        case .factorGrants: return "books.vertical"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .account: return "查看当前身份、机构与登录状态。"
-        case .security: return "修改密码并管理登录安全。"
-        case .productGroups: return "管理研究与回测可用的产品范围。"
-        case .factorGrants: return "管理个人因子库与 Profile 初始化授权。"
-        }
-    }
 }
 
 private struct AccountIdentityCard: View {

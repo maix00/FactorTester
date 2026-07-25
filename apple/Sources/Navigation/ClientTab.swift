@@ -9,8 +9,7 @@ enum ClientTabContent {
     case workPackage(ResearchDirectoryItem)
     case profiles
     case profile(id: String)
-    case account
-    case settings
+    case accountSettings
     case manager
     case jobs
 }
@@ -99,18 +98,11 @@ struct ClientTab: Identifiable {
         )
     }
 
-    static let account = ClientTab(
-        id: "account",
-        title: "个人中心",
+    static let accountSettings = ClientTab(
+        id: "account-settings",
+        title: "用户名/登录",
         systemImage: "person.crop.circle",
-        content: .account
-    )
-
-    static let settings = ClientTab(
-        id: "settings",
-        title: "设置",
-        systemImage: "gearshape",
-        content: .settings
+        content: .accountSettings
     )
 
     static let manager = ClientTab(
@@ -139,7 +131,7 @@ struct ClientTab: Identifiable {
     var isPinnedLauncher: Bool {
         [
             "home", "research", "jobs", "web:factor-library", "web:products",
-            "profiles", "account", "settings",
+            "profiles", "account-settings",
         ].contains(id)
     }
 

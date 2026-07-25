@@ -3,7 +3,7 @@ import SwiftUI
 struct ClientSettingsHub: View {
     let open: (ClientTab) -> Void
     @EnvironmentObject private var releaseController: ClientReleaseController
-    @State private var selectionID = SettingSection.server.id
+    @State private var selectionID = SettingSection.account.id
 
     var body: some View {
         HSplitView {
@@ -20,12 +20,12 @@ struct ClientSettingsHub: View {
 
             Group {
                 switch SettingSection(rawValue: selectionID) ?? .server {
+                case .account:
+                    AccountSettingsView()
                 case .server:
                     ServerSettingsView()
-                case .personalWorkspace:
-                    PersonalWorkspaceView()
-                case .workspaces:
-                    WorkspaceSettingsView(openProfiles: {
+                case .workspace:
+                    PersonalWorkspaceView(openProfiles: {
                         open(.profiles)
                     })
                 case .language:
@@ -43,57 +43,24 @@ struct ClientSettingsHub: View {
 }
 
 private enum SettingSection: String, CaseIterable, Identifiable {
-    case server, personalWorkspace, workspaces, language, updates
+    case account, server, workspace, language, updates
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .account: return "账户"
         case .server: return "服务器"
-        case .personalWorkspace: return "个人工作区"
-        case .workspaces: return "工作区"
+        case .workspace: return "工作区"
         case .language: return "语言"
         case .updates: return "客户端更新"
         }
     }
     var systemImage: String {
         switch self {
+        case .account: return "person.text.rectangle"
         case .server: return "server.rack"
-        case .personalWorkspace: return "folder.badge.person.crop"
-        case .workspaces: return "externaldrive.connected.to.line.below"
+        case .workspace: return "folder.badge.person.crop"
         case .language: return "globe"
         case .updates: return "arrow.down.app"
-        }
-    }
-}
-
-private struct WorkspaceSettingsView: View {
-    let openProfiles: () -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                SettingsPageHeader(
-                    title: "工作区",
-                    subtitle: "这里只管理本地路径、同步、容量、Pylance 与 Git 策略。"
-                )
-                GroupBox("Profile 与研究过程") {
-                    HStack(spacing: 16) {
-                        Image(systemName: "person.2.crop.square.stack")
-                            .font(.title2)
-                            .foregroundStyle(.tint)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("在独立 tab 中管理")
-                                .font(.headline)
-                            Text("Profile、实时研究步骤、Trial Plan、义务与报告不属于设置。")
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("打开 Profiles", action: openProfiles)
-                            .buttonStyle(.borderedProminent)
-                    }
-                    .padding(8)
-                }
-            }
-            .padding(24)
         }
     }
 }
