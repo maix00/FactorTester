@@ -31,9 +31,11 @@ one named `factortester` and one named
    delta payloads. Normal releases retain full DMGs for rollback and first
    install; delta assets are content-addressed and served by the same immutable
    asset route. A local Beta `--delta-only` release publishes only the delta,
-   keeps the previous full archive as its base, verifies the delta over HTTP,
-   and removes the newly generated full DMG after the successful readback.
-   The Beta publisher discovers the previous channel archive automatically.
+   keeps one private full archive under `bases/beta/` as the next delta base,
+   verifies the delta over HTTP, and removes the newly generated full DMG after
+   the successful readback. The private base is not exposed by the asset route;
+   older private bases are pruned after the channel pointers switch. The Beta
+   publisher discovers the previous channel archive automatically.
 
 ## Consequences
 

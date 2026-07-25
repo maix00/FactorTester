@@ -209,6 +209,7 @@ def release_client(
                 release_root=release_root,  # type: ignore[arg-type]
                 deltas=generated_appcast.delta_paths,
                 publish_full=not delta_only,
+                retain_base=delta_only,
             )
         else:
             publish_main_github(
@@ -269,6 +270,7 @@ def publish_beta_directory(
     release_root: Path,
     deltas: tuple[Path, ...] = (),
     publish_full: bool = True,
+    retain_base: bool = False,
 ) -> tuple[Path, Path, Path]:
     """Commit immutable payloads first, then switch both channel pointers."""
     digest = sha256(dmg.read_bytes()).hexdigest()
@@ -276,6 +278,10 @@ def publish_beta_directory(
     asset.parent.mkdir(parents=True, exist_ok=True)
     if publish_full:
         _copy_immutable(dmg, asset, expected_sha256=digest)
+    if retain_base:
+        base = release_root / "bases" / "beta" / f"{digest}.dmg"
+        base.parent.mkdir(parents=True, exist_ok=True)
+        _copy_immutable(dmg, base, expected_sha256=digest)
     for delta in deltas:
         _copy_immutable(
             delta,
@@ -301,7 +307,17 @@ def publish_beta_directory(
     # it first; new Sparkle clients switch immediately afterwards.
     staged_legacy.replace(legacy_pointer)
     staged_appcast.replace(appcast_pointer)
+    if retain_base:
+        _prune_beta_bases(release_root, keep=digest)
     return asset, appcast_pointer, legacy_pointer
+
+
+def _prune_beta_bases(release_root: Path, *, keep: str) -> None:
+    """Keep one private full archive as the next delta-generation base."""
+    base_root = release_root / "bases" / "beta"
+    for candidate in base_root.glob("*.dmg"):
+        if candidate.stem != keep:
+            candidate.unlink()
 
 
 def _remove_local_archive(path: Path) -> None:
@@ -331,6 +347,8 @@ def _discover_previous_beta_release(
     if not digest or not archive_url:
         raise ValueError("previous Beta manifest lacks archive identity")
     archive = release_root / "assets" / "beta" / f"{digest}.dmg"
+    if not archive.is_file():
+        archive = release_root / "bases" / "beta" / f"{digest}.dmg"
     if not archive.is_file():
         raise ValueError("previous Beta archive is missing")
     appcast = release_root / "beta.xml"

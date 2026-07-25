@@ -94,10 +94,14 @@ def test_beta_can_publish_delta_without_current_full_archive(
         release_root=root,
         deltas=(delta,),
         publish_full=False,
+        retain_base=True,
     )
 
     assert asset == root / "assets/beta" / f"{sha256(b'release').hexdigest()}.dmg"
     assert not asset.exists()
+    assert (
+        root / "bases/beta" / f"{sha256(b'release').hexdigest()}.dmg"
+    ).read_bytes() == b"release"
     assert (root / "assets/beta" / delta.name).read_bytes() == b"delta"
     assert not list(root.rglob("*.staging-*"))
 
