@@ -1,5 +1,8 @@
 import SwiftUI
 import Charts
+#if os(macOS)
+import AppKit
+#endif
 
 @MainActor
 final class TestJobsController: ObservableObject {
@@ -68,22 +71,32 @@ final class TestJobsController: ObservableObject {
 
     func download(_ artifact: TestJobArtifact, from job: TestJob) async {
         do {
+            let destination: URL
             do {
-                _ = try await service.download(jobID: job.id, port: job.port, artifact: artifact)
+                destination = try await service.download(jobID: job.id, port: job.port, artifact: artifact)
             } catch where job.port != currentPort {
-                _ = try await service.download(jobID: job.id, port: currentPort, artifact: artifact)
+                destination = try await service.download(jobID: job.id, port: currentPort, artifact: artifact)
             }
+            openFile(destination)
         } catch let failure { self.error = failure.localizedDescription }
     }
 
     func downloadAll(from job: TestJob) async {
         do {
+            let destination: URL
             do {
-                _ = try await service.downloadAll(jobID: job.id, port: job.port)
+                destination = try await service.downloadAll(jobID: job.id, port: job.port)
             } catch where job.port != currentPort {
-                _ = try await service.downloadAll(jobID: job.id, port: currentPort)
+                destination = try await service.downloadAll(jobID: job.id, port: currentPort)
             }
+            openFile(destination)
         } catch let failure { self.error = failure.localizedDescription }
+    }
+
+    private func openFile(_ url: URL) {
+#if os(macOS)
+        NSWorkspace.shared.open(url)
+#endif
     }
 
     private var currentPort: Int { Int(ServerConfig.shared.port) ?? 0 }
@@ -95,6 +108,7 @@ struct TestJobsView: View {
     @State private var selectedID: String?
     @State private var showPriceViewer = false
     @State private var loadedPriceBars: [PriceBar] = []
+    @State private var expandedResultIDs: Set<String> = []
 
     var body: some View {
         NavigationSplitView {
@@ -125,6 +139,7 @@ struct TestJobsView: View {
             guard let value, let job = controller.jobs.first(where: { $0.id == value }) else { return }
             showPriceViewer = false
             loadedPriceBars = []
+            expandedResultIDs = []
             Task { await controller.select(job) }
         }
         .alert("任务提示", isPresented: Binding(get: { controller.notice != nil }, set: { if !$0 { controller.notice = nil } })) { Button("好") {} } message: { Text(controller.notice ?? "") }
@@ -136,25 +151,25 @@ struct TestJobsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("测试任务详情").font(.title2.bold())
-                    Text("\(detail.job.id) · \(statusLabel(detail.job.status)) · 端口 \(detail.job.port) · Profile \(detail.job.profile)").foregroundStyle(.secondary)
                     HStack {
                         Button("刷新详情") { Task { await controller.select(detail.job) } }
-                        Button("下载全部生成物") { Task { await controller.downloadAll(from: detail.job) } }
+                        if !detail.artifacts.filter({ $0.state == "active" }).isEmpty {
+                            Button("下载全部生成物") { Task { await controller.downloadAll(from: detail.job) } }
+                        }
                         Button("清空生成物", role: .destructive) { Task { await controller.clear(detail.job) } }
                     }
-                    disclosure("配置", detail.configurationText)
+                    TestJobFieldTable(title: "任务字段", rows: detail.fieldRows)
+                    configuration(detail)
                     outputDeclarations(detail)
-                    disclosure("研究绑定", detail.researchBindingText)
-                    disclosure("调用方", detail.submissionContextText)
                     resultPreview(detail)
                     Text("生成物").font(.headline)
-                    ForEach(detail.artifacts.filter { $0.state == "active" }) { artifact in
-                        HStack {
-                            VStack(alignment: .leading) { Text(artifact.description); Text("\(artifact.sizeBytes) bytes").font(.caption).foregroundStyle(.secondary) }
-                            Spacer()
-                            Button("下载") { Task { await controller.download(artifact, from: detail.job) } }
+                    let activeArtifacts = detail.artifacts.filter { $0.state == "active" }
+                    if activeArtifacts.isEmpty {
+                        Text("暂无生成物").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        TestJobArtifactGrid(artifacts: activeArtifacts) { artifact in
+                            Task { await controller.download(artifact, from: detail.job) }
                         }
-                        Divider()
                     }
                 }
                 .padding(24)
@@ -165,8 +180,26 @@ struct TestJobsView: View {
         }
     }
 
-    private func disclosure(_ title: String, _ value: String) -> some View {
-        DisclosureGroup(title) { Text(value).font(.system(.body, design: .monospaced)).textSelection(.enabled).padding(.top, 6) }
+    @ViewBuilder private func configuration(_ detail: TestJobDetail) -> some View {
+        TestJobFieldTable(title: "测试配置", rows: detail.configurationFields)
+        if !detail.configurationJSON.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("配置 JSON").font(.subheadline.weight(.semibold))
+                TestJobCodeBlock(text: detail.configurationJSON)
+            }
+        }
+        if !detail.researchBindingFields.isEmpty {
+            TestJobFieldTable(title: "研究绑定", rows: detail.researchBindingFields)
+        }
+        if !detail.researchBindingJSON.isEmpty {
+            TestJobCodeBlock(text: detail.researchBindingJSON)
+        }
+        if !detail.submissionContextFields.isEmpty {
+            TestJobFieldTable(title: "调用方", rows: detail.submissionContextFields)
+        }
+        if !detail.submissionContextJSON.isEmpty {
+            TestJobCodeBlock(text: detail.submissionContextJSON)
+        }
     }
 
     private func outputDeclarations(_ detail: TestJobDetail) -> some View {
@@ -176,16 +209,9 @@ struct TestJobsView: View {
                 Text("该任务没有声明可视化输出；以下为结果原始预览。")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
-                ForEach(detail.outputDeclarations) { declaration in
-                    HStack {
-                        Text(declaration.label)
-                        Spacer()
-                        Text(presentationLabel(declaration.presentation))
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text(declaration.formats.joined(separator: ", "))
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
+                TestJobFieldTable(title: "展示方式", rows: detail.outputDeclarations.map {
+                    TestJobField(id: $0.id, name: $0.label, value: "\(presentationLabel($0.presentation)) · \($0.viewer) · \($0.formats.joined(separator: ", "))")
+                })
             }
         }
     }
@@ -194,26 +220,15 @@ struct TestJobsView: View {
     private func resultPreview(_ detail: TestJobDetail) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("结果预览").font(.headline)
-            if !detail.chartPoints.isEmpty {
-                Chart(detail.chartPoints) { point in
-                    LineMark(x: .value("时点", point.id), y: .value("数值", point.value))
-                }
-                .frame(height: 180)
-            }
-            if let first = detail.previewRows.first {
-                let columns = first.keys.sorted().prefix(24)
-                ScrollView(.horizontal) {
-                    Grid(horizontalSpacing: 12, verticalSpacing: 6) {
-                        GridRow { ForEach(columns, id: \.self) { Text($0).font(.caption.bold()) } }
-                        ForEach(detail.previewRows.prefix(30).indices, id: \.self) { index in
-                            GridRow { ForEach(columns, id: \.self) { Text(detail.previewRows[index][$0] ?? "—").font(.caption) } }
-                        }
+            ForEach(detail.resultSections) { section in
+                TestJobResultSectionView(
+                    section: section,
+                    isExpanded: expandedResultIDs.contains(section.id),
+                    onExpansionChanged: { expanded in
+                        if expanded { expandedResultIDs.insert(section.id) }
+                        else { expandedResultIDs.remove(section.id) }
                     }
-                    .padding(8)
-                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
-                }
-            } else {
-                Text(detail.resultText).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                )
             }
             if detail.outputDeclarations.contains(where: isPriceViewer) {
                 if showPriceViewer && !loadedPriceBars.isEmpty {

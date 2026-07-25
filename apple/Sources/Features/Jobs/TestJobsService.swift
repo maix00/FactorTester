@@ -57,6 +57,27 @@ struct TestJobOutputDeclaration: Identifiable, Hashable {
     let formats: [String]
 }
 
+struct TestJobField: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let value: String
+}
+
+struct TestJobResultSection: Identifiable {
+    enum Kind {
+        case chart
+        case table
+        case json
+    }
+
+    let id: String
+    let title: String
+    let kind: Kind
+    let chartPoints: [TestJobChartPoint]
+    let rows: [[String: String]]
+    let jsonText: String
+}
+
 struct TestJobDetail {
     let job: TestJob
     let runSpecHash: String
@@ -70,6 +91,14 @@ struct TestJobDetail {
     let chartPoints: [TestJobChartPoint]
     let priceResultData: Data?
     let artifacts: [TestJobArtifact]
+    let fieldRows: [TestJobField]
+    let configurationFields: [TestJobField]
+    let configurationJSON: String
+    let researchBindingFields: [TestJobField]
+    let researchBindingJSON: String
+    let submissionContextFields: [TestJobField]
+    let submissionContextJSON: String
+    let resultSections: [TestJobResultSection]
 }
 
 struct TestJobChartPoint: Identifiable {
@@ -113,30 +142,49 @@ final class TestJobsService {
         fallbackJob: TestJob? = nil
     ) async throws -> TestJobDetail {
         let encoded = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
-        let detail: [String: Any]
+        let response: [String: Any]
         do {
-            detail = try await request(path: "/api/jobs/\(encoded)", port: port)
+            response = try await request(path: "/api/jobs/\(encoded)", port: port)
         } catch {
             guard fallbackJob != nil else { throw error }
-            detail = [:]
+            response = [:]
         }
+        let unified = response["task_detail"] as? [String: Any]
+        let detail = unified ?? response
+        let jobPayload = (unified?["job"] as? [String: Any]) ?? response
         let artifacts: [String: Any]
-        do {
-            artifacts = try await request(path: "/api/jobs/\(encoded)/artifacts", port: port)
-        } catch {
-            // Older jobs may not have retained artifact metadata.  The job
-            // itself is still useful and must remain openable.
-            artifacts = ["artifacts": []]
-        }
         let result: Any?
-        do {
-            let resultJSON = try await request(path: "/api/jobs/\(encoded)/result", port: port)
-            result = resultJSON["result"] ?? detail["result_summary"]
-        } catch {
-            result = detail["result_summary"]
+        if let unified {
+            artifacts = ["artifacts": unified["artifacts"] as? [[String: Any]] ?? []]
+            let results = unified["results"] as? [String: Any]
+            if let summary = results?["summary"] {
+                result = summary
+            } else if let results {
+                result = [
+                    "status": results["status"] ?? "",
+                    "error": results["error"] ?? NSNull(),
+                ]
+            } else {
+                result = nil
+            }
+        } else {
+            do {
+                artifacts = try await request(path: "/api/jobs/\(encoded)/artifacts", port: port)
+            } catch {
+                // Older jobs may not have retained artifact metadata.  The job
+                // itself is still useful and must remain openable.
+                artifacts = ["artifacts": []]
+            }
+            do {
+                let resultJSON = try await request(path: "/api/jobs/\(encoded)/result", port: port)
+                result = resultJSON["result"] ?? response["result_summary"]
+            } catch {
+                result = response["result_summary"]
+            }
         }
         let rows = previewRows(result)
-        let job = makeJob(detail, fallback: fallbackJob ?? TestJob(
+        let chart = chartPoints(rows)
+        let job = makeJob(jobPayload, fallback: fallbackJob ?? TestJob(
             id: jobID,
             kind: "test",
             status: "unknown",
@@ -148,17 +196,25 @@ final class TestJobsService {
         ))
         return TestJobDetail(
             job: job,
-            runSpecHash: detail["run_spec_hash"] as? String ?? "",
-            outputRequests: detail["output_requests"] as? [String] ?? [],
-            outputDeclarations: (detail["output_declarations"] as? [[String: Any]] ?? []).map(makeOutputDeclaration),
+            runSpecHash: jobPayload["run_spec_hash"] as? String ?? "",
+            outputRequests: (unified?["output_requests"] as? [String]) ?? response["output_requests"] as? [String] ?? [],
+            outputDeclarations: ((unified?["output_declarations"] as? [[String: Any]]) ?? (response["output_declarations"] as? [[String: Any]]) ?? []).map(makeOutputDeclaration),
             configurationText: prettyJSON(detail["configuration"]),
-            researchBindingText: prettyJSON(detail["research_binding"]),
-            submissionContextText: prettyJSON(detail["submission_context"]),
+            researchBindingText: prettyJSON(detail["research_binding"] ?? response["research_binding"]),
+            submissionContextText: prettyJSON(detail["caller"] ?? response["submission_context"]),
             resultText: prettyJSON(result),
             previewRows: rows,
             chartPoints: chartPoints(rows),
             priceResultData: Self.safeJSONData(result),
             artifacts: (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact),
+            fieldRows: detailFieldRows(jobPayload.merging(response) { current, _ in current }, job: job),
+            configurationFields: scalarFieldRows(detail["configuration"], prefix: "配置"),
+            configurationJSON: residualJSON(detail["configuration"]),
+            researchBindingFields: scalarFieldRows(detail["research_binding"] ?? response["research_binding"], prefix: "研究绑定"),
+            researchBindingJSON: residualJSON(detail["research_binding"] ?? response["research_binding"]),
+            submissionContextFields: scalarFieldRows(detail["caller"] ?? response["submission_context"], prefix: "调用方"),
+            submissionContextJSON: residualJSON(detail["caller"] ?? response["submission_context"]),
+            resultSections: resultSections(rows: rows, chart: chart, resultText: prettyJSON(result))
         )
     }
 
@@ -290,6 +346,105 @@ final class TestJobsService {
             viewer: value["viewer"] as? String ?? "json",
             formats: value["formats"] as? [String] ?? []
         )
+    }
+
+    private func detailFieldRows(_ value: [String: Any], job: TestJob) -> [TestJobField] {
+        let context = value["server_context"] as? [String: Any] ?? [:]
+        let rawStatus = value["status"] as? String ?? job.status
+        let known: [(String, String, String)] = [
+            ("job_id", "job_id（任务 ID）", value["job_id"] as? String ?? job.id),
+            ("kind", "kind（任务类型）", value["kind"] as? String ?? job.kind),
+            ("status", "status（任务状态）", "\(rawStatus)（\(statusLabel(rawStatus))）"),
+            ("workspace_id", "workspace_id（工作区）", value["workspace_id"] as? String ?? job.workspaceID),
+            ("port", "port（端口）", stringValue(value["port"] ?? context["port"] ?? job.port)),
+            ("profile", "profile（研究 Profile）", stringValue(context["profile"] ?? job.profile)),
+            ("owner", "owner（提交用户）", stringValue(value["owner"])),
+            ("created_at", "created_at（提交时间）", timestampValue(value["created_at"])),
+            ("submitted_at", "submitted_at（提交时间，兼容字段）", timestampValue(value["submitted_at"])),
+            ("started_at", "started_at（开始时间）", timestampValue(value["started_at"])),
+            ("finished_at", "finished_at（完成时间）", timestampValue(value["finished_at"])),
+            ("completed_at", "completed_at（完成时间，兼容字段）", timestampValue(value["completed_at"])),
+            ("updated_at", "updated_at（更新时间）", timestampValue(value["updated_at"])),
+            ("run_spec_hash", "run_spec_hash（RunSpec 哈希）", value["run_spec_hash"] as? String ?? ""),
+            ("job_spec_hash", "job_spec_hash（JobSpec 哈希）", value["job_spec_hash"] as? String ?? ""),
+            ("execution_mode", "execution_mode（执行模式）", stringValue(value["execution_mode"])),
+            ("step_mode", "step_mode（Step 模式）", stringValue(value["step_mode"])),
+            ("error", "error（错误）", errorValue(value["error"]))
+        ]
+        var rows = known.map { TestJobField(id: $0.0, name: $0.1, value: $0.2) }
+        rows.append(contentsOf: scalarFieldRows(value["research_binding"], prefix: "研究绑定"))
+        rows.append(contentsOf: scalarFieldRows(value["submission_context"], prefix: "调用方"))
+        return rows
+    }
+
+    private func scalarFieldRows(_ value: Any?, prefix: String) -> [TestJobField] {
+        guard let dictionary = value as? [String: Any] else { return [] }
+        return dictionary.keys.sorted().compactMap { key in
+            guard let value = dictionary[key], isScalar(value) else { return nil }
+            return TestJobField(id: "\(prefix).\(key)", name: "\(prefix) · \(key)", value: stringValue(value))
+        }
+    }
+
+    private func residualJSON(_ value: Any?) -> String {
+        guard let dictionary = value as? [String: Any] else { return "" }
+        let residual = dictionary.filter { !isScalar($0.value) }
+        return residual.isEmpty ? "" : prettyJSON(residual)
+    }
+
+    private func resultSections(
+        rows: [[String: String]],
+        chart: [TestJobChartPoint],
+        resultText: String
+    ) -> [TestJobResultSection] {
+        var sections: [TestJobResultSection] = []
+        if !chart.isEmpty {
+            sections.append(TestJobResultSection(id: "chart", title: "收益/指标图表", kind: .chart, chartPoints: chart, rows: [], jsonText: ""))
+        }
+        if !rows.isEmpty {
+            sections.append(TestJobResultSection(id: "table", title: "结果表格", kind: .table, chartPoints: [], rows: rows, jsonText: ""))
+        }
+        if !resultText.isEmpty {
+            sections.append(TestJobResultSection(id: "json", title: "原始结果 JSON", kind: .json, chartPoints: [], rows: [], jsonText: resultText))
+        }
+        return sections
+    }
+
+    private func isScalar(_ value: Any) -> Bool {
+        value is String || value is NSNumber || value is NSNull
+    }
+
+    private func stringValue(_ value: Any?) -> String {
+        guard let value else { return "" }
+        if value is NSNull { return "" }
+        if let bool = value as? Bool { return bool ? "是" : "否" }
+        if let number = value as? NSNumber { return number.stringValue }
+        return String(describing: value)
+    }
+
+    private func timestampValue(_ value: Any?) -> String {
+        let seconds: Double
+        if let number = value as? NSNumber {
+            seconds = number.doubleValue
+        } else if let value = value as? Double {
+            seconds = value
+        } else {
+            return ""
+        }
+        guard seconds > 0 else { return "" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: Date(timeIntervalSince1970: seconds))
+    }
+
+    private func errorValue(_ value: Any?) -> String {
+        guard let value else { return "" }
+        if let text = value as? String { return text }
+        return prettyJSON(value)
+    }
+
+    private func statusLabel(_ value: String) -> String {
+        ["succeeded": "成功", "failed": "失败", "running": "运行中", "queued": "排队中", "planning": "规划中", "paused": "已暂停", "cancelled": "已取消"][value] ?? value
     }
 
     private func prettyJSON(_ value: Any?) -> String {

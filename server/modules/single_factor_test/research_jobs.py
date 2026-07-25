@@ -310,6 +310,8 @@ def _submission_context() -> dict[str, str]:
         "channel": channel,
         "client": marker or user_agent.split("/", 1)[0] or "unknown",
         "user_agent": user_agent[:200],
+        "trigger": "manual",
+        "api_route": str(request.path or ""),
     }
 
 

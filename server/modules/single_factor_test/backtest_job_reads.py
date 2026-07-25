@@ -98,6 +98,8 @@ def _submission_context(job) -> dict[str, object]:
         "channel": str(value.get("channel") or "unknown"),
         "client": str(value.get("client") or "unknown"),
         "user_agent": str(value.get("user_agent") or "")[:200],
+        "trigger": str(value.get("trigger") or ""),
+        "api_route": str(value.get("api_route") or ""),
     }
 
 
@@ -135,6 +137,57 @@ def _list_research_binding(job_repository, job, owner: str) -> dict[str, str]:
     if detail is not None:
         binding.update(detail.get("graph_binding") or {})
     return binding
+
+
+def _artifact_manifest(job) -> list[dict[str, object]]:
+    """Return the stable artifact metadata used by every job-detail client."""
+    return [
+        {
+            **item,
+            "description": artifact_description(str(item.get("name") or "")),
+        }
+        for item in repository().list_artifacts(
+            job_id=job.job_id,
+            owner=job.owner,
+        )
+    ]
+
+
+def _task_detail(
+    detail: dict,
+    *,
+    declarations: list[dict[str, object]],
+    evidence: dict | None,
+) -> dict[str, object]:
+    """Canonical structured task detail shared by CLI and desktop clients.
+
+    The historical top-level fields remain in the response for compatibility,
+    but new clients should consume this object instead of joining several
+    endpoints and guessing research/caller relationships locally.
+    """
+    job = detail["job"]
+    binding = job_research_binding(job) | (detail.get("graph_binding") or {})
+    caller = _submission_context(job)
+    run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
+    configuration = run_spec.get("configuration") if isinstance(run_spec, dict) else None
+    return {
+        "job": {
+            **job.summary(pinned=detail["pinned"]),
+            "server_context": _server_context(job),
+        },
+        "research_binding": binding,
+        "caller": caller,
+        "configuration": configuration,
+        "output_requests": list(job.job_spec.get("output_requests") or ()),
+        "results": {
+            "status": job.status.value,
+            "summary": job.result_summary,
+            "error": job.error,
+            "evidence": evidence,
+        },
+        "output_declarations": declarations,
+        "artifacts": _artifact_manifest(job),
+    }
 
 
 @sft_bp.get("/api/jobs")
@@ -198,6 +251,11 @@ def get_test_job(job_id: str):
         evidence_error = f"{type(exc).__name__}: {exc}"
     else:
         evidence_error = None
+    task_detail = _task_detail(
+        detail,
+        declarations=declarations,
+        evidence=evidence,
+    )
     payload = {
         "success": True,
         **job.summary(pinned=detail["pinned"]),
@@ -220,6 +278,8 @@ def get_test_job(job_id: str):
             | (detail.get("graph_binding") or {})
         ),
         "submission_context": _submission_context(job),
+        "caller": task_detail["caller"],
+        "task_detail": task_detail,
         "evidence": evidence,
         **job_urls(job.job_id),
     }

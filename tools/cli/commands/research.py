@@ -480,16 +480,18 @@ def job_status(job_id: str) -> None:
 def job_config(job_id: str) -> None:
     """Print the immutable configuration and output declaration for a Job."""
     detail = client_from_config().get_job(job_id)
+    canonical = detail.get("task_detail") or detail
+    job = canonical.get("job") or detail
     click.echo(_json({
         "job_id": job_id,
-        "run_id": detail.get("run_id"),
-        "kind": detail.get("kind"),
-        "run_spec_hash": detail.get("run_spec_hash"),
-        "output_requests": detail.get("output_requests") or [],
-        "server_context": detail.get("server_context") or {},
-        "submission_context": detail.get("submission_context") or {},
-        "research_binding": detail.get("research_binding") or {},
-        "configuration": detail.get("configuration"),
+        "run_id": job.get("run_id"),
+        "kind": job.get("kind"),
+        "run_spec_hash": job.get("run_spec_hash"),
+        "output_requests": canonical.get("output_requests") or detail.get("output_requests") or [],
+        "server_context": job.get("server_context") or detail.get("server_context") or {},
+        "caller": canonical.get("caller") or detail.get("submission_context") or {},
+        "research_binding": canonical.get("research_binding") or detail.get("research_binding") or {},
+        "configuration": canonical.get("configuration", detail.get("configuration")),
     }))
 
 
