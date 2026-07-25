@@ -28,8 +28,12 @@ struct TestJobArtifact: Identifiable, Hashable {
     let sizeBytes: Int
     let state: String
     let contentType: String
+    let serverFileName: String?
 
     var fileName: String {
+        if let serverFileName, !serverFileName.isEmpty {
+            return serverFileName
+        }
         let rawName = URL(fileURLWithPath: name).lastPathComponent
         guard URL(fileURLWithPath: rawName).pathExtension.isEmpty else {
             return rawName
@@ -332,7 +336,8 @@ final class TestJobsService {
             description: value["description"] as? String ?? name,
             sizeBytes: value["size_bytes"] as? Int ?? 0,
             state: value["state"] as? String ?? "active",
-            contentType: value["content_type"] as? String ?? "application/octet-stream"
+            contentType: value["content_type"] as? String ?? "application/octet-stream",
+            serverFileName: value["file_name"] as? String
         )
     }
 

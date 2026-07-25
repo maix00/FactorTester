@@ -6,6 +6,7 @@ import hashlib
 import io
 import time
 import zipfile
+from pathlib import Path
 
 from flask import Response, jsonify, request, stream_with_context
 import orjson
@@ -145,12 +146,35 @@ def _artifact_manifest(job) -> list[dict[str, object]]:
         {
             **item,
             "description": artifact_description(str(item.get("name") or "")),
+            "file_name": _artifact_file_name(item),
         }
         for item in repository().list_artifacts(
             job_id=job.job_id,
             owner=job.owner,
         )
     ]
+
+
+def _artifact_file_name(metadata: dict[str, object], path: Path | None = None) -> str:
+    """Return a safe downloadable name with an extension for old artifacts."""
+    raw_name = Path(str(metadata.get("name") or "artifact")).name or "artifact"
+    if Path(raw_name).suffix:
+        return raw_name
+    path_suffix = (path or Path(str(metadata.get("relative_path") or ""))).suffix
+    if path_suffix:
+        return f"{raw_name}{path_suffix}"
+    mime = str(metadata.get("content_type") or "").split(";", 1)[0].lower()
+    extension = {
+        "application/json": ".json",
+        "text/csv": ".csv",
+        "text/plain": ".txt",
+        "image/svg+xml": ".svg",
+        "image/png": ".png",
+        "application/pdf": ".pdf",
+        "application/zip": ".zip",
+        "application/x-parquet": ".parquet",
+    }.get(mime, "")
+    return f"{raw_name}{extension}" if extension else raw_name
 
 
 def _task_detail(
@@ -446,7 +470,11 @@ def list_test_job_artifacts(job_id: str):
         "success": True,
         "job_id": job_id,
         "artifacts": [
-            {**item, "description": artifact_description(str(item.get("name") or ""))}
+            {
+                **item,
+                "description": artifact_description(str(item.get("name") or "")),
+                "file_name": _artifact_file_name(item),
+            }
             for item in artifacts
         ],
     })
@@ -470,7 +498,7 @@ def download_test_job_artifacts_archive(job_id: str):
             raw = path.read_bytes()
             if hashlib.sha256(raw).hexdigest() != metadata["content_hash"]:
                 return jsonify({"success": False, "error": "artifact integrity check failed"}), 500
-            bundle.writestr(str(metadata["name"]) + path.suffix, raw)
+            bundle.writestr(_artifact_file_name(metadata, path), raw)
     archive.seek(0)
     return Response(
         archive.read(),
@@ -519,4 +547,9 @@ def get_test_job_artifact(job_id: str, name: str):
     return Response(
         raw,
         content_type=str(metadata["content_type"]),
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{_artifact_file_name(metadata, path)}"'
+            ),
+        },
     )

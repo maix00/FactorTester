@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import time
+import zipfile
 
 from flask import Flask
 import orjson
@@ -105,11 +107,15 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     )
 
     loaded = client.get("/api/jobs/job-full/artifacts/result")
+    archive = client.get("/api/jobs/job-full/artifacts/archive")
     cleared = client.delete("/api/jobs/job-full/artifacts")
     job = client.get("/api/jobs/job-full")
 
     assert loaded.status_code == 200
     assert loaded.get_json()["curve"] == [1, 2, 3]
+    assert 'filename="result.json"' in loaded.headers["Content-Disposition"]
+    with zipfile.ZipFile(io.BytesIO(archive.data)) as bundle:
+        assert bundle.namelist() == ["result.json"]
     assert cleared.get_json()["deleted_files"] == 1
     assert not target.exists()
     assert job.status_code == 200
