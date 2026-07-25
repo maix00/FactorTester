@@ -1,0 +1,137 @@
+import Foundation
+
+struct TestJob: Identifiable, Hashable {
+    let id: String
+    let kind: String
+    let status: String
+    let workspaceID: String
+    let port: Int
+    let profile: String
+    let updatedAt: Date?
+    let artifactCount: Int
+}
+
+struct TestJobArtifact: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let description: String
+    let sizeBytes: Int
+    let state: String
+}
+
+struct TestJobDetail {
+    let job: TestJob
+    let runSpecHash: String
+    let outputRequests: [String]
+    let configurationText: String
+    let researchBindingText: String
+    let artifacts: [TestJobArtifact]
+}
+
+final class TestJobsService {
+    private let session = URLSession(
+        configuration: .default,
+        delegate: SelfSignedTrustDelegate(),
+        delegateQueue: nil
+    )
+
+    func list() async throws -> [TestJob] {
+        let json = try await request(path: "/api/jobs?limit=200")
+        return (json["jobs"] as? [[String: Any]] ?? []).map(makeJob)
+    }
+
+    func detail(jobID: String) async throws -> TestJobDetail {
+        let encoded = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
+        async let detailJSON = request(path: "/api/jobs/\(encoded)")
+        async let artifactsJSON = request(path: "/api/jobs/\(encoded)/artifacts")
+        let detail = try await detailJSON
+        let artifacts = try await artifactsJSON
+        let job = makeJob(detail)
+        return TestJobDetail(
+            job: job,
+            runSpecHash: detail["run_spec_hash"] as? String ?? "",
+            outputRequests: detail["output_requests"] as? [String] ?? [],
+            configurationText: prettyJSON(detail["configuration"]),
+            researchBindingText: prettyJSON(detail["research_binding"]),
+            artifacts: (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact)
+        )
+    }
+
+    func clearArtifacts(jobID: String) async throws {
+        _ = try await request(path: "/api/jobs/\(jobID)/artifacts", method: "DELETE")
+    }
+
+    func download(
+        jobID: String,
+        artifact: TestJobArtifact
+    ) async throws -> URL {
+        let encodedJob = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
+        let encodedName = artifact.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? artifact.name
+        let data = try await requestData(path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)")
+        let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FactorTester/jobs/\(jobID)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let safeName = URL(fileURLWithPath: artifact.name).lastPathComponent
+        let destination = root.appendingPathComponent(safeName)
+        try data.write(to: destination, options: .atomic)
+        return destination
+    }
+
+    private func request(path: String, method: String = "GET") async throws -> [String: Any] {
+        let data = try await requestData(path: path, method: method)
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "TestJobs", code: 1, userInfo: [NSLocalizedDescriptionKey: "服务器返回格式无效"])
+        }
+        if let success = value["success"] as? Bool, !success {
+            throw NSError(domain: "TestJobs", code: 2, userInfo: [NSLocalizedDescriptionKey: value["error"] as? String ?? "任务请求失败"])
+        }
+        return value
+    }
+
+    private func requestData(path: String, method: String = "GET") async throws -> Data {
+        guard let url = ServerConfig.shared.url(forPath: path) else {
+            throw NSError(domain: "TestJobs", code: 3, userInfo: [NSLocalizedDescriptionKey: "尚未配置服务器"])
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw NSError(domain: "TestJobs", code: 4, userInfo: [NSLocalizedDescriptionKey: "任务服务器返回错误"])
+        }
+        return data
+    }
+
+    private func makeJob(_ value: [String: Any]) -> TestJob {
+        let context = value["server_context"] as? [String: Any]
+        return TestJob(
+            id: value["job_id"] as? String ?? "",
+            kind: value["kind"] as? String ?? "test",
+            status: value["status"] as? String ?? "unknown",
+            workspaceID: value["workspace_id"] as? String ?? "",
+            port: (value["port"] as? Int) ?? (context?["port"] as? Int) ?? 0,
+            profile: (context?["profile"] as? String) ?? "default",
+            updatedAt: (value["updated_at"] as? Double).map(Date.init(timeIntervalSince1970:)),
+            artifactCount: value["artifact_count"] as? Int ?? 0
+        )
+    }
+
+    private func makeArtifact(_ value: [String: Any]) -> TestJobArtifact {
+        let name = value["name"] as? String ?? "artifact"
+        return TestJobArtifact(
+            id: name,
+            name: name,
+            description: value["description"] as? String ?? name,
+            sizeBytes: value["size_bytes"] as? Int ?? 0,
+            state: value["state"] as? String ?? "active"
+        )
+    }
+
+    private func prettyJSON(_ value: Any?) -> String {
+        guard let value else { return "—" }
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return String(describing: value) }
+        return text
+    }
+}

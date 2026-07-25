@@ -14,8 +14,8 @@
     },
     {
       "id": "jobs",
-      "title": "研究任务",
-      "desc": "查看 Web 与 CLI 任务、配置、进度和生成物",
+      "title": "测试任务",
+      "desc": "查看 Web 与 CLI 测试任务、配置、进度和生成物",
       "icon": "任务",
       "sfSymbol": "list.bullet.rectangle",
       "path": "/jobs",

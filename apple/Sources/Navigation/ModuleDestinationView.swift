@@ -25,7 +25,7 @@ struct ModuleDestinationView: View {
     /// 目前首页已原生；其余模块沿用 web，迁移时在此 `case` 中 return AnyView(...) 即可。
     static func nativeView(for module: Module) -> AnyView? {
         switch module.id {
-        // case "single_factor_test": return AnyView(SingleFactorTestView())
+        case "jobs": return AnyView(TestJobsView())
         default: return nil
         }
     }

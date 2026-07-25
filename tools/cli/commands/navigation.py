@@ -20,4 +20,4 @@ def list_modules() -> None:
     click.echo("当前位置: 首页")
     for line in module_lines(modules):
         click.echo(line)
-    click.echo("研究任务: factortester workspace --help / run --help / job --help")
+    click.echo("测试任务: factortester workspace --help / run --help / job --help")
