@@ -3,19 +3,25 @@ import SwiftUI
 struct AccountCenterView: View {
     @EnvironmentObject private var session: SessionStore
     let open: (ClientTab) -> Void
-    @State private var section = AccountSection.account
+    @State private var sectionID = AccountSection.account.id
     @State private var showLogin = false
 
     var body: some View {
         HSplitView {
-            List(AccountSection.allCases, selection: $section) { item in
-                Label(item.title, systemImage: item.systemImage).tag(item)
-            }
-            .listStyle(.sidebar)
-            .frame(minWidth: 180, idealWidth: 200)
+            SettingsSidebar(
+                selection: $sectionID,
+                items: AccountSection.allCases.map {
+                    SettingsSidebarItem(
+                        id: $0.id,
+                        title: $0.title,
+                        systemImage: $0.systemImage
+                    )
+                }
+            )
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    let section = AccountSection(rawValue: sectionID) ?? .account
                     SettingsPageHeader(title: section.title, subtitle: section.subtitle)
                     content
                 }
@@ -32,7 +38,7 @@ struct AccountCenterView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch section {
+        switch AccountSection(rawValue: sectionID) ?? .account {
         case .account:
             AccountIdentityCard(showLogin: { showLogin = true })
         case .security:
@@ -134,6 +140,7 @@ private struct AccountIdentityCard: View {
 }
 
 private struct PasswordChangeCard: View {
+    @EnvironmentObject private var session: SessionStore
     @State private var current = ""
     @State private var new = ""
     @State private var confirmation = ""
@@ -175,7 +182,10 @@ private struct PasswordChangeCard: View {
             )
             succeeded = response.success
             message = response.success ? "密码已更新" : response.error
-            if response.success { current = ""; new = ""; confirmation = "" }
+            if response.success {
+                session.updateSavedPassword(new)
+                current = ""; new = ""; confirmation = ""
+            }
         } catch {
             message = (error as? APIError)?.errorDescription
                 ?? error.localizedDescription

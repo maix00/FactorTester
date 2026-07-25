@@ -138,7 +138,7 @@ final class TestJobsService {
             resultText: prettyJSON(result),
             previewRows: rows,
             chartPoints: chartPoints(rows),
-            priceResultData: result.flatMap { try? JSONSerialization.data(withJSONObject: $0) },
+            priceResultData: Self.safeJSONData(result),
             artifacts: (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact),
         )
     }
@@ -268,6 +268,18 @@ final class TestJobsService {
             return String(text.prefix(20_000)) + "\n…（内容过长，已截断；请下载生成物查看完整内容）"
         }
         return text
+    }
+
+    static func safeJSONData(_ value: Any?) -> Data? {
+        guard let value else { return nil }
+        guard JSONSerialization.isValidJSONObject(value)
+                || value is String
+                || value is NSNumber
+                || value is NSNull else { return nil }
+        return try? JSONSerialization.data(
+            withJSONObject: value,
+            options: [.fragmentsAllowed]
+        )
     }
 
     private func previewRows(_ value: Any?) -> [[String: String]] {

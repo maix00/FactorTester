@@ -6,11 +6,15 @@ import Security
 enum KeychainStore {
     static let service = "com.gtht.client.adapters"
 
-    static func save(_ secret: String, account: String) throws {
+    static func save(
+        _ secret: String,
+        account: String,
+        serviceName: String = service
+    ) throws {
         #if os(macOS)
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
+            kSecAttrService as String: serviceName,
             kSecAttrAccount as String: account,
         ]
         SecItemDelete(base as CFDictionary)
@@ -22,6 +26,41 @@ enum KeychainStore {
         }
         #else
         throw KeychainError.unsupported
+        #endif
+    }
+
+    static func read(
+        account: String,
+        serviceName: String = service
+    ) -> String? {
+        #if os(macOS)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var value: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &value) == errSecSuccess,
+              let data = value as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+        #else
+        return nil
+        #endif
+    }
+
+    static func delete(
+        account: String,
+        serviceName: String = service
+    ) {
+        #if os(macOS)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
         #endif
     }
 }

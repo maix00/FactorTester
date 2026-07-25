@@ -14,6 +14,7 @@ final class SessionStore: ObservableObject {
     private let api: any SessionAPI
     private let managerAPI: any ManagerSessionAPI
     private let bridgeOverride: ClientSessionBridge?
+    private var isRestoringSession = false
 
     init(
         api: any SessionAPI = APIClient.shared,
@@ -43,6 +44,7 @@ final class SessionStore: ObservableObject {
             return refreshed.isLoggedIn
         } catch let error as APIError {
             if case .unauthorized = error {
+                if await restoreSavedSession() { return true }
                 user = nil
                 isManagerLoggedIn = false
             } else {
@@ -67,8 +69,8 @@ final class SessionStore: ObservableObject {
     }
 
     private func clearAuthentication() {
-            user = nil
-            isManagerLoggedIn = false
+        user = nil
+        isManagerLoggedIn = false
     }
 
     func login(username: String, password: String) async -> Bool {
@@ -81,6 +83,7 @@ final class SessionStore: ObservableObject {
             )
             if resp.success {
                 seedUser(from: resp, fallbackUsername: username)
+                saveCredentials(username: username, password: password)
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
                     username: username,
@@ -143,6 +146,7 @@ final class SessionStore: ObservableObject {
             )
             if resp.success {
                 seedUser(from: resp, fallbackUsername: username)
+                saveCredentials(username: username, password: password)
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
                     username: username,
@@ -163,13 +167,7 @@ final class SessionStore: ObservableObject {
         username: String,
         password: String
     ) async -> Bool {
-        do {
-            try await api.setKeepLogin(true)
-        } catch {
-            clearAuthentication()
-            lastError = error.localizedDescription
-            return false
-        }
+        try? await api.setKeepLogin(true)
         let refreshed = await refresh()
         guard refreshed && isLoggedIn else {
             lastError = L10n.text("登录状态未能确认，请重新登录。")
@@ -199,23 +197,84 @@ final class SessionStore: ObservableObject {
         return true
     }
 
+    private func saveCredentials(username: String, password: String) {
+        SessionCredentialStore.save(
+            username: username,
+            password: password,
+            serverURL: ServerConfig.shared.baseURL
+        )
+    }
+
+    private func restoreSavedSession() async -> Bool {
+        guard !isRestoringSession,
+              let credentials = SessionCredentialStore.load(
+                serverURL: ServerConfig.shared.baseURL
+              ) else { return false }
+        isRestoringSession = true
+        defer { isRestoringSession = false }
+        do {
+            let response = try await api.login(
+                username: credentials.username,
+                password: credentials.password
+            )
+            guard response.success else {
+                SessionCredentialStore.clear()
+                clearAuthentication()
+                return false
+            }
+            seedUser(from: response, fallbackUsername: credentials.username)
+            try? await api.setKeepLogin(true)
+            if role == "super_admin" {
+                do {
+                    try await managerAPI.login(
+                        username: credentials.username,
+                        password: credentials.password
+                    )
+                    isManagerLoggedIn = true
+                } catch {
+                    isManagerLoggedIn = false
+                }
+            }
+            let bridged = await bridgeClientSession(
+                principalRef: response.username ?? credentials.username
+            )
+            if !bridged { lastError = nil }
+            return true
+        } catch let error as APIError {
+            if case .unauthorized = error {
+                SessionCredentialStore.clear()
+                clearAuthentication()
+            } else {
+                lastError = error.localizedDescription
+            }
+            return false
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
     func logout() async {
+        SessionCredentialStore.clear()
         user = nil
         isManagerLoggedIn = false
         let api = api
         let managerAPI = managerAPI
         let serverURL = ServerConfig.shared.baseURL?.absoluteString
         let executable = ClientCLIResolution.executable()
-        Task {
-            try? await api.logout()
-            await managerAPI.logout()
-            if let serverURL {
-                _ = try? await ReleaseCommand.runObject([
-                    "client", "profile", "clear-ui-session",
-                    "--server-url", serverURL,
-                ], executable: executable)
-            }
+        try? await api.logout()
+        await managerAPI.logout()
+        if let serverURL {
+            _ = try? await ReleaseCommand.runObject([
+                "client", "profile", "clear-ui-session",
+                "--server-url", serverURL,
+            ], executable: executable)
         }
+    }
+
+    func updateSavedPassword(_ password: String) {
+        guard let username = user?.username else { return }
+        saveCredentials(username: username, password: password)
     }
 
     func setKeepLogin(_ keep: Bool) async {

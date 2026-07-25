@@ -3,18 +3,23 @@ import SwiftUI
 struct ClientSettingsHub: View {
     let open: (ClientTab) -> Void
     @EnvironmentObject private var releaseController: ClientReleaseController
-    @State private var selection = SettingSection.server
+    @State private var selectionID = SettingSection.server.id
 
     var body: some View {
         HSplitView {
-            List(SettingSection.allCases, selection: $selection) { item in
-                Label(item.title, systemImage: item.systemImage).tag(item)
-            }
-            .listStyle(.sidebar)
-            .frame(minWidth: 180, idealWidth: 200)
+            SettingsSidebar(
+                selection: $selectionID,
+                items: SettingSection.allCases.map {
+                    SettingsSidebarItem(
+                        id: $0.id,
+                        title: $0.title,
+                        systemImage: $0.systemImage
+                    )
+                }
+            )
 
             Group {
-                switch selection {
+                switch SettingSection(rawValue: selectionID) ?? .server {
                 case .server:
                     ServerSettingsView()
                 case .personalWorkspace:
@@ -66,10 +71,10 @@ private struct WorkspaceSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("工作区")
-                    .font(.largeTitle.weight(.semibold))
-                Text("这里只管理本地路径、同步、容量、Pylance 与 Git 策略。")
-                    .foregroundStyle(.secondary)
+                SettingsPageHeader(
+                    title: "工作区",
+                    subtitle: "这里只管理本地路径、同步、容量、Pylance 与 Git 策略。"
+                )
                 GroupBox("Profile 与研究过程") {
                     HStack(spacing: 16) {
                         Image(systemName: "person.2.crop.square.stack")
@@ -99,20 +104,26 @@ private struct SettingsLanguageView: View {
 
     var body: some View {
         ScrollView {
-            GroupBox("界面语言") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("语言", selection: $language) {
-                        Text("跟随系统").tag(AppLanguage.system.rawValue)
-                        Text("简体中文")
-                            .tag(AppLanguage.simplifiedChinese.rawValue)
-                        Text("English").tag(AppLanguage.english.rawValue)
+            VStack(alignment: .leading, spacing: 16) {
+                SettingsPageHeader(
+                    title: "语言",
+                    subtitle: "选择 FTClient 的界面语言。"
+                )
+                GroupBox("界面语言") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Picker("语言", selection: $language) {
+                            Text("跟随系统").tag(AppLanguage.system.rawValue)
+                            Text("简体中文")
+                                .tag(AppLanguage.simplifiedChinese.rawValue)
+                            Text("English").tag(AppLanguage.english.rawValue)
+                        }
+                        .pickerStyle(.segmented)
+                        Text("JSON、状态值与 API 协议不会随界面语言改变。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .pickerStyle(.segmented)
-                    Text("JSON、状态值与 API 协议不会随界面语言改变。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .padding(8)
                 }
-                .padding(8)
             }
             .padding(24)
         }

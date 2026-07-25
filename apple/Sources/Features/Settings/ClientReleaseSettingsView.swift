@@ -13,16 +13,28 @@ struct ClientReleaseSettingsView: View {
     var body: some View {
         Group {
             if embedded {
-                updatePanel
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        SettingsPageHeader(
+                            title: "客户端更新",
+                            subtitle: "管理 Main / Beta 客户端版本、下载与更新策略。"
+                        )
+                        updatePanel
+                    }
+                    .padding(24)
+                    .frame(maxWidth: 760, alignment: .leading)
+                }
             } else {
                 VStack(spacing: 0) {
                     header
                     Divider()
                     TabView {
-                        updatePanel
-                            .tabItem {
-                                Label("客户端更新", systemImage: "arrow.down.app")
-                            }
+                        ScrollView {
+                            updatePanel.padding(24)
+                        }
+                        .tabItem {
+                            Label("客户端更新", systemImage: "arrow.down.app")
+                        }
                         LocalProfilesView()
                             .tabItem {
                                 Label("Profiles", systemImage: "person.2")
@@ -31,8 +43,7 @@ struct ClientReleaseSettingsView: View {
                 }
             }
         }
-        .frame(width: 640, height: 480)
-        .background(.regularMaterial)
+        .frame(minWidth: 560, minHeight: 460)
         .task { await controller.refresh() }
     }
 
@@ -137,8 +148,7 @@ struct ClientReleaseSettingsView: View {
             }
             .font(.callout)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private var installedVersion: String {
