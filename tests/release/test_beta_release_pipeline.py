@@ -42,6 +42,15 @@ def test_runtime_cache_key_ignores_swift_and_changes_for_cli(tmp_path: Path) -> 
     assert assets.runtime_input_digest(repo) != first
 
 
+def test_runtime_cache_key_includes_cli_command_modules(tmp_path: Path) -> None:
+    repo = _runtime_repo(tmp_path / "repo")
+    first = assets.runtime_input_digest(repo)
+    command = repo / "tools/cli/commands/client_release.py"
+    command.parent.mkdir(parents=True)
+    command.write_text("changed command")
+    assert assets.runtime_input_digest(repo) != first
+
+
 def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
     source = (Path(__file__).resolve().parents[2] / "script/release/assets.py").read_text()
     assert "RUNTIME_CACHE_SCHEMA = 2" in source

@@ -38,7 +38,7 @@ def runtime_input_digest(repo: Path) -> str:
     digest.update(("\n".join(DEPENDENCIES) + "\n").encode())
     roots = (
         repo / "tools/cli/pyproject.toml",
-        repo / "tools/cli/tools",
+        repo / "tools/cli",
         repo / "tools/cli/agent-harness/pyproject.toml",
         repo / "tools/cli/agent-harness/cli_anything",
         repo / "client-adapters/vibe-trading/adapter.json",
