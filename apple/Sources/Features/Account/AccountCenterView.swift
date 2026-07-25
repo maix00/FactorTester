@@ -30,14 +30,19 @@ struct AccountSettingsView: View {
                         ? "当前已登录，可在这里登出或切换账户。"
                         : "尚未登录；登录后可访问研究工作区和测试任务。"
                 ) {
-                    Picker("账户操作", selection: $panel) {
-                        Text(session.isLoggedIn ? "登出" : "登入")
-                            .tag(AccountPanel.session)
-                        Text("注册").tag(AccountPanel.register)
-                        Text("修改密码").tag(AccountPanel.password)
+                    HStack(spacing: 8) {
+                        Text(session.user?.username ?? "未登录")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Picker("账户操作", selection: $panel) {
+                            Text(session.isLoggedIn ? "登出" : "登入")
+                                .tag(AccountPanel.session)
+                            Text("注册").tag(AccountPanel.register)
+                            Text("修改密码").tag(AccountPanel.password)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
                 }
 
                 Divider()
@@ -56,12 +61,6 @@ struct AccountSettingsView: View {
             }
 
             SettingsSectionCard("账户身份") {
-                SettingsRow(title: "用户名", description: "当前登录账户。") {
-                    Text(session.user?.username ?? "—")
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Divider()
                 SettingsRow(title: "用户角色", description: "由服务器分配，客户端不能修改。") {
                     Text(session.user?.role ?? "—")
                         .foregroundStyle(.secondary)

@@ -23,7 +23,6 @@ struct PersonalWorkspaceView: View {
             if let openProfiles {
                 profileWorkspaceSection(openProfiles: openProfiles)
             }
-            reportAccessSection
             canonicalSection
             if let error = controller.error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -39,12 +38,36 @@ struct PersonalWorkspaceView: View {
 
     private var workspaceLayoutSection: some View {
         SettingsSectionCard("工作区路径") {
-            SettingsRow(title: "用户根目录", description: "当前账户的本地研究目录。") {
-                pathValue(userRoot)
+            SettingsRow(
+                title: "用户根目录 / 本地研究目录",
+                description: "本地研究报告读取目录；应用更新后授权仍然保留。"
+            ) {
+                VStack(alignment: .trailing, spacing: 5) {
+                    pathValue(authorizedRoot ?? userRoot)
+                    if authorizedRoot == nil {
+                        Text("未授权").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("已授权").font(.caption).foregroundStyle(.green)
+                    }
+                    if authorizedRoot == nil {
+                        Button("选择目录…") { chooseWorkspace() }
+                            .buttonStyle(.borderedProminent)
+                    } else {
+                        Button("更改目录…") { chooseWorkspace() }
+                            .buttonStyle(.bordered)
+                    }
+                }
             }
             Divider()
             SettingsRow(title: "Profile 根目录", description: "各个研究现场的独立 worktree。") {
                 pathValue("\(userRoot)/profiles")
+            }
+            if let accessError {
+                Divider()
+                Text(accessError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.vertical, 6)
             }
         }
     }
@@ -90,47 +113,6 @@ struct PersonalWorkspaceView: View {
             ) {
                 Button("打开 Profiles", action: openProfiles)
                     .buttonStyle(.borderedProminent)
-            }
-        }
-    }
-
-    private var reportAccessSection: some View {
-        SettingsSectionCard("本地研究报告") {
-            SettingsRow(
-                title: "目录授权",
-                description: "只在本机读取中文研究报告，不上传因子源码。"
-            ) {
-                if authorizedRoot == nil {
-                    Text("未授权").foregroundStyle(.secondary)
-                } else {
-                    Text("已启用").foregroundStyle(.green)
-                }
-            }
-            if let authorizedRoot {
-                Divider()
-                SettingsRow(title: "授权目录", description: "应用更新后授权仍然保留。") {
-                    Text(authorizedRoot == userRoot ? "用户根目录" : authorizedRoot)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.trailing)
-                }
-            }
-            if let accessError {
-                Text(accessError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(.vertical, 6)
-            }
-            HStack {
-                Spacer()
-                if authorizedRoot == nil {
-                    Button("选择用户目录…") { chooseWorkspace() }
-                        .buttonStyle(.borderedProminent)
-                } else {
-                    Button("更改用户目录…") { chooseWorkspace() }
-                        .buttonStyle(.bordered)
-                }
             }
         }
     }

@@ -66,19 +66,36 @@ struct ClientReleaseSettingsView: View {
 
     private var updatePanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SettingsSectionCard("更新状态") {
+            SettingsSectionCard("客户端更新") {
                 SettingsRow(title: statusTitle, description: statusSubtitle) {
-                    Image(systemName: statusIcon)
-                        .foregroundStyle(statusTint)
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Image(systemName: statusIcon)
+                            .foregroundStyle(statusTint)
+                        if controller.hasAvailableUpdate || controller.isUpdateReady {
+                            Text(controller.pendingVersion ?? controller.latestVersion)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        Button(action: primaryAction) {
+                            Label(primaryTitle, systemImage: primaryIcon)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(controller.isWorking)
+                    }
                 }
                 Divider()
                 SettingsRow(title: "更新渠道", description: "选择接收 Main 或 Beta 客户端。") {
-                    Picker("更新渠道", selection: $controller.channel) {
-                        Text("Main").tag("stable")
-                        Text("Beta").tag("beta")
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Picker("更新渠道", selection: $controller.channel) {
+                            Text("Main").tag("stable")
+                            Text("Beta").tag("beta")
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        Text(sourceLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
                     .disabled(controller.isWorking || controller.hasAvailableUpdate || controller.isUpdateReady)
                 }
                 Divider()
@@ -93,30 +110,8 @@ struct ClientReleaseSettingsView: View {
                         .foregroundStyle(.red)
                         .padding(.vertical, 6)
                 }
-                HStack {
-                    Spacer()
-                    Button(action: primaryAction) {
-                        Label(primaryTitle, systemImage: primaryIcon)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(controller.isWorking)
-                }
-                .padding(.top, 8)
-            }
-
-            SettingsSectionCard("版本详情") {
                 SettingsRow(title: "当前版本", description: "本机已安装版本。") {
                     Text(installedVersion).foregroundStyle(.secondary)
-                }
-                if !controller.latestVersion.isEmpty {
-                    Divider()
-                    SettingsRow(title: "可用版本", description: "服务器返回的最新版本。") {
-                        Text(controller.latestVersion).foregroundStyle(.secondary)
-                    }
-                }
-                Divider()
-                SettingsRow(title: "更新来源", description: "当前渠道的发布源。") {
-                    Text(sourceLabel).foregroundStyle(.secondary)
                 }
                 Divider()
                 SettingsRow(title: "签名", description: "发布包签名状态。") {
@@ -156,7 +151,7 @@ struct ClientReleaseSettingsView: View {
             return L10n.text("\(pendingVersion) 将在重启后安装")
         }
         if controller.hasAvailableUpdate {
-            return L10n.text("\(controller.latestVersion) 可以下载")
+            return L10n.text("有可用更新，可下载并在重启后安装")
         }
         return L10n.text("当前版本 \(installedVersion)")
     }
