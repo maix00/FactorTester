@@ -54,6 +54,8 @@ def _port_filter() -> int | None:
     raw = request.args.get("port")
     if raw is None:
         return _server_port() or None
+    if str(raw).strip().lower() in {"all", "*"}:
+        return None
     port = int(raw)
     if not 1 <= port <= 65535:
         raise ValueError("port must be between 1 and 65535")
@@ -85,6 +87,17 @@ def _server_context(job) -> dict[str, object]:
             or (binding or {}).get("profile_ref")
             or "default"
         ),
+    }
+
+
+def _submission_context(job) -> dict[str, object]:
+    value = job.job_spec.get("submission_context")
+    if not isinstance(value, dict):
+        return {"channel": "unknown", "client": "unknown"}
+    return {
+        "channel": str(value.get("channel") or "unknown"),
+        "client": str(value.get("client") or "unknown"),
+        "user_agent": str(value.get("user_agent") or "")[:200],
     }
 
 
@@ -162,6 +175,7 @@ def get_test_job(job_id: str):
             job_research_binding(job)
             | (detail.get("graph_binding") or {})
         ),
+        "submission_context": _submission_context(job),
         "evidence": job_evidence(detail),
         **job_urls(job.job_id),
     })

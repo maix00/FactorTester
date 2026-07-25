@@ -6,54 +6,85 @@ final class TestJobsController: ObservableObject {
     @Published private(set) var jobs: [TestJob] = []
     @Published private(set) var detail: TestJobDetail?
     @Published private(set) var isLoading = false
+    @Published private(set) var discoveredPorts: [Int] = []
     @Published var error: String?
     @Published var notice: String?
-    @Published var portText = ""
 
     private let service = TestJobsService()
 
     func refresh() async {
         isLoading = true
         defer { isLoading = false }
+        if let found = try? await service.visiblePorts() {
+            discoveredPorts = Array(Set(found + [currentPort])).sorted()
+        }
+        var loaded: [TestJob] = (try? await service.list()) ?? []
+        if loaded.isEmpty {
+            // Older deployments may not understand port=all. Keep the
+            // explicit-port path as a compatibility fallback.
+            for port in ports where port != currentPort {
+                loaded += (try? await service.list(port: port)) ?? []
+            }
+        }
+        jobs = loaded.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+        error = nil
+    }
+
+    func select(_ job: TestJob) async {
         do {
-            var loaded: [TestJob] = []
-            for port in ports { loaded += try await service.list(port: port) }
-            jobs = loaded.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+            do {
+                detail = try await service.detail(jobID: job.id, port: job.port)
+            } catch where job.port != currentPort {
+                // Terminal history may outlive its original listener.
+                detail = try await service.detail(jobID: job.id, port: currentPort)
+            }
             error = nil
         }
         catch let failure { self.error = failure.localizedDescription }
     }
 
-    func select(_ job: TestJob) async {
-        do { detail = try await service.detail(jobID: job.id, port: job.port); error = nil }
-        catch let failure { self.error = failure.localizedDescription }
-    }
-
     func clear(_ job: TestJob) async {
-        do { try await service.clearArtifacts(jobID: job.id, port: job.port); notice = "已清空 \(job.id) 的生成物"; await select(job); await refresh() }
+        do {
+            do {
+                try await service.clearArtifacts(jobID: job.id, port: job.port)
+            } catch where job.port != currentPort {
+                try await service.clearArtifacts(jobID: job.id, port: currentPort)
+            }
+            notice = "已清空 \(job.id) 的生成物"
+            await select(job)
+            await refresh()
+        }
         catch let failure { self.error = failure.localizedDescription }
     }
 
     func download(_ artifact: TestJobArtifact, from job: TestJob) async {
         do {
-            let url = try await service.download(jobID: job.id, port: job.port, artifact: artifact)
+            let url: URL
+            do {
+                url = try await service.download(jobID: job.id, port: job.port, artifact: artifact)
+            } catch where job.port != currentPort {
+                url = try await service.download(jobID: job.id, port: currentPort, artifact: artifact)
+            }
             notice = "已下载到 \(url.path)"
         } catch let failure { self.error = failure.localizedDescription }
     }
 
     var ports: [Int] {
-        let current = Int(ServerConfig.shared.port) ?? 0
+        let current = currentPort
         let saved = UserDefaults.standard.string(forKey: "factortester.jobPorts")?.split(separator: ",").compactMap { Int($0) } ?? []
-        return Array(Set([current] + saved).filter { 1...65535 ~= $0 }).sorted()
+        return Array(Set([current] + saved + discoveredPorts).filter { 1...65535 ~= $0 }).sorted()
     }
 
-    func addPort() {
-        guard let port = Int(portText), 1...65535 ~= port else { return }
-        let values = Set(ports + [port]).sorted().map(String.init).joined(separator: ",")
-        UserDefaults.standard.set(values, forKey: "factortester.jobPorts")
-        portText = ""
-        Task { await refresh() }
+    var currentPort: Int { Int(ServerConfig.shared.port) ?? 0 }
+
+    func discoverPorts() async {
+        do {
+            discoveredPorts = try await service.visiblePorts()
+            notice = "已发现端口：\(ports.map(String.init).joined(separator: ", "))"
+            await refresh()
+        } catch let failure { error = failure.localizedDescription }
     }
+
 }
 
 struct TestJobsView: View {
@@ -78,8 +109,9 @@ struct TestJobsView: View {
             .navigationTitle("测试任务")
             .toolbar {
                 ToolbarItemGroup {
-                    TextField("端口", text: $controller.portText).frame(width: 70)
-                    Button("添加端口") { controller.addPort() }
+                    Text("端口 \(controller.ports.map(String.init).joined(separator: ", "))")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("发现端口") { Task { await controller.discoverPorts() } }
                     Button { Task { await controller.refresh() } } label: { Label("刷新", systemImage: "arrow.clockwise") }
                 }
             }
@@ -115,6 +147,7 @@ struct TestJobsView: View {
                     disclosure("配置", detail.configurationText)
                     outputDeclarations(detail)
                     disclosure("研究绑定", detail.researchBindingText)
+                    disclosure("调用方", detail.submissionContextText)
                     resultPreview(detail)
                     Text("生成物").font(.headline)
                     ForEach(detail.artifacts.filter { $0.state == "active" }) { artifact in
@@ -184,7 +217,7 @@ struct TestJobsView: View {
             } else {
                 Text(detail.resultText).font(.system(.body, design: .monospaced)).textSelection(.enabled)
             }
-            if let declaration = detail.outputDeclarations.first(where: isPriceViewer) {
+            if detail.outputDeclarations.contains(where: isPriceViewer) {
                 if showPriceViewer && !loadedPriceBars.isEmpty {
                     PriceChartView(bars: loadedPriceBars)
                 } else {
@@ -193,7 +226,7 @@ struct TestJobsView: View {
                         showPriceViewer = !loadedPriceBars.isEmpty
                     }
                     .disabled(detail.priceResultData == nil)
-                    Text("(declaration.label)：仅在点击后读取 OHLCV 数据")
+                    Text("行情查看器：仅在点击后读取 OHLCV 数据")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

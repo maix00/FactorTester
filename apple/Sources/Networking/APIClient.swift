@@ -40,6 +40,8 @@ final class APIClient: NSObject {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
+        req.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
         if let json {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: json)

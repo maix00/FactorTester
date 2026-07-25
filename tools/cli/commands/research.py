@@ -433,12 +433,15 @@ def job_list(
     rows = []
     for port in ports:
         client = client_from_config() if port is None else client_from_config(port=port)
-        rows.extend(client.list_jobs(
-            workspace_id=workspace_id,
-            status=",".join(statuses),
-            kind=kind or "",
-            limit=limit,
-        ))
+        kwargs = {
+            "workspace_id": workspace_id,
+            "status": ",".join(statuses),
+            "kind": kind or "",
+            "limit": limit,
+        }
+        if port is not None:
+            kwargs["all_ports"] = False
+        rows.extend(client.list_jobs(**kwargs))
     rows.sort(key=lambda item: float(item.get("updated_at") or 0), reverse=True)
     rows = rows[:limit * len(ports)]
     if as_json:
@@ -450,6 +453,18 @@ def job_list(
             f"status={item.get('status')} attempt={item.get('attempt')} "
             f"port={item.get('port') or (item.get('server_context') or {}).get('port') or '-'}"
         )
+
+
+@job.command("ports")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def job_ports(as_json: bool) -> None:
+    """列出 manager 发现的 FactorTester 任务端口。"""
+    ports = client_from_config().list_job_ports()
+    if as_json:
+        click.echo(_json({"ports": ports, "count": len(ports)}))
+        return
+    click.echo("、".join(str(port) for port in ports) if ports else "暂无可用任务端口")
 
 
 @job.command("status")
@@ -472,6 +487,8 @@ def job_config(job_id: str) -> None:
         "run_spec_hash": detail.get("run_spec_hash"),
         "output_requests": detail.get("output_requests") or [],
         "server_context": detail.get("server_context") or {},
+        "submission_context": detail.get("submission_context") or {},
+        "research_binding": detail.get("research_binding") or {},
         "configuration": detail.get("configuration"),
     }))
 

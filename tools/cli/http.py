@@ -206,7 +206,11 @@ class HttpSession:
         if query:
             url = self._url(path, query=query)
         body = None
-        headers = {"Accept": "text/event-stream"}
+        headers = {
+            "Accept": "text/event-stream",
+            "User-Agent": "FactorTester-CLI/1",
+            "X-FactorTester-Client": "cli",
+        }
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -255,7 +259,11 @@ class HttpSession:
     ) -> dict[str, Any]:
         url = self._url(path, query=query)
         body = None
-        headers = {"Accept": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "FactorTester-CLI/1",
+            "X-FactorTester-Client": "cli",
+        }
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"

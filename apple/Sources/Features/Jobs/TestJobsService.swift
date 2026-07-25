@@ -35,6 +35,7 @@ struct TestJobDetail {
     let outputDeclarations: [TestJobOutputDeclaration]
     let configurationText: String
     let researchBindingText: String
+    let submissionContextText: String
     let resultText: String
     let previewRows: [[String: String]]
     let chartPoints: [TestJobChartPoint]
@@ -56,9 +57,17 @@ final class TestJobsService {
     )
 
     func list(port: Int? = nil) async throws -> [TestJob] {
-        let suffix = port.map { "&port=\($0)" } ?? ""
+        let suffix = port.map { "&port=\($0)" } ?? "&port=all"
         let json = try await request(path: "/api/jobs?limit=200\(suffix)", port: port)
         return (json["jobs"] as? [[String: Any]] ?? []).map(makeJob)
+    }
+
+    func visiblePorts() async throws -> [Int] {
+        let json = try await request(path: "/api/jobs/ports")
+        return (json["ports"] as? [Any] ?? []).compactMap {
+            if let value = $0 as? Int { return value }
+            return Int(String(describing: $0))
+        }.filter { 1...65535 ~= $0 }
     }
 
     func detail(jobID: String, port: Int = 0) async throws -> TestJobDetail {
@@ -78,6 +87,7 @@ final class TestJobsService {
             outputDeclarations: (detail["output_declarations"] as? [[String: Any]] ?? []).map(makeOutputDeclaration),
             configurationText: prettyJSON(detail["configuration"]),
             researchBindingText: prettyJSON(detail["research_binding"]),
+            submissionContextText: prettyJSON(detail["submission_context"]),
             resultText: prettyJSON(result),
             previewRows: rows,
             chartPoints: chartPoints(rows),
@@ -130,6 +140,8 @@ final class TestJobsService {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
+        request.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw NSError(domain: "TestJobs", code: 4, userInfo: [NSLocalizedDescriptionKey: "任务服务器返回错误"])

@@ -39,6 +39,11 @@ def current_port() -> int:
 
 def _port_error(job: JobRecord):
     port = current_port()
+    # A terminal job is durable history. Its result, configuration, and
+    # artifacts remain readable from any sibling listener that shares the
+    # authenticated repository, even after the original listener is stopped.
+    if job.status.value in {"succeeded", "failed", "cancelled"}:
+        return None
     if port and job.service_port and job.service_port != port:
         return jsonify({
             "success": False,

@@ -12,6 +12,8 @@ struct ServerSettingsView: View {
     @State private var managerScheme = "http"
     @State private var managerHost = "127.0.0.1"
     @State private var managerPort = "7998"
+    @State private var jobPortText = ""
+    @State private var jobPorts = ""
     @State private var testResult: String?
     @State private var testing = false
     @State private var showAdvanced = false
@@ -22,6 +24,7 @@ struct ServerSettingsView: View {
                 header
                 connectionCard
                 managerConnectionCard
+                jobPortsCard
                 HStack {
                     Button("测试连接") { Task { await test() } }
                         .disabled(testing || host.isEmpty)
@@ -51,6 +54,7 @@ struct ServerSettingsView: View {
             managerScheme = managerConfig.scheme
             managerHost = managerConfig.host.isEmpty ? "127.0.0.1" : managerConfig.host
             managerPort = managerConfig.port.isEmpty ? "7998" : managerConfig.port
+            jobPorts = UserDefaults.standard.string(forKey: "factortester.jobPorts") ?? ""
         }
     }
 
@@ -106,6 +110,32 @@ struct ServerSettingsView: View {
                     .autocorrectionDisabled()
                 TextField("Manager 端口", text: $managerPort)
                 Text("非本机 Manager 必须使用 HTTPS；登录凭据与业务服务一致。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+        }
+    }
+
+    private var jobPortsCard: some View {
+        GroupBox("手工任务端口") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    TextField("端口", text: $jobPortText)
+                        .frame(width: 100)
+                    Button("加入") {
+                        guard let value = Int(jobPortText), 1...65535 ~= value else { return }
+                        let existing = jobPorts.split(separator: ",").compactMap { Int($0) }
+                        jobPorts = Array(Set(existing + [value])).sorted().map(String.init).joined(separator: ",")
+                        jobPortText = ""
+                        UserDefaults.standard.set(jobPorts, forKey: "factortester.jobPorts")
+                    }
+                    Button("清空") {
+                        jobPorts = ""
+                        UserDefaults.standard.removeObject(forKey: "factortester.jobPorts")
+                    }
+                }
+                Text(jobPorts.isEmpty ? "没有手工端口；测试任务页面会自动从服务器发现端口。" : "已保存：\(jobPorts)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -294,6 +294,25 @@ def _deployment_id() -> str:
     return str(os.environ.get("GTHT_DEPLOYMENT_ID") or "factortester-local")
 
 
+def _submission_context() -> dict[str, str]:
+    user_agent = str(request.headers.get("User-Agent") or "").strip()
+    marker = str(request.headers.get("X-FactorTester-Client") or "").strip()
+    value = f"{marker} {user_agent}".lower()
+    if "cli" in value:
+        channel = "cli"
+    elif "swift" in value or "ftclient" in value:
+        channel = "swift"
+    elif "web" in value or "mozilla" in value:
+        channel = "web"
+    else:
+        channel = "http"
+    return {
+        "channel": channel,
+        "client": marker or user_agent.split("/", 1)[0] or "unknown",
+        "user_agent": user_agent[:200],
+    }
+
+
 def _daemon_client() -> JobDaemonClient:
     socket_path = os.environ.get(
         "GTHT_JOB_DAEMON_SOCKET",
@@ -313,6 +332,7 @@ def _submit_kind(kind: str, payload: dict, *, run_spec_hash: str):
     if runner is None:
         raise ValueError(f"unsupported research job kind: {kind}")
     repository = JobRepository()
+    payload.setdefault("submission_context", _submission_context())
     job = repository.create(JobRecord(
         job_id=uuid.uuid4().hex,
         kind=kind,

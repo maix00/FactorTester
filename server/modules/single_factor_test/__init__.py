@@ -32,6 +32,7 @@ from . import (  # noqa: E402, F401
     configuration_snapshot_routes,
     group,
     ic,
+    job_port_routes,
     page,
     profile_research_routes,
     research_graph_routes,

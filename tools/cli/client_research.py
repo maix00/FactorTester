@@ -9,6 +9,13 @@ from .http import BinaryResponse
 
 
 class ResearchClientMixin(ClientMixinBase):
+    def list_job_ports(self) -> list[int]:
+        data = self._expect_success(self.session.get("/api/jobs/ports"))
+        return [
+            int(value) for value in data.get("ports") or []
+            if isinstance(value, int) and 1 <= value <= 65535
+        ]
+
     def create_workspace(
         self,
         *,
@@ -220,6 +227,7 @@ class ResearchClientMixin(ClientMixinBase):
         status: str = "",
         kind: str = "",
         limit: int = 20,
+        all_ports: bool = True,
     ) -> list[dict[str, Any]]:
         query = {
             key: value for key, value in {
@@ -228,6 +236,7 @@ class ResearchClientMixin(ClientMixinBase):
                 "status": status,
                 "kind": kind,
                 "limit": limit,
+                "port": "all" if all_ports else "",
             }.items() if value
         }
         data = self._expect_success(
