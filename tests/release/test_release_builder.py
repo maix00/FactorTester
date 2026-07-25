@@ -76,6 +76,9 @@ def test_local_build_script_uses_installed_app_identity() -> None:
     assert "--install|install" in source
     assert "script.release.embed_runtime" in source
     assert "FTCLIENT_PYTHON" in source
+    assert "FTCLIENT_MARKETING_VERSION" in source
+    assert "FTCLIENT_BUILD_NUMBER" in source
+    assert "refusing to install an older client build" in source
     assert "sys.version_info >= (3, 11)" in source
 
 
@@ -88,6 +91,8 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
     cli = resources / "bin/factortester"
     cli.parent.mkdir(parents=True)
     cli.write_bytes(b"old")
+    research_cli = resources / "bin/cli-anything-factortester-research"
+    research_cli.write_bytes(b"old")
     receipt = resources / "bundle-receipt.json"
     receipt.write_text(json.dumps({
         "version": "bundle-1-r" + "a" * 40,
@@ -98,6 +103,7 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
     def embed(repo, target, *, version, source_revision):
         calls.append((repo, target, version, source_revision))
         cli.write_bytes(b"new")
+        research_cli.write_bytes(b"new")
         return receipt
 
     monkeypatch.setattr(runtime_refresh, "embed_client_runtime", embed)
@@ -118,6 +124,17 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
         "bundle-1-r" + "b" * 40,
         "b" * 40,
     )
+
+
+def test_local_runtime_refresh_rejects_short_revision_before_fast_path(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="full 40-character Git revision"):
+        runtime_refresh.ensure_client_runtime(
+            app=tmp_path / "FTClient.app",
+            version="bundle-1-rshort",
+            source_revision="fb35e13c",
+        )
 
 
 def test_local_build_script_requires_stable_signature_for_privacy_grants() -> None:

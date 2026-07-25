@@ -27,7 +27,7 @@ DEPENDENCIES = (
 )
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
-RUNTIME_CACHE_SCHEMA = 2
+RUNTIME_CACHE_SCHEMA = 3
 _SOURCE_REVISION = re.compile(r"^[0-9a-f]{40}$")
 _MACHO_PREFIXES = {
     b"\xcf\xfa\xed\xfe",
@@ -201,18 +201,38 @@ def embed_client_runtime(
         environment = root / "venv"
         venv.EnvBuilder(with_pip=True).create(environment)
         python = environment / "bin" / "python"
+        # Install the two build tools first, then install the source packages
+        # without dependency resolution.  The explicit runtime dependency
+        # list is the reproducibility boundary; allowing setuptools to resolve
+        # broad ``>=`` ranges here makes two releases from the same checkout
+        # contain different Python code.
         subprocess.run(
             [
-                str(python),
-                "-m",
-                "pip",
-                "install",
+                str(python), "-m", "pip", "install",
                 "--disable-pip-version-check",
                 f"pyinstaller=={PYINSTALLER_VERSION}",
                 f"pyright[nodejs]=={PYRIGHT_VERSION}",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                str(python), "-m", "pip", "install", "--no-deps",
+                "--disable-pip-version-check",
                 str(repo / "tools" / "cli"),
                 str(repo / "tools" / "cli" / "agent-harness"),
             ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                str(python), "-m", "pip", "install",
+                "--disable-pip-version-check", *DEPENDENCIES,
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [str(python), "-m", "pip", "check"],
             check=True,
         )
         node_binary = _nodejs_wheel_binary(environment)
@@ -375,6 +395,7 @@ def _write_cache_descriptor(resources: Path, cache_key: str) -> None:
     descriptor.write_text(json.dumps({
         "schema_version": RUNTIME_CACHE_SCHEMA,
         "runtime_input_sha256": cache_key,
+        "smoke_tested": True,
         "files": _runtime_payload_hashes(resources),
     }, sort_keys=True, separators=(",", ":")) + "\n")
     with descriptor.open("rb") as stream:
@@ -394,11 +415,19 @@ def _valid_runtime_cache(resources: Path, cache_key: str) -> bool:
         value = json.loads(required[-1].read_text())
     except (OSError, ValueError):
         return False
-    return (
+    valid = (
         value.get("schema_version") == RUNTIME_CACHE_SCHEMA
         and value.get("runtime_input_sha256") == cache_key
+        and value.get("smoke_tested") is True
         and value.get("files") == _runtime_payload_hashes(resources)
     )
+    if not valid:
+        return False
+    try:
+        _smoke_test_frozen_runtime(resources / "bin/factortester")
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
+    return (resources / "bin/cli-anything-factortester-research").stat().st_mode & 0o111 != 0
 
 
 def _nodejs_wheel_binary(environment: Path) -> Path:

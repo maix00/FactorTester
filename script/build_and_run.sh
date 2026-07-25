@@ -27,13 +27,21 @@ trap cleanup_staging EXIT
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 xcodegen generate --spec "$APPLE_DIR/project.yml" --project "$APPLE_DIR"
+XCODEBUILD_ARGS=(
+  -project "$PROJECT"
+  -scheme FactorTester-Client-macOS
+  -configuration Release
+  -derivedDataPath "$DERIVED_DATA"
+  CODE_SIGNING_ALLOWED=NO
+)
+if test -n "${FTCLIENT_MARKETING_VERSION:-}"; then
+  XCODEBUILD_ARGS+=("MARKETING_VERSION=$FTCLIENT_MARKETING_VERSION")
+fi
+if test -n "${FTCLIENT_BUILD_NUMBER:-}"; then
+  XCODEBUILD_ARGS+=("CURRENT_PROJECT_VERSION=$FTCLIENT_BUILD_NUMBER")
+fi
 xcodebuild \
-  -project "$PROJECT" \
-  -scheme FactorTester-Client-macOS \
-  -configuration Release \
-  -derivedDataPath "$DERIVED_DATA" \
-  CODE_SIGNING_ALLOWED=NO \
-  build
+  "${XCODEBUILD_ARGS[@]}" build
 
 SOURCE_REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
@@ -118,6 +126,13 @@ verify_install() {
   test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$installed_plist")" = \
     "$BUNDLE_ID"
   test "$(bundle_hash "$source")" = "$(bundle_hash "$installed")"
+  local source_build installed_build
+  source_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$source_plist")"
+  installed_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$installed_plist")"
+  if test "$source_build" -lt "$installed_build"; then
+    echo "refusing to install an older client build: $source_build < $installed_build" >&2
+    return 1
+  fi
   local cli="Contents/Resources/FactorTester/bin/factortester"
   local research_cli="Contents/Resources/FactorTester/bin/cli-anything-factortester-research"
   local receipt="Contents/Resources/FactorTester/bundle-receipt.json"
