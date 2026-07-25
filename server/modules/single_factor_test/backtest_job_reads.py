@@ -13,7 +13,7 @@ import orjson
 from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.ports import detect_port
 from server.jobs.ipc import DaemonUnavailable
-from server.jobs.report_outputs import artifact_description
+from server.jobs.report_outputs import artifact_description, output_declarations
 from server.jobs.states import JobStatus, TERMINAL_STATUSES
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.backtest_job_support import (
@@ -151,6 +151,7 @@ def get_test_job(job_id: str):
         "error": job.error,
         "run_spec_hash": job.run_spec_hash,
         "output_requests": list(job.job_spec.get("output_requests") or ()),
+        "output_declarations": output_declarations(job.job_spec.get("output_requests") or ()),
         "configuration": (
             job.job_spec.get("run_spec", {}).get("configuration")
             if isinstance(job.job_spec.get("run_spec"), dict)

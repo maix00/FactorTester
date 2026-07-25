@@ -19,15 +19,26 @@ struct TestJobArtifact: Identifiable, Hashable {
     let state: String
 }
 
+struct TestJobOutputDeclaration: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let label: String
+    let presentation: String
+    let viewer: String
+    let formats: [String]
+}
+
 struct TestJobDetail {
     let job: TestJob
     let runSpecHash: String
     let outputRequests: [String]
+    let outputDeclarations: [TestJobOutputDeclaration]
     let configurationText: String
     let researchBindingText: String
     let resultText: String
     let previewRows: [[String: String]]
     let chartPoints: [TestJobChartPoint]
+    let priceResultData: Data?
     let artifacts: [TestJobArtifact]
 }
 
@@ -64,11 +75,13 @@ final class TestJobsService {
             job: job,
             runSpecHash: detail["run_spec_hash"] as? String ?? "",
             outputRequests: detail["output_requests"] as? [String] ?? [],
+            outputDeclarations: (detail["output_declarations"] as? [[String: Any]] ?? []).map(makeOutputDeclaration),
             configurationText: prettyJSON(detail["configuration"]),
             researchBindingText: prettyJSON(detail["research_binding"]),
             resultText: prettyJSON(result),
             previewRows: rows,
             chartPoints: chartPoints(rows),
+            priceResultData: result.flatMap { try? JSONSerialization.data(withJSONObject: $0) },
             artifacts: (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact)
         )
     }
@@ -146,6 +159,18 @@ final class TestJobsService {
             description: value["description"] as? String ?? name,
             sizeBytes: value["size_bytes"] as? Int ?? 0,
             state: value["state"] as? String ?? "active"
+        )
+    }
+
+    private func makeOutputDeclaration(_ value: [String: Any]) -> TestJobOutputDeclaration {
+        let name = value["name"] as? String ?? "output"
+        return TestJobOutputDeclaration(
+            id: name,
+            name: name,
+            label: value["label"] as? String ?? name,
+            presentation: value["presentation"] as? String ?? "data",
+            viewer: value["viewer"] as? String ?? "json",
+            formats: value["formats"] as? [String] ?? []
         )
     }
 

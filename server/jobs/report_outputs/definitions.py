@@ -8,36 +8,42 @@ from typing import Any, Iterable
 OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
     "equity_curve": {
         "label": "净值曲线与回撤", "formats": ["svg", "json"],
+        "presentation": "chart", "viewer": "equity_curve",
         "artifacts": ["equity_curve_report", "equity_curve_data", "equity_curve_receipt", "equity_curve_data_receipt"],
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["backtest"],
     },
     "returns_over_time": {
         "label": "收益率随时间变化", "formats": ["svg", "json"],
+        "presentation": "chart", "viewer": "line_chart",
         "artifacts": ["returns_over_time_report", "returns_over_time_data", "returns_over_time_report_receipt", "returns_over_time_data_receipt"],
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["backtest"],
     },
     "metrics_over_time": {
         "label": "指标随时间变化", "formats": ["svg", "json"],
+        "presentation": "chart", "viewer": "metrics_chart",
         "artifacts": ["metrics_over_time_report", "metrics_over_time_data", "metrics_over_time_report_receipt", "metrics_over_time_data_receipt"],
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution"], "analyses": ["backtest"],
     },
     "fee_detail": {
         "label": "手续费明细", "formats": ["csv", "json"],
+        "presentation": "table", "viewer": "data_table",
         "artifacts": ["fee_detail_csv", "fee_detail_data", "fee_detail_csv_receipt", "fee_detail_data_receipt"],
         "before_run": True, "after_run": True, "requires": ["order_audit"],
         "analyses": ["backtest"],
     },
     "margin_detail": {
         "label": "保证金明细", "formats": ["csv", "json"],
+        "presentation": "table", "viewer": "data_table",
         "artifacts": ["margin_detail_csv", "margin_detail_data", "margin_detail_csv_receipt", "margin_detail_data_receipt"],
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution"], "analyses": ["backtest"],
     },
     "ratio_detail": {
         "label": "收益、手续费、保证金占比", "formats": ["csv", "json"],
+        "presentation": "table", "viewer": "data_table",
         "artifacts": ["ratio_detail_csv", "ratio_detail_data", "ratio_detail_csv_receipt", "ratio_detail_data_receipt"],
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution", "order_audit"],
@@ -81,6 +87,20 @@ _ARTIFACT_DESCRIPTIONS = {
 
 def output_capabilities() -> list[dict[str, Any]]:
     return [{"name": name, **dict(value)} for name, value in OUTPUT_DEFINITIONS.items()]
+
+
+def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
+    """Return the viewer contract stored with a Job detail response."""
+    return [
+        {
+            "name": name,
+            "label": OUTPUT_DEFINITIONS[name]["label"],
+            "presentation": OUTPUT_DEFINITIONS[name]["presentation"],
+            "viewer": OUTPUT_DEFINITIONS[name]["viewer"],
+            "formats": list(OUTPUT_DEFINITIONS[name]["formats"]),
+        }
+        for name in normalize_output_requests(list(requests))
+    ]
 
 
 def artifact_description(name: str) -> str:

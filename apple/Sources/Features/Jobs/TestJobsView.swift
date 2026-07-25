@@ -59,6 +59,8 @@ final class TestJobsController: ObservableObject {
 struct TestJobsView: View {
     @StateObject private var controller = TestJobsController()
     @State private var selectedID: String?
+    @State private var showPriceViewer = false
+    @State private var loadedPriceBars: [PriceBar] = []
 
     var body: some View {
         NavigationSplitView {
@@ -92,6 +94,8 @@ struct TestJobsView: View {
         }
         .onChange(of: selectedID) { value in
             guard let value, let job = controller.jobs.first(where: { $0.id == value }) else { return }
+            showPriceViewer = false
+            loadedPriceBars = []
             Task { await controller.select(job) }
         }
         .alert("任务提示", isPresented: Binding(get: { controller.notice != nil }, set: { if !$0 { controller.notice = nil } })) { Button("好") {} } message: { Text(controller.notice ?? "") }
@@ -109,7 +113,7 @@ struct TestJobsView: View {
                         Button("清空生成物", role: .destructive) { Task { await controller.clear(detail.job) } }
                     }
                     disclosure("配置", detail.configurationText)
-                    disclosure("输出声明", detail.outputRequests.joined(separator: "\n"))
+                    outputDeclarations(detail)
                     disclosure("研究绑定", detail.researchBindingText)
                     resultPreview(detail)
                     Text("生成物").font(.headline)
@@ -132,6 +136,27 @@ struct TestJobsView: View {
 
     private func disclosure(_ title: String, _ value: String) -> some View {
         DisclosureGroup(title) { Text(value).font(.system(.body, design: .monospaced)).textSelection(.enabled).padding(.top, 6) }
+    }
+
+    private func outputDeclarations(_ detail: TestJobDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("结果展示声明").font(.headline)
+            if detail.outputDeclarations.isEmpty {
+                Text("该任务没有声明可视化输出；以下为结果原始预览。")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(detail.outputDeclarations) { declaration in
+                    HStack {
+                        Text(declaration.label)
+                        Spacer()
+                        Text(presentationLabel(declaration.presentation))
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text(declaration.formats.joined(separator: ", "))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -159,6 +184,19 @@ struct TestJobsView: View {
             } else {
                 Text(detail.resultText).font(.system(.body, design: .monospaced)).textSelection(.enabled)
             }
+            if let declaration = detail.outputDeclarations.first(where: isPriceViewer) {
+                if showPriceViewer && !loadedPriceBars.isEmpty {
+                    PriceChartView(bars: loadedPriceBars)
+                } else {
+                    Button("加载行情查看器") {
+                        loadedPriceBars = PriceBarDecoder.decodeJSON(detail.priceResultData ?? Data())
+                        showPriceViewer = !loadedPriceBars.isEmpty
+                    }
+                    .disabled(detail.priceResultData == nil)
+                    Text("(declaration.label)：仅在点击后读取 OHLCV 数据")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
@@ -171,5 +209,13 @@ struct TestJobsView: View {
 
     private func statusLabel(_ value: String) -> String {
         ["succeeded": "成功", "failed": "失败", "running": "运行中", "queued": "排队中", "planning": "规划中", "paused": "已暂停", "cancelled": "已取消"][value] ?? value
+    }
+
+    private func presentationLabel(_ value: String) -> String {
+        ["chart": "图表", "table": "表格", "data": "数据", "text": "文本"][value] ?? value
+    }
+
+    private func isPriceViewer(_ declaration: TestJobOutputDeclaration) -> Bool {
+        ["price_chart", "kline_volume", "order_flow"].contains(declaration.viewer)
     }
 }

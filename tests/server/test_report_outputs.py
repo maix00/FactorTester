@@ -1,6 +1,7 @@
 from server.jobs.report_outputs import (
     build_report_artifacts,
     normalize_output_requests,
+    output_declarations,
     output_capabilities,
     source_artifacts_for,
 )
@@ -47,6 +48,10 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert source_artifacts_for(["fee_detail", "margin_detail"]) == {
         "result", "order_audit", "group_execution",
     }
+    declarations = output_declarations(["equity", "fees"])
+    assert [(item["presentation"], item["viewer"]) for item in declarations] == [
+        ("chart", "equity_curve"), ("table", "data_table"),
+    ]
 
 
 def test_requested_reports_include_images_tables_and_receipts() -> None:
