@@ -35,15 +35,16 @@ final class TestJobsService {
         delegateQueue: nil
     )
 
-    func list() async throws -> [TestJob] {
-        let json = try await request(path: "/api/jobs?limit=200")
+    func list(port: Int? = nil) async throws -> [TestJob] {
+        let suffix = port.map { "&port=\($0)" } ?? ""
+        let json = try await request(path: "/api/jobs?limit=200\(suffix)", port: port)
         return (json["jobs"] as? [[String: Any]] ?? []).map(makeJob)
     }
 
-    func detail(jobID: String) async throws -> TestJobDetail {
+    func detail(jobID: String, port: Int = 0) async throws -> TestJobDetail {
         let encoded = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
-        async let detailJSON = request(path: "/api/jobs/\(encoded)")
-        async let artifactsJSON = request(path: "/api/jobs/\(encoded)/artifacts")
+        async let detailJSON = request(path: "/api/jobs/\(encoded)", port: port)
+        async let artifactsJSON = request(path: "/api/jobs/\(encoded)/artifacts", port: port)
         let detail = try await detailJSON
         let artifacts = try await artifactsJSON
         let job = makeJob(detail)
@@ -57,17 +58,18 @@ final class TestJobsService {
         )
     }
 
-    func clearArtifacts(jobID: String) async throws {
-        _ = try await request(path: "/api/jobs/\(jobID)/artifacts", method: "DELETE")
+    func clearArtifacts(jobID: String, port: Int) async throws {
+        _ = try await request(path: "/api/jobs/\(jobID)/artifacts", method: "DELETE", port: port)
     }
 
     func download(
         jobID: String,
+        port: Int,
         artifact: TestJobArtifact
     ) async throws -> URL {
         let encodedJob = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
         let encodedName = artifact.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? artifact.name
-        let data = try await requestData(path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)")
+        let data = try await requestData(path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)", port: port)
         let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("FactorTester/jobs/\(jobID)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -77,8 +79,8 @@ final class TestJobsService {
         return destination
     }
 
-    private func request(path: String, method: String = "GET") async throws -> [String: Any] {
-        let data = try await requestData(path: path, method: method)
+    private func request(path: String, method: String = "GET", port: Int? = nil) async throws -> [String: Any] {
+        let data = try await requestData(path: path, method: method, port: port)
         guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw NSError(domain: "TestJobs", code: 1, userInfo: [NSLocalizedDescriptionKey: "服务器返回格式无效"])
         }
@@ -88,9 +90,14 @@ final class TestJobsService {
         return value
     }
 
-    private func requestData(path: String, method: String = "GET") async throws -> Data {
-        guard let url = ServerConfig.shared.url(forPath: path) else {
+    private func requestData(path: String, method: String = "GET", port: Int? = nil) async throws -> Data {
+        guard var url = ServerConfig.shared.url(forPath: path) else {
             throw NSError(domain: "TestJobs", code: 3, userInfo: [NSLocalizedDescriptionKey: "尚未配置服务器"])
+        }
+        if let port, port > 0, port != Int(ServerConfig.shared.port) {
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            components?.port = port
+            if let alternate = components?.url { url = alternate }
         }
         var request = URLRequest(url: url)
         request.httpMethod = method

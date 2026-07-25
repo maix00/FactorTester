@@ -7,31 +7,51 @@ final class TestJobsController: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var error: String?
     @Published var notice: String?
+    @Published var portText = ""
 
     private let service = TestJobsService()
 
     func refresh() async {
         isLoading = true
         defer { isLoading = false }
-        do { jobs = try await service.list(); error = nil }
+        do {
+            var loaded: [TestJob] = []
+            for port in ports { loaded += try await service.list(port: port) }
+            jobs = loaded.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+            error = nil
+        }
         catch let failure { self.error = failure.localizedDescription }
     }
 
     func select(_ job: TestJob) async {
-        do { detail = try await service.detail(jobID: job.id); error = nil }
+        do { detail = try await service.detail(jobID: job.id, port: job.port); error = nil }
         catch let failure { self.error = failure.localizedDescription }
     }
 
     func clear(_ job: TestJob) async {
-        do { try await service.clearArtifacts(jobID: job.id); notice = "已清空 \(job.id) 的生成物"; await select(job); await refresh() }
+        do { try await service.clearArtifacts(jobID: job.id, port: job.port); notice = "已清空 \(job.id) 的生成物"; await select(job); await refresh() }
         catch let failure { self.error = failure.localizedDescription }
     }
 
     func download(_ artifact: TestJobArtifact, from job: TestJob) async {
         do {
-            let url = try await service.download(jobID: job.id, artifact: artifact)
+            let url = try await service.download(jobID: job.id, port: job.port, artifact: artifact)
             notice = "已下载到 \(url.path)"
         } catch let failure { self.error = failure.localizedDescription }
+    }
+
+    var ports: [Int] {
+        let current = Int(ServerConfig.shared.port) ?? 0
+        let saved = UserDefaults.standard.string(forKey: "factortester.jobPorts")?.split(separator: ",").compactMap { Int($0) } ?? []
+        return Array(Set([current] + saved).filter { 1...65535 ~= $0 }).sorted()
+    }
+
+    func addPort() {
+        guard let port = Int(portText), 1...65535 ~= port else { return }
+        let values = Set(ports + [port]).sorted().map(String.init).joined(separator: ",")
+        UserDefaults.standard.set(values, forKey: "factortester.jobPorts")
+        portText = ""
+        Task { await refresh() }
     }
 }
 
@@ -53,7 +73,13 @@ struct TestJobsView: View {
             }
             .overlay { if controller.jobs.isEmpty && !controller.isLoading { emptyState("暂无测试任务") } }
             .navigationTitle("测试任务")
-            .toolbar { ToolbarItem { Button { Task { await controller.refresh() } } label: { Label("刷新", systemImage: "arrow.clockwise") } } }
+            .toolbar {
+                ToolbarItemGroup {
+                    TextField("端口", text: $controller.portText).frame(width: 70)
+                    Button("添加端口") { controller.addPort() }
+                    Button { Task { await controller.refresh() } } label: { Label("刷新", systemImage: "arrow.clockwise") }
+                }
+            }
         } detail: {
             detailView
         }
