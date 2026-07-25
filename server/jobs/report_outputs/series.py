@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -51,21 +52,61 @@ def metrics_rows(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
         values = item["values"]
         returns = [0.0] + [after / before - 1.0 if before else 0.0 for before, after in zip(values, values[1:])]
         peak = -math.inf
+        historical_max_drawdown = 0.0
+        initial = values[0]
         for index, (timestamp, value, period_return) in enumerate(zip(item["timestamps"], values, returns)):
             peak = max(peak, value)
+            current_drawdown = value / peak - 1.0 if peak else 0.0
+            historical_max_drawdown = min(historical_max_drawdown, current_drawdown)
             window = returns[max(0, index - 59):index + 1]
             mean = sum(window) / len(window)
             variance = sum((part - mean) ** 2 for part in window) / max(1, len(window) - 1)
             volatility = math.sqrt(variance)
+            sharpe = mean / volatility * math.sqrt(len(window)) if volatility else None
             rows.append({
                 "series": item["label"], "timestamp": timestamp, "equity": round(value, 8),
                 "period_return": round(period_return, 12),
                 "cumulative_return": round(value / (values[0] or 1.0) - 1.0, 12),
-                "drawdown": round(value / peak - 1.0 if peak else 0.0, 12),
+                "drawdown": round(current_drawdown, 12),
+                "max_drawdown": round(historical_max_drawdown, 12),
+                "annual_return": round(_annual_return(initial, value, item["timestamps"][0], timestamp), 12),
+                "sharpe_ratio": round(sharpe, 12) if sharpe is not None else None,
                 "rolling_sharpe_60": round(mean / volatility * math.sqrt(len(window)), 12) if volatility else None,
                 "rolling_volatility_60": round(volatility, 12),
             })
     return rows
+
+
+def _annual_return(initial: float, value: float, start: Any, end: Any) -> float:
+    if initial <= 0 or value <= 0:
+        return 0.0
+    start_seconds = _timestamp_seconds(start)
+    end_seconds = _timestamp_seconds(end)
+    elapsed_days = (end_seconds - start_seconds) / 86_400.0
+    # Observation-order indexes (0, 1, 2, …) are not calendar timestamps;
+    # annualizing over a few seconds would produce meaningless overflow.
+    if elapsed_days < 1.0:
+        return 0.0
+    exponent = min(365.25 / elapsed_days, 1_000.0)
+    try:
+        result = (value / initial) ** exponent - 1.0
+    except OverflowError:
+        result = math.copysign(float("1e308"), value - initial)
+    return result if math.isfinite(result) else math.copysign(float("1e308"), result)
+
+
+def _timestamp_seconds(value: Any) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+        return number / 1_000.0 if abs(number) > 20_000_000_000 else number
+    text = str(value or "")
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except ValueError:
+        return 0.0
 
 
 def finite_number(value: Any) -> float:

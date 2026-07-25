@@ -26,6 +26,8 @@ def test_equity_curve_artifact_is_small_deterministic_and_self_describing() -> N
     assert b"SgCCS" in image
     assert len(image) < 100_000
     assert receipt["panels"] == ["equity", "drawdown"]
+    assert receipt["drawdown_definition"] == "historical_maximum_drawdown_through_each_point"
+    assert receipt["initial_equity"] == [100]
     assert receipt["series"][0]["original_points"] == 20
     assert receipt["downsampling"] == "bucket_minmax_preserve_endpoints"
 

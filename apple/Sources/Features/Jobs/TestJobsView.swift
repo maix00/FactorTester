@@ -6,7 +6,6 @@ final class TestJobsController: ObservableObject {
     @Published private(set) var jobs: [TestJob] = []
     @Published private(set) var detail: TestJobDetail?
     @Published private(set) var isLoading = false
-    @Published private(set) var discoveredPorts: [Int] = []
     @Published var error: String?
     @Published var notice: String?
 
@@ -15,22 +14,12 @@ final class TestJobsController: ObservableObject {
     func refresh() async {
         isLoading = true
         defer { isLoading = false }
-        if let found = try? await service.visiblePorts() {
-            discoveredPorts = Array(Set(found + [currentPort])).sorted()
-        }
         var loaded: [TestJob] = []
         var listError: Error?
         do {
             loaded = try await service.list()
         } catch {
             listError = error
-        }
-        if loaded.isEmpty {
-            // Older deployments may not understand port=all. Keep the
-            // explicit-port path as a compatibility fallback.
-            for port in ports where port != currentPort {
-                loaded += (try? await service.list(port: port)) ?? []
-            }
         }
         if !loaded.isEmpty || listError == nil {
             jobs = loaded.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
@@ -79,31 +68,25 @@ final class TestJobsController: ObservableObject {
 
     func download(_ artifact: TestJobArtifact, from job: TestJob) async {
         do {
-            let url: URL
             do {
-                url = try await service.download(jobID: job.id, port: job.port, artifact: artifact)
+                _ = try await service.download(jobID: job.id, port: job.port, artifact: artifact)
             } catch where job.port != currentPort {
-                url = try await service.download(jobID: job.id, port: currentPort, artifact: artifact)
+                _ = try await service.download(jobID: job.id, port: currentPort, artifact: artifact)
             }
-            notice = "已下载到 \(url.path)"
         } catch let failure { self.error = failure.localizedDescription }
     }
 
-    var ports: [Int] {
-        let current = currentPort
-        let saved = UserDefaults.standard.string(forKey: "factortester.jobPorts")?.split(separator: ",").compactMap { Int($0) } ?? []
-        return Array(Set([current] + saved + discoveredPorts).filter { 1...65535 ~= $0 }).sorted()
-    }
-
-    var currentPort: Int { Int(ServerConfig.shared.port) ?? 0 }
-
-    func discoverPorts() async {
+    func downloadAll(from job: TestJob) async {
         do {
-            discoveredPorts = try await service.visiblePorts()
-            notice = "已发现端口：\(ports.map(String.init).joined(separator: ", "))"
-            await refresh()
-        } catch let failure { error = failure.localizedDescription }
+            do {
+                _ = try await service.downloadAll(jobID: job.id, port: job.port)
+            } catch where job.port != currentPort {
+                _ = try await service.downloadAll(jobID: job.id, port: currentPort)
+            }
+        } catch let failure { self.error = failure.localizedDescription }
     }
+
+    private var currentPort: Int { Int(ServerConfig.shared.port) ?? 0 }
 
 }
 
@@ -129,9 +112,6 @@ struct TestJobsView: View {
             .navigationTitle("测试任务")
             .toolbar {
                 ToolbarItemGroup {
-                    Text("端口 \(controller.ports.map(String.init).joined(separator: ", "))")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("发现端口") { Task { await controller.discoverPorts() } }
                     Button { Task { await controller.refresh() } } label: { Label("刷新", systemImage: "arrow.clockwise") }
                 }
             }
@@ -139,10 +119,7 @@ struct TestJobsView: View {
             detailView
         }
         .task {
-            while !Task.isCancelled {
-                await controller.refresh()
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-            }
+            await controller.refresh()
         }
         .onChange(of: selectedID) { value in
             guard let value, let job = controller.jobs.first(where: { $0.id == value }) else { return }
@@ -162,6 +139,7 @@ struct TestJobsView: View {
                     Text("\(detail.job.id) · \(statusLabel(detail.job.status)) · 端口 \(detail.job.port) · Profile \(detail.job.profile)").foregroundStyle(.secondary)
                     HStack {
                         Button("刷新详情") { Task { await controller.select(detail.job) } }
+                        Button("下载全部生成物") { Task { await controller.downloadAll(from: detail.job) } }
                         Button("清空生成物", role: .destructive) { Task { await controller.clear(detail.job) } }
                     }
                     disclosure("配置", detail.configurationText)

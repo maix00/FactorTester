@@ -34,6 +34,16 @@ final class SessionStore: ObservableObject {
     func refresh() async -> Bool {
         do {
             let refreshed = try await api.me()
+            // Some server versions answer `/api/me` with HTTP 200 and an
+            // empty identity after a restart instead of returning 401.  It
+            // is still an expired cookie, so try the Keychain credentials
+            // before exposing a logged-out screen.
+            guard refreshed.isLoggedIn else {
+                if await restoreSavedSessionWithRetry() { return true }
+                user = refreshed
+                isManagerLoggedIn = false
+                return false
+            }
             user = refreshed
             if role == "super_admin" {
                 isManagerLoggedIn = (try? await managerAPI.restoreSession()) == true
@@ -44,7 +54,7 @@ final class SessionStore: ObservableObject {
             return refreshed.isLoggedIn
         } catch let error as APIError {
             if case .unauthorized = error {
-                if await restoreSavedSession() { return true }
+                if await restoreSavedSessionWithRetry() { return true }
                 user = nil
                 isManagerLoggedIn = false
             } else {
@@ -202,6 +212,21 @@ final class SessionStore: ObservableObject {
             password: password,
             serverURL: ServerConfig.shared.baseURL
         )
+    }
+
+    private func restoreSavedSessionWithRetry() async -> Bool {
+        if await restoreSavedSession() { return true }
+        guard SessionCredentialStore.hasSavedCredentials(
+            serverURL: ServerConfig.shared.baseURL
+        ) else { return false }
+        for delay in [500_000_000, 1_000_000_000] {
+            try? await Task.sleep(nanoseconds: UInt64(delay))
+            if await restoreSavedSession() { return true }
+            guard SessionCredentialStore.hasSavedCredentials(
+                serverURL: ServerConfig.shared.baseURL
+            ) else { return false }
+        }
+        return false
     }
 
     private func restoreSavedSession() async -> Bool {

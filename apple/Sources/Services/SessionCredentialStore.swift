@@ -54,6 +54,10 @@ enum SessionCredentialStore {
         return credentials
     }
 
+    static func hasSavedCredentials(serverURL: URL?) -> Bool {
+        load(serverURL: serverURL) != nil
+    }
+
     static func clear() {
         KeychainStore.delete(account: account, serviceName: service)
     }

@@ -27,6 +27,25 @@ struct TestJobArtifact: Identifiable, Hashable {
     let description: String
     let sizeBytes: Int
     let state: String
+    let contentType: String
+
+    var fileName: String {
+        let rawName = URL(fileURLWithPath: name).lastPathComponent
+        guard URL(fileURLWithPath: rawName).pathExtension.isEmpty else {
+            return rawName
+        }
+        let extensionName: String
+        switch contentType.split(separator: ";", maxSplits: 1).first.map(String.init) {
+        case "text/csv": extensionName = "csv"
+        case "application/json": extensionName = "json"
+        case "image/svg+xml": extensionName = "svg"
+        case "application/zip": extensionName = "zip"
+        case "text/plain": extensionName = "txt"
+        case "application/pdf": extensionName = "pdf"
+        default: extensionName = "bin"
+        }
+        return "\(rawName).\(extensionName)"
+    }
 }
 
 struct TestJobOutputDeclaration: Identifiable, Hashable {
@@ -158,8 +177,21 @@ final class TestJobsService {
         let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("FactorTester/jobs/\(jobID)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let safeName = URL(fileURLWithPath: artifact.name).lastPathComponent
-        let destination = root.appendingPathComponent(safeName)
+        let destination = root.appendingPathComponent(artifact.fileName)
+        try data.write(to: destination, options: .atomic)
+        return destination
+    }
+
+    func downloadAll(jobID: String, port: Int) async throws -> URL {
+        let encodedJob = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
+        let data = try await requestData(
+            path: "/api/jobs/\(encodedJob)/artifacts/archive",
+            port: port
+        )
+        let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FactorTester/jobs/\(jobID)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let destination = root.appendingPathComponent("job-\(jobID)-artifacts.zip")
         try data.write(to: destination, options: .atomic)
         return destination
     }
@@ -243,7 +275,8 @@ final class TestJobsService {
             name: name,
             description: value["description"] as? String ?? name,
             sizeBytes: value["size_bytes"] as? Int ?? 0,
-            state: value["state"] as? String ?? "active"
+            state: value["state"] as? String ?? "active",
+            contentType: value["content_type"] as? String ?? "application/octet-stream"
         )
     }
 

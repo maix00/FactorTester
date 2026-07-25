@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .models import GeneratedReport
-from .render import csv_bytes, json_bytes, render_svg
+from .render import csv_bytes, json_bytes, render_metrics_svg, render_svg
 from .series import extract_series, metrics_rows, return_series
 from .tables import fee_rows, margin_rows, ratio_rows
 
@@ -35,8 +35,22 @@ def series_reports(name, series, title):
     receipt = {"schema_version": 1, "artifact_kind": name,
                "series": [{"label": item["label"], "points": len(item["values"])} for item in series]}
     payload = {"schema_version": 1, "artifact_kind": name, "series": series}
+    initial_value = 0.0 if name == "returns_over_time" else (
+        series[0]["values"][0] if series and series[0].get("values") else None
+    )
     return [
-        GeneratedReport(f"{name}_report", render_svg(title, series, percent=name == "returns_over_time"), "svg", "image/svg+xml", receipt),
+        GeneratedReport(
+            f"{name}_report",
+            render_svg(
+                title,
+                series,
+                percent=name == "returns_over_time",
+                initial_value=initial_value,
+            ),
+            "svg",
+            "image/svg+xml",
+            receipt,
+        ),
         GeneratedReport(f"{name}_data", json_bytes(payload), "json", "application/json", receipt),
     ]
 
@@ -44,12 +58,28 @@ def series_reports(name, series, title):
 def metrics_reports(series):
     rows = metrics_rows(series)
     receipt = {"schema_version": 1, "artifact_kind": "metrics_over_time", "row_count": len(rows),
-               "metrics": ["period_return", "cumulative_return", "drawdown", "rolling_sharpe_60", "rolling_volatility_60"]}
-    metric_series = [{"label": item["label"], "timestamps": item["timestamps"],
-                      "values": [row["rolling_sharpe_60"] or 0.0 for row in rows if row["series"] == item["label"]]}
-                     for item in series]
+               "metrics": ["annual_return", "sharpe_ratio", "max_drawdown",
+                            "drawdown", "rolling_volatility_60"]}
+    metric_series = []
+    metric_labels = {
+        "annual_return": "年化收益率",
+        "sharpe_ratio": "Sharpe ratio",
+        "max_drawdown": "历史最大回撤",
+        "drawdown": "当前回撤",
+        "rolling_volatility_60": "滚动波动率（60期）",
+    }
+    for metric, label in metric_labels.items():
+        for item in series:
+            item_rows = [row for row in rows if row["series"] == item["label"]]
+            metric_series.append({
+                "metric": metric,
+                "metric_label": label,
+                "label": item["label"],
+                "timestamps": item["timestamps"],
+                "values": [row.get(metric) or 0.0 for row in item_rows],
+            })
     return [
-        GeneratedReport("metrics_over_time_report", render_svg("指标随时间变化", metric_series), "svg", "image/svg+xml", receipt),
+        GeneratedReport("metrics_over_time_report", render_metrics_svg("指标随时间变化", metric_series), "svg", "image/svg+xml", receipt),
         GeneratedReport("metrics_over_time_data", json_bytes({"schema_version": 1, "rows": rows}), "json", "application/json", receipt),
     ]
 

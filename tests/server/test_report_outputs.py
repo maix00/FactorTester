@@ -5,6 +5,7 @@ from server.jobs.report_outputs import (
     output_capabilities,
     source_artifacts_for,
 )
+from server.jobs.report_outputs.series import metrics_rows
 
 
 def _sample():
@@ -68,3 +69,17 @@ def test_requested_reports_include_images_tables_and_receipts() -> None:
     assert {"equity_curve_report", "returns_over_time_report", "metrics_over_time_report"} <= names
     assert {"fee_detail_csv", "margin_detail_csv", "ratio_detail_csv"} <= names
     assert all(item.raw for item in artifacts)
+
+
+def test_metrics_rows_keep_historical_max_drawdown_and_cumulative_metrics() -> None:
+    rows = metrics_rows([{
+        "label": "A1",
+        "timestamps": ["2025-01-01T00:00:00Z", "2025-06-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        "values": [100.0, 120.0, 90.0],
+    }])
+
+    assert rows[-1]["drawdown"] == rows[-1]["max_drawdown"]
+    assert rows[-1]["max_drawdown"] < 0
+    assert "annual_return" in rows[-1]
+    assert "sharpe_ratio" in rows[-1]
+    assert rows[-1]["annual_return"] < 0

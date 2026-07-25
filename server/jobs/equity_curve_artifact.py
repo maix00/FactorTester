@@ -28,13 +28,18 @@ def build_equity_curve_artifact(
         equity_points = _minmax_points(item["values"], MAX_POINTS_PER_SERIES)
         peak = -math.inf
         drawdowns = []
+        historical_max_drawdown = 0.0
         for value in item["values"]:
             peak = max(peak, value)
-            drawdowns.append((value / peak - 1.0) if peak > 0 else 0.0)
+            current_drawdown = (value / peak - 1.0) if peak > 0 else 0.0
+            historical_max_drawdown = min(historical_max_drawdown, current_drawdown)
+            drawdowns.append(historical_max_drawdown)
         prepared.append({
             "label": item["label"],
             "start": item["start"],
             "end": item["end"],
+            "timeline": item["timeline"],
+            "initial_equity": item["values"][0],
             "original_points": len(item["values"]),
             "equity_points": equity_points,
             "drawdown_points": _minmax_points(
@@ -47,8 +52,10 @@ def build_equity_curve_artifact(
         "artifact_kind": "equity_curve_report",
         "renderer_version": RENDERER_VERSION,
         "value_basis": "reported_total_equity",
-        "x_axis": "observation_order",
+        "x_axis": "timestamp_or_observation_order",
         "panels": ["equity", "drawdown"],
+        "drawdown_definition": "historical_maximum_drawdown_through_each_point",
+        "initial_equity": [item["initial_equity"] for item in prepared],
         "downsampling": "bucket_minmax_preserve_endpoints",
         "max_points_per_series": MAX_POINTS_PER_SERIES,
         "series": [{
@@ -102,6 +109,7 @@ def _extract_series(result: dict[str, Any]) -> list[dict[str, Any]]:
         output.append({
             "label": label,
             "values": finite,
+            "timeline": timeline[:len(finite)],
             "start": str(timeline[0])[:64] if timeline else "",
             "end": str(timeline[min(len(timeline), len(finite)) - 1])[:64]
             if timeline else "",
@@ -201,6 +209,18 @@ def _render_svg(
         f'<line x1="{left}" y1="{drawdown_top}" x2="{width-right}" y2="{drawdown_top}" stroke="#d1d5db"/>',
         f'<line x1="{left}" y1="{drawdown_bottom}" x2="{width-right}" y2="{drawdown_bottom}" stroke="#d1d5db"/>',
     ]
+    for tick in range(5):
+        value = value_min + (value_max - value_min) * tick / 4
+        position = y_equity(value)
+        parts.extend([
+            f'<line x1="{left}" y1="{position:.2f}" x2="{width-right}" y2="{position:.2f}" stroke="#e5e7eb"/>',
+            f'<text x="8" y="{position + 4:.2f}" font-size="11">{value:.4g}</text>',
+        ])
+    parts.extend([
+        f'<text x="8" y="{drawdown_top+5}" font-size="11">0%</text>',
+        f'<text x="8" y="{drawdown_top + (drawdown_bottom - drawdown_top) / 2 + 4:.2f}" font-size="11">-50%</text>',
+        f'<text x="8" y="{drawdown_bottom}" font-size="11">-100%</text>',
+    ])
     legend_x = left
     for item in series:
         count = item["original_points"]
@@ -216,15 +236,39 @@ def _render_svg(
         parts.extend([
             f'<polyline fill="none" stroke="{color}" stroke-width="1.7" points="{equity_points}"/>',
             f'<polyline fill="none" stroke="{color}" stroke-width="1.3" points="{drawdown_points}"/>',
+        ])
+        initial = item["initial_equity"]
+        if initial is not None and value_min <= initial <= value_max:
+            initial_y = y_equity(initial)
+            parts.append(
+                f'<line x1="{left}" y1="{initial_y:.2f}" x2="{width-right}" y2="{initial_y:.2f}" stroke="{color}" stroke-dasharray="5,4" opacity="0.55"/>'
+                f'<text x="{width-right-120}" y="{initial_y-5:.2f}" font-size="10" fill="{color}">初始金额 {initial:.4g}</text>'
+            )
+        timeline = item.get("timeline") or []
+        for index in _axis_indices(item["original_points"]):
+            if index >= len(timeline):
+                continue
+            position = x(index, item["original_points"])
+            parts.append(
+                f'<line x1="{position:.2f}" y1="{drawdown_bottom}" x2="{position:.2f}" y2="{drawdown_bottom+6}" stroke="#9ca3af"/>'
+                f'<text x="{position:.2f}" y="{drawdown_bottom+20}" text-anchor="middle" font-size="10">{escape(_timestamp_label(timeline[index]))}</text>'
+            )
+        parts.extend([
             f'<line x1="{legend_x}" y1="520" x2="{legend_x+18}" y2="520" stroke="{color}" stroke-width="3"/>',
             f'<text x="{legend_x+23}" y="525" font-size="12">{escape(item["label"])}</text>',
         ])
         legend_x += min(190, 45 + len(item["label"]) * 7)
     parts.extend([
-        f'<text x="8" y="{equity_top+5}" font-size="11">{value_max:.4g}</text>',
-        f'<text x="8" y="{equity_bottom}" font-size="11">{value_min:.4g}</text>',
-        f'<text x="28" y="{drawdown_top+5}" font-size="11">0%</text>',
-        f'<text x="18" y="{drawdown_bottom}" font-size="11">-100%</text>',
         "</g></svg>",
     ])
     return "".join(parts).encode("utf-8")
+
+
+def _axis_indices(count: int) -> list[int]:
+    if count <= 1:
+        return [0] if count else []
+    return sorted(set([0, count // 4, count // 2, (count * 3) // 4, count - 1]))
+
+
+def _timestamp_label(value: Any) -> str:
+    return str(value).replace("T", " ")[:16]

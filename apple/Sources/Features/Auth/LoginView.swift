@@ -43,6 +43,9 @@ struct LoginView: View {
                 }
             }
             .padding(24)
+            .onSubmit {
+                Task { await submit() }
+            }
         }
         .frame(width: 460)
         .background(.regularMaterial)
@@ -93,6 +96,7 @@ struct LoginView: View {
     }
 
     private func submit() async {
+        guard !session.isWorking else { return }
         let ok: Bool
         if mode == .login {
             ok = await session.login(username: username, password: password)
@@ -103,6 +107,9 @@ struct LoginView: View {
                 organizationId: selectedOrg
             )
         }
-        if ok { onFinish(true); dismiss() }
+        if ok {
+            dismiss()
+            onFinish(true)
+        }
     }
 }
