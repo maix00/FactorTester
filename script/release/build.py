@@ -184,7 +184,11 @@ def _validate_source_checkout(repo: Path, source_revision: str) -> None:
         ["git", "rev-parse", "HEAD"], cwd=repo, text=True
     ).strip()
     if observed != source_revision:
-        raise ValueError("source revision does not match the release checkout")
+        raise ValueError(
+            "source revision does not match the release checkout: "
+            f"expected {source_revision}, observed {observed}; "
+            "use `git rev-parse HEAD` from this checkout"
+        )
     status = subprocess.check_output(
         [
             "git", "status", "--porcelain", "--untracked-files=all", "--",
