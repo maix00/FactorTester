@@ -35,7 +35,9 @@ one named `factortester` and one named
    verifies the delta over HTTP, and removes the newly generated full DMG after
    the successful readback. The private base is not exposed by the asset route;
    older private bases are pruned after the channel pointers switch. The Beta
-   publisher discovers the previous channel archive automatically.
+   publisher discovers the previous channel archive automatically and prunes
+   unreachable public Beta DMGs, deltas, and versioned appcasts after the
+   pointer switch.
 
 ## Consequences
 

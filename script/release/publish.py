@@ -309,6 +309,11 @@ def publish_beta_directory(
     staged_appcast.replace(appcast_pointer)
     if retain_base:
         _prune_beta_bases(release_root, keep=digest)
+        _prune_beta_public_artifacts(
+            release_root,
+            keep_digest=digest,
+            keep_deltas={delta.name for delta in deltas},
+        )
     return asset, appcast_pointer, legacy_pointer
 
 
@@ -317,6 +322,27 @@ def _prune_beta_bases(release_root: Path, *, keep: str) -> None:
     base_root = release_root / "bases" / "beta"
     for candidate in base_root.glob("*.dmg"):
         if candidate.stem != keep:
+            candidate.unlink()
+
+
+def _prune_beta_public_artifacts(
+    release_root: Path,
+    *,
+    keep_digest: str,
+    keep_deltas: set[str],
+) -> None:
+    """Remove public Beta artifacts no longer reachable from Delta-only mode."""
+    assets = release_root / "assets" / "beta"
+    for candidate in assets.glob("*.dmg"):
+        candidate.unlink()
+    for candidate in assets.glob("*.delta"):
+        if candidate.name not in keep_deltas:
+            candidate.unlink()
+
+    appcasts = release_root / "appcasts" / "beta"
+    current = appcasts / f"{keep_digest}.xml"
+    for candidate in appcasts.glob("*.xml"):
+        if candidate != current:
             candidate.unlink()
 
 

@@ -86,6 +86,14 @@ def test_beta_can_publish_delta_without_current_full_archive(
     root = tmp_path / "published"
     delta = tmp_path / ("a" * 64 + ".delta")
     delta.write_bytes(b"delta")
+    old_asset = root / "assets/beta/old.dmg"
+    old_asset.parent.mkdir(parents=True, exist_ok=True)
+    old_asset.write_bytes(b"old")
+    old_delta = root / "assets/beta/old.delta"
+    old_delta.write_bytes(b"old delta")
+    old_appcast = root / "appcasts/beta/old.xml"
+    old_appcast.parent.mkdir(parents=True, exist_ok=True)
+    old_appcast.write_text("old", encoding="utf-8")
 
     asset, _, _ = publish.publish_beta_directory(
         dmg=dmg,
@@ -103,6 +111,9 @@ def test_beta_can_publish_delta_without_current_full_archive(
         root / "bases/beta" / f"{sha256(b'release').hexdigest()}.dmg"
     ).read_bytes() == b"release"
     assert (root / "assets/beta" / delta.name).read_bytes() == b"delta"
+    assert not old_asset.exists()
+    assert not old_delta.exists()
+    assert not old_appcast.exists()
     assert not list(root.rglob("*.staging-*"))
 
 
