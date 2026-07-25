@@ -37,22 +37,10 @@ struct PersonalWorkspaceView: View {
         }
     }
 
-    private var suggestedPath: String {
-        let principal = session.user?.username ?? "<principal>"
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/FactorTester/users")
-            .appendingPathComponent(principal)
-            .appendingPathComponent("personal-workspace/factor-library").path
-    }
-
     private var workspaceLayoutSection: some View {
-        SettingsSectionCard("目录结构") {
+        SettingsSectionCard("工作区路径") {
             SettingsRow(title: "用户根目录", description: "当前账户的本地研究目录。") {
                 pathValue(userRoot)
-            }
-            Divider()
-            SettingsRow(title: "canonical 因子库", description: "所有 Profile 共用的唯一因子库。") {
-                pathValue(suggestedPath)
             }
             Divider()
             SettingsRow(title: "Profile 根目录", description: "各个研究现场的独立 worktree。") {
@@ -66,17 +54,6 @@ struct PersonalWorkspaceView: View {
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents/FactorTester/users")
             .appendingPathComponent(principal).path
-    }
-
-    private func pathText(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.monospaced())
-                .lineLimit(2)
-        }
     }
 
     private func pathValue(_ value: String) -> some View {
@@ -131,8 +108,12 @@ struct PersonalWorkspaceView: View {
             }
             if let authorizedRoot {
                 Divider()
-                SettingsRow(title: "正在读取", description: "应用更新后授权仍然保留。") {
-                    pathValue(authorizedRoot)
+                SettingsRow(title: "授权目录", description: "应用更新后授权仍然保留。") {
+                    Text(authorizedRoot == userRoot ? "用户根目录" : authorizedRoot)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.trailing)
                 }
             }
             if let accessError {
