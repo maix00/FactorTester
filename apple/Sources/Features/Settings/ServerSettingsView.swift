@@ -19,11 +19,11 @@ struct ServerSettingsView: View {
     var body: some View {
         SettingsPageShell(
             title: isInitialSetup ? "连接 FactorTester" : "服务器",
-            subtitle: "配置 Manager；具体 FactorTester 服务端口由 Manager 发现。",
+            subtitle: "配置 Manager；具体 FactorTester 服务端口由 Manager 发现",
             systemImage: "server.rack"
         ) {
             SettingsSectionCard("Manager") {
-                SettingsRow(title: "协议", description: "Manager 管理接口的传输协议。") {
+                SettingsRow(title: "协议", description: "Manager 管理接口的传输协议") {
                     Picker("协议", selection: $managerScheme) {
                         Text("HTTP").tag("http")
                         Text("HTTPS").tag("https")
@@ -32,24 +32,26 @@ struct ServerSettingsView: View {
                     .labelsHidden()
                 }
                 Divider()
-                SettingsRow(title: "网址", description: "Manager 主机名或 IP。") {
+                SettingsRow(title: "网址", description: "Manager 主机名或 IP") {
                     TextField("主机或 IP", text: $managerHost)
                         .autocorrectionDisabled()
                         .textFieldStyle(.roundedBorder)
                 }
                 Divider()
-                SettingsRow(title: "端口", description: "Manager 管理端口，默认 7998。") {
+                SettingsRow(title: "端口", description: "Manager 管理端口，默认 7998") {
                     TextField("Manager 端口", text: $managerPort)
                         .textFieldStyle(.roundedBorder)
                 }
             }
 
             SettingsSectionCard("FactorTester 服务端口") {
-                SettingsRow(title: "当前端口", description: "由 Manager 返回的可用服务端口；不再手工添加端口。") {
+                SettingsRow(title: "服务端口", description: "可填写固定端口；留空时由 Manager 自动选择可用端口") {
                     HStack(spacing: 8) {
-                        Text(currentServicePort)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                        TextField(
+                            availablePorts.first.map { "自动 · \($0)" } ?? "自动由 Manager",
+                            text: $port
+                        )
+                        .textFieldStyle(.roundedBorder)
                         SettingsRefreshButton(isWorking: discoveringPorts) {
                             Task { await discoverPorts() }
                         }
@@ -79,14 +81,6 @@ struct ServerSettingsView: View {
             loadValues()
             await discoverPorts()
         }
-    }
-
-    private var currentServicePort: String {
-        if let value = Int(port.trimmingCharacters(in: .whitespaces)), value > 0 {
-            return String(value)
-        }
-        if let first = availablePorts.first { return "自动 · \(first)" }
-        return "自动 · 未发现"
     }
 
     private func loadValues() {

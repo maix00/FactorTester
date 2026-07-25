@@ -20,15 +20,15 @@ struct AccountSettingsView: View {
     var body: some View {
         SettingsPageShell(
             title: "账户",
-            subtitle: "登录账户、账户身份与安全设置。",
+            subtitle: "登录账户、账户身份与安全设置",
             systemImage: "person.text.rectangle"
         ) {
             SettingsSectionCard("账户操作") {
                 SettingsRow(
                     title: "登录账户",
                     description: session.isLoggedIn
-                        ? "当前已登录，可在这里登出或切换账户。"
-                        : "尚未登录；登录后可访问研究工作区和测试任务。"
+                        ? "当前已登录，可在这里登出或切换账户"
+                        : "尚未登录；登录后可访问研究工作区和测试任务"
                 ) {
                     HStack(spacing: 8) {
                         Text(session.user?.username ?? "未登录")
@@ -61,12 +61,12 @@ struct AccountSettingsView: View {
             }
 
             SettingsSectionCard("账户身份") {
-                SettingsRow(title: "用户角色", description: "由服务器分配，客户端不能修改。") {
+                SettingsRow(title: "用户角色", description: "由服务器分配，客户端不能修改") {
                     Text(session.user?.role ?? "—")
                         .foregroundStyle(.secondary)
                 }
                 Divider()
-                SettingsRow(title: "用户组织", description: "账户所属组织，由服务器管理。") {
+                SettingsRow(title: "用户组织", description: "账户所属组织，由服务器管理") {
                     Text(session.user?.organizationName ?? "—")
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

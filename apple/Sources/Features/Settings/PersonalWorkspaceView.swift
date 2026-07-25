@@ -16,7 +16,7 @@ struct PersonalWorkspaceView: View {
     var body: some View {
         SettingsPageShell(
             title: "个人工作区",
-            subtitle: "用户目录、canonical 因子库，以及按 Profile 隔离的研究现场。",
+            subtitle: "用户目录、canonical 因子库，以及按 Profile 隔离的研究现场",
             systemImage: "folder.badge.person.crop"
         ) {
             workspaceSection
@@ -32,7 +32,7 @@ struct PersonalWorkspaceView: View {
         SettingsSectionCard("个人工作区") {
             SettingsRow(
                 title: "用户根目录 / 本地研究目录",
-                description: "本地研究报告读取目录；应用更新后授权仍然保留。"
+                description: "本地研究报告读取目录；应用更新后授权仍然保留"
             ) {
                 VStack(alignment: .trailing, spacing: 5) {
                     pathValue(authorizedRoot ?? userRoot)
@@ -51,14 +51,14 @@ struct PersonalWorkspaceView: View {
                 }
             }
             Divider()
-            SettingsRow(title: "Profile 根目录", description: "各个研究现场的独立 worktree。") {
+            SettingsRow(title: "Profile 根目录", description: "各个研究现场的独立 worktree") {
                 pathValue("\(userRoot)/profiles")
             }
             if let openProfiles {
                 Divider()
                 SettingsRow(
                     title: "研究现场",
-                    description: "Profile、实时研究步骤、Trial Plan、义务与报告。"
+                    description: "Profile、实时研究步骤、Trial Plan、义务与报告"
                 ) {
                     Button("打开 Profiles", action: openProfiles)
                         .buttonStyle(.borderedProminent)
@@ -66,7 +66,7 @@ struct PersonalWorkspaceView: View {
             }
             Divider()
             if let current = controller.current {
-                SettingsRow(title: "canonical 因子库所有者", description: "服务器确认的当前因子库所有者。") {
+                SettingsRow(title: "canonical 因子库所有者", description: "服务器确认的当前因子库所有者") {
                     Text(current.ownerRef).foregroundStyle(.secondary)
                 }
                 Divider()

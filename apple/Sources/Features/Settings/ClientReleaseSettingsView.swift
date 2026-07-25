@@ -15,7 +15,7 @@ struct ClientReleaseSettingsView: View {
             if embedded {
                 SettingsPageShell(
                     title: "客户端更新",
-                    subtitle: "管理 Main / Beta 客户端版本、下载与更新策略。",
+                    subtitle: "管理 Main / Beta 客户端版本、下载与更新策略",
                     systemImage: "arrow.down.app"
                 ) {
                     updatePanel
@@ -84,7 +84,7 @@ struct ClientReleaseSettingsView: View {
                     }
                 }
                 Divider()
-                SettingsRow(title: "更新渠道", description: "选择接收 Main 或 Beta 客户端。") {
+                SettingsRow(title: "更新渠道", description: "选择接收 Main 或 Beta 客户端") {
                     VStack(alignment: .trailing, spacing: 3) {
                         Picker("更新渠道", selection: $controller.channel) {
                             Text("Main").tag("stable")
@@ -99,7 +99,7 @@ struct ClientReleaseSettingsView: View {
                     .disabled(controller.isWorking || controller.hasAvailableUpdate || controller.isUpdateReady)
                 }
                 Divider()
-                SettingsRow(title: "自动下载", description: "发现新版本后自动准备更新。") {
+                SettingsRow(title: "自动下载", description: "发现新版本后自动准备更新") {
                     Toggle("自动下载更新", isOn: $controller.automaticallyUpdates)
                         .labelsHidden()
                 }
@@ -110,16 +110,16 @@ struct ClientReleaseSettingsView: View {
                         .foregroundStyle(.red)
                         .padding(.vertical, 6)
                 }
-                SettingsRow(title: "当前版本", description: "本机已安装版本。") {
+                SettingsRow(title: "当前版本", description: "本机已安装版本") {
                     Text(installedVersion).foregroundStyle(.secondary)
                 }
                 Divider()
-                SettingsRow(title: "签名", description: "发布包签名状态。") {
+                SettingsRow(title: "签名", description: "发布包签名状态") {
                     Text(controller.signatureText).foregroundStyle(.secondary)
                 }
                 if let checked = controller.lastChecked {
                     Divider()
-                    SettingsRow(title: "最后检查", description: "最近一次检查更新时间。") {
+                    SettingsRow(title: "最后检查", description: "最近一次检查更新时间") {
                         Text(checked.formatted(date: .abbreviated, time: .shortened))
                             .foregroundStyle(.secondary)
                     }
