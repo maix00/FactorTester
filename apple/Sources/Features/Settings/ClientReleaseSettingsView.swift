@@ -117,6 +117,7 @@ struct ClientReleaseSettingsView: View {
                         .foregroundStyle(.red)
                         .padding(.vertical, 6)
                 }
+                Divider()
                 SettingsRow(title: "签名", description: "发布包签名状态") {
                     Text(controller.signatureText).foregroundStyle(.secondary)
                 }
