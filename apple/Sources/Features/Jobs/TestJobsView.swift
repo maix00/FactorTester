@@ -18,7 +18,13 @@ final class TestJobsController: ObservableObject {
         if let found = try? await service.visiblePorts() {
             discoveredPorts = Array(Set(found + [currentPort])).sorted()
         }
-        var loaded: [TestJob] = (try? await service.list()) ?? []
+        var loaded: [TestJob] = []
+        var listError: Error?
+        do {
+            loaded = try await service.list()
+        } catch {
+            listError = error
+        }
         if loaded.isEmpty {
             // Older deployments may not understand port=all. Keep the
             // explicit-port path as a compatibility fallback.
@@ -26,8 +32,14 @@ final class TestJobsController: ObservableObject {
                 loaded += (try? await service.list(port: port)) ?? []
             }
         }
-        jobs = loaded.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
-        error = nil
+        if !loaded.isEmpty || listError == nil {
+            jobs = loaded.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+            error = nil
+        } else if jobs.isEmpty {
+            // Keep a useful error for an unauthenticated/temporarily offline
+            // server, instead of silently turning history into an empty page.
+            error = listError?.localizedDescription
+        }
     }
 
     func select(_ job: TestJob) async {
