@@ -129,6 +129,11 @@ def app_update_restart(as_json: bool) -> None:
 @click.option("--mandatory", is_flag=True)
 @click.option("--notary-profile")
 @click.option(
+    "--delta-only",
+    is_flag=True,
+    help="Beta-only: publish only the delta from the previous version.",
+)
+@click.option(
     "--previous-archive",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Previous app archive used to create a Sparkle delta.",

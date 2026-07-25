@@ -59,6 +59,7 @@ def generate_sparkle_appcast(
     previous_archive_url: str | None = None,
     previous_appcast: Path | None = None,
     delta_output: Path | None = None,
+    delta_only: bool = False,
 ) -> SparkleAppcast:
     """Run Sparkle's Keychain-backed generator in an isolated directory."""
     if channel not in {"stable", "beta"}:
@@ -137,6 +138,10 @@ def generate_sparkle_appcast(
                 )
         if previous_archive is not None and not delta_paths:
             raise ValueError("Sparkle did not generate a delta update")
+        if delta_only:
+            if previous_archive is None:
+                raise ValueError("Delta-only appcast requires a previous archive")
+            _retain_latest_item(generated)
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = output.with_name(f".{output.name}.staging")
         shutil.copy2(generated, temporary)
@@ -157,6 +162,20 @@ def generate_sparkle_appcast(
         download_url=validated.download_url,
         delta_paths=tuple(delta_paths),
     )
+
+
+def _retain_latest_item(appcast: Path) -> None:
+    tree = ET.parse(appcast)
+    root = tree.getroot()
+    channel = root.find("./channel")
+    if channel is None:
+        raise ValueError("Sparkle appcast channel is missing")
+    items = channel.findall("item")
+    if not items:
+        raise ValueError("Sparkle appcast has no release item")
+    for item in items[1:]:
+        channel.remove(item)
+    tree.write(appcast, encoding="utf-8", xml_declaration=True)
 
 
 def _rewrite_delta_urls(

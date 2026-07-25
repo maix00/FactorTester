@@ -48,6 +48,7 @@ class PublishedRelease:
     asset_url: str
     appcast_url: str
     legacy_manifest_url: str
+    delta_only: bool = False
 
 
 def release_client(
@@ -71,10 +72,13 @@ def release_client(
     notary_profile: str | None = None,
     previous_archive: Path | None = None,
     previous_appcast: Path | None = None,
+    delta_only: bool = False,
 ) -> PublishedRelease:
     """Build, sign, optionally notarize, publish, and read back one release."""
     if channel not in CHANNELS:
         raise ValueError("release channel must be stable or beta")
+    if delta_only and channel != "beta":
+        raise ValueError("Delta-only publishing is supported only for Beta")
     if not sparkle_public_key.strip():
         raise ValueError("Sparkle public key is required")
     if signing_identity != SHARED_SIGNING_IDENTITY:
@@ -172,6 +176,7 @@ def release_client(
             previous_archive_url=previous_archive_url,
             previous_appcast=previous_appcast,
             delta_output=delta_output,
+            delta_only=delta_only,
         )
         manifest = create_update_manifest(
             version=version,
@@ -203,6 +208,7 @@ def release_client(
                 legacy_manifest=manifest,
                 release_root=release_root,  # type: ignore[arg-type]
                 deltas=generated_appcast.delta_paths,
+                publish_full=not delta_only,
             )
         else:
             publish_main_github(
@@ -215,11 +221,13 @@ def release_client(
                 deltas=generated_appcast.delta_paths,
             )
 
-        for url, expected in (
-            (download_url, dmg),
+        readbacks = [
             (appcast_url, appcast),
             (legacy_url, legacy_path),
-        ):
+        ]
+        if not delta_only:
+            readbacks.insert(0, (download_url, dmg))
+        for url, expected in readbacks:
             verify_remote_bytes(url, expected)
         delta_prefix = download_url.rsplit("/", 1)[0] + "/"
         for delta in generated_appcast.delta_paths:
@@ -234,8 +242,16 @@ def release_client(
             asset_url=download_url,
             appcast_url=appcast_url,
             legacy_manifest_url=legacy_url,
+            delta_only=delta_only,
         )
         write_release_receipt(output / "release-receipt.json", receipt)
+        # Delta-only Beta releases use the full DMG only as a transient input
+        # for signing, installer verification, and Sparkle delta generation.
+        # The previous release remains the durable base archive on the server;
+        # retaining this newly built DMG locally would waste disk space and
+        # falsely suggest that it is available for first-install fallback.
+        if delta_only:
+            _remove_local_archive(dmg)
         return receipt
     except Exception:
         # A draft GitHub release remains non-public on upload failure and Beta
@@ -252,12 +268,14 @@ def publish_beta_directory(
     legacy_manifest: dict,
     release_root: Path,
     deltas: tuple[Path, ...] = (),
+    publish_full: bool = True,
 ) -> tuple[Path, Path, Path]:
     """Commit immutable payloads first, then switch both channel pointers."""
     digest = sha256(dmg.read_bytes()).hexdigest()
     asset = release_root / "assets" / "beta" / f"{digest}.dmg"
     asset.parent.mkdir(parents=True, exist_ok=True)
-    _copy_immutable(dmg, asset, expected_sha256=digest)
+    if publish_full:
+        _copy_immutable(dmg, asset, expected_sha256=digest)
     for delta in deltas:
         _copy_immutable(
             delta,
@@ -284,6 +302,14 @@ def publish_beta_directory(
     staged_legacy.replace(legacy_pointer)
     staged_appcast.replace(appcast_pointer)
     return asset, appcast_pointer, legacy_pointer
+
+
+def _remove_local_archive(path: Path) -> None:
+    """Remove a transient Delta-only full archive after successful publish."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _discover_previous_beta_release(
@@ -524,6 +550,21 @@ def main() -> None:
     parser.add_argument("--minimum-client", default="0.1.0")
     parser.add_argument("--mandatory", action="store_true")
     parser.add_argument("--notary-profile")
+    parser.add_argument(
+        "--delta-only",
+        action="store_true",
+        help="Beta-only: publish only the delta from the previous version.",
+    )
+    parser.add_argument(
+        "--previous-archive",
+        type=Path,
+        help="Previous app archive used to create a Sparkle delta.",
+    )
+    parser.add_argument(
+        "--previous-appcast",
+        type=Path,
+        help="Previous appcast used to create a Sparkle delta.",
+    )
     args = parser.parse_args()
     receipt = release_client(**vars(args))
     print(json.dumps(asdict(receipt), ensure_ascii=False, indent=2))

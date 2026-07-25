@@ -69,7 +69,48 @@ def test_beta_publishes_sparkle_and_legacy_pointers_last(
     assert xml_pointer.read_bytes() == appcast.read_bytes()
     assert json.loads(json_pointer.read_text())["sha256"] == digest
     assert (root / "assets/beta/delta.sha256.delta").read_bytes() == b"delta"
+
+
+def test_beta_can_publish_delta_without_current_full_archive(
+    tmp_path: Path,
+) -> None:
+    dmg = tmp_path / "FTClient.dmg"
+    dmg.write_bytes(b"release")
+    appcast = _appcast(
+        tmp_path / "appcast.xml",
+        version="1.2.3",
+        build=42,
+        channel="beta",
+        url="https://factor.example/assets/beta/current.dmg",
+    )
+    root = tmp_path / "published"
+    delta = tmp_path / ("a" * 64 + ".delta")
+    delta.write_bytes(b"delta")
+
+    asset, _, _ = publish.publish_beta_directory(
+        dmg=dmg,
+        appcast=appcast,
+        legacy_manifest={"schema_version": 1, "sha256": "a" * 64},
+        release_root=root,
+        deltas=(delta,),
+        publish_full=False,
+    )
+
+    assert asset == root / "assets/beta" / f"{sha256(b'release').hexdigest()}.dmg"
+    assert not asset.exists()
+    assert (root / "assets/beta" / delta.name).read_bytes() == b"delta"
     assert not list(root.rglob("*.staging-*"))
+
+
+def test_delta_only_cleanup_removes_transient_full_archive(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "FactorTester-Client.dmg"
+    archive.write_bytes(b"transient full archive")
+
+    publish._remove_local_archive(archive)
+
+    assert not archive.exists()
 
 
 def test_main_is_uploaded_as_draft_before_becoming_latest(
@@ -128,6 +169,7 @@ def test_public_cli_exposes_one_main_beta_release_command() -> None:
     assert "--channel [stable|beta]" in result.output
     assert "--sparkle-generate-appcast" in result.output
     assert "--notary-profile" in result.output
+    assert "--delta-only" in result.output
 
 
 def test_public_cli_exposes_explicit_app_update_state_machine() -> None:
