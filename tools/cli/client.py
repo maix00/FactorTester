@@ -11,6 +11,7 @@ from .client_protocol import ProtocolClientMixin
 from .client_order_audit import OrderAuditClientMixin
 from .client_research import ResearchClientMixin
 from .client_research_graph import ResearchGraphClientMixin
+from .client_research_step import ResearchStepClientMixin
 from .http import HttpSession
 
 
@@ -22,6 +23,7 @@ class FactorTesterClient(
     OrderAuditClientMixin,
     ResearchClientMixin,
     FactorLibraryClientMixin,
+    ResearchStepClientMixin,
 ):
     """Stable public client composed from domain-specific HTTP adapters."""
 

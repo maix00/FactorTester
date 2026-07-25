@@ -36,6 +36,7 @@ from . import (  # noqa: E402, F401
     page,
     profile_research_routes,
     research_graph_routes,
+    research_step_routes,
     research_result_report_routes,
     research_jobs,
     setting_instance_routes,

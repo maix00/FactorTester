@@ -229,6 +229,12 @@ def _build_local_state(
         "branch": {
             "instance_id": instance_id,
             "branch_id": branch_id,
+            "work_package_id": str(
+                branch_row["work_package_id"] or instance_id
+            ),
+            "current_owner_profile_ref": str(
+                branch_row["current_owner_profile_ref"] or ""
+            ),
             "status": branch["status"],
             "product_group": product_group,
             "workspace_id": workspace_id,
