@@ -6,8 +6,6 @@ struct ServerSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     var isInitialSetup = false
 
-    @State private var scheme = "http"
-    @State private var host = "127.0.0.1"
     @State private var port = ""
     @State private var managerScheme = "http"
     @State private var managerHost = "127.0.0.1"
@@ -21,31 +19,9 @@ struct ServerSettingsView: View {
     var body: some View {
         SettingsPageShell(
             title: isInitialSetup ? "连接 FactorTester" : "服务器",
-            subtitle: "分别配置业务服务和 Manager；服务端口由 Manager 发现。",
+            subtitle: "配置 Manager；具体 FactorTester 服务端口由 Manager 发现。",
             systemImage: "server.rack"
         ) {
-            SettingsSectionCard("业务服务") {
-                SettingsRow(title: "协议", description: "业务 API 使用的传输协议。") {
-                    Picker("协议", selection: $scheme) {
-                        Text("HTTP").tag("http")
-                        Text("HTTPS").tag("https")
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
-                Divider()
-                SettingsRow(title: "网址", description: "主机名或 IP，例如 127.0.0.1。") {
-                    TextField("主机或 IP", text: $host)
-                        .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
-                }
-                Divider()
-                SettingsRow(title: "端口", description: "留空时使用 Manager 按 main、feat 顺序提供的服务端口。") {
-                    TextField("自动由 Manager", text: $port)
-                        .textFieldStyle(.roundedBorder)
-                }
-            }
-
             SettingsSectionCard("Manager") {
                 SettingsRow(title: "协议", description: "Manager 管理接口的传输协议。") {
                     Picker("协议", selection: $managerScheme) {
@@ -91,12 +67,12 @@ struct ServerSettingsView: View {
             HStack {
                 Button("测试连接") { Task { await test() } }
                     .buttonStyle(.bordered)
-                    .disabled(testing || host.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(testing || managerHost.trimmingCharacters(in: .whitespaces).isEmpty)
                 if testing { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("保存连接") { Task { await saveConnections() } }
                     .buttonStyle(.borderedProminent)
-                    .disabled(saving || host.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(saving || managerHost.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .task {
@@ -114,8 +90,6 @@ struct ServerSettingsView: View {
     }
 
     private func loadValues() {
-        scheme = config.scheme
-        host = config.host
         port = config.port
         managerScheme = managerConfig.scheme
         managerHost = managerConfig.host
@@ -135,7 +109,7 @@ struct ServerSettingsView: View {
         let effectivePort = port.trimmingCharacters(in: .whitespaces).isEmpty
             ? availablePorts.first.map(String.init) ?? ""
             : port
-        config.save(scheme: scheme, host: host, port: effectivePort)
+        config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
         do {
             _ = try await APIClient.shared.me()
             await MainActor.run { testResult = "✓ 已连接" }
@@ -153,7 +127,7 @@ struct ServerSettingsView: View {
         let effectivePort = port.trimmingCharacters(in: .whitespaces).isEmpty
             ? availablePorts.first.map(String.init) ?? ""
             : port
-        config.save(scheme: scheme, host: host, port: effectivePort)
+        config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
         managerConfig.save(scheme: managerScheme, host: managerHost, port: managerPort)
         do {
             try await ManagerCLIClient.shared.configure(
