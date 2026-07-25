@@ -33,10 +33,18 @@ final class TestJobsController: ObservableObject {
     func select(_ job: TestJob) async {
         do {
             do {
-                detail = try await service.detail(jobID: job.id, port: job.port)
+                detail = try await service.detail(
+                    jobID: job.id,
+                    port: job.port,
+                    fallbackJob: job
+                )
             } catch where job.port != currentPort {
                 // Terminal history may outlive its original listener.
-                detail = try await service.detail(jobID: job.id, port: currentPort)
+                detail = try await service.detail(
+                    jobID: job.id,
+                    port: currentPort,
+                    fallbackJob: job
+                )
             }
             error = nil
         }
@@ -140,6 +148,18 @@ struct TestJobsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("测试任务详情").font(.title2.bold())
                     Text("\(detail.job.id) · \(statusLabel(detail.job.status)) · 端口 \(detail.job.port) · Profile \(detail.job.profile)").foregroundStyle(.secondary)
+                    if !detail.missingInformation.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("部分历史信息不可用").font(.headline)
+                            ForEach(detail.missingInformation, id: \.self) { message in
+                                Label(message, systemImage: "info.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(10)
+                        .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                    }
                     HStack {
                         Button("刷新详情") { Task { await controller.select(detail.job) } }
                         Button("清空生成物", role: .destructive) { Task { await controller.clear(detail.job) } }

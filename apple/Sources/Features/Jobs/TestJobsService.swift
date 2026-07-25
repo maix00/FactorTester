@@ -41,6 +41,7 @@ struct TestJobDetail {
     let chartPoints: [TestJobChartPoint]
     let priceResultData: Data?
     let artifacts: [TestJobArtifact]
+    let missingInformation: [String]
 }
 
 struct TestJobChartPoint: Identifiable {
@@ -50,11 +51,19 @@ struct TestJobChartPoint: Identifiable {
 }
 
 final class TestJobsService {
-    private let session = URLSession(
-        configuration: .default,
-        delegate: SelfSignedTrustDelegate(),
-        delegateQueue: nil
-    )
+    private lazy var session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        // Keep the same Flask session cookie used by APIClient.  A separate
+        // URLSession must not turn a logged-in job page into an anonymous one.
+        configuration.httpCookieStorage = HTTPCookieStorage.shared
+        configuration.httpCookieAcceptPolicy = .always
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(
+            configuration: configuration,
+            delegate: SelfSignedTrustDelegate(),
+            delegateQueue: nil
+        )
+    }()
 
     func list(port: Int? = nil) async throws -> [TestJob] {
         let suffix = port.map { "&port=\($0)" } ?? "&port=all"
@@ -70,16 +79,45 @@ final class TestJobsService {
         }.filter { 1...65535 ~= $0 }
     }
 
-    func detail(jobID: String, port: Int = 0) async throws -> TestJobDetail {
+    func detail(
+        jobID: String,
+        port: Int = 0,
+        fallbackJob: TestJob? = nil
+    ) async throws -> TestJobDetail {
         let encoded = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
-        async let detailJSON = request(path: "/api/jobs/\(encoded)", port: port)
-        async let artifactsJSON = request(path: "/api/jobs/\(encoded)/artifacts", port: port)
-        async let resultJSON = request(path: "/api/jobs/\(encoded)/result", port: port)
-        let detail = try await detailJSON
-        let artifacts = try await artifactsJSON
-        let result = (try? await resultJSON)?["result"] ?? detail["result_summary"]
+        let detail = try await request(path: "/api/jobs/\(encoded)", port: port)
+        var missingInformation: [String] = []
+        let artifacts: [String: Any]
+        do {
+            artifacts = try await request(path: "/api/jobs/\(encoded)/artifacts", port: port)
+        } catch {
+            // Older jobs may not have retained artifact metadata.  The job
+            // itself is still useful and must remain openable.
+            artifacts = ["artifacts": []]
+            missingInformation.append("生成物列表不可用（旧任务可能未保留生成物）")
+        }
+        let result: Any?
+        do {
+            let resultJSON = try await request(path: "/api/jobs/\(encoded)/result", port: port)
+            result = resultJSON["result"] ?? detail["result_summary"]
+        } catch {
+            result = detail["result_summary"]
+            missingInformation.append("结果明细不可用，以下显示任务保存的结果摘要")
+        }
+        if result == nil {
+            missingInformation.append("任务没有保存结果数据")
+        }
         let rows = previewRows(result)
-        let job = makeJob(detail)
+        let job = makeJob(detail, fallback: fallbackJob ?? TestJob(
+            id: jobID,
+            kind: "test",
+            status: "unknown",
+            workspaceID: "",
+            port: port,
+            profile: "default",
+            updatedAt: nil,
+            artifactCount: 0
+        ))
         return TestJobDetail(
             job: job,
             runSpecHash: detail["run_spec_hash"] as? String ?? "",
@@ -92,7 +130,8 @@ final class TestJobsService {
             previewRows: rows,
             chartPoints: chartPoints(rows),
             priceResultData: result.flatMap { try? JSONSerialization.data(withJSONObject: $0) },
-            artifacts: (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact)
+            artifacts: (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact),
+            missingInformation: missingInformation
         )
     }
 
@@ -149,17 +188,17 @@ final class TestJobsService {
         return data
     }
 
-    private func makeJob(_ value: [String: Any]) -> TestJob {
+    private func makeJob(_ value: [String: Any], fallback: TestJob? = nil) -> TestJob {
         let context = value["server_context"] as? [String: Any]
         return TestJob(
-            id: value["job_id"] as? String ?? "",
-            kind: value["kind"] as? String ?? "test",
-            status: value["status"] as? String ?? "unknown",
-            workspaceID: value["workspace_id"] as? String ?? "",
-            port: (value["port"] as? Int) ?? (context?["port"] as? Int) ?? 0,
-            profile: (context?["profile"] as? String) ?? "default",
+            id: value["job_id"] as? String ?? fallback?.id ?? "",
+            kind: value["kind"] as? String ?? fallback?.kind ?? "test",
+            status: value["status"] as? String ?? fallback?.status ?? "unknown",
+            workspaceID: value["workspace_id"] as? String ?? fallback?.workspaceID ?? "",
+            port: (value["port"] as? Int) ?? (context?["port"] as? Int) ?? fallback?.port ?? 0,
+            profile: (context?["profile"] as? String) ?? fallback?.profile ?? "default",
             updatedAt: (value["updated_at"] as? Double).map(Date.init(timeIntervalSince1970:)),
-            artifactCount: value["artifact_count"] as? Int ?? 0
+            artifactCount: value["artifact_count"] as? Int ?? fallback?.artifactCount ?? 0
         )
     }
 
