@@ -16,7 +16,7 @@ from tools.cli.release.profile import (
 from tools.cli.release.transaction import ClientReleaseStore
 from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.locations import default_client_root, validate_client_root
-from tools.cli.release.app_update_control import dispatch_app_update
+from tools.cli.release.app_update_control import dispatch_app_update, read_status
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_profile import client_profile
 from tools.cli.commands.client_research import client_research
@@ -50,18 +50,36 @@ def app_update() -> None:
 
 @app_update.command("check")
 @click.option("--json", "as_json", is_flag=True)
+@click.option("--wait", type=click.FloatRange(min=0), default=0, show_default=True)
 @friendly_errors
-def app_update_check(as_json: bool) -> None:
+def app_update_check(as_json: bool, wait: float) -> None:
     """Ask FTClient/Sparkle to check its selected channel."""
-    _echo(dispatch_app_update("check"), as_json)
+    _echo(dispatch_app_update("check", wait=wait), as_json)
 
 
 @app_update.command("download")
 @click.option("--json", "as_json", is_flag=True)
+@click.option("--wait", type=click.FloatRange(min=0), default=0, show_default=True)
 @friendly_errors
-def app_update_download(as_json: bool) -> None:
+def app_update_download(as_json: bool, wait: float) -> None:
     """Ask FTClient/Sparkle to download and prepare its available update."""
-    _echo(dispatch_app_update("download"), as_json)
+    _echo(dispatch_app_update("download", wait=wait), as_json)
+
+
+@app_update.command("status")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def app_update_status(as_json: bool) -> None:
+    """Read the last update state written by FTClient."""
+    value = read_status()
+    if as_json:
+        click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+        return
+    click.echo(
+        f"state={value.get('state', 'unknown')} "
+        f"installed={value.get('installed_version', '-')} "
+        f"latest={value.get('latest_version', '-')}"
+    )
 
 
 @app_update.command("restart")

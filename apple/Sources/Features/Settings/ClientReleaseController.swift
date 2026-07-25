@@ -40,6 +40,11 @@ final class ClientReleaseController: ObservableObject {
         channel = defaults.string(forKey: Keys.channel) ?? "stable"
         automaticallyUpdates = defaults.object(forKey: Keys.automatic) as? Bool ?? false
         lastChecked = defaults.object(forKey: Keys.lastChecked) as? Date
+        AppUpdateStatusStore.write(
+            state: "idle",
+            installedVersion: installedVersion,
+            latestVersion: latestVersion
+        )
         sparkle.automaticallyChecksForUpdates = true
         sparkle.automaticallyDownloadsUpdates = automaticallyUpdates
     }
@@ -173,9 +178,26 @@ final class ClientReleaseController: ObservableObject {
             lastError = message
             pendingExternalAction = nil
         }
+        AppUpdateStatusStore.write(
+            state: statusState(for: event),
+            installedVersion: installedVersion,
+            latestVersion: latestVersion,
+            error: lastError
+        )
         let now = Date()
         lastChecked = now
         defaults.set(now, forKey: Keys.lastChecked)
+    }
+
+    private func statusState(for event: SparkleUpdateEvent) -> String {
+        switch event {
+        case .checking: return "checking"
+        case .found: return "available"
+        case .downloading: return "downloading"
+        case .ready: return "ready"
+        case .current: return "current"
+        case .failed: return "failed"
+        }
     }
 
 }

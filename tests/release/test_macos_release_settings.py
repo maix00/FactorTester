@@ -69,7 +69,20 @@ def test_macos_pins_sparkle_and_embeds_one_update_trust_anchor() -> None:
     assert "downloadAvailableUpdate" in coordinator
     assert "installAndRelaunch" in coordinator
     assert "feedURLString(for updater: SPUUpdater)" in coordinator
+    assert "allowedChannels(for updater: SPUUpdater)" in coordinator
     assert "setFeedURL" not in coordinator
+
+
+def test_macos_persists_update_status_for_cli_observation() -> None:
+    controller = (
+        SOURCES / "Features" / "Settings" / "ClientReleaseController.swift"
+    ).read_text(encoding="utf-8")
+    store = (
+        SOURCES / "Features" / "Updates" / "AppUpdateStatusStore.swift"
+    ).read_text(encoding="utf-8")
+    assert "AppUpdateStatusStore.write" in controller
+    assert '"app-update-status.json"' in store
+    assert '"state"' in store
 
 
 def test_release_signing_is_inside_out_without_codesign_deep() -> None:
