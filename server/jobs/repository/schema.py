@@ -44,6 +44,7 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             step_mode INTEGER NOT NULL DEFAULT 0,
             retention_mode TEXT NOT NULL DEFAULT 'summary',
             deployment_id TEXT NOT NULL DEFAULT '',
+            service_port INTEGER NOT NULL DEFAULT 0,
             source_revision TEXT NOT NULL DEFAULT '',
             runner_path TEXT NOT NULL DEFAULT '',
             job_spec_json TEXT NOT NULL,
@@ -138,6 +139,14 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE research_jobs ADD COLUMN terminal_assurance_json TEXT"
         )
+    if "service_port" not in columns:
+        conn.execute(
+            "ALTER TABLE research_jobs ADD COLUMN service_port INTEGER NOT NULL DEFAULT 0"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_research_jobs_port_updated "
+        "ON research_jobs(service_port, updated_at DESC)"
+    )
     active_without_run_hash = conn.execute(
         """
         SELECT job_id, job_spec_json

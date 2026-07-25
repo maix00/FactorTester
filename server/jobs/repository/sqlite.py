@@ -116,10 +116,10 @@ class JobRepository(
                     INSERT INTO research_jobs (
                         job_id, run_id, owner, workspace_id, kind, status,
                         retry_of, attempt, step_mode, retention_mode,
-                        deployment_id, source_revision, runner_path,
+                        deployment_id, service_port, source_revision, runner_path,
                         job_spec_json, job_spec_hash, run_spec_hash,
                         entitlement_json, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.job_id,
@@ -133,6 +133,7 @@ class JobRepository(
                         int(record.step_mode),
                         record.retention_mode,
                         record.deployment_id,
+                        max(0, int(record.service_port or 0)),
                         record.source_revision,
                         record.runner_path,
                         job_spec_raw.decode(),

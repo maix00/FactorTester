@@ -20,6 +20,7 @@ from server.jobs.report_outputs import (
     source_artifacts_for,
 )
 from server.jobs.models import JobRecord
+from server.jobs.ports import detect_port
 from server.jobs.states import JobStatus, TERMINAL_STATUSES
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.backtest_job_support import (
@@ -320,6 +321,7 @@ def retry_test_job(job_id: str):
         step_mode=old.step_mode,
         retention_mode=old.retention_mode,
         deployment_id=_deployment_id(),
+        service_port=old.service_port or detect_port(request.environ),
         # A retry is a new JobAttempt executed by the currently deployed
         # backend.  Keep the immutable RunSpec/job_spec below, but attest the
         # code that will actually execute this attempt rather than copying the

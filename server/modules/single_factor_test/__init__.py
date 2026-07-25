@@ -2,9 +2,26 @@
 single_factor_test Blueprint package.
 Registers page + ic + group sub-modules onto a single Blueprint.
 """
-from flask import Blueprint
+from flask import Blueprint, request
+from urllib.parse import urlsplit
 
 sft_bp = Blueprint('sft', __name__)
+
+
+@sft_bp.after_request
+def allow_same_host_job_reads(response):
+    """Allow the Job page to aggregate authenticated sibling FactorTester ports."""
+    if not request.path.startswith("/api/jobs"):
+        return response
+    origin = str(request.headers.get("Origin") or "")
+    parsed = urlsplit(origin)
+    if origin and parsed.hostname == request.host.split(":", 1)[0]:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Vary"] = "Origin"
+    return response
 
 from . import (  # noqa: E402, F401
     agent_flow_routes,

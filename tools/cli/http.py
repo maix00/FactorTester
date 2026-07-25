@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from dataclasses import dataclass
 from http.cookiejar import LWPCookieJar, LoadError
@@ -10,7 +11,7 @@ from http.cookiejar import Cookie
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 
@@ -34,6 +35,19 @@ class ClientConfig:
         else:
             base = f"http://{host}:{port}"
         return cls(base_url=base.rstrip("/"))
+
+    def for_port(self, port: int) -> "ClientConfig":
+        parsed = urlsplit(self.base_url)
+        if not parsed.hostname:
+            raise ValueError(f"无效服务地址: {self.base_url}")
+        host = parsed.hostname
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = host
+        if parsed.username:
+            netloc = f"{parsed.username}@{netloc}"
+        netloc += f":{int(port)}"
+        return ClientConfig(urlunsplit((parsed.scheme or "http", netloc, parsed.path, parsed.query, "")).rstrip("/"))
 
 
 class HttpClientError(RuntimeError):
@@ -59,6 +73,12 @@ def config_path() -> Path:
 
 def cookie_path() -> Path:
     return _home_dir() / "cookies.lwp"
+
+
+def cookie_path_for(base_url: str) -> Path:
+    """Keep credentials isolated when one CLI talks to several ports."""
+    key = hashlib.sha256(base_url.rstrip("/").encode()).hexdigest()[:20]
+    return _home_dir() / "cookies" / f"{key}.lwp"
 
 
 def state_path() -> Path:
@@ -102,7 +122,8 @@ class HttpSession:
         timeout: float = 30,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.cookie_jar = LWPCookieJar(str(cookies or cookie_path()))
+        cookie_file = cookies or cookie_path_for(self.base_url)
+        self.cookie_jar = LWPCookieJar(str(cookie_file))
         self.timeout = timeout
         try:
             self.cookie_jar.load(ignore_discard=True, ignore_expires=True)
@@ -110,7 +131,7 @@ class HttpSession:
             pass
         except LoadError:
             Path(self.cookie_jar.filename).unlink(missing_ok=True)
-            self.cookie_jar = LWPCookieJar(str(cookies or cookie_path()))
+            self.cookie_jar = LWPCookieJar(str(cookie_file))
         self._opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
 
     def get(self, path: str, *, query: dict[str, Any] | None = None) -> dict[str, Any]:

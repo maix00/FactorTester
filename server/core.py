@@ -31,6 +31,12 @@ def jobs():
     return render_template('jobs.html')
 
 
+@core_bp.route('/jobs/<job_id>', methods=['GET'])
+def job_detail(job_id):
+    """Dedicated detail view; all data remains behind authenticated APIs."""
+    return render_template('job_detail.html', job_id=job_id)
+
+
 @core_bp.route('/local-data', methods=['GET'])
 def local_data():
     """Local SQL data browser entry; redirects to sqlite-web."""

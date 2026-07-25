@@ -54,6 +54,7 @@ class JobRecord:
     step_mode: bool = False
     retention_mode: str = "summary"
     deployment_id: str = ""
+    service_port: int = 0
     source_revision: str = ""
     runner_path: str = ""
     job_spec: dict[str, Any] = field(default_factory=dict)
@@ -91,8 +92,8 @@ class JobRecord:
             "attempt": self.attempt,
             "step_mode": self.step_mode,
             "retention_mode": self.retention_mode,
+            "port": self.service_port,
             "output_requests": list(self.job_spec.get("output_requests") or ()),
-            "deployment_id": self.deployment_id,
             "source_revision": self.source_revision,
             "job_spec_hash": self.job_spec_hash,
             "run_spec_hash": self.run_spec_hash,

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from flask import jsonify
+from flask import jsonify, request
 
 from server.jobs.models import JobRecord
+from server.jobs.ports import detect_port
 from server.jobs.repository import JobRepository
 from server.services.research_graph.research_cycle.job_evidence import (
     project_job_attempt_evidence,
@@ -32,12 +33,29 @@ def repository() -> JobRepository:
     return JobRepository()
 
 
+def current_port() -> int:
+    return detect_port(request.environ)
+
+
+def _port_error(job: JobRecord):
+    port = current_port()
+    if port and job.service_port and job.service_port != port:
+        return jsonify({
+            "success": False,
+            "error": "job belongs to another FactorTester port",
+            "job_port": job.service_port,
+        }), 409
+    return None
+
+
 def require_job(job_id: str):
     try:
-        return repository().require(
+        job = repository().require(
             job_id,
             owner=require_user(),
-        ), None
+        )
+        error = _port_error(job)
+        return (None, error) if error else (job, None)
     except KeyError:
         return None, (
             jsonify({
@@ -54,6 +72,9 @@ def require_job_detail(job_id: str):
         owner=require_user(),
     )
     if detail is not None:
+        error = _port_error(detail["job"])
+        if error:
+            return None, error
         return detail, None
     return None, (
         jsonify({

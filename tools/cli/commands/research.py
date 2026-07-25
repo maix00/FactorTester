@@ -9,7 +9,7 @@ from typing import Any
 
 import click
 
-from tools.cli.core.context import client_from_config
+from tools.cli.core.context import client_from_config, requested_ports
 from tools.cli.core.errors import friendly_errors
 from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
@@ -247,7 +247,8 @@ def workspace_snapshot_list() -> None:
 
 
 @click.group("run")
-def run() -> None:
+@click.option("--port", "run_ports", multiple=True, type=click.IntRange(1, 65535), help="提交到指定 FactorTester 端口。")
+def run(run_ports: tuple[int, ...]) -> None:
     """Submit and inspect immutable research runs."""
 
 
@@ -405,7 +406,8 @@ def run_clone_workspace(run_id: str, title: str) -> None:
 
 
 @click.group("job")
-def job() -> None:
+@click.option("--port", "job_ports", multiple=True, type=click.IntRange(1, 65535), help="操作指定 FactorTester 端口的任务。")
+def job(job_ports: tuple[int, ...]) -> None:
     """Observe and control durable job attempts."""
 
 
@@ -427,19 +429,26 @@ def job_list(
 ) -> None:
     state = load_state()
     workspace_id = "" if all_workspaces else state.workspace_id
-    rows = client_from_config().list_jobs(
-        workspace_id=workspace_id,
-        status=",".join(statuses),
-        kind=kind or "",
-        limit=limit,
-    )
+    ports = requested_ports() or (None,)
+    rows = []
+    for port in ports:
+        client = client_from_config() if port is None else client_from_config(port=port)
+        rows.extend(client.list_jobs(
+            workspace_id=workspace_id,
+            status=",".join(statuses),
+            kind=kind or "",
+            limit=limit,
+        ))
+    rows.sort(key=lambda item: float(item.get("updated_at") or 0), reverse=True)
+    rows = rows[:limit * len(ports)]
     if as_json:
         click.echo(_json({"jobs": rows, "count": len(rows)}))
         return
     for item in rows:
         click.echo(
             f"{item.get('job_id')} run={item.get('run_id')} kind={item.get('kind')} "
-            f"status={item.get('status')} attempt={item.get('attempt')}"
+            f"status={item.get('status')} attempt={item.get('attempt')} "
+            f"port={item.get('port') or (item.get('server_context') or {}).get('port') or '-'}"
         )
 
 

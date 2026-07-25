@@ -23,6 +23,7 @@ from server.jobs.artifacts import default_user_quota_bytes
 from server.jobs.report_outputs import normalize_output_requests, output_capabilities
 from server.jobs.entitlements import entitlement_for_owner
 from server.jobs.models import JobRecord
+from server.jobs.ports import detect_port
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.services.session_runtime import require_user
@@ -324,6 +325,7 @@ def _submit_kind(kind: str, payload: dict, *, run_spec_hash: str):
         step_mode=bool(payload.get("step_mode")),
         retention_mode=str(payload.get("retention_mode") or "summary"),
         deployment_id=_deployment_id(),
+        service_port=detect_port(request.environ),
         source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
         runner_path=runner,
         job_spec=deepcopy(payload),

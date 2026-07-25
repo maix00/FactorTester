@@ -22,7 +22,11 @@ from tools.cli.manager.commands import manager
 
 
 @click.group()
-def cli() -> None:
+@click.option(
+    "--port", "ports", multiple=True, type=click.IntRange(1, 65535),
+    help="目标 FactorTester 端口；可重复指定，job list 会聚合多个端口。",
+)
+def cli(ports: tuple[int, ...]) -> None:
     """FactorTester CLI.
 
     \b

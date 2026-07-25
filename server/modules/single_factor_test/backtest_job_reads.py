@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import os
 import time
 import zipfile
 
@@ -12,6 +11,7 @@ from flask import Response, jsonify, request, stream_with_context
 import orjson
 
 from server.jobs.artifacts import artifact_root, default_user_quota_bytes
+from server.jobs.ports import detect_port
 from server.jobs.ipc import DaemonUnavailable
 from server.jobs.report_outputs import artifact_description
 from server.jobs.states import JobStatus, TERMINAL_STATUSES
@@ -50,6 +50,16 @@ def _after_seq() -> int:
         return 0
 
 
+def _port_filter() -> int | None:
+    raw = request.args.get("port")
+    if raw is None:
+        return _server_port() or None
+    port = int(raw)
+    if not 1 <= port <= 65535:
+        raise ValueError("port must be between 1 and 65535")
+    return port
+
+
 def _sse(event: str, data: dict, *, event_id: int | None = None) -> str:
     lines = []
     if event_id is not None:
@@ -61,28 +71,14 @@ def _sse(event: str, data: dict, *, event_id: int | None = None) -> str:
 
 def _server_port() -> int:
     """Expose the listening port when the app is behind a simple launcher."""
-    candidates = (
-        request.environ.get("SERVER_PORT"),
-        os.environ.get("FACTORTESTER_VIBE_PORT"),
-        os.environ.get("GTHT_SERVER_PORT"),
-        os.environ.get("PORT"),
-    )
-    for raw in candidates:
-        try:
-            port = int(raw or 0)
-        except (TypeError, ValueError):
-            continue
-        if 1 <= port <= 65535:
-            return port
-    return 0
+    return detect_port(request.environ)
 
 
 def _server_context(job) -> dict[str, object]:
     run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
     binding = run_spec.get("research_binding") if isinstance(run_spec, dict) else None
     return {
-        "port": _server_port(),
-        "deployment_id": job.deployment_id,
+        "port": job.service_port or _server_port(),
         "profile": str(
             job.job_spec.get("profile")
             or job.job_spec.get("profile_name")
@@ -104,6 +100,7 @@ def _list_research_binding(job_repository, job, owner: str) -> dict[str, str]:
 def list_test_jobs():
     try:
         statuses = _statuses()
+        service_port = _port_filter()
         limit = min(
             200,
             max(1, int(request.args.get("limit", "20") or 20)),
@@ -120,6 +117,7 @@ def list_test_jobs():
         ).strip(),
         run_id=str(request.args.get("run_id") or "").strip(),
         statuses=statuses,
+        service_port=service_port,
         limit=limit,
     )
     return jsonify({
@@ -352,7 +350,10 @@ def download_test_job_artifacts_archive(job_id: str):
 
 @sft_bp.get("/api/jobs/<job_id>/artifacts/<name>")
 def get_test_job_artifact(job_id: str, name: str):
-    owner = require_user()
+    job, error = require_job(job_id)
+    if error:
+        return error
+    owner = job.owner
     metadata = repository().load_artifact(
         job_id=job_id,
         name=name,

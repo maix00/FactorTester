@@ -47,6 +47,7 @@ class JobQueryImplementation:
         run_id: str = "",
         kind: str = "",
         statuses: Iterable[JobStatus | str] | None = None,
+        service_port: int | None = None,
         limit: int = 20,
     ) -> list[JobRecord]:
         clauses = ["owner=?"]
@@ -65,6 +66,9 @@ class JobQueryImplementation:
                 return []
             clauses.append(f"status IN ({','.join('?' for _ in values)})")
             args.extend(values)
+        if service_port is not None:
+            clauses.append("service_port=?")
+            args.append(max(0, int(service_port)))
         args.append(min(200, max(1, int(limit))))
         with self._connection() as conn:
             rows = conn.execute(
@@ -90,6 +94,7 @@ class JobQueryImplementation:
         run_id: str = "",
         kind: str = "",
         statuses: Iterable[JobStatus | str] | None = None,
+        service_port: int | None = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Return UI list rows with pin and active-artifact metadata."""
@@ -111,6 +116,9 @@ class JobQueryImplementation:
                 f"jobs.status IN ({','.join('?' for _ in values)})"
             )
             args.extend(values)
+        if service_port is not None:
+            clauses.append("jobs.service_port=?")
+            args.append(max(0, int(service_port)))
         args.append(min(200, max(1, int(limit))))
         with self._connection() as conn:
             rows = conn.execute(
@@ -258,6 +266,7 @@ class JobQueryImplementation:
             step_mode=bool(row["step_mode"]),
             retention_mode=str(row["retention_mode"]),
             deployment_id=str(row["deployment_id"] or ""),
+            service_port=int(row["service_port"] or 0),
             source_revision=str(row["source_revision"] or ""),
             runner_path=str(row["runner_path"] or ""),
             job_spec=dict(_loads(row["job_spec_json"], {})),
