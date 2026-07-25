@@ -19,6 +19,7 @@ DEPENDENCIES = (
     "click==8.4.1",
     "markdown-it-py==4.2.0",
     "mdurl==0.1.2",
+    "orjson==3.11.9",
     "plotext==5.3.2",
     "pygments==2.20.0",
     "rich==15.0.0",
