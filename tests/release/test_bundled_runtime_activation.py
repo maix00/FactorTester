@@ -121,6 +121,16 @@ def test_bundle_identity_hash_and_installed_tamper_fail_closed(
         activate_bundled_runtime(invalid, tmp_path / "invalid-support")
 
 
+def test_bundle_identity_accepts_executable_script_launcher(
+    tmp_path: Path,
+) -> None:
+    launcher = tmp_path / "cli-anything-factortester-research"
+    launcher.write_bytes(b"#!/bin/sh\nexec \"$0.real\" \"$@\"\n")
+    launcher.chmod(0o755)
+
+    bundle_runtime._verify_source_identity(launcher)
+
+
 @pytest.mark.parametrize("failure_point", ["before_publish", "before_pointer"])
 def test_bundle_activation_crash_never_changes_pointer_early(
     tmp_path: Path,

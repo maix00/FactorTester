@@ -158,7 +158,7 @@ def _verify_source_identity(path: Path) -> None:
         b"\xbe\xba\xfe\xca",
     }:
         return
-    if prefix == b"#!":
+    if prefix.startswith(b"#!"):
         return
     raise ValueError(
         f"bundle runtime command is neither Mach-O nor executable script: {path.name}"
