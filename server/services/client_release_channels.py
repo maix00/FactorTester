@@ -6,6 +6,7 @@ import json
 import os
 from hashlib import sha256
 from pathlib import Path
+import re
 import stat
 from typing import Any
 from urllib.parse import urlparse
@@ -18,6 +19,7 @@ from tools.cli.release.update_channel import (
 from script.release.sparkle import is_secure_release_url
 
 MAX_SPARKLE_APPCAST_BYTES = 1024 * 1024
+MAX_SPARKLE_ITEMS = 10
 SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 
 
@@ -99,14 +101,43 @@ def load_beta_sparkle_appcast(
     except ET.ParseError as exc:
         raise ValueError("Sparkle Beta appcast is invalid XML") from exc
     items = document.findall("./channel/item")
-    if len(items) != 1:
-        raise ValueError("Sparkle Beta appcast must contain one item")
+    if not items or len(items) > MAX_SPARKLE_ITEMS:
+        raise ValueError("Sparkle Beta appcast item count is invalid")
+    for item in items:
+        if item.findtext(f"{{{SPARKLE_NAMESPACE}}}channel") != "beta":
+            raise ValueError("Sparkle appcast item is not Beta")
+        enclosure = item.find("enclosure")
+        if enclosure is None:
+            raise ValueError("Sparkle Beta appcast enclosure is missing")
+        url = enclosure.attrib.get("url", "")
+        parsed = urlparse(url)
+        signature = enclosure.attrib.get(
+            f"{{{SPARKLE_NAMESPACE}}}edSignature",
+            "",
+        )
+        if (
+            not _is_beta_asset_url(parsed, suffix="dmg")
+            or not signature
+        ):
+            raise ValueError("Sparkle Beta appcast item is invalid")
+        deltas = item.find(f"{{{SPARKLE_NAMESPACE}}}deltas")
+        if deltas is None:
+            continue
+        for delta in deltas.findall("enclosure"):
+            delta_url = urlparse(delta.attrib.get("url", ""))
+            if (
+                not _is_beta_asset_url(delta_url, suffix="delta")
+                or not delta.attrib.get(
+                    f"{{{SPARKLE_NAMESPACE}}}deltaFrom"
+                )
+                or not delta.attrib.get(
+                    f"{{{SPARKLE_NAMESPACE}}}edSignature"
+                )
+            ):
+                raise ValueError("Sparkle Beta delta item is invalid")
     item = items[0]
-    if item.findtext(f"{{{SPARKLE_NAMESPACE}}}channel") != "beta":
-        raise ValueError("Sparkle appcast item is not Beta")
     enclosure = item.find("enclosure")
-    if enclosure is None:
-        raise ValueError("Sparkle Beta appcast enclosure is missing")
+    assert enclosure is not None
     url = enclosure.attrib.get("url", "")
     parsed = urlparse(url)
     signature = enclosure.attrib.get(
@@ -130,3 +161,16 @@ def load_beta_sparkle_appcast(
             "Sparkle Beta appcast does not match the verified channel"
         )
     return raw, sha256(raw).hexdigest()
+
+
+def _is_beta_asset_url(parsed, *, suffix: str) -> bool:
+    if not is_secure_release_url(parsed.geturl()):
+        return False
+    if parsed.query or parsed.fragment:
+        return False
+    return bool(
+        re.fullmatch(
+            rf"/api/client/releases/assets/beta/[0-9a-f]{{64}}\.{suffix}",
+            parsed.path,
+        )
+    )

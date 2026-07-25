@@ -16,6 +16,7 @@ from script.release.update_manifest import (
 from server.auth import auth_bp
 from server.modules.shared import shared_bp
 from server.modules.shared import client_releases as routes
+from server.services.client_release_channels import SPARKLE_NAMESPACE
 from tests.release.test_update_channel_manifest import _keys
 from tools.cli.release.update_channel import resolve_update_manifest
 
@@ -157,6 +158,65 @@ def test_beta_sparkle_appcast_fails_closed(
     appcast.unlink()
     appcast.symlink_to(target)
     assert client.get("/api/client/releases/beta.xml").status_code == 503
+
+
+def test_beta_sparkle_appcast_accepts_history_and_delta_items(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    private, public = _keys(tmp_path / "keys")
+    root = tmp_path / "channels"
+    asset_root = root / "assets/beta"
+    asset_root.mkdir(parents=True)
+    payload = b"installer"
+    digest = sha256(payload).hexdigest()
+    dmg = asset_root / f"{digest}.dmg"
+    dmg.write_bytes(payload)
+    delta_payload = b"delta"
+    delta = asset_root / f"{sha256(delta_payload).hexdigest()}.delta"
+    delta.write_bytes(delta_payload)
+    origin = "http://127.0.0.1:8141"
+    dmg_url = f"{origin}/api/client/releases/assets/beta/{dmg.name}"
+    delta_url = f"{origin}/api/client/releases/assets/beta/{delta.name}"
+    manifest = create_update_manifest(
+        version="2.0.0-beta.2",
+        build=9,
+        channel="beta",
+        dmg=dmg,
+        dmg_url=dmg_url,
+        minimum_client="1.2.0",
+        mandatory=False,
+        published_at="2026-07-20T12:00:00Z",
+        private_key=private,
+        public_key=public,
+    )
+    write_update_manifest(root / "beta.json", manifest)
+    (root / "beta.xml").write_text(
+        f"""<rss xmlns:sparkle=\"{SPARKLE_NAMESPACE}\"><channel>
+<item><sparkle:channel>beta</sparkle:channel>
+<sparkle:version>9</sparkle:version>
+<enclosure url=\"{dmg_url}\" sparkle:edSignature=\"signed\" />
+<sparkle:deltas><enclosure url=\"{delta_url}\"
+ sparkle:deltaFrom=\"8\" sparkle:edSignature=\"signed\" /></sparkle:deltas>
+</item>
+<item><sparkle:channel>beta</sparkle:channel>
+<sparkle:version>8</sparkle:version>
+<enclosure url=\"{origin}/api/client/releases/assets/beta/{'b' * 64}.dmg\"
+ sparkle:edSignature=\"signed\" /></item>
+</channel></rss>""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(routes, "release_manifest_root", lambda: root)
+    monkeypatch.setattr(
+        routes,
+        "trusted_release_public_key",
+        lambda _channel: public,
+    )
+    app = Flask(__name__)
+    app.register_blueprint(shared_bp)
+
+    response = app.test_client().get("/api/client/releases/beta.xml")
+    assert response.status_code == 200
 
 
 def test_beta_release_channel_is_static_cacheable_and_conditional(
@@ -314,6 +374,15 @@ def test_server_serves_verified_retained_sha_addressed_beta_assets(
         "public, max-age=31536000, immutable"
     )
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+    delta_payload = b"delta asset"
+    delta_name = f"{sha256(delta_payload).hexdigest()}.delta"
+    (asset.parent / delta_name).write_bytes(delta_payload)
+    delta_response = client.get(
+        "/api/client/releases/assets/beta/" + delta_name
+    )
+    assert delta_response.status_code == 200
+    assert delta_response.data == delta_payload
+    assert delta_response.mimetype == "application/octet-stream"
     ranged = client.get(
         "/api/client/releases/assets/beta/" + filename,
         headers={"Range": "bytes=0-7"},

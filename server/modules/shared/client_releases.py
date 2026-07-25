@@ -20,8 +20,8 @@ from server.services.client_release_channels import (
 from . import shared_bp
 
 
-_ASSET_NAME = re.compile(r"^[0-9a-f]{64}\.dmg$")
-_MAX_DMG_BYTES = 4 * 1024 * 1024 * 1024
+_ASSET_NAME = re.compile(r"^[0-9a-f]{64}\.(?:dmg|delta)$")
+_MAX_ASSET_BYTES = 4 * 1024 * 1024 * 1024
 
 
 def release_manifest_root() -> Path:
@@ -89,14 +89,14 @@ def client_release_beta_appcast():
 
 @shared_bp.get("/api/client/releases/assets/<channel>/<filename>")
 def client_release_asset(channel: str, filename: str):
-    """Serve one retained, SHA-addressed Beta DMG without path re-resolution."""
+    """Serve one retained, SHA-addressed Beta update asset."""
     if channel != "beta" or not _ASSET_NAME.fullmatch(filename):
         return {"success": False, "error": "release asset not found"}, 404
     handle = None
     directory_descriptors: list[int] = []
     try:
         root = release_manifest_root().resolve()
-        expected_digest = filename.removesuffix(".dmg")
+        expected_digest = filename.rsplit(".", 1)[0]
         directory_flags = (
             os.O_RDONLY
             | getattr(os, "O_DIRECTORY", 0)
@@ -118,7 +118,7 @@ def client_release_asset(channel: str, filename: str):
         metadata = os.fstat(handle.fileno())
         if (
             not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size > _MAX_DMG_BYTES
+            or metadata.st_size > _MAX_ASSET_BYTES
             or _stream_sha256(handle) != expected_digest
         ):
             handle.close()
@@ -170,7 +170,11 @@ def client_release_asset(channel: str, filename: str):
     response = Response(
         _bounded_stream(handle, stop - start),
         status=status_code,
-        content_type="application/x-apple-diskimage",
+        content_type=(
+            "application/x-apple-diskimage"
+            if filename.endswith(".dmg")
+            else "application/octet-stream"
+        ),
     )
     response.call_on_close(handle.close)
     response.content_length = stop - start
