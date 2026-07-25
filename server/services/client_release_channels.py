@@ -148,14 +148,44 @@ def load_beta_sparkle_appcast(
     expected_digest = str(legacy.get("sha256") or "")
     if (
         not is_secure_release_url(url)
-        or url != expected_url
-        or parsed.path != (
-            "/api/client/releases/assets/beta/"
-            f"{expected_digest}.dmg"
-        )
         or parsed.query
         or parsed.fragment
         or not signature
+    ):
+        raise ValueError("Sparkle Beta appcast enclosure is invalid")
+    if url == expected_url and parsed.path == (
+        "/api/client/releases/assets/beta/"
+        f"{expected_digest}.dmg"
+    ):
+        return raw, sha256(raw).hexdigest()
+
+    # Delta-only Beta keeps the old signed legacy manifest as the trust root,
+    # while the appcast advances to a new build whose full DMG is deliberately
+    # not public.  Accept that transition only when the latest item contains a
+    # signed delta explicitly targeting the legacy build; arbitrary appcast
+    # pointer swaps must remain rejected.
+    try:
+        legacy_build = int(legacy.get("build"))
+        latest_build = int(
+            item.findtext(f"{{{SPARKLE_NAMESPACE}}}version") or ""
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Sparkle Beta appcast build is invalid") from exc
+    deltas = item.find(f"{{{SPARKLE_NAMESPACE}}}deltas")
+    matching_delta = None if deltas is None else next(
+        (
+            delta for delta in deltas.findall("enclosure")
+            if delta.attrib.get(f"{{{SPARKLE_NAMESPACE}}}deltaFrom")
+            == str(legacy_build)
+        ),
+        None,
+    )
+    if (
+        latest_build <= legacy_build
+        or matching_delta is None
+        or not matching_delta.attrib.get(
+            f"{{{SPARKLE_NAMESPACE}}}edSignature"
+        )
     ):
         raise ValueError(
             "Sparkle Beta appcast does not match the verified channel"
