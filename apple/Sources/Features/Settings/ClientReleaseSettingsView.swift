@@ -68,7 +68,7 @@ struct ClientReleaseSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             SettingsSectionCard("客户端更新") {
                 SettingsRow(title: statusTitle, description: statusSubtitle) {
-                    VStack(alignment: .trailing, spacing: 3) {
+                    VStack(alignment: .trailing, spacing: 8) {
                         Image(systemName: statusIcon)
                             .foregroundStyle(statusTint)
                         if controller.hasAvailableUpdate || controller.isUpdateReady {
@@ -76,11 +76,18 @@ struct ClientReleaseSettingsView: View {
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
                         }
-                        Button(action: primaryAction) {
-                            Label(primaryTitle, systemImage: primaryIcon)
+                        HStack(spacing: 8) {
+                            Button(action: primaryAction) {
+                                Label(primaryTitle, systemImage: primaryIcon)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(controller.isWorking)
+                            if let checked = controller.lastChecked {
+                                Text(checked.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(controller.isWorking)
                     }
                 }
                 Divider()
@@ -112,13 +119,6 @@ struct ClientReleaseSettingsView: View {
                 }
                 SettingsRow(title: "签名", description: "发布包签名状态") {
                     Text(controller.signatureText).foregroundStyle(.secondary)
-                }
-                if let checked = controller.lastChecked {
-                    Divider()
-                    SettingsRow(title: "最后检查", description: "最近一次检查更新时间") {
-                        Text(checked.formatted(date: .abbreviated, time: .shortened))
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
         }
