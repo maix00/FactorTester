@@ -25,6 +25,12 @@ def products():
     return render_template('products.html')
 
 
+@core_bp.route('/jobs', methods=['GET'])
+def jobs():
+    """User-scoped Job management page; data stays behind /api/jobs."""
+    return render_template('jobs.html')
+
+
 @core_bp.route('/local-data', methods=['GET'])
 def local_data():
     """Local SQL data browser entry; redirects to sqlite-web."""

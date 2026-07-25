@@ -22,6 +22,12 @@ def job_urls(job_id: str) -> dict[str, str]:
     }
 
 
+def job_research_binding(job: JobRecord) -> dict[str, str]:
+    run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
+    binding = run_spec.get("research_binding") if isinstance(run_spec, dict) else None
+    return dict(binding) if isinstance(binding, dict) else {}
+
+
 def repository() -> JobRepository:
     return JobRepository()
 

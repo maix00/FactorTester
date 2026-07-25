@@ -16,9 +16,11 @@ from typing import Any
 
 import orjson
 
-from server.jobs.equity_curve_artifact import (
-    build_equity_curve_artifact,
-    receipt_bytes,
+from server.jobs.equity_curve_artifact import receipt_bytes
+from server.jobs.report_outputs import (
+    build_report_artifacts,
+    normalize_output_requests,
+    source_artifacts_for,
 )
 
 
@@ -42,6 +44,7 @@ class _WorkerSink:
         *,
         artifact_root: str = "",
         retention_mode: str = "summary",
+        output_requests: list[str] | tuple[str, ...] = (),
         control_queue: Any = None,
         cancel_event: Any = None,
     ) -> None:
@@ -49,6 +52,9 @@ class _WorkerSink:
         self.output_queue = output_queue
         self.artifact_root = Path(artifact_root) if artifact_root else None
         self.retention_mode = str(retention_mode)
+        self.output_requests = tuple(normalize_output_requests(list(output_requests)))
+        self._source_artifacts = source_artifacts_for(self.output_requests)
+        self._source_payloads: dict[str, Any] = {}
         self.control_queue = control_queue
         self.cancel_event = cancel_event
         self._live_event_interval = 0.5
@@ -138,27 +144,43 @@ class _WorkerSink:
             data["details"] = details
         self._emit("runtime_info", data)
 
-    def emit_result(self, data: dict[str, Any]) -> None:
-        curve = build_equity_curve_artifact(data)
-        if curve is not None:
-            image, receipt = curve
+    def emit_result(self, data: dict[str, Any], *, source: dict[str, Any] | None = None) -> None:
+        # Keep the legacy equity report automatic, while allowing a RunSpec to
+        # request additional reports without retaining the complete result.
+        implicit_default = not self.output_requests
+        requested = list(self.output_requests) or ["equity_curve"]
+        merged_source = dict(self._source_payloads)
+        merged_source.update(source or {})
+        reports = build_report_artifacts(data, source=merged_source, requested=requested)
+        if implicit_default:
+            reports = [
+                report for report in reports
+                if report.name in {"equity_curve_report"}
+            ]
+        has_equity_curve = any(report.name == "equity_curve_report" for report in reports)
+        for report in reports:
             self._write_bytes_artifact(
-                "equity_curve_report",
-                image,
-                extension="svg",
-                content_type="image/svg+xml",
+                report.name,
+                report.raw,
+                extension=report.extension,
+                content_type=report.content_type,
+            )
+            receipt_name = (
+                "equity_curve_receipt"
+                if report.name == "equity_curve_report"
+                else f"{report.name}_receipt"
             )
             self._write_bytes_artifact(
-                "equity_curve_receipt",
-                receipt_bytes(receipt),
+                receipt_name,
+                receipt_bytes(report.receipt),
                 extension="json",
                 content_type="application/json",
             )
-        if self.retention_mode == "full":
+        if self.retention_mode == "full" or "result" in self._source_artifacts:
             self._write_artifact("result", data)
         self._flush_live_events()
         summary = _bounded_summary(data)
-        if curve is not None:
+        if has_equity_curve:
             summary["equity_curve_artifact_available"] = True
         self._emit("result", summary)
 
@@ -175,8 +197,13 @@ class _WorkerSink:
         self._emit("step", dict(step_info))
 
     def emit_artifact(self, name: str, value: Any) -> None:
-        if self.retention_mode == "full":
+        if self.retention_mode == "full" or str(name) in self._source_artifacts:
+            if str(name) in self._source_artifacts:
+                self._source_payloads[str(name)] = value
             self._write_artifact(str(name), value)
+
+    def should_retain_artifact(self, name: str) -> bool:
+        return self.retention_mode == "full" or str(name) in self._source_artifacts
 
     def emit_pause(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
         self._flush_live_events()
@@ -421,6 +448,9 @@ def _worker_entry(
                 output_queue,
                 artifact_root=str(task.get("artifact_root") or ""),
                 retention_mode=str(task.get("retention_mode") or "summary"),
+                output_requests=list(
+                    (task.get("payload") or {}).get("output_requests") or ()
+                ),
                 control_queue=task_queue,
                 cancel_event=cancel_flag,
             )

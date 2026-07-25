@@ -78,3 +78,40 @@ def test_summary_retention_keeps_curve_image_and_receipt_not_full_result(
     assert names == {"equity_curve_report", "equity_curve_receipt"}
     assert not (tmp_path / "job-summary" / "result.json").exists()
     assert (tmp_path / "job-summary" / "equity_curve_report.svg").is_file()
+
+
+def test_declared_outputs_retain_only_required_sources_and_generate_reports(tmp_path) -> None:
+    output = queue.Queue()
+    sink = _WorkerSink(
+        "job-declared",
+        output,
+        artifact_root=str(tmp_path),
+        retention_mode="summary",
+        output_requests=["fee_detail", "margin_detail"],
+    )
+    group_execution = {
+        "engine_result": {
+            "portfolios": {
+                "A1": {
+                    "equity_curve": {"1": 100.0, "2": 101.0},
+                    "margin_curve": {"1": {"CU.SHF": 10.0}},
+                    "notional_curve": {"1": {"CU.SHF": 100.0}},
+                }
+            }
+        }
+    }
+    sink.emit_artifact("group_execution", group_execution)
+    sink.emit_artifact("order_audit", {
+        "strategies": {"A1": {"fills": [{"timestamp": 1, "fee": 2.0}]}}
+    })
+    sink.emit_result({
+        "groups": [{"name": "A1", "timestamps": [1, 2], "total_equity": [100.0, 101.0]}]
+    }, source=group_execution)
+
+    names = {
+        item["data"]["name"]
+        for item in list(output.queue)
+        if item.get("event") == "artifact"
+    }
+    assert {"group_execution", "order_audit", "fee_detail_csv", "margin_detail_csv"} <= names
+    assert (tmp_path / "job-declared" / "result.json").exists()

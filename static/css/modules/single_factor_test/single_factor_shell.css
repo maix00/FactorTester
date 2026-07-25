@@ -175,6 +175,39 @@
     padding: 3px 8px;
 }
 
+.research-job-detail {
+    grid-column: 1 / -1;
+    border-top: 1px solid #e4e7ec;
+    padding: 8px 0 4px 8px;
+    color: #475467;
+    font-size: 11px;
+}
+
+.research-job-detail-summary,
+.research-job-artifacts-title {
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.research-job-config {
+    max-height: 180px;
+    overflow: auto;
+    margin: 4px 0 8px;
+    padding: 6px;
+    background: #fff;
+    border: 1px solid #e4e7ec;
+    white-space: pre-wrap;
+}
+
+.research-job-artifact-line {
+    margin: 3px 0;
+}
+
+.research-job-download-all {
+    display: inline-block;
+    margin-top: 6px;
+}
+
 @media (max-width: 720px) {
     .research-job-row { grid-template-columns: 1fr auto; }
     .research-job-progress { grid-column: 1 / -1; grid-row: 2; }

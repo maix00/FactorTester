@@ -63,6 +63,53 @@ class JobArtifactImplementation:
             raise RuntimeError("artifact write returned no record")
         return dict(stored)
 
+    def record_derived_artifact(
+        self,
+        *,
+        job_id: str,
+        name: str,
+        relative_path: str,
+        content_type: str,
+        content_hash: str,
+        size_bytes: int,
+        retention_mode: str = "retained",
+    ) -> dict[str, Any]:
+        """Record a user-requested report generated after terminalization.
+
+        Execution artifacts remain immutable once a Job is terminal.  Derived
+        reports are separately named and may be regenerated, so they use the
+        same metadata table with an explicit terminal-safe path.
+        """
+        now = time.time()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT job_id FROM research_jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise KeyError("research job not found")
+            stored = conn.execute(
+                """
+                INSERT INTO research_job_artifacts (
+                    job_id, name, retention_mode, state, content_type,
+                    relative_path, content_hash, size_bytes, created_at
+                ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id, name) DO UPDATE SET
+                    retention_mode=excluded.retention_mode,
+                    state='active', content_type=excluded.content_type,
+                    relative_path=excluded.relative_path,
+                    content_hash=excluded.content_hash,
+                    size_bytes=excluded.size_bytes, created_at=excluded.created_at,
+                    deleted_at=NULL
+                RETURNING *
+                """,
+                (str(job_id), str(name), str(retention_mode), str(content_type),
+                 str(relative_path), str(content_hash), max(0, int(size_bytes)), now),
+            ).fetchone()
+        if stored is None:
+            raise RuntimeError("derived artifact write returned no record")
+        return dict(stored)
+
     def load_artifact(
         self,
         *,

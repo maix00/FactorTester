@@ -13,6 +13,16 @@
       "roles": []
     },
     {
+      "id": "jobs",
+      "title": "研究任务",
+      "desc": "查看 Web 与 CLI 任务、配置、进度和生成物",
+      "icon": "任务",
+      "sfSymbol": "list.bullet.rectangle",
+      "path": "/jobs",
+      "requiresAuth": true,
+      "roles": []
+    },
+    {
       "id": "backtest",
       "title": "回测",
       "desc": "从因子库与产品组库选择输入，配置并运行回测",

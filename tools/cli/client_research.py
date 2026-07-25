@@ -140,6 +140,7 @@ class ResearchClientMixin(ClientMixinBase):
         analyses: list[str],
         retention_mode: str = "summary",
         step_mode: bool = False,
+        output_requests: list[str] | None = None,
         trial_binding: dict[str, Any] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
@@ -150,6 +151,8 @@ class ResearchClientMixin(ClientMixinBase):
             "retention_mode": retention_mode,
             "step_mode": bool(step_mode),
         }
+        if output_requests:
+            payload["output_requests"] = list(output_requests)
         if configuration_snapshot_id:
             payload["configuration_snapshot_id"] = configuration_snapshot_id
             payload["configuration_snapshot_revision"] = (
@@ -169,6 +172,7 @@ class ResearchClientMixin(ClientMixinBase):
         analyses: list[str],
         retention_mode: str = "summary",
         step_mode: bool = False,
+        output_requests: list[str] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
     ) -> dict[str, Any]:
@@ -179,6 +183,8 @@ class ResearchClientMixin(ClientMixinBase):
             "retention_mode": retention_mode,
             "step_mode": bool(step_mode),
         }
+        if output_requests:
+            payload["output_requests"] = list(output_requests)
         if configuration_snapshot_id:
             payload["configuration_snapshot_id"] = configuration_snapshot_id
             payload["configuration_snapshot_revision"] = (
@@ -278,6 +284,34 @@ class ResearchClientMixin(ClientMixinBase):
         return self.session.download(
             f"/api/jobs/{job_id}/artifacts/{name}"
         )
+
+    def job_artifact_archive(self, job_id: str) -> BinaryResponse:
+        return self.session.download(
+            f"/api/jobs/{job_id}/artifacts/archive"
+        )
+
+    def job_artifact_capabilities(self) -> list[dict[str, Any]]:
+        data = self._expect_success(
+            self.session.get("/api/jobs/artifact-capabilities")
+        )
+        return list(data.get("outputs") or [])
+
+    def list_job_artifacts(self, job_id: str) -> list[dict[str, Any]]:
+        data = self._expect_success(
+            self.session.get(f"/api/jobs/{job_id}/artifacts")
+        )
+        return list(data.get("artifacts") or [])
+
+    def generate_job_artifacts(
+        self,
+        job_id: str,
+        *,
+        output_requests: list[str],
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            f"/api/jobs/{job_id}/artifacts/generate",
+            {"output_requests": list(output_requests)},
+        ))
 
     def delete_job_artifacts(self, job_id: str) -> dict[str, Any]:
         return self._expect_success(

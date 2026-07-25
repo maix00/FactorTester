@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import os
 import time
+import zipfile
 
 from flask import Response, jsonify, request, stream_with_context
 import orjson
 
 from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.ipc import DaemonUnavailable
+from server.jobs.report_outputs import artifact_description
 from server.jobs.states import JobStatus, TERMINAL_STATUSES
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.backtest_job_support import (
@@ -18,6 +22,7 @@ from server.modules.single_factor_test.backtest_job_support import (
     repository,
     require_job,
     require_job_detail,
+    job_research_binding,
 )
 from server.modules.single_factor_test.research_jobs import _daemon_client
 from server.services.session_runtime import require_user
@@ -54,6 +59,47 @@ def _sse(event: str, data: dict, *, event_id: int | None = None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+def _server_port() -> int:
+    """Expose the listening port when the app is behind a simple launcher."""
+    candidates = (
+        request.environ.get("SERVER_PORT"),
+        os.environ.get("FACTORTESTER_VIBE_PORT"),
+        os.environ.get("GTHT_SERVER_PORT"),
+        os.environ.get("PORT"),
+    )
+    for raw in candidates:
+        try:
+            port = int(raw or 0)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= port <= 65535:
+            return port
+    return 0
+
+
+def _server_context(job) -> dict[str, object]:
+    run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
+    binding = run_spec.get("research_binding") if isinstance(run_spec, dict) else None
+    return {
+        "port": _server_port(),
+        "deployment_id": job.deployment_id,
+        "profile": str(
+            job.job_spec.get("profile")
+            or job.job_spec.get("profile_name")
+            or (binding or {}).get("profile_ref")
+            or "default"
+        ),
+    }
+
+
+def _list_research_binding(job_repository, job, owner: str) -> dict[str, str]:
+    binding = job_research_binding(job)
+    detail = job_repository.load_detail(job.job_id, owner=owner)
+    if detail is not None:
+        binding.update(detail.get("graph_binding") or {})
+    return binding
+
+
 @sft_bp.get("/api/jobs")
 def list_test_jobs():
     try:
@@ -64,8 +110,10 @@ def list_test_jobs():
         )
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
-    rows = repository().list_with_metadata(
-        owner=require_user(),
+    owner = require_user()
+    job_repository = repository()
+    rows = job_repository.list_with_metadata(
+        owner=owner,
         kind=str(request.args.get("kind") or "").strip(),
         workspace_id=str(
             request.args.get("workspace_id") or ""
@@ -80,6 +128,10 @@ def list_test_jobs():
             {
                 **item["job"].summary(pinned=item["pinned"]),
                 "artifact_count": item["artifact_count"],
+                "server_context": _server_context(item["job"]),
+                "research_binding": _list_research_binding(
+                    job_repository, item["job"], owner,
+                ),
                 **job_urls(item["job"].job_id),
             }
             for item in rows
@@ -99,6 +151,18 @@ def get_test_job(job_id: str):
         "execution_plan": job.execution_plan,
         "result_summary": job.result_summary,
         "error": job.error,
+        "run_spec_hash": job.run_spec_hash,
+        "output_requests": list(job.job_spec.get("output_requests") or ()),
+        "configuration": (
+            job.job_spec.get("run_spec", {}).get("configuration")
+            if isinstance(job.job_spec.get("run_spec"), dict)
+            else None
+        ),
+        "server_context": _server_context(job),
+        "research_binding": (
+            job_research_binding(job)
+            | (detail.get("graph_binding") or {})
+        ),
         "evidence": job_evidence(detail),
         **job_urls(job.job_id),
     })
@@ -250,8 +314,40 @@ def list_test_job_artifacts(job_id: str):
     return jsonify({
         "success": True,
         "job_id": job_id,
-        "artifacts": artifacts,
+        "artifacts": [
+            {**item, "description": artifact_description(str(item.get("name") or ""))}
+            for item in artifacts
+        ],
     })
+
+
+@sft_bp.get("/api/jobs/<job_id>/artifacts/archive")
+def download_test_job_artifacts_archive(job_id: str):
+    job, error = require_job(job_id)
+    if error:
+        return error
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for metadata in repository().list_artifacts(
+            job_id=job.job_id, owner=job.owner,
+        ):
+            if metadata["state"] != "active":
+                continue
+            path = (artifact_root() / str(metadata["relative_path"])).resolve()
+            if artifact_root() not in path.parents or not path.is_file():
+                continue
+            raw = path.read_bytes()
+            if hashlib.sha256(raw).hexdigest() != metadata["content_hash"]:
+                return jsonify({"success": False, "error": "artifact integrity check failed"}), 500
+            bundle.writestr(str(metadata["name"]) + path.suffix, raw)
+    archive.seek(0)
+    return Response(
+        archive.read(),
+        content_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="job-{job.job_id}-artifacts.zip"'
+        },
+    )
 
 
 @sft_bp.get("/api/jobs/<job_id>/artifacts/<name>")

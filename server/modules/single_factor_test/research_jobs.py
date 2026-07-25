@@ -20,6 +20,7 @@ from server.services import (
 )
 from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
 from server.jobs.artifacts import default_user_quota_bytes
+from server.jobs.report_outputs import normalize_output_requests, output_capabilities
 from server.jobs.entitlements import entitlement_for_owner
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
@@ -62,6 +63,14 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     if retention_mode not in {"summary", "full"}:
         raise _RunRequestError("unsupported retention_mode")
     step_mode = bool(data.get("step_mode"))
+    try:
+        output_requests = normalize_output_requests(data.get("output_requests"))
+    except ValueError as exc:
+        raise _RunRequestError(str(exc)) from exc
+    if output_requests and "backtest" not in analyses:
+        raise _RunRequestError(
+            "the requested backtest outputs require the backtest analysis"
+        )
     if step_mode and analyses != ["backtest"]:
         raise _RunRequestError(
             "step mode requires exactly one backtest analysis"
@@ -154,8 +163,25 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "analyses": analyses,
         "retention_mode": retention_mode,
         "step_mode": step_mode,
+        "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    trial_binding = data.get("trial_binding")
+    if isinstance(trial_binding, dict):
+        research_binding = {
+            key: str(trial_binding.get(key) or "")
+            for key in (
+                "profile_ref", "acting_profile_ref", "work_package_ref",
+                "instance_id", "branch_id",
+            )
+            if trial_binding.get(key)
+        }
+        if research_binding.get("instance_id") and not research_binding.get("work_package_ref"):
+            research_binding["work_package_ref"] = (
+                "work-package:" + research_binding["instance_id"]
+            )
+        if research_binding:
+            run_spec["research_binding"] = research_binding
     snapshot = configuration.get("snapshot")
     if isinstance(snapshot, dict):
         run_spec["configuration_snapshot"] = {
@@ -173,6 +199,7 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "analyses": analyses,
         "retention_mode": retention_mode,
         "step_mode": step_mode,
+        "output_requests": output_requests,
         "run_spec": run_spec,
     }
 
@@ -344,6 +371,16 @@ def create_research_workspace():
         factors=factors,
     )
     return jsonify({"success": True, "workspace": workspace}), 201
+
+
+@sft_bp.get("/api/jobs/artifact-capabilities")
+def get_job_artifact_capabilities():
+    """Declare outputs that can be requested before or after a Job."""
+    return jsonify({
+        "success": True,
+        "schema_version": 1,
+        "outputs": output_capabilities(),
+    })
 
 
 @sft_bp.get("/api/workspaces")
@@ -538,6 +575,7 @@ def submit_research_run():
             "_owner": owner,
             "retention_mode": retention_mode,
             "step_mode": step_mode,
+            "output_requests": list(prepared["output_requests"]),
             "run_spec": run_spec,
         }
         job = _submit_kind(
@@ -609,6 +647,7 @@ def preview_research_run():
         "analyses": prepared["analyses"],
         "retention_mode": prepared["retention_mode"],
         "step_mode": prepared["step_mode"],
+        "output_requests": list(prepared["output_requests"]),
         "sample_identity": sample_identity,
         "factor_revision_manifests": deepcopy(
             run_spec["configuration"]["shared"].get(

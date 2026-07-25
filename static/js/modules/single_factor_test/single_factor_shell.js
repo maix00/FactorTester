@@ -195,15 +195,35 @@ window.SingleFactorResearch = (function() {
             row.innerHTML = '<div class="research-job-identity"></div>'
                 + '<div class="research-job-progress"><div class="research-job-progress-label"></div>'
                 + '<div class="research-job-progress-track"><div class="research-job-progress-fill"></div></div></div>'
-                + '<div class="research-job-actions"></div>';
+                + '<div class="research-job-actions"></div>'
+                + '<div class="research-job-detail" hidden></div>';
             list.appendChild(row);
         }
         const progress = progressFrom(job);
-        row.querySelector('.research-job-identity').textContent = job.kind + ' · ' + job.status;
+        const binding = job.research_binding || {};
+        const context = job.server_context || {};
+        const bindingText = binding.work_package_ref || binding.profile_ref || binding.branch_id || '';
+        row.querySelector('.research-job-identity').textContent = job.kind + ' · ' + job.status
+            + ' · ' + (job.workspace_id || 'workspace?')
+            + ' · port ' + (context.port || '—')
+            + ' · profile ' + (context.profile || 'default')
+            + (bindingText ? ' · ' + bindingText : '');
         row.querySelector('.research-job-progress-label').textContent = progress.text;
         row.querySelector('.research-job-progress-fill').style.width = progress.percent + '%';
         const actions = row.querySelector('.research-job-actions');
         actions.replaceChildren();
+        if (!actions.querySelector('.research-job-details-button')) {
+            const detailsButton = document.createElement('button');
+            detailsButton.type = 'button';
+            detailsButton.className = 'research-job-details-button';
+            detailsButton.textContent = '配置/生成物';
+            detailsButton.onclick = async function() {
+                const detail = row.querySelector('.research-job-detail');
+                detail.hidden = !detail.hidden;
+                if (!detail.hidden) await loadJobDetail(job, detail);
+            };
+            actions.appendChild(detailsButton);
+        }
         if (job.status === 'awaiting_confirmation') {
             const approve = document.createElement('button');
             approve.type = 'button';
@@ -299,6 +319,56 @@ window.SingleFactorResearch = (function() {
         return row;
     }
 
+    async function loadJobDetail(job, target) {
+        target.textContent = '正在读取任务详情…';
+        try {
+            const detail = await jsonRequest('/api/jobs/' + encodeURIComponent(job.job_id));
+            const artifacts = await jsonRequest('/api/jobs/' + encodeURIComponent(job.job_id) + '/artifacts');
+            target.replaceChildren();
+            const summary = document.createElement('div');
+            summary.className = 'research-job-detail-summary';
+            const context = detail.server_context || {};
+            summary.textContent = '端口 ' + (context.port || '—') + ' · profile ' + (context.profile || 'default')
+                + ' · deployment ' + (context.deployment_id || '—')
+                + (detail.research_binding && detail.research_binding.work_package_ref
+                    ? ' · 研究工作 ' + detail.research_binding.work_package_ref : '');
+            target.appendChild(summary);
+            const config = document.createElement('pre');
+            config.className = 'research-job-config';
+            config.textContent = JSON.stringify({
+                run_spec_hash: detail.run_spec_hash,
+                output_requests: detail.output_requests || [],
+                configuration: detail.configuration || null
+            }, null, 2);
+            target.appendChild(config);
+            const title = document.createElement('div');
+            title.textContent = '生成物';
+            title.className = 'research-job-artifacts-title';
+            target.appendChild(title);
+            const list = document.createElement('div');
+            (artifacts.artifacts || []).forEach(function(item) {
+                if (item.state !== 'active') return;
+                const line = document.createElement('div');
+                line.className = 'research-job-artifact-line';
+                const link = document.createElement('a');
+                link.href = '/api/jobs/' + encodeURIComponent(job.job_id) + '/artifacts/' + encodeURIComponent(item.name);
+                link.textContent = (item.description || item.name) + ' · ' + item.name + '（' + (item.content_type || 'file') + '，' + (item.size_bytes || 0) + ' bytes）';
+                link.download = item.name;
+                line.appendChild(link);
+                list.appendChild(line);
+            });
+            target.appendChild(list);
+            const all = document.createElement('a');
+            all.href = '/api/jobs/' + encodeURIComponent(job.job_id) + '/artifacts/archive';
+            all.textContent = '一键下载全部生成物';
+            all.download = 'job-' + job.job_id + '-artifacts.zip';
+            all.className = 'research-job-download-all';
+            target.appendChild(all);
+        } catch (error) {
+            target.textContent = error.message || String(error);
+        }
+    }
+
     async function watchJob(job, generation) {
         if (!['submitted', 'planning', 'awaiting_confirmation', 'queued', 'running', 'paused'].includes(job.status)) return;
         const after = Number(jobCursors()[job.job_id] || 0);
@@ -352,7 +422,9 @@ window.SingleFactorResearch = (function() {
     async function restoreActiveJobs() {
         if (!workspace) return;
         const generation = ++monitorGeneration;
-        const data = await jsonRequest('/api/jobs?workspace_id=' + encodeURIComponent(workspace.workspace_id) + '&limit=20');
+        // Job ownership is user-scoped, so this module also shows tasks
+        // submitted from CLI, other Web pages, and other workspaces.
+        const data = await jsonRequest('/api/jobs?limit=100');
         if (generation !== monitorGeneration) return;
         const jobs = data.jobs || [];
         const visible = jobs;

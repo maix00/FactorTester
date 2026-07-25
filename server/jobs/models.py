@@ -91,6 +91,7 @@ class JobRecord:
             "attempt": self.attempt,
             "step_mode": self.step_mode,
             "retention_mode": self.retention_mode,
+            "output_requests": list(self.job_spec.get("output_requests") or ()),
             "deployment_id": self.deployment_id,
             "source_revision": self.source_revision,
             "job_spec_hash": self.job_spec_hash,

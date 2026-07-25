@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>研究任务</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/jobs.css') }}">
+</head>
+<body>
+  <main class="jobs-page">
+    <header><div><h1>研究任务</h1><p>统一管理 Web 与 CLI 提交的 Job、配置、进度和生成物。</p></div>
+      <div class="toolbar"><button id="refresh">刷新</button><button id="clear-all">清空全部生成物</button></div>
+    </header>
+    <div id="storage" class="storage"></div>
+    <section id="jobs"><div class="empty">读取任务中…</div></section>
+  </main>
+  <script src="{{ url_for('static', filename='js/jobs.js') }}"></script>
+</body>
+</html>

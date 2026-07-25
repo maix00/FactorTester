@@ -41,7 +41,13 @@ factortester job watch <job_id>
 factortester job orders <job_id>
 factortester job order <job_id> <order_group_id>
 factortester job status <job_id>
+factortester job config <job_id>
+factortester job progress <job_id>
+factortester job output-capabilities --json
+factortester job artifacts <job_id> --json
 factortester job artifact <job_id> <name>
+factortester job download-all <job_id>
+factortester job generate <job_id> --output fee_detail --output margin_detail
 factortester job cancel <job_id>
 factortester job retry <job_id>
 factortester job continue <job_id> --end
@@ -64,6 +70,30 @@ use `--order-id` to select one atomic Order. Both commands support `--json` and
 require the backtest to have been submitted with `--retain-full`.
 
 Every comparison must keep the ranking universe/product mask, signal visibility, forward-return window, next-open execution, fees, capacity, and sample slices aligned. Failed jobs retain their traceback, cancelled jobs retain a reason, and terminal records remain queryable until the configured TTL.
+
+## Declare and retrieve Job outputs
+
+The server is the authority for output names, Chinese descriptions, supported
+formats, and source prerequisites. CLI and UI use the same HTTP contract:
+
+```bash
+factortester job output-capabilities --json
+factortester run preview --analysis backtest \
+  --output equity_curve --output fee_detail --output margin_detail
+factortester run submit --analysis backtest --retain-full \
+  --output returns_over_time --output metrics_over_time
+```
+
+Requested names are frozen into the RunSpec. A detail request retains its
+declared source artifacts (`result`, `group_execution`, or `order_audit`) even
+when the default raw result would not be retained. After a terminal Job, `job generate` can create
+another declared output when its source was retained; otherwise the server
+returns the missing prerequisite instead of producing an empty report.
+`job artifacts` shows server metadata, `job artifact` downloads one file, and
+`job download-all` downloads a ZIP to the current workspace's local Job
+directory by default. `job clear-results` deletes server-side files; local
+downloads are separate and can be removed by the user or a local workspace
+cleanup command.
 
 ## Confirm data availability before sample design
 

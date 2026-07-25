@@ -256,6 +256,7 @@ def run() -> None:
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
 ]), required=True)
 @click.option("--retain-full", is_flag=True, help="预览完整结果保留模式。")
+@click.option("--output", "output_requests", multiple=True, help="预先生成的 Job 输出名，可重复；先用 job output-capabilities 查看。")
 @click.option("--configuration-snapshot-id", default="")
 @click.option(
     "--configuration-snapshot-revision",
@@ -271,6 +272,7 @@ def run() -> None:
 def run_preview(
     analyses: tuple[str, ...],
     retain_full: bool,
+    output_requests: tuple[str, ...],
     configuration_snapshot_id: str,
     configuration_snapshot_revision: int | None,
     step_mode: bool,
@@ -287,17 +289,18 @@ def run_preview(
         if configuration_snapshot_id
         else {}
     )
+    preview_kwargs = {
+        "analyses": list(analyses),
+        "retention_mode": "full" if retain_full else "summary",
+        "step_mode": step_mode,
+        **snapshot_options,
+    }
+    if output_requests:
+        preview_kwargs["output_requests"] = list(output_requests)
     result = client_from_config().preview_run(
         state.workspace_id,
-        (
-            None
-            if configuration_snapshot_id
-            else state.configuration_revision
-        ),
-        analyses=list(analyses),
-        retention_mode="full" if retain_full else "summary",
-        step_mode=step_mode,
-        **snapshot_options,
+        None if configuration_snapshot_id else state.configuration_revision,
+        **preview_kwargs,
     )
     click.echo(_json(result))
 
@@ -307,6 +310,7 @@ def run_preview(
     "backtest", "ic", "factor_evaluation", "factor_type_analysis",
 ]), required=True)
 @click.option("--retain-full", is_flag=True, help="在服务器配额内保留完整曲线和明细。")
+@click.option("--output", "output_requests", multiple=True, help="预先生成的 Job 输出名，可重复；先用 job output-capabilities 查看。")
 @click.option("--configuration-snapshot-id", default="")
 @click.option(
     "--configuration-snapshot-revision",
@@ -328,6 +332,7 @@ def run_preview(
 def run_submit(
     analyses: tuple[str, ...],
     retain_full: bool,
+    output_requests: tuple[str, ...],
     configuration_snapshot_id: str,
     configuration_snapshot_revision: int | None,
     step_mode: bool,
@@ -354,18 +359,19 @@ def run_submit(
         if configuration_snapshot_id
         else {}
     )
+    submit_kwargs = {
+        "analyses": list(analyses),
+        "retention_mode": "full" if retain_full else "summary",
+        "step_mode": step_mode,
+        "trial_binding": trial_binding,
+        **snapshot_options,
+    }
+    if output_requests:
+        submit_kwargs["output_requests"] = list(output_requests)
     result = client_from_config().submit_run(
         state.workspace_id,
-        (
-            None
-            if configuration_snapshot_id
-            else state.configuration_revision
-        ),
-        analyses=list(analyses),
-        retention_mode="full" if retain_full else "summary",
-        step_mode=step_mode,
-        trial_binding=trial_binding,
-        **snapshot_options,
+        None if configuration_snapshot_id else state.configuration_revision,
+        **submit_kwargs,
     )
     if as_json:
         click.echo(_json(result))
@@ -444,6 +450,23 @@ def job_status(job_id: str) -> None:
     click.echo(_json(client_from_config().get_job(job_id)))
 
 
+@job.command("config")
+@click.argument("job_id")
+@friendly_errors
+def job_config(job_id: str) -> None:
+    """Print the immutable configuration and output declaration for a Job."""
+    detail = client_from_config().get_job(job_id)
+    click.echo(_json({
+        "job_id": job_id,
+        "run_id": detail.get("run_id"),
+        "kind": detail.get("kind"),
+        "run_spec_hash": detail.get("run_spec_hash"),
+        "output_requests": detail.get("output_requests") or [],
+        "server_context": detail.get("server_context") or {},
+        "configuration": detail.get("configuration"),
+    }))
+
+
 @job.command("result")
 @click.argument("job_id")
 @friendly_errors
@@ -464,6 +487,18 @@ def job_watch(job_id: str, after: int, as_json: bool) -> None:
             continue
         for line in render_step_event(event["data"]):
             click.echo(line, color=True)
+
+
+@job.command("progress")
+@click.argument("job_id")
+@click.option("--after", default=0, type=int)
+@friendly_errors
+def job_progress(job_id: str, after: int) -> None:
+    """Stream compact progress; this is the one live HTTP/SSE operation."""
+    for event in client_from_config().stream_job_id(job_id, after=after):
+        if event.get("event") not in {"status", "progress", "signal_progress", "activity", "plan", "result", "error", "heartbeat"}:
+            continue
+        click.echo(_json(event))
 
 
 @job.command("step-field")
@@ -573,6 +608,74 @@ def job_artifact(job_id: str, name: str, output: Path) -> None:
         "content_hash": hashlib.sha256(response.content).hexdigest(),
         "size_bytes": len(response.content),
     }))
+
+
+@job.command("download-all")
+@click.argument("job_id")
+@click.option(
+    "--output",
+    required=False,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="写入本地目录；省略时使用当前 workspace 的专用 Job 目录。",
+)
+@friendly_errors
+def job_download_all(job_id: str, output: Path | None) -> None:
+    client = client_from_config()
+    detail = client.get_job(job_id)
+    if output is None:
+        workspace_id = str(detail.get("workspace_id") or load_state().workspace_id or "unknown")
+        output = Path.home() / ".factortester" / "workspaces" / workspace_id / "jobs" / job_id
+    response = client.job_artifact_archive(job_id)
+    output = output.expanduser().resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    target = output / f"job-{job_id}-artifacts.zip"
+    staging = target.with_name(f".{target.name}.part")
+    staging.write_bytes(response.content)
+    staging.replace(target)
+    click.echo(_json({
+        "job_id": job_id,
+        "path": str(target),
+        "content_type": response.content_type,
+        "content_hash": hashlib.sha256(response.content).hexdigest(),
+        "size_bytes": len(response.content),
+    }))
+
+
+@job.command("output-capabilities")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读能力声明。")
+@friendly_errors
+def job_output_capabilities(as_json: bool) -> None:
+    capabilities = client_from_config().job_artifact_capabilities()
+    if as_json:
+        click.echo(_json({"outputs": capabilities}))
+        return
+    for item in capabilities:
+        requires = ",".join(item.get("requires") or ()) or "无"
+        modes = ",".join(mode for mode in ("before_run", "after_run") if item.get(mode))
+        click.echo(f"{item.get('name')}\t{item.get('label')}\t{modes}\t依赖: {requires}")
+
+
+@job.command("artifacts")
+@click.argument("job_id")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 artifact 元数据。")
+@friendly_errors
+def job_artifacts(job_id: str, as_json: bool) -> None:
+    artifacts = client_from_config().list_job_artifacts(job_id)
+    if as_json:
+        click.echo(_json({"job_id": job_id, "artifacts": artifacts}))
+        return
+    for item in artifacts:
+        click.echo(f"{item.get('name')}\t{item.get('state')}\t{item.get('size_bytes')} bytes")
+
+
+@job.command("generate")
+@click.argument("job_id")
+@click.option("--output", "output_requests", multiple=True, required=True, help="事后生成的输出名，可重复。")
+@friendly_errors
+def job_generate(job_id: str, output_requests: tuple[str, ...]) -> None:
+    click.echo(_json(client_from_config().generate_job_artifacts(
+        job_id, output_requests=list(output_requests),
+    )))
 
 
 @job.command("clear-results")

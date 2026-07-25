@@ -38,7 +38,7 @@ def emit_group_run_outputs(
     )
     if net_returns is not None:
         sink.emit_artifact("net_returns", net_returns)
-    sink.emit_artifact("group_execution", {
+    group_execution = {
         "run_id": execution["payload"]["run_id"],
         "engine_result": execution["engine_result"],
         "group_owner": group_owner,
@@ -50,10 +50,11 @@ def emit_group_run_outputs(
             },
             "settings_by_strategy": execution["settings_by_strategy"],
         },
-    })
+    }
+    sink.emit_artifact("group_execution", group_execution)
     emit_order_audit_artifact(sink, account, run_id)
     first_owner = group_owner[0]
-    sink.emit_result({
+    result = {
         "success": True,
         "run_id": run_id,
         **serialized,
@@ -83,4 +84,5 @@ def emit_group_run_outputs(
             prepared["flat_ls_configs"],
             prepared["resolved_backtest_settings"],
         ),
-    })
+    }
+    sink.emit_result(result, source=group_execution)
