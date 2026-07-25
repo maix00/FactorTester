@@ -68,7 +68,7 @@ final class TestJobsService {
     func list(port: Int? = nil) async throws -> [TestJob] {
         let suffix = port.map { "&port=\($0)" } ?? "&port=all"
         let json = try await request(path: "/api/jobs?limit=200\(suffix)", port: port)
-        return (json["jobs"] as? [[String: Any]] ?? []).map(makeJob)
+        return (json["jobs"] as? [[String: Any]] ?? []).map { makeJob($0) }
     }
 
     func visiblePorts() async throws -> [Int] {
