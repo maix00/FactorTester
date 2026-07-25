@@ -251,10 +251,40 @@ final class TestJobsService {
         let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("FactorTester/jobs/\(jobID)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let destination = root.appendingPathComponent("job-\(jobID)-artifacts.zip")
-        try data.write(to: destination, options: .atomic)
-        return destination
+        let archive = root.appendingPathComponent(".job-\(jobID)-artifacts.zip")
+        try? FileManager.default.removeItem(at: archive)
+        try data.write(to: archive, options: .atomic)
+#if os(macOS)
+        do {
+            try extractArchive(archive, into: root)
+            try FileManager.default.removeItem(at: archive)
+        } catch {
+            // Keep the temporary archive when extraction fails so the user can
+            // recover it instead of silently losing the downloaded bytes.
+            throw error
+        }
+#endif
+        return root
     }
+
+#if os(macOS)
+    private func extractArchive(_ archive: URL, into directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = ["-x", "-k", archive.path, directory.path]
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let message = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .flatMap { $0.isEmpty ? nil : $0 }
+                ?? "无法解压任务生成物"
+            throw TestJobsRequestError(statusCode: nil, responseText: message)
+        }
+    }
+#endif
 
     private func request(path: String, method: String = "GET", port: Int? = nil) async throws -> [String: Any] {
         let data = try await requestData(path: path, method: method, port: port)
