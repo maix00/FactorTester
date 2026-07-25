@@ -178,21 +178,20 @@ final class SessionStore: ObservableObject {
                 try await managerAPI.login(username: username, password: password)
                 isManagerLoggedIn = true
             } catch {
-                try? await api.logout()
-                user = nil
                 isManagerLoggedIn = false
-                lastError = L10n.text("Manager 登录失败：") + error.localizedDescription
-                return false
+                // Manager is an optional capability.  A transient manager
+                // failure must not invalidate the already successful user
+                // session or force a second login.
+                lastError = L10n.text("Manager 暂时不可用，主登录仍保持有效：") + error.localizedDescription
             }
         } else {
             isManagerLoggedIn = false
         }
-        guard await bridgeClientSession(principalRef: principalRef) else {
-            try? await api.logout()
-            await managerAPI.logout()
-            user = nil
-            isManagerLoggedIn = false
-            return false
+        if !(await bridgeClientSession(principalRef: principalRef)) {
+            // The CLI/UI session bridge is auxiliary to the server session.
+            // Keep the authenticated identity and retry the bridge on the
+            // next refresh instead of logging the user out on a local error.
+            lastError = L10n.text("客户端会话桥接暂时不可用，主登录仍保持有效。")
         }
         return true
     }
