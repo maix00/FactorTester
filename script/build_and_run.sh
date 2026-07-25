@@ -119,19 +119,25 @@ verify_install() {
     "$BUNDLE_ID"
   test "$(bundle_hash "$source")" = "$(bundle_hash "$installed")"
   local cli="Contents/Resources/FactorTester/bin/factortester"
+  local research_cli="Contents/Resources/FactorTester/bin/cli-anything-factortester-research"
   local receipt="Contents/Resources/FactorTester/bundle-receipt.json"
   test -x "$installed/$cli"
+  test -x "$installed/$research_cli"
   test -f "$installed/$receipt"
   test "$(shasum -a 256 "$source/$cli" | awk '{print $1}')" = \
     "$(shasum -a 256 "$installed/$cli" | awk '{print $1}')"
   /usr/bin/python3 - "$installed" <<'PY'
 import hashlib, json, pathlib, sys
+import re
 app = pathlib.Path(sys.argv[1])
 root = app / "Contents/Resources/FactorTester"
 receipt = json.loads((root / "bundle-receipt.json").read_text())
 cli = root / "bin/factortester"
 assert hashlib.sha256(cli.read_bytes()).hexdigest() == receipt["files"]["bin/factortester"]
+assert re.fullmatch(r"[0-9a-f]{40}", str(receipt["source_revision"]))
 PY
+  "$installed/$cli" --help >/dev/null
+  "$installed/$research_cli" --help >/dev/null
   require_same_identity "$source" "$installed"
 }
 
