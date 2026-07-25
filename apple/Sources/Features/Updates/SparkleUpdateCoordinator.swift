@@ -16,6 +16,7 @@ enum SparkleUpdateEvent {
 @MainActor
 final class SparkleUpdateCoordinator: NSObject, SPUUpdaterDelegate {
     private let feedURL: () -> URL?
+    private let channel: () -> String
     private let event: (SparkleUpdateEvent) -> Void
     private lazy var userDriver = SparkleUpdateUserDriver(event: event)
     private lazy var updater = SPUUpdater(
@@ -27,9 +28,11 @@ final class SparkleUpdateCoordinator: NSObject, SPUUpdaterDelegate {
 
     init(
         feedURL: @escaping () -> URL?,
+        channel: @escaping () -> String,
         event: @escaping (SparkleUpdateEvent) -> Void
     ) {
         self.feedURL = feedURL
+        self.channel = channel
         self.event = event
         super.init()
         do {
@@ -41,6 +44,10 @@ final class SparkleUpdateCoordinator: NSObject, SPUUpdaterDelegate {
 
     func feedURLString(for updater: SPUUpdater) -> String? {
         feedURL()?.absoluteString
+    }
+
+    func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        channel() == "beta" ? ["beta"] : []
     }
 
     func checkForUpdates() {

@@ -29,6 +29,7 @@ final class ClientReleaseController: ObservableObject {
     private var pendingExternalAction: String?
     private lazy var sparkle = SparkleUpdateCoordinator(
         feedURL: { [weak self] in self?.sparkleFeedURL },
+        channel: { [weak self] in self?.channel ?? "stable" },
         event: { [weak self] event in self?.handleSparkle(event) }
     )
 
