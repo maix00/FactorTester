@@ -67,8 +67,11 @@ sign_app() {
     echo "refusing an ad-hoc build because it invalidates macOS privacy grants after updates" >&2
     exit 1
   fi
+  local entitlements="$APPLE_DIR/Resources/macOS/FactorTester-Client.entitlements"
+  test -f "$entitlements"
   /usr/bin/codesign --force --deep --sign "$SIGNING_IDENTITY" \
-    --options runtime --timestamp=none "$APP_BUNDLE"
+    --options runtime --timestamp=none \
+    --entitlements "$entitlements" "$APP_BUNDLE"
   /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
   local requirement
   requirement="$(designated_requirement "$APP_BUNDLE")"
@@ -141,6 +144,11 @@ verify_install() {
   test -f "$installed/$receipt"
   test "$(shasum -a 256 "$source/$cli" | awk '{print $1}')" = \
     "$(shasum -a 256 "$installed/$cli" | awk '{print $1}')"
+  if ! /usr/bin/codesign -d --entitlements :- "$installed" 2>&1 |
+      /usr/bin/grep -Fq "com.apple.security.cs.disable-library-validation"; then
+    echo "installed app is missing Sparkle library-validation entitlement" >&2
+    return 1
+  fi
   /usr/bin/python3 - "$installed" <<'PY'
 import hashlib, json, pathlib, sys
 import re

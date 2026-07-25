@@ -79,6 +79,8 @@ def test_local_build_script_uses_installed_app_identity() -> None:
     assert "FTCLIENT_MARKETING_VERSION" in source
     assert "FTCLIENT_BUILD_NUMBER" in source
     assert "refusing to install an older client build" in source
+    assert "FactorTester-Client.entitlements" in source
+    assert "--entitlements" in source
     assert "sys.version_info >= (3, 11)" in source
 
 
@@ -270,6 +272,13 @@ def test_embedded_app_is_resigned_and_verified_before_packaging(
 
     def record(command, **kwargs):
         commands.append(command)
+        if command[1:4] == ["-d", "--entitlements", ":-"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                b"<key>com.apple.security.cs.disable-library-validation</key>",
+                b"",
+            )
         detail = (
             'designated => identifier "com.gtht.client" and anchor trusted\n'
             if command[1:3] == ["-d", "-r-"] else ""
@@ -295,6 +304,7 @@ def test_embedded_app_is_resigned_and_verified_before_packaging(
             "codesign", "--verify", "--strict",
             "--all-architectures", str(app),
         ],
+        ["codesign", "-d", "--entitlements", ":-", str(app)],
         ["codesign", "-d", "-r-", str(app)],
     ]
 
@@ -311,6 +321,13 @@ def test_release_builder_rejects_cdhash_designated_requirement(
     monkeypatch,
 ) -> None:
     def record(command, **kwargs):
+        if command[1:4] == ["-d", "--entitlements", ":-"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                b"<key>com.apple.security.cs.disable-library-validation</key>",
+                b"",
+            )
         detail = (
             'designated => cdhash H"0123456789abcdef"\n'
             if command[1:3] == ["-d", "-r-"] else ""

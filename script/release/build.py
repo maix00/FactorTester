@@ -119,6 +119,18 @@ def _sign_embedded_app(app: Path, signing_identity: str | None) -> None:
         check=True,
         capture_output=True,
     )
+    entitlements = subprocess.run(
+        ["codesign", "-d", "--entitlements", ":-", str(app)],
+        check=True,
+        capture_output=True,
+    )
+    entitlement_payload = entitlements.stdout + entitlements.stderr
+    if isinstance(entitlement_payload, str):
+        entitlement_payload = entitlement_payload.encode()
+    if b"com.apple.security.cs.disable-library-validation" not in entitlement_payload:
+        raise ValueError(
+            "release signature is missing Sparkle library-validation entitlement"
+        )
     requirement = subprocess.run(
         ["codesign", "-d", "-r-", str(app)],
         check=True,
