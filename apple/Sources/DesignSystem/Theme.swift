@@ -164,6 +164,48 @@ struct SettingsRefreshButton: View {
     }
 }
 
+struct SettingsEditableText: View {
+    @Binding var value: String
+    let placeholder: String
+    let onCommit: () -> Void
+    @State private var editing = false
+
+    init(
+        value: Binding<String>,
+        placeholder: String,
+        onCommit: @escaping () -> Void = {}
+    ) {
+        _value = value
+        self.placeholder = placeholder
+        self.onCommit = onCommit
+    }
+
+    var body: some View {
+        Group {
+            if editing {
+                TextField(placeholder, text: $value)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        editing = false
+                        onCommit()
+                    }
+            } else {
+                Button {
+                    editing = true
+                } label: {
+                    Text(value.isEmpty ? placeholder : value)
+                        .foregroundStyle(value.isEmpty ? .secondary : .primary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("点击修改")
+            }
+        }
+        .frame(minWidth: 180, alignment: .trailing)
+    }
+}
+
 struct SettingsCard<Content: View>: View {
     let title: String?
     @ViewBuilder let content: () -> Content

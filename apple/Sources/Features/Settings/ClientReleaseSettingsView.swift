@@ -144,10 +144,10 @@ struct ClientReleaseSettingsView: View {
 
     private var statusSubtitle: String {
         if let pendingVersion = controller.pendingVersion {
-            return L10n.text("\(pendingVersion) 将在重启后安装")
+            return L10n.text("当前版本 \(installedVersion)，\(pendingVersion) 将在重启后安装")
         }
         if controller.hasAvailableUpdate {
-            return L10n.text("有可用更新，可下载并在重启后安装")
+            return L10n.text("当前版本 \(installedVersion)，有可用更新，可下载并在重启后安装")
         }
         return L10n.text("当前版本 \(installedVersion)")
     }

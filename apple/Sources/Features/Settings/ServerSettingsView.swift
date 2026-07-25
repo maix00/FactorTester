@@ -14,7 +14,7 @@ struct ServerSettingsView: View {
     @State private var discoveringPorts = false
     @State private var testResult: String?
     @State private var testing = false
-    @State private var saving = false
+    @State private var editingManagerScheme = false
 
     var body: some View {
         SettingsPageShell(
@@ -24,63 +24,90 @@ struct ServerSettingsView: View {
         ) {
             SettingsSectionCard("Manager") {
                 SettingsRow(title: "协议", description: "Manager 管理接口的传输协议") {
-                    Picker("协议", selection: $managerScheme) {
-                        Text("HTTP").tag("http")
-                        Text("HTTPS").tag("https")
+                    if editingManagerScheme {
+                        Picker("协议", selection: $managerScheme) {
+                            Text("HTTP").tag("http")
+                            Text("HTTPS").tag("https")
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .onChange(of: managerScheme) { _ in
+                            editingManagerScheme = false
+                            Task { await synchronizeManagerConfiguration() }
+                        }
+                    } else {
+                        Button {
+                            editingManagerScheme = true
+                        } label: {
+                            Text(managerScheme.uppercased())
+                                .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("点击修改")
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
                 }
                 Divider()
                 SettingsRow(title: "网址", description: "Manager 主机名或 IP") {
-                    TextField("主机或 IP", text: $managerHost)
-                        .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
+                    SettingsEditableText(
+                        value: $managerHost,
+                        placeholder: "主机或 IP",
+                        onCommit: { Task { await synchronizeManagerConfiguration() } }
+                    )
                 }
                 Divider()
                 SettingsRow(title: "端口", description: "Manager 管理端口，默认 7998") {
-                    TextField("Manager 端口", text: $managerPort)
-                        .textFieldStyle(.roundedBorder)
+                    SettingsEditableText(
+                        value: $managerPort,
+                        placeholder: "Manager 端口",
+                        onCommit: { Task { await synchronizeManagerConfiguration() } }
+                    )
                 }
+                Divider()
+                HStack {
+                    Button("测试连接") { Task { await test() } }
+                        .buttonStyle(.bordered)
+                        .disabled(testing || managerHost.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if testing { ProgressView().controlSize(.small) }
+                    if let testResult {
+                        Text(testResult)
+                            .font(.callout)
+                            .foregroundStyle(testResult.hasPrefix("✓") ? .green : .red)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 8)
             }
 
             SettingsSectionCard("FactorTester 服务端口") {
-                SettingsRow(title: "服务端口", description: "可填写固定端口；留空时由 Manager 自动选择可用端口") {
+                SettingsRow(
+                    title: "服务端口",
+                    description: "留空表示自动端口，当前自动使用 \(automaticPortText)"
+                ) {
                     HStack(spacing: 8) {
-                        TextField(
-                            availablePorts.first.map { "自动 · \($0)" } ?? "自动由 Manager",
-                            text: $port
+                        SettingsEditableText(
+                            value: $port,
+                            placeholder: "空值（自动使用 \(automaticPortText)）",
+                            onCommit: { Task { await synchronizeManagerConfiguration() } }
                         )
-                        .textFieldStyle(.roundedBorder)
                         SettingsRefreshButton(isWorking: discoveringPorts) {
                             Task { await discoverPorts() }
                         }
                     }
                 }
-                if let testResult {
-                    Divider()
-                    Text(testResult)
-                        .font(.callout)
-                        .foregroundStyle(testResult.hasPrefix("✓") ? .green : .red)
-                        .padding(.vertical, 8)
-                }
-            }
-
-            HStack {
-                Button("测试连接") { Task { await test() } }
-                    .buttonStyle(.bordered)
-                    .disabled(testing || managerHost.trimmingCharacters(in: .whitespaces).isEmpty)
-                if testing { ProgressView().controlSize(.small) }
-                Spacer()
-                Button("保存连接") { Task { await saveConnections() } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(saving || managerHost.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .task {
             loadValues()
             await discoverPorts()
         }
+        .onChange(of: managerScheme) { value in managerConfig.scheme = value }
+        .onChange(of: managerHost) { value in
+            managerConfig.host = value
+            config.host = value
+        }
+        .onChange(of: managerPort) { value in managerConfig.port = value }
+        .onChange(of: port) { value in config.port = value }
+        .onDisappear { Task { await synchronizeManagerConfiguration() } }
     }
 
     private func loadValues() {
@@ -90,6 +117,10 @@ struct ServerSettingsView: View {
         managerPort = managerConfig.port
     }
 
+    private var automaticPortText: String {
+        availablePorts.first.map(String.init) ?? "Manager 选择"
+    }
+
     @MainActor
     private func discoverPorts() async {
         discoveringPorts = true
@@ -97,42 +128,38 @@ struct ServerSettingsView: View {
         availablePorts = (try? await ManagerCLIClient.shared.availableServicePorts()) ?? []
     }
 
-    private func test() async {
-        await MainActor.run { testing = true; testResult = nil }
-        defer { Task { @MainActor in testing = false } }
-        let effectivePort = port.trimmingCharacters(in: .whitespaces).isEmpty
-            ? availablePorts.first.map(String.init) ?? ""
-            : port
-        config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
-        do {
-            _ = try await APIClient.shared.me()
-            await MainActor.run { testResult = "✓ 已连接" }
-        } catch {
-            await MainActor.run {
-                testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)
-            }
-        }
-    }
-
     @MainActor
-    private func saveConnections() async {
-        saving = true
-        defer { saving = false }
+    private func test() async {
+        testing = true
+        testResult = nil
+        defer { testing = false }
         let effectivePort = port.trimmingCharacters(in: .whitespaces).isEmpty
             ? availablePorts.first.map(String.init) ?? ""
             : port
         config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
-        managerConfig.save(scheme: managerScheme, host: managerHost, port: managerPort)
         do {
             try await ManagerCLIClient.shared.configure(
                 scheme: managerScheme,
                 host: managerHost,
                 port: managerPort
             )
-            testResult = "✓ 已保存"
+            _ = try await APIClient.shared.me()
+            testResult = "✓ 已连接"
             if isInitialSetup { dismiss() }
         } catch {
-            testResult = "✗ " + error.localizedDescription
+            testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)
         }
+    }
+
+    @MainActor
+    private func synchronizeManagerConfiguration() async {
+        managerConfig.save(scheme: managerScheme, host: managerHost, port: managerPort)
+        config.host = managerHost
+        config.port = port
+        try? await ManagerCLIClient.shared.configure(
+            scheme: managerScheme,
+            host: managerHost,
+            port: managerPort
+        )
     }
 }
