@@ -29,6 +29,14 @@ final class SessionStore: ObservableObject {
     var isLoggedIn: Bool { user?.isLoggedIn ?? false }
     var role: String? { user?.role }
 
+    /// 将原生 UI 的登录 Cookie 同步到 CLI，使设置页的 CLI 操作复用同一登录态
+    func refreshCLIClientSession() async -> Bool {
+        guard let principalRef = user?.username, !principalRef.isEmpty else {
+            return false
+        }
+        return await bridgeClientSession(principalRef: principalRef)
+    }
+
     /// 启动 / 设置变更后刷新当前登录态。
     @discardableResult
     func refresh() async -> Bool {
@@ -93,6 +101,9 @@ final class SessionStore: ObservableObject {
             )
             if resp.success {
                 seedUser(from: resp, fallbackUsername: username)
+                try? CanonicalFactorLibraryAccessStore.ensureDefault(
+                    for: resp.username ?? username
+                )
                 saveCredentials(username: username, password: password)
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
@@ -156,6 +167,9 @@ final class SessionStore: ObservableObject {
             )
             if resp.success {
                 seedUser(from: resp, fallbackUsername: username)
+                try? CanonicalFactorLibraryAccessStore.ensureDefault(
+                    for: resp.username ?? username
+                )
                 saveCredentials(username: username, password: password)
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
@@ -247,6 +261,9 @@ final class SessionStore: ObservableObject {
                 return false
             }
             seedUser(from: response, fallbackUsername: credentials.username)
+            try? CanonicalFactorLibraryAccessStore.ensureDefault(
+                for: response.username ?? credentials.username
+            )
             try? await api.setKeepLogin(true)
             if role == "super_admin" {
                 do {

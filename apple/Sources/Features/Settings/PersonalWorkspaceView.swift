@@ -7,8 +7,7 @@ struct PersonalWorkspaceView: View {
     @StateObject private var controller = PersonalWorkspaceController()
     @State private var authorizedRoot =
         PersonalWorkspaceAccessStore.authorizedRootPath
-    @State private var factorLibraryRoot =
-        CanonicalFactorLibraryAccessStore.rootPath
+    @State private var factorLibraryRoot: String?
     @State private var accessError: String?
 
     init(openProfiles: (() -> Void)? = nil) {
@@ -25,7 +24,10 @@ struct PersonalWorkspaceView: View {
         }
         .overlay { if controller.isWorking { ProgressView() } }
         .task {
-            await controller.refresh()
+            await refreshWorkspace()
+        }
+        .onChange(of: session.user?.username) { _ in
+            Task { await refreshWorkspace() }
         }
     }
 
@@ -81,14 +83,13 @@ struct PersonalWorkspaceView: View {
         Group {
             SettingsRow(
                 title: "本地 canonical 因子库",
-                description: "本地 Git 工作副本；同步前请先检查本地改动"
+                description: "固定的本地 Git 工作副本；安装或登录后自动建立"
             ) {
                 VStack(alignment: .trailing, spacing: 5) {
-                    pathValue(factorLibraryRoot ?? "未设置")
-                    Button(factorLibraryRoot == nil ? "选择目录…" : "更改目录…") {
-                        chooseFactorLibrary()
-                    }
-                    .buttonStyle(.bordered)
+                    pathValue(factorLibraryRoot ?? defaultFactorLibraryRoot)
+                    Text("固定位置")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             Divider()
@@ -110,10 +111,24 @@ struct PersonalWorkspaceView: View {
                 description: "按方向传输因子源码；同步到本地更新同名文件但不删除其他文件"
             ) {
                 HStack(spacing: 8) {
-                    Button("同步到服务器") { Task { await controller.syncToServer() } }
+                    Button("同步到服务器") {
+                        Task {
+                            _ = await session.refreshCLIClientSession()
+                            await controller.syncToServer(
+                                principal: session.user?.username
+                            )
+                        }
+                    }
                         .buttonStyle(.bordered)
                         .disabled(factorLibraryRoot == nil || controller.isWorking)
-                    Button("同步到本地") { Task { await controller.syncToLocal() } }
+                    Button("同步到本地") {
+                        Task {
+                            _ = await session.refreshCLIClientSession()
+                            await controller.syncToLocal(
+                                principal: session.user?.username
+                            )
+                        }
+                    }
                         .buttonStyle(.bordered)
                         .disabled(factorLibraryRoot == nil || controller.isWorking)
                 }
@@ -142,6 +157,14 @@ struct PersonalWorkspaceView: View {
             .appendingPathComponent(principal).path
     }
 
+    private var defaultFactorLibraryRoot: String {
+        let principal = session.user?.username ?? "<principal>"
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/FactorTester/users")
+            .appendingPathComponent(principal)
+            .appendingPathComponent("personal-workspace/factor-library").path
+    }
+
     private func pathValue(_ value: String) -> some View {
         Text(value)
             .font(.caption.monospaced())
@@ -165,32 +188,23 @@ struct PersonalWorkspaceView: View {
             authorizedRoot = PersonalWorkspaceAccessStore.authorizedRootPath
             accessError = nil
             Task {
-                await controller.refresh()
+                await refreshWorkspace()
             }
         } catch {
             accessError = "无法保存个人工作区授权：\(error.localizedDescription)"
         }
     }
 
-    private func chooseFactorLibrary() {
-        let panel = NSOpenPanel()
-        panel.title = "选择本地 canonical 因子库"
-        panel.message = "请选择用于同步因子源码的本地 Git 工作副本目录。"
-        panel.prompt = "选择目录"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        if let factorLibraryRoot {
-            panel.directoryURL = URL(fileURLWithPath: factorLibraryRoot, isDirectory: true)
-        }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try CanonicalFactorLibraryAccessStore.authorize(url)
+    private func refreshWorkspace() async {
+        if let principal = session.user?.username, !principal.isEmpty {
+            factorLibraryRoot = try? CanonicalFactorLibraryAccessStore.ensureDefault(
+                for: principal
+            )
+            _ = await session.refreshCLIClientSession()
+            await controller.refresh(principal: principal)
+        } else {
             factorLibraryRoot = CanonicalFactorLibraryAccessStore.rootPath
-            accessError = nil
-            Task { await controller.refresh() }
-        } catch {
-            accessError = "无法保存 canonical 因子库授权：\(error.localizedDescription)"
+            controller.clearServerState()
         }
     }
 

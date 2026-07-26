@@ -9,9 +9,22 @@ final class PersonalWorkspaceController: ObservableObject {
 
     private var cliPath: String { ClientCLIResolution.executable() }
 
-    func refresh() async {
+    func clearServerState() {
+        serverFactorLibrary = nil
+        error = nil
+    }
+
+    func refresh(principal: String? = nil) async {
         await perform {
-            if let rootPath = CanonicalFactorLibraryAccessStore.rootPath {
+            let rootPath: String?
+            if let principal, !principal.isEmpty {
+                rootPath = try CanonicalFactorLibraryAccessStore.ensureDefault(
+                    for: principal
+                )
+            } else {
+                rootPath = CanonicalFactorLibraryAccessStore.rootPath
+            }
+            if let rootPath {
                 let root = URL(fileURLWithPath: rootPath, isDirectory: true)
                 let local = try await CanonicalFactorLibraryAccessStore.withAccess(to: root) {
                     try await ReleaseCommand.runObject([
@@ -30,36 +43,40 @@ final class PersonalWorkspaceController: ObservableObject {
         }
     }
 
-    func syncToServer() async {
-        guard let rootPath = CanonicalFactorLibraryAccessStore.rootPath else {
-            error = "请先选择本地 canonical 因子库目录"
-            return
-        }
+    func syncToServer(principal: String? = nil) async {
         await perform {
+            let rootPath = try self.ensureRoot(principal: principal)
             let root = URL(fileURLWithPath: rootPath, isDirectory: true)
             _ = try await CanonicalFactorLibraryAccessStore.withAccess(to: root) {
                 try await ReleaseCommand.runObject([
                     "custom_factors", "workspace", "sync-to-server", root.path, "--json",
                 ], executable: self.cliPath)
             }
-            await self.refresh()
+            await self.refresh(principal: principal)
         }
     }
 
-    func syncToLocal() async {
-        guard let rootPath = CanonicalFactorLibraryAccessStore.rootPath else {
-            error = "请先选择本地 canonical 因子库目录"
-            return
-        }
+    func syncToLocal(principal: String? = nil) async {
         await perform {
+            let rootPath = try self.ensureRoot(principal: principal)
             let root = URL(fileURLWithPath: rootPath, isDirectory: true)
             _ = try await CanonicalFactorLibraryAccessStore.withAccess(to: root) {
                 try await ReleaseCommand.runObject([
                     "custom_factors", "workspace", "sync-to-local", root.path, "--json",
                 ], executable: self.cliPath)
             }
-            await self.refresh()
+            await self.refresh(principal: principal)
         }
+    }
+
+    private func ensureRoot(principal: String?) throws -> String {
+        if let principal, !principal.isEmpty {
+            return try CanonicalFactorLibraryAccessStore.ensureDefault(for: principal)
+        }
+        guard let rootPath = CanonicalFactorLibraryAccessStore.rootPath else {
+            throw ResearchJournalError.workspaceAccessRequired
+        }
+        return rootPath
     }
 
     private func perform(
