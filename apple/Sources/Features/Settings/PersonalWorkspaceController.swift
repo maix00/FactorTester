@@ -45,26 +45,20 @@ final class PersonalWorkspaceController: ObservableObject {
 
     func syncToServer(principal: String? = nil) async {
         await perform {
-            let rootPath = try self.ensureRoot(principal: principal)
-            let root = URL(fileURLWithPath: rootPath, isDirectory: true)
-            _ = try await CanonicalFactorLibraryAccessStore.withAccess(to: root) {
-                try await ReleaseCommand.runObject([
-                    "custom_factors", "workspace", "sync-to-server", root.path, "--json",
-                ], executable: self.cliPath)
-            }
+            _ = try self.ensureRoot(principal: principal)
+            _ = try await ReleaseCommand.runObject([
+                "custom_factors", "workspace", "push", "--branch-mode", "auto", "--json",
+            ], executable: self.cliPath)
             await self.refresh(principal: principal)
         }
     }
 
     func syncToLocal(principal: String? = nil) async {
         await perform {
-            let rootPath = try self.ensureRoot(principal: principal)
-            let root = URL(fileURLWithPath: rootPath, isDirectory: true)
-            _ = try await CanonicalFactorLibraryAccessStore.withAccess(to: root) {
-                try await ReleaseCommand.runObject([
-                    "custom_factors", "workspace", "sync-to-local", root.path, "--json",
-                ], executable: self.cliPath)
-            }
+            _ = try self.ensureRoot(principal: principal)
+            _ = try await ReleaseCommand.runObject([
+                "custom_factors", "workspace", "sync", "--branch-mode", "force", "--json",
+            ], executable: self.cliPath)
             await self.refresh(principal: principal)
         }
     }

@@ -35,7 +35,7 @@ def custom_factors(ctx: click.Context) -> None:
         click.echo("可用功能:")
         click.echo("  factortester custom_factors factor-library list|add")
         click.echo("  factortester custom_factors factor-library metrics|history|rank|stability|import-result|save-result")
-        click.echo("  factortester custom_factors workspace show|root|build|sync|push|sync-to-local|sync-to-server")
+        click.echo("  factortester custom_factors workspace show|root|build|sync|push|merge-download")
         click.echo("  factortester custom_factors workspace git status|diff|commit|branch|checkout")
         click.echo("  factortester custom_factors operators")
 
@@ -655,18 +655,40 @@ def build_workspace() -> None:
 
 @workspace.command("sync")
 @click.option("--branch-mode", default="force", show_default=True, help="同步分支模式。")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def sync_workspace(branch_mode: str) -> None:
+def sync_workspace(branch_mode: str, as_json: bool) -> None:
     """从数据库下载同步到本地 workspace。"""
-    _print_workspace_action("下载同步", client_from_config().sync_factor_workspace(branch_mode=branch_mode))
+    result = client_from_config().sync_factor_workspace(branch_mode=branch_mode)
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("下载同步", result)
 
 
 @workspace.command("push")
 @click.option("--branch-mode", default="auto", show_default=True, help="上传分支模式。")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def push_workspace(branch_mode: str) -> None:
+def push_workspace(branch_mode: str, as_json: bool) -> None:
     """上传本地 workspace 到数据库。"""
-    _print_workspace_action("上传入库", client_from_config().push_factor_workspace(branch_mode=branch_mode))
+    result = client_from_config().push_factor_workspace(branch_mode=branch_mode)
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("上传入库", result)
+
+
+@workspace.command("merge-download")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def merge_download_workspace(as_json: bool) -> None:
+    """把 download 分支按既定流程合并到 upload 分支。"""
+    result = client_from_config().factor_workspace_git_action("merge-download")
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("合并 download 到 upload", result)
 
 
 @workspace.command("server-state")
@@ -696,36 +718,34 @@ def workspace_local_state(root: str, as_json: bool) -> None:
         _print_workspace_state(result, "本地 canonical 因子库")
 
 
-@workspace.command("sync-to-server")
-@click.argument("root")
+@workspace.command("sync-to-server", hidden=True)
+@click.argument("root", required=False)
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def workspace_sync_to_server(root: str, as_json: bool) -> None:
-    """把本地 canonical 因子源码同步到服务器。"""
-    snapshot = _local_workspace_snapshot(root)
-    response = client_from_config().import_factor_workspace_snapshot(snapshot)
-    server = response.get("snapshot") if isinstance(response.get("snapshot"), dict) else {}
-    result = {"source": "server", "changed": response.get("changed") or [], **server}
+def workspace_sync_to_server(root: str | None, as_json: bool) -> None:
+    """兼容旧入口：按 upload 分支流程上传，不再导入任意 snapshot。"""
+    if root:
+        _assert_local_canonical_root(root)
+    result = client_from_config().push_factor_workspace(branch_mode="auto")
     if as_json:
         click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:
-        _print_workspace_action("同步到服务器", result)
+        _print_workspace_action("上传到服务器", result)
 
 
-@workspace.command("sync-to-local")
-@click.argument("root")
+@workspace.command("sync-to-local", hidden=True)
+@click.argument("root", required=False)
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def workspace_sync_to_local(root: str, as_json: bool) -> None:
-    """把服务器 canonical 因子源码同步到本地目录。"""
-    payload = client_from_config().factor_workspace_snapshot()
-    snapshot = payload.get("snapshot") if isinstance(payload.get("snapshot"), dict) else {}
-    written = _write_local_workspace_snapshot(root, snapshot)
-    result = {"source": "local", "written": written, **_local_workspace_state(root)}
+def workspace_sync_to_local(root: str | None, as_json: bool) -> None:
+    """兼容旧入口：按 download 分支流程下载，不再写入任意目录。"""
+    if root:
+        _assert_local_canonical_root(root)
+    result = client_from_config().sync_factor_workspace(branch_mode="force")
     if as_json:
         click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:
-        _print_workspace_action("同步到本地", result)
+        _print_workspace_action("下载到本地", result)
 
 
 @workspace.command("git-settings")
@@ -1097,6 +1117,19 @@ def _local_workspace_root(root: str) -> Path:
     return target
 
 
+def _assert_local_canonical_root(root: str) -> Path:
+    """Reject Profile worktrees from legacy sync aliases."""
+    target = _local_workspace_root(root)
+    parts = target.parts
+    for index, part in enumerate(parts[:-2]):
+        if part == "profiles" and parts[index + 2] == "factor-worktree":
+            raise click.ClickException(
+                "Profile factor-worktree 只能随单次任务上传源码，"
+                "不能作为 canonical 因子库同步目录"
+            )
+    return target
+
+
 def _local_workspace_files(root: str) -> list[dict[str, str]]:
     target = _local_workspace_root(root)
     files: list[dict[str, str]] = []
@@ -1139,40 +1172,6 @@ def _local_workspace_state(root: str) -> dict[str, Any]:
         "custom_factor_count": sum(item["kind"] == "custom" for item in files),
         "public_factor_count": sum(item["kind"] == "public" for item in files),
     }
-
-
-def _local_workspace_snapshot(root: str) -> dict[str, Any]:
-    state = _local_workspace_state(root)
-    return {
-        "schema_version": 1,
-        "workspace_root": state["workspace_root"],
-        "git_head": state["git_head"],
-        "git_current_branch": state["git_current_branch"],
-        "files": _local_workspace_files(root),
-    }
-
-
-def _write_local_workspace_snapshot(root: str, snapshot: dict[str, Any]) -> list[str]:
-    target = _local_workspace_root(root)
-    written: list[str] = []
-    files = snapshot.get("files") or []
-    if not isinstance(files, list) or len(files) > 2000:
-        raise click.ClickException("服务器 snapshot 文件数量无效")
-    for item in files:
-        if not isinstance(item, dict):
-            raise click.ClickException("服务器 snapshot 包含无效文件")
-        relative = str(item.get("path") or "").replace("\\", "/")
-        parts = Path(relative).parts
-        if len(parts) != 2 or parts[0] not in {"custom_factors", "public_factors"} or parts[1] != Path(parts[1]).name or not parts[1].endswith(".py"):
-            raise click.ClickException(f"服务器 snapshot 路径无效: {relative}")
-        source = item.get("source_code")
-        if not isinstance(source, str) or not source.strip():
-            raise click.ClickException(f"服务器 snapshot 源码为空: {relative}")
-        destination = target / parts[0] / parts[1]
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(source, encoding="utf-8")
-        written.append(str(destination))
-    return written
 
 
 def _print_workspace_state(payload: dict[str, Any], title: str) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from tools.data.sqlite.factor_source_store import normalize_factor_source_code
 from tools.data.sqlite.factor_source_settings import load_factor_source_root
 from tools.data.sqlite.factor_source_store import (
@@ -15,6 +16,39 @@ from tools.data.sqlite.factor_source_store import (
 from scripts.data_dir import DATA_DIR
 
 WORKSPACE_ROOTS_DIR = os.path.join(DATA_DIR, "factor_workspaces")
+
+
+def is_profile_factor_worktree_root(path: str | os.PathLike[str] | None) -> bool:
+    """Return whether *path* is an Agent-owned Profile worktree.
+
+    Profile worktrees are intentionally separate from the user canonical factor
+    workspace.  They may be used as a transient Run source, but they are never
+    a valid target for the upload/download repository synchronizer.
+    """
+    try:
+        parts = tuple(Path(os.path.abspath(os.fspath(path or ""))).parts)
+    except (TypeError, ValueError, OSError):
+        return False
+    for index, part in enumerate(parts[:-2]):
+        if part == "profiles" and parts[index + 2] == "factor-worktree":
+            return True
+    return False
+
+
+def assert_canonical_factor_workspace_root(path: str | os.PathLike[str]) -> str:
+    """Validate and return a canonical workspace root for source sync.
+
+    Keeping this check at the storage boundary prevents Web, CLI, and native
+    clients from accidentally treating a Profile worktree as canonical merely
+    because its filesystem path was configured in the server settings.
+    """
+    root = os.path.abspath(os.path.expanduser(os.fspath(path)))
+    if is_profile_factor_worktree_root(root):
+        raise PermissionError(
+            "Profile factor-worktree 只能用于 Agent 草稿或单次任务源码，"
+            "不能作为 canonical 因子库的 upload/download 同步目录"
+        )
+    return root
 
 
 def _normalize_root(path: str | None) -> str | None:

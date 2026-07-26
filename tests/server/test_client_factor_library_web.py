@@ -191,7 +191,7 @@ def test_client_library_javascript_has_exactly_one_metadata_network_boundary(
         assert forbidden not in script
 
 
-def test_workspace_snapshot_exposes_server_git_state_and_imports_custom_sources(
+def test_workspace_snapshot_exposes_server_git_state_but_rejects_direct_source_import(
     monkeypatch,
 ) -> None:
     rows = {
@@ -229,13 +229,9 @@ def test_workspace_snapshot_exposes_server_git_state_and_imports_custom_sources(
         "custom_factors/LocalAlpha.py",
         "public_factors/PublicAlpha.py",
     ]
+    assert all("source_code" not in item for item in snapshot["files"])
+    assert all(item["source_sha256"] for item in snapshot["files"])
 
-    saved: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        editor_routes,
-        "save_factor_source",
-        lambda username, factor_id, source: saved.append((factor_id, source)),
-    )
     imported = client.post(
         "/custom-factors/api/workspace/snapshot",
         json={
@@ -247,5 +243,5 @@ def test_workspace_snapshot_exposes_server_git_state_and_imports_custom_sources(
             },
         },
     )
-    assert imported.status_code == 200
-    assert saved == [("NextAlpha", "class NextAlpha: pass\n")]
+    assert imported.status_code == 410
+    assert imported.get_json()["code"] == "workspace_snapshot_write_disabled"

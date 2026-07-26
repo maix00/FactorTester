@@ -3,7 +3,6 @@
 import os
 import hashlib
 import json
-from pathlib import PurePosixPath
 
 from flask import jsonify, request
 
@@ -27,9 +26,12 @@ from server.services.factor_workspace import (
     run_factor_workspace_git_action,
     sync_factor_workspace,
 )
-from tools.data.factor_workspace.storage import factor_source_root, load_factor_source
+from tools.data.factor_workspace.storage import (
+    assert_canonical_factor_workspace_root,
+    factor_source_root,
+    load_factor_source,
+)
 from tools.data.sqlite.factor_source_store import list_factor_sources
-from tools.data.factor_workspace.storage import save_factor_source, save_public_factor_source
 
 
 @cf_bp.route('/api/validate', methods=['POST'])
@@ -185,6 +187,10 @@ def api_source_root():
     source_root = (data.get('source_root') or '').strip()
     if source_root:
         source_root = os.path.abspath(os.path.expanduser(source_root))
+        try:
+            source_root = assert_canonical_factor_workspace_root(source_root)
+        except PermissionError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 400
 
     from tools.data.sqlite.factor_source_settings import save_factor_source_root
     save_factor_source_root(username, source_root)
@@ -244,6 +250,11 @@ def api_workspace_git_settings():
     from tools.data.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
     git_enabled = bool(data.get('git_enabled'))
     git_repo_root = (data.get('git_repo_root') or '').strip()
+    if git_repo_root:
+        try:
+            git_repo_root = assert_canonical_factor_workspace_root(git_repo_root)
+        except PermissionError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 400
     save_factor_source_workspace_settings(
         username,
         git_enabled=git_enabled,
@@ -285,7 +296,8 @@ def _canonical_workspace_snapshot(username: str) -> dict:
             files.append({
                 'path': f'custom_factors/{factor_id}.py',
                 'kind': 'custom',
-                'source_code': source_code,
+                'source_sha256': hashlib.sha256(source_code.encode('utf-8')).hexdigest(),
+                'source_bytes': len(source_code.encode('utf-8')),
             })
     for row in list_factor_sources('public'):
         factor_id = str(row.get('factor_id') or '').strip()
@@ -294,7 +306,8 @@ def _canonical_workspace_snapshot(username: str) -> dict:
             files.append({
                 'path': f'public_factors/{factor_id}.py',
                 'kind': 'public',
-                'source_code': source_code,
+                'source_sha256': hashlib.sha256(source_code.encode('utf-8')).hexdigest(),
+                'source_bytes': len(source_code.encode('utf-8')),
             })
     files.sort(key=lambda item: item['path'])
     digest_payload = json.dumps(files, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
@@ -312,17 +325,6 @@ def _canonical_workspace_snapshot(username: str) -> dict:
     }
 
 
-def _snapshot_path(path: str) -> tuple[str, str] | None:
-    normalized = str(path or '').replace('\\', '/').strip()
-    parsed = PurePosixPath(normalized)
-    if parsed.is_absolute() or '..' in parsed.parts or parsed.suffix != '.py':
-        return None
-    if len(parsed.parts) != 2 or parsed.parts[0] not in {'custom_factors', 'public_factors'}:
-        return None
-    factor_id = parsed.stem.strip()
-    return ('custom' if parsed.parts[0] == 'custom_factors' else 'public', factor_id) if factor_id else None
-
-
 @cf_bp.route('/api/workspace/snapshot', methods=['GET', 'POST'])
 @login_required
 def api_workspace_snapshot():
@@ -332,42 +334,18 @@ def api_workspace_snapshot():
     if request.method == 'GET':
         return jsonify({'success': True, 'snapshot': _canonical_workspace_snapshot(username)})
 
-    payload = request.get_json(silent=True) or {}
-    snapshot = payload.get('snapshot') if isinstance(payload.get('snapshot'), dict) else payload
-    files = snapshot.get('files') if isinstance(snapshot, dict) else None
-    if not isinstance(files, list):
-        return jsonify({'success': False, 'error': 'snapshot.files 必须是数组'}), 400
-    if len(files) > 2000:
-        return jsonify({'success': False, 'error': '因子文件数量超过上限'}), 413
-    changed = []
-    skipped = []
-    total_size = 0
-    for item in files:
-        if not isinstance(item, dict):
-            return jsonify({'success': False, 'error': 'snapshot.files 包含无效项'}), 400
-        path_info = _snapshot_path(str(item.get('path') or ''))
-        source_code = item.get('source_code')
-        if path_info is None or not isinstance(source_code, str) or not source_code.strip():
-            return jsonify({'success': False, 'error': 'snapshot 文件路径或源码无效'}), 400
-        total_size += len(source_code.encode('utf-8'))
-        if total_size > 20 * 1024 * 1024:
-            return jsonify({'success': False, 'error': 'snapshot 总大小超过上限'}), 413
-        kind, factor_id = path_info
-        if kind == 'public' and not is_super_admin_account(get_account(username)):
-            skipped.append(f'{kind}:{factor_id}')
-            continue
-        if kind == 'public':
-            save_public_factor_source(factor_id, source_code)
-        else:
-            save_factor_source(username, factor_id, source_code)
-        changed.append(f'{kind}:{factor_id}')
-    sync_factor_workspace(username, branch_mode='force')
     return jsonify({
-        'success': True,
-        'changed': changed,
-        'skipped': skipped,
-        'snapshot': _canonical_workspace_snapshot(username),
-    })
+        'success': False,
+        'error': (
+            'workspace snapshot 只读；源码同步必须通过 upload/download 分支流程，'
+            '禁止直接导入 snapshot'
+        ),
+        'code': 'workspace_snapshot_write_disabled',
+        'next_commands': [
+            'factortester custom_factors workspace push',
+            'factortester custom_factors workspace sync',
+        ],
+    }), 410
 
 
 

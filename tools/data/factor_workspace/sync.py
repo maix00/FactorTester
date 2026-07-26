@@ -52,6 +52,7 @@ def _assert_workspace_owner(root: str, username: str) -> None:
 
 def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_existing: bool = False) -> dict[str, Any]:
     root = _workspace_root(username)
+    factor_workspace_storage.assert_canonical_factor_workspace_root(root)
     _assert_workspace_owner(root, username)
     _ensure_workspace_layout(root)
     repository = FactorWorkspaceRepository(username)
@@ -146,6 +147,7 @@ def sync_factor_workspace(username: str, branch_mode: str = "force") -> dict[str
 
 def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict[str, Any]:
     root = _workspace_root(username)
+    factor_workspace_storage.assert_canonical_factor_workspace_root(root)
     _assert_workspace_owner(root, username)
     _ensure_workspace_layout(root)
     repository = FactorWorkspaceRepository(username)
@@ -192,6 +194,7 @@ def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict
 
 def push_factor_workspace(username: str, allow_public_write: bool = False, branch_mode: str = "auto") -> dict[str, Any]:
     root = _workspace_root(username)
+    factor_workspace_storage.assert_canonical_factor_workspace_root(root)
     _assert_workspace_owner(root, username)
     _ensure_workspace_layout(root)
     repository = FactorWorkspaceRepository(username)

@@ -418,15 +418,6 @@ class FactorLibraryClientMixin(ClientMixinBase):
             self.session.get("/custom-factors/api/workspace/snapshot")
         )
 
-    def import_factor_workspace_snapshot(
-        self,
-        snapshot: dict[str, Any],
-    ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/custom-factors/api/workspace/snapshot",
-            {"snapshot": snapshot},
-        ))
-
     def factor_workspace_git_settings(self) -> dict[str, Any]:
         return self._expect_success(
             self.session.get("/custom-factors/api/workspace/git-settings")

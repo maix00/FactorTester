@@ -239,6 +239,19 @@ def test_factor_workspace_build_refuses_nonempty_unmanaged_root(monkeypatch, tmp
     assert protected_file.read_text(encoding="utf-8") == "keep me\n"
 
 
+def test_factor_workspace_sync_rejects_profile_worktree_root(monkeypatch, tmp_path):
+    profile_root = tmp_path / "users" / "alice" / "profiles" / "maxa" / "factor-worktree"
+    profile_root.mkdir(parents=True)
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(profile_root),
+    )
+
+    with pytest.raises(PermissionError, match="Profile factor-worktree"):
+        factor_workspace.sync_factor_workspace("alice", branch_mode="force")
+
+
 def test_generated_workspace_commit_suppresses_recursive_autosync(monkeypatch):
     observed: list[str | None] = []
     monkeypatch.delenv("FACTOR_WORKSPACE_SKIP_AUTOSYNC", raising=False)
