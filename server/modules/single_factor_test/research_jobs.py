@@ -27,6 +27,12 @@ from server.jobs.ports import detect_port
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.services.session_runtime import require_user
+from server.services.factor_registry import transient_factor_source_scope
+from server.services.transient_factor_sources import (
+    cleanup_scope,
+    create_scope,
+    validate_entries,
+)
 from server.services.research_graph.trial_plan.sample_identity import (
     derive_sample_identity,
 )
@@ -76,6 +82,14 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         raise _RunRequestError(
             "step mode requires exactly one backtest analysis"
         )
+    try:
+        transient_sources = validate_entries(data.get("transient_factor_sources"))
+    except ValueError as exc:
+        raise _RunRequestError(str(exc), details={"code": "invalid_transient_factor_sources"}) from exc
+    source_overrides = {
+        str(item["factor_id"]): str(item["source_code"])
+        for item in transient_sources
+    }
     snapshot_id = str(data.get("configuration_snapshot_id") or "").strip()
     snapshot_revision = data.get("configuration_snapshot_revision")
     if snapshot_id:
@@ -141,20 +155,27 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
             f"configuration missing analyses: {missing}"
         )
     try:
-        frozen_configuration = _freeze_product_selections(
-            configuration,
-            owner=owner,
-            analyses=analyses,
-        )
-        frozen_configuration = _freeze_external_factor_artifacts(
-            frozen_configuration
-        )
-        frozen_configuration = factor_revisions.freeze_factor_revisions(
-            frozen_configuration,
-            owner=owner,
-        )
+        with transient_factor_source_scope(overrides=source_overrides):
+            frozen_configuration = _freeze_product_selections(
+                configuration,
+                owner=owner,
+                analyses=analyses,
+            )
+            frozen_configuration = _freeze_external_factor_artifacts(
+                frozen_configuration
+            )
+            frozen_configuration = factor_revisions.freeze_factor_revisions(
+                frozen_configuration,
+                owner=owner,
+            )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
+    except ImportError as exc:
+        raise _RunRequestError(
+            "因子源码不在服务器 canonical 因子库；请在本次 Run 中显式上传 Profile 源码，"
+            "或先执行持久化授权同步",
+            details={"code": "factor_source_unavailable", "detail": str(exc)},
+        ) from exc
     run_spec = {
         "run_spec_version": research_runs.RUN_SPEC_VERSION,
         "workspace_id": workspace_id,
@@ -167,6 +188,20 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    if transient_sources:
+        run_spec["factor_source_policy"] = {
+            "mode": "transient_run_source",
+            "files": [
+                {
+                    key: value
+                    for key, value in item.items()
+                    if key != "source_code"
+                }
+                for item in transient_sources
+            ],
+        }
+    else:
+        run_spec["factor_source_policy"] = {"mode": "metadata_only"}
     trial_binding = data.get("trial_binding")
     if isinstance(trial_binding, dict):
         research_binding = {
@@ -202,6 +237,7 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "step_mode": step_mode,
         "output_requests": output_requests,
         "run_spec": run_spec,
+        "transient_sources": transient_sources,
     }
 
 
@@ -576,6 +612,8 @@ def submit_research_run():
     retention_mode = prepared["retention_mode"]
     step_mode = prepared["step_mode"]
     run_spec = prepared["run_spec"]
+    transient_sources = prepared.get("transient_sources") or []
+    transient_scope = create_scope(owner=owner, entries=transient_sources)
     try:
         run = research_runs.create_run(
             owner=owner,
@@ -586,7 +624,11 @@ def submit_research_run():
             trial_binding=data.get("trial_binding"),
         )
     except ValueError as exc:
+        cleanup_scope(str(transient_scope.get("scope_id") or ""))
         return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception:
+        cleanup_scope(str(transient_scope.get("scope_id") or ""))
+        raise
     jobs = []
     for kind in analyses:
         payload = {
@@ -601,6 +643,9 @@ def submit_research_run():
             "step_mode": step_mode,
             "output_requests": list(prepared["output_requests"]),
             "run_spec": run_spec,
+            "transient_factor_source_scope_id": str(
+                transient_scope.get("scope_id") or ""
+            ),
         }
         job = _submit_kind(
             kind,

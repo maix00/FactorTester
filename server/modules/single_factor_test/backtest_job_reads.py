@@ -107,7 +107,10 @@ def _submission_context(job) -> dict[str, object]:
 def _public_job_spec(job) -> dict[str, object]:
     """Return the stored spec without credentials/internal owner markers."""
     spec = dict(job.job_spec) if isinstance(job.job_spec, dict) else {}
-    for key in ("run_token", "_owner", "password", "secret", "api_key"):
+    for key in (
+        "run_token", "_owner", "password", "secret", "api_key",
+        "transient_factor_source_scope_id",
+    ):
         spec.pop(key, None)
     return spec
 
@@ -194,11 +197,13 @@ def _task_detail(
     caller = _submission_context(job)
     run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
     configuration = run_spec.get("configuration") if isinstance(run_spec, dict) else None
+    summary = job.summary(pinned=detail["pinned"])
     return {
         "job": {
-            **job.summary(pinned=detail["pinned"]),
+            **summary,
             "server_context": _server_context(job),
         },
+        "factor_source_policy": summary.get("factor_source_policy"),
         "research_binding": binding,
         "caller": caller,
         "configuration": configuration,

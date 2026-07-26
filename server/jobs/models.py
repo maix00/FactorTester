@@ -80,6 +80,19 @@ class JobRecord:
     updated_at: float = 0.0
 
     def summary(self, *, pinned: bool = False) -> dict[str, Any]:
+        run_spec = self.job_spec.get("run_spec") if isinstance(self.job_spec, dict) else None
+        factor_source_policy = (
+            dict(run_spec.get("factor_source_policy") or {})
+            if isinstance(run_spec, dict)
+            and isinstance(run_spec.get("factor_source_policy"), dict)
+            else {"mode": "metadata_only"}
+        )
+        if factor_source_policy.get("mode") == "transient_run_source":
+            from server.services.transient_factor_sources import scope_status
+
+            factor_source_policy["scope_status"] = scope_status(
+                str(self.job_spec.get("transient_factor_source_scope_id") or "")
+            )
         return {
             "job_id": self.job_id,
             "run_id": self.run_id,
@@ -97,6 +110,7 @@ class JobRecord:
             "source_revision": self.source_revision,
             "job_spec_hash": self.job_spec_hash,
             "run_spec_hash": self.run_spec_hash,
+            "factor_source_policy": factor_source_policy,
             "worker_pid": self.worker_pid,
             "worker_exitcode": self.worker_exitcode,
             "cancel_requested": self.cancel_requested_at is not None,

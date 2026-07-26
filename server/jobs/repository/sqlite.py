@@ -254,6 +254,12 @@ class JobRepository(
         record = self._record(updated)
         if record is None:
             raise RuntimeError("job transition returned no record")
+        if target in TERMINAL_STATUSES:
+            from server.services.transient_factor_sources import (
+                cleanup_for_terminal_job,
+            )
+
+            cleanup_for_terminal_job(self, record)
         return record
 
     def set_execution_plan(
@@ -334,6 +340,11 @@ class JobRepository(
                 record = self._record(row)
                 if record is None:
                     raise RuntimeError("terminal job could not be loaded")
+                from server.services.transient_factor_sources import (
+                    cleanup_for_terminal_job,
+                )
+
+                cleanup_for_terminal_job(self, record)
                 return record
             assignments = [
                 "cancel_requested_at=?",
@@ -381,6 +392,12 @@ class JobRepository(
         record = self._record(updated)
         if record is None:
             raise RuntimeError("cancel request returned no record")
+        if record.status in TERMINAL_STATUSES:
+            from server.services.transient_factor_sources import (
+                cleanup_for_terminal_job,
+            )
+
+            cleanup_for_terminal_job(self, record)
         return record
 
     def pin(self, job_id: str, *, owner: str) -> JobRecord:

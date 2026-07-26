@@ -176,7 +176,7 @@ def _manifests_from_definition(
     operator_registry_hash: str,
 ) -> list[dict[str, Any]]:
     family_ref = str(definition["canonical_family_ref"])
-    source_policy = (
+    source_policy = str(definition.get("source_mode") or "") or (
         "public"
         if definition["source_kind"] == "public" else "owner_only"
     )

@@ -25,6 +25,8 @@ import os
 import sqlite3
 import tempfile
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from flask import session
@@ -53,6 +55,48 @@ _custom_factor_cache_lock = threading.Lock()
 # 中文名缓存（从 SQLite 一次性加载，轻量，不实例化 FactorFamily）
 _chinese_names_cache: dict = {}
 _chinese_names_cache_loaded = False
+
+# A worker activates one opaque Run source scope for the duration of a task.
+# The scope is never a source authority by itself; the service validates its
+# owner and per-file hash before returning source text.
+_active_transient_source_scope: ContextVar[str] = ContextVar(
+    "active_transient_factor_source_scope", default=""
+)
+_active_transient_source_overrides: ContextVar[dict[str, str]] = ContextVar(
+    "active_transient_factor_source_overrides", default={}
+)
+
+
+@contextmanager
+def transient_factor_source_scope(
+    scope_id: str = "",
+    *,
+    overrides: dict[str, str] | None = None,
+):
+    token = _active_transient_source_scope.set(str(scope_id or "").strip())
+    override_token = _active_transient_source_overrides.set(
+        dict(overrides or {})
+    )
+    try:
+        yield
+    finally:
+        _active_transient_source_scope.reset(token)
+        _active_transient_source_overrides.reset(override_token)
+
+
+def _transient_source(owner: str, factor_id: str) -> str:
+    override = _active_transient_source_overrides.get().get(str(factor_id))
+    if override:
+        return override
+    scope_id = _active_transient_source_scope.get()
+    if not scope_id:
+        return ""
+    try:
+        from server.services.transient_factor_sources import load_source
+
+        return str(load_source(scope_id, factor_id, owner=owner) or "")
+    except Exception:
+        return ""
 
 
 # ── 页级缓存操作 ──
@@ -233,11 +277,18 @@ def resolve_factor_family_source(
         module_name,
         username,
     )
-    source_code = (
-        load_public_factor_source(factor_id)
-        if source_kind == "public"
-        else load_factor_source(owner, factor_id)
-    ) or ""
+    source_code = ""
+    source_mode = ""
+    if source_kind == "custom":
+        source_code = _transient_source(owner, factor_id)
+        if source_code:
+            source_mode = "transient_run_source"
+    if not source_code:
+        source_code = (
+            load_public_factor_source(factor_id)
+            if source_kind == "public"
+            else load_factor_source(owner, factor_id)
+        ) or ""
     if not source_code:
         raise ImportError(
             f"Cannot load factor family source for {module_name!r}"
@@ -252,6 +303,7 @@ def resolve_factor_family_source(
         "source_owner": owner,
         "factor_id": factor_id,
         "source_code": source_code,
+        "source_mode": source_mode,
     }
 
 
@@ -270,6 +322,10 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
     module_path = os.path.join(factors_dir, f"{factor_id}.py")
     source_code = ""
 
+    transient_source = ""
+    if source_kind == "custom":
+        transient_source = _transient_source(owner, factor_id)
+
     if source_kind == "public":
         source_code = load_public_factor_source(factor_id) or ''
         if not source_code:
@@ -278,13 +334,15 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
     else:
         if not owner:
             raise ImportError(f"Cannot load factor '{factor_id}': not found in '{module_path}' and no active user session")
-        source_code = load_factor_source(owner, factor_id) or ''
+        source_code = transient_source or load_factor_source(owner, factor_id) or ''
         if not source_code:
             raise ImportError(f"Cannot load factor '{factor_id}': not found in custom factor library for user '{owner}'")
         user_prefix = owner
 
     # page cache is only a reuse layer after source existence is proven above.
-    if page_uuid:
+    # A transient source must never enter a long-lived cache keyed only by
+    # (owner, factor_id), otherwise a later Run could observe stale source.
+    if page_uuid and not transient_source:
         with _page_cache_lock:
             ff_dict = page_families.get(page_uuid, {})
             if cache_key in ff_dict:
@@ -296,11 +354,11 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
     if ff is None:
         location = module_path if source_kind == "public" else f"custom factor library for user '{owner}'"
         raise ImportError(f"Cannot load factor '{factor_id}': source exists but no FactorFamily class found in {location}")
-    if source_kind == "custom":
+    if source_kind == "custom" and not transient_source:
         with _custom_factor_cache_lock:
             _custom_factor_cache[(owner, factor_id)] = ff
 
-    if page_uuid:
+    if page_uuid and not transient_source:
         with _page_cache_lock:
             page_families.setdefault(page_uuid, {})[cache_key] = ff
 

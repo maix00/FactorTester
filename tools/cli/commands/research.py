@@ -13,6 +13,7 @@ from tools.cli.core.context import client_from_config, requested_ports
 from tools.cli.core.errors import friendly_errors
 from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
+from tools.data.factor_workspace.storage import is_profile_factor_worktree_root
 
 
 def _json(value: Any) -> str:
@@ -24,6 +25,33 @@ def _require_workspace():
     if not state.workspace_id:
         raise click.ClickException("尚未选择 research workspace；请先运行 factortester workspace create/use")
     return state
+
+
+def _load_profile_factor_sources(root: Path | None) -> list[dict[str, str]]:
+    """Read only custom factor files from an Agent-owned Profile worktree."""
+    if root is None:
+        return []
+    target = root.expanduser().resolve()
+    if not is_profile_factor_worktree_root(target):
+        raise click.ClickException(
+            "--profile-factor-worktree 必须指向 Profile 的 factor-worktree，"
+            "不能上传 canonical 因子库"
+        )
+    source_dir = target / "custom_factors"
+    if not source_dir.is_dir():
+        raise click.ClickException(f"Profile 因子目录不存在: {source_dir}")
+    sources: list[dict[str, str]] = []
+    for path in sorted(source_dir.glob("*.py")):
+        resolved = path.resolve()
+        if resolved.parent != source_dir.resolve() or not resolved.is_file():
+            continue
+        sources.append({
+            "path": f"custom_factors/{path.name}",
+            "source_code": resolved.read_text(encoding="utf-8"),
+        })
+    if not sources:
+        raise click.ClickException("Profile worktree 没有可上传的 custom_factors/*.py")
+    return sources
 
 
 @click.group("workspace")
@@ -269,6 +297,11 @@ def run(run_ports: tuple[int, ...]) -> None:
     is_flag=True,
     help="预览逐 flow backtest 模式。",
 )
+@click.option(
+    "--profile-factor-worktree",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="本次预览临时上传的 Profile factor-worktree；只上传 custom_factors/*.py。",
+)
 @friendly_errors
 def run_preview(
     analyses: tuple[str, ...],
@@ -277,6 +310,7 @@ def run_preview(
     configuration_snapshot_id: str,
     configuration_snapshot_revision: int | None,
     step_mode: bool,
+    profile_factor_worktree: Path | None,
 ) -> None:
     """Preview the exact frozen RunSpec identity without creating state."""
     state = _require_workspace()
@@ -296,6 +330,10 @@ def run_preview(
         "step_mode": step_mode,
         **snapshot_options,
     }
+    if profile_factor_worktree is not None:
+        preview_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
+            profile_factor_worktree
+        )
     if output_requests:
         preview_kwargs["output_requests"] = list(output_requests)
     result = client_from_config().preview_run(
@@ -319,6 +357,11 @@ def run_preview(
 )
 @click.option("--step", "step_mode", is_flag=True, help="逐 flow 暂停，仅支持单个 backtest。")
 @click.option(
+    "--profile-factor-worktree",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="本次 Run 临时上传的 Profile factor-worktree；任务终止后自动清理。",
+)
+@click.option(
     "--trial-binding-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="绑定当前 Hypothesis Branch 已冻结 TrialPlan 的 JSON 文件。",
@@ -338,6 +381,7 @@ def run_submit(
     configuration_snapshot_revision: int | None,
     step_mode: bool,
     trial_binding_file: Path | None,
+    profile_factor_worktree: Path | None,
     as_json: bool,
 ) -> None:
     state = _require_workspace()
@@ -367,6 +411,10 @@ def run_submit(
         "trial_binding": trial_binding,
         **snapshot_options,
     }
+    if profile_factor_worktree is not None:
+        submit_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
+            profile_factor_worktree
+        )
     if output_requests:
         submit_kwargs["output_requests"] = list(output_requests)
     result = client_from_config().submit_run(
@@ -487,6 +535,11 @@ def job_config(job_id: str) -> None:
         "run_id": job.get("run_id"),
         "kind": job.get("kind"),
         "run_spec_hash": job.get("run_spec_hash"),
+        "factor_source_policy": (
+            job.get("factor_source_policy")
+            or detail.get("factor_source_policy")
+            or {}
+        ),
         "output_requests": canonical.get("output_requests") or detail.get("output_requests") or [],
         "server_context": job.get("server_context") or detail.get("server_context") or {},
         "caller": canonical.get("caller") or detail.get("submission_context") or {},

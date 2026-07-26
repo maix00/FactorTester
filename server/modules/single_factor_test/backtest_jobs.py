@@ -309,6 +309,12 @@ def retry_test_job(job_id: str):
         return error
     if old.status not in TERMINAL_STATUSES:
         return jsonify({"success": False, "error": "only terminal jobs can be retried"}), 409
+    if str(old.job_spec.get("transient_factor_source_scope_id") or ""):
+        return jsonify({
+            "success": False,
+            "error": "transient Profile source has been cleaned; resubmit the Run with the Profile worktree",
+            "code": "transient_source_retry_requires_resubmit",
+        }), 409
     job = repository().create(JobRecord(
         job_id=uuid.uuid4().hex,
         run_id=old.run_id,

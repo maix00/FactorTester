@@ -49,6 +49,10 @@ cli-anything-factortester-research workspace inspect \
 cli-anything-factortester-research run-step -- \
   run submit --analysis ic --analysis factor_evaluation \
   --analysis factor_type_analysis --analysis backtest
+# Profile-only factor source is opt-in and scoped to this Run; it is never
+# synchronized into the canonical user factor library:
+factortester run submit --analysis backtest \
+  --profile-factor-worktree /path/to/profiles/<profile>/factor-worktree
 cli-anything-factortester-research run-step -- job list
 ```
 
