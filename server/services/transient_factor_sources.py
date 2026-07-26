@@ -178,7 +178,12 @@ def cleanup_scope(scope_id: str) -> bool:
         return False
     if not root.exists():
         return False
-    shutil.rmtree(root, ignore_errors=False)
+    try:
+        shutil.rmtree(root, ignore_errors=False)
+    except OSError:
+        # Terminal transitions must remain durable even when a stale file
+        # briefly prevents cleanup.  Startup GC can retry the scope later.
+        return False
     return True
 
 
@@ -250,14 +255,13 @@ def cleanup_stale_scopes(repository: Any, *, max_age_seconds: float = 3600.0) ->
             manifest = json.loads(
                 (candidate / "manifest.json").read_text(encoding="utf-8")
             )
-            owner = str(manifest.get("owner") or "").strip()
             created_at = float(manifest.get("created_at") or 0.0)
             if created_at > 0.0 and now - created_at < max_age:
                 continue
-            if repository.has_active_transient_scope(
-                owner=owner,
-                scope_id=candidate.name,
-            ):
+            # The manifest is disposable state, not an authority for job
+            # ownership.  Query every owner so a corrupted/edited owner field
+            # cannot make GC delete a scope still referenced by a live job.
+            if repository.has_active_transient_scope(scope_id=candidate.name):
                 continue
             shutil.rmtree(candidate, ignore_errors=False)
             removed += 1

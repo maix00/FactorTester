@@ -218,3 +218,38 @@ def test_stale_cleanup_removes_incomplete_manifest_without_active_job(
 
     assert sources.cleanup_stale_scopes(Repository(), max_age_seconds=0.0) == 1
     assert not root.exists()
+
+
+def test_stale_cleanup_checks_active_scope_across_manifest_owner_changes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(sources.Settings, "CACHE_DB_PATH", str(tmp_path / "cache.sqlite"))
+    scope = sources.create_scope(
+        owner="alice",
+        entries=[{
+            "path": "custom_factors/ProfileAlpha.py",
+            "source_code": "class ProfileAlpha:\n    pass\n",
+        }],
+    )
+    manifest_path = (
+        tmp_path / "transient_factor_sources" / scope["scope_id"] / "manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["owner"] = "different-owner"
+    manifest["created_at"] = 1.0
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    class ActiveRepository:
+        def has_active_transient_scope(self, *, owner: str = "", scope_id: str):
+            assert owner == ""
+            assert scope_id == scope["scope_id"]
+            return True
+
+    assert sources.cleanup_stale_scopes(ActiveRepository(), max_age_seconds=0.0) == 0
+    assert sources.scope_status(scope["scope_id"]) == "available"
+
+
+def test_active_scope_query_rejects_empty_scope_id(tmp_path: Path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    assert repository.has_active_transient_scope(scope_id="") is False

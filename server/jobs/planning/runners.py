@@ -27,7 +27,8 @@ def plan_job(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     from server.modules.single_factor_test.planning import build_execution_plan
 
     with transient_factor_source_scope(
-        str(payload.get("transient_factor_source_scope_id") or "")
+        str(payload.get("transient_factor_source_scope_id") or ""),
+        owner=owner,
     ):
         plan = build_execution_plan(str(payload.get("kind") or ""), spec)
     sink.emit_result({

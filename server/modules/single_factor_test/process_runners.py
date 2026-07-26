@@ -13,7 +13,8 @@ def _factor_runtime_scope(payload: dict[str, Any]):
 
     register_factor_param_resolver_for_user(str(payload.get("_owner") or ""))
     return transient_factor_source_scope(
-        str(payload.get("transient_factor_source_scope_id") or "")
+        str(payload.get("transient_factor_source_scope_id") or ""),
+        owner=str(payload.get("_owner") or "").strip(),
     )
 
 

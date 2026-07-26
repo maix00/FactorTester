@@ -134,13 +134,16 @@ class JobQueryImplementation:
         owner: str = "",
     ) -> bool:
         """Check active JobSpecs without materializing their payloads."""
+        scope_id = str(scope_id or "").strip()
+        if not scope_id:
+            return False
         terminal_values = tuple(status.value for status in TERMINAL_STATUSES)
         placeholders = ",".join("?" for _ in terminal_values)
         clauses = [
             f"status NOT IN ({placeholders})",
             "instr(job_spec_json, ?) > 0",
         ]
-        args: list[Any] = [*terminal_values, str(scope_id)]
+        args: list[Any] = [*terminal_values, scope_id]
         if str(owner or "").strip():
             clauses.insert(0, "owner=?")
             args.insert(0, str(owner).strip())
