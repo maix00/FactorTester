@@ -48,7 +48,9 @@ struct ClientTabView: View {
                 researchLoginPrompt
             }
         case .jobs:
-            TestJobsView()
+            TestJobsView(openJob: { open(.testJob($0)) })
+        case .testJob(let job):
+            TestJobDetailView(job: job)
         case .workPackage(let item):
             if ResearchSessionAccess.canLoad(user: session.user) {
                 workPackage(item)

@@ -12,6 +12,7 @@ enum ClientTabContent {
     case accountSettings
     case manager
     case jobs
+    case testJob(TestJob)
 }
 
 struct ClientTab: Identifiable {
@@ -72,6 +73,15 @@ struct ClientTab: Identifiable {
         systemImage: "checklist",
         content: .jobs
     )
+
+    static func testJob(_ job: TestJob) -> ClientTab {
+        ClientTab(
+            id: "test-job:\(job.id)",
+            title: "任务 \(String(job.id.prefix(10)))",
+            systemImage: "doc.text.magnifyingglass",
+            content: .testJob(job)
+        )
+    }
 
     static func workPackage(_ item: ResearchDirectoryItem) -> ClientTab {
         ClientTab(
