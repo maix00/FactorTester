@@ -318,23 +318,33 @@ def _smoke_test_frozen_runtime(binary: Path) -> None:
             # Unit tests use placeholder executables; real PyInstaller output
             # is Mach-O and is always exercised here.
             return
-    subprocess.run(
-        [str(binary), "--help"],
-        check=True,
-        capture_output=True,
-        timeout=60,
-    )
+    _run_frozen_help(binary)
     research_env = os.environ.copy()
     research_env["FACTORTESTER_ENTRYPOINT"] = (
         "cli-anything-factortester-research"
     )
-    subprocess.run(
-        [str(binary), "--help"],
-        check=True,
-        capture_output=True,
-        env=research_env,
-        timeout=60,
-    )
+    _run_frozen_help(binary, env=research_env)
+
+
+def _run_frozen_help(binary: Path, *, env: dict[str, str] | None = None) -> None:
+    """Run one frozen entrypoint and retain its diagnostic output on failure."""
+    try:
+        subprocess.run(
+            [str(binary), "--help"],
+            check=True,
+            capture_output=True,
+            env=env,
+            timeout=60,
+        )
+    except subprocess.CalledProcessError as exc:
+        stdout = (exc.stdout or b"").decode("utf-8", errors="replace")
+        stderr = (exc.stderr or b"").decode("utf-8", errors="replace")
+        detail = "\n".join(
+            part for part in (stdout.strip(), stderr.strip()) if part
+        ) or "<no output>"
+        raise RuntimeError(
+            f"frozen runtime smoke test failed for {binary}:\n{detail}"
+        ) from exc
 
 
 def _write_runtime_receipt(
