@@ -198,16 +198,18 @@ struct ProfileResearchService {
         if response.statusCode == 304 { return .notModified }
         guard (200..<300).contains(response.statusCode) else {
             if response.statusCode == 401 || response.statusCode == 403 {
-                throw APIError.transport("没有权限读取该研究工作区")
+                throw APIError.transport(L10n.text("没有权限读取该研究工作区"))
             }
             if let payload = try? decoder.decode(
                 ResearchProjectionErrorPayload.self,
                 from: response.data
             ), !payload.error.isEmpty {
                 let prefix = payload.errorCode.map {
-                    "研究投影读取失败（\($0)）"
-                } ?? "研究投影读取失败"
-                throw APIError.transport("\(prefix)：\(payload.error)")
+                    L10n.format("研究投影读取失败（%@）", $0)
+                } ?? L10n.text("研究投影读取失败")
+                throw APIError.transport(
+                    L10n.format("%@：%@", prefix, payload.error)
+                )
             }
             throw APIError.transport(
                 "Research projection HTTP \(response.statusCode)"
@@ -220,7 +222,7 @@ struct ProfileResearchService {
             )
         } catch is DecodingError {
             throw APIError.transport(
-                "研究投影格式无法识别；客户端与服务器协议版本可能不一致。"
+                L10n.text("研究投影格式无法识别；客户端与服务器协议版本可能不一致。")
             )
         }
     }

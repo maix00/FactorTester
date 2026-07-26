@@ -88,8 +88,8 @@ struct DashboardShortcutCard: View {
                 Image(systemName: systemImage)
                     .font(.system(size: 28))
                     .foregroundStyle(Theme.accent)
-                Text(title).font(.headline)
-                Text(description)
+                Text(L10n.resource(title)).font(.headline)
+                Text(L10n.resource(description))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -116,8 +116,8 @@ struct ModuleCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
                 icon
-                Text(module.title).font(.headline)
-                Text(module.desc)
+                Text(L10n.resource(module.title)).font(.headline)
+                Text(L10n.resource(module.desc))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -116,7 +116,7 @@ extension ResearchJournalPresentation {
     }
 
     static func readableObligationQuestion(_ value: String?) -> String {
-        chineseText(value) ?? "义务描述缺失"
+        chineseText(value) ?? L10n.text("义务描述缺失")
     }
 
     static func stageObligationRows(
@@ -199,7 +199,7 @@ extension ResearchJournalPresentation {
                     ?? readableObligationQuestion(nil),
                 materiality: materialityLabel(obligation?.materiality),
                 change: change.map(obligationChangeLabel)
-                    ?? "本步骤未变化",
+                    ?? L10n.text("本步骤未变化"),
                 currentStatus: statusLabel(
                     statusOverrides[objectID]
                         ?? change?.toState
@@ -214,13 +214,16 @@ extension ResearchJournalPresentation {
         _ change: ResearchStateChange
     ) -> String {
         if change.fromState != change.toState {
-            return "\(statusLabel(change.fromState)) → "
-                + statusLabel(change.toState)
+            return L10n.format(
+                "%@ → %@",
+                L10n.text(statusLabel(change.fromState)),
+                L10n.text(statusLabel(change.toState))
+            )
         }
         if change.fromRequirementRefs != change.toRequirementRefs {
-            return "义务分类已更新"
+            return L10n.text("义务分类已更新")
         }
-        return "义务内容已更新"
+        return L10n.text("义务内容已更新")
     }
 
     static func obligationStatuses(

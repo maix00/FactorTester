@@ -29,7 +29,7 @@ struct ManagerView: View {
                         Text(item.branch).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text("端口 \(item.port)").monospacedDigit()
+                    Text(verbatim: L10n.format("端口 %lld", item.port)).monospacedDigit()
                     status(item)
                     Menu("操作") {
                         Button("启动") { run(.start, item) }
@@ -57,7 +57,7 @@ struct ManagerView: View {
     private func status(_ item: ManagerWorktree) -> some View {
         let text = item.running ? "运行中" : (item.portInUse ? "端口占用" : "已停止")
         let color: Color = item.running ? .green : (item.portInUse ? .orange : .secondary)
-        return Text(text)
+        return Text(LocalizedStringKey(text))
             .font(.caption.weight(.medium))
             .foregroundStyle(color)
             .padding(.horizontal, 8)

@@ -97,7 +97,12 @@ struct TestJobDetailView: View {
                     TestJobField(
                         id: $0.id,
                         name: $0.label,
-                        value: "\(presentationLabel($0.presentation)) · \($0.viewer) · \($0.formats.joined(separator: ", "))"
+                        value: L10n.format(
+                            "%@ · %@ · %@",
+                            presentationLabel($0.presentation),
+                            $0.viewer,
+                            $0.formats.joined(separator: ", ")
+                        )
                     )
                 })
             }
@@ -157,7 +162,8 @@ struct TestJobDetailView: View {
     }
 
     private func presentationLabel(_ value: String) -> String {
-        ["chart": "图表", "table": "表格", "data": "数据", "text": "文本"][value] ?? value
+        let key = ["chart": "图表", "table": "表格", "data": "数据", "text": "文本"][value] ?? value
+        return L10n.text(key)
     }
 
     private func isPriceViewer(_ declaration: TestJobOutputDeclaration) -> Bool {

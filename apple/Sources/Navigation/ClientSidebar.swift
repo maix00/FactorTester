@@ -48,7 +48,11 @@ struct ClientSidebar: View {
     }
 
     private func launcher(_ tab: ClientTab) -> some View {
-        Label(tab.title, systemImage: tab.systemImage)
+        Label {
+            Text(verbatim: tab.localizedTitle)
+        } icon: {
+            Image(systemName: tab.systemImage)
+        }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { open(tab) }
@@ -61,7 +65,15 @@ struct ClientSidebar: View {
     private func bottomLauncher(_ tab: ClientTab) -> some View {
         HStack(spacing: 6) {
             Button { open(tab) } label: {
-                Label(tab.id == ClientTab.accountSettings.id ? accountTitle : tab.title, systemImage: tab.systemImage)
+                Label {
+                    if tab.id == ClientTab.accountSettings.id {
+                        Text(verbatim: accountTitle)
+                    } else {
+                        Text(verbatim: tab.localizedTitle)
+                    }
+                } icon: {
+                    Image(systemName: tab.systemImage)
+                }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
@@ -100,13 +112,14 @@ struct ClientSidebar: View {
                 updateIcon("arrow.down.circle.fill", color: .blue)
             }
             .buttonStyle(.plain)
-            .help("有更新：下载并准备 \(releaseController.latestVersion)")
+            .help(L10n.format("有更新：下载并准备 %@", releaseController.latestVersion))
             .accessibilityIdentifier("sidebar.update.available")
         }
     }
 
     private var accountTitle: String {
-        session.user?.username.flatMap { $0.isEmpty ? nil : $0 } ?? "设置"
+        session.user?.username.flatMap { $0.isEmpty ? nil : $0 }
+            ?? L10n.text("设置")
     }
 
     private func updateIcon(_ systemImage: String, color: Color) -> some View {
@@ -119,7 +132,11 @@ struct ClientSidebar: View {
 
     private func openedRow(_ tab: ClientTab) -> some View {
         HStack(spacing: 8) {
-            Label(tab.title, systemImage: tab.systemImage)
+            Label {
+                Text(verbatim: tab.localizedTitle)
+            } icon: {
+                Image(systemName: tab.systemImage)
+            }
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 4)

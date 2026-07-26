@@ -18,7 +18,11 @@ struct ProfileDirectoryCard: View {
                 }
             }
             .buttonStyle(.plain)
-            Label(statusText, systemImage: statusIcon)
+            Label {
+                Text(verbatim: statusText)
+            } icon: {
+                Image(systemName: statusIcon)
+            }
                 .font(.callout).foregroundStyle(statusColor)
             HStack {
                 Text(profile.factorWorkspaceBinding?.branch ?? profile.id)
@@ -48,10 +52,12 @@ struct ProfileDirectoryCard: View {
             ),
             titleVisibility: .visible
         ) {
-            Button(intent?.buttonTitle ?? "", role: intent?.role) {
+            Button(role: intent?.role) {
                 let selected = intent
                 intent = nil
                 Task { await perform(selected) }
+            } label: {
+                Text(LocalizedStringKey(intent?.buttonTitle ?? ""))
             }
             Button("取消", role: .cancel) { intent = nil }
         } message: {
@@ -60,10 +66,12 @@ struct ProfileDirectoryCard: View {
     }
 
     private var statusText: String {
-        if profile.status == "inactive" { return "已停用 · 可安全解绑 Worktree" }
+        if profile.status == "inactive" {
+            return L10n.text("已停用 · 可安全解绑 Worktree")
+        }
         return profile.factorWorkspaceBinding == nil
-            ? "尚未绑定独立因子 Worktree"
-            : "已绑定 · \(profile.researchRecords.count) 项研究"
+            ? L10n.text("尚未绑定独立因子 Worktree")
+            : L10n.format("已绑定 · %lld 项研究", profile.researchRecords.count)
     }
     private var statusIcon: String {
         if profile.status == "inactive" { return "pause.circle.fill" }
@@ -87,8 +95,8 @@ enum ProfileLifecycleIntent {
     case deactivate, unbind
     var title: String {
         switch self {
-        case .deactivate: return "停用 \(label)？"
-        case .unbind: return "解绑 \(label) 的 Worktree？"
+        case .deactivate: return L10n.format("停用 %@？", label)
+        case .unbind: return L10n.format("解绑 %@ 的 Worktree？", label)
         }
     }
     var label: String { "Profile" }
@@ -102,9 +110,9 @@ enum ProfileLifecycleIntent {
     var message: String {
         switch self {
         case .deactivate:
-            return "停止本地身份继续认领；研究记录、worktree、分支和提交均保留。"
+            return L10n.text("停止本地身份继续认领；研究记录、worktree、分支和提交均保留。")
         case .unbind:
-            return "仅 clean worktree 可解绑。分支、提交和操作 receipt 永久保留。"
+            return L10n.text("仅 clean worktree 可解绑。分支、提交和操作 receipt 永久保留。")
         }
     }
 }

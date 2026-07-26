@@ -69,7 +69,7 @@ struct ResearchEntryResolutionView: View {
                 itemGroup(groups.referenceOnly, tint: .orange)
                 itemGroup(groups.unresolved, tint: .red)
                 if !groups.reused.isEmpty {
-                    DisclosureGroup("沿用既有验证（\(groups.reused.count)）") {
+                    DisclosureGroup(L10n.format("沿用既有验证（%lld）", groups.reused.count)) {
                         itemGroup(groups.reused, tint: .secondary)
                             .padding(.top, 6)
                     }
@@ -111,10 +111,12 @@ struct ResearchEntryResolutionView: View {
                     HStack(spacing: 6) {
                         if let change = ResearchEntryResolutionPresentation
                             .changeLabel(item.changeKind) {
-                            Text(change)
+                            Text(LocalizedStringKey(change))
                         }
-                        Text(ResearchEntryResolutionPresentation.statusLabel(
-                            item.resolutionStatus
+                        Text(LocalizedStringKey(
+                            ResearchEntryResolutionPresentation.statusLabel(
+                                item.resolutionStatus
+                            )
                         ))
                     }
                     .font(.caption)

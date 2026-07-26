@@ -27,12 +27,54 @@ enum Theme {
     }
 }
 
+/// Text used by the shared settings chrome. String literals are catalog keys;
+/// server values and already-formatted dynamic messages must opt into
+/// `verbatim` so user data is never looked up as a translation key.
+struct SettingsDisplayText: View, ExpressibleByStringLiteral {
+    private enum Storage {
+        case localized(LocalizedStringResource)
+        case verbatim(String)
+    }
+
+    private let storage: Storage
+
+    init(stringLiteral value: String) {
+        storage = .localized(L10n.resource(value))
+    }
+
+    init(_ value: String) {
+        storage = .localized(L10n.resource(value))
+    }
+
+    init(verbatim value: String) {
+        storage = .verbatim(value)
+    }
+
+    var textValue: Text {
+        switch storage {
+        case let .localized(resource): Text(resource)
+        case let .verbatim(value): Text(verbatim: value)
+        }
+    }
+
+    static func verbatim(_ value: String) -> SettingsDisplayText {
+        SettingsDisplayText(verbatim: value)
+    }
+
+    var body: some View {
+        switch storage {
+        case let .localized(resource): Text(resource)
+        case let .verbatim(value): Text(verbatim: value)
+        }
+    }
+}
+
 struct SettingsPageHeader: View {
-    let title: String
-    let subtitle: String
+    let title: SettingsDisplayText
+    let subtitle: SettingsDisplayText
     let systemImage: String?
 
-    init(title: String, subtitle: String, systemImage: String? = nil) {
+    init(title: SettingsDisplayText, subtitle: SettingsDisplayText, systemImage: String? = nil) {
         self.title = title
         self.subtitle = subtitle
         self.systemImage = systemImage
@@ -48,22 +90,22 @@ struct SettingsPageHeader: View {
                     .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
             }
             VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.largeTitle.weight(.semibold))
-                Text(subtitle).foregroundStyle(.secondary)
+                title.font(.largeTitle.weight(.semibold))
+                subtitle.foregroundStyle(.secondary)
             }
         }
     }
 }
 
 struct SettingsPageShell<Content: View>: View {
-    let title: String
-    let subtitle: String
+    let title: SettingsDisplayText
+    let subtitle: SettingsDisplayText
     let systemImage: String
     @ViewBuilder let content: () -> Content
 
     init(
-        title: String,
-        subtitle: String,
+        title: SettingsDisplayText,
+        subtitle: SettingsDisplayText,
         systemImage: String,
         @ViewBuilder content: @escaping () -> Content
     ) {
@@ -90,13 +132,13 @@ struct SettingsPageShell<Content: View>: View {
 }
 
 struct SettingsRow<Control: View>: View {
-    let title: String
-    let description: String
+    let title: SettingsDisplayText
+    let description: SettingsDisplayText
     @ViewBuilder let control: () -> Control
 
     init(
-        title: String,
-        description: String,
+        title: SettingsDisplayText,
+        description: SettingsDisplayText,
         @ViewBuilder control: @escaping () -> Control
     ) {
         self.title = title
@@ -107,9 +149,9 @@ struct SettingsRow<Control: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 18) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                title
                     .font(.body.weight(.medium))
-                Text(description)
+                description
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -123,10 +165,10 @@ struct SettingsRow<Control: View>: View {
 }
 
 struct SettingsSectionCard<Content: View>: View {
-    let title: String
+    let title: SettingsDisplayText
     @ViewBuilder let content: () -> Content
 
-    init(_ title: String, @ViewBuilder content: @escaping () -> Content) {
+    init(_ title: SettingsDisplayText, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.content = content
     }
@@ -141,11 +183,11 @@ struct SettingsSectionCard<Content: View>: View {
 }
 
 struct SettingsRefreshButton: View {
-    let title: String
+    let title: SettingsDisplayText
     let isWorking: Bool
     let action: () -> Void
 
-    init(_ title: String = "刷新", isWorking: Bool = false, action: @escaping () -> Void) {
+    init(_ title: SettingsDisplayText = "刷新", isWorking: Bool = false, action: @escaping () -> Void) {
         self.title = title
         self.isWorking = isWorking
         self.action = action
@@ -156,7 +198,11 @@ struct SettingsRefreshButton: View {
             if isWorking {
                 ProgressView().controlSize(.small)
             } else {
-                Label(title, systemImage: "arrow.clockwise")
+                Label {
+                    title
+                } icon: {
+                    Image(systemName: "arrow.clockwise")
+                }
             }
         }
         .buttonStyle(.bordered)
@@ -166,13 +212,13 @@ struct SettingsRefreshButton: View {
 
 struct SettingsEditableText: View {
     @Binding var value: String
-    let placeholder: String
+    let placeholder: SettingsDisplayText
     let onCommit: () -> Void
     @State private var editing = false
 
     init(
         value: Binding<String>,
-        placeholder: String,
+        placeholder: SettingsDisplayText,
         onCommit: @escaping () -> Void = {}
     ) {
         _value = value
@@ -183,7 +229,9 @@ struct SettingsEditableText: View {
     var body: some View {
         Group {
             if editing {
-                TextField(placeholder, text: $value)
+                TextField(text: $value, prompt: placeholder.textValue) {
+                    EmptyView()
+                }
                     .textFieldStyle(.roundedBorder)
                     .onSubmit {
                         editing = false
@@ -193,10 +241,16 @@ struct SettingsEditableText: View {
                 Button {
                     editing = true
                 } label: {
-                    Text(value.isEmpty ? placeholder : value)
-                        .foregroundStyle(value.isEmpty ? .secondary : .primary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .contentShape(Rectangle())
+                    Group {
+                        if value.isEmpty {
+                            placeholder
+                        } else {
+                            Text(verbatim: value)
+                        }
+                    }
+                    .foregroundStyle(value.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("点击修改")
@@ -207,10 +261,10 @@ struct SettingsEditableText: View {
 }
 
 struct SettingsCard<Content: View>: View {
-    let title: String?
+    let title: SettingsDisplayText?
     @ViewBuilder let content: () -> Content
 
-    init(_ title: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+    init(_ title: SettingsDisplayText? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.content = content
     }
@@ -219,7 +273,7 @@ struct SettingsCard<Content: View>: View {
         GroupBox {
             content().padding(8)
         } label: {
-            if let title { Text(title).font(.headline) }
+            if let title { title.font(.headline) }
         }
     }
 }

@@ -4,12 +4,28 @@ import Foundation
 
 @MainActor
 final class ClientReleaseController: ObservableObject {
+    enum SignatureState: Sendable {
+        case checking
+        case accepted
+        case signedButNotAccepted
+        case unsigned
+
+        var localizedText: String {
+            switch self {
+            case .checking: return L10n.text("检查中…")
+            case .accepted: return L10n.text("Developer ID 已签名并通过 Gatekeeper")
+            case .signedButNotAccepted: return L10n.text("已签名，但未通过 Gatekeeper")
+            case .unsigned: return L10n.text("未签名开发版本")
+            }
+        }
+    }
+
     @Published private(set) var installedVersion =
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
     @Published private(set) var latestVersion = ""
     @Published private(set) var compatible: Bool?
     @Published private(set) var healthy: Bool?
-    @Published private(set) var signatureText = L10n.text("检查中…")
+    @Published private(set) var signatureState: SignatureState = .checking
     @Published private(set) var isWorking = false
     @Published private(set) var lastChecked: Date?
     @Published private(set) var sparkleUpdateReady = false
@@ -24,6 +40,11 @@ final class ClientReleaseController: ObservableObject {
             sparkle.automaticallyDownloadsUpdates = automaticallyUpdates
         }
     }
+
+    /// Resolves the current display language at render time rather than when
+    /// the controller was initialized. This keeps the Settings page in sync
+    /// when the user switches languages without another update check.
+    var signatureText: String { signatureState.localizedText }
 
     private let defaults: UserDefaults
     private var pendingExternalAction: String?
@@ -52,10 +73,9 @@ final class ClientReleaseController: ObservableObject {
     func refresh(force: Bool = true) async {
         if !force, !shouldCheckAtLaunch { return }
         let signature = await AppSignatureStatus.inspect()
-        signatureText = signature.acceptedByGatekeeper
-            ? L10n.text("Developer ID 已签名并通过 Gatekeeper")
-            : (signature.signed ? L10n.text("已签名，但未通过 Gatekeeper")
-                               : L10n.text("未签名开发版本"))
+        signatureState = signature.acceptedByGatekeeper
+            ? .accepted
+            : (signature.signed ? .signedButNotAccepted : .unsigned)
         healthy = signature.signed
         sparkle.checkForUpdates()
     }

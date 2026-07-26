@@ -92,13 +92,15 @@ struct ResearchRecordModel: Identifiable {
         let family = factorFamilies.joined(separator: "、")
         let role: String
         switch researchRole {
-        case "auxiliary_or_conditional_signal": role = "辅助与条件信号"
-        case "new_main_factor_candidate": role = "新主因子候选"
-        case "main_factor": role = "主因子"
-        case "auxiliary_factor": role = "辅助因子"
-        default: role = "因子"
+        case "auxiliary_or_conditional_signal":
+            role = L10n.text("辅助与条件信号")
+        case "new_main_factor_candidate":
+            role = L10n.text("新主因子候选")
+        case "main_factor": role = L10n.text("主因子")
+        case "auxiliary_factor": role = L10n.text("辅助因子")
+        default: role = L10n.text("因子")
         }
-        if !family.isEmpty { return "\(family) · \(role)研究" }
+        if !family.isEmpty { return L10n.format("%@ · %@研究", family, role) }
         return title
     }
 

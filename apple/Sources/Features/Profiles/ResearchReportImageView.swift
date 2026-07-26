@@ -78,8 +78,12 @@ struct ResearchReportImageView: View {
 
     private func receiptRow(_ label: String, _ value: String) -> some View {
         GridRow {
-            Text(label).foregroundStyle(.secondary)
-            Text(value.isEmpty ? "无" : value)
+            Text(LocalizedStringKey(label)).foregroundStyle(.secondary)
+            if value.isEmpty {
+                Text("无")
+            } else {
+                Text(verbatim: value)
+            }
         }
     }
 
@@ -203,15 +207,15 @@ enum ResearchReportAssetError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingReportRoot:
-            return "研究报告没有可信的本地图片目录。"
+            return L10n.text("研究报告没有可信的本地图片目录。")
         case .missingFile:
-            return "报告图片尚未保存到个人工作区。"
+            return L10n.text("报告图片尚未保存到个人工作区。")
         case .invalidFile:
-            return "报告图片不是受支持的有界普通文件。"
+            return L10n.text("报告图片不是受支持的有界普通文件。")
         case .hashMismatch:
-            return "报告图片完整性校验失败。"
+            return L10n.text("报告图片完整性校验失败。")
         case .unsafeSVG:
-            return "报告 SVG 含有脚本、外链或其他主动内容。"
+            return L10n.text("报告 SVG 含有脚本、外链或其他主动内容。")
         }
     }
 }

@@ -18,7 +18,9 @@ struct ServerSettingsView: View {
 
     var body: some View {
         SettingsPageShell(
-            title: isInitialSetup ? "连接 FactorTester" : "服务器",
+            title: SettingsDisplayText(
+                isInitialSetup ? "连接 FactorTester" : "服务器"
+            ),
             subtitle: "配置 Manager；具体 FactorTester 服务端口由 Manager 发现",
             systemImage: "server.rack"
         ) {
@@ -86,7 +88,12 @@ struct ServerSettingsView: View {
                     HStack(spacing: 8) {
                         SettingsEditableText(
                             value: $port,
-                            placeholder: "空值（自动选择的 \(automaticPortText)）",
+                            placeholder: .verbatim(
+                                L10n.format(
+                                    "空值（自动选择的 %@）",
+                                    automaticPortText
+                                )
+                            ),
                             onCommit: { Task { await synchronizeManagerConfiguration() } }
                         )
                         SettingsRefreshButton(isWorking: discoveringPorts) {
@@ -118,7 +125,9 @@ struct ServerSettingsView: View {
     }
 
     private var automaticPortText: String {
-        availablePorts.first.map { "\($0) 端口" } ?? "端口尚未返回"
+        availablePorts.first.map {
+            L10n.format("%lld 端口", $0)
+        } ?? L10n.text("端口尚未返回")
     }
 
     @MainActor
@@ -144,7 +153,7 @@ struct ServerSettingsView: View {
                 port: managerPort
             )
             _ = try await APIClient.shared.me()
-            testResult = "✓ 已连接"
+            testResult = "✓ " + L10n.text("已连接")
             if isInitialSetup { dismiss() }
         } catch {
             testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)

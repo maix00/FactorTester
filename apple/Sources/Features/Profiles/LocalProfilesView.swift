@@ -108,8 +108,13 @@ struct LocalProfilesView: View {
                 }
                 ForEach(profile.initializationSources) { source in
                     HStack {
-                        Label("当前 principal：\(source.ownerRef)", systemImage: "books.vertical")
-                        Text(source.mode).foregroundStyle(.secondary)
+                        Label {
+                            Text(verbatim: L10n.format("当前 principal：%@", source.ownerRef))
+                        } icon: {
+                            Image(systemName: "books.vertical")
+                        }
+                        Text(verbatim: ProfilePresentationText.initializationSourceMode(source.mode))
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Text(source.sourceRef).font(.caption)
                     }
@@ -132,9 +137,11 @@ struct LocalProfilesView: View {
                 ForEach(profile.agents) { agent in
                     HStack {
                         Label(agent.id, systemImage: "person.crop.circle")
-                        Text(agent.role).foregroundStyle(.secondary)
+                        Text(verbatim: ProfilePresentationText.agentRole(agent.role))
+                            .foregroundStyle(.secondary)
                         Spacer()
-                        Text(agent.scope).font(.caption)
+                        Text(verbatim: ProfilePresentationText.agentScope(agent.scope))
+                            .font(.caption)
                     }
                 }
             }

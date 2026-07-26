@@ -57,7 +57,7 @@ struct TestJobsView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("测试任务").font(.title2.weight(.semibold))
-                Text("共 \(controller.jobs.count) 个任务，每页 \(pageSize) 个")
+                Text(verbatim: L10n.format("共 %lld 个任务，每页 %lld 个", controller.jobs.count, pageSize))
                     .font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
@@ -77,7 +77,8 @@ struct TestJobsView: View {
                     openJob(job)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(job.kind).font(.callout.weight(.medium))
+                        Text(verbatim: ProfilePresentationText.jobKind(job.kind))
+                            .font(.callout.weight(.medium))
                         Text(job.id).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -92,7 +93,7 @@ struct TestJobsView: View {
                     .font(.callout.monospacedDigit())
             }
             TableColumn("状态") { job in
-                Text(statusLabel(job.status))
+                Text(LocalizedStringKey(statusLabel(job.status)))
                     .foregroundStyle(statusColor(job.status))
             }
             TableColumn("Profile") { job in
@@ -112,7 +113,7 @@ struct TestJobsView: View {
         HStack(spacing: 10) {
             Button("上一页") { page = max(1, page - 1); pageInput = String(page) }
                 .disabled(page <= 1)
-            Text("第 \(page) / \(pageCount) 页")
+            Text(verbatim: L10n.format("第 %lld / %lld 页", page, pageCount))
                 .font(.callout.monospacedDigit())
             Button("下一页") { page = min(pageCount, page + 1); pageInput = String(page) }
                 .disabled(page >= pageCount)
@@ -171,7 +172,7 @@ struct TestJobsView: View {
     private func emptyState(_ title: String) -> some View {
         VStack(spacing: 8) {
             Image(systemName: "checklist").font(.largeTitle).foregroundStyle(.secondary)
-            Text(title).foregroundStyle(.secondary)
+            Text(LocalizedStringKey(title)).foregroundStyle(.secondary)
             if let error = controller.error {
                 Text(error).font(.caption).foregroundStyle(.secondary)
             }

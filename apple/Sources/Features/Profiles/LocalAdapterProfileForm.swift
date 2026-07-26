@@ -60,8 +60,9 @@ struct LocalAdapterProfileForm: View {
         _ value: Binding<String>
     ) -> some View {
         GridRow {
-            Text(title).frame(width: 74, alignment: .leading)
-            TextField(prompt, text: value).textFieldStyle(.roundedBorder)
+            Text(L10n.resource(title)).frame(width: 74, alignment: .leading)
+            TextField(LocalizedStringKey(prompt), text: value)
+                .textFieldStyle(.roundedBorder)
         }
     }
 }

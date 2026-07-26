@@ -219,7 +219,10 @@ final class SessionStore: ObservableObject {
                 // Manager is an optional capability.  A transient manager
                 // failure must not invalidate the already successful user
                 // session or force a second login.
-                lastError = L10n.text("Manager 暂时不可用，主登录仍保持有效：") + error.localizedDescription
+                lastError = L10n.format(
+                    "Manager 暂时不可用，主登录仍保持有效：%@",
+                    error.localizedDescription
+                )
             }
         } else {
             isManagerLoggedIn = false

@@ -49,7 +49,7 @@ final class APIClient: NSObject {
         do {
             let (data, response) = try await session.data(for: req)
             guard let http = response as? HTTPURLResponse else {
-                throw APIError.transport("服务器没有返回有效的 HTTP 响应")
+                throw APIError.transport(L10n.text("服务器没有返回有效的 HTTP 响应"))
             }
             guard (200..<300).contains(http.statusCode) else {
                 let detail = Self.responseMessage(data) ?? "HTTP \(http.statusCode)"

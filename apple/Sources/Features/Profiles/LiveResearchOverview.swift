@@ -9,28 +9,28 @@ struct LiveResearchOverview: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(detail.label).font(.title2.weight(.semibold))
-                        Text(detail.currentNode)
+                        Text(verbatim: ResearchDisplayText.node(detail.currentNode))
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(detail.status)
+                    Text(verbatim: ResearchDisplayText.lifecycleStatus(detail.status))
                         .font(.callout.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(.quaternary, in: Capsule())
                 }
                 if let trial = detail.trialPlanRef {
-                    ReferenceGroup(title: "Trial Plan", refs: [trial])
+                    ReferenceGroup(title: "试验计划", refs: [trial])
                 }
                 ReferenceGroup(
                     title: "Evidence",
                     refs: detail.evidenceRefs,
                     omitted: detail.omittedEvidenceCount
                 )
-                ReferenceGroup(title: "Jobs", refs: detail.jobRefs)
-                ReferenceGroup(title: "Runs", refs: detail.runRefs)
+                ReferenceGroup(title: "任务", refs: detail.jobRefs)
+                ReferenceGroup(title: "运行状态", refs: detail.runRefs)
                 if let report = detail.reportLookupRef {
-                    ReferenceGroup(title: "Report lookup", refs: [report])
+                    ReferenceGroup(title: "报告", refs: [report])
                 }
                 if let closure = detail.researchCycle.closure {
                     GroupBox("研究关闭状态") {
@@ -53,7 +53,7 @@ struct ReferenceGroup: View {
     var omitted = 0
 
     var body: some View {
-        GroupBox(title) {
+        GroupBox(LocalizedStringKey(title)) {
             VStack(alignment: .leading, spacing: 6) {
                 if refs.isEmpty {
                     Text("无").foregroundStyle(.secondary)
@@ -65,7 +65,7 @@ struct ReferenceGroup: View {
                         .textSelection(.enabled)
                 }
                 if omitted > 0 {
-                    Text("另有 \(omitted) 项未载入")
+                    Text(verbatim: L10n.format("另有 %lld 项未载入", omitted))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }

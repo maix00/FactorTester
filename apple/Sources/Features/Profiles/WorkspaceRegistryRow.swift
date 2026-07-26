@@ -13,12 +13,12 @@ struct WorkspaceRegistryRow: View {
                 Text(workspace.path)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Owner: \(workspace.ownerRef)")
+                Text(verbatim: L10n.format("Owner: %@", workspace.ownerRef))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text(accessLabel)
+            Text(LocalizedStringKey(accessLabel))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

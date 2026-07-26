@@ -15,7 +15,7 @@ struct ResearchStructuredDetailView: View {
                 Picker("Timeline / steps", selection: $selectedStep) {
                     Text("Select a step").tag("")
                     ForEach(record.timeline) { link in
-                        Text("\(link.kind) · \(link.targetRef)").tag(link.id)
+                        Text(verbatim: L10n.format("%@ · %@", link.kind, link.targetRef)).tag(link.id)
                     }
                 }
                 if selectedStep.isEmpty {
@@ -29,7 +29,7 @@ struct ResearchStructuredDetailView: View {
                 ForEach(record.artifacts) { artifact in
                     HStack {
                         Label(artifact.format, systemImage: "doc.text")
-                        Text(artifact.status)
+                        Text(verbatim: ProfilePresentationText.artifactStatus(artifact.status))
                         Spacer()
                         Button("View original report") { open(artifact) }
                             .disabled(artifact.status != "ready")
@@ -81,7 +81,10 @@ struct ResearchStructuredDetailView: View {
     }
 
     private func referenceRow(kind: String, value: String) -> some View {
-        LabeledContent(kind, value: value)
+        LabeledContent(
+            ResearchDisplayText.linkKind(kind),
+            value: value
+        )
             .font(.caption)
             .foregroundStyle(.secondary)
             .textSelection(.enabled)

@@ -28,12 +28,20 @@ struct LocalProfileForm: View {
                 }
                 GridRow {
                     Text("初始化").frame(width: 64, alignment: .leading)
-                    Text(session.user?.username ?? "请先在个人中心登录")
-                        .foregroundStyle(session.isLoggedIn ? .primary : .secondary)
+                    if let username = session.user?.username, !username.isEmpty {
+                        Text(verbatim: username)
+                            .foregroundStyle(.primary)
+                    } else {
+                        Text(L10n.resource("请先在个人中心登录"))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 GridRow {
                     Spacer()
-                    Text("使用当前登录身份和 canonical 因子库初始化；自动创建 agent/\(branchProfileID) 独立分支与 worktree。")
+                Text(verbatim: L10n.format(
+                    "使用当前登录身份和 canonical 因子库初始化；自动创建 agent/%@ 独立分支与 worktree。",
+                    branchProfileID
+                ))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -77,8 +85,9 @@ struct LocalProfileForm: View {
         _ value: Binding<String>
     ) -> some View {
         GridRow {
-            Text(title).frame(width: 64, alignment: .leading)
-            TextField(prompt, text: value).textFieldStyle(.roundedBorder)
+            Text(L10n.resource(title)).frame(width: 64, alignment: .leading)
+            TextField(LocalizedStringKey(prompt), text: value)
+                .textFieldStyle(.roundedBorder)
         }
     }
 

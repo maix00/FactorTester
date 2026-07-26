@@ -25,7 +25,8 @@ struct ProfileLiveResearchDetail: View {
                         workPackage: workPackage,
                         steps: controller.timeline,
                         nextCursor: controller.nextTimelineCursor,
-                        profileName: context?.profile.displayName ?? "未知 Profile",
+                        profileName: context?.profile.displayName
+                            ?? L10n.text("未知 Profile"),
                         auditCacheNamespace: context.map {
                             "\($0.profile.id)|\($0.profile.serverURL)"
                         } ?? detail.branchRef,
@@ -79,8 +80,8 @@ struct ProfileLiveResearchDetail: View {
 
     private var emptyStateMessage: String {
         if let error = controller.error { return error }
-        if controller.isLoadingResearch { return "正在读取研究过程…" }
-        return "当前研究分支尚无可显示的检查点。"
+        if controller.isLoadingResearch { return L10n.text("正在读取研究过程…") }
+        return L10n.text("当前研究分支尚无可显示的检查点。")
     }
 
     private func reportContext(

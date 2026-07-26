@@ -207,7 +207,7 @@ extension ResearchJournalPresentation {
                 block.rows.first?.text ?? block.text ?? block.fallback
             }.first
             title = bindingTitle ?? readableTitle(from: firstText)
-                ?? "研究记录"
+                ?? L10n.text("研究记录")
         }
         return ResearchJournalSection(
             sectionID: section.sectionID,

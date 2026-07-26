@@ -147,7 +147,7 @@ struct ResearchNarrativeReportView: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(reportTitle)
                     .font(.largeTitle.weight(.bold))
-                Text(statusLabel(detail.status))
+                Text(LocalizedStringKey(statusLabel(detail.status)))
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 9)
                     .padding(.vertical, 4)
@@ -155,10 +155,11 @@ struct ResearchNarrativeReportView: View {
                     .foregroundStyle(statusTint)
                 Spacer()
             }
-            Text(
-                "由 \(profileName) 负责 · 当前阶段："
-                    + ResearchDisplayText.node(detail.currentNode)
-            )
+            Text(verbatim: L10n.format(
+                "由 %@ 负责 · 当前阶段：%@",
+                profileName,
+                ResearchDisplayText.node(detail.currentNode)
+            ))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Text("以下正文由研究 Agent 在各检查点提交，并与相应证据和义务变化绑定。")
@@ -186,7 +187,7 @@ struct ResearchNarrativeReportView: View {
             }
             if firstInChapter {
                 HStack(spacing: 8) {
-                    Text(stageLabel(for: section))
+                    Text(LocalizedStringKey(stageLabel(for: section)))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color.accentColor)
                         .padding(.horizontal, 8)
@@ -216,7 +217,7 @@ struct ResearchNarrativeReportView: View {
             }
 
             if firstInChapter {
-                Text(stageLabel(for: section))
+                Text(LocalizedStringKey(stageLabel(for: section)))
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(.primary)
             }
@@ -278,9 +279,7 @@ struct ResearchNarrativeReportView: View {
                 }
             }
             if !missingPresentationLinks(in: section).isEmpty {
-                DisclosureGroup(
-                    "审计待补：\(missingPresentationLinks(in: section).count) 项证据缺少中文说明"
-                ) {
+                DisclosureGroup {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("这些引用仍保留在可信 journal 中，但在补齐历史 presentation metadata 前不会污染研究正文。")
                             .font(.caption)
@@ -294,6 +293,11 @@ struct ResearchNarrativeReportView: View {
                         }
                     }
                     .padding(.top, 6)
+                } label: {
+                    Text(verbatim: L10n.format(
+                        "审计待补：%lld 项证据缺少中文说明",
+                        missingPresentationLinks(in: section).count
+                    ))
                 }
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
@@ -394,11 +398,11 @@ struct ResearchNarrativeReportView: View {
                 Label("因子公式", systemImage: "function")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.accentColor)
-                Text(block.fallback ?? "因子公式")
+                Text(verbatim: block.fallback ?? L10n.text("因子公式"))
                     .font(.callout)
                 RenderedMathFormulaView(
                     latex: block.latex ?? "",
-                    fallback: block.fallback ?? "因子公式"
+                    fallback: block.fallback ?? L10n.text("因子公式")
                 )
                 .background(
                     Color.secondary.opacity(0.07),
@@ -643,7 +647,7 @@ struct ResearchNarrativeReportView: View {
                     obligationRowsTable(groups.active, section: section)
                 }
                 if showInherited && !groups.inherited.isEmpty {
-                    DisclosureGroup("沿用义务（\(groups.inherited.count)）") {
+                    DisclosureGroup(L10n.format("沿用义务（%lld）", groups.inherited.count)) {
                         obligationRowsTable(
                             groups.inherited,
                             section: section
@@ -702,11 +706,11 @@ struct ResearchNarrativeReportView: View {
                 .font(.callout)
                 .lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(row.materiality)
+            Text(LocalizedStringKey(row.materiality))
                 .frame(width: 54, alignment: .leading)
-            Text(row.change)
+            Text(verbatim: row.change)
                 .frame(width: 112, alignment: .leading)
-            Text(row.currentStatus)
+            Text(LocalizedStringKey(row.currentStatus))
                 .frame(width: 64, alignment: .leading)
             HStack(spacing: 5) {
                 auditChip(
@@ -1024,7 +1028,7 @@ private struct ResearchAuditPopover: View {
             .font(.headline)
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
-            Text(ResearchDisplayText.auditPurpose(selection.link.kind))
+            Text(verbatim: ResearchDisplayText.auditPurpose(selection.link.kind))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1260,7 +1264,7 @@ private struct ResearchAuditPopover: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 ForEach(values, id: \.self) { value in
-                    Text("• \(value)")
+                    Text(verbatim: L10n.format("• %@", value))
                         .font(.caption)
                         .textSelection(.enabled)
                 }
@@ -1281,7 +1285,10 @@ private struct ResearchAuditPopover: View {
             } catch is CancellationError {
                 return
             } catch {
-                self.error = "无法读取该运行前配置：\(error.localizedDescription)"
+                self.error = L10n.format(
+                    "无法读取该运行前配置：%@",
+                    error.localizedDescription
+                )
             }
             return
         }
@@ -1295,7 +1302,10 @@ private struct ResearchAuditPopover: View {
         } catch is CancellationError {
             return
         } catch {
-            self.error = "无法读取该检查点的审计对象：\(error.localizedDescription)"
+            self.error = L10n.format(
+                "无法读取该检查点的审计对象：%@",
+                error.localizedDescription
+            )
         }
     }
 }
@@ -1303,18 +1313,18 @@ private struct ResearchAuditPopover: View {
 enum ResearchDisplayText {
     static func reportRequirement(_ requirementID: String) -> String? {
         switch requirementID.split(separator: ".").last.map(String.init) {
-        case "expression_identity": return "原公式、参数与版本"
+        case "expression_identity": return L10n.text("原公式、参数与版本")
         case "observable_meaning_direction_units":
-            return "可观察含义、方向、单位与数值域"
-        case "timing_and_causality": return "时序与因果可用性"
-        case "alternatives_and_falsifiers": return "替代解释与可证伪条件"
-        case "behavioral_mechanism": return "行为机制"
-        case "boundary_conditions": return "适用边界与市场环境"
-        case "microstructure_channel": return "微观结构渠道"
-        case "participant_ecology": return "市场参与者生态"
-        case "risk_transfer_and_fundamentals": return "风险转移与基本面机制"
-        case "conditioning_semantics": return "条件化信号的研究语义"
-        case "parameterization_and_derivation": return "参数化与派生因子"
+            return L10n.text("可观察含义、方向、单位与数值域")
+        case "timing_and_causality": return L10n.text("时序与因果可用性")
+        case "alternatives_and_falsifiers": return L10n.text("替代解释与可证伪条件")
+        case "behavioral_mechanism": return L10n.text("行为机制")
+        case "boundary_conditions": return L10n.text("适用边界与市场环境")
+        case "microstructure_channel": return L10n.text("微观结构渠道")
+        case "participant_ecology": return L10n.text("市场参与者生态")
+        case "risk_transfer_and_fundamentals": return L10n.text("风险转移与基本面机制")
+        case "conditioning_semantics": return L10n.text("条件化信号的研究语义")
+        case "parameterization_and_derivation": return L10n.text("参数化与派生因子")
         default: return nil
         }
     }
@@ -1324,44 +1334,42 @@ enum ResearchDisplayText {
             of: "\\p{Han}",
             options: .regularExpression
         ) != nil else {
-            return "因子研究报告"
+            return L10n.text("因子研究报告")
         }
         return title
     }
 
     static func linkKind(_ kind: String) -> String {
         switch kind {
-        case "checkpoint": return "检查点"
-        case "trial_plan": return "试验计划"
-        case "obligation": return "研究义务"
-        case "claim": return "证据状态"
-        case "evidence": return "证据"
-        case "job": return "计算任务"
-        case "run": return "试验运行（含冻结配置）"
-        case "run_spec": return "运行前配置"
-        case "delta": return "状态变化"
-        case "profile_handoff": return "研究转接"
-        default: return "审计对象"
+        case "checkpoint": return L10n.text("检查点")
+        case "trial_plan": return L10n.text("试验计划")
+        case "obligation": return L10n.text("研究义务")
+        case "claim": return L10n.text("证据状态")
+        case "evidence": return L10n.text("证据")
+        case "job": return L10n.text("计算任务")
+        case "run": return L10n.text("试验运行（含冻结配置）")
+        case "run_spec": return L10n.text("运行前配置")
+        case "delta": return L10n.text("状态变化")
+        case "profile_handoff": return L10n.text("研究转接")
+        default: return L10n.text("审计对象")
         }
     }
 
     static func auditPurpose(_ kind: String) -> String {
         switch kind {
-        case "checkpoint": return "说明这段研究叙事对应哪一次可信检查点。"
-        case "trial_plan": return "说明本步骤准备回答什么问题，以及样本、范围和停止条件。"
-        case "obligation": return "说明研究仍需回答的问题、重要性和当前收敛程度。"
-        case "claim": return "说明当前研究主张获得了什么程度的证据支持。"
-        case "evidence": return "说明本步骤取得的结果、指标、产物、限制和冲突。"
-        case "job": return "说明后端计算任务的状态、输入规范和可追溯结果。"
+        case "checkpoint": return L10n.text("说明这段研究叙事对应哪一次可信检查点。")
+        case "trial_plan": return L10n.text("说明本步骤准备回答什么问题，以及样本、范围和停止条件。")
+        case "obligation": return L10n.text("说明研究仍需回答的问题、重要性和当前收敛程度。")
+        case "claim": return L10n.text("说明当前研究主张获得了什么程度的证据支持。")
+        case "evidence": return L10n.text("说明本步骤取得的结果、指标、产物、限制和冲突。")
+        case "job": return L10n.text("说明后端计算任务的状态、输入规范和可追溯结果。")
         case "run":
-            return "说明服务器实际接受并执行的冻结配置；"
-                + "它是结果证据的来源与身份依据，不是统计结果本身。"
+            return L10n.text("说明服务器实际接受并执行的冻结配置；它是结果证据的来源与身份依据，不是统计结果本身。")
         case "run_spec":
-            return "说明运行前拟提交的完整配置、RunSpec 哈希和可审计提交合同，"
-                + "用于事前审查及提交前后配置一致性核对。"
-        case "delta": return "说明证据为何使研究义务或主张发生状态变化。"
-        case "profile_handoff": return "说明研究由谁转接、转接了哪些范围与检查点。"
-        default: return "说明本步骤正文所引用的可审计研究对象。"
+            return L10n.text("说明运行前拟提交的完整配置、RunSpec 哈希和可审计提交合同，用于事前审查及提交前后配置一致性核对。")
+        case "delta": return L10n.text("说明证据为何使研究义务或主张发生状态变化。")
+        case "profile_handoff": return L10n.text("说明研究由谁转接、转接了哪些范围与检查点。")
+        default: return L10n.text("说明本步骤正文所引用的可审计研究对象。")
         }
     }
 
@@ -1372,33 +1380,45 @@ enum ResearchDisplayText {
         if label.range(of: "\\p{Han}", options: .regularExpression) != nil {
             return label
         }
-        return "\(node(currentNode))研究"
+        return L10n.format("%@研究", node(currentNode))
     }
 
     static func node(_ node: String) -> String {
         switch node {
-        case "candidate_discovery": return "候选发现"
-        case "hypothesis_preregistration": return "假设预注册"
-        case "capability_resolution": return "研究能力确认"
-        case "data_contract": return "数据契约"
-        case "factor_semantics": return "因子语义"
-        case "validation_design": return "验证设计"
-        case "trial_plan": return "试验计划"
-        case "capability_gap": return "能力缺口"
-        case "job_evidence_ready": return "回测证据就绪"
-        case "evidence_assessment": return "证据评估"
-        case "factor_improvement": return "因子改进"
-        case "completed": return "研究完成"
-        default: return "研究进行中"
+        case "candidate_discovery": return L10n.text("候选发现")
+        case "hypothesis_preregistration": return L10n.text("假设预注册")
+        case "capability_resolution": return L10n.text("研究能力确认")
+        case "data_contract": return L10n.text("数据契约")
+        case "factor_semantics": return L10n.text("因子语义")
+        case "validation_design": return L10n.text("验证设计")
+        case "trial_plan": return L10n.text("试验计划")
+        case "capability_gap": return L10n.text("能力缺口")
+        case "job_evidence_ready": return L10n.text("回测证据就绪")
+        case "evidence_assessment": return L10n.text("证据评估")
+        case "factor_improvement": return L10n.text("因子改进")
+        case "completed": return L10n.text("研究完成")
+        default: return L10n.text("研究进行中")
+        }
+    }
+
+    static func lifecycleStatus(_ status: String) -> String {
+        switch status.lowercased() {
+        case "running": return L10n.text("进行中")
+        case "paused": return L10n.text("已暂停")
+        case "completed", "closed": return L10n.text("已完成")
+        case "blocked": return L10n.text("等待处理")
+        case "failed": return L10n.text("失败")
+        default:
+            return status.isEmpty ? L10n.text("状态未知") : status
         }
     }
 
     static func productGroup(_ productGroup: String) -> String {
         switch productGroup.lowercased() {
-        case "china_futures", "cnfutures": return "中国期货"
-        case "china_equities", "cnequities": return "中国股票"
-        case "japan_futures", "jpfutures": return "日本期货"
-        default: return "其他产品组"
+        case "china_futures", "cnfutures": return L10n.text("中国期货")
+        case "china_equities", "cnequities": return L10n.text("中国股票")
+        case "japan_futures", "jpfutures": return L10n.text("日本期货")
+        default: return L10n.text("其他产品组")
         }
     }
 }

@@ -348,14 +348,14 @@ enum ResearchJournalPresentation {
                 for: link,
                 in: evidencePresentations
             ) ?? link.label.flatMap(readableEvidenceLabel)
-                ?? "证据描述缺失"
+                ?? L10n.text("证据描述缺失")
         } else if link.kind == "obligation" {
             summary = obligationSummary(
                 for: link,
                 in: obligationPresentations
             )
                 ?? obligationSummary(for: link, in: obligations)
-                ?? "义务描述缺失"
+                ?? L10n.text("义务描述缺失")
         } else if link.kind == "run_spec" {
             summary = link.label.flatMap(runSpecAlias)
                 ?? contextualSummary(
@@ -369,7 +369,11 @@ enum ResearchJournalPresentation {
                     sectionTitle: sectionTitle
                 )
         }
-        return "\(ResearchDisplayText.linkKind(link.kind)) · \(summary)"
+        return L10n.format(
+            "%@ · %@",
+            ResearchDisplayText.linkKind(link.kind),
+            summary
+        )
     }
 
     private static func obligationSummary(
@@ -421,20 +425,20 @@ enum ResearchJournalPresentation {
         for kind: String,
         sectionTitle: String
     ) -> String {
-        let section = nonEmpty(sectionTitle) ?? "本步骤"
+        let section = nonEmpty(sectionTitle) ?? L10n.text("本步骤")
         switch kind {
-        case "checkpoint": return "\(section)检查点"
-        case "trial_plan": return "\(section)试验计划"
-        case "obligation": return "\(section)待回答问题"
-        case "claim": return "\(section)研究主张"
-        case "evidence": return "\(section)研究证据"
-        case "job": return "\(section)计算任务"
-        case "run": return "\(section)试验运行及服务器冻结配置"
-        case "run_spec": return "\(section)拟提交的完整配置"
-        case "delta": return "\(section)状态变化"
-        case "profile_handoff": return "\(section)研究转接"
-        case "report_section": return "\(section)报告章节"
-        default: return "\(section)审计详情"
+        case "checkpoint": return L10n.format("%@检查点", section)
+        case "trial_plan": return L10n.format("%@试验计划", section)
+        case "obligation": return L10n.format("%@待回答问题", section)
+        case "claim": return L10n.format("%@研究主张", section)
+        case "evidence": return L10n.format("%@研究证据", section)
+        case "job": return L10n.format("%@计算任务", section)
+        case "run": return L10n.format("%@试验运行及服务器冻结配置", section)
+        case "run_spec": return L10n.format("%@拟提交的完整配置", section)
+        case "delta": return L10n.format("%@状态变化", section)
+        case "profile_handoff": return L10n.format("%@研究转接", section)
+        case "report_section": return L10n.format("%@报告章节", section)
+        default: return L10n.format("%@审计详情", section)
         }
     }
 
@@ -866,17 +870,17 @@ enum ResearchJournalError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingReference:
-            return "该研究记录尚无完整中文报告。"
+            return L10n.text("该研究记录尚无完整中文报告。")
         case .workspaceAccessRequired:
-            return "请先在“设置 → 个人工作区”中选择当前用户目录，授权 FTClient 读取中文研究报告。"
+            return L10n.text("请先在“设置 → 个人工作区”中选择当前用户目录，授权 FTClient 读取中文研究报告。")
         case .invalidSize:
-            return "研究报告超出本地安全读取上限。"
+            return L10n.text("研究报告超出本地安全读取上限。")
         case .hashMismatch:
-            return "研究报告完整性校验失败。"
+            return L10n.text("研究报告完整性校验失败。")
         case .historyIncomplete:
-            return "研究报告未能从可信起点连续重建，需要从根起点重新研究。"
+            return L10n.text("研究报告未能从可信起点连续重建，需要从根起点重新研究。")
         case .invalidContract:
-            return "研究报告格式不受支持。"
+            return L10n.text("研究报告格式不受支持。")
         }
     }
 }

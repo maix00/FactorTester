@@ -66,8 +66,7 @@ private enum SettingSection: String, CaseIterable, Identifiable {
 }
 
 private struct SettingsLanguageView: View {
-    @AppStorage("client.language") private var language =
-        AppLanguage.system.rawValue
+    @EnvironmentObject private var languageStore: LanguageStore
 
     var body: some View {
         SettingsPageShell(
@@ -80,10 +79,16 @@ private struct SettingsLanguageView: View {
                     title: "显示语言",
                     description: "JSON、状态值与 API 协议不会随界面语言改变"
                 ) {
-                    Picker("语言", selection: $language) {
-                        Text("跟随系统").tag(AppLanguage.system.rawValue)
-                        Text("简体中文").tag(AppLanguage.simplifiedChinese.rawValue)
-                        Text("English").tag(AppLanguage.english.rawValue)
+                    Picker(
+                        "语言",
+                        selection: Binding(
+                            get: { languageStore.selection.rawValue },
+                            set: { languageStore.select(rawValue: $0) }
+                        )
+                    ) {
+                        ForEach(LanguageCatalog.options()) { option in
+                            Text(L10n.resource(option.titleKey)).tag(option.id)
+                        }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()

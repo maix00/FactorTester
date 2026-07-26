@@ -15,7 +15,7 @@ struct InitializationSourceView: View {
                 Picker("Authorized factor library", selection: $selectedOwner) {
                     Text("Select a registered grant").tag("")
                     ForEach(controller.grants) { grant in
-                        Text("\(grant.name) · \(grant.factorCount)")
+                        Text(verbatim: L10n.format("%@ · %lld", grant.name, grant.factorCount))
                             .tag(grant.id)
                     }
                 }

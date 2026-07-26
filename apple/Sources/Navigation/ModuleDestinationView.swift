@@ -15,7 +15,7 @@ struct ModuleDestinationView: View {
                 WebPageView(path: module.path)
             }
         }
-        .navigationTitle(module.title)
+        .navigationTitle(LocalizedStringKey(module.title))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif

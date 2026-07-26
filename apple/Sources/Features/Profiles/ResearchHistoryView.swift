@@ -17,7 +17,7 @@ struct ResearchHistoryView: View {
                         VStack(alignment: .leading) {
                             Text(record.title)
                             HStack(spacing: 6) {
-                                Text(record.status)
+                                Text(verbatim: ProfilePresentationText.artifactStatus(record.status))
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(
                                         record.status == "ready"

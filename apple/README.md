@@ -37,6 +37,22 @@ apple/
   Resources/                  Assets（图标 / 强调色）、entitlements
 ```
 
+## 多语言基础设施
+
+- 所有界面共享 `Resources/Shared/Localizable.xcstrings`，当前提供 `zh-Hans`
+  与 `en`。新增语言只需在 String Catalog 中添加一个 localization，语言选择器会
+  从 bundle 自动发现，不需要修改功能模块。
+- 根场景注入 `LanguageStore`，统一保存 `client.language`、更新 SwiftUI 的
+  `Locale`，设置页和服务层都读取同一状态。`L10n.format` 只用于动态格式化文本；
+  JSON、状态码、API 字段和研究正文保持原始值。
+- 共享设置组件会把设置标题、说明和占位符转换成 `LocalizedStringResource`，避免
+  功能页通过 `String` 属性绕过本地化。用户提供的路径、Profile 名称、服务器响应和
+  研究报告内容则按原文显示。
+- 提交前运行 `./scripts/audit-localization.py`。脚本会检查 SwiftUI 可见文字、
+  设置项和页面卡片的命名参数、图表与研究展示分组、`L10n` 动态键、展示辅助函数
+  返回的动态文字、重复键和 String Catalog 中每个语言的非空翻译，并拦截高风险的后端状态裸
+  显示，逐个输出 App、Account、Jobs、Profiles、Settings 等功能模块的覆盖状态。
+
 ## 前置要求
 
 - **完整版 Xcode**（不是 Command Line Tools）。安装后执行一次：

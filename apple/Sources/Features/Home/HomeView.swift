@@ -35,7 +35,7 @@ struct HomeView: View {
                         .allowsHitTesting(selection == tab.id)
                 }
             }
-            .navigationTitle(selectedTab?.title ?? ClientTab.home.title)
+            .navigationTitle(selectedTab?.localizedTitle ?? ClientTab.home.localizedTitle)
         }
         .sheet(isPresented: $showLogin) { loginSheet }
         .task {

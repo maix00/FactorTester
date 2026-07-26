@@ -36,7 +36,10 @@ struct ProfileOverviewSection: View {
                                     systemImage: "books.vertical"
                                 )
                                 Spacer()
-                                Text("只读 · \(source.mode)")
+                                Text(verbatim: L10n.format(
+                                    "只读 · %@",
+                                    ProfilePresentationText.initializationSourceMode(source.mode)
+                                ))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -82,7 +85,7 @@ struct ProfileReferenceSection: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text(title).font(.title2.weight(.semibold))
+                Text(LocalizedStringKey(title)).font(.title2.weight(.semibold))
                 Text("仅展示本地索引和有界 projection 引用；不轮询完整 trace。")
                     .font(.caption).foregroundStyle(.secondary)
                 if links.isEmpty {

@@ -7,7 +7,7 @@ struct TestJobFieldTable: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline)
+            Text(L10n.resource(title)).font(.headline)
             if rows.isEmpty {
                 Text("暂无字段").font(.caption).foregroundStyle(.secondary)
             } else {
@@ -19,7 +19,7 @@ struct TestJobFieldTable: View {
                     Divider().gridCellUnsizedAxes(.horizontal)
                     ForEach(rows) { row in
                         GridRow {
-                            Text(row.name).font(.caption)
+                            fieldName(row).font(.caption)
                                 .frame(minWidth: 150, alignment: .leading)
                             Text(row.value)
                                 .font(.caption)
@@ -33,6 +33,16 @@ struct TestJobFieldTable: View {
                 .background(.quaternary.opacity(0.24), in: RoundedRectangle(cornerRadius: 7))
             }
         }
+    }
+
+    private func fieldName(_ row: TestJobField) -> Text {
+        if let nameKey = row.nameKey {
+            if let nameArgument = row.nameArgument {
+                return Text(verbatim: L10n.format(nameKey, nameArgument))
+            }
+            return Text(L10n.resource(nameKey))
+        }
+        return Text(verbatim: row.name)
     }
 }
 
@@ -94,7 +104,7 @@ struct TestJobResultSectionView: View {
         DisclosureGroup(
             isExpanded: Binding(get: { isExpanded }, set: onExpansionChanged),
             content: { content },
-            label: { Text(section.title).font(.headline) }
+            label: { Text(L10n.resource(section.title)).font(.headline) }
         )
     }
 
@@ -102,8 +112,14 @@ struct TestJobResultSectionView: View {
         switch section.kind {
         case .chart:
             Chart(section.chartPoints) { point in
-                LineMark(x: .value("时点", point.id), y: .value("数值", point.value))
-                PointMark(x: .value("时点", point.id), y: .value("数值", point.value))
+                LineMark(
+                    x: .value(L10n.text("时点"), point.id),
+                    y: .value(L10n.text("数值"), point.value)
+                )
+                PointMark(
+                    x: .value(L10n.text("时点"), point.id),
+                    y: .value(L10n.text("数值"), point.value)
+                )
             }
             .chartXAxis { AxisMarks(values: .automatic) }
             .chartYAxis { AxisMarks(position: .leading) }

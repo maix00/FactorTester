@@ -50,14 +50,17 @@ struct ResearchCheckpointTimeline: View {
             Image(systemName: "location.fill")
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 3) {
-                Text("当前阶段 · \(detail.currentNode)")
+                Text(verbatim: L10n.format("当前阶段 · %@", detail.currentNode))
                     .font(.headline)
                 HStack(spacing: 10) {
-                    Text(detail.status)
+                    Text(verbatim: ResearchDisplayText.lifecycleStatus(detail.status))
                     if let trialPlanRef = detail.trialPlanRef {
                         Text(trialPlanRef).monospaced()
                     }
-                    Text("\(detail.researchCycle.obligations.filter { $0.status != "discharged" }.count) 项未清义务")
+                    Text(verbatim: L10n.format(
+                        "%lld 项未清义务",
+                        detail.researchCycle.obligations.filter { $0.status != "discharged" }.count
+                    ))
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -125,7 +128,7 @@ private struct ResearchCheckpointCard: View {
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Text("\(step.fromNode) → \(step.toNode)")
+                        Text(verbatim: L10n.format("%@ → %@", step.fromNode, step.toNode))
                             .font(.headline)
                         if isCurrent {
                             Text("当前").font(.caption.weight(.semibold))
@@ -164,7 +167,11 @@ private struct ResearchCheckpointCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(reference).font(.caption.monospaced())
                     if let current {
-                        Text("\(current.questionSummary) · 当前为 \(current.status)")
+                        Text(verbatim: L10n.format(
+                            "%@ · 当前为 %@",
+                            current.questionSummary,
+                            current.status
+                        ))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -198,7 +205,7 @@ private struct ResearchCheckpointCard: View {
     @ViewBuilder
     private func referenceGroup(_ title: String, refs: [String]) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.subheadline.weight(.semibold))
+            Text(LocalizedStringKey(title)).font(.subheadline.weight(.semibold))
             if refs.isEmpty {
                 Text("无").font(.caption).foregroundStyle(.secondary)
             } else {
@@ -213,9 +220,14 @@ private struct ResearchCheckpointCard: View {
     private func changeGroup(_ title: String, values: [ResearchStateChange]) -> some View {
         if !values.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.subheadline.weight(.semibold))
+            Text(LocalizedStringKey(title)).font(.subheadline.weight(.semibold))
                 ForEach(values) { change in
-                    Text("\(change.objectID)：\(change.fromState) → \(change.toState)")
+                    Text(verbatim: L10n.format(
+                        "%@：%@ → %@",
+                        change.objectID,
+                        change.fromState,
+                        change.toState
+                    ))
                         .font(.caption)
                 }
             }
@@ -271,7 +283,7 @@ struct ProfileLiveTimeline: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text("\(step.fromNode) → \(step.toNode)")
+            Text(verbatim: L10n.format("%@ → %@", step.fromNode, step.toNode))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             changes(step.obligationChanges, title: "义务变化")
@@ -307,10 +319,13 @@ struct ProfileLiveTimeline: View {
         title: String
     ) -> some View {
         ForEach(values) { change in
-            Text(
-                "\(title)：\(change.objectID) "
-                    + "\(change.fromState) → \(change.toState)"
-            )
+            Text(verbatim: L10n.format(
+                "%@: %@ %@ → %@",
+                title,
+                change.objectID,
+                change.fromState,
+                change.toState
+            ))
             .font(.caption)
         }
     }

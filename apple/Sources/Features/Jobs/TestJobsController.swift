@@ -55,7 +55,7 @@ final class TestJobsController: ObservableObject {
             } catch where job.port != currentPort {
                 try await service.clearArtifacts(jobID: job.id, port: currentPort)
             }
-            notice = "已清空 \(job.id) 的生成物"
+            notice = L10n.format("已清空 %@ 的生成物", job.id)
             await select(job)
             await refresh()
         } catch {

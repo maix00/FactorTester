@@ -25,10 +25,18 @@ struct LiveObligationsView: View {
                                 )
                                     .font(.headline)
                                 Spacer()
-                                Text(obligation.status)
+                                Text(LocalizedStringKey(
+                                    ResearchJournalPresentation.statusLabel(
+                                        obligation.status
+                                    )
+                                ))
                                     .font(.caption.weight(.semibold))
                             }
-                            Text(obligation.materiality)
+                            Text(LocalizedStringKey(
+                                ResearchJournalPresentation.materialityLabel(
+                                    obligation.materiality
+                                )
+                            ))
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }

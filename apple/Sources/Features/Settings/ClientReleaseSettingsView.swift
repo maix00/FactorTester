@@ -67,7 +67,10 @@ struct ClientReleaseSettingsView: View {
     private var updatePanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             SettingsSectionCard("客户端更新") {
-                SettingsRow(title: statusTitle, description: statusSubtitle) {
+                SettingsRow(
+                    title: .verbatim(statusTitle),
+                    description: .verbatim(statusSubtitle)
+                ) {
                     VStack(alignment: .trailing, spacing: 8) {
                         Image(systemName: statusIcon)
                             .foregroundStyle(statusTint)
@@ -145,12 +148,19 @@ struct ClientReleaseSettingsView: View {
 
     private var statusSubtitle: String {
         if let pendingVersion = controller.pendingVersion {
-            return L10n.text("当前版本 \(installedVersion)，\(pendingVersion) 将在重启后安装")
+            return L10n.format(
+                "当前版本 %@，%@ 将在重启后安装",
+                installedVersion,
+                pendingVersion
+            )
         }
         if controller.hasAvailableUpdate {
-            return L10n.text("当前版本 \(installedVersion)，有可用更新，可下载并在重启后安装")
+            return L10n.format(
+                "当前版本 %@，有可用更新，可下载并在重启后安装",
+                installedVersion
+            )
         }
-        return L10n.text("当前版本 \(installedVersion)")
+        return L10n.format("当前版本 %@", installedVersion)
     }
 
     private var statusIcon: String {

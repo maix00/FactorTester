@@ -15,15 +15,15 @@ struct PriceChartView: View {
             Chart {
                 ForEach(bars) { bar in
                     RuleMark(
-                        x: .value("时点", bar.id),
-                        yStart: .value("最低", bar.low),
-                        yEnd: .value("最高", bar.high)
+                        x: .value(L10n.text("时点"), bar.id),
+                        yStart: .value(L10n.text("最低"), bar.low),
+                        yEnd: .value(L10n.text("最高"), bar.high)
                     )
                     .foregroundStyle(bar.isUp ? .green : .red)
                     RectangleMark(
-                        x: .value("时点", bar.id),
-                        yStart: .value("开盘", min(bar.open, bar.close)),
-                        yEnd: .value("收盘", max(bar.open, bar.close)),
+                        x: .value(L10n.text("时点"), bar.id),
+                        yStart: .value(L10n.text("开盘"), min(bar.open, bar.close)),
+                        yEnd: .value(L10n.text("收盘"), max(bar.open, bar.close)),
                         width: .fixed(7)
                     )
                     .foregroundStyle(bar.isUp ? .green : .red)
@@ -34,7 +34,10 @@ struct PriceChartView: View {
             .frame(height: 240)
             if showVolume {
                 Chart(bars) { bar in
-                    BarMark(x: .value("时点", bar.id), y: .value("成交量", bar.volume))
+                    BarMark(
+                        x: .value(L10n.text("时点"), bar.id),
+                        y: .value(L10n.text("成交量"), bar.volume)
+                    )
                         .foregroundStyle(bar.isUp ? .green.opacity(0.7) : .red.opacity(0.7))
                 }
                 .chartYAxis { AxisMarks(position: .leading) }

@@ -67,7 +67,7 @@ struct ClientAdapterPanel: View {
             }
             Text(adapter.displayName)
                 .font(.headline)
-            Text("版本 \(adapter.version)")
+            Text(verbatim: L10n.format("版本 %@", adapter.version))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
@@ -102,7 +102,7 @@ struct ClientAdapterPanel: View {
         let color: Color = adapter.healthy
             ? .green
             : (adapter.running ? .orange : .secondary)
-        return Text(label)
+        return Text(LocalizedStringKey(label))
             .font(.caption.weight(.medium))
             .foregroundStyle(color)
             .padding(.horizontal, 8)

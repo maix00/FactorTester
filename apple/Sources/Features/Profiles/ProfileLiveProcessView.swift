@@ -89,7 +89,10 @@ struct WorkPackageResearchView: View {
                     Text("研究工作包")
                     Text(item.summary.workPackageRef).monospaced()
                     Text("·")
-                    Text("研究身份：\(item.profileNames.joined(separator: "、"))")
+                    Text(verbatim: L10n.format(
+                        "研究身份：%@",
+                        item.profileNames.joined(separator: "、")
+                    ))
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

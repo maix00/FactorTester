@@ -1,6 +1,7 @@
 name: FactorTester-Client
 options:
   bundleIdPrefix: com.gtht
+  developmentLanguage: zh-Hans
   deploymentTarget:
     iOS: "16.0"
     macOS: "13.0"

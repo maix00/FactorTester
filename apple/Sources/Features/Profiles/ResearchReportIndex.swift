@@ -130,8 +130,8 @@ enum ResearchReportIndexError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingReference: return "研究报告索引不存在。"
-        case .invalidContract: return "研究报告索引缺少章节与检查点的稳定映射。"
+        case .missingReference: return L10n.text("研究报告索引不存在。")
+        case .invalidContract: return L10n.text("研究报告索引缺少章节与检查点的稳定映射。")
         }
     }
 }

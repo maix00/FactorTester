@@ -129,7 +129,7 @@ final class ProfileLiveProcessController: ObservableObject {
             guard let branch = selectedBranch else {
                 detail = nil
                 timeline = []
-                error = "研究版本树指向的分支不在当前工作包中，请刷新研究目录后重试。"
+                error = L10n.text("研究版本树指向的分支不在当前工作包中，请刷新研究目录后重试。")
                 return
             }
             detail = nil
@@ -160,7 +160,7 @@ final class ProfileLiveProcessController: ObservableObject {
             }
         } catch is CancellationError {
             if activeResearchRequestID == requestID {
-                error = "研究过程读取已取消；可重新选择检查点或刷新研究。"
+                error = L10n.text("研究过程读取已取消；可重新选择检查点或刷新研究。")
             }
             return
         } catch {

@@ -11,12 +11,12 @@ enum AppRuntimePolicy {
 
 @main
 struct FactorTesterClientApp: App {
-    @AppStorage("client.language") private var language = AppLanguage.system.rawValue
     @StateObject private var config = ServerConfig.shared
     @StateObject private var managerConfig = ManagerConfig.shared
     @StateObject private var session = SessionStore()
     @StateObject private var registry = ModuleRegistry()
     @StateObject private var updates = ClientReleaseController()
+    @StateObject private var languageStore = LanguageStore()
     @State private var runtimeActivationError: String?
 
     var body: some Scene {
@@ -45,9 +45,10 @@ struct FactorTesterClientApp: App {
             .environmentObject(session)
             .environmentObject(registry)
             .environmentObject(updates)
+            .environmentObject(languageStore)
             .environment(
                 \.locale,
-                AppLanguage(rawValue: language)?.locale ?? .autoupdatingCurrent
+                languageStore.locale
             )
             .alert(
                 L10n.text("客户端运行时未能激活"),

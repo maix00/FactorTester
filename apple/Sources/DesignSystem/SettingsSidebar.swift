@@ -12,7 +12,11 @@ struct SettingsSidebar: View {
 
     var body: some View {
         List(items, selection: $selection) { item in
-            Label(item.title, systemImage: item.systemImage)
+            Label {
+                Text(L10n.resource(item.title))
+            } icon: {
+                Image(systemName: item.systemImage)
+            }
                 .tag(item.id)
         }
         .listStyle(.sidebar)

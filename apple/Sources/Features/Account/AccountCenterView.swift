@@ -31,9 +31,15 @@ struct AccountSettingsView: View {
                         : "尚未登录；登录后可访问研究工作区和测试任务"
                 ) {
                     HStack(spacing: 8) {
-                        Text(session.user?.username ?? "未登录")
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        if let username = session.user?.username, !username.isEmpty {
+                            Text(verbatim: username)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        } else {
+                            Text("未登录")
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                         Picker("账户操作", selection: $panel) {
                             Text(session.isLoggedIn ? "登出" : "登入")
                                 .tag(AccountPanel.session)
@@ -62,14 +68,24 @@ struct AccountSettingsView: View {
 
             SettingsSectionCard("账户身份") {
                 SettingsRow(title: "用户角色", description: "由服务器分配，客户端不能修改") {
-                    Text(session.user?.role ?? "—")
-                        .foregroundStyle(.secondary)
+                    if let role = session.user?.role, !role.isEmpty {
+                        Text(verbatim: role).foregroundStyle(.secondary)
+                    } else {
+                        Text("—").foregroundStyle(.secondary)
+                    }
                 }
                 Divider()
                 SettingsRow(title: "用户组织", description: "账户所属组织，由服务器管理") {
-                    Text(session.user?.organizationName ?? "—")
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if let organization = session.user?.organizationName,
+                       !organization.isEmpty {
+                        Text(verbatim: organization)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text("—")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
@@ -196,7 +212,7 @@ private struct PasswordPanel: View {
     @MainActor private func submit() async {
         succeeded = false
         guard new == confirmation else {
-            message = "两次输入的新密码不一致"
+            message = L10n.text("两次输入的新密码不一致")
             return
         }
         working = true
@@ -207,7 +223,7 @@ private struct PasswordPanel: View {
                 newPassword: new
             )
             succeeded = response.success
-            message = response.success ? "密码已更新" : response.error
+            message = response.success ? L10n.text("密码已更新") : response.error
             if response.success {
                 session.updateSavedPassword(new)
                 current = ""; new = ""; confirmation = ""

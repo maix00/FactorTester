@@ -56,14 +56,14 @@ final class ResearchAuditObjectCache: ObservableObject {
         guard targetRef.hasPrefix("runspec:"),
               let journalURL = URL(string: journalRef),
               journalURL.isFileURL else {
-            throw APIError.transport("RunSpec 本地引用无效")
+            throw APIError.transport(L10n.text("RunSpec 本地引用无效"))
         }
         let objectID = String(targetRef.dropFirst("runspec:".count))
         guard objectID.range(
             of: #"^[0-9a-f]{64}$"#,
             options: .regularExpression
         ) != nil else {
-            throw APIError.transport("RunSpec 哈希无效")
+            throw APIError.transport(L10n.text("RunSpec 哈希无效"))
         }
         return journalURL
             .deletingLastPathComponent()
@@ -78,7 +78,7 @@ final class ResearchAuditObjectCache: ObservableObject {
         using decoder: JSONDecoder = JSONDecoder()
     ) throws -> ResearchAuditObjectPayload {
         guard targetRef.hasPrefix("runspec:") else {
-            throw APIError.transport("RunSpec 本地引用无效")
+            throw APIError.transport(L10n.text("RunSpec 本地引用无效"))
         }
         let objectID = String(targetRef.dropFirst("runspec:".count))
         let value = try decoder.decode(
@@ -97,7 +97,7 @@ final class ResearchAuditObjectCache: ObservableObject {
               SHA256.hash(data: canonical).map({
                   String(format: "%02x", $0)
               }).joined() == objectID else {
-            throw APIError.transport("RunSpec 本地对象缺少完整配置或与引用不一致")
+            throw APIError.transport(L10n.text("RunSpec 本地对象缺少完整配置或与引用不一致"))
         }
         return value
     }

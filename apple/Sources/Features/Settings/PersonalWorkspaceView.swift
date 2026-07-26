@@ -98,9 +98,9 @@ struct PersonalWorkspaceView: View {
                 description: "分别显示本地工作副本与服务器 canonical 版本"
             ) {
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text("本地 · \(controller.localFactorLibrary?.gitHead ?? "—")")
+                    Text(verbatim: L10n.format("本地 · %@", controller.localFactorLibrary?.gitHead ?? "—"))
                         .font(.caption.monospaced())
-                    Text("服务器 · \(controller.serverFactorLibrary?.gitHead ?? "—")")
+                    Text(verbatim: L10n.format("服务器 · %@", controller.serverFactorLibrary?.gitHead ?? "—"))
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                 }
@@ -136,14 +136,14 @@ struct PersonalWorkspaceView: View {
             if let local = controller.localFactorLibrary {
                 Divider()
                 SettingsRow(title: "本地因子数量", description: "当前本地工作副本的文件统计") {
-                    Text("自定义 \(local.customCount) · 公共 \(local.publicCount)")
+                    Text(verbatim: L10n.format("自定义 %lld · 公共 %lld", local.customCount, local.publicCount))
                         .foregroundStyle(.secondary)
                 }
             }
             if let server = controller.serverFactorLibrary {
                 Divider()
                 SettingsRow(title: "服务器因子数量", description: "当前登录用户可同步的服务器快照") {
-                    Text("自定义 \(server.customCount) · 公共 \(server.publicCount)")
+                    Text(verbatim: L10n.format("自定义 %lld · 公共 %lld", server.customCount, server.publicCount))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -175,9 +175,9 @@ struct PersonalWorkspaceView: View {
 
     private func chooseWorkspace() {
         let panel = NSOpenPanel()
-        panel.title = "选择 FactorTester 用户目录"
-        panel.message = "请选择当前用户目录，用于读取本地中文研究报告。"
-        panel.prompt = "授权读取"
+        panel.title = L10n.text("选择 FactorTester 用户目录")
+        panel.message = L10n.text("请选择当前用户目录，用于读取本地中文研究报告。")
+        panel.prompt = L10n.text("授权读取")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -191,7 +191,10 @@ struct PersonalWorkspaceView: View {
                 await refreshWorkspace()
             }
         } catch {
-            accessError = "无法保存个人工作区授权：\(error.localizedDescription)"
+            accessError = L10n.format(
+                "无法保存个人工作区授权：%@",
+                error.localizedDescription
+            )
         }
     }
 

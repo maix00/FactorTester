@@ -5,7 +5,13 @@ struct TestJobsRequestError: LocalizedError {
     let responseText: String
 
     var errorDescription: String? {
-        if let statusCode { return "任务服务器返回错误（HTTP \(statusCode)）：\(responseText)" }
+        if let statusCode {
+            return L10n.format(
+                "任务服务器返回错误（HTTP %ld）：%@",
+                statusCode,
+                responseText
+            )
+        }
         return responseText
     }
 }
@@ -65,6 +71,22 @@ struct TestJobField: Identifiable, Hashable {
     let id: String
     let name: String
     let value: String
+    let nameKey: String?
+    let nameArgument: String?
+
+    init(
+        id: String,
+        name: String,
+        value: String,
+        nameKey: String? = nil,
+        nameArgument: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.value = value
+        self.nameKey = nameKey
+        self.nameArgument = nameArgument
+    }
 }
 
 struct TestJobResultSection: Identifiable {
@@ -284,7 +306,7 @@ final class TestJobsService {
             let message = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .flatMap { $0.isEmpty ? nil : $0 }
-                ?? "无法解压任务生成物"
+                ?? L10n.text("无法解压任务生成物")
             throw TestJobsRequestError(statusCode: nil, responseText: message)
         }
     }
@@ -293,13 +315,16 @@ final class TestJobsService {
     private func request(path: String, method: String = "GET", port: Int? = nil) async throws -> [String: Any] {
         let data = try await requestData(path: path, method: method, port: port)
         guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw TestJobsRequestError(statusCode: nil, responseText: "服务器返回格式无效")
+            throw TestJobsRequestError(
+                statusCode: nil,
+                responseText: L10n.text("服务器返回格式无效")
+            )
         }
         if let success = value["success"] as? Bool, !success {
             let message = value["error"] as? String
                 ?? value["message"] as? String
                 ?? value["detail"] as? String
-                ?? "任务请求失败"
+                ?? L10n.text("任务请求失败")
             let detail = value["detail"] as? String
             let responseText = detail.map { message == $0 ? message : "\(message)：\($0)" } ?? message
             throw TestJobsRequestError(
@@ -312,7 +337,10 @@ final class TestJobsService {
 
     private func requestData(path: String, method: String = "GET", port: Int? = nil) async throws -> Data {
         guard var url = ServerConfig.shared.url(forPath: path) else {
-            throw TestJobsRequestError(statusCode: nil, responseText: "尚未配置服务器")
+            throw TestJobsRequestError(
+                statusCode: nil,
+                responseText: L10n.text("尚未配置服务器")
+            )
         }
         if let port, port > 0, port != Int(ServerConfig.shared.port) {
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -326,7 +354,10 @@ final class TestJobsService {
         request.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
-            throw TestJobsRequestError(statusCode: nil, responseText: "服务器没有返回有效的 HTTP 响应")
+            throw TestJobsRequestError(
+                statusCode: nil,
+                responseText: L10n.text("服务器没有返回有效的 HTTP 响应")
+            )
         }
         guard (200..<300).contains(http.statusCode) else {
             throw TestJobsRequestError(
@@ -410,7 +441,14 @@ final class TestJobsService {
             ("step_mode", "step_mode（Step 模式）", stringValue(value["step_mode"])),
             ("error", "error（错误）", errorValue(value["error"]))
         ]
-        var rows = known.map { TestJobField(id: $0.0, name: $0.1, value: $0.2) }
+        var rows = known.map {
+            TestJobField(
+                id: $0.0,
+                name: $0.1,
+                value: $0.2,
+                nameKey: $0.1
+            )
+        }
         rows.append(contentsOf: scalarFieldRows(value["research_binding"], prefix: "研究绑定"))
         rows.append(contentsOf: scalarFieldRows(value["submission_context"], prefix: "调用方"))
         return rows
@@ -420,7 +458,14 @@ final class TestJobsService {
         guard let dictionary = value as? [String: Any] else { return [] }
         return dictionary.keys.sorted().compactMap { key in
             guard let value = dictionary[key], isScalar(value) else { return nil }
-            return TestJobField(id: "\(prefix).\(key)", name: "\(prefix) · \(key)", value: stringValue(value))
+            let nameKey = "\(prefix) · %@"
+            return TestJobField(
+                id: "\(prefix).\(key)",
+                name: "\(prefix) · \(key)",
+                value: stringValue(value),
+                nameKey: nameKey,
+                nameArgument: key
+            )
         }
     }
 
@@ -455,7 +500,7 @@ final class TestJobsService {
     private func stringValue(_ value: Any?) -> String {
         guard let value else { return "" }
         if value is NSNull { return "" }
-        if let bool = value as? Bool { return bool ? "是" : "否" }
+        if let bool = value as? Bool { return L10n.text(bool ? "是" : "否") }
         if let number = value as? NSNumber { return number.stringValue }
         return String(describing: value)
     }
@@ -471,7 +516,7 @@ final class TestJobsService {
         }
         guard seconds > 0 else { return "" }
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = L10n.locale
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: Date(timeIntervalSince1970: seconds))
     }
@@ -483,7 +528,12 @@ final class TestJobsService {
     }
 
     private func statusLabel(_ value: String) -> String {
-        ["succeeded": "成功", "failed": "失败", "running": "运行中", "queued": "排队中", "planning": "规划中", "paused": "已暂停", "cancelled": "已取消"][value] ?? value
+        let key = [
+            "succeeded": "成功", "failed": "失败", "running": "运行中",
+            "queued": "排队中", "planning": "规划中", "paused": "已暂停",
+            "cancelled": "已取消",
+        ][value] ?? value
+        return L10n.text(key)
     }
 
     private func prettyJSON(_ value: Any?) -> String {
@@ -492,7 +542,7 @@ final class TestJobsService {
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
               let text = String(data: data, encoding: .utf8) else { return String(describing: value) }
         if text.count > 20_000 {
-            return String(text.prefix(20_000)) + "\n…（内容过长，已截断；请下载生成物查看完整内容）"
+            return String(text.prefix(20_000)) + "\n…（" + L10n.text("内容过长，已截断；请下载生成物查看完整内容") + ")"
         }
         return text
     }

@@ -326,7 +326,7 @@ struct ProfileResearchOverview: View {
                     .foregroundStyle(.secondary)
                 Picker("研究状态", selection: $lifecycle) {
                     ForEach(ResearchLifecycleFilter.allCases) { value in
-                        Text(value.title).tag(value)
+                        Text(LocalizedStringKey(value.title)).tag(value)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -341,11 +341,14 @@ struct ProfileResearchOverview: View {
                 }
                 if let emptyState {
                     if emptyState == .loadingResearch {
-                        ProgressView(emptyState.message)
+                        ProgressView(LocalizedStringKey(emptyState.message))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 48)
                     } else {
-                        Label(emptyState.message, systemImage: emptyState.systemImage)
+                        Label(
+                            LocalizedStringKey(emptyState.message),
+                            systemImage: emptyState.systemImage
+                        )
                             .foregroundStyle(
                                 emptyState == .profileLoadFailed
                                     ? .orange : .secondary
@@ -404,19 +407,23 @@ struct ProfileResearchOverview: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
-                    Text(
-                        "\(ResearchDisplayText.productGroup(item.summary.productGroup)) · "
-                            + "\(item.summary.branchCount) 个分支 · "
-                            + "\(item.summary.runningBranchCount) 个进行中"
-                    )
+                    Text(verbatim: L10n.format(
+                        "%@ · %lld 个分支 · %lld 个进行中",
+                        ResearchDisplayText.productGroup(item.summary.productGroup),
+                        item.summary.branchCount,
+                        item.summary.runningBranchCount
+                    ))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     Label {
-                        Text(
-                            item.profileNames.isEmpty
-                                ? "未分配 Profile"
-                                : "关联 Profile：\(item.profileNames.joined(separator: "、"))"
-                        )
+                        if item.profileNames.isEmpty {
+                            Text(LocalizedStringKey("未分配 Profile"))
+                        } else {
+                            Text(verbatim: L10n.format(
+                                "关联 Profile：%@",
+                                item.profileNames.joined(separator: "、")
+                            ))
+                        }
                     } icon: {
                         Image(systemName: item.profileNames.isEmpty
                             ? "person.crop.circle.badge.questionmark"
@@ -480,7 +487,7 @@ struct ProfileResearchOverview: View {
         case "deleted": .orange
         default: summary.runningBranchCount > 0 ? .blue : .secondary
         }
-        return Text(label)
+        return Text(LocalizedStringKey(label))
             .font(.caption.weight(.semibold))
             .foregroundStyle(color)
             .padding(.horizontal, 8)

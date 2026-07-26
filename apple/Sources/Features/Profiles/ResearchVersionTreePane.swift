@@ -185,14 +185,14 @@ struct ResearchVersionTreePane: View {
                         statusLegend(color: .orange, label: "暂停")
                         statusLegend(color: .green, label: "完成")
                         if hiddenBranchCount > 0 {
-                            Text("另有 \(hiddenBranchCount) 条分支")
+                            Text(verbatim: L10n.format("另有 %lld 条分支", hiddenBranchCount))
                                 .font(.system(size: 9))
                                 .foregroundStyle(.secondary)
                         }
                     }
                     if let omittedNodeCount = remainingOmittedNodeCount,
                        omittedNodeCount > 0 {
-                        Text("尚有 \(omittedNodeCount) 个检查点未载入")
+                        Text(verbatim: L10n.format("尚有 %lld 个检查点未载入", omittedNodeCount))
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
                     }
@@ -324,7 +324,10 @@ struct ResearchVersionTreePane: View {
                 return
             }
             guard !node.sectionRef.isEmpty else {
-                missingReportMessage = "“\(node.title)”尚无已验证的报告正文。"
+                missingReportMessage = L10n.format(
+                    "“%@”尚无已验证的报告正文。",
+                    node.title
+                )
                 return
             }
             missingReportMessage = nil
@@ -400,7 +403,7 @@ struct ResearchVersionTreePane: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text(node.subtitle)
+                    Text(LocalizedStringKey(node.subtitle))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -418,7 +421,7 @@ struct ResearchVersionTreePane: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(node.title)，\(node.subtitle)")
+        .accessibilityLabel(L10n.format("%@，%@", node.title, node.subtitle))
         .accessibilityIdentifier("research.tree.node.\(node.id)")
         .help(
             node.sectionRef.isEmpty
@@ -502,14 +505,14 @@ struct ResearchVersionTreePane: View {
                         visibleBranches[$0].label,
                         currentNode: visibleBranches[$0].currentNode
                     )
-                } ?? "较早研究分支"
+                } ?? L10n.text("较早研究分支")
                 result.append(ResearchTreeNode(
                     id: "lineage|\(branch.branchRef)",
                     checkpointRef: "",
                     sectionRef: "",
                     title: lineage.relation == "fork"
-                        ? "从 \(sourceLabel) 分叉"
-                        : "沿用 \(sourceLabel) 的研究证据",
+                        ? L10n.format("从 %@ 分叉", sourceLabel)
+                        : L10n.format("沿用 %@ 的研究证据", sourceLabel),
                     subtitle: sourceIndex == nil ? "来源未载入" : "已验证来源",
                     timestamp: branch.createdAt,
                     lane: branchLane,
@@ -760,7 +763,7 @@ struct ResearchVersionTreePane: View {
                     Circle().stroke(Color.accentColor, lineWidth: 1.4)
                 }
                 .frame(width: 7, height: 7)
-            Text(label)
+            Text(LocalizedStringKey(label))
         }
         .font(.system(size: 9))
         .foregroundStyle(.secondary)
@@ -771,7 +774,7 @@ struct ResearchVersionTreePane: View {
             Circle()
                 .fill(color)
                 .frame(width: 7, height: 7)
-            Text(label)
+            Text(LocalizedStringKey(label))
         }
         .font(.system(size: 9))
         .foregroundStyle(.secondary)
@@ -843,7 +846,8 @@ private struct ResearchTreeNode: Identifiable {
 }
 
 private func graphVersion(_ graphRef: String) -> String {
-    graphRef.split(separator: "@").last.map(String.init) ?? "图版本"
+    graphRef.split(separator: "@").last.map(String.init)
+        ?? L10n.text("图版本")
 }
 
 private func continuationTitle(from source: String?, to target: String) -> String {
@@ -852,14 +856,14 @@ private func continuationTitle(from source: String?, to target: String) -> Strin
         return value.split(separator: "@").last.map(String.init) ?? value
     }
     return refs.count == 2
-        ? "图版本承接 \(refs[0]) → \(refs[1])"
-        : "图版本承接"
+        ? L10n.format("图版本承接 %@ → %@", refs[0], refs[1])
+        : L10n.text("图版本承接")
 }
 
 enum ResearchTreeTimestamp {
     static func text(_ timestamp: Double) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.locale = L10n.locale
         formatter.dateFormat = "MM-dd HH:mm"
         return formatter.string(from: Date(timeIntervalSince1970: timestamp))
     }
