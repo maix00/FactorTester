@@ -10,7 +10,7 @@ import orjson
 
 from ..assurance import TerminalAssuranceSummary
 from ..models import JobRecord, SchedulingEntitlement
-from ..states import JobStatus
+from ..states import JobStatus, TERMINAL_STATUSES
 
 
 def _loads(value: str | None, default: Any = None) -> Any:
@@ -92,6 +92,40 @@ class JobQueryImplementation:
             for row in rows
             if (record := self._record(row)) is not None
         ]
+
+    def has_run_attempts(self, *, owner: str, run_id: str) -> bool:
+        """Return whether a Run has at least one durable JobAttempt."""
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM research_jobs
+                WHERE owner=? AND run_id=?
+                LIMIT 1
+                """,
+                (str(owner), str(run_id)),
+            ).fetchone()
+        return row is not None
+
+    def all_run_attempts_terminal(self, *, owner: str, run_id: str) -> bool:
+        """Check Run terminality without materializing full JobSpecs."""
+        terminal_values = tuple(status.value for status in TERMINAL_STATUSES)
+        placeholders = ",".join("?" for _ in terminal_values)
+        with self._connection() as conn:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN status IN ({placeholders})
+                                THEN 0 ELSE 1 END) AS non_terminal
+                FROM research_jobs
+                WHERE owner=? AND run_id=?
+                """,
+                (*terminal_values, str(owner), str(run_id)),
+            ).fetchone()
+        return bool(
+            row is not None
+            and int(row["total"] or 0) > 0
+            and int(row["non_terminal"] or 0) == 0
+        )
 
     def list_with_metadata(
         self,

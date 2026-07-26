@@ -155,7 +155,10 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
             f"configuration missing analyses: {missing}"
         )
     try:
-        with transient_factor_source_scope(overrides=source_overrides):
+        with transient_factor_source_scope(
+            owner=owner,
+            overrides=source_overrides,
+        ):
             frozen_configuration = _freeze_product_selections(
                 configuration,
                 owner=owner,
@@ -630,29 +633,40 @@ def submit_research_run():
         cleanup_scope(str(transient_scope.get("scope_id") or ""))
         raise
     jobs = []
-    for kind in analyses:
-        payload = {
-            **_execution_payload(frozen_configuration, kind),
-            "run_id": run["run_id"],
-            "run_token": f"{run['run_id']}:{kind}",
-            "workspace_id": workspace_id,
-            "configuration_id": configuration["configuration_id"],
-            "configuration_revision": configuration["revision"],
-            "_owner": owner,
-            "retention_mode": retention_mode,
-            "step_mode": step_mode,
-            "output_requests": list(prepared["output_requests"]),
-            "run_spec": run_spec,
-            "transient_factor_source_scope_id": str(
-                transient_scope.get("scope_id") or ""
-            ),
-        }
-        job = _submit_kind(
-            kind,
-            payload,
-            run_spec_hash=str(run["run_spec_hash"]),
-        )
-        jobs.append(job.summary())
+    try:
+        for kind in analyses:
+            payload = {
+                **_execution_payload(frozen_configuration, kind),
+                "run_id": run["run_id"],
+                "run_token": f"{run['run_id']}:{kind}",
+                "workspace_id": workspace_id,
+                "configuration_id": configuration["configuration_id"],
+                "configuration_revision": configuration["revision"],
+                "_owner": owner,
+                "retention_mode": retention_mode,
+                "step_mode": step_mode,
+                "output_requests": list(prepared["output_requests"]),
+                "run_spec": run_spec,
+                "transient_factor_source_scope_id": str(
+                    transient_scope.get("scope_id") or ""
+                ),
+            }
+            job = _submit_kind(
+                kind,
+                payload,
+                run_spec_hash=str(run["run_spec_hash"]),
+            )
+            jobs.append(job.summary())
+    except Exception:
+        # A submission failure before the first Job is durable must not leave
+        # a source bundle behind.  Once a Job exists, its terminal lifecycle
+        # owns cleanup because that Job may already be running.
+        if not JobRepository().has_run_attempts(
+            owner=owner,
+            run_id=str(run["run_id"]),
+        ):
+            cleanup_scope(str(transient_scope.get("scope_id") or ""))
+        raise
     try:
         presentation_sample_identity = derive_sample_identity(run_spec)
     except ValueError:

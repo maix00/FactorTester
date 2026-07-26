@@ -85,6 +85,9 @@ def validate_entries(raw: Any) -> list[dict[str, Any]]:
 
 def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Persist an isolated source scope and return its source-free manifest."""
+    owner = str(owner or "").strip()
+    if not owner:
+        raise ValueError("transient factor source owner is required")
     validated = validate_entries(list(entries))
     if not validated:
         return {"scope_id": "", "files": [], "mode": "metadata_only"}
@@ -135,10 +138,13 @@ def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, 
 
 def load_source(scope_id: str, factor_id: str, *, owner: str = "") -> str | None:
     """Load one source only when the scope manifest belongs to *owner*."""
+    owner = str(owner or "").strip()
+    if not owner:
+        return None
     try:
         root = _scope_path(scope_id)
         manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-        if owner and str(manifest.get("owner") or "") != str(owner):
+        if str(manifest.get("owner") or "") != owner:
             return None
         allowed = {
             str(item.get("factor_id") or "")
@@ -190,9 +196,9 @@ def cleanup_for_terminal_job(repository: Any, job: Any) -> bool:
     )
     if not scope_id:
         return False
-    from server.jobs.states import TERMINAL_STATUSES
-
-    attempts = repository.list(owner=job.owner, run_id=job.run_id, limit=200)
-    if not attempts or any(item.status not in TERMINAL_STATUSES for item in attempts):
+    if not repository.all_run_attempts_terminal(
+        owner=job.owner,
+        run_id=job.run_id,
+    ):
         return False
     return cleanup_scope(scope_id)

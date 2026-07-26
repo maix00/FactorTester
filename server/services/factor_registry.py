@@ -65,28 +65,41 @@ _active_transient_source_scope: ContextVar[str] = ContextVar(
 _active_transient_source_overrides: ContextVar[dict[str, str]] = ContextVar(
     "active_transient_factor_source_overrides", default={}
 )
+_active_transient_source_owner: ContextVar[str] = ContextVar(
+    "active_transient_factor_source_owner", default=""
+)
 
 
 @contextmanager
 def transient_factor_source_scope(
     scope_id: str = "",
     *,
+    owner: str = "",
     overrides: dict[str, str] | None = None,
 ):
+    owner = str(owner or "").strip()
+    if overrides and not owner:
+        raise ValueError("transient factor source override owner is required")
     token = _active_transient_source_scope.set(str(scope_id or "").strip())
     override_token = _active_transient_source_overrides.set(
         dict(overrides or {})
     )
+    owner_token = _active_transient_source_owner.set(owner)
     try:
         yield
     finally:
         _active_transient_source_scope.reset(token)
         _active_transient_source_overrides.reset(override_token)
+        _active_transient_source_owner.reset(owner_token)
 
 
 def _transient_source(owner: str, factor_id: str) -> str:
+    owner = str(owner or "").strip()
+    if not owner:
+        return ""
     override = _active_transient_source_overrides.get().get(str(factor_id))
-    if override:
+    bound_owner = _active_transient_source_owner.get()
+    if override and (not bound_owner or bound_owner == owner):
         return override
     scope_id = _active_transient_source_scope.get()
     if not scope_id:
@@ -262,6 +275,11 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
                 f"{sharing_reason} for current user {active_user!r}"
             )
         return "custom", owner, factor_id, f"{owner}:{factor_id}"
+    # An unqualified factor reference normally resolves to the public library.
+    # During a Run, an explicitly supplied Profile source is stronger than
+    # that default; otherwise a same-named public factor would silently win.
+    if active_user and _transient_source(active_user, factor_id):
+        return "custom", active_user, factor_id, f"{active_user}:{factor_id}"
     if _public_factor_source_exists(factor_id):
         return "public", "$COMMON", factor_id, f"$COMMON:{factor_id}"
     return "custom", active_user or "", factor_id, f"{active_user}:{factor_id}" if active_user else factor_id

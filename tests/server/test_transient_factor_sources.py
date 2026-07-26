@@ -23,6 +23,7 @@ def test_transient_scope_is_hashed_and_cleaned(monkeypatch, tmp_path: Path) -> N
     assert "source_code" not in scope["files"][0]
     assert sources.load_source(scope["scope_id"], "ProfileAlpha", owner="alice")
     assert sources.load_source(scope["scope_id"], "ProfileAlpha", owner="bob") is None
+    assert sources.load_source(scope["scope_id"], "ProfileAlpha", owner="") is None
     root = tmp_path / "transient_factor_sources" / scope["scope_id"]
     assert root.exists()
     assert sources.cleanup_scope(scope["scope_id"])
@@ -39,9 +40,19 @@ def test_transient_scope_rejects_non_factor_paths(monkeypatch, tmp_path: Path) -
         }])
 
 
+def test_transient_scope_requires_an_owner(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sources.Settings, "CACHE_DB_PATH", str(tmp_path / "cache.sqlite"))
+    with pytest.raises(ValueError, match="owner"):
+        sources.create_scope(owner="", entries=[{
+            "path": "custom_factors/ProfileAlpha.py",
+            "source_code": "class ProfileAlpha:\n    pass\n",
+        }])
+
+
 def test_factor_registry_prefers_run_override_without_persisting_source() -> None:
     source = "class ProfileAlpha:\n    pass\n"
     with factor_registry.transient_factor_source_scope(
+        owner="alice",
         overrides={"ProfileAlpha": source}
     ):
         resolved = factor_registry.resolve_factor_family_source(
@@ -50,6 +61,41 @@ def test_factor_registry_prefers_run_override_without_persisting_source() -> Non
         )
     assert resolved["source_kind"] == "custom"
     assert resolved["source_code"] == source
+
+
+def test_transient_override_wins_over_public_name_collision(monkeypatch) -> None:
+    source = "class ProfileAlpha:\n    pass\n"
+    monkeypatch.setattr(
+        factor_registry,
+        "_public_factor_source_exists",
+        lambda factor_id: factor_id == "ProfileAlpha",
+    )
+    monkeypatch.setattr(
+        factor_registry,
+        "load_public_factor_source",
+        lambda factor_id: "class PublicAlpha:\n    pass\n",
+    )
+    with factor_registry.transient_factor_source_scope(
+        owner="alice",
+        overrides={"ProfileAlpha": source}
+    ):
+        resolved = factor_registry.resolve_factor_family_source(
+            "ProfileAlpha",
+            username="alice",
+        )
+    assert resolved["source_kind"] == "custom"
+    assert resolved["source_mode"] == "transient_run_source"
+    assert resolved["source_code"] == source
+
+
+def test_transient_override_is_bound_to_owner() -> None:
+    source = "class ProfileAlpha:\n    pass\n"
+    with factor_registry.transient_factor_source_scope(
+        owner="alice",
+        overrides={"ProfileAlpha": source},
+    ):
+        assert factor_registry._transient_source("alice", "ProfileAlpha") == source
+        assert factor_registry._transient_source("bob", "ProfileAlpha") == ""
 
 
 def test_scope_is_removed_only_after_all_run_attempts_are_terminal(
@@ -79,4 +125,27 @@ def test_scope_is_removed_only_after_all_run_attempts_are_terminal(
     repository.transition("job-a", JobStatus.SUCCEEDED, expected=JobStatus.RUNNING)
     assert sources.scope_status(scope["scope_id"]) == "available"
     repository.transition("job-b", JobStatus.FAILED, expected=JobStatus.RUNNING)
+    assert sources.scope_status(scope["scope_id"]) == "cleaned"
+
+
+def test_cleanup_uses_aggregate_run_attempt_query(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sources.Settings, "CACHE_DB_PATH", str(tmp_path / "cache.sqlite"))
+    scope = sources.create_scope(
+        owner="alice",
+        entries=[{
+            "path": "custom_factors/ProfileAlpha.py",
+            "source_code": "class ProfileAlpha:\n    pass\n",
+        }],
+    )
+
+    class Record:
+        owner = "alice"
+        run_id = "run-1"
+        job_spec = {"transient_factor_source_scope_id": scope["scope_id"]}
+
+    class Repository:
+        def all_run_attempts_terminal(self, *, owner: str, run_id: str):
+            return True
+
+    assert sources.cleanup_for_terminal_job(Repository(), Record())
     assert sources.scope_status(scope["scope_id"]) == "cleaned"
