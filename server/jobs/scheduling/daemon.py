@@ -55,6 +55,9 @@ class ResearchJobScheduler:
         self._draining = False
         self._thread: threading.Thread | None = None
         self._tick_lock = threading.Lock()
+        from server.services.transient_factor_sources import cleanup_stale_scopes
+
+        cleanup_stale_scopes(self.repository)
         self._recover_interrupted_jobs()
 
     def _recover_interrupted_jobs(self) -> None:

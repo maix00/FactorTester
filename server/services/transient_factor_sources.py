@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import time
 import uuid
 from typing import Any, Iterable
 
@@ -99,6 +100,7 @@ def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, 
         "schema_version": 1,
         "scope_id": scope_id,
         "owner": str(owner),
+        "created_at": time.time(),
         "files": [
             {
                 key: value
@@ -202,3 +204,33 @@ def cleanup_for_terminal_job(repository: Any, job: Any) -> bool:
     ):
         return False
     return cleanup_scope(scope_id)
+
+
+def cleanup_stale_scopes(repository: Any, *, max_age_seconds: float = 3600.0) -> int:
+    """Reclaim abandoned scopes that have no active JobAttempt reference."""
+    root = _base_root()
+    now = time.time()
+    removed = 0
+    for candidate in root.iterdir():
+        if not candidate.is_dir() or not _SCOPE.fullmatch(candidate.name):
+            continue
+        try:
+            manifest = json.loads(
+                (candidate / "manifest.json").read_text(encoding="utf-8")
+            )
+            owner = str(manifest.get("owner") or "").strip()
+            created_at = float(manifest.get("created_at") or 0.0)
+            if not owner or created_at <= 0.0:
+                continue
+            if now - created_at < max(0.0, float(max_age_seconds)):
+                continue
+            if repository.has_active_transient_scope(
+                owner=owner,
+                scope_id=candidate.name,
+            ):
+                continue
+            shutil.rmtree(candidate, ignore_errors=False)
+            removed += 1
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return removed

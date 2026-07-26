@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -148,4 +149,34 @@ def test_cleanup_uses_aggregate_run_attempt_query(monkeypatch, tmp_path: Path) -
             return True
 
     assert sources.cleanup_for_terminal_job(Repository(), Record())
+    assert sources.scope_status(scope["scope_id"]) == "cleaned"
+
+
+def test_stale_scope_cleanup_keeps_active_job_sources(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sources.Settings, "CACHE_DB_PATH", str(tmp_path / "cache.sqlite"))
+    scope = sources.create_scope(
+        owner="alice",
+        entries=[{
+            "path": "custom_factors/ProfileAlpha.py",
+            "source_code": "class ProfileAlpha:\n    pass\n",
+        }],
+    )
+    manifest_path = (
+        tmp_path / "transient_factor_sources" / scope["scope_id"] / "manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["created_at"] = 1.0
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    class ActiveRepository:
+        def has_active_transient_scope(self, *, owner: str, scope_id: str):
+            return True
+
+    class EmptyRepository:
+        def has_active_transient_scope(self, *, owner: str, scope_id: str):
+            return False
+
+    assert sources.cleanup_stale_scopes(ActiveRepository(), max_age_seconds=0.0) == 0
+    assert sources.scope_status(scope["scope_id"]) == "available"
+    assert sources.cleanup_stale_scopes(EmptyRepository(), max_age_seconds=0.0) == 1
     assert sources.scope_status(scope["scope_id"]) == "cleaned"

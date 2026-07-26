@@ -127,6 +127,23 @@ class JobQueryImplementation:
             and int(row["non_terminal"] or 0) == 0
         )
 
+    def has_active_transient_scope(self, *, owner: str, scope_id: str) -> bool:
+        """Check active JobSpecs without materializing their payloads."""
+        terminal_values = tuple(status.value for status in TERMINAL_STATUSES)
+        placeholders = ",".join("?" for _ in terminal_values)
+        with self._connection() as conn:
+            row = conn.execute(
+                f"""
+                SELECT 1 FROM research_jobs
+                WHERE owner=?
+                  AND status NOT IN ({placeholders})
+                  AND instr(job_spec_json, ?) > 0
+                LIMIT 1
+                """,
+                (str(owner), *terminal_values, str(scope_id)),
+            ).fetchone()
+        return row is not None
+
     def list_with_metadata(
         self,
         *,
