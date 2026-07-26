@@ -15,6 +15,7 @@ from server.jobs.artifacts import cleanup_staging_files
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.modules.single_factor_test import sft_bp
+from server.modules.single_factor_test.backtest_job_reads import _public_job_spec
 
 
 def _create_job(
@@ -135,6 +136,26 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
         == "trusted"
     )
     assert repository.storage_usage(owner="alice") == 0
+
+
+def test_public_job_projection_redacts_nested_private_fields() -> None:
+    class Job:
+        job_spec = {
+            "run_spec": {
+                "configuration": {
+                    "nested": {
+                        "source_code": "private",
+                        "password": "private",
+                    },
+                },
+            },
+            "transient_factor_source_scope_id": "private",
+        }
+
+    projected = _public_job_spec(Job())
+    serialized = orjson.dumps(projected).decode()
+    assert "private" not in serialized
+    assert "source_code" not in serialized
 
 
 def test_user_can_bulk_clear_retained_results_by_workspace(tmp_path, monkeypatch) -> None:

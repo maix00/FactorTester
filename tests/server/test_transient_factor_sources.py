@@ -32,6 +32,23 @@ def test_transient_scope_is_hashed_and_cleaned(monkeypatch, tmp_path: Path) -> N
     assert sources.scope_status(scope["scope_id"]) == "cleaned"
 
 
+def test_scope_status_detects_source_corruption(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sources.Settings, "CACHE_DB_PATH", str(tmp_path / "cache.sqlite"))
+    scope = sources.create_scope(
+        owner="alice",
+        entries=[{
+            "path": "custom_factors/ProfileAlpha.py",
+            "source_code": "class ProfileAlpha:\n    pass\n",
+        }],
+    )
+    source_path = (
+        tmp_path / "transient_factor_sources" / scope["scope_id"]
+        / "custom_factors" / "ProfileAlpha.py"
+    )
+    source_path.write_text("class ProfileAlpha:\n    changed = True\n", encoding="utf-8")
+    assert sources.scope_status(scope["scope_id"]) == "corrupt"
+
+
 def test_transient_scope_rejects_non_factor_paths(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(sources.Settings, "CACHE_DB_PATH", str(tmp_path / "cache.sqlite"))
     with pytest.raises(ValueError, match="custom_factors"):
@@ -169,14 +186,35 @@ def test_stale_scope_cleanup_keeps_active_job_sources(monkeypatch, tmp_path: Pat
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     class ActiveRepository:
-        def has_active_transient_scope(self, *, owner: str, scope_id: str):
+        def has_active_transient_scope(self, *, owner: str = "", scope_id: str):
             return True
 
     class EmptyRepository:
-        def has_active_transient_scope(self, *, owner: str, scope_id: str):
+        def has_active_transient_scope(self, *, owner: str = "", scope_id: str):
             return False
 
     assert sources.cleanup_stale_scopes(ActiveRepository(), max_age_seconds=0.0) == 0
     assert sources.scope_status(scope["scope_id"]) == "available"
     assert sources.cleanup_stale_scopes(EmptyRepository(), max_age_seconds=0.0) == 1
     assert sources.scope_status(scope["scope_id"]) == "cleaned"
+
+
+def test_stale_cleanup_removes_incomplete_manifest_without_active_job(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(sources.Settings, "CACHE_DB_PATH", str(tmp_path / "cache.sqlite"))
+    root = tmp_path / "transient_factor_sources" / ("a" * 32)
+    root.mkdir(parents=True)
+    (root / "custom_factors").mkdir()
+    (root / "custom_factors" / "ProfileAlpha.py").write_text(
+        "class ProfileAlpha:\n    pass\n",
+        encoding="utf-8",
+    )
+
+    class Repository:
+        def has_active_transient_scope(self, *, owner: str = "", scope_id: str):
+            return False
+
+    assert sources.cleanup_stale_scopes(Repository(), max_age_seconds=0.0) == 1
+    assert not root.exists()

@@ -104,15 +104,30 @@ def _submission_context(job) -> dict[str, object]:
     }
 
 
+_PRIVATE_JOB_KEYS = frozenset({
+    "run_token", "_owner", "password", "secret", "api_key",
+    "source_code", "transient_factor_source_scope_id",
+})
+
+
+def _public_value(value):
+    """Recursively remove credentials and executable source from projections."""
+    if isinstance(value, dict):
+        return {
+            str(key): _public_value(item)
+            for key, item in value.items()
+            if str(key) not in _PRIVATE_JOB_KEYS
+        }
+    if isinstance(value, list):
+        return [_public_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_public_value(item) for item in value]
+    return value
+
+
 def _public_job_spec(job) -> dict[str, object]:
     """Return the stored spec without credentials/internal owner markers."""
-    spec = dict(job.job_spec) if isinstance(job.job_spec, dict) else {}
-    for key in (
-        "run_token", "_owner", "password", "secret", "api_key",
-        "transient_factor_source_scope_id",
-    ):
-        spec.pop(key, None)
-    return spec
+    return _public_value(job.job_spec) if isinstance(job.job_spec, dict) else {}
 
 
 def _compatibility(job) -> dict[str, object]:
@@ -196,7 +211,10 @@ def _task_detail(
     binding = job_research_binding(job) | (detail.get("graph_binding") or {})
     caller = _submission_context(job)
     run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
-    configuration = run_spec.get("configuration") if isinstance(run_spec, dict) else None
+    configuration = (
+        _public_value(run_spec.get("configuration"))
+        if isinstance(run_spec, dict) else None
+    )
     summary = job.summary(pinned=detail["pinned"])
     return {
         "job": {
@@ -288,7 +306,7 @@ def get_test_job(job_id: str):
     payload = {
         "success": True,
         **job.summary(pinned=detail["pinned"]),
-        "execution_plan": job.execution_plan,
+        "execution_plan": _public_value(job.execution_plan),
         "job_spec": _public_job_spec(job),
         "compatibility": _compatibility(job),
         "result_summary": job.result_summary,
@@ -297,7 +315,7 @@ def get_test_job(job_id: str):
         "output_requests": list(job.job_spec.get("output_requests") or ()),
         "output_declarations": declarations,
         "configuration": (
-            job.job_spec.get("run_spec", {}).get("configuration")
+            _public_value(job.job_spec.get("run_spec", {}).get("configuration"))
             if isinstance(job.job_spec.get("run_spec"), dict)
             else None
         ),

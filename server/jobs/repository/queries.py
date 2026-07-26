@@ -127,20 +127,31 @@ class JobQueryImplementation:
             and int(row["non_terminal"] or 0) == 0
         )
 
-    def has_active_transient_scope(self, *, owner: str, scope_id: str) -> bool:
+    def has_active_transient_scope(
+        self,
+        *,
+        scope_id: str,
+        owner: str = "",
+    ) -> bool:
         """Check active JobSpecs without materializing their payloads."""
         terminal_values = tuple(status.value for status in TERMINAL_STATUSES)
         placeholders = ",".join("?" for _ in terminal_values)
+        clauses = [
+            f"status NOT IN ({placeholders})",
+            "instr(job_spec_json, ?) > 0",
+        ]
+        args: list[Any] = [*terminal_values, str(scope_id)]
+        if str(owner or "").strip():
+            clauses.insert(0, "owner=?")
+            args.insert(0, str(owner).strip())
         with self._connection() as conn:
             row = conn.execute(
                 f"""
                 SELECT 1 FROM research_jobs
-                WHERE owner=?
-                  AND status NOT IN ({placeholders})
-                  AND instr(job_spec_json, ?) > 0
+                WHERE {' AND '.join(clauses)}
                 LIMIT 1
                 """,
-                (str(owner), *terminal_values, str(scope_id)),
+                args,
             ).fetchone()
         return row is not None
 

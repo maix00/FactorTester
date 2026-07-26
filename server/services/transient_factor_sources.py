@@ -101,14 +101,7 @@ def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, 
         "scope_id": scope_id,
         "owner": str(owner),
         "created_at": time.time(),
-        "files": [
-            {
-                key: value
-                for key, value in entry.items()
-                if key != "source_code"
-            }
-            for entry in validated
-        ],
+        "files": [],
     }
     try:
         for entry in validated:
@@ -122,6 +115,13 @@ def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, 
             finally:
                 if fd >= 0:
                     os.close(fd)
+            metadata = {
+                key: value
+                for key, value in entry.items()
+                if key != "source_code"
+            }
+            metadata["source_mtime_ns"] = path.stat().st_mtime_ns
+            manifest["files"].append(metadata)
         manifest_path = root / "manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n",
@@ -186,8 +186,37 @@ def scope_status(scope_id: str) -> str:
     if not scope_id:
         return "not_applicable"
     try:
-        return "available" if _scope_path(scope_id).exists() else "cleaned"
-    except ValueError:
+        root = _scope_path(scope_id)
+        if not root.exists():
+            return "cleaned"
+        manifest = json.loads(
+            (root / "manifest.json").read_text(encoding="utf-8")
+        )
+        files = manifest.get("files")
+        if not isinstance(files, list) or not files:
+            return "corrupt"
+        for item in files:
+            if not isinstance(item, dict):
+                return "corrupt"
+            factor_id = str(item.get("factor_id") or "")
+            if not _ID.fullmatch(factor_id):
+                return "corrupt"
+            path = root / "custom_factors" / f"{factor_id}.py"
+            stat = path.stat()
+            if stat.st_size != int(item.get("source_bytes") or -1):
+                return "corrupt"
+            declared_mtime = int(item.get("source_mtime_ns") or 0)
+            if declared_mtime and stat.st_mtime_ns != declared_mtime:
+                return "corrupt"
+            if not declared_mtime:
+                source = path.read_text(encoding="utf-8")
+                encoded = source.encode("utf-8")
+                if hashlib.sha256(encoded).hexdigest() != str(
+                    item.get("source_sha256") or ""
+                ):
+                    return "corrupt"
+        return "available"
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return "invalid"
 
 
@@ -210,19 +239,20 @@ def cleanup_stale_scopes(repository: Any, *, max_age_seconds: float = 3600.0) ->
     """Reclaim abandoned scopes that have no active JobAttempt reference."""
     root = _base_root()
     now = time.time()
+    max_age = max(0.0, float(max_age_seconds))
     removed = 0
     for candidate in root.iterdir():
         if not candidate.is_dir() or not _SCOPE.fullmatch(candidate.name):
             continue
         try:
+            if now - candidate.stat().st_mtime < max_age:
+                continue
             manifest = json.loads(
                 (candidate / "manifest.json").read_text(encoding="utf-8")
             )
             owner = str(manifest.get("owner") or "").strip()
             created_at = float(manifest.get("created_at") or 0.0)
-            if not owner or created_at <= 0.0:
-                continue
-            if now - created_at < max(0.0, float(max_age_seconds)):
+            if created_at > 0.0 and now - created_at < max_age:
                 continue
             if repository.has_active_transient_scope(
                 owner=owner,
@@ -232,5 +262,11 @@ def cleanup_stale_scopes(repository: Any, *, max_age_seconds: float = 3600.0) ->
             shutil.rmtree(candidate, ignore_errors=False)
             removed += 1
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            continue
+            try:
+                if repository.has_active_transient_scope(scope_id=candidate.name):
+                    continue
+                shutil.rmtree(candidate, ignore_errors=False)
+                removed += 1
+            except (OSError, TypeError, ValueError):
+                continue
     return removed
