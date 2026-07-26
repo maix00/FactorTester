@@ -34,7 +34,10 @@ final class SessionStore: ObservableObject {
         guard let principalRef = user?.username, !principalRef.isEmpty else {
             return false
         }
-        return await bridgeClientSession(principalRef: principalRef)
+        return await bridgeClientSession(
+            principalRef: principalRef,
+            reportError: false
+        )
     }
 
     /// 启动 / 设置变更后刷新当前登录态。
@@ -53,6 +56,13 @@ final class SessionStore: ObservableObject {
                 return false
             }
             user = refreshed
+            try? CanonicalFactorLibraryAccessStore.ensureDefault(
+                for: refreshed.username ?? ""
+            )
+            _ = await bridgeClientSession(
+                principalRef: refreshed.username ?? "",
+                reportError: false
+            )
             if role == "super_admin" {
                 isManagerLoggedIn = (try? await managerAPI.restoreSession()) == true
             } else {
@@ -120,7 +130,10 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    private func bridgeClientSession(principalRef: String) async -> Bool {
+    private func bridgeClientSession(
+        principalRef: String,
+        reportError: Bool = true
+    ) async -> Bool {
         if let bridgeOverride {
             return await bridgeOverride(principalRef)
         }
@@ -151,7 +164,7 @@ final class SessionStore: ObservableObject {
             ])
             return true
         } catch {
-            lastError = error.localizedDescription
+            if reportError { lastError = error.localizedDescription }
             return false
         }
     }
