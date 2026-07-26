@@ -13,7 +13,6 @@ from tools.cli.core.context import client_from_config, requested_ports
 from tools.cli.core.errors import friendly_errors
 from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
-from tools.data.factor_workspace.storage import is_profile_factor_worktree_root
 
 
 def _json(value: Any) -> str:
@@ -31,6 +30,11 @@ def _load_profile_factor_sources(root: Path | None) -> list[dict[str, str]]:
     """Read only custom factor files from an Agent-owned Profile worktree."""
     if root is None:
         return []
+    # Keep the HTTP-only CLI startup independent from the server's full data
+    # layer.  The storage validator is needed only when this optional local
+    # source upload is explicitly requested.
+    from tools.data.factor_workspace.storage import is_profile_factor_worktree_root
+
     target = root.expanduser().resolve()
     if not is_profile_factor_worktree_root(target):
         raise click.ClickException(
