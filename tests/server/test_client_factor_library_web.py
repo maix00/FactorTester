@@ -9,6 +9,7 @@ from flask import Flask
 from server.modules.custom_factors import cf_bp
 from server.modules.custom_factors import catalog_routes
 from server.modules.custom_factors import factor_library_routes
+from server.modules.custom_factors import editor_routes
 
 
 ROOT = Path(__file__).parents[2]
@@ -188,3 +189,63 @@ def test_client_library_javascript_has_exactly_one_metadata_network_boundary(
         "source-code",
     ):
         assert forbidden not in script
+
+
+def test_workspace_snapshot_exposes_server_git_state_and_imports_custom_sources(
+    monkeypatch,
+) -> None:
+    rows = {
+        "custom": [{
+            "owner_username": "alice",
+            "factor_id": "LocalAlpha",
+            "source_code": "class LocalAlpha: pass\n",
+        }],
+        "public": [{
+            "owner_username": "",
+            "factor_id": "PublicAlpha",
+            "source_code": "class PublicAlpha: pass\n",
+        }],
+    }
+    monkeypatch.setattr(editor_routes, "list_factor_sources", lambda kind: rows[kind])
+    monkeypatch.setattr(
+        editor_routes,
+        "get_factor_workspace_git_state",
+        lambda username: {
+            "workspace_root": "/srv/factors/alice",
+            "git_head": "abc1234",
+            "git_current_branch": "main",
+        },
+    )
+    monkeypatch.setattr(editor_routes, "get_account", lambda username: {})
+    monkeypatch.setattr(editor_routes, "is_super_admin_account", lambda account: False)
+
+    client = _app().test_client()
+    _login(client)
+    response = client.get("/custom-factors/api/workspace/snapshot")
+    assert response.status_code == 200
+    snapshot = response.get_json()["snapshot"]
+    assert snapshot["git_head"] == "abc1234"
+    assert [item["path"] for item in snapshot["files"]] == [
+        "custom_factors/LocalAlpha.py",
+        "public_factors/PublicAlpha.py",
+    ]
+
+    saved: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        editor_routes,
+        "save_factor_source",
+        lambda username, factor_id, source: saved.append((factor_id, source)),
+    )
+    imported = client.post(
+        "/custom-factors/api/workspace/snapshot",
+        json={
+            "snapshot": {
+                "files": [{
+                    "path": "custom_factors/NextAlpha.py",
+                    "source_code": "class NextAlpha: pass\n",
+                }],
+            },
+        },
+    )
+    assert imported.status_code == 200
+    assert saved == [("NextAlpha", "class NextAlpha: pass\n")]

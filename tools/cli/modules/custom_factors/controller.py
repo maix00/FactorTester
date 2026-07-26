@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ def custom_factors(ctx: click.Context) -> None:
         click.echo("可用功能:")
         click.echo("  factortester custom_factors factor-library list|add")
         click.echo("  factortester custom_factors factor-library metrics|history|rank|stability|import-result|save-result")
-        click.echo("  factortester custom_factors workspace show|root|build|sync|push")
+        click.echo("  factortester custom_factors workspace show|root|build|sync|push|sync-to-local|sync-to-server")
         click.echo("  factortester custom_factors workspace git status|diff|commit|branch|checkout")
         click.echo("  factortester custom_factors operators")
 
@@ -668,6 +669,65 @@ def push_workspace(branch_mode: str) -> None:
     _print_workspace_action("上传入库", client_from_config().push_factor_workspace(branch_mode=branch_mode))
 
 
+@workspace.command("server-state")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def workspace_server_state(as_json: bool) -> None:
+    """读取服务器 canonical 因子库快照和 Git 版本。"""
+    payload = client_from_config().factor_workspace_snapshot()
+    snapshot = payload.get("snapshot") if isinstance(payload.get("snapshot"), dict) else {}
+    result = {"source": "server", **snapshot}
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_state(result, "服务器 canonical 因子库")
+
+
+@workspace.command("local-state")
+@click.argument("root")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def workspace_local_state(root: str, as_json: bool) -> None:
+    """读取本地 canonical 因子库目录和 Git 版本。"""
+    result = _local_workspace_state(root)
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_state(result, "本地 canonical 因子库")
+
+
+@workspace.command("sync-to-server")
+@click.argument("root")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def workspace_sync_to_server(root: str, as_json: bool) -> None:
+    """把本地 canonical 因子源码同步到服务器。"""
+    snapshot = _local_workspace_snapshot(root)
+    response = client_from_config().import_factor_workspace_snapshot(snapshot)
+    server = response.get("snapshot") if isinstance(response.get("snapshot"), dict) else {}
+    result = {"source": "server", "changed": response.get("changed") or [], **server}
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("同步到服务器", result)
+
+
+@workspace.command("sync-to-local")
+@click.argument("root")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def workspace_sync_to_local(root: str, as_json: bool) -> None:
+    """把服务器 canonical 因子源码同步到本地目录。"""
+    payload = client_from_config().factor_workspace_snapshot()
+    snapshot = payload.get("snapshot") if isinstance(payload.get("snapshot"), dict) else {}
+    written = _write_local_workspace_snapshot(root, snapshot)
+    result = {"source": "local", "written": written, **_local_workspace_state(root)}
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("同步到本地", result)
+
+
 @workspace.command("git-settings")
 @click.option("--enable/--disable", "git_enabled", default=None, help="启用或禁用 workspace Git。")
 @click.option("--repo-root", default="", help="Git 仓库根目录。")
@@ -1028,6 +1088,102 @@ def _print_workspace_git(payload: dict[str, Any]) -> None:
     branches = payload.get("git_branches") or []
     if branches:
         click.echo("  分支: " + ", ".join(str(branch) for branch in branches))
+
+
+def _local_workspace_root(root: str) -> Path:
+    target = Path(root).expanduser().resolve()
+    if not target.exists() or not target.is_dir():
+        raise click.ClickException(f"本地 canonical 因子库目录不存在: {target}")
+    return target
+
+
+def _local_workspace_files(root: str) -> list[dict[str, str]]:
+    target = _local_workspace_root(root)
+    files: list[dict[str, str]] = []
+    for kind, directory in (("custom", "custom_factors"), ("public", "public_factors")):
+        source_dir = target / directory
+        if not source_dir.is_dir():
+            continue
+        for path in sorted(source_dir.glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            if source.strip():
+                files.append({
+                    "path": f"{directory}/{path.name}",
+                    "kind": kind,
+                    "source_code": source,
+                })
+    return files
+
+
+def _local_git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _local_workspace_state(root: str) -> dict[str, Any]:
+    target = _local_workspace_root(root)
+    files = _local_workspace_files(str(target))
+    return {
+        "source": "local",
+        "workspace_root": str(target),
+        "git_head": _local_git(target, "rev-parse", "--short", "HEAD"),
+        "git_current_branch": _local_git(target, "branch", "--show-current"),
+        "git_dirty": bool(_local_git(target, "status", "--porcelain")),
+        "custom_factor_count": sum(item["kind"] == "custom" for item in files),
+        "public_factor_count": sum(item["kind"] == "public" for item in files),
+    }
+
+
+def _local_workspace_snapshot(root: str) -> dict[str, Any]:
+    state = _local_workspace_state(root)
+    return {
+        "schema_version": 1,
+        "workspace_root": state["workspace_root"],
+        "git_head": state["git_head"],
+        "git_current_branch": state["git_current_branch"],
+        "files": _local_workspace_files(root),
+    }
+
+
+def _write_local_workspace_snapshot(root: str, snapshot: dict[str, Any]) -> list[str]:
+    target = _local_workspace_root(root)
+    written: list[str] = []
+    files = snapshot.get("files") or []
+    if not isinstance(files, list) or len(files) > 2000:
+        raise click.ClickException("服务器 snapshot 文件数量无效")
+    for item in files:
+        if not isinstance(item, dict):
+            raise click.ClickException("服务器 snapshot 包含无效文件")
+        relative = str(item.get("path") or "").replace("\\", "/")
+        parts = Path(relative).parts
+        if len(parts) != 2 or parts[0] not in {"custom_factors", "public_factors"} or parts[1] != Path(parts[1]).name or not parts[1].endswith(".py"):
+            raise click.ClickException(f"服务器 snapshot 路径无效: {relative}")
+        source = item.get("source_code")
+        if not isinstance(source, str) or not source.strip():
+            raise click.ClickException(f"服务器 snapshot 源码为空: {relative}")
+        destination = target / parts[0] / parts[1]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(source, encoding="utf-8")
+        written.append(str(destination))
+    return written
+
+
+def _print_workspace_state(payload: dict[str, Any], title: str) -> None:
+    click.echo(title)
+    click.echo(f"目录: {payload.get('workspace_root') or '未设置'}")
+    click.echo(f"Git 版本: {payload.get('git_head') or '无'}")
+    click.echo(f"分支: {payload.get('git_current_branch') or '无'}")
+    if payload.get("source") == "local":
+        click.echo(f"本地改动: {'有' if payload.get('git_dirty') else '无'}")
+    click.echo(f"自定义因子: {payload.get('custom_factor_count') or 0}")
+    click.echo(f"公共因子: {payload.get('public_factor_count') or 0}")
 
 
 def _print_workspace_action(action: str, payload: dict[str, Any]) -> None:

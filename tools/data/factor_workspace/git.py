@@ -355,11 +355,19 @@ def get_factor_workspace_git_state(username: str) -> dict[str, Any]:
         "workspace_root": root,
         "git_enabled": bool(settings.get("git_enabled")),
         "git_repo_root": repo_root,
+        "git_head": _git_head(root),
         "git_current_branch": _git_current_branch(root) or "",
         "git_auto_sync_branch": FIXED_UPLOAD_BRANCH,
         "git_force_sync_branch": FIXED_DOWNLOAD_BRANCH,
         "git_branches": branches,
     }
+
+
+def _git_head(root: str) -> str:
+    if not _git_binary_available() or not os.path.isdir(os.path.join(root, ".git")):
+        return ""
+    result = _run_git(root, "rev-parse", "--short", "HEAD")
+    return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def get_factor_workspace_autosync_branch(username: str) -> str:
