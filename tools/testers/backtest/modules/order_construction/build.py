@@ -30,7 +30,9 @@ def construct_orders(state, ctx, module) -> None:
             delta = float(deltas[product] or 0.0)
             if abs(delta) <= 1e-12:
                 continue
-            ledger = ledger_for_strategy_product(state, strategy, product)
+            ledger = ledger_for_strategy_product(
+                state, strategy, product, timestamp=ctx.timestamp,
+            )
             position = ledger.get(LedgerModule.positions, {}).get(product)
             current = float(getattr(position, "quantity", 0.0) or 0.0)
             needs_close = current and (current > 0) != (delta > 0)
@@ -73,6 +75,11 @@ def construct_orders(state, ctx, module) -> None:
                     )
             state.order_store.register_group(group)
             for order in children:
+                ledger_id = getattr(ledger, "ledger_id", None)
+                if ledger_id in (None, ""):
+                    ledger_id = getattr(getattr(ledger, "ledger", None), "name", None)
+                if ledger_id not in (None, ""):
+                    order.set("ledger_id", str(ledger_id))
                 state.order_store.register_order(order)
                 audit_store.record(
                     order, step="construct_order", label="构造原子订单",
