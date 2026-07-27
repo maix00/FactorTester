@@ -35,6 +35,9 @@ from server.services.research_graph.protocol import (
     GraphActivationBlocked,
     serialize_bounded_trace_evidence,
 )
+from server.services.research_graph.product_scope import (
+    implementation_product_scope,
+)
 from server.services.research_graph.work_packages import (
     insert_active,
     require_active,
@@ -49,11 +52,17 @@ def create_graph_instance(
     product_group: str,
     workspace_id: str,
     capability_resolution: dict[str, Any],
+    title: str = "",
     shadow_graph_version: int | None = None,
     shadow_run_id: str = "",
     shadow_proposal_id: str = "",
     profile_ref: str = "",
 ) -> dict[str, Any]:
+    product_group = product_group.strip()
+    if not product_group:
+        raise ValueError(
+            "product_group is required; exact product universe belongs to the TrialPlan"
+        )
     profile_ref = optional_profile_ref(profile_ref)
     if shadow_graph_version is not None:
         if not shadow_run_id:
@@ -179,6 +188,7 @@ def create_graph_instance(
             work_package_id=instance_id,
             workspace_id=workspace_id,
             created_at=now,
+            title=title.strip(),
         )
         _, resolution_json, resolution_hash = (
             serialize_capability_resolution(
@@ -229,6 +239,8 @@ def create_graph_instance(
         "graph_id": graph_id,
         "graph_version": int(active["version"]),
         "product_group": product_group,
+        "product_scope": implementation_product_scope(product_group),
+        "title": title.strip(),
         "workspace_id": workspace_id,
         "capability_resolution": local_resolution,
         "mode": mode,

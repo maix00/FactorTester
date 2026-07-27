@@ -224,9 +224,19 @@ def _publish_migrated_package(
     old_report = branch_root.joinpath("REPORT.md").read_bytes()
     report_bytes = _preserve_report_header(old_report, rendered)
     refs = report_index.artifact_refs(snapshot, renderer.extension)
+    # A result-subject migration rebuilds the target branch from its complete
+    # fragment set. Remove the branch's derived rows first; otherwise a
+    # current-node projection from the pre-migration report remains in INDEX
+    # even though it has no corresponding journal section.
+    rebuild_index = dict(index)
+    branch_prefix = f"report-section:{branch_id}:"
+    rebuild_index["sections"] = [
+        item for item in index["sections"]
+        if not item["section_ref"].startswith(branch_prefix)
+    ]
     rebuilt_index = report_index.merge_index(
-        index, snapshot, renderer, hashlib.sha256(report_bytes).hexdigest(),
-        refs,
+        rebuild_index, snapshot, renderer,
+        hashlib.sha256(report_bytes).hexdigest(), refs,
     )
     rebuilt_branch = next(
         item for item in rebuilt_index["branches"]

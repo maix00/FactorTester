@@ -278,23 +278,17 @@ def merge_index(
         _validate_index(value, snapshot)
         return value
     projected_sections = _project_sections(snapshot)
-    projected_branch_prefixes = {
-        (
-            "report-section:"
-            f"{section['branch_ref'].split(':')[-1]}:"
-        )
-        for section in snapshot["sections"]
+    # A checkpoint publishes a new section revision, not a replacement of the
+    # whole branch history. Remove only exact section identities being
+    # projected; otherwise every checkpoint on one branch erases its earlier
+    # report rows before the bounded-window policy can retain them.
+    projected_refs = {
+        item["section_ref"] for item in projected_sections
     }
-    projected_branch_prefixes.add(
-        f"report-section:{snapshot['branch_id']}:"
-    )
     merged_sections = sorted(
         [
             item for item in value["sections"]
-            if not any(
-                item["section_ref"].startswith(prefix)
-                for prefix in projected_branch_prefixes
-            )
+            if item["section_ref"] not in projected_refs
         ]
         + projected_sections,
         key=lambda item: (item["created_at"], item["section_ref"]),

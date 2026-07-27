@@ -44,6 +44,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             owner TEXT NOT NULL,
             work_package_id TEXT NOT NULL,
             workspace_id TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
             lifecycle TEXT NOT NULL DEFAULT 'active' CHECK (
                 lifecycle IN ('active', 'archived', 'deleted')
             ),
@@ -67,7 +68,11 @@ def create_schema(conn: sqlite3.Connection) -> None:
     )
 
 
-def backfill(conn: sqlite3.Connection) -> None:
+def backfill(
+    conn: sqlite3.Connection,
+    *,
+    ensure_title_column: bool = True,
+) -> None:
     """Create canonical active rows for pre-lifecycle Work Packages."""
     conn.execute(
         """
@@ -86,6 +91,17 @@ def backfill(conn: sqlite3.Connection) -> None:
         """
     )
 
+    if ensure_title_column:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(research_work_packages)")
+        }
+        if "title" not in columns:
+            conn.execute(
+                "ALTER TABLE research_work_packages "
+                "ADD COLUMN title TEXT NOT NULL DEFAULT ''"
+            )
+
 
 def insert_active(
     conn: sqlite3.Connection,
@@ -94,15 +110,16 @@ def insert_active(
     work_package_id: str,
     workspace_id: str,
     created_at: float,
+    title: str = "",
 ) -> None:
     conn.execute(
         """
         INSERT INTO research_work_packages (
-            owner, work_package_id, workspace_id, lifecycle, revision,
+            owner, work_package_id, workspace_id, title, lifecycle, revision,
             lifecycle_history_json, created_at, updated_at
-        ) VALUES (?, ?, ?, 'active', 1, '[]', ?, ?)
+        ) VALUES (?, ?, ?, ?, 'active', 1, '[]', ?, ?)
         """,
-        (owner, work_package_id, workspace_id, created_at, created_at),
+        (owner, work_package_id, workspace_id, title, created_at, created_at),
     )
 
 

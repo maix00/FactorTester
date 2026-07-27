@@ -90,6 +90,8 @@ cover/
 
 # Local agent work directories
 .claude/
+.factortester-research-session.json
+.factortester-research-session.json.artifacts/
 
 # Translations
 *.mo

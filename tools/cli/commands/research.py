@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import importlib
 from pathlib import Path
 from typing import Any
 
@@ -33,10 +34,12 @@ def _load_profile_factor_sources(root: Path | None) -> list[dict[str, str]]:
     # Keep the HTTP-only CLI startup independent from the server's full data
     # layer.  The storage validator is needed only when this optional local
     # source upload is explicitly requested.
-    from tools.data.factor_workspace.storage import is_profile_factor_worktree_root
+    storage = importlib.import_module(
+        "tools.data.factor_workspace.storage"
+    )
 
     target = root.expanduser().resolve()
-    if not is_profile_factor_worktree_root(target):
+    if not storage.is_profile_factor_worktree_root(target):
         raise click.ClickException(
             "--profile-factor-worktree 必须指向 Profile 的 factor-worktree，"
             "不能上传 canonical 因子库"

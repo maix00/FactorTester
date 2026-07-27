@@ -81,6 +81,15 @@ def build_cycle_submission_contract(
                 edge.get("review_requirement") or "none"
             ),
         },
+        "report_packet": {
+            "required_tasks": list(
+                (packet.get("report_packet") or {}).get("required_tasks") or []
+            ),
+            "completion_rule": str(
+                (packet.get("report_packet") or {}).get("completion_rule") or ""
+            ),
+            "data_policy": "Graph stores references and contracts only",
+        },
         "reusable_refs": {
             "obligations": obligations,
             "requirements": requirements,
@@ -107,6 +116,10 @@ def build_cycle_submission_contract(
                 "schema_version, fragment_hash and exact unique items only; "
                 "each item has report_requirement_id, subject_ref, "
                 "content_kind and item_hash"
+            ),
+            "report_document": (
+                "local generic report document; attach report_requirement "
+                "chips before cycle advance"
             ),
             "evidence_envelope": (
                 "schema_version 2; factual evidence cannot contain decision "

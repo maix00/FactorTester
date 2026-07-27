@@ -1,4 +1,4 @@
-"""Authenticated, bounded Profile research projections."""
+"""Authenticated, bounded Profile research navigation read-model routes."""
 
 from __future__ import annotations
 

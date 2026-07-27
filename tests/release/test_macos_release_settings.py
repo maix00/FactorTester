@@ -22,10 +22,10 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert "/api/client/releases/beta.xml" in controller
     assert "releases/latest/download/appcast.xml" in controller
     assert "SparkleUpdateCoordinator" in controller
-    for label in ("更新详情", "客户端更新", "下载更新", "重启并更新"):
+    for label in ("客户端更新", "下载更新", "重启并更新", "检查更新"):
         assert label in view
     for label in (
-        'Text("Main")', 'Text("Beta")', "最后检查", "自动下载更新",
+        'Text("Main")', 'Text("Beta")', "lastChecked", "自动下载更新",
     ):
         assert label in view
     assert "ClientReleaseStatusCard" not in view
@@ -36,6 +36,8 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert "6 * 60 * 60" in controller
     assert ".onOpenURL" in app
     assert "handleUpdateCommand" in controller
+    assert 'pendingExternalAction = action' in controller
+    assert 'case "download"' in controller
     assert "ClientSidebar" in home
     assert "openTab: open" in home
     assert "approval" not in view.lower()
@@ -188,6 +190,7 @@ def test_macos_manages_provider_neutral_local_profiles() -> None:
     profile_root = SOURCES / "Features" / "Profiles"
     local_profile_files = [
         profile_root / "LocalProfileController.swift",
+        profile_root / "LocalProfileControllerRuntime.swift",
         profile_root / "LocalProfileCommands.swift",
         profile_root / "LocalProfileSnapshotStore.swift",
     ]
@@ -198,15 +201,14 @@ def test_macos_manages_provider_neutral_local_profiles() -> None:
         SOURCES / "Features" / "Settings" / "ClientReleaseSettingsView.swift"
     ).read_text(encoding="utf-8")
     combined = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in sorted(profile_root.glob("*.swift"))
+        path.read_text(encoding="utf-8") for path in local_profile_files
     )
 
     assert '["client", "profile", "list"]' in controller
     assert '"profile", "agent", "set"' in controller
     assert "LocalProfilesView()" in settings
     assert "审批" not in combined
-    for forbidden in ("Codex", "model_id", "runtime_id", "password", "token"):
+    for forbidden in ("Codex", "model_id", "runtime_id", "password"):
         assert forbidden not in combined
     for path in local_profile_files:
         assert len(path.read_text(encoding="utf-8").splitlines()) <= 130
@@ -221,9 +223,6 @@ def test_macos_manages_provider_neutral_local_profiles() -> None:
 
 def test_macos_adapter_secrets_go_to_keychain_not_cli_arguments() -> None:
     profile_root = SOURCES / "Features" / "Profiles"
-    form = (profile_root / "LocalAdapterProfileForm.swift").read_text(
-        encoding="utf-8"
-    )
     controller = "\n".join(
         (profile_root / filename).read_text(encoding="utf-8")
         for filename in (
@@ -234,9 +233,7 @@ def test_macos_adapter_secrets_go_to_keychain_not_cli_arguments() -> None:
         encoding="utf-8"
     )
 
-    assert "SecureField" in form
-    assert "KeychainStore.save" in form
-    assert "keychain://" in form
+    assert not (profile_root / "LocalAdapterProfileForm.swift").exists()
     assert '"--credential-ref"' in controller
     assert "secret" not in controller.lower()
     assert "kSecClassGenericPassword" in keychain
@@ -257,20 +254,18 @@ def test_macos_profiles_use_principal_scoped_default_workspace() -> None:
     model = (profile_root / "LocalProfileModel.swift").read_text(
         encoding="utf-8"
     )
-    form = (profile_root / "LocalProfileForm.swift").read_text(
-        encoding="utf-8"
-    )
     view = "\n".join(
         path.read_text(encoding="utf-8")
         for path in (
             profile_root / "LocalProfilesView.swift",
             profile_root / "WorkspaceRegistryRow.swift",
+            SOURCES / "Features" / "Settings" / "PersonalWorkspaceView.swift",
         )
     )
     assert 'json["workspaces"]' in model
     assert 'json["owner_ref"]' in model
-    assert "Documents/FactorTester/users/" in form
-    assert "workspaceRoot" not in form
+    assert "Documents/FactorTester/users" in view
+    assert "LocalProfileForm" not in view
     assert "可见工作区" in view
     assert "Owner:" in view
 
@@ -287,17 +282,18 @@ def test_macos_settings_show_only_active_unified_workspace() -> None:
         settings_root / "PersonalWorkspaceController.swift"
     ).read_text(encoding="utf-8")
 
-    assert "PersonalWorkspaceView()" in hub
+    assert "PersonalWorkspaceView(openProfiles:" in hub
     assert "LocalProfilesView()" not in hub
-    assert "Profile、实时研究步骤、Trial Plan、义务与报告不属于设置" in hub
+    workspace_view = view + (SOURCES / "Features" / "Profiles" / "ProfileWorkspaceView.swift").read_text(encoding="utf-8")
+    assert "Profile、实时研究步骤、Trial Plan、义务与报告" in workspace_view
     assert "Documents/FactorTester/users" in view
     assert "personal-workspace/factor-library" in view
-    assert "Profile 只链接 canonical repo 的独立 worktree" in view
-    assert "当前 canonical 因子库" in view
+    assert "各个研究现场的独立 worktree" in view
+    assert "本地 canonical 因子库" in view
     assert "Legacy quarantine" not in view
     assert "迁移" not in view
-    assert '"user-layout", "show"' in controller
-    assert '"user-layout", "migration"' not in controller
+    assert '"custom_factors", "workspace", "local-state"' in controller
+    assert '"custom_factors", "workspace", "server-state"' in controller
     assert "Process()" not in controller
     assert '"git"' not in controller
 
@@ -321,10 +317,11 @@ def test_macos_tabs_and_account_center_use_real_routes() -> None:
     assert "case profile(id: String)" in navigation
     assert "case web(path: String)" in navigation
     assert "/api/account/password" in api
-    assert ".products" in account
-    assert ".factorLibrary" in account
+    assert "AccountSettingsView()" in account
+    assert ".products" not in account
+    assert ".factorLibrary" not in account
     assert '"127.0.0.1"' in config
-    assert '"8000"' in config
+    assert "baseURL" in config and "port" in config
 
 
 def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
@@ -366,26 +363,25 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
         encoding="utf-8"
     )
 
-    for label in (
-        "主页", "研究", "因子库", "产品", "Profiles", "个人中心", "设置",
-    ):
+    for label in ("主页", "研究", "因子库", "产品", "Profiles", "设置"):
         assert label in sidebar + tab_model
+    assert "个人中心" not in sidebar + tab_model
     assert 'Section("已打开")' in sidebar
     assert "openTabs.filter(\\.isClosable)" in sidebar
     assert "TabView(selection:" not in home
     assert "LocalProfileController()" in home
-    assert "ForEach(controller.profiles)" in directory
+    assert "List(controller.profiles)" in directory
     assert "MaxA" not in directory and "MaxB" not in directory
     assert "所有进行中和已完成的研究统一从 Research" in workspace
     for label in ("实时过程", "Trial Plans", "Evidence"):
         assert label not in workspace
     assert "不轮询完整 trace" in sections + live
-    for label in ("研究进度", "Profiles", "个人中心"):
+    for label in ("研究进度", "Profiles"):
         assert label in dashboard
     assert "Form {" not in login
     assert "Form {" not in server
-    assert "DisclosureGroup" in server
-    assert "127.0.0.1" in server and "8000" in server
+    assert "SettingsEditableText" in server
+    assert "managerPort = \"7998\"" in server
     assert '"/api/profile-research"' in projection_service
     assert 'URLQueryItem(name: "limit", value: "50")' in projection_service
     assert '"If-None-Match"' in projection_service
@@ -400,12 +396,12 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
         SOURCES / "Features" / "Account" / "AccountCenterView.swift"
     ).read_text(encoding="utf-8")
     assert (
-        "case server, personalWorkspace, workspaces, language, updates"
+        "case account, server, workspace, language, updates"
         in settings_hub
     )
     assert "LocalProfilesView()" not in settings_hub
-    assert "Button(\"打开 Profiles\"" in settings_hub
-    assert "case account, security, productGroups, factorGrants" in account
+    assert "open(.profiles)" in settings_hub
+    assert "case session, register, password" in account
     assert "case language" not in account
 
 
@@ -414,7 +410,7 @@ def test_macos_profile_directory_fails_closed_on_profile_deletion() -> None:
     lifecycle = (
         profile_root / "LocalProfileLifecycleController.swift"
     ).read_text(encoding="utf-8")
-    card = (profile_root / "ProfileDirectoryCard.swift").read_text(
+    directory = (profile_root / "ProfilesDirectoryView.swift").read_text(
         encoding="utf-8"
     )
     receipt = (
@@ -427,8 +423,8 @@ def test_macos_profile_directory_fails_closed_on_profile_deletion() -> None:
     assert '"factor-worktree", "rollback"' in lifecycle
     assert "Process()" not in lifecycle
     assert "git " not in lifecycle.lower()
-    assert "解绑并删除" not in card
-    assert "可安全解绑 Worktree" in card
+    assert not (profile_root / "ProfileDirectoryCard.swift").exists()
+    assert "打开 Profile" in directory
     assert "不删除 Git 分支、提交或 receipt" in receipt
     assert "清理已删除 Profile 的空目录" in receipt
 

@@ -129,7 +129,7 @@ final class ProfileLiveProcessController: ObservableObject {
             guard let branch = selectedBranch else {
                 detail = nil
                 timeline = []
-                error = L10n.text("研究版本树指向的分支不在当前工作包中，请刷新研究目录后重试。")
+                error = L10n.text("研究路径指向的分支不在当前工作包中，请刷新研究目录后重试。")
                 return
             }
             detail = nil

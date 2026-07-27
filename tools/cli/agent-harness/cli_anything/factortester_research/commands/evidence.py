@@ -75,3 +75,61 @@ def capture_job(
     click.echo(
         f"job: {job_id} · assurance={disposition} · reused={reused}"
     )
+
+
+@evidence.command("put")
+@click.option("--envelope-file", required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--applicability-file", required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def put_evidence(envelope_file: str, applicability_file: str, as_json: bool) -> None:
+    result = run_factortester([
+        "research-evidence", "put",
+        "--envelope-file", envelope_file,
+        "--applicability-file", applicability_file,
+        "--json",
+    ], timeout=60)
+    _forward_backend(result, as_json)
+
+
+@evidence.command("get")
+@click.argument("evidence_ref")
+@click.option("--json", "as_json", is_flag=True)
+def get_evidence(evidence_ref: str, as_json: bool) -> None:
+    result = run_factortester([
+        "research-evidence", "get", evidence_ref, "--json",
+    ], timeout=60)
+    _forward_backend(result, as_json)
+
+
+@evidence.command("admit")
+@click.argument("evidence_ref")
+@click.option("--environment-ref", required=True)
+@click.option("--subject-ref", required=True)
+@click.option("--qualification", required=True)
+@click.option("--note", default="")
+@click.option("--json", "as_json", is_flag=True)
+def admit_evidence(
+    evidence_ref: str, environment_ref: str, subject_ref: str,
+    qualification: str, note: str, as_json: bool,
+) -> None:
+    result = run_factortester([
+        "research-evidence", "admit", evidence_ref,
+        "--environment-ref", environment_ref,
+        "--subject-ref", subject_ref,
+        "--qualification", qualification,
+        "--note", note,
+        "--json",
+    ], timeout=60)
+    _forward_backend(result, as_json)
+
+
+def _forward_backend(result, as_json: bool) -> None:
+    if result.returncode != 0:
+        raise click.ClickException((result.stderr or result.stdout or "FactorTester command failed")[:1000])
+    if as_json:
+        try:
+            echo_json(json.loads(result.stdout))
+        except json.JSONDecodeError:
+            click.echo(result.stdout)
+        return
+    click.echo(result.stdout.strip())

@@ -22,7 +22,10 @@ def test_research_history_uses_verified_chinese_journal_as_primary_reading_view(
     assert "auditChip" in view
     assert ".popover(item:" in view
     assert "ResearchVersionTreePane" in view
-    assert 'DisclosureGroup("沿用义务' in view
+    # The disclosure control is now a reusable localized header so the Swift
+    # viewer can keep the same collapsed semantics in every locale.
+    assert "ResearchReportSectionDisclosureHeader" in view
+    assert "沿用义务" in view
     assert "ResearchCheckpointCard" not in view
     assert "journalRef" in model
     assert "journalHash" in model
@@ -42,5 +45,6 @@ def test_research_tree_never_collapses_unrelated_branches_onto_one_lane() -> Non
 
     assert "private var visibleBranches" in tree
     assert "workPackage.omittedBranchCount" in tree
-    assert 'Text("另有 \\(hiddenBranchCount) 条分支")' in tree
+    assert "hiddenBranchCount" in tree
+    assert 'L10n.format("另有 %lld 条分支"' in tree
     assert "return min(index, laneCount - 1)" not in tree

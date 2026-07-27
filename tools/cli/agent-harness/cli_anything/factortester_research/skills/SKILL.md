@@ -86,6 +86,15 @@ normalized execution plan; the Agent does not write it. `strategy-intent` remain
 the compatibility command for editing legacy workspace role bindings. Do not
 place Flow, StrategyBook, or policy object names in a StrategySpec.
 
+`factortester client research create` requires `--product-group`. This is the
+implementation group used for capability resolution, not a frozen instrument
+universe. The exact ranking universe and product mask belong in the
+TrialPlan/RunSpec. To create an independent hypothesis path, first read the
+branch reference from research detail, then run
+`factortester client research fork graph-branch:<instance>:<branch> --profile <profile> --label ...`.
+If the new path needs a separate local content report, clone it first with
+`report fork --source-file <source> --output-file <target>`; the document stays
+content-only and its bindings sidecar retains lineage metadata.
 Local `workspace inspect` is provisional source understanding, not executable
 factor identity. `run preview` and `run submit` use the same RunSpec-v2 freeze
 path and return source-free `factor_revision_manifests`. Each manifest hashes
@@ -114,7 +123,8 @@ factortester research-graph start factor-research \
   --workspace-id <workspace_id> \
   --capability-resolution-file capability-resolution.json
 cli-anything-factortester-research cycle next \
-  <instance_id> <branch_id> --json
+  <instance_id> <branch_id> \
+  --report-file <content-only-report.json> --json
 ```
 
 When the current edge is `data_contract__factor_semantics`, put the exact
@@ -216,7 +226,10 @@ cli-anything-factortester-research cycle advance \
   --json
 ```
 
-`cycle next` performs no local write and rejects an oversized packet, raw
+`cycle next` performs no local report write when `--report-file` is omitted. When
+the report file is supplied it idempotently creates the current-node chapter
+anchor and its sidecar binding before returning; the Agent then adds sections
+and report-requirement chips under the returned chapter. It still rejects an oversized packet, raw
 stdout/stderr, full graph/catalog content, artifacts, trace history, or legacy
 evidence. `cycle advance` validates before backend mutation and records only a
 local factual command envelope plus compact event metadata.

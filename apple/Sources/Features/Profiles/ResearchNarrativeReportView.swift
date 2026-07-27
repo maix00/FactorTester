@@ -1,5 +1,13 @@
 import SwiftUI
 
+private struct ResearchReportChapter: Identifiable {
+    let id: String
+    let key: String
+    let sections: [ResearchJournalSection]
+
+    var firstSection: ResearchJournalSection { sections[0] }
+}
+
 struct ResearchNarrativeReportView: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
@@ -15,6 +23,7 @@ struct ResearchNarrativeReportView: View {
     let loadAuditObject: (String) async throws -> ResearchAuditObjectPayload
 
     @State private var sections: [ResearchJournalSection] = []
+    @State private var expandedSectionRefs: Set<String> = []
     @State private var reportError: String?
     @State private var selectedCheckpointRef = ""
     @State private var sectionRefsByCheckpoint: [String: String] = [:]
@@ -70,7 +79,7 @@ struct ResearchNarrativeReportView: View {
                         VStack(spacing: 10) {
                             Image(systemName: "doc.text.magnifyingglass")
                                 .font(.largeTitle)
-                            Text("完整报告暂不可用")
+                            Text(L10n.text("完整报告暂不可用"))
                                 .font(.headline)
                             Text(reportError)
                                 .foregroundStyle(.secondary)
@@ -78,23 +87,14 @@ struct ResearchNarrativeReportView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 64)
                     } else if sections.isEmpty {
-                        ProgressView("正在校验并读取中文研究报告…")
+                        ProgressView(L10n.text("正在校验并读取中文研究报告…"))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 64)
                     } else {
-                        let chapterStarts = ResearchJournalPresentation
-                            .chapterStartIndexes(sections)
                         let changeOwners = ResearchJournalPresentation
                             .obligationChangeOwners(sections)
-                        ForEach(Array(sections.enumerated()), id: \.element.id) {
-                            index, section in
-                            positionedSection(
-                                section,
-                                firstInChapter: chapterStarts.contains(index),
-                                ownedChangeIDs: changeOwners[
-                                    section.sectionRef
-                                ] ?? []
-                            )
+                        ForEach(reportChapters) { chapter in
+                            chapterView(chapter, changeOwners: changeOwners)
                         }
                     }
                 }
@@ -142,6 +142,96 @@ struct ResearchNarrativeReportView: View {
         }
     }
 
+    private var reportChapters: [ResearchReportChapter] {
+        var result: [ResearchReportChapter] = []
+        for section in sections {
+            let key = section.chapterRef
+                ?? ResearchJournalPresentation.chapterRef(for: section)
+            if let last = result.last, last.key == key {
+                result[result.count - 1] = ResearchReportChapter(
+                    id: last.id,
+                    key: key,
+                    sections: last.sections + [section]
+                )
+            } else {
+                result.append(ResearchReportChapter(
+                    id: "\(key)|\(result.count)",
+                    key: key,
+                    sections: [section]
+                ))
+            }
+        }
+        return result
+    }
+
+    private func chapterView(
+        _ chapter: ResearchReportChapter,
+        changeOwners: [String: Set<String>]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            chapterHeader(chapter.firstSection)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(chapter.sections.enumerated()), id: \.element.id) {
+                    index, section in
+                    let ownedChanges = changeOwners[section.sectionRef] ?? []
+                    let specialKind = ResearchReportSectionSpecialKind.resolve(
+                        displayKind: section.displayKind,
+                        sectionRole: section.sectionRole,
+                        hasObligationChanges: sectionHasObligationChanges(
+                            section,
+                            ownedChangeIDs: ownedChanges
+                        )
+                    )
+                    positionedSection(
+                        section,
+                        firstInChapter: index == 0,
+                        ownedChangeIDs: ownedChanges,
+                        specialKind: specialKind,
+                        isExpanded: expandedSectionRefs.contains(
+                            section.sectionRef
+                        ),
+                        toggle: { toggleSection(section) }
+                    )
+                }
+            }
+            .padding(.leading, 16)
+        }
+        .padding(16)
+        .background(
+            Color.secondary.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.secondary.opacity(0.16), lineWidth: 1)
+        }
+        .padding(.bottom, 18)
+    }
+
+    private func chapterHeader(_ section: ResearchJournalSection) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(LocalizedStringKey(stageLabel(for: section)))
+                .font(.title2.weight(.semibold))
+            HStack(spacing: 8) {
+                Text(section.graphRef)
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.08), in: Capsule())
+                Text(sectionSubtitle(section))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(shortReference(section.checkpointRef))
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+            if let entryResolution = entryResolutionForChapter(section),
+               entryResolution.reason != "graph_continuation" {
+                ResearchEntryResolutionView(value: entryResolution)
+            }
+        }
+    }
+
     private var reportHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -174,56 +264,20 @@ struct ResearchNarrativeReportView: View {
         _ section: ResearchJournalSection,
         firstInChapter: Bool,
         ownedChangeIDs: Set<String>,
+        specialKind: ResearchReportSectionSpecialKind?,
+        isExpanded: Bool,
+        toggle: @escaping () -> Void,
         titleOverride: String? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if section.displayKind == "graph_continuation" {
-                Label(
-                    "图版本承接 / 重新进入审查",
-                    systemImage: "arrow.triangle.branch"
-                )
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.indigo)
-            }
-            if firstInChapter {
-                HStack(spacing: 8) {
-                    Text(LocalizedStringKey(stageLabel(for: section)))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(0.1), in: Capsule())
-                    Text(section.graphRef)
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.08), in: Capsule())
-                    if let occurredAt = section.researchOccurredAt {
-                        Text("研究发生于")
-                        Text(Date(timeIntervalSince1970: occurredAt), style: .date)
-                        Text(Date(timeIntervalSince1970: occurredAt), style: .time)
-                        Text("· 登记于")
-                    }
-                    Text(Date(timeIntervalSince1970: section.createdAt), style: .date)
-                    if section.researchOccurredAt != nil {
-                        Text(Date(timeIntervalSince1970: section.createdAt), style: .time)
-                    }
-                    Text("·")
-                    Text(shortReference(section.checkpointRef))
-                        .monospaced()
-                }
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            }
-
-            if firstInChapter {
-                Text(LocalizedStringKey(stageLabel(for: section)))
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.primary)
-            }
-            Text(titleOverride ?? section.title)
-                .font(.headline)
-                .foregroundStyle(.primary)
+            ResearchReportSectionDisclosureHeader(
+                title: titleOverride ?? section.title,
+                subtitle: sectionSubtitle(section),
+                specialKind: specialKind,
+                isExpanded: isExpanded,
+                action: toggle
+            )
+            if isExpanded {
             if !section.body.isEmpty {
                 reportParagraph(section.body, linkIDs: [], section: section)
             }
@@ -233,7 +287,7 @@ struct ResearchNarrativeReportView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         if let timing = block.reportTiming {
                             HStack(spacing: 4) {
-                                Text("本条报告形成于")
+                                Text(L10n.text("本条报告形成于"))
                                 Text(
                                     Date(timeIntervalSince1970: timing.occurredAt),
                                     style: .date
@@ -251,11 +305,7 @@ struct ResearchNarrativeReportView: View {
                 }
             }
 
-            if firstInChapter,
-               let entryResolution = entryResolutionForChapter(section),
-               entryResolution.reason != "graph_continuation" {
-                ResearchEntryResolutionView(value: entryResolution)
-            } else if section.sectionRole == "upgrade_reentry",
+            if section.sectionRole == "upgrade_reentry",
                       let entryResolution = transitionStep(
                         for: section
                       )?.entryResolution {
@@ -303,15 +353,12 @@ struct ResearchNarrativeReportView: View {
                 .foregroundStyle(.secondary)
             }
             Divider().padding(.top, firstInChapter ? 18 : 8)
+            }
         }
-        .padding(.horizontal, section.displayKind == "graph_continuation" ? 14 : 0)
-        .padding(.top, section.displayKind == "graph_continuation" ? 12 : 0)
-        .background(
-            section.displayKind == "graph_continuation"
-                ? Color.indigo.opacity(0.06) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 10)
-        )
-        .padding(.bottom, firstInChapter ? 24 : 12)
+        // Sections remain content inside the chapter surface. Do not wrap an
+        // ordinary or special subsection in another card: the disclosure
+        // header and the chapter indentation already provide the hierarchy.
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .onTapGesture {
             selectedCheckpointRef = section.checkpointRef
@@ -323,12 +370,18 @@ struct ResearchNarrativeReportView: View {
         _ section: ResearchJournalSection,
         firstInChapter: Bool,
         ownedChangeIDs: Set<String>,
+        specialKind: ResearchReportSectionSpecialKind?,
+        isExpanded: Bool,
+        toggle: @escaping () -> Void,
         titleOverride: String? = nil
     ) -> some View {
         narrativeSection(
             section,
             firstInChapter: firstInChapter,
             ownedChangeIDs: ownedChangeIDs,
+            specialKind: specialKind,
+            isExpanded: isExpanded,
+            toggle: toggle,
             titleOverride: titleOverride
         )
             .id(section.sectionRef)
@@ -845,6 +898,34 @@ struct ResearchNarrativeReportView: View {
                     return $0.id < $1.id
                 }
             sections = loadedSections
+            let changeOwners = ResearchJournalPresentation.obligationChangeOwners(
+                loadedSections
+            )
+            // Chapter content is useful immediately; ordinary subsections and
+            // special change sections remain compact until the user opens
+            // them. This also prevents image/WebView work for hidden content.
+            expandedSectionRefs = Set(
+                loadedSections.enumerated().compactMap { index, section in
+                    let changes = changeOwners[section.sectionRef] ?? []
+                    let special = ResearchReportSectionSpecialKind.resolve(
+                        displayKind: section.displayKind,
+                        sectionRole: section.sectionRole,
+                        hasObligationChanges: sectionHasObligationChanges(
+                            section,
+                            ownedChangeIDs: changes
+                        )
+                    )
+                    let isChapterStart = index == 0 ||
+                        (section.chapterRef
+                            ?? ResearchJournalPresentation.chapterRef(for: section))
+                        != (loadedSections[index - 1].chapterRef
+                            ?? ResearchJournalPresentation.chapterRef(
+                                for: loadedSections[index - 1]
+                            ))
+                    return isChapterStart && special == nil
+                        ? section.sectionRef : nil
+                }
+            )
             await loadHistory(Array(Set(
                 loadedSections.flatMap {
                     [$0.checkpointRef, $0.auditCheckpointRef]
@@ -855,8 +936,10 @@ struct ResearchNarrativeReportView: View {
                 uniquingKeysWith: { first, _ in first }
             )
             reportError = nil
+            // Open at the graph head; historical checkpoints remain
+            // available through the path navigator.
             selectedCheckpointRef = ResearchReportNavigation.reconciledSelection(
-                currentCheckpointRef: selectedCheckpointRef,
+                currentCheckpointRef: detail.latestTraceRef ?? "",
                 availableCheckpointRefs: loadedSections.map(\.checkpointRef)
             )
         } catch {
@@ -864,6 +947,53 @@ struct ResearchNarrativeReportView: View {
             sectionRefsByCheckpoint = [:]
             reportError = error.localizedDescription
         }
+    }
+
+    private func toggleSection(_ section: ResearchJournalSection) {
+        if expandedSectionRefs.contains(section.sectionRef) {
+            expandedSectionRefs.remove(section.sectionRef)
+        } else {
+            expandedSectionRefs.insert(section.sectionRef)
+        }
+    }
+
+    private func sectionHasObligationChanges(
+        _ section: ResearchJournalSection,
+        ownedChangeIDs: Set<String>
+    ) -> Bool {
+        if section.sectionRole == "obligation_change"
+            || section.links.contains(where: { $0.kind == "delta" }) {
+            return true
+        }
+        guard let snapshot = ResearchJournalPresentation.obligationSnapshotStep(
+            for: section,
+            steps: orderedSteps
+        ) else { return false }
+        let changedIDs = Set(snapshot.obligationChanges.map {
+            obligationObjectID($0.objectID)
+        })
+        return !changedIDs.isDisjoint(with: ownedChangeIDs)
+    }
+
+    private func sectionSubtitle(_ section: ResearchJournalSection) -> String {
+        if let occurredAt = section.researchOccurredAt {
+            return L10n.format(
+                "研究发生于 %@",
+                DateFormatter.localizedString(
+                    from: Date(timeIntervalSince1970: occurredAt),
+                    dateStyle: .medium,
+                    timeStyle: .short
+                )
+            )
+        }
+        return L10n.format(
+            "登记于 %@",
+            DateFormatter.localizedString(
+                from: Date(timeIntervalSince1970: section.createdAt),
+                dateStyle: .medium,
+                timeStyle: .short
+            )
+        )
     }
 
     private var orderedSteps: [ResearchTransitionStep] {

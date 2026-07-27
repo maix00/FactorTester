@@ -16,6 +16,7 @@ from uuid import uuid4
 from script.release.assets import build_installer_dmg, embed_client_runtime
 from script.release.build import (
     REPO, _sign_embedded_app, _validate_source_checkout,
+    xcodebuild_environment,
 )
 from script.release.update_manifest import (
     create_update_manifest, verify_installer, write_update_manifest,
@@ -72,6 +73,7 @@ def release_beta(
     if not signing_identity.strip() or signing_identity.strip() == "-":
         raise ValueError("ad-hoc signing is forbidden")
     _validate_source_checkout(REPO, source_revision)
+    build_environment = xcodebuild_environment()
     if output.exists():
         raise ValueError(f"release output already exists: {output}")
     output.mkdir(parents=True)
@@ -85,6 +87,7 @@ def release_beta(
          "-scheme", "FactorTester-Client-macOS", "-configuration", "Release",
          "-derivedDataPath", str(REPO / "apple/build"),
          "CODE_SIGNING_ALLOWED=NO", "build"],
+        env=build_environment,
         check=True,
     )
     source = REPO / "apple/build/Build/Products/Release/FTClient.app"

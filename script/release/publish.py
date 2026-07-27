@@ -24,6 +24,7 @@ from script.release.build import (
     REPO,
     _sign_embedded_app,
     _validate_source_checkout,
+    xcodebuild_environment,
     validate_embedded_sparkle_key,
 )
 from script.release.sparkle import (
@@ -35,6 +36,7 @@ from script.release.update_manifest import (
     verify_installer,
     write_update_manifest,
 )
+from script.release.source_checkout import clean_worktree
 
 
 CHANNELS = {"stable", "beta"}
@@ -54,6 +56,7 @@ class PublishedRelease:
     appcast_url: str
     legacy_manifest_url: str
     delta_only: bool = False
+    source_mode: str = "current-checkout"
 
 
 def release_client(
@@ -78,8 +81,49 @@ def release_client(
     previous_archive: Path | None = None,
     previous_appcast: Path | None = None,
     delta_only: bool = False,
+    from_clean_commit: str | None = None,
 ) -> PublishedRelease:
     """Build, sign, optionally notarize, publish, and read back one release."""
+    if from_clean_commit is not None:
+        if from_clean_commit != source_revision:
+            raise ValueError(
+                "--from-clean-commit must equal --source-revision"
+            )
+        with clean_worktree(REPO, from_clean_commit) as checkout:
+            original_repo = globals()["REPO"]
+            from script.release import build as release_build
+            original_build_repo = release_build.REPO
+            globals()["REPO"] = checkout
+            release_build.REPO = checkout
+            try:
+                receipt = release_client(
+                    channel=channel,
+                    version=version,
+                    build=build,
+                    source_revision=source_revision,
+                    output=output,
+                    signing_identity=signing_identity,
+                    sparkle_public_key=sparkle_public_key,
+                    sparkle_generate_appcast=sparkle_generate_appcast,
+                    legacy_private_key=legacy_private_key,
+                    legacy_public_key=legacy_public_key,
+                    server_origin=server_origin,
+                    release_root=release_root,
+                    github_repository=github_repository,
+                    cache_dir=cache_dir,
+                    minimum_client=minimum_client,
+                    mandatory=mandatory,
+                    notary_profile=notary_profile,
+                    previous_archive=previous_archive,
+                    previous_appcast=previous_appcast,
+                    delta_only=delta_only,
+                )
+            finally:
+                globals()["REPO"] = original_repo
+                release_build.REPO = original_build_repo
+        return PublishedRelease(
+            **{**asdict(receipt), "source_mode": "clean-commit"}
+        )
     if channel not in CHANNELS:
         raise ValueError("release channel must be stable or beta")
     if delta_only and channel != "beta":
@@ -95,6 +139,7 @@ def release_client(
     if channel == "beta" and (server_origin is None or release_root is None):
         raise ValueError("Beta requires server origin and release root")
     _validate_source_checkout(REPO, source_revision)
+    build_environment = xcodebuild_environment()
     if output.exists():
         raise ValueError(f"release output already exists: {output}")
     output.mkdir(parents=True)
@@ -121,6 +166,7 @@ def release_client(
                 "CODE_SIGNING_ALLOWED=NO",
                 "build",
             ],
+            env=build_environment,
             check=True,
         )
         source = REPO / "apple/build/Build/Products/Release/FTClient.app"
@@ -250,6 +296,7 @@ def release_client(
             appcast_url=appcast_url,
             legacy_manifest_url=legacy_url,
             delta_only=delta_only,
+            source_mode="current-checkout",
         )
         write_release_receipt(output / "release-receipt.json", receipt)
         # Delta-only Beta releases use the full DMG only as a transient input
@@ -614,6 +661,13 @@ def main() -> None:
         "--previous-appcast",
         type=Path,
         help="Previous appcast used to create a Sparkle delta.",
+    )
+    parser.add_argument(
+        "--from-clean-commit",
+        help=(
+            "Explicitly build from this clean commit in a temporary worktree; "
+            "must equal --source-revision."
+        ),
     )
     args = parser.parse_args()
     receipt = release_client(**vars(args))

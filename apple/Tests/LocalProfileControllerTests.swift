@@ -33,7 +33,7 @@ final class LocalProfileControllerTests: XCTestCase {
 
         XCTAssertEqual(controller.profiles.map(\.id), ["maxa"])
         XCTAssertNotNil(defaults.data(forKey: "client.profile.list.cache.v1"))
-        XCTAssertEqual(controller.loadState, .loading)
+        XCTAssertEqual(controller.loadState, .loaded)
     }
 
     func testLocalProfileStoreSupersedesStaleCachedResearchRecords() throws {

@@ -12,6 +12,7 @@ WORK_PACKAGE_DETAIL_SQL = f"""
            i.current_owner_profile_ref, i.graph_id, i.graph_version,
            COALESCE(wp.lifecycle, 'active') AS lifecycle,
            COALESCE(wp.revision, 1) AS lifecycle_revision,
+           COALESCE(wp.title, '') AS title,
            i.product_group,
            i.workspace_id, i.mode,
            (

@@ -8,22 +8,13 @@ replace every reference named by ``reference_map`` atomically.
 from __future__ import annotations
 
 from copy import deepcopy
+import importlib
 import json
 from pathlib import Path
 import re
 import sqlite3
 from typing import Any
 
-from server.services.research_graph.protocol import json_hash
-from server.services.research_graph.research_cycle.evidence import (
-    validate_agent_evidence_envelope,
-)
-from server.services.research_graph.research_cycle.adjudication import (
-    validate_adjudication_proposal,
-)
-from server.services.research_graph.research_cycle.replay import (
-    validate_research_cycle_checkpoint,
-)
 from .journal import content_hash, fragment_payload, load_fragments
 
 
@@ -46,6 +37,12 @@ def migrate_trace_evidence_rows(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Repair exact historical rows and return an auditable hash receipt."""
     values = [deepcopy(item) for item in rows]
+    (
+        json_hash,
+        validate_agent_evidence_envelope,
+        validate_adjudication_proposal,
+        validate_research_cycle_checkpoint,
+    ) = _load_server_contracts()
     reference_map: dict[str, str] = {}
     object_changes: list[dict[str, str]] = []
 
@@ -79,7 +76,7 @@ def migrate_trace_evidence_rows(
         checkpoint = evidence.get("research_cycle_checkpoint")
         if not isinstance(cycle, dict) or not isinstance(checkpoint, dict):
             continue
-        _rehash_cycle_events(cycle)
+        _rehash_cycle_events(cycle, validate_adjudication_proposal)
         old_projection = str(checkpoint.get("projection_hash") or "")
         checkpoint.pop("projection_hash", None)
         migrated_checkpoint = validate_research_cycle_checkpoint(checkpoint)
@@ -109,7 +106,7 @@ def migrate_trace_evidence_rows(
     return values, receipt
 
 
-def _rehash_cycle_events(cycle: dict[str, Any]) -> None:
+def _rehash_cycle_events(cycle: dict[str, Any], validate_proposal) -> None:
     proposal_map: dict[str, str] = {}
     for event in cycle.get("events") or []:
         if not isinstance(event, dict):
@@ -119,7 +116,7 @@ def _rehash_cycle_events(cycle: dict[str, Any]) -> None:
             old = str(proposal.get("proposal_hash") or "")
             candidate = deepcopy(proposal)
             candidate.pop("proposal_hash", None)
-            migrated = validate_adjudication_proposal(candidate)
+            migrated = validate_proposal(candidate)
             event["proposal"] = migrated
             proposal_map[old] = migrated["proposal_hash"]
         decision = event.get("decision")
@@ -192,6 +189,33 @@ def migrate_work_package_database(
         encoding="utf-8",
     )
     return receipt
+
+
+def _load_server_contracts():
+    """Load server validators only when the migration command is invoked.
+
+    The packaged CLI must remain importable without the server/data runtime;
+    this command is an explicit local migration operation and may opt into
+    those contracts at execution time.
+    """
+    protocol = importlib.import_module(
+        "server.services.research_graph.protocol"
+    )
+    evidence = importlib.import_module(
+        "server.services.research_graph.research_cycle.evidence"
+    )
+    adjudication = importlib.import_module(
+        "server.services.research_graph.research_cycle.adjudication"
+    )
+    replay = importlib.import_module(
+        "server.services.research_graph.research_cycle.replay"
+    )
+    return (
+        protocol.json_hash,
+        evidence.validate_agent_evidence_envelope,
+        adjudication.validate_adjudication_proposal,
+        replay.validate_research_cycle_checkpoint,
+    )
 
 
 def migrate_report_fragments(

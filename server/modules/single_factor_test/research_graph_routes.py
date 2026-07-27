@@ -306,6 +306,7 @@ def create_research_graph_instance():
             owner=require_user(),
             product_group=str(data.get("product_group") or ""),
             workspace_id=str(data.get("workspace_id") or ""),
+            title=str(data.get("title") or ""),
             capability_resolution=data.get("capability_resolution") or {},
             shadow_graph_version=data.get("shadow_graph_version"),
             shadow_run_id=str(data.get("shadow_run_id") or ""),

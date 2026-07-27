@@ -8,8 +8,15 @@ from pathlib import Path
 import click
 
 from tools.cli.core.context import client_from_config
+from tools.cli.client import FactorTesterClient
+from tools.cli.http import HttpSession
 from tools.cli.core.errors import friendly_errors
+from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
+from tools.cli.release.profile_research_create import (
+    create_profile_research,
+)
+from tools.cli.release.profile_research_context import load_creation_context
 from tools.cli.release.research_reporting.publisher import (
     MAX_CARRIER_BYTES,
     MAX_NARRATIVE_BYTES,
@@ -38,6 +45,118 @@ def client_research() -> None:
 
 
 client_research.add_command(migrate_result_subjects)
+
+
+@client_research.command("create")
+@click.option("--profile", "profile_id", required=True)
+@click.option("--title", required=True)
+@click.option("--agent-id", default="")
+@click.option("--workspace-id", default="")
+@click.option("--graph-id", default="factor-research", show_default=True)
+@click.option(
+    "--product-group",
+    required=True,
+    help="实现产品组；不是具体 universe，后者在 TrialPlan/RunSpec 冻结。",
+)
+@click.option(
+    "--capability-resolution-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@friendly_errors
+def create_profile_scoped_research(
+    profile_id: str,
+    title: str,
+    agent_id: str,
+    workspace_id: str,
+    graph_id: str,
+    product_group: str,
+    capability_resolution_file: Path | None,
+    release_profile: Path | None,
+) -> None:
+    """以 Profile 作用域创建研究与初始分支。
+
+    product_group 只声明能力解析所需的实现产品组；具体品种、排名
+    universe 和 product mask 必须在后续 TrialPlan/RunSpec 中声明。
+    """
+    root = load_profile_root(release_profile)
+    store = LocalProfileStore(root)
+    context = load_creation_context(
+        store,
+        profile_id,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+    )
+    resolution = None
+    if capability_resolution_file is not None:
+        payload = json.loads(
+            capability_resolution_file.read_text(encoding="utf-8")
+        )
+        resolution = payload.get("resolution") if isinstance(payload, dict) else None
+        if not isinstance(resolution, dict):
+            resolution = payload
+        if not isinstance(resolution, dict):
+            raise click.ClickException(
+                "capability resolution must be a JSON object"
+            )
+    _echo_json(create_profile_research(
+        store,
+        context,
+        title=title,
+        graph_id=graph_id,
+        product_group=product_group,
+        capability_resolution=resolution,
+    ))
+
+
+@client_research.command("fork")
+@click.argument("research_ref")
+@click.option("--profile", "profile_id", required=True)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--label", required=True)
+@click.option("--acting-profile-ref", default="")
+@friendly_errors
+def fork_profile_scoped_research(
+    research_ref: str,
+    profile_id: str,
+    release_profile: Path | None,
+    label: str,
+    acting_profile_ref: str,
+) -> None:
+    """从一个 graph-branch 引用创建独立的 Hypothesis Branch。
+
+    研究列表的 work-package 引用只代表研究容器；必须从详情中的
+    graph-branch:<instance>:<branch> 引用选择实际分叉源。
+    """
+    parts = research_ref.split(":")
+    if len(parts) != 3 or parts[0] != "graph-branch" or not all(parts[1:]):
+        raise click.ClickException(
+            "research_ref must use graph-branch:<instance>:<branch>"
+        )
+    instance_id, branch_id = parts[1], parts[2]
+    profile = LocalProfileStore(load_profile_root(release_profile)).load(
+        profile_id
+    )
+    server_url = str((profile.get("server") or {}).get("base_url") or "")
+    if not server_url:
+        raise click.ClickException(
+            f"profile has no server URL: {profile_id}"
+        )
+    client = FactorTesterClient(HttpSession(server_url))
+    _echo_json(client.fork_research_graph_branch(
+        instance_id,
+        branch_id,
+        label=label,
+        acting_profile_ref=(
+            acting_profile_ref or f"profile:{profile_id}"
+        ),
+    ))
 
 
 @client_research.group("asset")

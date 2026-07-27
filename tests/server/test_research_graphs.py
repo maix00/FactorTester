@@ -1126,6 +1126,7 @@ def test_shadow_start_http_forwards_explicit_proposal_id(
             "graph_id": "factor-research",
             "product_group": "equities",
             "workspace_id": "workspace-1",
+            "title": "MaxA research",
             "capability_resolution": {},
             "shadow_graph_version": 9,
             "shadow_run_id": "run-shadow",
@@ -1135,6 +1136,7 @@ def test_shadow_start_http_forwards_explicit_proposal_id(
 
     assert response.status_code == 201
     assert captured["shadow_proposal_id"] == "proposal-v9"
+    assert captured["title"] == "MaxA research"
 
 
 def test_graph_versions_are_immutable_and_activation_moves_only_pointer(

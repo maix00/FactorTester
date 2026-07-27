@@ -11,7 +11,10 @@ from tools.cli.release.locations import default_client_root
 
 
 ACTIONS = {"check", "download", "restart"}
-TERMINAL_STATES = {"available", "ready", "current", "failed"}
+EXPECTED_STATES = {
+    "check": {"available", "current", "failed"},
+    "download": {"downloading", "ready", "current", "failed"},
+}
 
 
 def status_path() -> Path:
@@ -34,6 +37,14 @@ def read_status() -> dict:
 def dispatch_app_update(action: str, *, wait: float = 0) -> dict:
     if action not in ACTIONS:
         raise ValueError("app update action is invalid")
+    before = read_status()
+    before_marker = (
+        before.get("state"),
+        before.get("installed_version"),
+        before.get("latest_version"),
+        before.get("error"),
+        before.get("updated_at"),
+    )
     url = "factortester://app-update?" + urlencode({"action": action})
     subprocess.run(["open", url], check=True, capture_output=True)
     result = {
@@ -42,11 +53,21 @@ def dispatch_app_update(action: str, *, wait: float = 0) -> dict:
         "handler": "FTClient/Sparkle",
         "dispatched": True,
     }
-    if wait > 0 and action != "restart":
+    if wait > 0 and action in EXPECTED_STATES:
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             status = read_status()
-            if status.get("state") in TERMINAL_STATES:
+            marker = (
+                status.get("state"),
+                status.get("installed_version"),
+                status.get("latest_version"),
+                status.get("error"),
+                status.get("updated_at"),
+            )
+            if (
+                marker != before_marker
+                and status.get("state") in EXPECTED_STATES[action]
+            ):
                 result["status"] = status
                 return result
             time.sleep(0.25)

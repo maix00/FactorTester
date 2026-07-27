@@ -38,6 +38,9 @@ from .refs import (
     work_package_ref_for,
     workspace_ref_for,
 )
+from server.services.research_graph.product_scope import (
+    implementation_product_scope,
+)
 from .summary import _branch_summary, _work_package_summary
 from .timeline import _bounded_transition_page
 from .tree import _tree_projection
@@ -49,7 +52,13 @@ MAX_TIMELINE_LIMIT = 50
 
 
 class ProfileResearchProjection:
-    """Project profile-facing research with one bounded read per operation."""
+    """Serve the bounded Profile research navigation read model.
+
+    This is not the report store and should not be called a report projection:
+    it owns Work Package/branch topology, lineage, lifecycle, timeline cursors,
+    and stable report lookup refs. Report bodies and assets remain in the local
+    Profile report document/journal and are loaded through their own verifier.
+    """
 
     def list_research(
         self,
@@ -138,6 +147,9 @@ class ProfileResearchProjection:
                 f"{str(first['graph_id'])}@v{int(first['graph_version'])}"
             ),
             "product_group": str(first["product_group"]),
+            "product_scope": implementation_product_scope(
+                str(first["product_group"])
+            ),
             "mode": str(first["mode"]),
             "lifecycle": str(first["lifecycle"]),
             "lifecycle_revision": int(first["lifecycle_revision"]),

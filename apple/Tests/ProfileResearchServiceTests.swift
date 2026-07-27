@@ -1477,7 +1477,7 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         XCTAssertFalse(controller.isLoading)
         XCTAssertEqual(
             controller.error,
-            "研究版本树指向的分支不在当前工作包中，请刷新研究目录后重试。"
+            "研究路径指向的分支不在当前工作包中，请刷新研究目录后重试。"
         )
     }
 

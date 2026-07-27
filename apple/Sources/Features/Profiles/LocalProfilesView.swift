@@ -45,7 +45,6 @@ struct LocalProfilesView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    LocalProfileForm(controller: controller)
                     if let profile = selectedProfile {
                         profileDetails(profile)
                         InitializationSourceView(profile: profile)
@@ -58,14 +57,6 @@ struct LocalProfilesView: View {
                             activeID = profile.id
                         }
                         .disabled(activeID == profile.id)
-                        LocalAgentForm(
-                            controller: controller,
-                            profileID: profile.id
-                        )
-                        LocalAdapterProfileForm(
-                            controller: controller,
-                            profileID: profile.id
-                        )
                     }
                     if let error = controller.error {
                         Label(error, systemImage: "exclamationmark.triangle.fill")

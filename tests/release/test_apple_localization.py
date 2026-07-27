@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import re
+import json
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 APPLE = ROOT / "apple"
 LOCALIZATIONS = APPLE / "Resources" / "Shared"
-STRINGS_ENTRY = re.compile(r'^"((?:[^"\\]|\\.)*)"\s*=\s*"((?:[^"\\]|\\.)*)";$')
-
 CRITICAL_KEYS = {
     "登录",
     "个人中心",
@@ -33,16 +31,13 @@ CRITICAL_KEYS = {
 
 
 def _load(language: str) -> dict[str, str]:
-    path = LOCALIZATIONS / f"{language}.lproj" / "Localizable.strings"
+    path = LOCALIZATIONS / "Localizable.xcstrings"
+    catalog = json.loads(path.read_text(encoding="utf-8"))
     entries: dict[str, str] = {}
-    for line_number, raw_line in enumerate(path.read_text().splitlines(), 1):
-        line = raw_line.strip()
-        if not line or line.startswith("/*"):
-            continue
-        match = STRINGS_ENTRY.fullmatch(line)
-        assert match, f"{path}:{line_number}: malformed strings entry"
-        key, value = match.groups()
-        assert key not in entries, f"{path}: duplicate key {key!r}"
+    for key, entry in catalog["strings"].items():
+        localization = entry.get("localizations", {}).get(language)
+        assert localization, f"{path}: missing {language} translation for {key!r}"
+        value = localization["stringUnit"]["value"]
         assert value, f"{path}: empty translation for {key!r}"
         entries[key] = value
     return entries
@@ -67,11 +62,12 @@ def test_language_override_is_durable_and_does_not_rewrite_protocol_values() -> 
     settings = (
         APPLE / "Sources" / "Features" / "Settings" / "ClientSettingsHub.swift"
     ).read_text()
-    assert '@AppStorage("client.language")' in app
-    assert '@AppStorage("client.language")' in settings
-    assert "case system" in language
-    assert 'case simplifiedChinese = "zh-Hans"' in language
-    assert 'case english = "en"' in language
+    assert 'LanguageStore()' in app
+    assert 'static let defaultsKey = "client.language"' in language
+    assert "UserDefaults" in language
+    assert 'static let system = AppLanguage("system")' in language
+    assert 'static let simplifiedChinese = AppLanguage("zh-Hans")' in language
+    assert 'static let english = AppLanguage("en")' in language
     assert ".environment(" in app and "\\.locale" in app
     assert "JSON、状态值与 API 协议不会随界面语言改变" in settings
 
@@ -79,5 +75,4 @@ def test_language_override_is_durable_and_does_not_rewrite_protocol_values() -> 
 def test_localizations_are_bundled_for_both_apple_targets() -> None:
     project = (APPLE / "project.yml").read_text()
     assert project.count("- path: Resources/Shared") == 2
-    assert (LOCALIZATIONS / "zh-Hans.lproj" / "Localizable.strings").is_file()
-    assert (LOCALIZATIONS / "en.lproj" / "Localizable.strings").is_file()
+    assert (LOCALIZATIONS / "Localizable.xcstrings").is_file()

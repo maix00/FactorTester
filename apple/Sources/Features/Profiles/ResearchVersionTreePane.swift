@@ -163,27 +163,32 @@ struct ResearchVersionTreePane: View {
     let loadEarlier: () async -> Void
     let canLoadEarlier: Bool
 
+    // The label column is intentionally allowed two lines. A fixed one-line
+    // row truncates English and future locales with longer node names.
     private let rowHeight: CGFloat = 46
     private let laneSpacing = ResearchTreeLayout.laneSpacing
     @State private var isLoadingEarlier = false
     @State private var missingReportMessage: String?
+    @State private var cachedNodes: [ResearchTreeNode] = []
+    @State private var cachedEdges: [ResearchTreeResolvedEdge] = []
+    @State private var cachedNodesKey = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("研究版本树")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.text("研究路径"))
                     .font(.headline)
-                Text("时间向下 · 点击定位正文")
+                Text(L10n.text("多版本图在节点处相连 · 点击定位报告"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 10) {
-                        treeLegend(filled: true, label: "检查点")
-                        treeLegend(filled: false, label: "分叉/承接")
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
+                        treeLegend(filled: true, label: L10n.text("检查点"))
+                        treeLegend(filled: false, label: L10n.text("分叉/承接"))
                     }
-                    HStack(spacing: 9) {
-                        statusLegend(color: .orange, label: "暂停")
-                        statusLegend(color: .green, label: "完成")
+                    HStack(spacing: 7) {
+                        statusLegend(color: .orange, label: L10n.text("暂停"))
+                        statusLegend(color: .green, label: L10n.text("完成"))
                         if hiddenBranchCount > 0 {
                             Text(verbatim: L10n.format("另有 %lld 条分支", hiddenBranchCount))
                                 .font(.system(size: 9))
@@ -208,7 +213,7 @@ struct ResearchVersionTreePane: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 13)
+            .padding(.vertical, 9)
             Divider()
             ScrollViewReader { proxy in
                 if canLoadEarlier {
@@ -221,7 +226,7 @@ struct ResearchVersionTreePane: View {
                                 .frame(maxWidth: .infinity)
                         } else {
                             Label(
-                                "更早记录",
+                                L10n.text("更早记录"),
                                 systemImage: "clock.arrow.circlepath"
                             )
                             .frame(maxWidth: .infinity)
@@ -229,7 +234,7 @@ struct ResearchVersionTreePane: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isLoadingEarlier)
-                    .padding(12)
+                    .padding(8)
                     Divider()
                 }
                 ScrollView {
@@ -242,7 +247,7 @@ struct ResearchVersionTreePane: View {
                             }
                         }
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 4)
                 }
                 .onChange(of: selectedCheckpointRef) { checkpointRef in
                     guard let node = nodes.first(where: {
@@ -257,12 +262,22 @@ struct ResearchVersionTreePane: View {
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
+        .task(id: nodeCacheKey) {
+            let value = buildNodes()
+            let edges = resolvedEdges(for: value)
+            guard !Task.isCancelled else { return }
+            cachedNodes = value
+            cachedEdges = edges
+            cachedNodesKey = nodeCacheKey
+        }
     }
 
     private var laneBackground: some View {
         Canvas { context, size in
             let visibleNodes = nodes
-            for edge in resolvedEdges(for: visibleNodes) {
+            let edges = cachedNodesKey == nodeCacheKey
+                ? cachedEdges : resolvedEdges(for: visibleNodes)
+            for edge in edges {
                 let index = edge.targetRow
                 let node = visibleNodes[index]
                 let target = CGPoint(
@@ -370,13 +385,32 @@ struct ResearchVersionTreePane: View {
                     alignment: .leading
                 )
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        Text(node.title)
-                            .font(.caption.weight(node.isHead ? .semibold : .regular))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(node.title)
+                        .font(.caption.weight(node.isHead ? .semibold : .regular))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 5) {
+                        Text(LocalizedStringKey(node.subtitle))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .truncationMode(.middle)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 2)
+                        if node.isHead {
+                            Text("HEAD")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(
+                                    node.isCurrentHead
+                                        ? Color.accentColor : Color.secondary
+                                )
+                        }
+                        if node.isRoot {
+                            Text(L10n.text("根"))
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                        }
                         if !node.graphRef.isEmpty {
                             Text(graphVersion(node.graphRef))
                                 .font(.system(size: 8, weight: .semibold))
@@ -389,31 +423,9 @@ struct ResearchVersionTreePane: View {
                                 )
                                 .fixedSize()
                         }
-                        if node.isHead {
-                            Text("HEAD")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(
-                                    node.isCurrentHead
-                                        ? Color.accentColor : Color.secondary
-                                )
-                        }
-                        if node.isRoot {
-                            Text("根")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(.secondary)
-                        }
                     }
-                    Text(LocalizedStringKey(node.subtitle))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .frame(
-                            minWidth: ResearchTreeLayout.minimumTimestampWidth,
-                            alignment: .leading
-                        )
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .clipped()
                 Spacer(minLength: 0)
             }
             .frame(height: rowHeight)
@@ -423,14 +435,33 @@ struct ResearchVersionTreePane: View {
         .buttonStyle(.plain)
         .accessibilityLabel(L10n.format("%@，%@", node.title, node.subtitle))
         .accessibilityIdentifier("research.tree.node.\(node.id)")
-        .help(
-            node.sectionRef.isEmpty
-                ? "该检查点尚无已验证的报告正文"
-                : "在研究报告中定位该检查点"
-        )
+        .help(node.sectionRef.isEmpty
+            ? L10n.text("该检查点尚无已验证的报告正文")
+            : L10n.text("在研究报告中定位该检查点"))
     }
 
     private var nodes: [ResearchTreeNode] {
+        guard cachedNodesKey == nodeCacheKey else { return buildNodes() }
+        return cachedNodes
+    }
+
+    /// The projection is bounded server-side, but building it still involves
+    /// sorting and lineage joins. Cache it across selection/scroll updates;
+    /// only a new server etag or timeline window invalidates the cache.
+    private var nodeCacheKey: String {
+        let first = steps.first?.stepRef ?? ""
+        let last = steps.last?.stepRef ?? ""
+        let treeShape = workPackage.tree.map {
+            "\($0.schemaVersion)|\($0.nodes.count)|\($0.edges.count)"
+        } ?? "none"
+        return [
+            workPackage.etag, detail.etag, detail.branchRef,
+            detail.latestTraceRef ?? "", "\(steps.count)", first, last,
+            "\(sectionRefsByCheckpoint.count)", treeShape,
+        ].joined(separator: "|")
+    }
+
+    private func buildNodes() -> [ResearchTreeNode] {
         if let projection = workPackage.tree,
            !projection.nodes.isEmpty {
             return projectedNodes(projection)

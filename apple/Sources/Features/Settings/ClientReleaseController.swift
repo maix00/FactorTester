@@ -118,12 +118,9 @@ final class ClientReleaseController: ObservableObject {
         case "check":
             sparkle.checkForUpdates()
         case "download":
-            if hasAvailableUpdate {
-                sparkle.downloadAvailableUpdate()
-            } else {
-                pendingExternalAction = action
-                sparkle.checkForUpdates()
-            }
+            if isUpdateReady { return }
+            pendingExternalAction = action
+            sparkle.checkForUpdates()
         case "restart":
             if isUpdateReady {
                 sparkle.installAndRelaunch()

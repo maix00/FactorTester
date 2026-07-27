@@ -18,6 +18,7 @@ from script.release import build as release_build
 from script.release import embed_runtime as runtime_refresh
 from script.release.build import build_release, validate_embedded_sparkle_key
 from script.release.manifest import _kind, create_manifest
+from script.release.source_checkout import clean_worktree
 from tools.cli.release.app_archive import install_macos_app
 from tools.cli.release.contracts import validate_release_manifest
 
@@ -58,6 +59,43 @@ def test_manifest_builder_signs_explicit_assets(tmp_path: Path) -> None:
 
 def test_release_builder_requires_public_source_revision() -> None:
     assert "source_revision" in build_release.__annotations__
+
+
+def test_release_builder_discovers_full_xcode_when_select_points_to_tools(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    developer = tmp_path / "Xcode.app/Contents/Developer"
+    (developer / "usr/bin").mkdir(parents=True)
+    (developer / "usr/bin/xcodebuild").write_text("", encoding="utf-8")
+    monkeypatch.delenv("DEVELOPER_DIR", raising=False)
+    monkeypatch.setattr(
+        release_build.subprocess,
+        "check_output",
+        lambda *_args, **_kwargs: "/Library/Developer/CommandLineTools\n",
+    )
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(release_build.subprocess, "run", run)
+    real_path = Path
+    monkeypatch.setattr(
+        release_build,
+        "Path",
+        lambda value: (
+            developer
+            if value == "/Applications/Xcode.app/Contents/Developer"
+            else real_path(value)
+        ),
+    )
+
+    result = release_build.xcodebuild_environment()
+
+    assert result["DEVELOPER_DIR"] == str(developer)
+    assert calls[0][0][-1] == "-version"
 
 
 def test_release_builder_rejects_missing_sparkle_public_key(tmp_path: Path) -> None:
@@ -422,6 +460,41 @@ def test_release_builder_binds_revision_and_clean_client_checkout(
     monkeypatch.setattr(release_build.subprocess, "check_output", dirty)
     with pytest.raises(ValueError, match="unpublished client changes"):
         release_build._validate_source_checkout(tmp_path, revision)
+
+
+def test_clean_commit_fallback_requires_explicit_temporary_worktree(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Tests"],
+        check=True,
+    )
+    (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-qm", "base"], check=True
+    )
+    revision = subprocess.check_output(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
+    ).strip()
+    (repo / "unpublished.txt").write_text("dirty\n", encoding="utf-8")
+
+    with clean_worktree(repo, revision) as checkout:
+        assert (checkout / "tracked.txt").read_text() == "base\n"
+        assert not (checkout / "unpublished.txt").exists()
+        observed = subprocess.check_output(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assert observed == revision
+
+    assert (repo / "unpublished.txt").exists()
 
 
 def test_embedded_runtime_writes_internal_hash_receipt(
