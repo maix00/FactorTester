@@ -128,6 +128,11 @@ def release_client(
         raise ValueError("release channel must be stable or beta")
     if delta_only and channel != "beta":
         raise ValueError("Delta-only publishing is supported only for Beta")
+    if delta_only and not signing_identity.startswith("Developer ID Application:"):
+        raise ValueError(
+            "Delta-only publishing requires a trusted Developer ID signing "
+            "identity; publish a complete DMG with this local release identity"
+        )
     if not sparkle_public_key.strip():
         raise ValueError("Sparkle public key is required")
     if signing_identity != SHARED_SIGNING_IDENTITY:
@@ -362,11 +367,13 @@ def publish_beta_directory(
     staged_appcast.replace(appcast_pointer)
     if retain_base:
         _prune_beta_bases(release_root, keep=digest)
-        _prune_beta_public_artifacts(
-            release_root,
-            keep_digest=digest,
-            keep_deltas={delta.name for delta in deltas},
-        )
+    else:
+        _prune_beta_bases(release_root, keep="")
+    _prune_beta_public_artifacts(
+        release_root,
+        keep_digest=digest,
+        keep_deltas={delta.name for delta in deltas},
+    )
     return asset, appcast_pointer, legacy_pointer
 
 
@@ -387,7 +394,8 @@ def _prune_beta_public_artifacts(
     """Remove public Beta artifacts no longer reachable from Delta-only mode."""
     assets = release_root / "assets" / "beta"
     for candidate in assets.glob("*.dmg"):
-        candidate.unlink()
+        if candidate.stem != keep_digest:
+            candidate.unlink()
     for candidate in assets.glob("*.delta"):
         if candidate.name not in keep_deltas:
             candidate.unlink()

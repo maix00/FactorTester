@@ -104,7 +104,14 @@ def test_generate_appcast_stages_previous_archive_and_publishes_content_addresse
     previous = tmp_path / "previous.dmg"
     previous.write_bytes(b"previous")
     previous_appcast = tmp_path / "previous-appcast.xml"
-    previous_appcast.write_text("<rss />", encoding="utf-8")
+    previous_appcast.write_text(
+        """<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+ version="2.0"><channel><item><sparkle:version>4</sparkle:version>
+<sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+<enclosure url="https://example.test/previous.dmg" sparkle:edSignature="signed" />
+</item></channel></rss>""",
+        encoding="utf-8",
+    )
     output = tmp_path / "appcast.xml"
     delta_output = tmp_path / "deltas"
     tool = _tool(tmp_path, "generate_appcast")
@@ -160,6 +167,15 @@ def test_delta_only_appcast_keeps_only_the_matching_upgrade(
     previous.write_bytes(b"previous")
     output = tmp_path / "appcast.xml"
     delta_output = tmp_path / "deltas"
+    previous_appcast = tmp_path / "previous-appcast.xml"
+    previous_appcast.write_text(
+        """<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+ version="2.0"><channel><item><sparkle:version>4</sparkle:version>
+<sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+<enclosure url="https://example.test/previous.dmg" sparkle:edSignature="signed" />
+</item></channel></rss>""",
+        encoding="utf-8",
+    )
     tool = _tool(tmp_path, "generate_appcast")
 
     def run(command, **kwargs):
@@ -193,6 +209,7 @@ def test_delta_only_appcast_keeps_only_the_matching_upgrade(
         build=5,
         channel="beta",
         previous_archive=previous,
+        previous_appcast=previous_appcast,
         delta_output=delta_output,
         delta_only=True,
     )

@@ -90,6 +90,9 @@ def generate_sparkle_appcast(
         previous_name = previous_archive.name
     else:
         previous_name = ""
+    expected_delta_from = _latest_build(previous_appcast)
+    if previous_appcast is not None and expected_delta_from is None:
+        raise ValueError("previous Sparkle appcast has no valid build")
 
     with tempfile.TemporaryDirectory(
         prefix="factortester-sparkle-appcast-"
@@ -141,6 +144,8 @@ def generate_sparkle_appcast(
         if delta_only:
             if previous_archive is None:
                 raise ValueError("Delta-only appcast requires a previous archive")
+            if previous_appcast is None:
+                raise ValueError("Delta-only appcast requires a previous appcast")
             _retain_latest_item(generated)
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = output.with_name(f".{output.name}.staging")
@@ -153,6 +158,7 @@ def generate_sparkle_appcast(
         build=build,
         channel=channel,
         download_url=download_url,
+        expected_delta_from=expected_delta_from,
     )
     return SparkleAppcast(
         path=validated.path,
@@ -176,6 +182,23 @@ def _retain_latest_item(appcast: Path) -> None:
     for item in items[1:]:
         channel.remove(item)
     tree.write(appcast, encoding="utf-8", xml_declaration=True)
+
+
+def _latest_build(appcast: Path | None) -> int | None:
+    if appcast is None or not appcast.is_file():
+        return None
+    try:
+        root = ET.parse(appcast).getroot()
+    except (OSError, ET.ParseError):
+        return None
+    item = root.find("./channel/item")
+    if item is None:
+        return None
+    value = item.findtext(f"{{{SPARKLE_NAMESPACE}}}version")
+    try:
+        return int(value or "")
+    except ValueError:
+        return None
 
 
 def _rewrite_delta_urls(
@@ -205,6 +228,7 @@ def validate_sparkle_appcast(
     build: int,
     channel: str,
     download_url: str,
+    expected_delta_from: int | None = None,
 ) -> SparkleAppcast:
     try:
         root = ET.parse(path).getroot()
@@ -236,6 +260,16 @@ def validate_sparkle_appcast(
     )
     if not signature:
         raise ValueError("Sparkle appcast archive signature is missing")
+    if expected_delta_from is not None:
+        deltas = item.find(f"{{{SPARKLE_NAMESPACE}}}deltas")
+        observed = {
+            enclosure.attrib.get(f"{{{SPARKLE_NAMESPACE}}}deltaFrom")
+            for enclosure in (deltas.findall("enclosure") if deltas is not None else [])
+        }
+        if str(expected_delta_from) not in observed:
+            raise ValueError(
+                "Sparkle appcast delta does not target the previous build"
+            )
     return SparkleAppcast(
         path=path,
         version=version,

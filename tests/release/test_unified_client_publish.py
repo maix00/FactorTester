@@ -71,6 +71,47 @@ def test_beta_publishes_sparkle_and_legacy_pointers_last(
     assert (root / "assets/beta/delta.sha256.delta").read_bytes() == b"delta"
 
 
+def test_full_beta_publish_prunes_unreachable_prior_artifacts(
+    tmp_path: Path,
+) -> None:
+    dmg = tmp_path / "FTClient.dmg"
+    dmg.write_bytes(b"release")
+    digest = sha256(b"release").hexdigest()
+    appcast = _appcast(
+        tmp_path / "appcast.xml",
+        version="1.2.3",
+        build=42,
+        channel="beta",
+        url=f"https://factor.example/assets/beta/{digest}.dmg",
+    )
+    root = tmp_path / "published"
+    old_asset = root / "assets/beta/old.dmg"
+    old_asset.parent.mkdir(parents=True, exist_ok=True)
+    old_asset.write_bytes(b"old")
+    old_delta = root / "assets/beta/old.delta"
+    old_delta.write_bytes(b"old delta")
+    old_appcast = root / "appcasts/beta/old.xml"
+    old_appcast.parent.mkdir(parents=True, exist_ok=True)
+    old_appcast.write_text("old", encoding="utf-8")
+    old_base = root / "bases/beta/old.dmg"
+    old_base.parent.mkdir(parents=True, exist_ok=True)
+    old_base.write_bytes(b"old")
+
+    publish.publish_beta_directory(
+        dmg=dmg,
+        appcast=appcast,
+        legacy_manifest={"schema_version": 1, "sha256": digest},
+        release_root=root,
+        publish_full=True,
+    )
+
+    assert (root / "assets/beta" / f"{digest}.dmg").is_file()
+    assert not old_asset.exists()
+    assert not old_delta.exists()
+    assert not old_appcast.exists()
+    assert not old_base.exists()
+
+
 def test_beta_can_publish_delta_without_current_full_archive(
     tmp_path: Path,
 ) -> None:
@@ -126,6 +167,25 @@ def test_delta_only_cleanup_removes_transient_full_archive(
     publish._remove_local_archive(archive)
 
     assert not archive.exists()
+
+
+def test_delta_only_requires_trusted_signing_identity() -> None:
+    with pytest.raises(ValueError, match="trusted Developer ID"):
+        publish.release_client(
+            channel="beta",
+            version="1.2.3",
+            build=42,
+            source_revision="a" * 40,
+            output=Path("/tmp/unused-release-output"),
+            signing_identity=publish.SHARED_SIGNING_IDENTITY,
+            sparkle_public_key="public",
+            sparkle_generate_appcast=Path("/tmp/generate_appcast"),
+            legacy_private_key=Path("/tmp/private.pem"),
+            legacy_public_key=Path("/tmp/public.pem"),
+            server_origin="http://127.0.0.1:8141",
+            release_root=Path("/tmp/release-root"),
+            delta_only=True,
+        )
 
 
 def test_main_is_uploaded_as_draft_before_becoming_latest(
