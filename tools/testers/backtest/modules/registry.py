@@ -47,6 +47,7 @@ from .minor_unit import MinorUnitModule
 from .factor import FactorModule
 from .factor_signal import FactorSignalModule
 from .target import TargetStrategyModule
+from .strategy_hooks import StrategyHookModule
 from .group_membership import GroupMembershipModule
 from .threshold_signal import ThresholdSignalModule
 from .long_short import LongShortCompositionModule
@@ -72,6 +73,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     RolloverModule,
     MarketDataModule,
     BarEventModule,
+    StrategyHookModule,
     MinorUnitModule,
     FactorModule,
     FactorSignalModule,

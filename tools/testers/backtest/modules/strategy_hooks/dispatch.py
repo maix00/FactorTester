@@ -1,0 +1,96 @@
+"""Runtime callback dispatch; intent conversion lives in the adjacent module."""
+
+from __future__ import annotations
+
+from types import MappingProxyType
+from typing import Any
+
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.market_events import MarketDataEvent, MarketDataEventKind
+from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.engines.native.strategy_hooks import (
+    StrategyContext,
+    intent_payload,
+    normalize_hook_result,
+)
+
+from .fields import emitted_signal
+
+
+def _context_for(state: Any, ctx: Any, strategy: Any) -> StrategyContext:
+    from tools.testers.backtest.modules.market_data import MarketDataModule
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+
+    prices = ctx.get(MarketDataModule.current_prices, {})
+    positions: dict[Any, Any] = {}
+    try:
+        ledger = state.ledger_for_strategy(strategy)
+        stored = ledger.get(LedgerModule.positions, {})
+        if isinstance(stored, dict):
+            positions = dict(stored)
+    except (AttributeError, KeyError):
+        # Lightweight unit/scheduler tests may intentionally omit a ledger.
+        pass
+    return StrategyContext(
+        strategy=strategy,
+        timestamp=ctx.timestamp,
+        event_kind=ctx.event_kind,
+        positions=MappingProxyType(positions),
+        current_prices=MappingProxyType(dict(prices) if isinstance(prices, dict) else {}),
+    )
+
+
+def _call_start(state: Any, ctx: Any) -> None:
+    for strategy in ctx.active_strategies:
+        result = strategy.on_start(_context_for(state, ctx, strategy))
+        if normalize_hook_result(result):
+            raise ValueError("on_start cannot emit an intent before a market timestamp")
+
+
+def _call_stop(state: Any, ctx: Any) -> None:
+    for strategy in ctx.active_strategies:
+        result = strategy.on_stop(_context_for(state, ctx, strategy))
+        if normalize_hook_result(result):
+            raise ValueError("on_stop cannot emit a new trading intent")
+
+
+def _call_market_data(state: Any, ctx: Any) -> None:
+    for strategy in ctx.active_strategies:
+        for event in ctx.payloads_for(strategy):
+            if not isinstance(event, MarketDataEvent):
+                raise TypeError("MARKET_DATA hook requires MarketDataEvent payload")
+            result = _specific_market_hook(state, strategy, ctx, event)
+            _emit_intents(ctx, strategy, result)
+
+
+def _specific_market_hook(state: Any, strategy: Any, ctx: Any, event: MarketDataEvent) -> Any:
+    hook_name = {
+        MarketDataEventKind.QUOTE: "on_quote",
+        MarketDataEventKind.TRADE: "on_trade",
+        MarketDataEventKind.BOOK_DELTA: "on_book_delta",
+    }.get(event.kind)
+    hook = getattr(type(strategy), hook_name, None) if hook_name else None
+    if callable(hook) and hook is not getattr(Strategy, hook_name, None):
+        return getattr(strategy, hook_name)(_context_for(state, ctx, strategy), event.payload)
+    return strategy.on_market_data(_context_for(state, ctx, strategy), event)
+
+
+def _call_bar(state: Any, ctx: Any) -> None:
+    for strategy in ctx.active_strategies:
+        for bar in ctx.payloads_for(strategy):
+            _emit_intents(ctx, strategy, strategy.on_bar(_context_for(state, ctx, strategy), bar))
+
+
+def _call_order_event(state: Any, ctx: Any) -> None:
+    for strategy in ctx.active_strategies:
+        for order in ctx.payloads_for(strategy):
+            result = strategy.on_order_event(_context_for(state, ctx, strategy), order)
+            _emit_intents(ctx, strategy, result)
+
+
+def _emit_intents(ctx: Any, strategy: Any, result: Any) -> None:
+    for intent in normalize_hook_result(result):
+        ctx.set_for(
+            emitted_signal, strategy,
+            EventDraft(EventKind.SIGNAL, ctx.timestamp, strategy, payload=intent_payload(intent)),
+        )

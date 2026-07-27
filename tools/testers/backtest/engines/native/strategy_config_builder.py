@@ -51,6 +51,14 @@ _GROUP_STRATEGY_FLOWS = {"group_quantile_membership"}
 _THRESHOLD_STRATEGY_FLOWS = {"threshold_signal_target"}
 _LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
 _TERM_CARRY_STRATEGY_FLOWS = {"term_carry_target"}
+_STRATEGY_HOOK_FLOWS = {
+    "strategy_hook_on_start",
+    "strategy_hook_on_market_data",
+    "strategy_hook_on_bar",
+    "strategy_hook_on_signal_intent",
+    "strategy_hook_on_order_event",
+    "strategy_hook_on_stop",
+}
 _DAILY_MARK_TO_MARKET_FLOWS = {
     "register_daily_mark_to_market_notices",
     "apply_daily_mark_to_market",
@@ -121,7 +129,16 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
     if not (uses_dmtm or uses_margin_notice):
         excluded |= _LEDGER_LOOKUP_FLOWS
     strategy_kind = _strategy_intent_mode(resolved_settings)
-    if strategy_kind == "long_short":
+    if strategy_kind == "custom":
+        excluded |= _FACTOR_MODE_FLOWS | _LIVE_FACTOR_SUPPORT_FLOWS
+        excluded |= (
+            _GROUP_STRATEGY_FLOWS
+            | _THRESHOLD_STRATEGY_FLOWS
+            | _LONG_SHORT_STRATEGY_FLOWS
+            | _TERM_CARRY_STRATEGY_FLOWS
+            | {"precompute_strategy_intents"}
+        )
+    elif strategy_kind == "long_short":
         excluded |= (
             _GROUP_STRATEGY_FLOWS
             | _THRESHOLD_STRATEGY_FLOWS
@@ -145,6 +162,8 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
             | _LONG_SHORT_STRATEGY_FLOWS
             | _TERM_CARRY_STRATEGY_FLOWS
         )
+    if strategy_kind != "custom":
+        excluded |= _STRATEGY_HOOK_FLOWS
     return frozenset(names - excluded)
 
 
@@ -400,10 +419,15 @@ def apply_strategy_configs(
     counterparty: str | CounterPartyProfile | None = None,
     counterparty_by_strategy: Mapping[str, str | CounterPartyProfile | None] | None = None,
     counterparty_by_ledger: Mapping[str, str | CounterPartyProfile | None] | None = None,
+    strategies_by_alias: Mapping[str, Strategy] | None = None,
 ) -> None:
     book = strategy_book or StrategyBookSimple()
     resolved = {str(alias): dict(settings) for alias, settings in resolved_settings_by_alias.items()}
-    strategy_objects = {alias: Strategy(alias=alias) for alias in resolved}
+    provided = strategies_by_alias or {}
+    strategy_objects = {
+        alias: provided.get(alias, Strategy(alias=alias))
+        for alias in resolved
+    }
     materialize_strategy_book_store(state, book, strategy_objects, resolved)
     _resolve_cash_pool_configs(resolved, state=state, strategies_by_alias=strategy_objects, strategy_book=book)
     state.ledger_configs = _resolve_ledger_configs(
