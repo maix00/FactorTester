@@ -227,17 +227,25 @@ def scope_status(scope_id: str) -> str:
 
 def cleanup_for_terminal_job(repository: Any, job: Any) -> bool:
     """Delete a scope after all attempts belonging to the Run are terminal."""
-    scope_id = str(
+    factor_scope_id = str(
         (job.job_spec or {}).get("transient_factor_source_scope_id") or ""
     )
-    if not scope_id:
+    strategy_scope_id = str(
+        (job.job_spec or {}).get("transient_strategy_source_scope_id") or ""
+    )
+    if not factor_scope_id and not strategy_scope_id:
         return False
     if not repository.all_run_attempts_terminal(
         owner=job.owner,
         run_id=job.run_id,
     ):
         return False
-    return cleanup_scope(scope_id)
+    removed = cleanup_scope(factor_scope_id) if factor_scope_id else False
+    if strategy_scope_id:
+        from server.services.transient_strategy_sources import cleanup_scope as cleanup_strategy_scope
+
+        removed = cleanup_strategy_scope(strategy_scope_id) or removed
+    return removed
 
 
 def cleanup_stale_scopes(repository: Any, *, max_age_seconds: float = 3600.0) -> int:

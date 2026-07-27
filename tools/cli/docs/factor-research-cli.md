@@ -25,6 +25,12 @@ factortester strategy-intent configure A1 \
   --role sizing=InverseRisk --allocation-policy factor_sizing \
   --sizing-transform inverse --json
 
+# Public strategy entry: templates and custom Strategy Actor specs.
+# StrategyPlan is produced internally after validation; it is not a user-written template.
+factortester strategy list --json
+factortester strategy template show group_quantile --json
+factortester strategy validate --spec strategy.yaml --json
+
 # Validate the full panel through GTHT and freeze its id/hashes in this workspace:
 factortester external-factor validate \
   /path/to/gtht_handoff.json \

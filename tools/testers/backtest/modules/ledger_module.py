@@ -85,6 +85,8 @@ class LedgerModule(ExecutableModule):
     _margin_utilization_ref = FieldRef("margin_utilization", owner="MarginModule")
     _margin_limit_excess_ref = FieldRef("margin_limit_excess", owner="MarginModule")
     _order_fill_valuation_prices_ref = FieldRef("order_fill_valuation_prices")
+    position_events = FieldRef("position_events")
+    order_status_events = FieldRef("order_status_events")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "positions": FieldDefinition(public=False, display_value_kind="positions"),

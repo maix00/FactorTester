@@ -80,6 +80,7 @@ class TargetStrategyModule(ExecutableModule):
                 ("group", "分组"),
                 ("threshold", "阈值"),
                 ("term_carry", "Term Carry"),
+                ("custom", "自定义事件"),
             ),
             chip_template="策略意图: {value}",
             tab_label="分组数量",

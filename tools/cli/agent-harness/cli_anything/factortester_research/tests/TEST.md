@@ -17,7 +17,7 @@ artifact contracts produced by the workflow.
   delete or rewrite the serialized margin-budget fields.
 - `factortester margin-budget show/configure` reads and revision-updates the
   real workspace; it validates `0 < target <= max < 1` and exposes that margin
-  mode defaults to 0.40/0.50 while disabled margin leaves weights unscaled.
+  mode defaults to 0.30/0.40 while disabled margin leaves weights unscaled.
 - The CLI-Anything command delegates exactly to the installed `factortester`
   executable and does not reimplement workspace or validation semantics.
 

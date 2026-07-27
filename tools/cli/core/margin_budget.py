@@ -21,10 +21,10 @@ def margin_budget_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "enabled": mode.lower() not in {"none", "off", "zero"},
             "allocation_policy": _effective(group, local, "allocation_policy", "equal_notional"),
             "target_margin_utilization": float(_effective(
-                group, local, "target_margin_utilization", 0.40,
+                group, local, "target_margin_utilization", 0.30,
             )),
             "max_margin_utilization": float(_effective(
-                group, local, "max_margin_utilization", 0.50,
+                group, local, "max_margin_utilization", 0.40,
             )),
             "margin_utilization_tolerance": float(_effective(
                 group, local, "margin_utilization_tolerance", 0.01,

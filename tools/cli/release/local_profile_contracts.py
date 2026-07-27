@@ -28,7 +28,7 @@ def new_local_profile(
     principal_ref: str = "",
 ) -> dict[str, Any]:
     return validate_local_profile({
-        "schema_version": 8,
+        "schema_version": 9,
         "profile_id": profile_id,
         "status": "active",
         "display_name": display_name,
@@ -48,6 +48,7 @@ def new_local_profile(
         "agents": [],
         "research_records": [],
         "factor_workspace_binding": {},
+        "strategy_workspace_binding": {},
         "adapters": [],
     })
 
@@ -62,16 +63,17 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "session_binding",
         "research_records",
         "factor_workspace_binding",
+        "strategy_workspace_binding",
     }
     observed = set(value)
     legacy_optional = {
         "workspaces", "initialization_sources", "session_binding",
         "research_records",
-        "factor_workspace_binding", "status",
+        "factor_workspace_binding", "strategy_workspace_binding", "status",
     }
     if not (allowed - legacy_optional).issubset(observed) or observed - allowed:
         raise ValueError("local profile fields are invalid")
-    if value.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7, 8}:
+    if value.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
         raise ValueError("local profile schema_version is unsupported")
     status = value.get("status", "active")
     if status not in {"active", "inactive"}:
@@ -96,8 +98,11 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
     factor_workspace_binding = _factor_workspace_binding(
         value.get("factor_workspace_binding", {})
     )
+    strategy_workspace_binding = _strategy_workspace_binding(
+        value.get("strategy_workspace_binding", {})
+    )
     return {
-        "schema_version": 8,
+        "schema_version": 9,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
@@ -116,6 +121,7 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
             _research_record(item) for item in research_records
         ],
         "factor_workspace_binding": factor_workspace_binding,
+        "strategy_workspace_binding": strategy_workspace_binding,
         "agents": [_agent(item) for item in agents],
         "adapters": [_adapter(item) for item in adapters],
     }
@@ -184,6 +190,69 @@ def _factor_workspace_binding(value: Any) -> dict[str, Any]:
         },
         "receipt_hash": _text(
             value.get("receipt_hash"), "factor_workspace.receipt_hash"
+        ),
+        "receipt_ref": receipt_ref,
+    }
+
+
+def _strategy_workspace_binding(value: Any) -> dict[str, Any]:
+    """Validate an isolated actor source worktree, independent of factors."""
+    if value == {}:
+        return {}
+    fields = {
+        "binding_id", "canonical_repo_ref", "base_commit", "branch",
+        "worktree_path", "research_root", "git_common_dir", "owner_ref",
+        "sync_policy", "receipt_hash", "receipt_ref",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("strategy workspace binding fields are invalid")
+    sync = value.get("sync_policy")
+    if not isinstance(sync, dict) or set(sync) != {
+        "source_sync_enabled", "auto_push", "auto_merge",
+    }:
+        raise ValueError("strategy workspace sync policy fields are invalid")
+    if sync["auto_push"] is not False or sync["auto_merge"] is not False:
+        raise ValueError("strategy workspace cannot auto push or merge")
+    commit = _text(value.get("base_commit"), "strategy_workspace.base_commit")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("strategy workspace base_commit is invalid")
+    canonical_ref = _text(
+        value.get("canonical_repo_ref"),
+        "strategy_workspace.canonical_repo_ref",
+    )
+    _reference(
+        canonical_ref,
+        field="strategy_workspace.canonical_repo_ref",
+        schemes={"local-strategy-git"},
+    )
+    receipt_ref = _text(
+        value.get("receipt_ref"), "strategy_workspace.receipt_ref"
+    )
+    _reference(receipt_ref, field="strategy_workspace.receipt_ref", schemes={"file"})
+    return {
+        "binding_id": validate_local_identifier(
+            value.get("binding_id"), "strategy_workspace.binding_id"
+        ),
+        "canonical_repo_ref": canonical_ref,
+        "base_commit": commit,
+        "branch": _text(value.get("branch"), "strategy_workspace.branch"),
+        "worktree_path": _text(
+            value.get("worktree_path"), "strategy_workspace.worktree_path"
+        ),
+        "research_root": _text(
+            value.get("research_root"), "strategy_workspace.research_root"
+        ),
+        "git_common_dir": _text(
+            value.get("git_common_dir"), "strategy_workspace.git_common_dir"
+        ),
+        "owner_ref": _text(value.get("owner_ref"), "strategy_workspace.owner_ref"),
+        "sync_policy": {
+            "source_sync_enabled": bool(sync["source_sync_enabled"]),
+            "auto_push": False,
+            "auto_merge": False,
+        },
+        "receipt_hash": _text(
+            value.get("receipt_hash"), "strategy_workspace.receipt_hash"
         ),
         "receipt_ref": receipt_ref,
     }

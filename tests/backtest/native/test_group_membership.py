@@ -1071,7 +1071,7 @@ def test_schedule_order_execution_skips_orders_without_future_bar():
     assert seen == []
 
 
-def test_schedule_order_execution_sets_scheduled_and_pushes_event():
+def test_schedule_order_execution_accepts_and_pushes_event():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -1089,7 +1089,7 @@ def test_schedule_order_execution_sets_scheduled_and_pushes_event():
 
     _schedule_order_execution(account, ctx)
 
-    assert order.status == OrderStatus.SCHEDULED
+    assert order.status == OrderStatus.ACCEPTED
     seen = []
     queue.set_dispatcher(EventKind.ORDER, lambda batch: seen.extend(batch))
     queue.run_until_drained()
@@ -1097,6 +1097,44 @@ def test_schedule_order_execution_sets_scheduled_and_pushes_event():
     assert seen[0].payload.order is order
     assert seen[0].payload.order_id == order.order_id
     assert seen[0].payload.revision == order.revision
+
+
+def test_runtime_receives_submitted_and_accepted_on_separate_event_axis():
+    s = Strategy(alias="status-events")
+    p = _product()
+    config = StrategyConfig(
+        strategy=s,
+        active_flow_names=frozenset({"strategy_runtime_on_order_status_event"}),
+        field_values={
+            GroupMembershipModule.execution_timing: "next_bar",
+            OrderExecutionModule.execution_price_basis: "open",
+        },
+    )
+    account = BacktestRunState(strategy_configs={s: config})
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2)
+    )
+    queue = EventQueue()
+    timestamp = pd.Timestamp("2024-01-01")
+    order = Order(
+        instrument=p, timestamp=timestamp, quantity=10.0,
+        intent_quantity=10.0, strategy=s,
+    )
+    ctx = FlowContext(
+        timestamp=timestamp, event_queue=queue,
+        active_strategies=frozenset({s}),
+    )
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    _schedule_order_execution(account, ctx)
+
+    status_events = []
+    queue.set_dispatcher(EventKind.ORDER_STATUS, lambda batch: status_events.extend(batch))
+    queue.run_until_drained()
+    assert [event.payload.status for event in status_events] == [
+        OrderStatus.SUBMITTED,
+        OrderStatus.ACCEPTED,
+    ]
 
 
 def test_schedule_order_execution_uses_each_products_next_available_open_bar():
@@ -1162,7 +1200,7 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
     ctx1 = FlowContext(timestamp=t1, event_queue=queue, active_strategies=frozenset({s}))
     ctx1.set_for(OrderConstructModule.orders, s, [old_order])
     _schedule_order_execution(account, ctx1)
-    assert old_order.status == OrderStatus.SCHEDULED
+    assert old_order.status == OrderStatus.ACCEPTED
     assert old_order.timestamp == pd.Timestamp("2024-01-02") + pd.Timedelta(microseconds=1)
     assert old_order.get("price_timestamp") == pd.Timestamp("2024-01-03")
 
@@ -1172,7 +1210,7 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
     _schedule_order_execution(account, ctx2)
 
     assert old_order.status == OrderStatus.CANCELLED
-    assert new_order.status == OrderStatus.SCHEDULED
+    assert new_order.status == OrderStatus.ACCEPTED
 
 
 def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_signal_time():
@@ -1196,7 +1234,7 @@ def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_s
     ctx1 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
     ctx1.set_for(OrderConstructModule.orders, s, [old_order])
     _schedule_order_execution(account, ctx1)
-    assert old_order.status == OrderStatus.SCHEDULED
+    assert old_order.status == OrderStatus.ACCEPTED
 
     new_order = Order(instrument=p, timestamp=t, quantity=20.0, intent_quantity=20.0, strategy=s)
     ctx2 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
@@ -1204,7 +1242,7 @@ def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_s
     _schedule_order_execution(account, ctx2)
 
     assert old_order.status == OrderStatus.CANCELLED
-    assert new_order.status == OrderStatus.SCHEDULED
+    assert new_order.status == OrderStatus.ACCEPTED
 
 
 def test_schedule_order_execution_respects_strategy_book_pending_order_policy():
@@ -1234,8 +1272,8 @@ def test_schedule_order_execution_respects_strategy_book_pending_order_policy():
     ctx2.set_for(OrderConstructModule.orders, s, [new_order])
     _schedule_order_execution(account, ctx2)
 
-    assert old_order.status == OrderStatus.SCHEDULED
-    assert new_order.status == OrderStatus.SCHEDULED
+    assert old_order.status == OrderStatus.ACCEPTED
+    assert new_order.status == OrderStatus.ACCEPTED
 
 
 def test_schedule_order_execution_does_not_cancel_across_different_products():
@@ -1261,8 +1299,8 @@ def test_schedule_order_execution_does_not_cancel_across_different_products():
     ctx2.set_for(OrderConstructModule.orders, s, [order2])
     _schedule_order_execution(account, ctx2)
 
-    assert order1.status == OrderStatus.SCHEDULED  # untouched, different product
-    assert order2.status == OrderStatus.SCHEDULED
+    assert order1.status == OrderStatus.ACCEPTED  # untouched, different product
+    assert order2.status == OrderStatus.ACCEPTED
 
 
 def test_buy_and_hold_freezes_target_weights_after_first_computation():

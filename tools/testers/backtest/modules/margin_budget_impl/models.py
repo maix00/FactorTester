@@ -53,11 +53,11 @@ def settings_for_pool(state, pool_id: str, config: Any, module: Any) -> PoolSett
     return PoolSettings(
         target=float(
             getattr(pool, "target_margin_utilization", None)
-            or config.get(module.target_margin_utilization, 0.40)
+            or config.get(module.target_margin_utilization, 0.30)
         ),
         maximum=float(
             getattr(pool, "max_margin_utilization", None)
-            or config.get(module.max_margin_utilization, 0.50)
+            or config.get(module.max_margin_utilization, 0.40)
         ),
         tolerance=float(
             getattr(pool, "margin_utilization_tolerance", None)

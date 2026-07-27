@@ -11,7 +11,12 @@ from tools.testers.backtest.engines.native.order import (
 )
 
 from .actions import record_order_action
-from .schedule import create_order_attempt
+from .schedule import (
+    create_order_attempt,
+    order_status_event,
+    order_status_event_if_enabled,
+    order_transition_events_if_enabled,
+)
 
 
 def activate_ready_dependents(state: Any, ctx: Any) -> list[EventDraft]:
@@ -52,6 +57,17 @@ def activate_ready_dependents(state: Any, ctx: Any) -> list[EventDraft]:
                     state, order, timestamp=ctx.timestamp,
                     market_timestamp=market_timestamp,
                 )
+                try:
+                    emit_status_events = state.config_for(order.strategy).uses_flow(
+                        "strategy_runtime_on_order_status_event"
+                    )
+                except KeyError:
+                    emit_status_events = False
+                if emit_status_events:
+                    drafts.append(order_status_event(order, timestamp=ctx.timestamp))
+                order.status = OrderStatus.ACCEPTED
+                if emit_status_events:
+                    drafts.append(order_status_event(order, timestamp=ctx.timestamp))
                 drafts.append(EventDraft(
                     EventKind.ORDER, ctx.timestamp, order.strategy, attempt,
                 ))
@@ -69,4 +85,8 @@ def activate_ready_dependents(state: Any, ctx: Any) -> list[EventDraft]:
                 order.status = OrderStatus.CANCELLED
                 order.reject_reason = "prerequisite close order did not fill"
                 state.order_store.remove_from_live_indexes(order)
+                drafts.extend(order_transition_events_if_enabled(
+                    state, order, timestamp=ctx.timestamp,
+                    pending_status=OrderStatus.PENDING_CANCEL,
+                ))
     return drafts

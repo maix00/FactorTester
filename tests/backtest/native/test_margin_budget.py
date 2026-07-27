@@ -90,8 +90,8 @@ def test_mixed_margin_and_cash_products_use_one_for_cash_margin_rate() -> None:
 
     summary = ctx.get(MarginBudgetModule.margin_budget_summary)["private:mixed"]
     assert summary["weighted_margin_ratio"] == pytest.approx(0.55)
-    assert summary["gross_leverage"] == pytest.approx(0.40 / 0.55)
-    assert summary["projected_margin"] == pytest.approx(400.0)
+    assert summary["gross_leverage"] == pytest.approx(0.30 / 0.55)
+    assert summary["projected_margin"] == pytest.approx(300.0)
 
 
 def test_disabled_margin_keeps_cash_target_weight() -> None:

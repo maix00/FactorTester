@@ -59,6 +59,32 @@ def test_bar_events_not_registered_when_every_strategy_is_precomputed():
     assert queue.pending_count() == 0
 
 
+def test_custom_strategy_bar_hook_registers_bar_events():
+    class CustomBarStrategy(Strategy):
+        def on_bar(self, ctx, bar):
+            return None
+
+    strategy = CustomBarStrategy(alias="custom-bar")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"schedule_bar_events", "strategy_runtime_on_bar"}),
+        ),
+    })
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {"P1": [1.0, 2.0]},
+        index=[pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")],
+    )
+    queue = EventQueue()
+    ctx = FlowContext(timestamp=None, event_queue=queue)
+
+    _schedule_bar_events(account, ctx)
+
+    events = ctx.get(BarEventModule.dispatched_bar_events)
+    assert len(events) == 2
+    assert {event.strategy for event in events} == {strategy}
+
+
 def test_bar_events_deduplicate_strategies_sharing_one_live_factor():
     first = Strategy(alias="first")
     second = Strategy(alias="second")

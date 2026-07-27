@@ -41,13 +41,13 @@ class MarginBudgetModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "target_margin_utilization": FieldDefinition(
-            public=True, label="目标保证金利用率", default=0.40, control_template="number", tab="margin",
+            public=True, label="目标保证金利用率", default=0.30, control_template="number", tab="margin",
             minimum=0.01, maximum=0.99, step=0.01,
             visible_when={"margin_mode": ("auto", "exact", "custom", "fixed")},
             chip_template="目标保证金: {value}", tab_label="保证金", tab_order=160,
         ),
         "max_margin_utilization": FieldDefinition(
-            public=True, label="保证金利用率上限", default=0.50, control_template="number", tab="margin",
+            public=True, label="保证金利用率上限", default=0.40, control_template="number", tab="margin",
             minimum=0.01, maximum=0.99, step=0.01,
             visible_when={"margin_mode": ("auto", "exact", "custom", "fixed")},
             chip_template="保证金上限: {value}", tab_label="保证金", tab_order=160,

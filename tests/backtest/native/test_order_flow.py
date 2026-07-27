@@ -26,16 +26,16 @@ def _ctx_for(order, strategy):
     )
 
 
-def test_scheduled_order_without_terminal_status_is_recorded_as_working():
+def test_submitted_order_without_terminal_status_is_recorded_as_working():
     s = Strategy(alias="S")
     order = Order(instrument=_product(), timestamp=pd.Timestamp("2024-01-01"),
-                   quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.SCHEDULED)
+                   quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.SUBMITTED)
     account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
     record_order_terminal_state(account, _ctx_for(order, s))
 
     records = account.order_flow_store.records_for_order(order.order_id)
     assert records[-1]["step"] == "order_working"
-    assert records[-1]["status"] == "scheduled"
+    assert records[-1]["status"] == "submitted"
 
 
 def test_rejected_order_is_recorded():

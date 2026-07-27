@@ -12,6 +12,9 @@ from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_lifecycle import (
     create_order_attempt,
+    order_status_event,
+    order_status_event_if_enabled,
+    order_transition_events_if_enabled,
     record_order_action,
 )
 from tools.testers.backtest.modules.order_lifecycle.offsets import (
@@ -60,6 +63,13 @@ def schedule_order_execution(state, ctx) -> None:
             order.set("execution_price_basis", basis)
             order.set("matching_model", model)
             if order.status is OrderStatus.BLOCKED:
+                if not order.get("blocked_event_emitted"):
+                    blocked_event = order_status_event_if_enabled(
+                        state, order, timestamp=ctx.timestamp,
+                    )
+                    order.set("blocked_event_emitted", True)
+                    if blocked_event is not None:
+                        drafts.append(blocked_event)
                 continue
             schedule = resolve_execution_schedule(
                 state, ctx, strategy, order.instrument,
@@ -73,13 +83,22 @@ def schedule_order_execution(state, ctx) -> None:
                 market_timestamp=price_ts,
                 trading_day_resolver=state.market_data_store.trading_day_resolver,
             )
-            apply_pending_conflict(
+            pending_status_events = apply_pending_conflict(
                 state, strategy, order, ctx.timestamp, pending, conflict,
             )
+            drafts.extend(pending_status_events)
             attempt = create_order_attempt(
                 state, order, timestamp=execution_ts,
                 market_timestamp=price_ts,
             )
+            emit_status_events = config.uses_flow(
+                "strategy_runtime_on_order_status_event"
+            )
+            if emit_status_events:
+                drafts.append(order_status_event(order, timestamp=ctx.timestamp))
+            order.status = OrderStatus.ACCEPTED
+            if emit_status_events:
+                drafts.append(order_status_event(order, timestamp=execution_ts))
             pending[(strategy, order.instrument)] = order
             drafts.append(EventDraft(
                 EventKind.ORDER, execution_ts, strategy, attempt,
@@ -97,14 +116,14 @@ def should_skip_order(order) -> bool:
 
 def apply_pending_conflict(
     state, strategy, order, timestamp, pending, conflict,
-) -> None:
+) -> tuple[EventDraft, ...]:
     if conflict is not None:
-        conflict(state, strategy, order, timestamp)
-        return
+        result = conflict(state, strategy, order, timestamp)
+        return (result,) if isinstance(result, EventDraft) else ()
     stale = pending.get((strategy, order.instrument))
     if (
         stale is not None
-        and stale.status == OrderStatus.SCHEDULED
+        and stale.status in {OrderStatus.SUBMITTED, OrderStatus.ACCEPTED}
         and stale.get("price_timestamp", stale.timestamp) > timestamp
     ):
         stale.revision += 1
@@ -113,3 +132,8 @@ def apply_pending_conflict(
             timestamp=timestamp, reason="pending order conflict",
         )
         stale.status = OrderStatus.CANCELLED
+        return order_transition_events_if_enabled(
+            state, stale, timestamp=timestamp,
+            pending_status=OrderStatus.PENDING_CANCEL,
+        )
+    return ()

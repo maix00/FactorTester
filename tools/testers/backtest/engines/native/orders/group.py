@@ -24,7 +24,7 @@ def derive_group_status(statuses: tuple[str, ...]) -> str:
         return "filled"
     if any(status == "partially_filled" for status in statuses):
         return "partially_filled"
-    if any(status in {"scheduled", "accepted"} for status in statuses):
+    if any(status in {"submitted", "accepted"} for status in statuses):
         return "working"
     if any(status == "blocked" for status in statuses):
         return "waiting"

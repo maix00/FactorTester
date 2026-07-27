@@ -309,7 +309,10 @@ def retry_test_job(job_id: str):
         return error
     if old.status not in TERMINAL_STATUSES:
         return jsonify({"success": False, "error": "only terminal jobs can be retried"}), 409
-    if str(old.job_spec.get("transient_factor_source_scope_id") or ""):
+    if (
+        str(old.job_spec.get("transient_factor_source_scope_id") or "")
+        or str(old.job_spec.get("transient_strategy_source_scope_id") or "")
+    ):
         return jsonify({
             "success": False,
             "error": "transient Profile source has been cleaned; resubmit the Run with the Profile worktree",

@@ -110,8 +110,8 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
         "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
     }
-    assert index["defaults"]["target_margin_utilization"]["value"] == 0.40
-    assert index["defaults"]["max_margin_utilization"]["value"] == 0.50
+    assert index["defaults"]["target_margin_utilization"]["value"] == 0.30
+    assert index["defaults"]["max_margin_utilization"]["value"] == 0.40
     assert index["defaults"]["target_margin_utilization"]["visible_when"] == {
         "margin_mode": ["auto", "exact", "custom", "fixed"],
     }

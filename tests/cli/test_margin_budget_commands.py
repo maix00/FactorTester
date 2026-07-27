@@ -52,8 +52,8 @@ def test_show_reports_enabled_margin_defaults_and_equal_notional(monkeypatch) ->
     row = json.loads(result.output)["strategies"][0]
     assert row["enabled"] is True
     assert row["allocation_policy"] == "equal_notional"
-    assert row["target_margin_utilization"] == 0.40
-    assert row["max_margin_utilization"] == 0.50
+    assert row["target_margin_utilization"] == 0.30
+    assert row["max_margin_utilization"] == 0.40
 
 
 def test_configure_updates_workspace_and_validates_target_max_order(monkeypatch) -> None:

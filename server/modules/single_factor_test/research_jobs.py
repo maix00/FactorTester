@@ -33,6 +33,12 @@ from server.services.transient_factor_sources import (
     create_scope,
     validate_entries,
 )
+from server.services.transient_strategy_sources import (
+    cleanup_scope as cleanup_strategy_scope,
+    create_scope as create_strategy_scope,
+    validate_entries as validate_strategy_entries,
+)
+from server.services.strategy_plans import normalize_strategy_plan
 from server.services.research_graph.trial_plan.sample_identity import (
     derive_sample_identity,
 )
@@ -86,6 +92,34 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         transient_sources = validate_entries(data.get("transient_factor_sources"))
     except ValueError as exc:
         raise _RunRequestError(str(exc), details={"code": "invalid_transient_factor_sources"}) from exc
+    try:
+        transient_strategy_sources = validate_strategy_entries(
+            data.get("transient_strategy_sources")
+        )
+    except ValueError as exc:
+        raise _RunRequestError(
+            str(exc), details={"code": "invalid_transient_strategy_sources"}
+        ) from exc
+    strategy_specs = data.get("strategy_specs") or []
+    uploaded_strategy_paths = {
+        str(item.get("path") or "") for item in transient_strategy_sources
+    }
+    try:
+        strategy_plan = normalize_strategy_plan(
+            strategy_specs, uploaded_paths=uploaded_strategy_paths,
+        )
+    except ValueError as exc:
+        code = (
+            "strategy_source_unavailable"
+            if "source is not uploaded" in str(exc)
+            else "invalid_strategy_plan"
+        )
+        raise _RunRequestError(str(exc), details={"code": code}) from exc
+    if transient_strategy_sources and not strategy_plan:
+        raise _RunRequestError(
+            "transient strategy sources require a matching strategy_specs entry",
+            details={"code": "orphan_transient_strategy_sources"},
+        )
     source_overrides = {
         str(item["factor_id"]): str(item["source_code"])
         for item in transient_sources
@@ -191,6 +225,20 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    if strategy_plan:
+        run_spec["strategy_specs"] = deepcopy(strategy_plan)
+        run_spec["strategy_plan"] = deepcopy(strategy_plan)
+    run_spec["strategy_source_policy"] = (
+        {
+            "mode": "transient_run_source",
+            "files": [
+                {key: value for key, value in item.items() if key != "source_code"}
+                for item in transient_strategy_sources
+            ],
+        }
+        if transient_strategy_sources
+        else {"mode": "metadata_only"}
+    )
     if transient_sources:
         run_spec["factor_source_policy"] = {
             "mode": "transient_run_source",
@@ -241,6 +289,9 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "output_requests": output_requests,
         "run_spec": run_spec,
         "transient_sources": transient_sources,
+        "transient_strategy_sources": transient_strategy_sources,
+        "strategy_specs": strategy_plan,
+        "strategy_plan": strategy_plan,
     }
 
 
@@ -617,6 +668,10 @@ def submit_research_run():
     run_spec = prepared["run_spec"]
     transient_sources = prepared.get("transient_sources") or []
     transient_scope = create_scope(owner=owner, entries=transient_sources)
+    transient_strategy_scope = create_strategy_scope(
+        owner=owner,
+        entries=prepared.get("transient_strategy_sources") or [],
+    )
     try:
         run = research_runs.create_run(
             owner=owner,
@@ -628,9 +683,11 @@ def submit_research_run():
         )
     except ValueError as exc:
         cleanup_scope(str(transient_scope.get("scope_id") or ""))
+        cleanup_strategy_scope(str(transient_strategy_scope.get("scope_id") or ""))
         return jsonify({"success": False, "error": str(exc)}), 400
     except Exception:
         cleanup_scope(str(transient_scope.get("scope_id") or ""))
+        cleanup_strategy_scope(str(transient_strategy_scope.get("scope_id") or ""))
         raise
     jobs = []
     try:
@@ -647,8 +704,13 @@ def submit_research_run():
                 "step_mode": step_mode,
                 "output_requests": list(prepared["output_requests"]),
                 "run_spec": run_spec,
+                "strategy_specs": list(prepared.get("strategy_specs") or []),
+                "strategy_plan": list(prepared.get("strategy_plan") or []),
                 "transient_factor_source_scope_id": str(
                     transient_scope.get("scope_id") or ""
+                ),
+                "transient_strategy_source_scope_id": str(
+                    transient_strategy_scope.get("scope_id") or ""
                 ),
             }
             job = _submit_kind(
@@ -666,6 +728,7 @@ def submit_research_run():
             run_id=str(run["run_id"]),
         ):
             cleanup_scope(str(transient_scope.get("scope_id") or ""))
+            cleanup_strategy_scope(str(transient_strategy_scope.get("scope_id") or ""))
         raise
     try:
         presentation_sample_identity = derive_sample_identity(run_spec)
@@ -731,6 +794,11 @@ def preview_research_run():
         "retention_mode": prepared["retention_mode"],
         "step_mode": prepared["step_mode"],
         "output_requests": list(prepared["output_requests"]),
+        "strategy_specs": deepcopy(prepared.get("strategy_specs") or []),
+        "strategy_plan": deepcopy(prepared.get("strategy_plan") or []),
+        "strategy_source_policy": deepcopy(
+            run_spec.get("strategy_source_policy") or {}
+        ),
         "sample_identity": sample_identity,
         "factor_revision_manifests": deepcopy(
             run_spec["configuration"]["shared"].get(

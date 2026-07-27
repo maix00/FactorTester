@@ -305,7 +305,12 @@ def test_equity_ignores_zero_position_without_price():
 def test_apply_order_fill_skips_rejected_order_without_ledger_effect():
     s = Strategy(alias="S")
     p = _product()
-    config = _strategy_config(s, engine_mode="basic")
+    base_config = _strategy_config(s, engine_mode="basic")
+    config = StrategyConfig(
+        strategy=s,
+        active_flow_names=frozenset({"strategy_runtime_on_order_status_event"}),
+        field_values=base_config.field_values,
+    )
     account = _state_with_ledger_configs({s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
@@ -331,6 +336,10 @@ def test_apply_order_fill_skips_rejected_order_without_ledger_effect():
     assert ledger.get(LedgerModule.positions)[p].quantity == 0.0
     assert order.status == OrderStatus.REJECTED
     assert order.reject_reason == "触及涨停，买入方向不可成交"
+    status_events = order_ctx._event_queue.snapshot_head()
+    assert len(status_events) == 1
+    assert status_events[0].kind is EventKind.ORDER_STATUS
+    assert status_events[0].payload.status is OrderStatus.REJECTED
 
 
 def test_apply_order_fill_and_equity_use_contract_multiplier():

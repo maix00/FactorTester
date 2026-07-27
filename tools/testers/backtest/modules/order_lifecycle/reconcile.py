@@ -11,6 +11,7 @@ from tools.testers.backtest.engines.native.order import (
 
 from .access import order_stores_for
 from .actions import record_order_action
+from .schedule import order_transition_events_if_enabled
 
 
 def reconcile_target_delta(
@@ -21,6 +22,7 @@ def reconcile_target_delta(
     actual_quantity: float,
     target_quantity: float,
     timestamp: Any,
+    status_event_sink: Any | None = None,
 ) -> float:
     order_store, audit_store = order_stores_for(state)
     scope = (strategy, product)
@@ -42,6 +44,12 @@ def reconcile_target_delta(
         pending = order_store.pending_orders
         if pending.get(scope) is order:
             pending.pop(scope, None)
+        if status_event_sink is not None:
+            for event in order_transition_events_if_enabled(
+                state, order, timestamp=timestamp,
+                pending_status=OrderStatus.PENDING_UPDATE,
+            ):
+                status_event_sink(event)
         audit_store.record(
             order,
             step="target_reconcile_cancel",

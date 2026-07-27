@@ -6,6 +6,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 import tools.testers.backtest.engines.native.scheduler as scheduler_module
 from tools.testers.backtest.engines.native.scheduler import EventQueue
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.engines.native.timer_events import TimerCancel, TimerSchedule
 
 
 def test_pop_order_by_timestamp_then_kind():
@@ -55,6 +56,20 @@ def test_order_due_at_earlier_timestamp_fills_before_next_signal_decision():
     queue.run_until_drained()
 
     assert seen == [EventKind.ORDER, EventKind.SIGNAL]
+
+
+def test_timer_decision_runs_after_position_and_before_signal():
+    queue = EventQueue()
+    strategy = Strategy(alias="timer-order")
+    seen: list[EventKind] = []
+    timestamp = pd.Timestamp("2024-01-02 09:00:00")
+    for kind in (EventKind.BAR, EventKind.POSITION, EventKind.TIMER, EventKind.SIGNAL):
+        queue.set_dispatcher(kind, lambda batch, kind=kind: seen.append(kind))
+        queue.push_event(EventDraft(kind, timestamp, strategy))
+
+    queue.run_until_drained()
+
+    assert seen == [EventKind.BAR, EventKind.POSITION, EventKind.TIMER, EventKind.SIGNAL]
 
 
 def test_dynamic_push_during_handling_is_processed_in_order():
@@ -195,3 +210,52 @@ def test_event_queue_batches_same_timestamp_even_with_different_index_keys():
         pd.Timestamp("2026-03-09"),
         pd.Timestamp("2026-03-10"),
     }
+
+
+def test_recurring_timer_fires_deterministically_until_end():
+    queue = EventQueue()
+    strategy = Strategy(alias="timer")
+    seen: list[pd.Timestamp] = []
+    queue.set_dispatcher(EventKind.TIMER, lambda batch: seen.append(batch[0].timestamp))
+    queue.apply_timer_control(
+        strategy,
+        TimerSchedule(
+            "heartbeat",
+            pd.Timestamp("2024-01-01 09:00"),
+            interval=pd.Timedelta(minutes=1),
+            end_timestamp=pd.Timestamp("2024-01-01 09:02"),
+        ),
+    )
+
+    queue.run_until_drained()
+
+    assert seen == [
+        pd.Timestamp("2024-01-01 09:00"),
+        pd.Timestamp("2024-01-01 09:01"),
+        pd.Timestamp("2024-01-01 09:02"),
+    ]
+
+
+def test_cancelled_timer_does_not_fire_or_reschedule():
+    queue = EventQueue()
+    strategy = Strategy(alias="timer-cancel")
+    seen: list[pd.Timestamp] = []
+
+    def on_timer(batch: list[EventDraft]) -> None:
+        seen.append(batch[0].timestamp)
+        queue.apply_timer_control(strategy, TimerCancel("heartbeat"))
+
+    queue.set_dispatcher(EventKind.TIMER, on_timer)
+    queue.apply_timer_control(
+        strategy,
+        TimerSchedule(
+            "heartbeat",
+            pd.Timestamp("2024-01-01 09:00"),
+            interval=pd.Timedelta(minutes=1),
+            end_timestamp=pd.Timestamp("2024-01-01 09:02"),
+        ),
+    )
+
+    queue.run_until_drained()
+
+    assert seen == [pd.Timestamp("2024-01-01 09:00")]

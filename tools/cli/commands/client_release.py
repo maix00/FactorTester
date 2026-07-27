@@ -20,6 +20,7 @@ from tools.cli.release.app_update_control import dispatch_app_update, read_statu
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_profile import client_profile
 from tools.cli.commands.client_research import client_research
+from tools.cli.commands.strategy_profile import register_strategy_profile_commands
 
 
 def _echo(value: dict, as_json: bool) -> None:
@@ -41,6 +42,7 @@ def client_release() -> None:
 client_release.add_command(client_adapter)
 client_release.add_command(client_profile)
 client_release.add_command(client_research)
+register_strategy_profile_commands(client_profile)
 
 
 @client_release.group("app-update")

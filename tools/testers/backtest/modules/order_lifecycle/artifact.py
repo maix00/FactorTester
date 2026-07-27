@@ -6,7 +6,10 @@ from .projection import project_strategy_order_audit
 
 
 def emit_order_audit_artifact(sink, state, run_id: str) -> None:
-    if not getattr(sink, "should_retain_artifact", lambda _name: True)("order_audit"):
+    retain = getattr(sink, "should_retain_artifact", None)
+    if retain is None:
+        retain = lambda _name: getattr(sink, "retention_mode", "full") == "full"
+    if not retain("order_audit"):
         return
     sink.emit_artifact("order_audit", {
         "run_id": run_id,

@@ -24,7 +24,7 @@ def default_pending_order_conflict_policy(
         return
     if (
         stale is not None
-        and stale.status == OrderStatus.SCHEDULED
+        and stale.status in {OrderStatus.SUBMITTED, OrderStatus.ACCEPTED}
         and stale.get("price_timestamp", stale.timestamp) > signal_timestamp
     ):
         stale.revision += 1

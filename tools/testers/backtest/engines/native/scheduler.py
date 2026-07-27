@@ -361,6 +361,7 @@ def _audit_event_draft_value(value: EventDraft, *, key_labels: Mapping[str, str]
         "type": "EventDraft",
         "kind": value.kind.name.lower(),
         "timestamp": _audit_value(value.timestamp, key_labels=key_labels),
+        "sequence": value.sequence,
         "strategy": key_labels.get(str(strategy), str(strategy)) if strategy is not None and key_labels is not None else (str(strategy) if strategy is not None else ""),
         "ledger": str(ledger) if ledger is not None else "",
         "payload": _audit_value(value.payload, key_labels=key_labels),
@@ -653,7 +654,7 @@ class FlowContext:
     def set_for(self, ref: "FieldRef", strategy: "Strategy", value: Any) -> None:
         self._record_contract_access("write", ref)
         self._values_by_strategy.setdefault(ref, {})[strategy] = value
-        self._push_if_event(value)
+        self._push_if_event(value, strategy)
 
     def enter_flow(self, flow: ResolvedFlow) -> None:
         self._active_flow = flow
@@ -753,7 +754,14 @@ class FlowContext:
             return self.event_kind.name.lower()
         return "unknown"
 
-    def _push_if_event(self, value: Any) -> None:
+    def _push_if_event(self, value: Any, strategy: "Strategy | None" = None) -> None:
+        from .timer_events import TimerCancel, TimerSchedule
+
+        if isinstance(value, (TimerSchedule, TimerCancel)):
+            if strategy is None:
+                raise SchedulerError("timer control requires a strategy-scoped output")
+            self._event_queue.apply_timer_control(strategy, value)
+            return
         if isinstance(value, EventDraft):
             self._event_queue.push_event(value)
         elif isinstance(value, list) and value and isinstance(value[0], EventDraft):
@@ -833,31 +841,91 @@ class FlowContext:
 
 
 class EventQueue:
-    """Single global priority queue keyed (timestamp, kind, counter).
+    """Single global priority queue keyed (timestamp, kind, sequence, counter).
     `kind` (an IntEnum) participates directly in sort ordering — no-
     lookahead is guaranteed structurally by causal_valuation's precomputed
     ffill-only series, not by queue mechanics, so there's no separate
     "bucket"/"tick" concept here."""
 
     def __init__(self) -> None:
-        self._heap: list[tuple[pd.Timestamp, EventKind, int, EventDraft]] = []
+        self._heap: list[tuple[pd.Timestamp, EventKind, int, int, EventDraft]] = []
         self._counter = itertools.count()
         self._dispatchers: dict[EventKind, Callable[[list[EventDraft]], None]] = {}
+        self._timer_generations = itertools.count(1)
+        self._timers: dict[tuple[Any, str], tuple[int, Any]] = {}
+
+    def apply_timer_control(self, strategy: "Strategy", control: Any) -> None:
+        """Apply a strategy timer request without exposing queue internals."""
+
+        from .timer_events import TimerCancel, TimerEvent, TimerSchedule
+
+        key = (strategy, getattr(control, "name", ""))
+        if isinstance(control, TimerCancel):
+            self._timers.pop(key, None)
+            return
+        if not isinstance(control, TimerSchedule):
+            raise TypeError(f"unsupported timer control: {type(control).__name__}")
+        generation = next(self._timer_generations)
+        self._timers[key] = (generation, control)
+        self.push_event(EventDraft(
+            EventKind.TIMER,
+            control.first_timestamp,
+            strategy,
+            payload=TimerEvent(control.name, control.first_timestamp, generation=generation),
+        ))
+
+    def _timer_event_active(self, draft: EventDraft) -> bool:
+        from .timer_events import TimerEvent
+
+        event = draft.payload
+        if not isinstance(event, TimerEvent):
+            return True
+        registration = self._timers.get((draft.strategy, event.name))
+        return registration is not None and registration[0] == event.generation
+
+    def _advance_timer(self, draft: EventDraft) -> None:
+        from .timer_events import TimerEvent
+
+        event = draft.payload
+        if not isinstance(event, TimerEvent):
+            return
+        registration = self._timers.get((draft.strategy, event.name))
+        if registration is None or registration[0] != event.generation:
+            return
+        generation, schedule = registration
+        if schedule.interval is None:
+            self._timers.pop((draft.strategy, event.name), None)
+            return
+        next_timestamp = event.timestamp + schedule.interval
+        if schedule.end_timestamp is not None and next_timestamp > schedule.end_timestamp:
+            self._timers.pop((draft.strategy, event.name), None)
+            return
+        self.push_event(EventDraft(
+            EventKind.TIMER,
+            next_timestamp,
+            draft.strategy,
+            payload=TimerEvent(
+                event.name,
+                next_timestamp,
+                occurrence=event.occurrence + 1,
+                generation=generation,
+            ),
+        ))
 
     def set_dispatcher(self, kind: EventKind, dispatcher: Callable[[list[EventDraft]], None]) -> None:
         self._dispatchers[kind] = dispatcher
 
     def push_event(self, draft: EventDraft) -> None:
-        heapq.heappush(self._heap, (draft.timestamp, draft.kind, next(self._counter), draft))
+        heapq.heappush(self._heap, (draft.timestamp, draft.kind, draft.sequence, next(self._counter), draft))
 
     def push_events(self, drafts: list[EventDraft]) -> None:
         if not drafts:
             return
         if len(drafts) < 64 or len(drafts) * 4 < len(self._heap):
             for draft in drafts:
-                heapq.heappush(self._heap, (draft.timestamp, draft.kind, next(self._counter), draft))
+                heapq.heappush(self._heap, (draft.timestamp, draft.kind, draft.sequence, next(self._counter), draft))
             return
-        self._heap.extend((draft.timestamp, draft.kind, next(self._counter), draft) for draft in drafts)
+        self._heap.extend((draft.timestamp, draft.kind, draft.sequence, next(self._counter), draft) for draft in drafts)
         heapq.heapify(self._heap)
 
     def pending_count(self) -> int:
@@ -865,13 +933,13 @@ class EventQueue:
         return len(self._heap)
 
     def pending_count_by_kind(self, kind: EventKind) -> int:
-        return sum(1 for _, draft_kind, _, _ in self._heap if draft_kind is kind)
+        return sum(1 for _, draft_kind, _, _, _ in self._heap if draft_kind is kind)
 
     def snapshot_head(self, limit: int = 50) -> list[EventDraft]:
         """Return the next pending events in dispatch order without mutating the heap."""
         if limit <= 0:
             return []
-        return [draft for _timestamp, _kind, _counter, draft in sorted(self._heap)[:limit]]
+        return [draft for _timestamp, _kind, _sequence, _counter, draft in sorted(self._heap)[:limit]]
 
     def run_until_drained(self) -> None:
         """Progress reporting lives in `make_dispatcher` (Flow-level), not
@@ -879,17 +947,24 @@ class EventQueue:
         that inner loop is where real work (and real wall-clock time) is
         spent, not the batching loop itself."""
         while self._heap:
-            first_ts, first_kind, _, first = heapq.heappop(self._heap)
+            first_ts, first_kind, _, _, first = heapq.heappop(self._heap)
             batch = [first]
             while (
                 self._heap
                 and self._heap[0][0] == first_ts
                 and self._heap[0][1] == first_kind
             ):
-                batch.append(heapq.heappop(self._heap)[3])
+                batch.append(heapq.heappop(self._heap)[4])
+            if first.kind is EventKind.TIMER:
+                batch = [draft for draft in batch if self._timer_event_active(draft)]
+                if not batch:
+                    continue
             dispatcher = self._dispatchers.get(first.kind)
             if dispatcher is not None:
                 dispatcher(batch)
+            if first.kind is EventKind.TIMER:
+                for draft in batch:
+                    self._advance_timer(draft)
 
 
 class _ProgressTracker:
@@ -1280,6 +1355,7 @@ def _audit_event_queue_head(state: "BacktestRunState", event_queue: EventQueue, 
         rows.append({
             "index": index,
             "timestamp": str(draft.timestamp),
+            "sequence": draft.sequence,
             "event_kind": draft.kind.name,
             "strategy": _strategy_alias(state, draft.strategy) if draft.strategy is not None else "",
             "ledger": str(draft.ledger) if draft.ledger is not None else "",
@@ -1335,6 +1411,7 @@ def _audit_event_subject_row(
     )
     return {
         "timestamp": str(draft.timestamp),
+        "sequence": draft.sequence,
         "event_kind": draft.kind.name,
         "strategy": strategy,
         "ledger": ledger,

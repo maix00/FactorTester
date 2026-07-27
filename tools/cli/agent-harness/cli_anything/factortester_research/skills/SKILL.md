@@ -68,6 +68,24 @@ adjudication to resolve or bound it.
 Treat the workspace as editable configuration, the `ResearchRun` as immutable
 RunSpec ownership, and `Job` as lifecycle/result/artifact ownership. Never use
 `page_uuid` as execution ownership; observe, cancel, and retry by `job_id`.
+
+## Choose a strategy without exposing runtime internals
+
+Use the public strategy surface when a run needs an executable strategy declaration:
+
+```bash
+factortester strategy list --json
+factortester strategy template show group_quantile --json
+factortester strategy validate --spec strategy.yaml --json
+```
+
+`StrategyTemplate` is a reusable built-in algorithm entry. `StrategySpec` selects
+one template or a `profile:<path>` custom Strategy Actor and carries parameters,
+data, account, and execution settings. `StrategyPlan` is the server's frozen,
+normalized execution plan; the Agent does not write it. `strategy-intent` remains
+the compatibility command for editing legacy workspace role bindings. Do not
+place Flow, StrategyBook, or policy object names in a StrategySpec.
+
 `factortester client research create` requires `--product-group`. This is the
 implementation group used for capability resolution, not a frozen instrument
 universe. The exact ranking universe and product mask belong in the

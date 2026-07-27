@@ -18,7 +18,9 @@ def round_execution_scaled_quantity(state, strategy, order, quantity: float) -> 
     )
     lot_size = lot_sizes.get(order.instrument)
     if not lot_size:
-        ledger = ledger_for_strategy_product(state, strategy, order.instrument)
+        ledger = ledger_for_strategy_product(
+            state, strategy, order.instrument, order=order,
+        )
         if _resolve_use_int_position(state.config_for(strategy), state.ledger_config_for(ledger)):
             lot_size = 1.0
     return default_round_order_quantity(quantity, lot_size, policy)

@@ -269,6 +269,7 @@ def test_client_research_create_is_profile_scoped_and_records_local_state(
         "client", "research", "create",
         "--profile", "maxa",
         "--title", "MaxA research",
+        "--product-group", "core",
     ])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["research"]["work_package_id"] == (

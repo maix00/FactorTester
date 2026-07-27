@@ -19,19 +19,24 @@ if TYPE_CHECKING:
 class EventKind(IntEnum):
     """Values are priority order, not arbitrary labels — at the same
     timestamp, the lower value pops first from the EventQueue (see
-    scheduler.EventQueue). BAR before ORDER before SIGNAL before lifecycle
-    notices before TRADE_INTENT before LEDGER: completed market data updates
-    first, carried orders consume that bar before the next signal observes
-    positions, then lifecycle notices can cheaply decide whether an order is
-    needed before generic trade intents materialize market data. Dynamically
-    emitted same-time events remain causal
+    scheduler.EventQueue). BAR before ORDER before POSITION before TIMER before
+    SIGNAL before lifecycle notices before TRADE_INTENT before LEDGER:
+    completed market data updates first, carried orders consume that bar before
+    a clock callback observes positions, then lifecycle notices can cheaply
+    decide whether an order is needed before generic trade intents materialize
+    market data. Dynamically emitted same-time events remain causal
     because they enter the queue only after their producer runs. Values are spaced so a future
     EventKind can be inserted without renumbering everything after it."""
-    BAR = 0       # a market bar has arrived; live factors may update state
     FIELD_CHANGE = -5  # historical market-rule field change event; processed before any
                        # BAR so the field snapshot is already current for the
                        # entire timestamp
+    MARKET_FEED = -1  # one raw quote/trade/book observation; payload kind carries
+                      # L1/L2/L3 semantics and feed sequence preserves same-time order
+    BAR = 0       # an aggregate market bar has arrived; live factors may update state
+    ORDER_STATUS = 4  # an order lifecycle transition; never enters matching Flows
     ORDER = 5     # an existing Order has reached one matching opportunity
+    POSITION = 6  # a fill has changed a strategy-owned position; ledger is already updated
+    TIMER = 8     # a clock-owned strategy timer or one-shot time alert fired
     SIGNAL = 10   # a strategy signal/rebalance decision point has arrived
     LIFECYCLE_NOTICE = 14  # contract rollover / force-close notice; handlers
                            # inspect positions and emit ORDER only when needed
@@ -48,9 +53,14 @@ class EventDraft:
     kind: EventKind
     timestamp: pd.Timestamp
     strategy: "Strategy | None" = None
-        # Strategy-scoped events: BAR/SIGNAL/LIFECYCLE_NOTICE/TRADE_INTENT/ORDER. LEDGER
+        # Strategy-scoped events: BAR/TIMER/SIGNAL/ORDER_STATUS/ORDER/POSITION/LIFECYCLE_NOTICE/TRADE_INTENT. LEDGER
         # can set this to None and route by ledger instead.
     payload: Any = None
     index_key: Any = None
     index_names: tuple[Any, ...] = ()
     ledger: "Ledger | None" = None
+    sequence: int = 0
+
+    def __post_init__(self) -> None:
+        if self.sequence < 0:
+            raise ValueError("EventDraft.sequence must be non-negative")

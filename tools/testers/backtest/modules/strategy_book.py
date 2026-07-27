@@ -177,17 +177,15 @@ class StrategyBookStore:
 
     def ledger_for_order(self, state: object, order: object) -> Ledger:
         strategy = getattr(order, "strategy")
-        if self.policies.order_routing is not None:
+        order_ledger_id = getattr(order, "fields", {}).get("ledger_id")
+        if order_ledger_id not in (None, ""):
+            ledger = ledger_identity(str(order_ledger_id))
+        elif self.policies.order_routing is not None:
             ledger = ledger_identity(str(self.policies.order_routing(state, order)))
         else:
-            order_ledger_id = getattr(order, "fields", {}).get("ledger_id")
-            ledger = (
-                ledger_identity(str(order_ledger_id))
-                if order_ledger_id not in (None, "")
-                else self.product_ledger_by_strategy.get(
-                    (strategy, getattr(order, "instrument", None)),
-                    self.default_ledger_for_strategy(state, strategy),
-                )
+            ledger = self.product_ledger_by_strategy.get(
+                (strategy, getattr(order, "instrument", None)),
+                self.default_ledger_for_strategy(state, strategy),
             )
         allowed = self.ledgers_for_strategy(state, strategy)
         if ledger not in allowed:
@@ -207,7 +205,6 @@ class StrategyBookStore:
             for ledger, pool_id in self.cash_pool_by_ledger.items()
             if str(pool_id) == target
         }
-
 
 def strategy_book_store_for(state: object) -> StrategyBookStore:
     store = getattr(state, "strategy_book_store", None)
@@ -434,12 +431,19 @@ def assign_ledger_for_strategy(
     return store.ledger_for_order(state, order)
 
 
-def ledger_for_strategy_product(state: object, strategy: object, product: object) -> object:
-    store = strategy_book_store_for(state)
-    ledger_key = store.product_ledger_by_strategy.get(
-        (strategy, product),
-        store.default_ledger_for_strategy(state, strategy),
-    )
+def ledger_for_strategy_product(
+    state: object,
+    strategy: object,
+    product: object,
+    *,
+    timestamp: Any = None,
+    order: Any = None,
+) -> object:
+    from tools.testers.backtest.modules.strategy_routing import freeze_product_route
+
+    ledger_key = freeze_product_route(
+        state, strategy, product, timestamp=timestamp, order=order,
+    ).ledger
     ledgers = getattr(state, "ledgers", None)
     if isinstance(ledgers, dict):
         ledger_state = ledgers.get(ledger_key)

@@ -1363,9 +1363,9 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
     queue.run_until_drained()
 
     assert ledger.get(MarginModule.margin_requirement) == pytest.approx(20.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(9.8)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(15.2)
     assert ledger.get(MarginModule.margin_utilization) == pytest.approx(20.0 / 12.0)
-    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(9.8)
+    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(15.2)
     assert captured_orders
     attempt = captured_orders[0].payload
     order = attempt.order
@@ -1540,9 +1540,9 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
     assert _cash_major(state, ledger) == pytest.approx(0.0)
     assert entry.margin_reserved.to_major() == pytest.approx(12.0)
     assert ledger.get(MarginModule.margin_requirement) == pytest.approx(20.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(9.8)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(15.2)
     assert ledger.get(MarginModule.margin_utilization) == pytest.approx(20.0 / 12.0)
-    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(9.8)
+    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(15.2)
     assert queue.pending_count_by_kind(EventKind.TRADE_INTENT) == 1
     assert queue.pending_count_by_kind(EventKind.ORDER) == 0
 
@@ -1714,7 +1714,7 @@ def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
     entry = ledger.get(_positions_ref())[product]
     assert _cash_major(state, ledger) == pytest.approx(15.0)
     assert entry.margin_reserved.to_major() == pytest.approx(17.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(3.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(7.2)
 
 
 def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode_does_not_need_split():

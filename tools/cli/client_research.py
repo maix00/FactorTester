@@ -150,6 +150,8 @@ class ResearchClientMixin(ClientMixinBase):
         output_requests: list[str] | None = None,
         trial_binding: dict[str, Any] | None = None,
         transient_factor_sources: list[dict[str, Any]] | None = None,
+        strategy_specs: list[dict[str, Any]] | None = None,
+        transient_strategy_sources: list[dict[str, Any]] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
     ) -> dict[str, Any]:
@@ -172,6 +174,10 @@ class ResearchClientMixin(ClientMixinBase):
             payload["trial_binding"] = trial_binding
         if transient_factor_sources:
             payload["transient_factor_sources"] = list(transient_factor_sources)
+        if strategy_specs:
+            payload["strategy_specs"] = list(strategy_specs)
+        if transient_strategy_sources:
+            payload["transient_strategy_sources"] = list(transient_strategy_sources)
         return self._expect_success(self.session.post("/api/runs", payload))
 
     def preview_run(
@@ -184,6 +190,8 @@ class ResearchClientMixin(ClientMixinBase):
         step_mode: bool = False,
         output_requests: list[str] | None = None,
         transient_factor_sources: list[dict[str, Any]] | None = None,
+        strategy_specs: list[dict[str, Any]] | None = None,
+        transient_strategy_sources: list[dict[str, Any]] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
     ) -> dict[str, Any]:
@@ -198,6 +206,10 @@ class ResearchClientMixin(ClientMixinBase):
             payload["output_requests"] = list(output_requests)
         if transient_factor_sources:
             payload["transient_factor_sources"] = list(transient_factor_sources)
+        if strategy_specs:
+            payload["strategy_specs"] = list(strategy_specs)
+        if transient_strategy_sources:
+            payload["transient_strategy_sources"] = list(transient_strategy_sources)
         if configuration_snapshot_id:
             payload["configuration_snapshot_id"] = configuration_snapshot_id
             payload["configuration_snapshot_revision"] = (
