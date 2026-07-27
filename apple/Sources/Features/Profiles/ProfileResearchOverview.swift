@@ -371,7 +371,7 @@ struct ProfileResearchOverview: View {
                     researchRow(item)
                 }
                 .buttonStyle(.plain)
-                lifecycleMenu(item)
+                lifecycleActions(item)
             }
             .padding(.vertical, 4)
         }
@@ -391,8 +391,7 @@ struct ProfileResearchOverview: View {
                     statusBadge(item.summary)
                 }
                 Text(verbatim: L10n.format(
-                    "%@：%@ · %lld 个分支 · %lld 个进行中",
-                    L10n.text("实现产品组"),
+                    "%@ · %lld 个分支 · %lld 个进行中",
                     ResearchDisplayText.productGroup(item.summary.productGroup),
                     item.summary.branchCount,
                     item.summary.runningBranchCount
@@ -437,32 +436,66 @@ struct ProfileResearchOverview: View {
     }
 
     @ViewBuilder
-    private func lifecycleMenu(_ item: ResearchDirectoryItem) -> some View {
-        Menu {
+    private func lifecycleActions(_ item: ResearchDirectoryItem) -> some View {
+        HStack(spacing: 8) {
             switch lifecycle {
             case .active:
-                Button("归档", systemImage: "archivebox") {
+                lifecycleButton(
+                    title: "归档",
+                    systemImage: "archivebox",
+                    role: nil
+                ) {
                     Task { await controller.transition(item, to: .archived) }
                 }
+                lifecycleButton(
+                    title: "删除",
+                    systemImage: "trash",
+                    role: .destructive
+                ) {
+                    Task { await controller.transition(item, to: .deleted) }
+                }
             case .archived:
-                Button("重新启用", systemImage: "arrow.uturn.backward") {
+                lifecycleButton(
+                    title: "重新启用",
+                    systemImage: "arrow.uturn.backward",
+                    role: nil
+                ) {
                     Task { await controller.transition(item, to: .active) }
                 }
-                Button("移到最近删除", systemImage: "trash", role: .destructive) {
+                lifecycleButton(
+                    title: "删除",
+                    systemImage: "trash",
+                    role: .destructive
+                ) {
                     Task { await controller.transition(item, to: .deleted) }
                 }
             case .deleted:
-                Button("恢复到已归档", systemImage: "arrow.uturn.backward") {
+                lifecycleButton(
+                    title: "恢复到已归档",
+                    systemImage: "arrow.uturn.backward",
+                    role: nil
+                ) {
                     Task { await controller.transition(item, to: .archived) }
                 }
             }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.title3)
-                .frame(width: 32, height: 32)
         }
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.borderless)
         .fixedSize()
+    }
+
+    private func lifecycleButton(
+        title: String,
+        systemImage: String,
+        role: ButtonRole?,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
+            Image(systemName: systemImage)
+                .font(.callout.weight(.semibold))
+                .frame(width: 28, height: 28)
+        }
+        .accessibilityLabel(L10n.text(title))
+        .help(L10n.text(title))
     }
 
     private func statusBadge(_ summary: ProfileResearchSummary) -> some View {
