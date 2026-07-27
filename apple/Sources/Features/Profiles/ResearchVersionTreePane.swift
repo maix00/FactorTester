@@ -158,6 +158,7 @@ struct ResearchVersionTreePane: View {
     let workPackage: ProfileResearchWorkPackageDetail
     let steps: [ResearchTransitionStep]
     let sectionRefsByCheckpoint: [String: String]
+    let sectionRefsByNode: [String: String]
     @Binding var selectedCheckpointRef: String
     let select: (_ checkpointRef: String, _ branchID: String) -> Void
     let loadEarlier: () async -> Void
@@ -458,7 +459,8 @@ struct ResearchVersionTreePane: View {
         return [
             workPackage.etag, detail.etag, detail.branchRef,
             detail.latestTraceRef ?? "", "\(steps.count)", first, last,
-            "\(sectionRefsByCheckpoint.count)", treeShape,
+            "\(sectionRefsByCheckpoint.count)",
+            "\(sectionRefsByNode.count)", treeShape,
         ].joined(separator: "|")
     }
 
@@ -556,6 +558,9 @@ struct ResearchVersionTreePane: View {
                 ))
             }
         }
+        if result.isEmpty {
+            result.append(initialNode)
+        }
         return result.sorted {
             ResearchTreeOrdering.isBefore(
                 timestamp: $0.timestamp,
@@ -601,7 +606,8 @@ struct ResearchVersionTreePane: View {
             return ResearchTreeNode(
                 id: "checkpoint|\(node.nodeRef)",
                 checkpointRef: node.checkpointRef,
-                sectionRef: sectionRefsByCheckpoint[node.checkpointRef] ?? "",
+                sectionRef: sectionRefsByCheckpoint[node.checkpointRef]
+                    ?? nodeSectionRef(node.toNode),
                 title: isContinuation
                     ? continuationTitle(
                         from: sourceGraphRef,
@@ -675,6 +681,13 @@ struct ResearchVersionTreePane: View {
                 branchID: branch.branchID
             ))
         }
+        if !result.contains(where: {
+            $0.physicalBranchRef == detail.branchRef
+                && ($0.toNode == detail.currentNode
+                    || $0.checkpointRef == detail.latestTraceRef)
+        }) {
+            result.append(initialNode)
+        }
         let ordered = result.sorted {
             ResearchTreeOrdering.isBefore(
                 timestamp: $0.timestamp,
@@ -684,6 +697,41 @@ struct ResearchVersionTreePane: View {
             )
         }
         return ordered
+    }
+
+    private var initialNode: ResearchTreeNode {
+        let nodeID = detail.currentNode
+        let checkpointRef = detail.latestTraceRef
+            ?? (nodeID.isEmpty ? "" : "node:\(nodeID)")
+        let createdAt = visibleBranches.first {
+            $0.branchRef == detail.branchRef
+        }?.createdAt ?? 0
+        return ResearchTreeNode(
+            id: "initial|\(detail.branchRef)|\(nodeID)",
+            checkpointRef: checkpointRef,
+            sectionRef: nodeSectionRef(nodeID),
+            title: ResearchDisplayText.node(nodeID),
+            subtitle: L10n.text("当前节点"),
+            timestamp: createdAt,
+            lane: selectedLane,
+            status: detail.status,
+            isHead: true,
+            isCurrentHead: true,
+            isRoot: true,
+            isLineage: false,
+            sourceLane: nil,
+            sourceCheckpointRef: nil,
+            branchID: detail.branchID,
+            toNode: nodeID,
+            physicalBranchRef: detail.branchRef
+        )
+    }
+
+    private func nodeSectionRef(_ nodeID: String) -> String {
+        guard !nodeID.isEmpty else { return "" }
+        return sectionRefsByNode["node:\(nodeID)"]
+            ?? sectionRefsByNode[nodeID]
+            ?? ""
     }
 
     private func loadEarlierPreservingAnchor(

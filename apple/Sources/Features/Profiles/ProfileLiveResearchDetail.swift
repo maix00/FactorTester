@@ -90,12 +90,16 @@ struct ProfileLiveResearchDetail: View {
             ResearchDocumentReportView(
                 detail: detail,
                 workPackage: workPackage,
+                steps: controller.timeline,
+                nextCursor: controller.nextTimelineCursor,
                 profileName: context?.profile.displayName
                     ?? L10n.text("未知 Profile"),
                 reportTitle: ResearchDisplayText.reportTitle(
                     context?.record.title ?? ""
                 ),
-                artifact: documentArtifact
+                artifact: documentArtifact,
+                selectBranch: { controller.selectedBranchID = $0 },
+                loadEarlier: { await controller.loadEarlierTimeline() }
             )
         } else {
             ResearchNarrativeReportView(

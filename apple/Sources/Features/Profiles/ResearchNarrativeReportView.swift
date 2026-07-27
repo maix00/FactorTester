@@ -38,6 +38,7 @@ struct ResearchNarrativeReportView: View {
                 workPackage: workPackage,
                 steps: orderedSteps,
                 sectionRefsByCheckpoint: sectionRefsByCheckpoint,
+                sectionRefsByNode: [:],
                 selectedCheckpointRef: $selectedCheckpointRef,
                 select: selectCheckpoint,
                 loadEarlier: loadEarlier,

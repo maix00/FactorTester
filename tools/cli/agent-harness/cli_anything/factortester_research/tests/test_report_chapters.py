@@ -9,12 +9,36 @@ from click.testing import CliRunner
 from tools.cli.release.research_reporting.document import (
     add_component,
     bindings_path_for,
+    ensure_profile_report_chapter,
     ensure_report_chapters,
     new_bindings,
     new_document,
     save_bindings,
     save_document,
 )
+
+
+def test_profile_report_creation_exposes_node_navigation_anchor(
+    tmp_path: Path,
+) -> None:
+    result = ensure_profile_report_chapter(
+        workspace_root=tmp_path,
+        work_package_id="work-package-1",
+        title="动量因子研究",
+        node_id="hypothesis_preregistration",
+        branch_ref="graph-branch:work-package-1:branch-1",
+    )
+
+    descriptor = result["descriptor"]
+    assert descriptor["format"] == "document"
+    assert len(descriptor["section_refs"]) == 1
+    anchor = descriptor["section_refs"][0]
+    assert anchor["kind"] == "report_section"
+    assert anchor["target_ref"] == "node:hypothesis_preregistration"
+    assert anchor["label"] == "假设登记"
+    assert anchor["section_ref"] == result["document"]["components"][0][
+        "component_id"
+    ]
 
 
 def _packet() -> dict:

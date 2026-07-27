@@ -13,36 +13,73 @@ private struct LocalReportComponent: Identifiable {
 struct ResearchDocumentReportView: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
+    let steps: [ResearchTransitionStep]
+    let nextCursor: String?
     let profileName: String
     let reportTitle: String
     let artifact: ResearchArtifactModel
+    let selectBranch: (String) -> Void
+    let loadEarlier: () async -> Void
 
     @State private var title = ""
     @State private var components: [LocalReportComponent] = []
     @State private var error: String?
+    @State private var selectedCheckpointRef = ""
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.secondary)
-                } else if components.isEmpty {
-                    ProgressView(L10n.text("正在读取本地研究报告…"))
-                } else {
-                    ForEach(components.filter { $0.kind == "chapter" }) {
-                        chapter in
-                        chapterView(chapter)
+        HStack(spacing: 0) {
+            ResearchVersionTreePane(
+                detail: detail,
+                workPackage: workPackage,
+                steps: steps,
+                sectionRefsByCheckpoint: navigationSectionRefs,
+                sectionRefsByNode: navigationSectionRefs,
+                selectedCheckpointRef: $selectedCheckpointRef,
+                select: selectCheckpoint,
+                loadEarlier: loadEarlier,
+                canLoadEarlier: nextCursor != nil
+            )
+            .frame(width: ResearchTreeLayout.navigatorWidth)
+            .clipped()
+            Divider()
+            report
+        }
+        .task(id: artifact.localRef) {
+            await load()
+        }
+    }
+
+    private var report: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.secondary)
+                    } else if components.isEmpty {
+                        ProgressView(L10n.text("正在读取本地研究报告…"))
+                    } else {
+                        ForEach(components.filter { $0.kind == "chapter" }) {
+                            chapter in
+                            chapterView(chapter)
+                        }
                     }
                 }
+                .frame(maxWidth: 820, alignment: .leading)
+                .padding(.horizontal, 42)
+                .padding(.vertical, 34)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
-            .frame(maxWidth: 820, alignment: .leading)
-            .padding(.horizontal, 42)
-            .padding(.vertical, 34)
-            .frame(maxWidth: .infinity, alignment: .center)
+            .onChange(of: selectedCheckpointRef) { checkpointRef in
+                guard let componentID = componentID(for: checkpointRef) else {
+                    return
+                }
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    proxy.scrollTo(componentID, anchor: .top)
+                }
+            }
         }
-        .task(id: artifact.localRef) { await load() }
     }
 
     private var header: some View {
@@ -76,6 +113,7 @@ struct ResearchDocumentReportView: View {
                 .padding(.leading, 14)
             }
         }
+        .id(chapter.id)
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.045),
@@ -103,9 +141,50 @@ struct ResearchDocumentReportView: View {
             title = loadedTitle
             components = loadedComponents
             error = nil
+            if selectedCheckpointRef.isEmpty {
+                selectedCheckpointRef = detail.latestTraceRef
+                    ?? navigationSectionRefs.keys.sorted().first
+                    ?? (detail.currentNode.isEmpty
+                        ? "" : "node:\(detail.currentNode)")
+            }
         } catch {
             self.error = L10n.text("本地研究报告无法读取")
         }
+    }
+
+    private var navigationSectionRefs: [String: String] {
+        Dictionary(
+            artifact.sectionRefs.map { ($0.targetRef, $0.sectionRef) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    private func selectCheckpoint(
+        _ checkpointRef: String,
+        _ branchID: String
+    ) {
+        if ResearchBranchNavigation.requiresReload(
+            currentBranchRef: detail.branchRef,
+            targetBranchID: branchID
+        ) {
+            selectBranch(branchID)
+        }
+        selectedCheckpointRef = checkpointRef
+    }
+
+    private func componentID(for checkpointRef: String) -> String? {
+        if let componentID = navigationSectionRefs[checkpointRef] {
+            return componentID
+        }
+        if let step = steps.first(where: { $0.stepRef == checkpointRef }) {
+            return navigationSectionRefs["node:\(step.toNode)"]
+        }
+        if let node = workPackage.tree?.nodes.first(where: {
+            $0.checkpointRef == checkpointRef
+        }) {
+            return navigationSectionRefs["node:\(node.toNode)"]
+        }
+        return nil
     }
 
     private static func component(
