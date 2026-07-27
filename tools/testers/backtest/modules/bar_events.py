@@ -80,7 +80,7 @@ class BarEventModule(ExecutableModule):
 
 
 def _schedule_bar_events(state, ctx) -> None:
-    """Register one BAR event per live factor calculation group and timestamp.
+    """Register BAR events for live factors and custom bar strategies.
 
     EventDraft still carries a representative strategy because the scheduler
     dispatches through strategy-scoped batches.  Warm-up is strategy-local:
