@@ -183,7 +183,7 @@ struct ResearchVersionTreePane: View {
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 7) {
-                        treeLegend(filled: true, label: L10n.text("检查点"))
+                        treeLegend(filled: true, label: L10n.text("研究节点"))
                         treeLegend(filled: false, label: L10n.text("分叉/承接"))
                     }
                     HStack(spacing: 7) {
@@ -197,7 +197,10 @@ struct ResearchVersionTreePane: View {
                     }
                     if let omittedNodeCount = remainingOmittedNodeCount,
                        omittedNodeCount > 0 {
-                        Text(verbatim: L10n.format("尚有 %lld 个检查点未载入", omittedNodeCount))
+                        Text(verbatim: L10n.format(
+                            "尚有 %lld 个历史研究节点未载入",
+                            omittedNodeCount
+                        ))
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
                     }
@@ -435,9 +438,7 @@ struct ResearchVersionTreePane: View {
         .buttonStyle(.plain)
         .accessibilityLabel(L10n.format("%@，%@", node.title, node.subtitle))
         .accessibilityIdentifier("research.tree.node.\(node.id)")
-        .help(node.sectionRef.isEmpty
-            ? L10n.text("该检查点尚无已验证的报告正文")
-            : L10n.text("在研究报告中定位该检查点"))
+        .help(treeNodeHelp(node))
     }
 
     private var nodes: [ResearchTreeNode] {
@@ -508,11 +509,8 @@ struct ResearchVersionTreePane: View {
                     sectionRef: branch.latestTraceRef.flatMap {
                         sectionRefsByCheckpoint[$0]
                     } ?? "",
-                    title: ResearchDisplayText.branchLabel(
-                        branch.label,
-                        currentNode: branch.currentNode
-                    ),
-                    subtitle: treeStatusLabel(branch.status),
+                    title: ResearchDisplayText.node(branch.currentNode),
+                    subtitle: treeBranchSubtitle(branch),
                     timestamp: branch.updatedAt,
                     lane: branchLane,
                     status: branch.status,
@@ -663,11 +661,8 @@ struct ResearchVersionTreePane: View {
                 sectionRef: branch.latestTraceRef.flatMap {
                     sectionRefsByCheckpoint[$0]
                 } ?? "",
-                title: ResearchDisplayText.branchLabel(
-                    branch.label,
-                    currentNode: branch.currentNode
-                ),
-                subtitle: treeStatusLabel(branch.status),
+                title: ResearchDisplayText.node(branch.currentNode),
+                subtitle: treeBranchSubtitle(branch),
                 timestamp: branch.updatedAt,
                 lane: lane(for: branch.branchRef),
                 status: branch.status,
@@ -909,6 +904,24 @@ private func treeStatusLabel(_ status: String) -> String {
     case "failed": return "失败"
     default: return "状态未知"
     }
+}
+
+private func treeBranchSubtitle(
+    _ branch: ProfileResearchBranchSummary
+) -> String {
+    guard branch.latestTraceRef != nil else {
+        return L10n.text("当前节点 · 尚无报告检查点")
+    }
+    return treeStatusLabel(branch.status)
+}
+
+private func treeNodeHelp(_ node: ResearchTreeNode) -> String {
+    guard !node.checkpointRef.isEmpty else {
+        return L10n.text("当前 Graph 节点；尚无可定位的报告检查点")
+    }
+    return node.sectionRef.isEmpty
+        ? L10n.text("该研究节点尚无已验证的报告正文")
+        : L10n.text("在研究报告中定位该研究节点")
 }
 
 private func treeReference(_ value: String) -> String {

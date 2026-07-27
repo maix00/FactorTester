@@ -18,10 +18,12 @@ def _tree_projection(
 ) -> dict[str, Any]:
     """Decode the bounded tree carrier and add only authoritative edges.
 
-    Trace rows are the only checkpoint nodes.  The projection never invents a
-    merge: ordinary edges connect adjacent loaded checkpoints on one branch;
-    fork/continuation edges are emitted only when their creation evidence was
-    valid enough for ``_branch_lineage``.
+    Trace rows are historical transition nodes carrying checkpoint references.
+    The current Graph node is projected from the branch summary separately,
+    so an empty trace history is still a valid Work Package state.  The
+    projection never invents a merge: ordinary edges connect adjacent loaded
+    transition nodes on one branch; fork/continuation edges are emitted only
+    when their creation evidence was valid enough for ``_branch_lineage``.
     """
     if value in (None, ""):
         return {"schema_version": 2, "nodes": [], "edges": [],
