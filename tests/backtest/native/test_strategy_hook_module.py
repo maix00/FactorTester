@@ -54,6 +54,11 @@ class MutatingOrderStrategy(Strategy):
         order.status = OrderStatus.CANCELLED
 
 
+class MutatingFeedStrategy(Strategy):
+    def on_book_snapshot(self, ctx, snapshot):
+        snapshot["bids"].append((1.0, 1.0))
+
+
 class PositionStrategy(Strategy):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -477,3 +482,21 @@ def test_order_callbacks_receive_detached_order_snapshots():
     _call_order_event(object(), ctx)
 
     assert order.status is OrderStatus.FILLED
+
+
+def test_feed_callbacks_receive_detached_mutable_payload_snapshots():
+    strategy = MutatingFeedStrategy(alias="feed-snapshot")
+    payload = {"bids": [], "asks": []}
+    event = MarketFeedEvent(
+        pd.Timestamp("2025-01-01"), "P1", "book_snapshot", payload,
+    )
+    ctx = _context(
+        strategy, EventKind.MARKET_FEED,
+        [EventDraft(EventKind.MARKET_FEED, event.timestamp, strategy, event)],
+    )
+
+    from tools.testers.backtest.modules.strategy_hooks import _call_market_feed
+
+    _call_market_feed(object(), ctx)
+
+    assert payload["bids"] == []

@@ -77,8 +77,16 @@ def _specific_feed_hook(state: Any, strategy: Any, ctx: Any, event: MarketFeedEv
         MarketFeedEventKind.BOOK_SNAPSHOT: "on_book_snapshot",
     }.get(event.kind)
     if hook_name in overridden_strategy_callbacks(strategy):
-        return getattr(strategy, hook_name)(_context_for(state, ctx, strategy), event.payload)
-    return strategy.on_market_feed(_context_for(state, ctx, strategy), event)
+        return getattr(strategy, hook_name)(
+            _context_for(state, ctx, strategy), _feed_payload_snapshot(event.payload),
+        )
+    return strategy.on_market_feed(
+        _context_for(state, ctx, strategy), copy.deepcopy(event),
+    )
+
+
+def _feed_payload_snapshot(payload: Any) -> Any:
+    return copy.deepcopy(payload)
 
 
 def _call_bar(state: Any, ctx: Any) -> None:
