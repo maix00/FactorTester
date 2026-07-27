@@ -394,7 +394,9 @@ struct ProfileResearchOverview: View {
             }
         }
         .padding(24)
-        .task(id: "\(isActive)|\(bindingSignature)|\(profileLoadState)|\(lifecycle.rawValue)|\(serverAccessAvailable)") {
+        .task(
+            id: "\(isActive)|\(profileSnapshotSignature)|\(profileLoadState)|\(lifecycle.rawValue)|\(serverAccessAvailable)"
+        ) {
             controller.replaceProfiles(profiles)
             // The overview is mounted in HomeView even while hidden. Do not
             // consume the first task run with an empty profile snapshot; wait
@@ -595,10 +597,27 @@ struct ProfileResearchOverview: View {
             )
     }
 
-    private var bindingSignature: String {
+    /// Include local report heads in the invalidation key. A bundled CLI
+    /// refresh can preserve the same Profile/workspace binding while adding a
+    /// new report checkpoint; omitting the report head leaves the first
+    /// mounted Research tab with an empty stale controller until remount.
+    private var profileSnapshotSignature: String {
         profiles.map { profile in
-            let refs = profile.workspaces.map(\.serverWorkspaceRef).joined(separator: ",")
-            return "\(profile.id)|\(profile.serverURL)|\(refs)"
+            let refs = profile.workspaces
+                .map(\.serverWorkspaceRef)
+                .joined(separator: ",")
+            let reports = profile.researchRecords.map { record in
+                let artifacts = record.artifacts.map {
+                    "\($0.id):\($0.journalHash):\($0.indexRef)"
+                }.joined(separator: ",")
+                return [
+                    record.id,
+                    record.graphInstanceRef,
+                    record.checkpointRef,
+                    artifacts,
+                ].joined(separator: ":")
+            }.joined(separator: ",")
+            return "\(profile.id)|\(profile.serverURL)|\(refs)|\(reports)"
         }.sorted().joined(separator: ";")
     }
 
