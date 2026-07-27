@@ -60,6 +60,14 @@ def test_client_release_help_exposes_no_secret_arguments() -> None:
     assert "token" not in result.output.lower()
 
 
+def test_publish_release_requires_a_manager_service_port() -> None:
+    result = CliRunner().invoke(cli, ["client", "release", "--help"])
+
+    assert result.exit_code == 0
+    assert "--service-port" in result.output
+    assert "Manager" in result.output
+
+
 def test_profile_cannot_replace_packaged_release_trust_anchor(
     tmp_path: Path,
 ) -> None:

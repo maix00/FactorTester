@@ -104,27 +104,6 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
     }
 
-    @MainActor
-    func testResearchDirectoryPublishesLocalRecordsBeforeServerRefresh() {
-        let profile = LocalProfileModel(json: [
-            "profile_id": "maxa",
-            "display_name": "MaxA",
-            "research_records": [[
-                "record_id": "local-research",
-                "title": "本地研究",
-                "graph_instance_ref": "work-package:local",
-            ]],
-        ])
-
-        let controller = ResearchDirectoryController(profiles: [profile])
-
-        XCTAssertEqual(controller.localItems.map(\.record.id), [
-            "local-research",
-        ])
-        XCTAssertEqual(controller.localItems.first?.profileName, "MaxA")
-        XCTAssertTrue(controller.items.isEmpty)
-    }
-
     func testResearchTreeLanesStayInsideFixedNavigatorWidth() {
         let maximumGraphWidth = ResearchTreeLayout.graphColumnWidth(
             laneCount: ResearchTreeLayout.maximumVisibleBranches
@@ -1002,7 +981,7 @@ final class ProfileResearchServiceTests: XCTestCase {
         }
     }
 
-    func testStructuredProjectionFailureIsShownInsteadOfBareHTTP500() async {
+    func testStructuredProjectionFailurePreservesServerMessage() async {
         let transport = FakeProjectionTransport(responses: [
             ResearchHTTPResponse(
                 data: Data(
@@ -1029,8 +1008,7 @@ final class ProfileResearchServiceTests: XCTestCase {
         } catch {
             XCTAssertEqual(
                 (error as? APIError)?.errorDescription,
-                "研究投影读取失败（research_projection_failed）："
-                    + "研究投影暂时无法读取，请稍后重试。"
+                "研究投影暂时无法读取，请稍后重试。"
             )
         }
     }
@@ -1060,7 +1038,7 @@ final class ProfileResearchServiceTests: XCTestCase {
         } catch {
             XCTAssertEqual(
                 (error as? APIError)?.errorDescription,
-                "研究投影读取失败：profile research not found"
+                "profile research not found"
             )
         }
     }

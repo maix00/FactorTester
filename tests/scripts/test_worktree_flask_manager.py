@@ -74,8 +74,8 @@ def test_manager_binds_loopback_by_default(tmp_path, monkeypatch) -> None:
 
 def test_worktree_api_requires_shared_bearer_token(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(tmp_path, "python")
-    state.secret_path.parent.mkdir(parents=True, exist_ok=True)
-    (state.secret_path.parent / "manager-capability.key").write_text(
+    state.capability_path.parent.mkdir(parents=True, exist_ok=True)
+    state.capability_path.write_text(
         "test-capability", encoding="ascii"
     )
     monkeypatch.setattr(state, "worktrees", lambda: [])
@@ -582,12 +582,11 @@ def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkey
     assert created[1][1]["env"]["GTHT_DEPLOYMENT_ID"].endswith("-8135")
     assert created[1][1]["env"]["GTHT_JOB_DAEMON_SOCKET"] == str(bundle.socket_path)
     assert created[1][1]["env"]["FACTORTESTER_WERKZEUG_RELOADER"] == "0"
-    assert created[1][1]["env"]["FLASK_SECRET_KEY"]
-    assert created[1][1]["env"]["FLASK_SECRET_KEY"] == created[2][1]["env"]["FLASK_SECRET_KEY"]
+    assert "FLASK_SECRET_KEY" not in created[1][1]["env"]
+    assert "FLASK_SECRET_KEY" not in created[2][1]["env"]
     assert "GTHT_MANAGER_CAPABILITY_TOKEN" not in created[0][1]["env"]
     assert created[1][1]["env"]["GTHT_MANAGER_CAPABILITY_TOKEN"]
     assert created[2][1]["env"]["GTHT_MANAGER_CAPABILITY_TOKEN"]
-    assert (tmp_path / ".workspace" / "flask-manager" / "flask-secret.key").stat().st_mode & 0o777 == 0o600
 
 
 def test_service_env_adds_repo_harness_without_losing_pythonpath(

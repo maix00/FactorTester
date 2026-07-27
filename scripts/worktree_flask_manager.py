@@ -82,7 +82,6 @@ class ManagerState:
         self.vibe_process: subprocess.Popen | None = None
         self.log_dir = self.repo / ".workspace" / "flask-manager" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.secret_path = self.log_dir.parent / "flask-secret.key"
         self.capability_path = self.log_dir.parent / "manager-capability.key"
         self._sessions: dict[str, tuple[str, float]] = {}
         self._session_lock = threading.Lock()
@@ -123,15 +122,6 @@ class ManagerState:
             name=f"manager-action-{hashlib.sha256(label.encode()).hexdigest()[:8]}",
             daemon=True,
         ).start()
-
-    def _flask_secret(self) -> str:
-        if not self.secret_path.exists():
-            self.secret_path.write_text(secrets.token_hex(32), encoding="ascii")
-        self.secret_path.chmod(0o600)
-        value = self.secret_path.read_text(encoding="ascii").strip()
-        if not value:
-            raise RuntimeError("Flask session secret is empty")
-        return value
 
     def capability_token(self) -> str:
         if not self.capability_path.exists():
@@ -334,7 +324,6 @@ class ManagerState:
                 ["git", "rev-parse", "HEAD"], cwd=path, text=True
             ).strip(),
             "GTHT_JOB_ARTIFACT_ROOT": str(path / ".workspace" / "job-results"),
-            "FLASK_SECRET_KEY": self._flask_secret(),
         })
         return env, deployment_id, socket_path
 

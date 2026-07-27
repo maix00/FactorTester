@@ -97,6 +97,12 @@ def app_update_restart(as_json: bool) -> None:
 @click.option("--version", required=True)
 @click.option("--build", type=click.IntRange(min=1), required=True)
 @click.option("--source-revision", required=True)
+@click.option(
+    "--service-port",
+    type=click.IntRange(1, 65535),
+    required=True,
+    help="发布前由 7998 Manager 受控重启的服务端口",
+)
 @click.option("--output", type=click.Path(path_type=Path), required=True)
 @click.option(
     "--signing-identity",
@@ -156,9 +162,16 @@ def app_update_restart(as_json: bool) -> None:
 def publish_release(**options) -> None:
     """Build, sign, notarize, publish, and read back Main or Beta."""
     from script.release.publish import release_client
+    from tools.cli.release.service_activation import restart_release_service
 
+    service_port = options.pop("service_port")
+    restart = restart_release_service(port=service_port)
     receipt = release_client(**options)
-    click.echo(json.dumps(receipt.__dict__, ensure_ascii=False, indent=2))
+    payload = {
+        **receipt.__dict__,
+        "service_restart": restart.__dict__,
+    }
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 @client_release.command("activate-bundle", hidden=True)

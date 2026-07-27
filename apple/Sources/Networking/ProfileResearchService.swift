@@ -204,12 +204,7 @@ struct ProfileResearchService {
                 ResearchProjectionErrorPayload.self,
                 from: response.data
             ), !payload.error.isEmpty {
-                let prefix = payload.errorCode.map {
-                    L10n.format("研究投影读取失败（%@）", $0)
-                } ?? L10n.text("研究投影读取失败")
-                throw APIError.transport(
-                    L10n.format("%@：%@", prefix, payload.error)
-                )
+                throw APIError.transport(payload.error)
             }
             throw APIError.transport(
                 "Research projection HTTP \(response.statusCode)"

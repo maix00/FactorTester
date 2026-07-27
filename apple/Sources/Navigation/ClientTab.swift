@@ -7,7 +7,6 @@ enum ClientTabContent {
     case web(path: String)
     case research
     case workPackage(ResearchDirectoryItem)
-    case localResearch(LocalResearchDirectoryItem)
     case profiles
     case profile(id: String)
     case accountSettings
@@ -105,16 +104,6 @@ struct ClientTab: Identifiable {
             titleKey: nil,
             systemImage: "point.3.connected.trianglepath.dotted",
             content: .workPackage(item)
-        )
-    }
-
-    static func localResearch(_ item: LocalResearchDirectoryItem) -> ClientTab {
-        ClientTab(
-            id: "local-research:\(item.id)",
-            title: item.title,
-            titleKey: nil,
-            systemImage: "doc.text",
-            content: .localResearch(item)
         )
     }
 
