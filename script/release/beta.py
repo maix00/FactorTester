@@ -73,6 +73,7 @@ def release_beta(
     if not signing_identity.strip() or signing_identity.strip() == "-":
         raise ValueError("ad-hoc signing is forbidden")
     _validate_source_checkout(REPO, source_revision)
+    build_environment = xcodebuild_environment()
     if output.exists():
         raise ValueError(f"release output already exists: {output}")
     output.mkdir(parents=True)
@@ -86,7 +87,7 @@ def release_beta(
          "-scheme", "FactorTester-Client-macOS", "-configuration", "Release",
          "-derivedDataPath", str(REPO / "apple/build"),
          "CODE_SIGNING_ALLOWED=NO", "build"],
-        env=xcodebuild_environment(),
+        env=build_environment,
         check=True,
     )
     source = REPO / "apple/build/Build/Products/Release/FTClient.app"

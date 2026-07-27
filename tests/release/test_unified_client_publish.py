@@ -215,6 +215,38 @@ def test_cli_update_actions_only_dispatch_to_ftclient_sparkle(
     assert result["handler"] == "FTClient/Sparkle"
 
 
+def test_cli_download_waits_for_a_real_download_state(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    status = tmp_path / "app-update-status.json"
+    status.write_text(json.dumps({
+        "state": "available",
+        "installed_version": "0.1.0",
+        "latest_version": "0.2.0",
+        "updated_at": "before",
+    }))
+    monkeypatch.setattr(app_update_control, "status_path", lambda: status)
+
+    def open_update(command, **_kwargs):
+        assert command == [
+            "open", "factortester://app-update?action=download"
+        ]
+        status.write_text(json.dumps({
+            "state": "ready",
+            "installed_version": "0.1.0",
+            "latest_version": "0.2.0",
+            "updated_at": "after",
+        }))
+
+    monkeypatch.setattr(app_update_control.subprocess, "run", open_update)
+
+    result = app_update_control.dispatch_app_update("download", wait=1)
+
+    assert result["status"]["state"] == "ready"
+    assert "timed_out" not in result
+
+
 def test_all_channels_require_the_existing_shared_signing_identity(
     tmp_path: Path,
 ) -> None:

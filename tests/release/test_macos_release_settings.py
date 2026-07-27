@@ -36,6 +36,8 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
     assert "6 * 60 * 60" in controller
     assert ".onOpenURL" in app
     assert "handleUpdateCommand" in controller
+    assert 'pendingExternalAction = action' in controller
+    assert 'case "download"' in controller
     assert "ClientSidebar" in home
     assert "openTab: open" in home
     assert "approval" not in view.lower()

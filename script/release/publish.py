@@ -96,6 +96,7 @@ def release_client(
     if channel == "beta" and (server_origin is None or release_root is None):
         raise ValueError("Beta requires server origin and release root")
     _validate_source_checkout(REPO, source_revision)
+    build_environment = xcodebuild_environment()
     if output.exists():
         raise ValueError(f"release output already exists: {output}")
     output.mkdir(parents=True)
@@ -122,7 +123,7 @@ def release_client(
                 "CODE_SIGNING_ALLOWED=NO",
                 "build",
             ],
-            env=xcodebuild_environment(),
+            env=build_environment,
             check=True,
         )
         source = REPO / "apple/build/Build/Products/Release/FTClient.app"
