@@ -20,6 +20,7 @@ from server.services.research_graph.branch.cycle_objects import (
     load_research_cycle_object,
 )
 from server.services.research_graph.branch.next_packet import (
+    build_graph_branch_edge_info,
     build_graph_branch_next,
 )
 from server.services.research_graph.branch.requirement_read import (
@@ -74,6 +75,7 @@ __all__ = [
     "active_runtime_packet_budget_configuration",
     "authorize_graph_activation",
     "build_graph_branch_context",
+    "build_graph_branch_edge_info",
     "build_graph_branch_next",
     "continue_graph_branch",
     "configure_runtime_packet_budget_profile",

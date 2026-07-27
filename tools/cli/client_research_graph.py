@@ -447,27 +447,29 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("branch") or {})
 
-    def get_research_graph_branch_context(
+    def get_research_graph_node_info(
         self,
         instance_id: str,
         branch_id: str,
     ) -> dict[str, Any]:
+        """Read the current Node contract and its ordered next actions."""
         data = self._expect_success(self.session.get(
             f"/api/research-graph-instances/{instance_id}"
-            f"/branches/{branch_id}/context"
+            f"/branches/{branch_id}/node"
         ))
-        return dict(data.get("context") or {})
+        return dict(data.get("node") or {})
 
-    def get_research_graph_branch_next(
+    def get_research_graph_edge_info(
         self,
         instance_id: str,
         branch_id: str,
+        edge_id: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.get(
             f"/api/research-graph-instances/{instance_id}"
-            f"/branches/{branch_id}/next"
+            f"/branches/{branch_id}/edges/{edge_id}"
         ))
-        return dict(data.get("next") or {})
+        return dict(data.get("edge") or {})
 
     def get_current_graph_requirement(
         self,
@@ -639,7 +641,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("revision") or {})
 
-    def advance_research_graph_branch(
+    def advance_research_graph_node(
         self,
         instance_id: str,
         branch_id: str,
@@ -650,7 +652,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graph-instances/{instance_id}"
-            f"/branches/{branch_id}/advance",
+            f"/branches/{branch_id}/node/advance",
             {
                 "edge_id": edge_id,
                 "evidence": evidence,

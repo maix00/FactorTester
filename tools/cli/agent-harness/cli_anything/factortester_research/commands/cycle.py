@@ -61,7 +61,7 @@ def cycle_next(
     """Read the packet and optionally ensure its report chapter locally."""
     result = run_factortester([
         "research-graph",
-        "next",
+        "node", "info",
         instance_id,
         branch_id,
     ], timeout=60)
@@ -95,7 +95,7 @@ def cycle_next(
             }
         except (OSError, ValueError) as exc:
             raise click.ClickException(
-                f"无法同步研究报告章节：{exc}"
+                f"无法更新本地研究报告章节：{exc}"
             ) from exc
     if as_json:
         echo_json(packet)
@@ -237,7 +237,7 @@ def cycle_prepare(
     """Generate the exact local wire contract for one current candidate edge."""
     try:
         packet = enrich_graph_packet(validate_next_packet(_backend_json_result([
-            "research-graph", "next", instance_id, branch_id,
+            "research-graph", "node", "info", instance_id, branch_id,
         ])))
         evidence = (
             _load_evidence(evidence_file)
@@ -344,7 +344,7 @@ def cycle_advance(
                 )
             )
             current_packet = enrich_graph_packet(validate_next_packet(_backend_json_result([
-                "research-graph", "next", instance_id, branch_id,
+                "research-graph", "node", "info", instance_id, branch_id,
             ])))
             validation.update(validate_contract_for_current_packet(
                 contract, current_packet, edge_id=edge_id,
@@ -355,7 +355,7 @@ def cycle_advance(
             report_bindings = load_bindings(bindings_file, report_document)
             report_status = validate_report_tasks(
                 enrich_graph_packet(validate_next_packet(_backend_json_result([
-                    "research-graph", "next", instance_id, branch_id,
+                    "research-graph", "node", "info", instance_id, branch_id,
                 ]))),
                 report_bindings,
             )
@@ -378,6 +378,7 @@ def cycle_advance(
         raise click.ClickException(str(exc)) from exc
     args = [
         "research-graph",
+        "node",
         "advance",
         instance_id,
         branch_id,

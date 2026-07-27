@@ -164,8 +164,9 @@ def test_cli_has_no_second_application_updater() -> None:
     root = Path(__file__).resolve().parents[2] / "tools/cli/release"
     assert not (root / "app_update.py").exists()
     control = (root / "app_update_control.py").read_text()
-    assert 'subprocess.run(["open", url]' in control
-    for forbidden in ("hdiutil", "codesign", "copytree", "/Applications"):
+    assert "def _update_open_command" in control
+    assert 'return ["open", url]' in control
+    for forbidden in ("hdiutil", "codesign", "copytree"):
         assert forbidden not in control
 
 

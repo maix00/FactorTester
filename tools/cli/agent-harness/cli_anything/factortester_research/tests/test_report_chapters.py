@@ -92,7 +92,7 @@ def test_cycle_next_can_sync_chapter_without_agent_report_add(
     class Result:
         returncode = 0
         stderr = ""
-        argv = ["research-graph", "next", "instance-1", "branch-1"]
+        argv = ["research-graph", "node", "info", "instance-1", "branch-1"]
         stdout = json.dumps({
             "graph": "factor-research@v2",
             "node": {"node_id": "factor_semantics"},

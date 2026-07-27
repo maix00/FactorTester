@@ -9,11 +9,12 @@ from tools.data.sqlite.bootstrap import ensure_unified_sqlite_store
 
 
 _mounted_app = None
+_login_hook_registered = False
 
 
 def build_sqlite_web_app(secret_key):
     """Return the configured sqlite-web Flask app."""
-    global _mounted_app
+    global _mounted_app, _login_hook_registered
     if _mounted_app is not None:
         return _mounted_app
 
@@ -26,11 +27,14 @@ def build_sqlite_web_app(secret_key):
     initialize_app(db_paths, read_only=True)
     sqlite_web_app.secret_key = secret_key
 
-    @sqlite_web_app.before_request
-    def _require_shared_login():
-        if session.get('username'):
-            return None
-        return redirect('/?next=/sqlite-web/')
+    if not _login_hook_registered:
+        @sqlite_web_app.before_request
+        def _require_shared_login():
+            if session.get('username'):
+                return None
+            return redirect('/?next=/sqlite-web/')
+
+        _login_hook_registered = True
 
     _mounted_app = sqlite_web_app
     return _mounted_app

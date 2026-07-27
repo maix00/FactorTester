@@ -54,6 +54,30 @@ def test_reentry_frame_keeps_only_unresolved_requirement_changes() -> None:
     ) == []
 
 
+def test_detour_keeps_original_resume_node() -> None:
+    frame = {
+        "schema_version": 1,
+        "reason": "node_entry",
+        "status": "pending",
+        "resume_node": "validation_design",
+        "unresolved_requirement_ids": ["data.scope"],
+        "resolved_requirement_ids": [],
+    }
+    detoured = advance_entry_resolution_frame(
+        frame=frame,
+        current_node="validation_design",
+        target_node="capability_gap",
+        assessments=[{
+            "requirement_id": "data.scope",
+            "entry_effect": {"status": "blocked"},
+        }],
+    )
+
+    assert detoured["resume_node"] == "validation_design"
+    assert detoured["detour_node"] == "capability_gap"
+    assert detoured["unresolved_requirement_ids"] == ["data.scope"]
+
+
 def test_exact_receipt_avoids_repeating_an_unchanged_requirement() -> None:
     requirement_id = "data.required_fields"
     graph = {

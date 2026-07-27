@@ -58,12 +58,13 @@ def series_reports(name, series, title):
     initial_value = 0.0 if name == "returns_over_time" else (
         series[0]["values"][0] if series and series[0].get("values") else None
     )
+    display_series = _display_series(series)
     return [
         GeneratedReport(
             f"{name}_report",
             render_svg(
                 title,
-                series,
+                display_series,
                 percent=name == "returns_over_time",
                 initial_value=initial_value,
             ),
@@ -99,9 +100,37 @@ def metrics_reports(series):
                 "values": [row.get(metric) or 0.0 for row in item_rows],
             })
     return [
-        GeneratedReport("metrics_over_time_report", render_metrics_svg("指标随时间变化", metric_series), "svg", "image/svg+xml", receipt),
+        GeneratedReport(
+            "metrics_over_time_report",
+            render_metrics_svg("指标随时间变化", _display_series(metric_series)),
+            "svg", "image/svg+xml", receipt,
+        ),
         GeneratedReport("metrics_over_time_data", json_bytes({"schema_version": 1, "rows": rows}), "json", "application/json", receipt),
     ]
+
+
+def _display_series(
+    series: list[dict[str, Any]], *, maximum: int = 1200,
+) -> list[dict[str, Any]]:
+    """Bound SVG point counts while retaining the full JSON data artifact."""
+    output = []
+    for item in series:
+        values = list(item.get("values") or ())
+        timestamps = list(item.get("timestamps") or ())
+        if len(values) <= maximum:
+            output.append(item)
+            continue
+        stride = max(1, (len(values) - 1) // (maximum - 1))
+        indices = list(range(0, len(values), stride))
+        if indices[-1] != len(values) - 1:
+            indices.append(len(values) - 1)
+        output.append({
+            **item,
+            "values": [values[index] for index in indices],
+            "timestamps": [timestamps[index] for index in indices]
+            if len(timestamps) >= len(values) else timestamps,
+        })
+    return output
 
 
 def table_reports(name, rows):

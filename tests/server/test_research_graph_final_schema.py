@@ -177,6 +177,7 @@ def test_recreated_work_package_owner_backfills_existing_instances(
         "owner": "owner-old",
         "work_package_id": "package-old",
         "workspace_id": "workspace-old",
+        "title": "",
         "lifecycle": "active",
         "revision": 1,
         "lifecycle_history_json": "[]",

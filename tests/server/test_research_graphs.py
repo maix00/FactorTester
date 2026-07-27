@@ -1270,7 +1270,7 @@ def test_branch_advance_http_rejects_legacy_evidence(
     response = client.post(
         (
             f"/api/research-graph-instances/{instance['instance_id']}"
-            f"/branches/{branch['branch_id']}/advance"
+            f"/branches/{branch['branch_id']}/node/advance"
         ),
         json={
             "edge_id": "hypothesis__resolution",
@@ -2517,20 +2517,15 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
         capability_resolution=resolution,
     )
     branch_id = instance["branches"][0]["branch_id"]
-    context_response = client.get(
+    node_response = client.get(
         f"/api/research-graph-instances/{instance['instance_id']}"
-        f"/branches/{branch_id}/context"
+        f"/branches/{branch_id}/node"
     )
-    next_response = client.get(
-        f"/api/research-graph-instances/{instance['instance_id']}"
-        f"/branches/{branch_id}/next"
-    )
-    assert context_response.status_code == 200
-    assert next_response.status_code == 200
-    assert "required_capabilities" in context_response.get_json()["context"]
-    assert "candidate_edges" not in context_response.get_json()["context"]
-    assert "candidate_edges" in next_response.get_json()["next"]
-    assert "required_capabilities" not in next_response.get_json()["next"]
+    assert node_response.status_code == 200
+    node = node_response.get_json()["node"]
+    assert "capabilities" in node
+    assert "candidate_edges" in node
+    assert "next_actions" in node
     history = client.get("/api/research-graphs/factor-research/versions")
     assert [item["lifecycle"] for item in history.get_json()["versions"]] == [
         "draft",

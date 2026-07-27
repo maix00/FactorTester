@@ -423,7 +423,7 @@ def test_cli_prepare_uses_next_one_detail_and_factor_describe(
 
     def run(args: list[str], *, timeout: int):
         calls.append(args)
-        if args[:2] == ["research-graph", "next"]:
+        if args[:3] == ["research-graph", "node", "info"]:
             return _Result(_next_packet())
         if args[:2] == ["research-graph", "requirement-detail"]:
             return _Result(_detail(args[-1]))

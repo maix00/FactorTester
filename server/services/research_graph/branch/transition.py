@@ -65,6 +65,7 @@ from server.services.research_graph.protocol import (
     serialize_bounded_trace_evidence,
 )
 from server.services.research_graph.graph_objects import (
+    create_graph_object_schema,
     insert_graph_objects,
 )
 from server.services.research_graph.report_checkpoint import (
@@ -106,7 +107,8 @@ def advance_graph_branch(
         "entry_requirement_assessment_receipts",
     )):
         raise ValueError(
-            "trace projections and Graph object refs are server-owned"
+            "server_evidence, trace projections, and Graph object refs are "
+            "server-owned"
         )
     cycle_submission = evidence.get("research_cycle")
     if isinstance(cycle_submission, dict) and any(
@@ -158,6 +160,12 @@ def advance_graph_branch(
         proposed_trial_plan_hash
     )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        # Graph-object storage is a support relation.  The normal startup
+        # path creates it, but transitions must also work against a database
+        # created by an older fixture or a process that started before the
+        # support migration.  IF NOT EXISTS is a no-op on the warm path and
+        # makes cold-object persistence atomic with this transition.
+        create_graph_object_schema(conn)
         conn.execute("BEGIN IMMEDIATE")
         branch_row = load_instance_branch_with_latest_trace(
             conn,

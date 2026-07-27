@@ -446,24 +446,9 @@ def get_research_graph_branch(instance_id: str, branch_id: str):
 
 
 @sft_bp.get(
-    "/api/research-graph-instances/<instance_id>/branches/<branch_id>/context"
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>/node"
 )
-def get_research_graph_branch_context(instance_id: str, branch_id: str):
-    try:
-        context = research_graphs.build_graph_branch_context(
-            instance_id=instance_id,
-            branch_id=branch_id,
-            owner=require_user(),
-        )
-    except KeyError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 404
-    return jsonify({"success": True, "context": context})
-
-
-@sft_bp.get(
-    "/api/research-graph-instances/<instance_id>/branches/<branch_id>/next"
-)
-def get_research_graph_branch_next(instance_id: str, branch_id: str):
+def get_research_graph_node_info(instance_id: str, branch_id: str):
     try:
         packet = research_graphs.build_graph_branch_next(
             instance_id=instance_id,
@@ -474,7 +459,31 @@ def get_research_graph_branch_next(instance_id: str, branch_id: str):
         return jsonify({"success": False, "error": str(exc)}), 404
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
-    return jsonify({"success": True, "next": packet})
+    return jsonify({"success": True, "node": packet})
+
+
+@sft_bp.get(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/edges/<edge_id>"
+)
+def get_research_graph_edge_info(
+    instance_id: str,
+    branch_id: str,
+    edge_id: str,
+):
+    """Read one available edge and its report requirements."""
+    try:
+        value = research_graphs.build_graph_branch_edge_info(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=require_user(),
+            edge_id=edge_id,
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "edge": value})
 
 
 @sft_bp.get(
@@ -664,9 +673,9 @@ def get_trial_execution_binding(instance_id: str, branch_id: str):
 
 
 @sft_bp.post(
-    "/api/research-graph-instances/<instance_id>/branches/<branch_id>/advance"
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>/node/advance"
 )
-def advance_research_graph_branch(instance_id: str, branch_id: str):
+def advance_research_graph_node(instance_id: str, branch_id: str):
     data = request.get_json(silent=True) or {}
     try:
         branch = research_graphs.advance_graph_branch(

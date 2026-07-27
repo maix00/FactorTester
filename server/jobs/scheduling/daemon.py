@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+import logging
 from typing import Any
 
 from server.jobs.events import EventBroker
@@ -16,6 +17,9 @@ from .worker_pool import (
     WorkerUnavailable,
     persisted_result_summary,
 )
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 PLANNER_RUNNER = "server.jobs.planning.runners:plan_job"
@@ -275,7 +279,7 @@ class ResearchJobScheduler:
             return
         if event == "result" and stage == "execution" and job.status is JobStatus.RUNNING:
             if job.cancel_requested_at is not None:
-                self.repository.transition(
+                cancelled = self.repository.transition(
                     job_id,
                     JobStatus.CANCELLED,
                     expected=JobStatus.RUNNING,
@@ -287,15 +291,17 @@ class ResearchJobScheduler:
                         "message": "cancellation was requested before the result was committed",
                     },
                 )
+                self._register_terminal_evidence(cancelled)
                 self.broker.close(job_id)
                 return
             summary = persisted_result_summary(data)
-            self.repository.transition(
+            completed = self.repository.transition(
                 job_id,
                 JobStatus.SUCCEEDED,
                 expected=JobStatus.RUNNING,
                 result_summary=summary,
             )
+            self._register_terminal_evidence(completed)
             self.broker.close(job_id)
             return
         if event != "error":
@@ -303,21 +309,51 @@ class ResearchJobScheduler:
         cancelled = bool(data.get("cancelled")) or job.cancel_requested_at is not None
         target = JobStatus.CANCELLED if cancelled else JobStatus.FAILED
         if job.status in {JobStatus.PLANNING, JobStatus.RUNNING}:
-            self.repository.transition(
+            completed = self.repository.transition(
                 job_id,
                 target,
                 expected=job.status,
                 cancel_reason=job.cancel_reason if cancelled else "",
                 error=data,
             )
+            self._register_terminal_evidence(completed)
             self.broker.close(job_id)
+
+    def _register_terminal_evidence(self, job: Any) -> None:
+        """Persist factual JobAttempt evidence without delaying job success."""
+        try:
+            from server.services.research_graph.branch.job_attempt import (
+                persist_terminal_job_evidence,
+            )
+
+            detail = self.repository.load_detail(
+                job.job_id,
+                owner=job.owner,
+            )
+            if detail is None:
+                return
+            registered = persist_terminal_job_evidence(
+                detail=detail,
+                owner=job.owner,
+            )
+            if registered is not None:
+                self.broker.publish(
+                    job.job_id,
+                    "evidence_registered",
+                    registered,
+                )
+        except Exception:
+            _LOGGER.exception(
+                "terminal JobAttempt evidence registration failed: %s",
+                job.job_id,
+            )
 
     def _handle_worker_loss(self, job_id: str, message: dict[str, Any], *, stage: str) -> None:
         job = self.repository.load(job_id)
         if job is None or job.status not in {JobStatus.PLANNING, JobStatus.RUNNING}:
             return
         cancelled = job.cancel_requested_at is not None
-        self.repository.transition(
+        completed = self.repository.transition(
             job_id,
             JobStatus.CANCELLED if cancelled else JobStatus.FAILED,
             expected=job.status,
@@ -331,7 +367,8 @@ class ResearchJobScheduler:
                 "worker_exitcode": message.get("worker_exitcode"),
             },
         )
-        self.broker.publish(job_id, "error", self.repository.require(job_id).error or {})
+        self._register_terminal_evidence(completed)
+        self.broker.publish(job_id, "error", completed.error or {})
         self.broker.close(job_id)
 
     def _enforce_storage_quota(self, owner: str) -> None:

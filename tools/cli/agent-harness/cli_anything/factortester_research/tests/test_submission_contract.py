@@ -227,7 +227,7 @@ def test_cycle_advance_rejects_stale_contract_before_mutation(
 
     def backend(args: list[str], *, timeout: int):
         calls.append(args)
-        if args[:2] == ["research-graph", "next"]:
+        if args[:3] == ["research-graph", "node", "info"]:
             return SimpleNamespace(
                 returncode=0,
                 stdout=json.dumps(current),
@@ -248,7 +248,7 @@ def test_cycle_advance_rejects_stale_contract_before_mutation(
     assert result.exit_code != 0
     assert "stale" in result.output
     assert calls == [[
-        "research-graph", "next", "instance-1", "branch-1",
+        "research-graph", "node", "info", "instance-1", "branch-1",
     ]]
 
 

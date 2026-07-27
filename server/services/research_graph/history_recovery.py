@@ -392,10 +392,10 @@ def _backup_database(source: Path, target: Path) -> None:
     if target.exists():
         raise FileExistsError(f"backup already exists: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(source) as source_conn:
-        with sqlite3.connect(target) as target_conn:
+    with connect_sqlite(source) as source_conn:
+        with connect_sqlite(target) as target_conn:
             source_conn.backup(target_conn)
-    with sqlite3.connect(target) as backup_conn:
+    with connect_sqlite(target) as backup_conn:
         result = backup_conn.execute("PRAGMA integrity_check").fetchone()
     if result is None or str(result[0]).lower() != "ok":
         target.unlink(missing_ok=True)

@@ -55,7 +55,7 @@ def entry_prepare(
     """Prepare an editable, selected-requirement assessment document."""
     try:
         packet = validate_next_packet(_call_json([
-            "research-graph", "next", instance_id, branch_id,
+            "research-graph", "node", "info", instance_id, branch_id,
         ]))
         details = {
             requirement_id: _call_json([

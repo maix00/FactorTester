@@ -120,7 +120,7 @@ class FakeClient:
             "branches": [{"branch_id": "branch-1", "status": "running"}],
         }
 
-    def advance_research_graph_branch(
+    def advance_research_graph_node(
         self,
         instance_id,
         branch_id,
@@ -261,22 +261,6 @@ class FakeClient:
         return {
             "invocation_id": invocation_id,
             "status": "released",
-        }
-
-    def get_research_graph_branch_context(self, instance_id, branch_id):
-        return {
-            "graph": "factor-research@v3",
-            "branch": {"instance_id": instance_id, "branch_id": branch_id},
-            "node": {"node_id": "hypothesis"},
-        }
-
-    def get_research_graph_branch_next(self, instance_id, branch_id):
-        return {
-            "graph": "factor-research@v3",
-            "branch": {"instance_id": instance_id, "branch_id": branch_id},
-            "node": {"node_id": "hypothesis"},
-            "candidate_edges": [],
-            "requires_agent_judgment": False,
         }
 
     def get_current_graph_requirement(
@@ -479,7 +463,7 @@ def test_research_graph_start_consumes_node_local_capability_resolution(
     )
 
 
-def test_research_graph_next_and_bounded_review_commands(
+def test_research_graph_bounded_review_commands(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -489,9 +473,6 @@ def test_research_graph_next_and_bounded_review_commands(
     diff_file = tmp_path / "diff.json"
     diff_file.write_text(json.dumps({"reason": "semantic edge change"}))
 
-    next_result = runner.invoke(cli, [
-        "research-graph", "next", "instance-1", "branch-1",
-    ])
     proposed = runner.invoke(cli, [
         "research-graph", "propose", "factor-research", "2",
         "--risk-level", "L4",
@@ -508,9 +489,6 @@ def test_research_graph_next_and_bounded_review_commands(
         "--agent-execution-id", "reviewer-execution",
     ])
 
-    assert next_result.exit_code == 0
-    assert '"node_id": "hypothesis"' in next_result.output
-    assert '"candidate_edges": []' in next_result.output
     assert proposed.exit_code == 0
     assert reviewed.exit_code == 0
     assert fake.proposal[2]["token_estimate"] == 400
@@ -520,6 +498,14 @@ def test_research_graph_next_and_bounded_review_commands(
         == "auth-conversation:test-cli"
     )
     assert fake.review[1]["scope_drift"] is False
+
+
+def test_legacy_graph_navigation_commands_are_removed() -> None:
+    runner = CliRunner()
+    for command in ("context", "next", "advance"):
+        result = runner.invoke(cli, ["research-graph", command])
+        assert result.exit_code != 0
+        assert "No such command" in result.output
 
 
 def test_research_graph_requirement_detail_reads_only_one_contract(
@@ -540,266 +526,6 @@ def test_research_graph_requirement_detail_reads_only_one_contract(
     payload = json.loads(result.output)
     assert payload["requirement"]["title_zh"] == "产品数据源"
     assert "requirement_catalog" not in payload
-
-
-def test_research_graph_advance_projects_target_capability_descriptions(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    evidence_file = tmp_path / "evidence.json"
-    evidence_file.write_text(json.dumps({"ready": True}))
-    resolution_file = tmp_path / "resolution.json"
-    resolution_file.write_text(json.dumps({"resolution": {
-        "node_id": "validation",
-        "bindings": [{
-            "capability_id": "validation.run",
-            "capability_description": "Run validation.",
-            "descriptor_hash": "a" * 64,
-            "implementation_id": "local.validation",
-            "provider": "private-runtime",
-        }],
-        "gaps": [],
-    }}))
-
-    result = CliRunner().invoke(cli, [
-        "research-graph",
-        "advance",
-        "instance-1",
-        "branch-1",
-        "--edge-id",
-        "hypothesis__validation",
-        "--evidence-file",
-        str(evidence_file),
-        "--target-capability-resolution-file",
-        str(resolution_file),
-    ])
-
-    assert result.exit_code == 0
-    projected = fake.advance[3]["target_capability_resolution"]
-    assert projected["bindings"] == [{
-        "capability_id": "validation.run",
-        "capability_description": "Run validation.",
-        "descriptor_hash": "a" * 64,
-    }]
-
-
-def test_research_graph_advance_publishes_checkpoint_for_bound_profile(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    carrier = {"schema_version": 1, "checkpoint_ref": "trace:checkpoint-1"}
-    fake.advance_response = {
-        "instance_id": "instance-1",
-        "branch_id": "branch-1",
-        "current_node": "validation",
-        "report_checkpoint": carrier,
-    }
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    selected_client = {}
-
-    def profile_client(root, profile_id):
-        selected_client.update({"root": root, "profile_id": profile_id})
-        return fake
-
-    monkeypatch.setattr(commands, "_client_for_profile", profile_client)
-    published = {}
-
-    def publish(**kwargs):
-        published.update(kwargs)
-        return {
-            "changed": True,
-            "report_changed": True,
-            "profile_changed": True,
-            "checkpoint_ref": "trace:checkpoint-1",
-            "artifact": {
-                "artifact_ref": "artifact:research/instance-1/REPORT.md",
-                "local_ref": "file:///private/report.md",
-                "index_ref": "file:///private/index.json",
-            },
-        }
-
-    monkeypatch.setattr(commands, "publish_research_checkpoint", publish)
-    monkeypatch.setattr(
-        commands,
-        "load_profile_root",
-        lambda _profile: tmp_path / "client-support",
-    )
-    evidence_file = tmp_path / "evidence.json"
-    evidence_file.write_text(json.dumps({"ready": True}))
-    narrative_file = tmp_path / "narrative.json"
-    narrative = {"schema_version": 1, "language": "zh-Hans"}
-    narrative_file.write_text(json.dumps(narrative))
-
-    result = CliRunner().invoke(cli, [
-        "research-graph", "advance", "instance-1", "branch-1",
-        "--edge-id", "hypothesis__validation",
-        "--evidence-file", str(evidence_file),
-        "--profile-id", "maxa",
-        "--agent-id", "research-maxa",
-        "--narrative-file", str(narrative_file),
-    ])
-
-    assert result.exit_code == 0
-    assert published == {
-        "client_root": tmp_path / "client-support",
-        "profile_id": "maxa",
-        "agent_id": "research-maxa",
-        "carrier": carrier,
-        "narrative": narrative,
-    }
-    assert selected_client == {
-        "root": tmp_path / "client-support",
-        "profile_id": "maxa",
-    }
-    payload = json.loads(result.output)
-    assert payload["local_report_sync"]["status"] == "published"
-    assert payload["report_checkpoint_ref"] == "trace:checkpoint-1"
-    assert "report_checkpoint" not in payload
-    assert "file:" not in result.output
-
-
-def test_research_graph_advance_reports_local_sync_failure_after_transition(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    fake.advance_response = {
-        "instance_id": "instance-1",
-        "branch_id": "branch-1",
-        "current_node": "validation",
-        "report_checkpoint": {
-            "schema_version": 1,
-            "checkpoint_ref": "trace:checkpoint-1",
-        },
-    }
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    monkeypatch.setattr(
-        commands,
-        "_client_for_profile",
-        lambda _root, _profile_id: fake,
-    )
-    monkeypatch.setattr(
-        commands,
-        "load_profile_root",
-        lambda _profile: tmp_path / "client-support",
-    )
-    monkeypatch.setattr(
-        commands,
-        "publish_research_checkpoint",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            OSError("/Users/max/private/report directory is unavailable")
-        ),
-    )
-    evidence_file = tmp_path / "evidence.json"
-    evidence_file.write_text(json.dumps({"ready": True}))
-    narrative_file = tmp_path / "narrative.json"
-    narrative_file.write_text(json.dumps({
-        "schema_version": 1,
-        "language": "zh-Hans",
-    }))
-
-    result = CliRunner().invoke(cli, [
-        "research-graph", "advance", "instance-1", "branch-1",
-        "--edge-id", "hypothesis__validation",
-        "--evidence-file", str(evidence_file),
-        "--profile-id", "maxa",
-        "--agent-id", "research-maxa",
-        "--narrative-file", str(narrative_file),
-    ])
-
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
-    assert payload["branch"]["current_node"] == "validation"
-    assert payload["local_report_sync"] == {
-        "status": "required",
-        "error_code": "local_report_io_error",
-        "message": (
-            "Server transition completed; local report sync is required."
-        ),
-        "checkpoint_ref": "trace:checkpoint-1",
-    }
-    assert "/Users/" not in result.output
-    assert fake.advance_call_count == 1
-
-
-def test_research_graph_advance_requires_local_chinese_narrative_after_transition(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    fake.advance_response = {
-        "instance_id": "instance-1",
-        "branch_id": "branch-1",
-        "current_node": "validation",
-        "report_checkpoint": {
-            "schema_version": 1,
-            "checkpoint_ref": "trace:checkpoint-1",
-        },
-    }
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    monkeypatch.setattr(
-        commands, "_client_for_profile", lambda _root, _profile_id: fake,
-    )
-    monkeypatch.setattr(
-        commands,
-        "load_profile_root",
-        lambda _profile: tmp_path / "client-support",
-    )
-    evidence_file = tmp_path / "evidence.json"
-    evidence_file.write_text(json.dumps({"ready": True}))
-
-    result = CliRunner().invoke(cli, [
-        "research-graph", "advance", "instance-1", "branch-1",
-        "--edge-id", "hypothesis__validation",
-        "--evidence-file", str(evidence_file),
-        "--profile-id", "maxa",
-        "--agent-id", "research-maxa",
-    ])
-
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
-    assert payload["local_report_sync"]["status"] == "required"
-    assert payload["local_report_sync"]["error_code"] == (
-        "local_narrative_required"
-    )
-    assert fake.advance_call_count == 1
-
-
-def test_research_graph_advance_marks_uninitialized_cycle_without_local_write(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    monkeypatch.setattr(
-        commands,
-        "_client_for_profile",
-        lambda _root, _profile_id: fake,
-    )
-    monkeypatch.setattr(
-        commands,
-        "load_profile_root",
-        lambda _profile: tmp_path / "client-support",
-    )
-    evidence_file = tmp_path / "evidence.json"
-    evidence_file.write_text(json.dumps({"ready": True}))
-
-    result = CliRunner().invoke(cli, [
-        "research-graph", "advance", "instance-1", "branch-1",
-        "--edge-id", "hypothesis__validation",
-        "--evidence-file", str(evidence_file),
-        "--profile-id", "maxa",
-        "--agent-id", "research-maxa",
-    ])
-
-    assert result.exit_code == 0
-    assert json.loads(result.output)["local_report_sync"] == {
-        "status": "not_available",
-        "reason": "checkpoint_carrier_not_available",
-    }
 
 
 def test_research_graph_continuation_is_previewed_then_exactly_applied(
@@ -923,7 +649,7 @@ def test_research_graph_continuation_retargets_local_profile_without_new_record(
         "target_instance_id": "physical-v7",
         "target_branch_id": "branch-v7",
     }
-    assert payload["local_report_sync"] == {
+    assert payload["local_report_publish"] == {
         "status": "published",
         "changed": True,
         "checkpoint_ref": "trace:continued",

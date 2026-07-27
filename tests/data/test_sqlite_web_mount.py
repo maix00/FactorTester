@@ -48,7 +48,10 @@ def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
     app = create_app()
 
     assert unified_db.exists()
-    assert set(datasets.keys()) == {'unifieddata.sqlite'}
+    # DataHub now keeps registered auxiliary stores in the sqlite-web view;
+    # the contract is that the current unified mirror is present, not that it
+    # is the only store (the old assertion predates DataHub store registration).
+    assert 'unifieddata.sqlite' in datasets
 
     client = app.test_client()
     resp = client.get('/sqlite-web/')

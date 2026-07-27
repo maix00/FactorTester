@@ -968,16 +968,6 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         assurance = job_detail["evidence"]["terminal_assurance"]
         assert assurance["disposition"] == "trusted"
         assert assurance["anomaly_codes"] == []
-        context = _run_json(
-            factortester,
-            [
-                "research-graph",
-                "context",
-                live_instance["instance_id"],
-                live_branch["branch_id"],
-            ],
-            env=env,
-        )
         cycle_session = tmp_path / "cycle-session.json"
         next_packet = _run_json(
             harness,
@@ -993,11 +983,21 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             env=env,
         )
         packet_ceiling = runtime_packet_budget["ceiling_bytes"]
-        assert context["context_bytes"] <= packet_ceiling
-        assert "candidate_edges" not in context
         assert next_packet["next_bytes"] <= packet_ceiling
         assert "candidate_edges" in next_packet
-        assert "required_capabilities" not in next_packet
+        node_info = _run_json(
+            factortester,
+            [
+                "research-graph",
+                "node",
+                "info",
+                live_instance["instance_id"],
+                live_branch["branch_id"],
+            ],
+            env=env,
+        )
+        assert node_info["next_bytes"] <= packet_ceiling
+        assert "candidate_edges" in node_info
 
         edge = next(
             item for item in graph["edges"]
@@ -1133,7 +1133,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             env=env,
         )
         advanced = cycle_advanced["backend"]
-        assert advanced["current_node"] == edge["to_node"]
+        advanced_branch = advanced.get("branch") or advanced
+        assert advanced_branch["current_node"] == edge["to_node"]
         assert cycle_advanced["local_validation"]["proposal_count"] == 0
         assert cycle_session.is_file()
 

@@ -227,6 +227,41 @@ def _group_product_path_selection_id(group: dict[str, Any]) -> str:
     return str(group.get("product_path_selection_id") or "")
 
 
+def _groups_with_parent_fallback(groups: list[dict]) -> list[dict]:
+    """Build derived-group views without mutating their parent or identity."""
+    groups_by_id = {
+        str(group.get("id")): group
+        for group in groups
+        if isinstance(group, dict) and group.get("id")
+    }
+    resolving: set[str] = set()
+    resolved: dict[str, dict] = {}
+
+    def resolve(group: dict) -> dict:
+        group_id = str(group.get("id") or "")
+        if group_id and group_id in resolved:
+            return deepcopy(resolved[group_id])
+        if group_id:
+            if group_id in resolving:
+                return deepcopy(group)
+            resolving.add(group_id)
+        merged = deepcopy(group)
+        parent = groups_by_id.get(str(group.get("parentId") or ""))
+        if isinstance(parent, dict):
+            parent_view = resolve(parent)
+            for key, value in parent_view.items():
+                if key in _GROUP_INHERIT_UNIQUE_KEYS:
+                    continue
+                if merged.get(key) in (None, ""):
+                    merged[key] = deepcopy(value)
+        if group_id:
+            resolving.discard(group_id)
+            resolved[group_id] = deepcopy(merged)
+        return merged
+
+    return [resolve(group) if isinstance(group, dict) else group for group in groups]
+
+
 def _ensure_tester_factors_for_group(
     tester: Any,
     factor_aliases: list[str],

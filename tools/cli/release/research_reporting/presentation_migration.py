@@ -12,7 +12,6 @@ import importlib
 import json
 from pathlib import Path
 import re
-import sqlite3
 from typing import Any
 
 from .journal import content_hash, fragment_payload, load_fragments
@@ -130,8 +129,10 @@ def migrate_work_package_database(
     *, database_path: Path, work_package_id: str, receipt_path: Path,
 ) -> dict[str, Any]:
     """Atomically migrate one Work Package and persist its receipt."""
-    with sqlite3.connect(database_path) as conn:
-        conn.row_factory = sqlite3.Row
+    connect_sqlite = importlib.import_module(
+        "tools.data.sqlite.db"
+    ).connect_sqlite
+    with connect_sqlite(database_path) as conn:
         rows = conn.execute(
             """
             SELECT t.trace_id, t.evidence_json

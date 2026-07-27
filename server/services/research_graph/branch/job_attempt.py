@@ -17,6 +17,7 @@ from server.services.research_graph.branch.research_cycle import (
 from server.services.research_graph.research_cycle.job_evidence import (
     project_job_attempt_evidence,
 )
+from server.services.research_evidence_registry import put_evidence
 from server.services.research_graph.versions import load_graph_from_conn
 from tools.data.sqlite.db import connect_sqlite
 
@@ -28,6 +29,50 @@ _SERVER_GUARDS = (
     "terminal_job_trusted",
     "net_return_series_available",
 )
+
+
+def persist_terminal_job_evidence(
+    *,
+    detail: dict[str, Any],
+    owner: str,
+) -> dict[str, Any] | None:
+    """Register a trusted terminal JobAttempt as reusable evidence.
+
+    Job completion owns factual registration.  Report writing remains local to
+    the Profile client, while the server keeps only the content-addressed
+    envelope and its applicability scope.
+    """
+    job = detail.get("job")
+    binding = detail.get("trial_binding") or {}
+    if job is None or not isinstance(binding, dict):
+        return None
+    envelope = project_job_attempt_evidence(
+        job,
+        identity_refs=detail.get("identity_refs"),
+        trial_stage=str(binding.get("trial_stage") or ""),
+        active_artifacts=detail.get("active_artifacts") or [],
+    )
+    if envelope is None:
+        return None
+    identity = envelope.get("identity_refs") or {}
+    applicability: dict[str, Any] = {
+        "source_refs": [
+            f"research-job:{job.job_id}",
+            f"research-run:{job.run_id}",
+        ],
+    }
+    for field in (
+        "contract_hash", "methodology_hash", "trial_plan_hash",
+        "run_spec_hash",
+    ):
+        value = str(identity.get(field) or "")
+        if value:
+            applicability[field] = value
+    return put_evidence(
+        owner=owner,
+        envelope=envelope,
+        applicability=applicability,
+    )
 
 
 def prepare_transition(

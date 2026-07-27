@@ -34,6 +34,21 @@ CURRENT_BRANCH_CONTEXT_SQL = """
 def branch_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
+    # A few internal readers can still hand us a row projected before the
+    # Work Package lifecycle columns were added.  The public branch query
+    # always aliases these fields, but the payload projection should remain a
+    # total function for historical rows and handoff/replay callers.
+    columns = set(row.keys())
+    lifecycle = (
+        row["work_package_lifecycle"]
+        if "work_package_lifecycle" in columns
+        else "active"
+    )
+    revision = (
+        row["work_package_revision"]
+        if "work_package_revision" in columns
+        else 1
+    )
     return {
         "branch_id": str(row["branch_id"]),
         "hypothesis_branch_id": str(
@@ -53,10 +68,8 @@ def branch_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "label": str(row["label"]),
         "current_node": str(row["current_node"]),
         "status": str(row["status"]),
-        "work_package_lifecycle": str(
-            row["work_package_lifecycle"] or "active"
-        ),
-        "work_package_revision": int(row["work_package_revision"] or 1),
+        "work_package_lifecycle": str(lifecycle or "active"),
+        "work_package_revision": int(revision or 1),
         "created_at": float(row["created_at"]),
         "updated_at": float(row["updated_at"]),
     }

@@ -63,6 +63,11 @@ def test_production_code_uses_shared_sqlite_connection_factory() -> None:
         for path in (repo_root / root_name).rglob("*.py"):
             if path == repo_root / "tools/data/sqlite/db.py":
                 continue
+            # Release/build output is an ignored copy of source files, not
+            # production code.  Do not report the same source violation twice
+            # merely because a local packaging run left its staging tree.
+            if "build" in path.relative_to(repo_root).parts:
+                continue
             if "sqlite3.connect(" in path.read_text(encoding="utf-8"):
                 violations.append(str(path.relative_to(repo_root)))
 

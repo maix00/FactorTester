@@ -307,7 +307,7 @@ class TestCLISubprocess:
             "#!/usr/bin/env python3\n"
             "import json, sys\n"
             "assert sys.argv[1:] == [\n"
-            "  'research-graph', 'next', 'instance-1', 'branch-1'\n"
+            "  'research-graph', 'node', 'info', 'instance-1', 'branch-1'\n"
             "]\n"
             "print(json.dumps({\n"
             "  'graph': 'factor-research@v2',\n"

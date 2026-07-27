@@ -129,7 +129,10 @@ def add_report_component(
     "evidence", "obligation", "task", "job", "claim", "artifact",
     "report_requirement", "graph_reference", "checkpoint", "run",
 ]), required=True)
-@click.option("--target-ref", required=True)
+@click.option(
+    "--target-ref", required=True,
+    help="Graph 注册的 report_requirement_id",
+)
 @click.option("--label", default="")
 @click.option("--data-file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--json", "as_json", is_flag=True)

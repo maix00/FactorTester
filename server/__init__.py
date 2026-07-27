@@ -54,7 +54,6 @@ def create_app() -> Flask:
     from server.auth import auth_bp
     from server.core import core_bp
     from server.modules.templates import templates_bp
-    from server.modules.shared import shared_bp
     from server.modules.shared import register_routes as register_shared_routes
     from server.modules.factors import factors_bp
     from server.modules.factors import register_routes as register_factor_routes
@@ -66,6 +65,7 @@ def create_app() -> Flask:
     from server.server_operations import server_operations_bp
 
     register_shared_routes()
+    from server.modules.shared import shared_bp
     register_factor_routes()
     register_custom_factor_routes()
 

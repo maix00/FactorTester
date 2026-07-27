@@ -672,7 +672,11 @@ struct ResearchNarrativeReportView: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 280, alignment: .leading)
+                // Chips size to their content.  A fixed/max width leaves a
+                // large empty tail for short labels and makes mixed locales
+                // look inconsistent.  The surrounding row owns any layout
+                // width; the chip itself must not claim it.
+                .layoutPriority(1)
         }
         .buttonStyle(.bordered)
         .controlSize(.mini)

@@ -20,7 +20,9 @@ from tools.cli.release.research_reporting.publisher import (
 from tools.cli.release.research_reporting.continuation_narrative import (
     continuation_narrative,
 )
-from tools.cli.release.research_reporting.graph_adapter import enrich_graph_packet
+from tools.cli.commands.research_graph_navigation import (
+    register_navigation_commands,
+)
 
 
 def _json(value) -> str:
@@ -444,31 +446,6 @@ def show_graph_branch(instance_id: str, branch_id: str) -> None:
     )))
 
 
-@research_graph.command("context")
-@click.argument("instance_id")
-@click.argument("branch_id")
-def graph_branch_context(instance_id: str, branch_id: str) -> None:
-    """只返回当前节点的最小状态包，避免装载完整图和目录。"""
-    click.echo(_json(
-        client_from_config().get_research_graph_branch_context(
-            instance_id,
-            branch_id,
-        )
-    ))
-
-
-@research_graph.command("next")
-@click.argument("instance_id")
-@click.argument("branch_id")
-def next_graph_step(instance_id: str, branch_id: str) -> None:
-    """确定性计算候选边 readiness、缺失证据与 Agent 判断需求。"""
-    packet = client_from_config().get_research_graph_branch_next(
-        instance_id,
-        branch_id,
-    )
-    click.echo(_json(enrich_graph_packet(packet)))
-
-
 @research_graph.command("cycle-object")
 @click.argument("instance_id")
 @click.argument("branch_id")
@@ -749,6 +726,7 @@ from tools.cli.commands.research_result_report import (
     register_research_result_report_commands,
 )
 register_research_result_report_commands(research_graph)
+register_navigation_commands(research_graph)
 
 
 @research_graph.command("fork")
@@ -937,7 +915,7 @@ def continue_graph_branch(
                 },
             }
         else:
-            report_sync = _publish_continuation_report(
+            report_publish = _publish_continuation_report(
                 client=client,
                 client_root=client_root,
                 profile_id=profile_id,
@@ -953,7 +931,7 @@ def continue_graph_branch(
                     "target_instance_id": target_instance_id,
                     "target_branch_id": target_branch_id,
                 },
-                "local_report_sync": report_sync,
+                "local_report_publish": report_publish,
             }
     click.echo(_json(continuation))
 
@@ -998,166 +976,3 @@ def _publish_continuation_report(
         "checkpoint_ref": published["checkpoint_ref"],
         "artifact_ref": artifact["artifact_ref"],
     }
-
-
-@research_graph.command("advance")
-@click.argument("instance_id")
-@click.argument("branch_id")
-@click.option("--edge-id", required=True)
-@click.option(
-    "--evidence-file",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@click.option(
-    "--target-capability-resolution-file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@click.option("--profile-id")
-@click.option("--agent-id")
-@click.option("--acting-profile-ref", default="")
-@click.option(
-    "--narrative-file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="与本次 checkpoint 绑定的简体中文研究叙事 JSON。",
-)
-@click.option(
-    "--release-profile",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-def advance_graph_branch(
-    instance_id: str,
-    branch_id: str,
-    edge_id: str,
-    evidence_file: Path,
-    target_capability_resolution_file: Path | None,
-    profile_id: str | None,
-    agent_id: str | None,
-    acting_profile_ref: str,
-    narrative_file: Path | None,
-    release_profile: Path | None,
-) -> None:
-    """提交证据并沿 Active Graph 的一条已声明边前进。"""
-    evidence = json.loads(evidence_file.read_text(encoding="utf-8"))
-    if not isinstance(evidence, dict):
-        raise click.ClickException("transition evidence must be a JSON object")
-    if target_capability_resolution_file is not None:
-        payload = json.loads(
-            target_capability_resolution_file.read_text(encoding="utf-8")
-        )
-        resolution = (
-            payload.get("resolution") if isinstance(payload, dict) else None
-        )
-        if not isinstance(resolution, dict):
-            resolution = payload
-        if not isinstance(resolution, dict):
-            raise click.ClickException(
-                "target capability resolution must be a JSON object"
-            )
-        evidence["target_capability_resolution"] = (
-            server_capability_resolution(resolution)
-        )
-    if bool(profile_id) != bool(agent_id):
-        raise click.ClickException(
-            "--profile-id and --agent-id must be provided together"
-        )
-    if narrative_file is not None and not profile_id:
-        raise click.ClickException(
-            "--narrative-file requires --profile-id and --agent-id"
-        )
-    narrative = None
-    if narrative_file is not None:
-        narrative = json.loads(narrative_file.read_text(encoding="utf-8"))
-        if not isinstance(narrative, dict):
-            raise click.ClickException("local narrative must be a JSON object")
-    client_root = load_profile_root(release_profile) if profile_id else None
-    client = (
-        _client_for_profile(client_root, profile_id)
-        if client_root is not None and profile_id is not None
-        else client_from_config()
-    )
-    transition_kwargs = {
-        "edge_id": edge_id,
-        "evidence": evidence,
-    }
-    if acting_profile_ref:
-        transition_kwargs["acting_profile_ref"] = acting_profile_ref
-    branch = client.advance_research_graph_branch(
-        instance_id,
-        branch_id,
-        **transition_kwargs,
-    )
-    report_checkpoint = branch.get("report_checkpoint")
-    if profile_id and agent_id and report_checkpoint is not None:
-        assert client_root is not None
-        if narrative is None:
-            click.echo(_json({
-                "branch": branch,
-                "local_report_sync": {
-                    "status": "required",
-                    "error_code": "local_narrative_required",
-                    "message": (
-                        "Server transition completed; a Simplified Chinese "
-                        "local narrative is required to publish the report."
-                    ),
-                    "checkpoint_ref": report_checkpoint.get(
-                        "checkpoint_ref"
-                    ),
-                },
-            }))
-            return
-        try:
-            report_sync = publish_research_checkpoint(
-                client_root=client_root,
-                profile_id=profile_id,
-                agent_id=agent_id,
-                carrier=report_checkpoint,
-                narrative=narrative,
-            )
-        except (OSError, ValueError) as exc:
-            error_code = (
-                "local_report_io_error"
-                if isinstance(exc, OSError)
-                else "local_report_validation_error"
-            )
-            click.echo(_json({
-                "branch": branch,
-                "local_report_sync": {
-                    "status": "required",
-                    "error_code": error_code,
-                    "message": (
-                        "Server transition completed; local report sync is "
-                        "required."
-                    ),
-                    "checkpoint_ref": report_checkpoint.get(
-                        "checkpoint_ref"
-                    ),
-                },
-            }))
-            return
-        sync_artifact = report_sync["artifact"]
-        branch = {
-            **{
-                key: value
-                for key, value in branch.items()
-                if key != "report_checkpoint"
-            },
-            "report_checkpoint_ref": report_checkpoint["checkpoint_ref"],
-            "local_report_sync": {
-                "status": "published",
-                "changed": report_sync["changed"],
-                "report_changed": report_sync["report_changed"],
-                "profile_changed": report_sync["profile_changed"],
-                "checkpoint_ref": report_sync["checkpoint_ref"],
-                "artifact_ref": sync_artifact["artifact_ref"],
-            },
-        }
-    elif profile_id and agent_id:
-        branch = {
-            **branch,
-            "local_report_sync": {
-                "status": "not_available",
-                "reason": "checkpoint_carrier_not_available",
-            },
-        }
-    click.echo(_json(branch))

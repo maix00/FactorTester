@@ -15,6 +15,7 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
 from tools.cli.core.strategy_spec import load_spec
+from tools.cli.release.research_reporting.job_artifacts import collect_job_report
 
 
 def _json(value: Any) -> str:
@@ -634,24 +635,61 @@ def job_config(job_id: str) -> None:
 
 @job.command("result")
 @click.argument("job_id")
+@click.option(
+    "--report-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="任务结束后自动下载生成物并挂载统计表格、图片到本地报告。",
+)
+@click.option(
+    "--output",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Job 生成物本地目录；省略时使用当前 workspace 的 Job 目录。",
+)
 @friendly_errors
-def job_result(job_id: str) -> None:
+def job_result(job_id: str, report_file: Path | None, output: Path | None) -> None:
     """Read the retained result, cancellation detail, or failure traceback."""
-    click.echo(_json(client_from_config().job_result(job_id)))
+    client = client_from_config()
+    result = client.job_result(job_id)
+    if report_file is not None:
+        result["report_collection"] = collect_job_report(
+            client, job_id=job_id, report_file=report_file, output_dir=output,
+        )
+    click.echo(_json(result))
 
 
 @job.command("watch")
 @click.argument("job_id")
 @click.option("--after", default=0, type=int)
 @click.option("--json", "as_json", is_flag=True, help="原样输出完整 SSE 事件 JSON。")
+@click.option(
+    "--report-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Job 结束后自动下载生成物并挂载统计表格、图片到本地报告。",
+)
+@click.option(
+    "--output",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Job 生成物本地目录；省略时使用当前 workspace 的 Job 目录。",
+)
 @friendly_errors
-def job_watch(job_id: str, after: int, as_json: bool) -> None:
-    for event in client_from_config().stream_job_id(job_id, after=after):
+def job_watch(
+    job_id: str, after: int, as_json: bool,
+    report_file: Path | None, output: Path | None,
+) -> None:
+    client = client_from_config()
+    for event in client.stream_job_id(job_id, after=after):
         if as_json or event.get("event") != "step" or not isinstance(event.get("data"), dict):
             click.echo(_json(event))
             continue
         for line in render_step_event(event["data"]):
             click.echo(line, color=True)
+    if report_file is not None:
+        click.echo(_json({
+            "report_collection": collect_job_report(
+                client, job_id=job_id, report_file=report_file,
+                output_dir=output,
+            ),
+        }))
 
 
 @job.command("progress")
@@ -804,6 +842,32 @@ def job_download_all(job_id: str, output: Path | None) -> None:
         "content_hash": hashlib.sha256(response.content).hexdigest(),
         "size_bytes": len(response.content),
     }))
+
+
+@job.command("collect-report")
+@click.argument("job_id")
+@click.option(
+    "--report-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="本地 graph-independent report.json。",
+)
+@click.option(
+    "--output",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Job 生成物本地目录；省略时使用当前 workspace 的 Job 目录。",
+)
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def job_collect_report(
+    job_id: str, report_file: Path, output: Path | None, as_json: bool,
+) -> None:
+    """Download all Job files; mount only statistical tables and images."""
+    value = collect_job_report(
+        client_from_config(), job_id=job_id,
+        report_file=report_file, output_dir=output,
+    )
+    _output(value, as_json)
 
 
 @job.command("output-capabilities")

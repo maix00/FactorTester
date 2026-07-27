@@ -11,6 +11,21 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
     value = deepcopy(packet)
     node = (value.get("node") or {}).get("node_id") or ""
     tasks: list[dict[str, Any]] = []
+    report_contract = value.get("report_requirements") or {}
+    current = report_contract.get("current_node") or {}
+    for phase in ("on_entry", "on_exit"):
+        for item in current.get(phase) or []:
+            if isinstance(item, dict):
+                tasks.append(_requirement_task(item, node, phase=phase))
+    for edge_id, rows in (report_contract.get("candidate_edges") or {}).items():
+        for item in rows or []:
+            if isinstance(item, dict):
+                tasks.append(_requirement_task(
+                    item,
+                    node,
+                    edge_id=str(edge_id),
+                    phase=str(item.get("phase") or "edge"),
+                ))
     for edge in value.get("candidate_edges") or []:
         if not isinstance(edge, dict):
             continue
@@ -28,28 +43,26 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
     deduped = {item["task_ref"]: item for item in tasks}
     value["report_packet"] = {
         "document_commands": [
-            "cycle next <instance> <branch> --report-file <file>",
-            "report fork --source-file <file> --output-file <file>",
+            "factortester node info <instance> <branch>",
+            "factortester edge info <instance> <branch> <edge-id>",
             "report add --kind chapter|section|subsection|entry|special|table|image|code|math|result",
             "report asset --asset-file <json>",
-            "report chip --kind evidence|obligation|task|job|artifact|report_requirement",
+            "report chip <report-file> <component-id> --chip-id <chip-id> --kind evidence|obligation|task|job|artifact|report_requirement",
             "report manifest --file <file>",
-            "report validate-document",
+            "report validate <file>",
+            "factortester node advance <instance> <branch> --edge-id <edge-id> --evidence-file <file>",
         ],
         "current_node": str(node),
         "required_tasks": list(deduped.values()),
         "data_policy": "Graph carries references and contracts only; load evidence separately",
-        "completion_rule": "Every required report task must have a report_requirement chip",
+        "completion_rule": "Every required report task must be covered by a report_submission item",
         "chapter_policy": {
-            "mode": "automatic_on_cycle_next",
+            "mode": "agent_managed_local_document",
             "anchor": "current Graph node",
-            "command": "cycle next --report-file <content-only-report.json>",
+            "command": "report add <report-file> --kind chapter",
             "idempotent": True,
             "data_policy": "chapter ownership stays in the bindings sidecar",
-            "branch_policy": (
-                "cycle next records branch_ref in sidecar data; content-only "
-                "reports may be cloned with report fork"
-            ),
+            "branch_policy": "Graph navigation never creates report chapters automatically",
         },
         "manifest_contract": {
             "command": "report manifest --file <file>",
@@ -61,6 +74,8 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "data_policy": "Manifest carries refs and hashes only; report content stays local",
         },
     }
+    if value.get("next_actions"):
+        value["report_packet"]["next_action"] = value["next_actions"][0]
     return value
 
 
@@ -97,6 +112,35 @@ def _task(ref: str, node: str, edge: str, *, required: bool) -> dict[str, Any]:
         ],
         "submission": "attach a report_requirement chip to the completed component",
     }
+
+
+def _requirement_task(
+    item: dict[str, Any],
+    node: str,
+    *,
+    phase: str,
+    edge_id: str = "",
+) -> dict[str, Any]:
+    """Translate the server report contract into one actionable task."""
+    ref = str(item.get("report_requirement_id") or "")
+    subject_ref = str(item.get("subject_ref") or "")
+    task = _task(ref, node, edge_id or "node", required=True)
+    task.update({
+        "phase": phase,
+        "subject_ref": subject_ref,
+        "status": str(item.get("status") or "missing"),
+        "allowed_content": list(item.get("allowed_content") or []),
+        "next_command": (
+            "factortester report add <report-file> "
+            "--component-id <component-id> --kind <kind> --title <title>"
+        ),
+        "bind_command": (
+            "factortester report chip <report-file> <component-id> "
+            "--chip-id <chip-id> --kind report_requirement "
+            "--target-ref " + ref + " --data-file <subject-data-file>"
+        ),
+    })
+    return task
 
 
 def _chapter_title(node: str) -> str:

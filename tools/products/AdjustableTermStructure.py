@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import import_module
+import os
 from typing import Any, Dict, Iterable, List, Optional, TypeVar, cast
 
 import numpy as np
@@ -445,6 +446,13 @@ def get_contract_product_map(path: str) -> dict:
     结果按 path 缓存（term structure parquet 不常变），多次调用不重复 I/O。
     """
     if path not in _contract_product_cache:
+        # A registered path may be an optional derived artifact that has not
+        # been materialized on this machine yet.  Missing metadata means the
+        # contract is unresolved; it must not turn a parent-product lookup
+        # into an unrelated FileNotFoundError.
+        if not os.path.isfile(path):
+            _contract_product_cache[path] = {}
+            return {}
         store = TermStructureStore(path)
         df = store.load(columns=[TERM_CONTRACT_UID_COL, TERM_PRODUCT_COL])
         if df.empty:
