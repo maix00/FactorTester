@@ -96,6 +96,7 @@ FIELD_CHANGE
 → MARKET_FEED (quote/trade/book delta)
 → BAR
 → ORDER (existing orders consume the observation)
+→ POSITION (a successful fill updates a position)
 → SIGNAL (strategy decisions)
 → LEDGER
 ```
@@ -111,10 +112,14 @@ timestamp and therefore goes through the existing order pipeline.
   return target/order intents.
 - Order-aware strategies can override a status-specific callback for the
   native order vocabulary (`blocked`, `submitted`, `accepted`,
-  `partially_filled`, `cancel_pending`, `replace_pending`, `filled`,
+  `partially_filled`, `pending_cancel`, `pending_update`, `filled`,
   `cancelled`, `rejected`, `expired`); each falls back to `on_order_event`.
 - L2/L3 events are first-class and cannot be confused with aggregate bars.
 - The ledger and issue-144 order lifecycle remain the sole owners of fills,
   fees, margin, DMTM, cancellation, replacement, and residual orders.
+- Position events are emitted only after a fill is posted to the ledger. They
+  carry immutable snapshots and never grant a strategy a mutable ledger handle.
+- Account/ledger and clock/timer events remain internal native infrastructure;
+  exposing them later requires an explicit payload and ownership contract.
 - Adding a new market-data format only adds a payload type and a hook adapter;
   it does not multiply scheduler phases or rewrite Strategy authors' code.

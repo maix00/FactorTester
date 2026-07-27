@@ -10,8 +10,8 @@ native 回测曾把用户策略、策略回调、账本拓扑、策略簿 policy
 适配器都暴露在相近的命名层级。作者因此需要理解多个对象，CLI 也容易把
 运行时内部对象误当成配置入口。
 
-本 ADR 不删除旧对象。旧对象在迁移期间继续提供兼容入口，但新的用户和
-CLI 接口必须只有一条清晰路径。
+本 ADR 定义当前唯一的用户和 CLI 路径；不提供旧运行时名称或旧 hook 名称的
+兼容别名。内部 Flow 目录可以继续按实现职责组织，但不构成公共 API。
 
 ## 决策
 
@@ -25,7 +25,7 @@ CLI 接口必须只有一条清晰路径。
 3. **Strategy Actor**：用户实现的一个对象实例，而不是一份回调函数表。
    每次回测只创建/绑定一次，回放期间由 scheduler 按因果事件顺序反复调用；
    它可以在实例字段中保存上一次事件的状态，通过 `on_start`、`on_bar`、
-   `on_market_feed`、`on_order_event` 等回调返回 typed intent 或
+   `on_market_feed`、`on_order_event`、`on_position_event` 等回调返回 typed intent 或
    `StrategyCommand`。它不直接改变持仓、订单或现金，因此不能绕过执行层。
 4. **StrategyContext**：只读市场/持仓视图和命令工厂。Actor 不拿到 scheduler、
    Flow、ledger、broker 或任意可变运行时 store 的引用。
@@ -36,8 +36,13 @@ CLI 接口必须只有一条清晰路径。
 注册器和订单事件调度器各自维护一套判断逻辑。
 
 订单生命周期的通用入口采用行业通用的 `on_order_event`；
-`on_order_filled`、`on_order_canceled` 等具体状态回调优先级更高，未匹配时再
+`on_order_filled`、`on_order_pending_cancel`、`on_order_canceled` 等具体状态回调优先级更高，未匹配时再
 回落到 `on_event`。
+
+成交后的持仓事件同样采用“具体回调优先、通用回调回落”规则：
+`on_position_opened`、`on_position_changed`、`on_position_closed` 未覆写时回到
+`on_position_event`，再由其默认实现回到 `on_event`。持仓事件携带账本更新后的
+不可变快照；策略不能通过快照修改账本。
 
 `StrategyPlan` 是服务端将 `StrategySpec` 校验、补默认值、解析数据需求并
 冻结后的内部计划。它不是用户要编写的策略模板，也不是另一个 hook 对象。
@@ -68,6 +73,11 @@ CLI 接口必须只有一条清晰路径。
 实际撮合机会前进入 `ACCEPTED`，再由 `ORDER` 事件处理成交、部分成交或拒绝。
 状态事件不会经过价格、容量、费用、保证金或账本 Flow，避免“通知事件”被误当
 成一次撮合机会；只有声明了订单状态回调的 Strategy 才会接收这条事件轴。
+
+公开状态名与行业状态机对齐：`SUBMITTED`、`ACCEPTED`、`PARTIALLY_FILLED`、
+`PENDING_CANCEL`、`PENDING_UPDATE`、`FILLED`、`CANCELLED`、`REJECTED`、
+`EXPIRED`。本地等待依赖的 `BLOCKED` 仍是 native 的前置编排状态，不伪装成
+交易所已经接受的订单状态。
 
 第一阶段的 replace 语义是“撤销旧余量再提交新余量”，不承诺交易所级原子
 replace。后续若需要限价、TIF、offset 或账户路由，将扩展命令字段而不是新增
@@ -114,13 +124,14 @@ execution: {liquidity: infinite}
 
 ## 迁移与兼容
 
-当前 `strategy_kind` 和旧 target intents 仍属于配置语义，但运行时只接受
+当前 `strategy_kind` 和 target intents 仍属于配置语义，但运行时只接受
 `StrategyRuntime` 的新 Flow 名称与 `StrategySpec` 入口。历史 ADR 保留原语义和
-实施记录，本 ADR 作为新的用户/CLI 入口说明；不再提供旧运行时名称的解析别名。
+实施记录，本 ADR 作为新的用户/CLI 入口说明；不再提供旧运行时名称或旧 hook
+名称的解析别名。
 
 ## 后续工作
 
 1. 增加 `StrategySpec` schema、模板注册表和 CLI 命令
 2. 将 routing/sizing/pending decision 冻结为统一 decision envelope
-3. 将内部模块逐步改名并保留导入别名
+3. 审计并决定是否需要账户状态/定时器事件，不在没有明确归属前伪造公开 hook
 4. 为 custom Actor 增加命令、订单生命周期和多账户路由的端到端验收
