@@ -69,6 +69,22 @@ feed sequence. L2/L3 do not require separate scheduler kinds unless a future
 matching model needs a different priority. The payload kind is the extensible
 boundary, while `EventKind` remains the scheduling boundary.
 
+### 2.1 SIGNAL is not a timer
+
+`EventKind.SIGNAL` is a domain decision point, not a clock notification. The
+factor signal module creates it from an aligned factor table or from live
+factor state that was updated by a BAR. Its timestamp therefore means
+“the strategy may evaluate this signal now”, not “a wall-clock timer fired”.
+Signals can be sparse, session-aligned, or derived from a data source; they
+must not be emitted when the relevant market input is unavailable.
+
+A future timer API must introduce a separate clock-owned event payload and
+event kind. The clock/timer service will own registration, cancellation,
+repeat policy, timezone/DST handling, and deterministic same-timestamp
+ordering. A timer callback must not be implemented by reusing SIGNAL or by
+creating a synthetic BAR. Until that ownership contract exists, native keeps
+clock/timer events internal and does not expose `on_timer`.
+
 `BarStrategy` consumes aggregate BAR events only. When a user has only L2/L3
 data but wants a bar strategy, a separate `MarketDataAggregator` actor must
 consume the raw book/trade events and publish a derived BAR event with an
