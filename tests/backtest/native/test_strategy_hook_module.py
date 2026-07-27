@@ -4,6 +4,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.market_events import MarketDataEvent, Quote
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.engines.native.orders.enums import OrderStatus
 from tools.testers.backtest.engines.native.strategy_hooks import StrategyContext
 from tools.testers.backtest.modules.strategy_hooks import StrategyHookModule
 from tools.testers.backtest.modules.target import TargetStrategyModule, OrderDeltaIntent
@@ -24,6 +25,11 @@ class QuoteStrategy(Strategy):
 
     def on_stop(self, ctx: StrategyContext):
         self.seen.append("stop")
+
+
+class PartialStrategy(QuoteStrategy):
+    def on_order_partially_filled(self, ctx, order):
+        self.seen.append("partial")
 
 
 def _context(strategy, event_kind, payloads):
@@ -100,3 +106,14 @@ def test_custom_strategy_mode_selects_hooks_without_group_flows():
     assert "strategy_hook_on_bar" in active
     assert "strategy_hook_on_order_event" in config.active_flow_names
     assert "group_quantile_membership" not in active
+
+
+def test_partial_fill_uses_specific_order_hook():
+    strategy = PartialStrategy(alias="partial-hook")
+    order = type("OrderView", (), {"status": OrderStatus.PARTIALLY_FILLED})()
+
+    from tools.testers.backtest.modules.strategy_hooks.dispatch import _specific_order_hook
+
+    _specific_order_hook(strategy, StrategyContext(strategy, None, EventKind.ORDER, {}, {}), order)
+
+    assert strategy.seen == ["partial"]

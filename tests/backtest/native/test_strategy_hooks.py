@@ -4,10 +4,14 @@ import pytest
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.strategy_hooks import (
+    ExecutionCapabilities,
     StrategyContext,
+    StrategyRequirements,
     intent_payload,
     normalize_hook_result,
+    validate_strategy_capabilities,
 )
+from tools.testers.backtest.engines.native.market_events import MarketDataEventKind
 
 
 def test_legacy_strategy_has_noop_hooks():
@@ -57,3 +61,18 @@ def test_hook_result_accepts_one_or_many_typed_intents():
 def test_hook_result_rejects_untyped_commands():
     with pytest.raises(TypeError, match="typed intents"):
         normalize_hook_result({"P1": 1.0})
+
+
+def test_capability_validation_reports_missing_data_and_execution_features():
+    report = validate_strategy_capabilities(
+        StrategyRequirements(
+            market_events=frozenset({MarketDataEventKind.BOOK_DELTA}),
+            needs_partial_fills=True,
+            needs_order_events=True,
+        ),
+        ExecutionCapabilities(),
+    )
+
+    assert report["ok"] is False
+    assert report["missing_market_events"] == ["book_delta"]
+    assert len(report["errors"]) == 3

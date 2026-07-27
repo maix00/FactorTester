@@ -8,6 +8,7 @@ from typing import Any
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.market_events import MarketDataEvent, MarketDataEventKind
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.engines.native.orders.enums import OrderStatus
 from tools.testers.backtest.engines.native.strategy_hooks import (
     StrategyContext,
     intent_payload,
@@ -84,8 +85,22 @@ def _call_bar(state: Any, ctx: Any) -> None:
 def _call_order_event(state: Any, ctx: Any) -> None:
     for strategy in ctx.active_strategies:
         for order in ctx.payloads_for(strategy):
-            result = strategy.on_order_event(_context_for(state, ctx, strategy), order)
+            result = _specific_order_hook(strategy, _context_for(state, ctx, strategy), order)
             _emit_intents(ctx, strategy, result)
+
+
+def _specific_order_hook(strategy: Any, context: StrategyContext, order: Any) -> Any:
+    hook_name = {
+        OrderStatus.PARTIALLY_FILLED: "on_order_partially_filled",
+        OrderStatus.FILLED: "on_order_filled",
+        OrderStatus.CANCELLED: "on_order_canceled",
+        OrderStatus.REJECTED: "on_order_rejected",
+        OrderStatus.EXPIRED: "on_order_expired",
+    }.get(getattr(order, "status", None))
+    hook = getattr(type(strategy), hook_name, None) if hook_name else None
+    if callable(hook) and hook is not getattr(Strategy, hook_name, None):
+        return getattr(strategy, hook_name)(context, order)
+    return strategy.on_order_event(context, order)
 
 
 def _emit_intents(ctx: Any, strategy: Any, result: Any) -> None:

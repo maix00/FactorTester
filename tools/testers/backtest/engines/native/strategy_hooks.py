@@ -10,11 +10,47 @@ from typing import TYPE_CHECKING, Any, Iterable
 import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventKind
+from tools.testers.backtest.engines.native.market_events import MarketDataEventKind
 if TYPE_CHECKING:
     from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetWeightIntent
 
 
 StrategyIntent = Any
+
+
+@dataclass(frozen=True)
+class StrategyRequirements:
+    market_events: frozenset[MarketDataEventKind] = frozenset()
+    needs_partial_fills: bool = False
+    needs_order_events: bool = False
+
+
+@dataclass(frozen=True)
+class ExecutionCapabilities:
+    market_events: frozenset[MarketDataEventKind] = frozenset()
+    partial_fills: bool = False
+    order_events: bool = False
+
+
+def validate_strategy_capabilities(
+    requirements: StrategyRequirements,
+    capabilities: ExecutionCapabilities,
+) -> dict[str, Any]:
+    missing_events = sorted(
+        event.value for event in requirements.market_events - capabilities.market_events
+    )
+    errors: list[str] = []
+    if missing_events:
+        errors.append(f"missing market events: {', '.join(missing_events)}")
+    if requirements.needs_partial_fills and not capabilities.partial_fills:
+        errors.append("strategy requires partial fills")
+    if requirements.needs_order_events and not capabilities.order_events:
+        errors.append("strategy requires order lifecycle events")
+    return {
+        "ok": not errors,
+        "missing_market_events": missing_events,
+        "errors": errors,
+    }
 
 
 @dataclass(frozen=True)

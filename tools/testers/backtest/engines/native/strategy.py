@@ -42,6 +42,21 @@ class Strategy(UniqueNameObject):
     def on_order_event(self, ctx: Any, order: Any) -> Any:
         return None
 
+    def on_order_partially_filled(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
+    def on_order_filled(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
+    def on_order_canceled(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
+    def on_order_rejected(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
+    def on_order_expired(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
 
 class BarStrategy(Strategy):
     """Convenience base for strategies whose author input is aggregate bars."""
