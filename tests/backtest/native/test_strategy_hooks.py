@@ -11,6 +11,7 @@ from tools.testers.backtest.engines.native.strategy_hooks import (
     normalize_hook_result,
     validate_strategy_capabilities,
 )
+from tools.testers.backtest.engines.native.strategy_commands import SubmitOrderCommand
 from tools.testers.backtest.engines.native.market_events import MarketFeedEventKind
 
 
@@ -50,6 +51,23 @@ def test_context_returns_typed_intents_without_mutating_inputs():
         "intent_kind": "target_weights",
         "weights": {"P1": 0.5},
         "reason": "entry",
+    }
+
+
+def test_context_order_helpers_return_serializable_commands():
+    strategy = Strategy(alias="command-context")
+    context = StrategyContext(strategy, pd.Timestamp("2025-01-01"), EventKind.BAR, {}, {})
+
+    command = context.submit_order("P1", 2, side="sell", reason="risk")
+
+    assert isinstance(command, SubmitOrderCommand)
+    assert intent_payload(command) == {
+        "kind": "strategy_hook_command",
+        "command_kind": "submit_order",
+        "product": "P1",
+        "quantity": 2.0,
+        "side": "sell",
+        "reason": "risk",
     }
 
 

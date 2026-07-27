@@ -47,7 +47,8 @@ class StrategyHookModule(ExecutableModule):
         "strategy_hook_on_signal_intent", inputs=(),
         outputs=(TargetStrategyModule.trade_intent, TargetStrategyModule.target_weights),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
-        strategy_scoped=True, event_payload_inputs=("strategy_hook_intent",),
+        strategy_scoped=True,
+        event_payload_inputs=("strategy_hook_intent", "strategy_hook_command"),
         description="接收自定义策略意图",
         compute=lambda state, ctx: _apply_signal_intent(state, ctx),
     )

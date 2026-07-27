@@ -11,6 +11,13 @@ import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.market_events import MarketFeedEventKind
+from tools.testers.backtest.engines.native.strategy_commands import (
+    CancelOrderCommand,
+    ClosePositionCommand,
+    ReplaceOrderCommand,
+    SubmitOrderCommand,
+    StrategyCommand,
+)
 if TYPE_CHECKING:
     from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetWeightIntent
 
@@ -82,6 +89,18 @@ class StrategyContext:
 
         return OrderDeltaIntent(dict(deltas), reason=reason)
 
+    def submit_order(self, product: Any, quantity: float, *, side: str = "buy", reason: str = "submit_order") -> StrategyCommand:
+        return SubmitOrderCommand(product, quantity, side=side, reason=reason)
+
+    def cancel_order(self, order_id: str, *, reason: str = "cancel_order") -> StrategyCommand:
+        return CancelOrderCommand(order_id, reason=reason)
+
+    def replace_order(self, order_id: str, quantity: float, *, reason: str = "replace_order") -> StrategyCommand:
+        return ReplaceOrderCommand(order_id, quantity, reason=reason)
+
+    def close_position(self, product: Any, quantity: float | None = None, *, reason: str = "close_position") -> StrategyCommand:
+        return ClosePositionCommand(product, quantity=quantity, reason=reason)
+
 
 def normalize_hook_result(result: Any) -> tuple[StrategyIntent, ...]:
     """Accept one intent or a short iterable, never arbitrary queue objects."""
@@ -90,16 +109,16 @@ def normalize_hook_result(result: Any) -> tuple[StrategyIntent, ...]:
 
     if result is None:
         return ()
-    if isinstance(result, (TargetWeightIntent, OrderDeltaIntent)):
+    if isinstance(result, (TargetWeightIntent, OrderDeltaIntent, SubmitOrderCommand, CancelOrderCommand, ReplaceOrderCommand, ClosePositionCommand)):
         return (result,)
     if isinstance(result, Iterable) and not isinstance(result, (str, bytes, dict)):
         values = tuple(result)
-        if not all(isinstance(value, (TargetWeightIntent, OrderDeltaIntent)) for value in values):
-            raise TypeError("strategy hook iterable must contain typed intents")
+        if not all(isinstance(value, (TargetWeightIntent, OrderDeltaIntent, SubmitOrderCommand, CancelOrderCommand, ReplaceOrderCommand, ClosePositionCommand)) for value in values):
+            raise TypeError("strategy hook iterable must contain typed intents or commands")
         return values
     raise TypeError(
         "strategy hook must return typed intents: TargetWeightIntent, "
-        "OrderDeltaIntent, an iterable of those, or None"
+        "OrderDeltaIntent, StrategyCommand, an iterable of those, or None"
     )
 
 
@@ -107,6 +126,11 @@ def intent_payload(intent: StrategyIntent) -> dict[str, Any]:
     """Stable serializable payload used by a queued SIGNAL event."""
 
     from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetWeightIntent
+
+    if isinstance(intent, (SubmitOrderCommand, CancelOrderCommand, ReplaceOrderCommand, ClosePositionCommand)):
+        from tools.testers.backtest.engines.native.strategy_commands import command_payload
+
+        return command_payload(intent)
 
     if isinstance(intent, TargetWeightIntent):
         return {

@@ -9,10 +9,12 @@ from .dispatch import (
 )
 from .flows import StrategyHookModule
 from .intent import _apply_signal_intent
+from .commands import apply_strategy_command
 
 __all__ = [
     "StrategyHookModule",
     "_apply_signal_intent",
+    "apply_strategy_command",
     "_call_bar",
     "_call_market_feed",
     "_call_order_event",

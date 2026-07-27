@@ -1,13 +1,15 @@
 import pandas as pd
+from types import SimpleNamespace
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.market_events import MarketFeedEvent, Quote
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
-from tools.testers.backtest.engines.native.orders.enums import OrderStatus
 from tools.testers.backtest.engines.native.strategy_hooks import StrategyContext
 from tools.testers.backtest.modules.strategy_hooks import StrategyHookModule
 from tools.testers.backtest.modules.target import TargetStrategyModule, OrderDeltaIntent
+from tools.testers.backtest.engines.native.orders import Order, OrderStatus
+from tools.testers.backtest.modules.order_lifecycle.store import OrderStore
 from tools.testers.backtest.engines.native.strategy_config_builder import _resolve_active_flow_names, build_strategy_configs
 
 
@@ -97,6 +99,58 @@ def test_hook_signal_intent_enters_existing_target_pipeline():
     intent = ctx.get_for(TargetStrategyModule.trade_intent, strategy)
     assert isinstance(intent, OrderDeltaIntent)
     assert intent.deltas == {"P1": 2.0}
+
+
+def test_hook_submit_command_enters_existing_target_pipeline():
+    strategy = QuoteStrategy(alias="command-adapter")
+    payload = {
+        "kind": "strategy_hook_command",
+        "command_kind": "submit_order",
+        "product": "P1",
+        "quantity": 2.0,
+        "side": "sell",
+        "reason": "risk",
+    }
+    event = EventDraft(EventKind.SIGNAL, pd.Timestamp("2025-01-01"), strategy, payload)
+    ctx = _context(strategy, EventKind.SIGNAL, [event])
+
+    from tools.testers.backtest.modules.strategy_hooks import _apply_signal_intent
+
+    _apply_signal_intent(SimpleNamespace(), ctx)
+
+    intent = ctx.get_for(TargetStrategyModule.trade_intent, strategy)
+    assert isinstance(intent, OrderDeltaIntent)
+    assert intent.deltas == {"P1": -2.0}
+
+
+def test_hook_cancel_command_closes_only_the_strategy_order():
+    strategy = QuoteStrategy(alias="command-cancel")
+    order = Order(
+        instrument="P1",
+        timestamp=pd.Timestamp("2025-01-01"),
+        quantity=2.0,
+        intent_quantity=2.0,
+        strategy=strategy,
+        order_id="cancel-me",
+        status=OrderStatus.SCHEDULED,
+    )
+    state = SimpleNamespace(order_store=OrderStore())
+    state.order_store.register_order(order)
+    payload = {
+        "kind": "strategy_hook_command",
+        "command_kind": "cancel_order",
+        "order_id": "cancel-me",
+        "reason": "risk",
+    }
+    event = EventDraft(EventKind.SIGNAL, pd.Timestamp("2025-01-01"), strategy, payload)
+    ctx = _context(strategy, EventKind.SIGNAL, [event])
+
+    from tools.testers.backtest.modules.strategy_hooks import _apply_signal_intent
+
+    _apply_signal_intent(state, ctx)
+
+    assert order.status is OrderStatus.CANCELLED
+    assert state.order_store.actions_by_order[order.order_id][0].reason == "risk"
 
 
 def test_custom_strategy_mode_selects_hooks_without_group_flows():
