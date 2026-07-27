@@ -77,6 +77,7 @@ final class ClientReleaseController: ObservableObject {
             ? .accepted
             : (signature.signed ? .signedButNotAccepted : .unsigned)
         healthy = signature.signed
+        guard !isWorking, !hasAvailableUpdate else { return }
         sparkle.checkForUpdates()
     }
 
@@ -116,17 +117,33 @@ final class ClientReleaseController: ObservableObject {
         }
         switch action {
         case "check":
+            // Sparkle keeps the update reply open after it reports an
+            // available update. Starting another check at that point causes
+            // its user driver to receive a re-entrant check request.
+            guard !isWorking, !hasAvailableUpdate else { return }
             sparkle.checkForUpdates()
         case "download":
             if isUpdateReady { return }
-            pendingExternalAction = action
-            sparkle.checkForUpdates()
+            if hasAvailableUpdate {
+                pendingExternalAction = nil
+                sparkle.downloadAvailableUpdate()
+            } else {
+                pendingExternalAction = action
+                if !isWorking {
+                    sparkle.checkForUpdates()
+                }
+            }
         case "restart":
             if isUpdateReady {
                 sparkle.installAndRelaunch()
+            } else if hasAvailableUpdate {
+                pendingExternalAction = action
+                sparkle.downloadAvailableUpdate()
             } else {
                 pendingExternalAction = action
-                sparkle.checkForUpdates()
+                if !isWorking {
+                    sparkle.checkForUpdates()
+                }
             }
         default:
             lastError = L10n.text("忽略了无效的更新命令。")

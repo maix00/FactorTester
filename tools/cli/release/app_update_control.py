@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+import os
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlencode
@@ -34,6 +36,28 @@ def read_status() -> dict:
     return value if isinstance(value, dict) else {"schema_version": 1, "state": "unknown"}
 
 
+def installed_client_app() -> Path | None:
+    """Return the canonical installed app, avoiding stale URL registrations."""
+    if sys.platform != "darwin":
+        return None
+    configured = os.environ.get("FACTORTESTER_CLIENT_APP")
+    candidates = (
+        Path(configured).expanduser() if configured else None,
+        Path("/Applications/FTClient.app"),
+    )
+    for candidate in candidates:
+        if candidate is not None and candidate.is_dir():
+            return candidate
+    return None
+
+
+def _update_open_command(url: str) -> list[str]:
+    app = installed_client_app()
+    if app is None:
+        return ["open", url]
+    return ["open", "-a", str(app), url]
+
+
 def dispatch_app_update(action: str, *, wait: float = 0) -> dict:
     if action not in ACTIONS:
         raise ValueError("app update action is invalid")
@@ -46,7 +70,7 @@ def dispatch_app_update(action: str, *, wait: float = 0) -> dict:
         before.get("updated_at"),
     )
     url = "factortester://app-update?" + urlencode({"action": action})
-    subprocess.run(["open", url], check=True, capture_output=True)
+    subprocess.run(_update_open_command(url), check=True, capture_output=True)
     result = {
         "schema_version": 1,
         "action": action,

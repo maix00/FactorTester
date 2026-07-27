@@ -182,6 +182,12 @@ private final class SparkleUpdateUserDriver: NSObject, SPUUserDriver {
         installReply = nil
     }
 
+    func showUpdateInFocus() {
+        // The client renders update state in Settings instead of presenting
+        // Sparkle's modal UI. This callback is still required when an update
+        // check arrives while the existing update choice is open.
+    }
+
     func downloadAvailableUpdate() {
         let reply = downloadReply
         downloadReply = nil

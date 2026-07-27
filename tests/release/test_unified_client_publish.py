@@ -202,6 +202,7 @@ def test_cli_update_actions_only_dispatch_to_ftclient_sparkle(
     monkeypatch,
 ) -> None:
     commands: list[list[str]] = []
+    monkeypatch.setattr(app_update_control, "installed_client_app", lambda: None)
     monkeypatch.setattr(
         app_update_control.subprocess,
         "run",
@@ -216,6 +217,22 @@ def test_cli_update_actions_only_dispatch_to_ftclient_sparkle(
     assert result["handler"] == "FTClient/Sparkle"
 
 
+def test_cli_update_targets_the_current_installed_app(monkeypatch) -> None:
+    monkeypatch.setattr(
+        app_update_control,
+        "installed_client_app",
+        lambda: Path("/Applications/FTClient.app"),
+    )
+    assert app_update_control._update_open_command(
+        "factortester://app-update?action=check"
+    ) == [
+        "open",
+        "-a",
+        "/Applications/FTClient.app",
+        "factortester://app-update?action=check",
+    ]
+
+
 def test_cli_download_waits_for_a_real_download_state(
     tmp_path: Path,
     monkeypatch,
@@ -228,6 +245,7 @@ def test_cli_download_waits_for_a_real_download_state(
         "updated_at": "before",
     }))
     monkeypatch.setattr(app_update_control, "status_path", lambda: status)
+    monkeypatch.setattr(app_update_control, "installed_client_app", lambda: None)
 
     def open_update(command, **_kwargs):
         assert command == [
