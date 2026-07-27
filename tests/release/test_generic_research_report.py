@@ -14,6 +14,9 @@ from tools.cli.release.research_reporting.document import (
     render_markdown,
     validate_document,
 )
+from tools.cli.release.research_reporting.document.profile_sync import (
+    ensure_profile_report_chapter,
+)
 from tools.cli.release.research_reporting.graph_adapter import (
     enrich_graph_packet,
     validate_report_tasks,
@@ -54,6 +57,46 @@ def test_graph_packet_contains_references_not_evidence_payload() -> None:
     assert report["required_tasks"][0]["task_ref"] == "report.edge.validation__trial"
     assert "evidence_payload" not in json.dumps(report, ensure_ascii=False).lower()
     assert "data_policy" in report
+
+
+def test_profile_report_chapters_follow_node_entry_without_checkpoint(
+    tmp_path,
+) -> None:
+    first = ensure_profile_report_chapter(
+        workspace_root=tmp_path,
+        work_package_id="wp-1",
+        title="动量因子研究",
+        node_id="hypothesis_preregistration",
+        branch_ref="graph-branch:physical-1:branch-1",
+    )
+    second = ensure_profile_report_chapter(
+        workspace_root=tmp_path,
+        work_package_id="wp-1",
+        title="动量因子研究",
+        node_id="data_contract",
+        branch_ref="graph-branch:physical-1:branch-1",
+    )
+    repeated = ensure_profile_report_chapter(
+        workspace_root=tmp_path,
+        work_package_id="wp-1",
+        title="动量因子研究",
+        node_id="data_contract",
+        branch_ref="graph-branch:physical-1:branch-1",
+    )
+
+    document = json.loads(
+        first["report_path"].read_text(encoding="utf-8")
+    )
+    assert [item["kind"] for item in document["components"]] == [
+        "chapter", "chapter",
+    ]
+    assert [item["title"] for item in document["components"]] == [
+        "假设登记", "数据契约",
+    ]
+    assert first["chapter_sync"]["created_count"] == 1
+    assert second["chapter_sync"]["created_count"] == 1
+    assert repeated["chapter_sync"]["created_count"] == 0
+    assert repeated["descriptor"]["format"] == "document"
 
 
 def test_graph_report_completion_uses_external_bindings() -> None:

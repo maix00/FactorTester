@@ -88,6 +88,12 @@ struct ResearchRecordModel: Identifiable {
         } ?? artifacts.last { !$0.journalRef.isEmpty }
     }
 
+    var currentDocumentArtifact: ResearchArtifactModel? {
+        artifacts.last {
+            $0.format == "document" && !$0.localRef.isEmpty
+        }
+    }
+
     var researchScopeTitle: String {
         let family = factorFamilies.joined(separator: "、")
         let role: String

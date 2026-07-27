@@ -57,12 +57,15 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "data_policy": "Graph carries references and contracts only; load evidence separately",
         "completion_rule": "Every required report task must be covered by a report_submission item",
         "chapter_policy": {
-            "mode": "agent_managed_local_document",
+            "mode": "automatic_local_node_entry",
             "anchor": "current Graph node",
-            "command": "report add <report-file> --kind chapter",
+            "command": "factortester client research create|node advance",
             "idempotent": True,
             "data_policy": "chapter ownership stays in the bindings sidecar",
-            "branch_policy": "Graph navigation never creates report chapters automatically",
+            "branch_policy": (
+                "entering a node creates its empty local chapter; Agent prose, "
+                "evidence and checkpoint bindings remain explicit"
+            ),
         },
         "manifest_contract": {
             "command": "report manifest --file <file>",

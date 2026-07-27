@@ -281,6 +281,14 @@ def test_client_research_create_is_profile_scoped_and_records_local_state(
     assert record["graph_branch_ref"] == (
         "graph-branch:instance-new:branch-new"
     )
+    report = (
+        tmp_path / "research" / "research" / "instance-new" / "REPORT.json"
+    )
+    document = json.loads(report.read_text(encoding="utf-8"))
+    assert [item["kind"] for item in document["components"]] == ["chapter"]
+    assert document["components"][0]["title"] == "假设登记"
+    assert record["artifacts"][0]["format"] == "document"
+    assert record["artifacts"][0]["local_ref"].endswith("REPORT.json")
 
 
 def test_client_research_checkpoint_publish_accepts_bounded_file(

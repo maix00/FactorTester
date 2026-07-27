@@ -20,41 +20,12 @@ struct ProfileLiveResearchDetail: View {
                             .padding(.vertical, 8)
                             .background(Color.orange.opacity(0.08))
                     }
-                    ResearchNarrativeReportView(
+                    reportView(
                         detail: detail,
                         workPackage: workPackage,
-                        steps: controller.timeline,
-                        nextCursor: controller.nextTimelineCursor,
-                        profileName: context?.profile.displayName
-                            ?? L10n.text("未知 Profile"),
-                        auditCacheNamespace: context.map {
-                            "\($0.profile.id)|\($0.profile.serverURL)"
-                        } ?? detail.branchRef,
-                        reportTitle: ResearchDisplayText.reportTitle(
-                            context?.record.title ?? ""
-                        ),
-                        artifact: artifact,
-                        selectBranch: { branchID in
-                            controller.selectedBranchID = branchID
-                        },
-                        loadEarlier: { await controller.loadEarlierTimeline() },
-                        loadHistory: { checkpointRefs in
-                            await controller.loadTimeline(
-                                through: checkpointRefs
-                            )
-                        },
-                        loadAuditObject: { href in
-                            guard let url = context.flatMap({
-                                URL(string: $0.profile.serverURL)
-                            }) else {
-                                throw APIError.transport(
-                                    "研究记录没有有效的服务器地址"
-                                )
-                            }
-                            return try await ProfileResearchService(
-                                baseURL: url
-                            ).auditObject(href: href)
-                        }
+                        context: context,
+                        journalArtifact: artifact,
+                        documentArtifact: context?.record.currentDocumentArtifact
                     )
                 }
             } else {
@@ -75,6 +46,77 @@ struct ProfileLiveResearchDetail: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func reportView(
+        detail: ProfileResearchDetail,
+        workPackage: ProfileResearchWorkPackageDetail,
+        context: (profile: LocalProfileModel, record: ResearchRecordModel)?,
+        journalArtifact: ResearchArtifactModel?,
+        documentArtifact: ResearchArtifactModel?
+    ) -> some View {
+        if journalArtifact != nil {
+            ResearchNarrativeReportView(
+                detail: detail,
+                workPackage: workPackage,
+                steps: controller.timeline,
+                nextCursor: controller.nextTimelineCursor,
+                profileName: context?.profile.displayName
+                    ?? L10n.text("未知 Profile"),
+                auditCacheNamespace: context.map {
+                    "\($0.profile.id)|\($0.profile.serverURL)"
+                } ?? detail.branchRef,
+                reportTitle: ResearchDisplayText.reportTitle(
+                    context?.record.title ?? ""
+                ),
+                artifact: journalArtifact,
+                selectBranch: { controller.selectedBranchID = $0 },
+                loadEarlier: { await controller.loadEarlierTimeline() },
+                loadHistory: { await controller.loadTimeline(through: $0) },
+                loadAuditObject: { href in
+                    guard let url = context.flatMap({
+                        URL(string: $0.profile.serverURL)
+                    }) else {
+                        throw APIError.transport("研究记录没有有效的服务器地址")
+                    }
+                    return try await ProfileResearchService(
+                        baseURL: url
+                    ).auditObject(href: href)
+                }
+            )
+        } else if let documentArtifact {
+            ResearchDocumentReportView(
+                detail: detail,
+                workPackage: workPackage,
+                profileName: context?.profile.displayName
+                    ?? L10n.text("未知 Profile"),
+                reportTitle: ResearchDisplayText.reportTitle(
+                    context?.record.title ?? ""
+                ),
+                artifact: documentArtifact
+            )
+        } else {
+            ResearchNarrativeReportView(
+                detail: detail,
+                workPackage: workPackage,
+                steps: controller.timeline,
+                nextCursor: controller.nextTimelineCursor,
+                profileName: context?.profile.displayName
+                    ?? L10n.text("未知 Profile"),
+                auditCacheNamespace: detail.branchRef,
+                reportTitle: ResearchDisplayText.reportTitle(
+                    context?.record.title ?? ""
+                ),
+                artifact: nil,
+                selectBranch: { controller.selectedBranchID = $0 },
+                loadEarlier: { await controller.loadEarlierTimeline() },
+                loadHistory: { await controller.loadTimeline(through: $0) },
+                loadAuditObject: { _ in
+                    throw APIError.transport("研究记录没有有效的服务器地址")
+                }
+            )
         }
     }
 

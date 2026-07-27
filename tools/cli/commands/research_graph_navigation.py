@@ -16,6 +16,9 @@ from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.publisher import (
     publish_research_checkpoint,
 )
+from tools.cli.release.research_reporting.document import (
+    ensure_profile_report_chapter,
+)
 from tools.cli.commands.research_graph_node_advance import (
     doctor,
     prepare_evidence,
@@ -48,13 +51,24 @@ def _publish_transition_report(
     client_root: Path,
     profile_id: str,
     agent_id: str,
+    instance_id: str,
+    branch_id: str,
     narrative_file: Path | None,
 ) -> dict[str, Any]:
+    chapter_sync = _sync_current_node_chapter(
+        client_root=client_root,
+        profile_id=profile_id,
+        agent_id=agent_id,
+        instance_id=instance_id,
+        branch_id=branch_id,
+        current_node=str(branch.get("current_node") or ""),
+    )
     carrier = branch.get("report_checkpoint")
     if not isinstance(carrier, dict):
         return {
             "status": "not_available",
             "reason": "checkpoint_carrier_not_available",
+            "chapter_sync": chapter_sync,
         }
     if narrative_file is None:
         return {
@@ -65,6 +79,7 @@ def _publish_transition_report(
                 "is required to update the report."
             ),
             "checkpoint_ref": carrier.get("checkpoint_ref"),
+            "chapter_sync": chapter_sync,
         }
     try:
         narrative = read_object(narrative_file)
@@ -85,6 +100,7 @@ def _publish_transition_report(
             ),
             "message": "Server transition completed; local report update is required.",
             "checkpoint_ref": carrier.get("checkpoint_ref"),
+            "chapter_sync": chapter_sync,
         }
     artifact = published["artifact"]
     return {
@@ -94,6 +110,68 @@ def _publish_transition_report(
         "profile_changed": published["profile_changed"],
         "checkpoint_ref": published["checkpoint_ref"],
         "artifact_ref": artifact["artifact_ref"],
+        "chapter_sync": chapter_sync,
+    }
+
+
+def _sync_current_node_chapter(
+    *,
+    client_root: Path,
+    profile_id: str,
+    agent_id: str,
+    instance_id: str,
+    branch_id: str,
+    current_node: str,
+) -> dict[str, Any]:
+    if not current_node:
+        return {"status": "not_available", "reason": "current_node_missing"}
+    try:
+        store = LocalProfileStore(client_root)
+        profile = store.load(profile_id)
+    except (OSError, ValueError) as exc:
+        return {
+            "status": "not_available",
+            "reason": "local_report_sync_unavailable",
+            "message": str(exc),
+        }
+    branch_ref = f"graph-branch:{instance_id}:{branch_id}"
+    records = [
+        item for item in profile["research_records"]
+        if item["agent_id"] == agent_id
+        and item["graph_branch_ref"] == branch_ref
+    ]
+    if len(records) != 1:
+        return {
+            "status": "not_available",
+            "reason": "local_research_record_not_found",
+        }
+    record = records[0]
+    try:
+        report = ensure_profile_report_chapter(
+            workspace_root=Path(profile["workspace_root"]),
+            work_package_id=record["record_id"],
+            title=record["title"],
+            node_id=current_node,
+            branch_ref=branch_ref,
+        )
+    except (OSError, ValueError) as exc:
+        return {
+            "status": "failed",
+            "reason": "local_report_sync_failed",
+            "message": str(exc),
+            "node_id": current_node,
+        }
+    updated = dict(record)
+    updated["artifacts"] = [
+        item for item in record["artifacts"]
+        if item["artifact_ref"] != report["descriptor"]["artifact_ref"]
+    ] + [report["descriptor"]]
+    store.upsert_research_record(profile_id, updated)
+    return {
+        "status": "synchronized",
+        "node_id": current_node,
+        **report["chapter_sync"],
+        "report_file": str(report["report_path"]),
     }
 
 
@@ -217,6 +295,8 @@ def register_navigation_commands(parent: click.Group) -> None:
                 client_root=client_root,
                 profile_id=profile_id,
                 agent_id=agent_id,
+                instance_id=instance_id,
+                branch_id=branch_id,
                 narrative_file=narrative_file,
             )
             carrier = branch.get("report_checkpoint")

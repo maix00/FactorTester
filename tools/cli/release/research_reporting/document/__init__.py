@@ -19,6 +19,7 @@ from .model import (
     validate_document,
 )
 from .manifest import document_manifest
+from .profile_sync import ensure_profile_report_chapter
 from .render import render_markdown
 from .store import load_bindings, load_document, save_bindings, save_document
 
@@ -45,4 +46,5 @@ __all__ = [
     "validate_bindings",
     "validate_document",
     "ensure_report_chapters",
+    "ensure_profile_report_chapter",
 ]

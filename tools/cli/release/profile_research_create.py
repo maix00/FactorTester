@@ -8,6 +8,7 @@ its primary Hypothesis Branch together.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 from tools.cli.capability_projection import server_capability_resolution
@@ -16,6 +17,7 @@ from tools.cli.http import HttpSession
 
 from .local_profile import LocalProfileStore
 from .profile_research_context import ProfileResearchContext
+from .research_reporting.document import ensure_profile_report_chapter
 
 
 def create_profile_research(
@@ -101,6 +103,14 @@ def create_profile_research(
         },
         "timeline_refs": [],
     }
+    report = ensure_profile_report_chapter(
+        workspace_root=Path(context.profile["workspace_root"]),
+        work_package_id=work_package_id,
+        title=title,
+        node_id=str(resolution.get("node_id") or ""),
+        branch_ref=record["graph_branch_ref"],
+    )
+    record["artifacts"] = [report["descriptor"]]
     store.upsert_research_record(context.profile_id, record)
     return {
         "profile_id": context.profile_id,
@@ -110,6 +120,10 @@ def create_profile_research(
         "title": title,
         "research": instance,
         "local_record": record,
+        "local_report": {
+            "path": str(report["report_path"]),
+            "chapter_sync": report["chapter_sync"],
+        },
     }
 
 

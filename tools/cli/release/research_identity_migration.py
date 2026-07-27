@@ -38,13 +38,16 @@ def _normalize_record(record: dict[str, Any]) -> bool:
         return False
 
     old_instance_ref = str(record.get("graph_instance_ref") or "").strip()
-    instance_id = _reference_id(old_instance_ref, "work-package:")
-    if not instance_id:
-        instance_id = _reference_id(old_instance_ref, "graph-instance:")
-    if not instance_id:
-        instance_id = record_id
-
-    canonical_instance_ref = f"work-package:{record_id}"
+    logical_work_package_id = _reference_id(
+        old_instance_ref, "work-package:"
+    )
+    instance_id = logical_work_package_id or _reference_id(
+        old_instance_ref, "graph-instance:"
+    ) or record_id
+    # A Work Package is a logical container and may own several physical
+    # branches.  Do not rewrite an already-canonical Work Package to a branch
+    # record id; only legacy graph-instance refs need a new logical identity.
+    canonical_instance_ref = f"work-package:{logical_work_package_id or record_id}"
     old_branch_ref = str(record.get("graph_branch_ref") or "").strip()
     canonical_branch_ref = _normalize_branch_ref(
         old_branch_ref,

@@ -16,7 +16,7 @@ _WORKSPACE_ACCESS = {"owner", "granted", "read_only"}
 _RESEARCH_STATUS = {
     "pending", "generating", "failed", "stale", "ready",
 }
-_ARTIFACT_FORMATS = {"markdown", "pdf"}
+_ARTIFACT_FORMATS = {"document", "markdown", "pdf"}
 
 
 def new_local_profile(
