@@ -1442,6 +1442,30 @@ def test_authenticated_routes_emit_etag_and_honor_conditional_reads(
     assert replay.status_code == 304
 
 
+def test_empty_work_package_timeline_is_a_valid_empty_page(
+    app_client,
+) -> None:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute("DELETE FROM research_graph_trace")
+        conn.execute(
+            "UPDATE research_graph_branches SET latest_trace_id=''"
+        )
+
+    response = app_client.get(
+        "/api/profile-research/"
+        "work-package:instance-a/branches/branch-0000/timeline"
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["items"] == []
+    assert payload["research_ref"] == (
+        "graph-branch:instance-a:branch-0000"
+    )
+    assert payload["next_cursor"] is None
+
+
 def test_projection_route_returns_structured_json_for_internal_failure(
     app_client,
     monkeypatch,

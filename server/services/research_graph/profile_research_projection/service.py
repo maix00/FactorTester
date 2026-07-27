@@ -294,8 +294,8 @@ class ProfileResearchProjection:
                 ).fetchall()
         if not rows:
             raise KeyError("profile research not found")
-        rows = [row for row in rows if row["trace_id"] is not None]
         current_instance_id = str(rows[0]["current_instance_id"])
+        rows = [row for row in rows if row["trace_id"] is not None]
         current_ref = research_ref_for(current_instance_id, branch_id)
         return _bounded_transition_page(
             rows=rows,
