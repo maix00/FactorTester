@@ -105,8 +105,6 @@ struct LocalProfileModel: Identifiable {
     }
 
     func owns(workPackageRef: String) -> Bool {
-        let workPackageID = workPackageRef.removingPrefix("work-package:")
-        guard !workPackageID.isEmpty else { return false }
         return researchRecords.contains { record in
             guard record.graphInstanceRef == workPackageRef,
                   let agent = agents.first(where: {
@@ -117,11 +115,5 @@ struct LocalProfileModel: Identifiable {
                 "graph-branch:\(agent.instanceID):\(agent.branchID)"
             )
         }
-    }
-}
-
-private extension String {
-    func removingPrefix(_ prefix: String) -> String {
-        hasPrefix(prefix) ? String(dropFirst(prefix.count)) : ""
     }
 }

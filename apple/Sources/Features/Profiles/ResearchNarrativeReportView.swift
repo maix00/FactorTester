@@ -1548,12 +1548,7 @@ enum ResearchDisplayText {
     }
 
     static func productGroup(_ productGroup: String) -> String {
-        switch productGroup.lowercased() {
-        case "china_futures", "cnfutures": return L10n.text("中国期货")
-        case "china_equities", "cnequities": return L10n.text("中国股票")
-        case "japan_futures", "jpfutures": return L10n.text("日本期货")
-        default: return L10n.text("其他产品组")
-        }
+        productGroup.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

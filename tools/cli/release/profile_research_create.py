@@ -51,11 +51,22 @@ def create_profile_research(
         title=title,
     )
     branches = instance.get("branches") or []
-    branch_id = str((branches[0] if branches else {}).get("branch_id") or "")
+    primary_branch = branches[0] if branches else {}
+    branch_id = str(primary_branch.get("branch_id") or "")
     if not branch_id:
         raise ValueError("server returned a research without its primary Branch")
     now = time.time()
-    work_package_id = str(instance.get("work_package_id") or instance.get("instance_id") or "")
+    instance_id = str(instance.get("instance_id") or "")
+    work_package_id = str(
+        instance.get("work_package_id") or instance_id
+    )
+    branch_instance_id = str(
+        primary_branch.get("instance_id") or instance_id
+    )
+    if not instance_id or not work_package_id or not branch_instance_id:
+        raise ValueError(
+            "server returned a research without canonical instance references"
+        )
     record = {
         "record_id": work_package_id,
         "title": title,
@@ -74,8 +85,10 @@ def create_profile_research(
         "updated_at": now,
         "workspace_ref": context.workspace_ref,
         "run_ref": "",
-        "graph_instance_ref": f"graph-instance:{instance.get('instance_id')}",
-        "graph_branch_ref": f"graph-branch:{branch_id}",
+        "graph_instance_ref": f"work-package:{work_package_id}",
+        "graph_branch_ref": (
+            f"graph-branch:{branch_instance_id}:{branch_id}"
+        ),
         "checkpoint_ref": "",
         "evidence_refs": [],
         "artifacts": [],

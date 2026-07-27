@@ -182,8 +182,13 @@ final class ResearchJournalTests: XCTestCase {
         XCTAssertEqual(ResearchDisplayText.linkKind("profile_handoff"), "研究转接")
         XCTAssertEqual(
             ResearchDisplayText.productGroup("china_futures"),
+            "china_futures"
+        )
+        XCTAssertEqual(
+            ResearchDisplayText.productGroup("中国期货"),
             "中国期货"
         )
+        XCTAssertEqual(ResearchDisplayText.productGroup("  "), "")
         XCTAssertEqual(
             ResearchDisplayText.reportTitle("SgCCS 因子研究报告"),
             "SgCCS 因子研究报告"
@@ -1413,7 +1418,7 @@ final class ResearchJournalTests: XCTestCase {
             ),
             "因子语义研究"
         )
-        XCTAssertEqual(ResearchDisplayText.productGroup("unknown_group"), "其他产品组")
+        XCTAssertEqual(ResearchDisplayText.productGroup("unknown_group"), "unknown_group")
     }
 
     func testStoredWorkspaceAuthorizationSurvivesBookmarkReplacement() throws {

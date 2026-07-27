@@ -275,8 +275,11 @@ def test_client_research_create_is_profile_scoped_and_records_local_state(
     assert json.loads(result.output)["research"]["work_package_id"] == (
         "instance-new"
     )
-    assert store.load("maxa")["research_records"][0]["title"] == (
-        "MaxA research"
+    record = store.load("maxa")["research_records"][0]
+    assert record["title"] == "MaxA research"
+    assert record["graph_instance_ref"] == "work-package:instance-new"
+    assert record["graph_branch_ref"] == (
+        "graph-branch:instance-new:branch-new"
     )
 
 

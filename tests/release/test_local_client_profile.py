@@ -46,6 +46,47 @@ def test_local_profile_is_strict_private_and_version_independent(
         validate_local_profile({**stored, "token": "must-not-be-stored"})
 
 
+def test_loading_profile_migrates_legacy_research_identity_once(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "client-support"
+    store = LocalProfileStore(root)
+    profile = new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8141",
+        workspace_root=tmp_path / "workspace",
+    )
+    profile["research_records"] = [{
+        "record_id": "work-package-1",
+        "title": "研究",
+        "status": "pending",
+        "scope": {},
+        "factor_family_versions": [],
+        "agent_id": "research-maxa",
+        "created_at": 1.0,
+        "updated_at": 1.0,
+        "workspace_ref": "",
+        "run_ref": "",
+        "graph_instance_ref": "graph-instance:physical-1",
+        "graph_branch_ref": "graph-branch:branch-1",
+        "checkpoint_ref": "",
+        "evidence_refs": [],
+        "artifacts": [],
+        "provenance": {},
+        "timeline_refs": [],
+    }]
+    store.save(profile)
+
+    migrated = store.load("maxa")
+    record = migrated["research_records"][0]
+    assert record["graph_instance_ref"] == "work-package:work-package-1"
+    assert record["graph_branch_ref"] == (
+        "graph-branch:physical-1:branch-1"
+    )
+    assert store.load("maxa") == migrated
+
+
 def test_graph_upgrade_retargets_one_stable_work_package_record(
     tmp_path: Path,
 ) -> None:

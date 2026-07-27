@@ -152,7 +152,9 @@ final class ResearchDirectoryController: ObservableObject {
                     )
                     let record = owners
                         .flatMap(\.researchRecords)
-                        .first { $0.graphInstanceRef == summary.workPackageRef }
+                        .first {
+                            $0.graphInstanceRef == summary.workPackageRef
+                        }
                     return ResearchDirectoryItem(
                         serverURL: binding.serverURL,
                         workspaceID: binding.workspaceID,

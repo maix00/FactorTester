@@ -6,7 +6,7 @@ extension LocalProfileController {
         // the CLI. Do not cold-start the packaged Python runtime on every
         // Home/Profile view appearance; explicit refreshes remain authoritative.
         guard !refreshInFlight else { return }
-        if !force && !profiles.isEmpty {
+        if !force && !profiles.isEmpty && authoritativeLoadCompleted {
             loadState = .loaded
             return
         }
@@ -38,7 +38,7 @@ extension LocalProfileController {
 
     func refreshFromCLI() async throws {
         let values = try await loadProfileValues()
-        apply(values)
+        apply(values, authoritative: true)
     }
 
     @discardableResult
@@ -53,12 +53,14 @@ extension LocalProfileController {
 
     private func apply(
         _ values: [[String: Any]],
-        fingerprint: String? = nil
+        fingerprint: String? = nil,
+        authoritative: Bool = false
     ) {
         profiles = values.map(LocalProfileModel.init)
             .filter { !$0.id.isEmpty }
         snapshotStore.cache(values)
         localFileFingerprint = fingerprint ?? snapshotStore.fileFingerprint()
+        if authoritative { authoritativeLoadCompleted = true }
         loadState = .loaded
     }
 

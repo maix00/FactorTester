@@ -17,6 +17,7 @@ final class LocalProfileController: ObservableObject {
     let snapshotStore: LocalProfileSnapshotStore
     var localFileFingerprint: String
     var refreshInFlight = false
+    var authoritativeLoadCompleted = false
     static var sharedProfileListTask:
         Task<[[String: Any]], Error>?
 

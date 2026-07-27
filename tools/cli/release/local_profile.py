@@ -15,6 +15,7 @@ from .local_profile_contracts import (
     validate_local_profile,
 )
 from .storage import read_json, write_json
+from .research_identity_migration import migrate_research_identity
 
 
 __all__ = [
@@ -32,7 +33,7 @@ class LocalProfileStore:
         if not self.root.is_dir():
             return []
         return [
-            validate_local_profile(read_json(path))
+            self.load(path.stem)
             for path in sorted(self.root.glob("*.json"))
         ]
 
@@ -40,7 +41,11 @@ class LocalProfileStore:
         value = read_json(self._path(profile_id))
         if value is None:
             raise ValueError(f"local profile not found: {profile_id}")
-        return validate_local_profile(value)
+        profile = validate_local_profile(value)
+        migrated, receipt = migrate_research_identity(profile)
+        if receipt["records_migrated"]:
+            return self.save(migrated)
+        return profile
 
     def save(self, value: dict[str, Any]) -> dict[str, Any]:
         profile = validate_local_profile(value)
