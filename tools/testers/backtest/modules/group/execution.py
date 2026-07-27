@@ -62,6 +62,13 @@ def schedule_order_execution(state, ctx) -> None:
             order.set("execution_price_basis", basis)
             order.set("matching_model", model)
             if order.status is OrderStatus.BLOCKED:
+                if not order.get("blocked_event_emitted"):
+                    blocked_event = order_status_event_if_enabled(
+                        state, order, timestamp=ctx.timestamp,
+                    )
+                    order.set("blocked_event_emitted", True)
+                    if blocked_event is not None:
+                        drafts.append(blocked_event)
                 continue
             schedule = resolve_execution_schedule(
                 state, ctx, strategy, order.instrument,

@@ -347,6 +347,44 @@ def test_internal_pending_conflict_cancel_emits_status_snapshot():
     assert event.payload.status is OrderStatus.CANCELLED
 
 
+def test_blocked_order_status_is_emitted_once_by_execution_scheduler():
+    from tools.testers.backtest.modules.group.execution import schedule_order_execution
+    from tools.testers.backtest.modules.group_membership import GroupMembershipModule
+    from tools.testers.backtest.modules.order_construct import OrderConstructModule
+
+    strategy = Strategy(alias="blocked-order")
+    order = Order(
+        instrument="P1", timestamp=pd.Timestamp("2025-01-01"),
+        quantity=1.0, intent_quantity=1.0, strategy=strategy,
+        order_id="blocked", status=OrderStatus.BLOCKED,
+    )
+    config = type("ConfigView", (), {
+        "get": lambda self, _ref, default=None: default,
+        "uses_flow": lambda self, name: name == "strategy_runtime_on_order_status_event",
+    })()
+    state = SimpleNamespace(
+        order_store=OrderStore(),
+        config_for=lambda _strategy: config,
+        market_data_store=SimpleNamespace(trading_day_resolver=None),
+    )
+    # The blocked branch is reached before schedule lookup; only these fields
+    # are needed to prove that it emits once and remains local to execution.
+    ctx = _context(strategy, EventKind.SIGNAL, [])
+    ctx.active_strategies = frozenset({strategy})
+    ctx.set_for(OrderConstructModule.orders, strategy, [order])
+    state.order_store.pending_orders = {}
+
+    # The complete scheduler needs execution settings for non-blocked orders;
+    # call twice with the same object to test the one-shot marker.
+    schedule_order_execution(state, ctx)
+    first = ctx._event_queue.snapshot_head()
+    schedule_order_execution(state, ctx)
+    second = ctx._event_queue.snapshot_head()
+
+    assert [event.payload.status for event in first] == [OrderStatus.BLOCKED]
+    assert [event.payload.status for event in second] == [OrderStatus.BLOCKED]
+
+
 def test_partial_fill_uses_specific_order_hook():
     strategy = PartialStrategy(alias="partial-hook")
     order = type("OrderView", (), {"status": OrderStatus.PARTIALLY_FILLED})()
