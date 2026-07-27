@@ -210,7 +210,7 @@
       "prohibitions": ["do not use a UI page identifier as the research lifecycle owner"],
       "implementations": [
         {
-          "implementation_id": "factortester.workspace.create",
+          "implementation_id": "factortester.client.research.create",
           "provider": "factortester",
           "kind": "cli",
           "approval_status": "approved",

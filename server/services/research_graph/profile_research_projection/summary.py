@@ -22,6 +22,7 @@ def _work_package_summary(row: sqlite3.Row) -> dict[str, Any]:
         "research_ref": work_package_ref,
         "work_package_ref": work_package_ref,
         "workspace_ref": workspace_ref_for(str(row["workspace_id"])),
+        "title": str(row["title"] or ""),
         "created_by_profile_ref": _profile_ref(row, "created_by_profile_ref"),
         "current_owner_profile_ref": _profile_ref(
             row, "current_owner_profile_ref"

@@ -248,10 +248,7 @@ def _validate_source_checkout(repo: Path, source_revision: str) -> None:
             "use `git rev-parse HEAD` from this checkout"
         )
     status = subprocess.check_output(
-        [
-            "git", "status", "--porcelain", "--untracked-files=all", "--",
-            "apple", "tools/cli", "client-adapters", "script",
-        ],
+        ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=repo,
         text=True,
     )

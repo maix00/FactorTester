@@ -165,7 +165,7 @@ struct ResearchVersionTreePane: View {
 
     // The label column is intentionally allowed two lines. A fixed one-line
     // row truncates English and future locales with longer node names.
-    private let rowHeight: CGFloat = 62
+    private let rowHeight: CGFloat = 46
     private let laneSpacing = ResearchTreeLayout.laneSpacing
     @State private var isLoadingEarlier = false
     @State private var missingReportMessage: String?
@@ -175,18 +175,18 @@ struct ResearchVersionTreePane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(L10n.text("研究路径"))
                     .font(.headline)
                 Text(L10n.text("多版本图在节点处相连 · 点击定位报告"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
                         treeLegend(filled: true, label: L10n.text("检查点"))
                         treeLegend(filled: false, label: L10n.text("分叉/承接"))
                     }
-                    HStack(spacing: 9) {
+                    HStack(spacing: 7) {
                         statusLegend(color: .orange, label: L10n.text("暂停"))
                         statusLegend(color: .green, label: L10n.text("完成"))
                         if hiddenBranchCount > 0 {
@@ -213,7 +213,7 @@ struct ResearchVersionTreePane: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 13)
+            .padding(.vertical, 9)
             Divider()
             ScrollViewReader { proxy in
                 if canLoadEarlier {
@@ -234,7 +234,7 @@ struct ResearchVersionTreePane: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isLoadingEarlier)
-                    .padding(12)
+                    .padding(8)
                     Divider()
                 }
                 ScrollView {
@@ -247,7 +247,7 @@ struct ResearchVersionTreePane: View {
                             }
                         }
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 4)
                 }
                 .onChange(of: selectedCheckpointRef) { checkpointRef in
                     guard let node = nodes.first(where: {

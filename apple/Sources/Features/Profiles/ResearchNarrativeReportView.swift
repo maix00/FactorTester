@@ -1,5 +1,13 @@
 import SwiftUI
 
+private struct ResearchReportChapter: Identifiable {
+    let id: String
+    let key: String
+    let sections: [ResearchJournalSection]
+
+    var firstSection: ResearchJournalSection { sections[0] }
+}
+
 struct ResearchNarrativeReportView: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
@@ -83,30 +91,10 @@ struct ResearchNarrativeReportView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 64)
                     } else {
-                        let chapterStarts = ResearchJournalPresentation
-                            .chapterStartIndexes(sections)
                         let changeOwners = ResearchJournalPresentation
                             .obligationChangeOwners(sections)
-                        ForEach(Array(sections.enumerated()), id: \.element.id) {
-                            index, section in
-                            let ownedChanges = changeOwners[section.sectionRef] ?? []
-                            let specialKind = ResearchReportSectionSpecialKind.resolve(
-                                displayKind: section.displayKind,
-                                hasObligationChanges: sectionHasObligationChanges(
-                                    section,
-                                    ownedChangeIDs: ownedChanges
-                                )
-                            )
-                            positionedSection(
-                                section,
-                                firstInChapter: chapterStarts.contains(index),
-                                ownedChangeIDs: ownedChanges,
-                                specialKind: specialKind,
-                                isExpanded: expandedSectionRefs.contains(
-                                    section.sectionRef
-                                ),
-                                toggle: { toggleSection(section) }
-                            )
+                        ForEach(reportChapters) { chapter in
+                            chapterView(chapter, changeOwners: changeOwners)
                         }
                     }
                 }
@@ -150,6 +138,96 @@ struct ResearchNarrativeReportView: View {
                         programmaticScrollToken = nil
                     }
                 }
+            }
+        }
+    }
+
+    private var reportChapters: [ResearchReportChapter] {
+        var result: [ResearchReportChapter] = []
+        for section in sections {
+            let key = section.chapterRef
+                ?? ResearchJournalPresentation.chapterRef(for: section)
+            if let last = result.last, last.key == key {
+                result[result.count - 1] = ResearchReportChapter(
+                    id: last.id,
+                    key: key,
+                    sections: last.sections + [section]
+                )
+            } else {
+                result.append(ResearchReportChapter(
+                    id: "\(key)|\(result.count)",
+                    key: key,
+                    sections: [section]
+                ))
+            }
+        }
+        return result
+    }
+
+    private func chapterView(
+        _ chapter: ResearchReportChapter,
+        changeOwners: [String: Set<String>]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            chapterHeader(chapter.firstSection)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(chapter.sections.enumerated()), id: \.element.id) {
+                    index, section in
+                    let ownedChanges = changeOwners[section.sectionRef] ?? []
+                    let specialKind = ResearchReportSectionSpecialKind.resolve(
+                        displayKind: section.displayKind,
+                        sectionRole: section.sectionRole,
+                        hasObligationChanges: sectionHasObligationChanges(
+                            section,
+                            ownedChangeIDs: ownedChanges
+                        )
+                    )
+                    positionedSection(
+                        section,
+                        firstInChapter: index == 0,
+                        ownedChangeIDs: ownedChanges,
+                        specialKind: specialKind,
+                        isExpanded: expandedSectionRefs.contains(
+                            section.sectionRef
+                        ),
+                        toggle: { toggleSection(section) }
+                    )
+                }
+            }
+            .padding(.leading, 16)
+        }
+        .padding(16)
+        .background(
+            Color.secondary.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.secondary.opacity(0.16), lineWidth: 1)
+        }
+        .padding(.bottom, 18)
+    }
+
+    private func chapterHeader(_ section: ResearchJournalSection) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(LocalizedStringKey(stageLabel(for: section)))
+                .font(.title2.weight(.semibold))
+            HStack(spacing: 8) {
+                Text(section.graphRef)
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.08), in: Capsule())
+                Text(sectionSubtitle(section))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(shortReference(section.checkpointRef))
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+            if let entryResolution = entryResolutionForChapter(section),
+               entryResolution.reason != "graph_continuation" {
+                ResearchEntryResolutionView(value: entryResolution)
             }
         }
     }
@@ -200,50 +278,6 @@ struct ResearchNarrativeReportView: View {
                 action: toggle
             )
             if isExpanded {
-            if section.displayKind == "graph_continuation" {
-                Label(
-                    L10n.text("图版本承接 / 重新进入审查"),
-                    systemImage: "arrow.triangle.branch"
-                )
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.indigo)
-            }
-            if firstInChapter {
-                HStack(spacing: 8) {
-                    Text(LocalizedStringKey(stageLabel(for: section)))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(0.1), in: Capsule())
-                    Text(section.graphRef)
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.08), in: Capsule())
-                    if let occurredAt = section.researchOccurredAt {
-                        Text(L10n.text("研究发生于"))
-                        Text(Date(timeIntervalSince1970: occurredAt), style: .date)
-                        Text(Date(timeIntervalSince1970: occurredAt), style: .time)
-                        Text(L10n.text("· 登记于"))
-                    }
-                    Text(Date(timeIntervalSince1970: section.createdAt), style: .date)
-                    if section.researchOccurredAt != nil {
-                        Text(Date(timeIntervalSince1970: section.createdAt), style: .time)
-                    }
-                    Text("·")
-                    Text(shortReference(section.checkpointRef))
-                        .monospaced()
-                }
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            }
-
-            if firstInChapter {
-                Text(LocalizedStringKey(stageLabel(for: section)))
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.primary)
-            }
             if !section.body.isEmpty {
                 reportParagraph(section.body, linkIDs: [], section: section)
             }
@@ -271,11 +305,7 @@ struct ResearchNarrativeReportView: View {
                 }
             }
 
-            if firstInChapter,
-               let entryResolution = entryResolutionForChapter(section),
-               entryResolution.reason != "graph_continuation" {
-                ResearchEntryResolutionView(value: entryResolution)
-            } else if section.sectionRole == "upgrade_reentry",
+            if section.sectionRole == "upgrade_reentry",
                       let entryResolution = transitionStep(
                         for: section
                       )?.entryResolution {
@@ -325,13 +355,17 @@ struct ResearchNarrativeReportView: View {
             Divider().padding(.top, firstInChapter ? 18 : 8)
             }
         }
-        .padding(.horizontal, specialKind == nil ? 0 : 14)
-        .padding(.top, specialKind == nil ? 0 : 12)
+        .padding(12)
         .background(
-            specialKind == nil ? Color.clear : Color.indigo.opacity(0.06),
-            in: RoundedRectangle(cornerRadius: 10)
+            specialKind == nil ? Color.secondary.opacity(0.025) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 9)
         )
-        .padding(.bottom, firstInChapter ? 24 : 12)
+        .overlay {
+            if specialKind == nil {
+                RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(Color.secondary.opacity(0.10), lineWidth: 1)
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             selectedCheckpointRef = section.checkpointRef
@@ -871,9 +905,6 @@ struct ResearchNarrativeReportView: View {
                     return $0.id < $1.id
                 }
             sections = loadedSections
-            let chapterStarts = ResearchJournalPresentation.chapterStartIndexes(
-                loadedSections
-            )
             let changeOwners = ResearchJournalPresentation.obligationChangeOwners(
                 loadedSections
             )
@@ -885,12 +916,20 @@ struct ResearchNarrativeReportView: View {
                     let changes = changeOwners[section.sectionRef] ?? []
                     let special = ResearchReportSectionSpecialKind.resolve(
                         displayKind: section.displayKind,
+                        sectionRole: section.sectionRole,
                         hasObligationChanges: sectionHasObligationChanges(
                             section,
                             ownedChangeIDs: changes
                         )
                     )
-                    return chapterStarts.contains(index) && special == nil
+                    let isChapterStart = index == 0 ||
+                        (section.chapterRef
+                            ?? ResearchJournalPresentation.chapterRef(for: section))
+                        != (loadedSections[index - 1].chapterRef
+                            ?? ResearchJournalPresentation.chapterRef(
+                                for: loadedSections[index - 1]
+                            ))
+                    return isChapterStart && special == nil
                         ? section.sectionRef : nil
                 }
             )
@@ -929,11 +968,18 @@ struct ResearchNarrativeReportView: View {
         _ section: ResearchJournalSection,
         ownedChangeIDs: Set<String>
     ) -> Bool {
-        !stageObligationRows(
-            in: section,
-            showInherited: false,
-            ownedChangeIDs: ownedChangeIDs
-        ).active.isEmpty
+        if section.sectionRole == "obligation_change"
+            || section.links.contains(where: { $0.kind == "delta" }) {
+            return true
+        }
+        guard let snapshot = ResearchJournalPresentation.obligationSnapshotStep(
+            for: section,
+            steps: orderedSteps
+        ) else { return false }
+        let changedIDs = Set(snapshot.obligationChanges.map {
+            obligationObjectID($0.objectID)
+        })
+        return !changedIDs.isDisjoint(with: ownedChangeIDs)
     }
 
     private func sectionSubtitle(_ section: ResearchJournalSection) -> String {

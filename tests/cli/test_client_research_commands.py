@@ -7,6 +7,7 @@ from click.testing import CliRunner
 
 from tools.cli.app import cli
 from tools.cli.commands import client_research
+from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
 
 class _FakeClient:
@@ -179,6 +180,103 @@ def test_client_research_branch_and_timeline_are_public(monkeypatch) -> None:
     assert timeline.exit_code == 0, timeline.output
     assert json.loads(branch.output)["branch_ref"].endswith(":branch-1")
     assert json.loads(timeline.output)["items"][0]["step_ref"] == "trace:1"
+
+
+def test_client_research_create_is_profile_scoped_and_records_local_state(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    worktree = tmp_path / "factor-worktree"
+    worktree.mkdir()
+    store = LocalProfileStore(tmp_path)
+    profile = new_local_profile(
+        profile_id="maxa",
+        display_name="MaxA",
+        server_url="http://127.0.0.1:8141",
+        workspace_root=tmp_path / "research",
+        principal_ref="owner-1",
+    )
+    profile["workspaces"] = [{
+        "workspace_id": "workspace-a",
+        "path": str(tmp_path / "research"),
+        "access_mode": "owner",
+        "owner_ref": "owner-1",
+        "server_workspace_ref": "workspace:workspace-a",
+    }]
+    profile["agents"] = [{
+        "agent_id": "research-maxa",
+        "role": "research",
+        "scope": {"instance_id": "old-instance", "branch_id": "old-branch"},
+        "status": "ready",
+        "next_action": "Resume the authorized research scope.",
+    }]
+    profile["factor_workspace_binding"] = {
+        "binding_id": "factor-maxa",
+        "canonical_repo_ref": "local-factor-git:maxa",
+        "base_commit": "a" * 40,
+        "branch": "research-maxa",
+        "worktree_path": str(worktree),
+        "research_root": str(tmp_path / "research"),
+        "git_common_dir": str(tmp_path / ".git"),
+        "owner_ref": "owner-1",
+        "sync_policy": {
+            "source_sync_enabled": False,
+            "auto_push": False,
+            "auto_merge": False,
+        },
+        "receipt_hash": "receipt",
+        "receipt_ref": "file:factor-maxa",
+    }
+    store.save(profile)
+
+    class FakeClient:
+        def get_active_research_graph(self, graph_id):
+            assert graph_id == "factor-research"
+            return {
+                "graph_id": graph_id,
+                "entry_node": "hypothesis_preregistration",
+                "nodes": [{
+                    "node_id": "hypothesis_preregistration",
+                    "required_capabilities": ["research-hypothesis.preregister"],
+                }],
+                "capability_descriptors": {
+                    "research-hypothesis.preregister": {
+                        "capability_description": "Freeze the hypothesis.",
+                        "descriptor_hash": "b" * 64,
+                    },
+                },
+            }
+
+        def create_research_graph_instance(self, **kwargs):
+            assert kwargs["profile_ref"] == "profile:maxa"
+            assert kwargs["workspace_id"] == "workspace-a"
+            assert kwargs["title"] == "MaxA research"
+            assert kwargs["capability_resolution"]["node_id"] == (
+                "hypothesis_preregistration"
+            )
+            return {
+                "instance_id": "instance-new",
+                "work_package_id": "instance-new",
+                "branches": [{"branch_id": "branch-new"}],
+            }
+
+    monkeypatch.setattr(
+        "tools.cli.release.profile_research_create.FactorTesterClient",
+        lambda session: FakeClient(),
+    )
+    monkeypatch.setattr(client_research, "load_profile_root", lambda path: tmp_path)
+    result = CliRunner().invoke(cli, [
+        "client", "research", "create",
+        "--profile", "maxa",
+        "--title", "MaxA research",
+    ])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["research"]["work_package_id"] == (
+        "instance-new"
+    )
+    assert store.load("maxa")["research_records"][0]["title"] == (
+        "MaxA research"
+    )
 
 
 def test_client_research_checkpoint_publish_accepts_bounded_file(

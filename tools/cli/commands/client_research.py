@@ -9,7 +9,12 @@ import click
 
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
+from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
+from tools.cli.release.profile_research_create import (
+    create_profile_research,
+)
+from tools.cli.release.profile_research_context import load_creation_context
 from tools.cli.release.research_reporting.publisher import (
     MAX_CARRIER_BYTES,
     MAX_NARRATIVE_BYTES,
@@ -38,6 +43,67 @@ def client_research() -> None:
 
 
 client_research.add_command(migrate_result_subjects)
+
+
+@client_research.command("create")
+@click.option("--profile", "profile_id", required=True)
+@click.option("--title", required=True)
+@click.option("--agent-id", default="")
+@click.option("--workspace-id", default="")
+@click.option("--graph-id", default="factor-research", show_default=True)
+@click.option(
+    "--product-group",
+    default="china_futures",
+    show_default=True,
+)
+@click.option(
+    "--capability-resolution-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@friendly_errors
+def create_profile_scoped_research(
+    profile_id: str,
+    title: str,
+    agent_id: str,
+    workspace_id: str,
+    graph_id: str,
+    product_group: str,
+    capability_resolution_file: Path | None,
+    release_profile: Path | None,
+) -> None:
+    """以 Profile 作用域原子创建 Work Package 和初始 Hypothesis Branch。"""
+    root = load_profile_root(release_profile)
+    store = LocalProfileStore(root)
+    context = load_creation_context(
+        store,
+        profile_id,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+    )
+    resolution = None
+    if capability_resolution_file is not None:
+        payload = json.loads(
+            capability_resolution_file.read_text(encoding="utf-8")
+        )
+        resolution = payload.get("resolution") if isinstance(payload, dict) else None
+        if not isinstance(resolution, dict):
+            resolution = payload
+        if not isinstance(resolution, dict):
+            raise click.ClickException(
+                "capability resolution must be a JSON object"
+            )
+    _echo_json(create_profile_research(
+        store,
+        context,
+        title=title,
+        graph_id=graph_id,
+        product_group=product_group,
+        capability_resolution=resolution,
+    ))
 
 
 @client_research.group("asset")

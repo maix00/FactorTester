@@ -93,6 +93,13 @@ def migrate_graph_branch_projection(
             )
             create_instance_branch_schema(conn)
             _write_instances(conn, instances)
+            # The target schema is created while the legacy instance table is
+            # temporarily renamed, so its first backfill sees no instances.
+            # Re-run it after projection to retain one canonical Work Package
+            # row for every migrated graph instance.
+            from server.services.research_graph.work_packages import backfill
+
+            backfill(conn, ensure_title_column=False)
             _write_branches(conn, branches)
             if failure_injector is not None:
                 failure_injector("after_target_write")
@@ -116,7 +123,14 @@ def migrate_graph_branch_projection(
         "resource_aggregate_totals_discarded": resource_totals,
         "schema_tables_before": before_count,
         "schema_tables_after": after_count,
-        "schema_tables_removed": before_count - after_count,
+        # The two legacy instance tables are renamed before the target
+        # tables are created, so a table-count delta is not a stable removal
+        # metric once Work Package support tables are present.  Report the
+        # duplicate legacy resource tables actually dropped instead.
+        "schema_tables_removed": len({
+            "research_graph_node_resolutions",
+            "research_capability_receipts",
+        } & tables),
         "transactions": 1,
         "rollback_target": (
             "restore pre-migration database backup and parent commit 3045e844"

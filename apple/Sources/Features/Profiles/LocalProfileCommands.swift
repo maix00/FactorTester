@@ -7,7 +7,7 @@ extension LocalProfileController {
         attempts: Int = 3
     ) async {
         for attempt in 0..<max(attempts, 1) {
-            await refresh()
+            await refresh(force: true)
             let synchronized = profiles.first { $0.id == profileID }?
                 .researchRecords.contains { $0.checkpointRef == checkpointRef }
                 ?? false

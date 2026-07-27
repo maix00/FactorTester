@@ -143,6 +143,13 @@ def app_update_restart(as_json: bool) -> None:
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Previous appcast to update when creating a Sparkle delta.",
 )
+@click.option(
+    "--from-clean-commit",
+    help=(
+        "Explicitly build from this clean commit in a temporary worktree; "
+        "must equal --source-revision."
+    ),
+)
 @friendly_errors
 def publish_release(**options) -> None:
     """Build, sign, notarize, publish, and read back Main or Beta."""

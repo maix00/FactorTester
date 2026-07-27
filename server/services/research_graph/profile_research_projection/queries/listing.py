@@ -10,6 +10,7 @@ LIST_FIRST_SQL = """
                COALESCE(wp.revision, 1) AS lifecycle_revision,
                i.graph_id, i.graph_version, i.product_group,
                i.workspace_id, i.mode,
+               COALESCE(wp.title, '') AS title,
                (
                    SELECT MIN(root.created_at)
                    FROM research_graph_instances AS root
@@ -65,6 +66,7 @@ LIST_AFTER_SQL = """
                COALESCE(wp.revision, 1) AS lifecycle_revision,
                i.graph_id, i.graph_version, i.product_group,
                i.workspace_id, i.mode,
+               COALESCE(wp.title, '') AS title,
                (
                    SELECT MIN(root.created_at)
                    FROM research_graph_instances AS root

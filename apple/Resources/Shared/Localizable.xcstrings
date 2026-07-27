@@ -7,6 +7,7 @@
     "RunSpec 本地引用无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Invalid local RunSpec reference"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"RunSpec 本地引用无效"}}}},
     "研究投影格式无法识别；客户端与服务器协议版本可能不一致。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The research projection format is unrecognized; client and server protocol versions may differ."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究投影格式无法识别；客户端与服务器协议版本可能不一致。"}}}},
     "研究版本树指向的分支不在当前工作包中，请刷新研究目录后重试。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The research version tree points to a branch outside the current work package. Refresh the research directory and try again."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究版本树指向的分支不在当前工作包中，请刷新研究目录后重试。"}}}},
+    "研究路径指向的分支不在当前工作包中，请刷新研究目录后重试。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The research path points to a branch outside the current work package. Refresh the research directory and try again."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究路径指向的分支不在当前工作包中，请刷新研究目录后重试。"}}}},
     "研究过程读取已取消；可重新选择检查点或刷新研究。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research process loading was cancelled; choose a checkpoint again or refresh the research."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究过程读取已取消；可重新选择检查点或刷新研究。"}}}},
     "无法读取该运行前配置：%@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unable to read the pre-run configuration: %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"无法读取该运行前配置：%@"}}}},
     "无法读取该检查点的审计对象：%@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unable to read the audit object for this checkpoint: %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"无法读取该检查点的审计对象：%@"}}}},
@@ -1700,6 +1701,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "义务变化"
+          }
+        }
+      }
+    },
+    "已展开" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "expanded"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已展开"
+          }
+        }
+      }
+    },
+    "已收起" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "collapsed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已收起"
+          }
+        }
+      }
+    },
+    "研究发生于 %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Research occurred %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "研究发生于 %@"
+          }
+        }
+      }
+    },
+    "登记于 %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recorded %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登记于 %@"
           }
         }
       }
@@ -8022,6 +8091,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "研究版本树"
+          }
+        }
+      }
+    },
+    "研究路径" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Research Path"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "研究路径"
+          }
+        }
+      }
+    },
+    "多版本图在节点处相连 · 点击定位报告" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Graph versions join at nodes · click to locate a report"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多版本图在节点处相连 · 点击定位报告"
           }
         }
       }

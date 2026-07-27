@@ -48,8 +48,8 @@ cli-anything-factortester-research plan \
 cli-anything-factortester-research workspace prepare --build --sync --json
 cli-anything-factortester-research workspace inspect \
   --factor-family SgCCS --json
-cli-anything-factortester-research run-step -- \
-  workspace create --factor-family SgCCS
+factortester client research create \
+  --profile maxa --title "SgCCS research"
 cli-anything-factortester-research run-step -- \
   run submit --analysis ic --analysis factor_evaluation \
   --analysis factor_type_analysis --analysis backtest

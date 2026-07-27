@@ -319,131 +319,108 @@ struct ProfileResearchOverview: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("研究进度").font(.largeTitle.weight(.semibold))
-                Text("按 Work Package 查看跨 Profile 的阶段、义务、证据与报告。")
-                    .foregroundStyle(.secondary)
-                Picker("研究状态", selection: $lifecycle) {
-                    ForEach(ResearchLifecycleFilter.allCases) { value in
-                        Text(LocalizedStringKey(value.title)).tag(value)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 420)
-                if let error = controller.error {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.callout)
-                        .foregroundStyle(.orange)
-                }
-                ForEach(controller.items) { item in
-                    workPackageCard(item)
-                }
-                if let emptyState {
-                    if emptyState == .loadingResearch {
-                        ProgressView(LocalizedStringKey(emptyState.message))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 48)
-                    } else {
-                        Label(
-                            LocalizedStringKey(emptyState.message),
-                            systemImage: emptyState.systemImage
-                        )
-                            .foregroundStyle(
-                                emptyState == .profileLoadFailed
-                                    ? .orange : .secondary
-                            )
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 40)
-                    }
-                }
-                if !controller.items.isEmpty {
-                    Button("刷新") {
-                        Task { await controller.refresh(lifecycle: lifecycle) }
-                    }
-                        .buttonStyle(.bordered)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("研究进度").font(.largeTitle.weight(.semibold))
+            Text("按 Work Package 查看跨 Profile 的阶段、义务、证据与报告。")
+                .foregroundStyle(.secondary)
+            Picker("研究状态", selection: $lifecycle) {
+                ForEach(ResearchLifecycleFilter.allCases) { value in
+                    Text(LocalizedStringKey(value.title)).tag(value)
                 }
             }
-            .padding(24)
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 420)
+            if let error = controller.error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
+            if controller.items.isEmpty {
+                emptyContent
+            } else {
+                researchList
+                Button("刷新") {
+                    Task { await controller.refresh(lifecycle: lifecycle) }
+                }
+                .buttonStyle(.bordered)
+            }
         }
+        .padding(24)
         .task(id: "\(bindingSignature)|\(lifecycle.rawValue)") {
             controller.replaceProfiles(profiles)
             await controller.refresh(lifecycle: lifecycle)
         }
     }
 
-    private func workPackageCard(_ item: ResearchDirectoryItem) -> some View {
-        HStack(spacing: 8) {
-            Button { openWorkPackage(item) } label: {
-                cardContent(item)
+    private var researchList: some View {
+        List(controller.items) { item in
+            HStack(spacing: 12) {
+                Button { openWorkPackage(item) } label: {
+                    researchRow(item)
+                }
+                .buttonStyle(.plain)
+                lifecycleMenu(item)
             }
-            .buttonStyle(.plain)
-            lifecycleMenu(item)
+            .padding(.vertical, 4)
         }
-        .padding(16)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(.separator, lineWidth: 0.5)
-        }
+        .listStyle(.inset)
+        .frame(minHeight: 220)
     }
 
-    private func cardContent(_ item: ResearchDirectoryItem) -> some View {
-            HStack(spacing: 16) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(.title2)
-                    .foregroundStyle(.tint)
-                    .frame(width: 34)
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(spacing: 8) {
-                        Text(item.displayTitle)
-                        .font(.headline)
-                        statusBadge(item.summary)
-                    }
-                    if !item.scopeSummary.isEmpty,
-                       item.scopeSummary != item.displayTitle {
-                        Text(item.scopeSummary)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(verbatim: L10n.format(
-                        "%@ · %lld 个分支 · %lld 个进行中",
-                        ResearchDisplayText.productGroup(item.summary.productGroup),
-                        item.summary.branchCount,
-                        item.summary.runningBranchCount
-                    ))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    Label {
-                        if item.profileNames.isEmpty {
-                            Text(LocalizedStringKey("未分配 Profile"))
-                        } else {
-                            Text(verbatim: L10n.format(
-                                "关联 Profile：%@",
-                                item.profileNames.joined(separator: "、")
-                            ))
-                        }
-                    } icon: {
-                        Image(systemName: item.profileNames.isEmpty
-                            ? "person.crop.circle.badge.questionmark"
-                            : "person.2")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private func researchRow(_ item: ResearchDirectoryItem) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(item.displayTitle).font(.headline)
+                    statusBadge(item.summary)
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text(item.serverURL.host ?? item.serverURL.absoluteString)
-                    Text(item.summary.workPackageRef)
-                }
-                .font(.caption.monospaced())
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(.secondary)
+                Text(verbatim: L10n.format(
+                    "%@ · %lld 个分支 · %lld 个进行中",
+                    ResearchDisplayText.productGroup(item.summary.productGroup),
+                    item.summary.branchCount,
+                    item.summary.runningBranchCount
+                ))
+                .font(.callout)
+                .foregroundStyle(.secondary)
             }
-            .contentShape(Rectangle())
+            Spacer(minLength: 12)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(item.profileNames.isEmpty
+                     ? "未分配 Profile"
+                     : item.profileNames.joined(separator: "、"))
+                .font(.callout)
+                .lineLimit(1)
+                Text(item.summary.workPackageRef)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var emptyContent: some View {
+        if let emptyState {
+            if emptyState == .loadingResearch {
+                ProgressView(LocalizedStringKey(emptyState.message))
+                    .frame(maxWidth: .infinity, minHeight: 220)
+            } else {
+                Label(
+                    LocalizedStringKey(emptyState.message),
+                    systemImage: emptyState.systemImage
+                )
+                .foregroundStyle(emptyState == .profileLoadFailed ? .orange : .secondary)
+                .frame(maxWidth: .infinity, minHeight: 220)
+            }
+        }
     }
 
     @ViewBuilder

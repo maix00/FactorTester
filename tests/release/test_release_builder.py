@@ -18,6 +18,7 @@ from script.release import build as release_build
 from script.release import embed_runtime as runtime_refresh
 from script.release.build import build_release, validate_embedded_sparkle_key
 from script.release.manifest import _kind, create_manifest
+from script.release.source_checkout import clean_worktree
 from tools.cli.release.app_archive import install_macos_app
 from tools.cli.release.contracts import validate_release_manifest
 
@@ -459,6 +460,41 @@ def test_release_builder_binds_revision_and_clean_client_checkout(
     monkeypatch.setattr(release_build.subprocess, "check_output", dirty)
     with pytest.raises(ValueError, match="unpublished client changes"):
         release_build._validate_source_checkout(tmp_path, revision)
+
+
+def test_clean_commit_fallback_requires_explicit_temporary_worktree(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Tests"],
+        check=True,
+    )
+    (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-qm", "base"], check=True
+    )
+    revision = subprocess.check_output(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
+    ).strip()
+    (repo / "unpublished.txt").write_text("dirty\n", encoding="utf-8")
+
+    with clean_worktree(repo, revision) as checkout:
+        assert (checkout / "tracked.txt").read_text() == "base\n"
+        assert not (checkout / "unpublished.txt").exists()
+        observed = subprocess.check_output(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assert observed == revision
+
+    assert (repo / "unpublished.txt").exists()
 
 
 def test_embedded_runtime_writes_internal_hash_receipt(

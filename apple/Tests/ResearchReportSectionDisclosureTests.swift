@@ -6,6 +6,7 @@ final class ResearchReportSectionDisclosureTests: XCTestCase {
         XCTAssertEqual(
             ResearchReportSectionSpecialKind.resolve(
                 displayKind: "research",
+                sectionRole: nil,
                 hasObligationChanges: true
             ),
             .obligationChange
@@ -16,6 +17,7 @@ final class ResearchReportSectionDisclosureTests: XCTestCase {
         XCTAssertEqual(
             ResearchReportSectionSpecialKind.resolve(
                 displayKind: "graph_continuation",
+                sectionRole: nil,
                 hasObligationChanges: false
             ),
             .graphContinuation
@@ -26,6 +28,7 @@ final class ResearchReportSectionDisclosureTests: XCTestCase {
         XCTAssertNil(
             ResearchReportSectionSpecialKind.resolve(
                 displayKind: "research",
+                sectionRole: nil,
                 hasObligationChanges: false
             )
         )

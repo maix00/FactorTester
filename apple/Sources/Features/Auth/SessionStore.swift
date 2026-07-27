@@ -227,12 +227,9 @@ final class SessionStore: ObservableObject {
         } else {
             isManagerLoggedIn = false
         }
-        if !(await bridgeClientSession(principalRef: principalRef)) {
-            // The CLI/UI session bridge is auxiliary to the server session.
-            // Keep the authenticated identity and retry the bridge on the
-            // next refresh instead of logging the user out on a local error.
-            lastError = L10n.text("客户端会话桥接暂时不可用，主登录仍保持有效。")
-        }
+        // `refresh()` already bridges the freshly confirmed session. Do not
+        // invoke the CLI bridge a second time here; duplicate imports caused
+        // login/registration to race and made the UI appear to log in twice.
         return true
     }
 

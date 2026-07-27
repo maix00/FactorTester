@@ -8,10 +8,17 @@ enum ResearchReportSectionSpecialKind: Equatable {
 
     static func resolve(
         displayKind: String,
+        sectionRole: String?,
         hasObligationChanges: Bool
     ) -> Self? {
-        if hasObligationChanges { return .obligationChange }
-        if displayKind == "graph_continuation" { return .graphContinuation }
+        if displayKind == "graph_continuation"
+            || sectionRole == "graph_continuation" {
+            return .graphContinuation
+        }
+        if sectionRole == "obligation_change"
+            || hasObligationChanges {
+            return .obligationChange
+        }
         return nil
     }
 

@@ -185,6 +185,7 @@ def test_public_cli_exposes_one_main_beta_release_command() -> None:
     assert "--sparkle-generate-appcast" in result.output
     assert "--notary-profile" in result.output
     assert "--delta-only" in result.output
+    assert "--from-clean-commit" in result.output
 
 
 def test_public_cli_exposes_explicit_app_update_state_machine() -> None:
