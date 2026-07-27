@@ -217,6 +217,47 @@ def test_delta_only_appcast_keeps_only_the_matching_upgrade(
     assert output.read_text(encoding="utf-8").count("<item>") == 1
 
 
+def test_latest_only_appcast_drops_unreachable_history(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    archive = tmp_path / "current.dmg"
+    archive.write_bytes(b"current")
+    output = tmp_path / "appcast.xml"
+    tool = _tool(tmp_path, "generate_appcast")
+
+    def run(command, **kwargs):
+        root = Path(command[-1])
+        (root / "appcast.xml").write_text(
+            """<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+ version="2.0"><channel><item><sparkle:version>5</sparkle:version>
+<sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+<sparkle:channel>beta</sparkle:channel>
+<enclosure url="https://example.test/current.dmg" sparkle:edSignature="signed" /></item>
+<item><sparkle:version>4</sparkle:version>
+<sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+<sparkle:channel>beta</sparkle:channel>
+<enclosure url="https://example.test/previous.dmg" sparkle:edSignature="signed" /></item>
+</channel></rss>""",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    generate_sparkle_appcast(
+        archive=archive,
+        output=output,
+        tool=tool,
+        download_url="https://example.test/current.dmg",
+        version="0.2.0",
+        build=5,
+        channel="beta",
+        latest_only=True,
+    )
+
+    assert output.read_text(encoding="utf-8").count("<item>") == 1
+
+
 def test_release_url_allows_loopback_http_but_not_public_http() -> None:
     assert is_secure_release_url(
         "http://127.0.0.1:8141/api/client/releases/beta.xml"

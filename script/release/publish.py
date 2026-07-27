@@ -231,10 +231,11 @@ def release_client(
             channel=channel,
             previous_archive=previous_archive,
             previous_archive_url=previous_archive_url,
-            previous_appcast=previous_appcast,
-            delta_output=delta_output,
-            delta_only=delta_only,
-        )
+        previous_appcast=previous_appcast,
+        delta_output=delta_output,
+        delta_only=delta_only,
+        latest_only=channel == "beta",
+    )
         manifest = create_update_manifest(
             version=version,
             build=build,
