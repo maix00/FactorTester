@@ -152,9 +152,51 @@ def test_hook_cancel_command_closes_only_the_strategy_order():
     assert order.status is OrderStatus.CANCELLED
     assert state.order_store.actions_by_order[order.order_id][0].reason == "risk"
     pending = ctx._event_queue.snapshot_head()
-    assert len(pending) == 1
-    assert pending[0].kind is EventKind.ORDER_STATUS
-    assert pending[0].payload is order
+    assert len(pending) == 2
+    assert [event.kind for event in pending] == [
+        EventKind.ORDER_STATUS,
+        EventKind.ORDER_STATUS,
+    ]
+    assert [event.payload.status for event in pending] == [
+        OrderStatus.CANCEL_PENDING,
+        OrderStatus.CANCELLED,
+    ]
+    assert all(event.payload is not order for event in pending)
+
+
+def test_hook_replace_command_exposes_pending_replace_before_cancel():
+    strategy = QuoteStrategy(alias="command-replace")
+    order = Order(
+        instrument="P1",
+        timestamp=pd.Timestamp("2025-01-01"),
+        quantity=2.0,
+        intent_quantity=2.0,
+        strategy=strategy,
+        order_id="replace-me",
+        status=OrderStatus.ACCEPTED,
+    )
+    state = SimpleNamespace(order_store=OrderStore())
+    state.order_store.register_order(order)
+    payload = {
+        "kind": "strategy_runtime_command",
+        "command_kind": "replace_order",
+        "order_id": "replace-me",
+        "quantity": 3.0,
+        "reason": "resize",
+    }
+    event = EventDraft(EventKind.SIGNAL, pd.Timestamp("2025-01-01"), strategy, payload)
+    ctx = _context(strategy, EventKind.SIGNAL, [event])
+
+    from tools.testers.backtest.modules.strategy_hooks import _apply_signal_intent
+
+    _apply_signal_intent(state, ctx)
+
+    assert order.status is OrderStatus.CANCELLED
+    pending = ctx._event_queue.snapshot_head()
+    assert [event.payload.status for event in pending] == [
+        OrderStatus.REPLACE_PENDING,
+        OrderStatus.CANCELLED,
+    ]
 
 
 def test_custom_strategy_mode_selects_hooks_without_group_flows():

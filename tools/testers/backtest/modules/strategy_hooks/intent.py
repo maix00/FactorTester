@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.engines.native.strategy_commands import command_from_payload
 from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetStrategyModule, TargetWeightIntent
 
 from .commands import apply_strategy_command
 from .fields import emitted_signal
+from tools.testers.backtest.modules.order_lifecycle import order_status_event
 
 
 def _apply_signal_intent(state: Any, ctx: Any) -> None:
@@ -60,8 +61,22 @@ def _emit_command_lifecycle_event(
     order = getattr(order_store, "orders_by_id", {}).get(order_id)
     if order is None or not getattr(order.status, "terminal", False):
         return
-    ctx.set_for(
-        emitted_signal,
-        strategy,
-        EventDraft(EventKind.ORDER_STATUS, ctx.timestamp, strategy, order),
+    actions = getattr(order_store, "actions_by_order", {}).get(order_id, ())
+    if not actions:
+        return
+    latest = actions[-1]
+    if getattr(getattr(latest, "action", None), "value", None) != "cancel":
+        return
+    if str(getattr(latest, "reason", "") or "") != str(
+        getattr(command, "reason", "") or ""
+    ):
+        return
+    pending_status = (
+        OrderStatus.REPLACE_PENDING
+        if kind == "replace_order"
+        else OrderStatus.CANCEL_PENDING
     )
+    ctx.set_for(emitted_signal, strategy, [
+        order_status_event(order, timestamp=ctx.timestamp, status=pending_status),
+        order_status_event(order, timestamp=ctx.timestamp),
+    ])

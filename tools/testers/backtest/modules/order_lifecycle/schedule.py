@@ -41,9 +41,16 @@ def create_order_attempt(
     return attempt
 
 
-def order_status_event(order: Any, *, timestamp: Any) -> EventDraft:
+def order_status_event(
+    order: Any,
+    *,
+    timestamp: Any,
+    status: OrderStatus | None = None,
+) -> EventDraft:
     """Snapshot one order transition without sharing mutable order state."""
 
     snapshot = copy.copy(order)
     snapshot.fields = dict(getattr(order, "fields", {}) or {})
+    if status is not None:
+        snapshot.status = status
     return EventDraft(EventKind.ORDER_STATUS, timestamp, order.strategy, snapshot)
