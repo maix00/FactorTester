@@ -31,7 +31,9 @@ on_bar(ctx, bar)
 on_quote(ctx, quote)
 on_trade(ctx, trade)
 on_book_delta(ctx, delta)
+on_book_snapshot(ctx, snapshot)
 on_order_event(ctx, order)
+on_order_<status>(ctx, order)  # e.g. on_order_canceled
 ```
 
 `on_market_feed(ctx, event)` is the generic fallback for market-feed types
@@ -58,7 +60,7 @@ Its payload carries a typed `MarketFeedEventKind`:
 | `QUOTE` | L1 BBO | `on_quote` |
 | `TRADE` | trade tick | `on_trade` |
 | `BOOK_DELTA` | L2 MBP or L3 MBO delta | `on_book_delta` |
-| `BOOK_SNAPSHOT` | L2/L3 snapshot | `on_market_feed` initially |
+| `BOOK_SNAPSHOT` | L2/L3 snapshot | `on_book_snapshot` |
 
 `EventKind.BAR` remains the aggregate-bar event. Raw market events are ordered
 before BAR and ORDER at the same timestamp; equal timestamp events retain the
@@ -106,6 +108,10 @@ timestamp and therefore goes through the existing order pipeline.
 
 - Simple strategies need only subclass `BarStrategy` or `EventStrategy` and
   return target/order intents.
+- Order-aware strategies can override a status-specific callback for the
+  native order vocabulary (`blocked`, `scheduled`, `accepted`,
+  `partially_filled`, `cancel_pending`, `replace_pending`, `filled`,
+  `cancelled`, `rejected`, `expired`); each falls back to `on_order_event`.
 - L2/L3 events are first-class and cannot be confused with aggregate bars.
 - The ledger and issue-144 order lifecycle remain the sole owners of fills,
   fees, margin, DMTM, cancellation, replacement, and residual orders.

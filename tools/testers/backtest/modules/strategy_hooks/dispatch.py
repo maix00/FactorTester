@@ -69,6 +69,7 @@ def _specific_feed_hook(state: Any, strategy: Any, ctx: Any, event: MarketFeedEv
         MarketFeedEventKind.QUOTE: "on_quote",
         MarketFeedEventKind.TRADE: "on_trade",
         MarketFeedEventKind.BOOK_DELTA: "on_book_delta",
+        MarketFeedEventKind.BOOK_SNAPSHOT: "on_book_snapshot",
     }.get(event.kind)
     hook = getattr(type(strategy), hook_name, None) if hook_name else None
     if callable(hook) and hook is not getattr(Strategy, hook_name, None):
@@ -91,7 +92,12 @@ def _call_order_event(state: Any, ctx: Any) -> None:
 
 def _specific_order_hook(strategy: Any, context: StrategyContext, order: Any) -> Any:
     hook_name = {
+        OrderStatus.BLOCKED: "on_order_blocked",
+        OrderStatus.SCHEDULED: "on_order_scheduled",
+        OrderStatus.ACCEPTED: "on_order_accepted",
         OrderStatus.PARTIALLY_FILLED: "on_order_partially_filled",
+        OrderStatus.CANCEL_PENDING: "on_order_cancel_pending",
+        OrderStatus.REPLACE_PENDING: "on_order_replace_pending",
         OrderStatus.FILLED: "on_order_filled",
         OrderStatus.CANCELLED: "on_order_canceled",
         OrderStatus.REJECTED: "on_order_rejected",

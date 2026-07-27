@@ -39,10 +39,28 @@ class Strategy(UniqueNameObject):
     def on_book_delta(self, ctx: Any, delta: Any) -> Any:
         return None
 
+    def on_book_snapshot(self, ctx: Any, snapshot: Any) -> Any:
+        return None
+
     def on_order_event(self, ctx: Any, order: Any) -> Any:
         return None
 
+    def on_order_blocked(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
+    def on_order_scheduled(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
+    def on_order_accepted(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
     def on_order_partially_filled(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
+    def on_order_cancel_pending(self, ctx: Any, order: Any) -> Any:
+        return self.on_order_event(ctx, order)
+
+    def on_order_replace_pending(self, ctx: Any, order: Any) -> Any:
         return self.on_order_event(ctx, order)
 
     def on_order_filled(self, ctx: Any, order: Any) -> Any:
