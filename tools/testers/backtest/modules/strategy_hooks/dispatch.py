@@ -87,10 +87,27 @@ def _call_bar(state: Any, ctx: Any) -> None:
 
 
 def _call_order_event(state: Any, ctx: Any) -> None:
+    _call_order_event_impl(state, ctx, status_axis=False)
+
+
+def _call_order_status_event(state: Any, ctx: Any) -> None:
+    _call_order_event_impl(state, ctx, status_axis=True)
+
+
+def _call_order_event_impl(state: Any, ctx: Any, *, status_axis: bool) -> None:
     for strategy in ctx.active_strategies:
+        if not status_axis and _uses_order_status_axis(state, strategy):
+            continue
         for order in ctx.payloads_for(strategy):
             result = _specific_order_hook(strategy, _context_for(state, ctx, strategy), order)
             _emit_intents(ctx, strategy, result)
+
+
+def _uses_order_status_axis(state: Any, strategy: Any) -> bool:
+    config_for = getattr(state, "config_for", None)
+    if not callable(config_for):
+        return False
+    return config_for(strategy).uses_flow("strategy_runtime_on_order_status_event")
 
 
 def _call_position_event(state: Any, ctx: Any) -> None:

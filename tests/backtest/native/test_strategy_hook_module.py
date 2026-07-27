@@ -40,6 +40,15 @@ class PartialStrategy(QuoteStrategy):
         self.seen.append("partial")
 
 
+class FilledStrategy(Strategy):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.seen: list[str] = []
+
+    def on_order_filled(self, ctx, order):
+        self.seen.append("on_order_filled")
+
+
 class PositionStrategy(Strategy):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -277,6 +286,34 @@ def test_order_status_event_is_an_isolated_lifecycle_snapshot():
 
     assert event.kind is EventKind.ORDER_STATUS
     assert event.payload.status is OrderStatus.SUBMITTED
+
+
+def test_order_matching_axis_does_not_duplicate_status_axis_callback():
+    strategy = FilledStrategy(alias="deduplicated-order-hook")
+    config = type("ConfigView", (), {
+        "uses_flow": lambda self, name: name == "strategy_runtime_on_order_status_event",
+    })()
+    state = type("StateView", (), {
+        "config_for": lambda self, _strategy: config,
+    })()
+    order = type("OrderView", (), {"status": OrderStatus.FILLED})()
+    event = EventDraft(EventKind.ORDER, pd.Timestamp("2025-01-01"), strategy, order)
+    matching_ctx = _context(strategy, EventKind.ORDER, [event])
+
+    from tools.testers.backtest.modules.strategy_hooks.dispatch import (
+        _call_order_event,
+        _call_order_status_event,
+    )
+
+    _call_order_event(state, matching_ctx)
+    assert strategy.seen == []
+
+    status_ctx = _context(
+        strategy, EventKind.ORDER_STATUS,
+        [EventDraft(EventKind.ORDER_STATUS, pd.Timestamp("2025-01-01"), strategy, order)],
+    )
+    _call_order_status_event(state, status_ctx)
+    assert strategy.seen == ["on_order_filled"]
 
 
 def test_partial_fill_uses_specific_order_hook():

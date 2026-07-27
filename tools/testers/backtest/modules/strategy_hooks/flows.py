@@ -11,7 +11,8 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.target import TargetStrategyModule
 
 from .dispatch import (
-    _call_bar, _call_market_feed, _call_order_event, _call_position_event,
+    _call_bar, _call_market_feed, _call_order_event, _call_order_status_event,
+    _call_position_event,
     _call_start, _call_stop,
 )
 from .fields import emitted_signal
@@ -71,7 +72,7 @@ class StrategyRuntime(ExecutableModule):
         outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER_STATUS,
         order=950, strategy_scoped=True, event_payload_inputs=("order_status",),
         description="处理订单状态变化事件",
-        compute=lambda state, ctx: _call_order_event(state, ctx),
+        compute=lambda state, ctx: _call_order_status_event(state, ctx),
     )
     on_position_event: ClassVar[Flow] = Flow(
         "strategy_runtime_on_position_event", inputs=(MarketDataModule.current_prices,),

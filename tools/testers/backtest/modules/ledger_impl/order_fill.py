@@ -136,6 +136,11 @@ def apply_order_fill(state, ctx) -> None:
                     ledger_id=ledger.ledger_id,
                 )
             )
+        status_event = order_status_event_if_enabled(
+            state, order, timestamp=ctx.timestamp,
+        )
+        if status_event is not None:
+            status_event_drafts.append(status_event)
         fill_prices_by_ledger.setdefault(ledger.ledger_id, {})[
             order.instrument
         ] = fill.price
