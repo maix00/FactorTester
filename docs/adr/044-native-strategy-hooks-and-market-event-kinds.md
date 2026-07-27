@@ -89,6 +89,11 @@ The preflight report must distinguish:
 - fill model (`next_bar_full_fill`, `bar_volume_limited`, `book_matching`)
 - whether partial fills and residual carry are supported
 
+Preflight capability checks also distinguish ordinary order events from the
+`ORDER_STATUS` axis and the post-fill `POSITION` axis. A strategy that requires
+either axis must fail validation when the selected execution model cannot emit
+it; it must not silently fall back to a BAR-only strategy.
+
 ## Event ordering
 
 ```text
