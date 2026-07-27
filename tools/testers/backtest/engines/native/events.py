@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 class EventKind(IntEnum):
     """Values are priority order, not arbitrary labels — at the same
     timestamp, the lower value pops first from the EventQueue (see
-    scheduler.EventQueue). BAR before ORDER before SIGNAL before lifecycle
+    scheduler.EventQueue). BAR before ORDER before POSITION before SIGNAL before lifecycle
     notices before TRADE_INTENT before LEDGER: completed market data updates
     first, carried orders consume that bar before the next signal observes
     positions, then lifecycle notices can cheaply decide whether an order is
@@ -52,7 +52,7 @@ class EventDraft:
     kind: EventKind
     timestamp: pd.Timestamp
     strategy: "Strategy | None" = None
-        # Strategy-scoped events: BAR/SIGNAL/ORDER_STATUS/ORDER/LIFECYCLE_NOTICE/TRADE_INTENT. LEDGER
+        # Strategy-scoped events: BAR/SIGNAL/ORDER_STATUS/ORDER/POSITION/LIFECYCLE_NOTICE/TRADE_INTENT. LEDGER
         # can set this to None and route by ledger instead.
     payload: Any = None
     index_key: Any = None
