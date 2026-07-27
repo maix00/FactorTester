@@ -51,6 +51,11 @@ class Strategy(UniqueNameObject):
         return None
 
     def on_order_event(self, ctx: Any, order: Any) -> Any:
+        return self.on_order(ctx, order)
+
+    def on_order(self, ctx: Any, order: Any) -> Any:
+        """Receive any order lifecycle event when no specific hook is used."""
+
         return self.on_event(ctx, order)
 
     def on_order_blocked(self, ctx: Any, order: Any) -> Any:
@@ -98,6 +103,7 @@ STRATEGY_CALLBACKS: Final[tuple[str, ...]] = (
     "on_book_delta",
     "on_book_snapshot",
     "on_order_event",
+    "on_order",
     "on_order_blocked",
     "on_order_scheduled",
     "on_order_accepted",

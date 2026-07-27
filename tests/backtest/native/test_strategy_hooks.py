@@ -55,6 +55,18 @@ def test_generic_on_event_is_used_by_default_adapters():
     assert strategy.on_order_event(context, {"order": 1}) == {"order": 1}
 
 
+def test_on_order_is_the_public_generic_order_callback():
+    class OrderStrategy(StrategyActor):
+        def on_order(self, ctx, order):
+            return order
+
+    strategy = OrderStrategy(alias="generic-order")
+    context = StrategyContext(strategy, None, EventKind.ORDER, {}, {})
+
+    assert strategy.on_order_event(context, {"order": 1}) == {"order": 1}
+    assert "on_order" in overridden_strategy_callbacks(strategy)
+
+
 def test_context_returns_typed_intents_without_mutating_inputs():
     strategy = Strategy(alias="custom")
     context = StrategyContext(strategy, pd.Timestamp("2025-01-01"), EventKind.BAR, {}, {})

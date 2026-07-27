@@ -35,6 +35,9 @@ CLI 接口必须只有一条清晰路径。
 运行时通过统一的 callback registry 判断用户实际覆写了哪些回调，不再让 BAR
 注册器和订单事件调度器各自维护一套判断逻辑。
 
+订单生命周期的通用入口采用 `on_order`；旧的 `on_order_event` 继续作为兼容别名，
+而 `on_order_filled`、`on_order_canceled` 等具体状态回调优先级更高。
+
 `StrategyPlan` 是服务端将 `StrategySpec` 校验、补默认值、解析数据需求并
 冻结后的内部计划。它不是用户要编写的策略模板，也不是另一个 hook 对象。
 
