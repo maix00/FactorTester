@@ -56,7 +56,7 @@ class Strategy(UniqueNameObject):
     def on_order_blocked(self, ctx: Any, order: Any) -> Any:
         return self.on_order_event(ctx, order)
 
-    def on_order_scheduled(self, ctx: Any, order: Any) -> Any:
+    def on_order_submitted(self, ctx: Any, order: Any) -> Any:
         return self.on_order_event(ctx, order)
 
     def on_order_accepted(self, ctx: Any, order: Any) -> Any:
@@ -99,7 +99,7 @@ STRATEGY_CALLBACKS: Final[tuple[str, ...]] = (
     "on_book_snapshot",
     "on_order_event",
     "on_order_blocked",
-    "on_order_scheduled",
+    "on_order_submitted",
     "on_order_accepted",
     "on_order_partially_filled",
     "on_order_cancel_pending",

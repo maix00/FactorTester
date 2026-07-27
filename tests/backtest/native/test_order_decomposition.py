@@ -158,7 +158,7 @@ def test_blocked_open_activates_at_close_fill_timestamp():
     assert len(drafts) == 1
     assert drafts[0].timestamp == timestamp
     assert drafts[0].payload.order_id == opening.order_id
-    assert opening.status == OrderStatus.SCHEDULED
+    assert opening.status == OrderStatus.ACCEPTED
 
 
 def test_close_today_consumes_only_today_lots():

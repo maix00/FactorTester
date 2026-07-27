@@ -63,6 +63,13 @@ class StrategyRuntime(ExecutableModule):
         description="处理订单生命周期事件",
         compute=lambda state, ctx: _call_order_event(state, ctx),
     )
+    on_order_status_event: ClassVar[Flow] = Flow(
+        "strategy_runtime_on_order_status_event", inputs=(MarketDataModule.current_prices,),
+        outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER_STATUS,
+        order=950, strategy_scoped=True, event_payload_inputs=("order_status",),
+        description="处理订单状态变化事件",
+        compute=lambda state, ctx: _call_order_event(state, ctx),
+    )
     on_stop: ClassVar[Flow] = Flow(
         "strategy_runtime_on_stop", inputs=(), outputs=(), phase=Phase.POST_REPLAY,
         order=1000, strategy_scoped=True, description="结束自定义策略",
@@ -70,5 +77,6 @@ class StrategyRuntime(ExecutableModule):
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (
-        on_start, on_market_feed, on_bar, on_signal_intent, on_order_event, on_stop,
+        on_start, on_market_feed, on_bar, on_signal_intent,
+        on_order_event, on_order_status_event, on_stop,
     )

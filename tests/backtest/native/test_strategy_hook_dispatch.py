@@ -41,7 +41,7 @@ def _strategy_with_hook(hook_name):
     ("status", "hook_name"),
     [
         (OrderStatus.BLOCKED, "on_order_blocked"),
-        (OrderStatus.SCHEDULED, "on_order_scheduled"),
+        (OrderStatus.SUBMITTED, "on_order_submitted"),
         (OrderStatus.ACCEPTED, "on_order_accepted"),
         (OrderStatus.PARTIALLY_FILLED, "on_order_partially_filled"),
         (OrderStatus.CANCEL_PENDING, "on_order_cancel_pending"),

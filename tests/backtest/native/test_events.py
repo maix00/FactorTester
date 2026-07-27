@@ -11,6 +11,7 @@ def test_event_kind_values_and_ordering():
         EventKind.FIELD_CHANGE,
         EventKind.MARKET_FEED,
         EventKind.BAR,
+        EventKind.ORDER_STATUS,
         EventKind.ORDER,
         EventKind.SIGNAL,
         EventKind.LIFECYCLE_NOTICE,
@@ -23,6 +24,7 @@ def test_event_kind_values_and_ordering():
     assert EventKind.LIFECYCLE_NOTICE == 14
     assert EventKind.TRADE_INTENT == 15
     assert EventKind.ORDER == 5
+    assert EventKind.ORDER_STATUS == 4
     assert EventKind.MARKET_FEED < EventKind.BAR < EventKind.ORDER
     assert EventKind.ORDER < EventKind.SIGNAL
     assert EventKind.SIGNAL < EventKind.LIFECYCLE_NOTICE

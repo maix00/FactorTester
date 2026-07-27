@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.order import OrderAttempt, OrderStatus
 
 from .actions import record_initial_submit
@@ -25,7 +27,7 @@ def create_order_attempt(
     order.timestamp = timestamp
     order.eligible_at = timestamp
     order.set("price_timestamp", market_timestamp)
-    order.status = OrderStatus.SCHEDULED
+    order.status = OrderStatus.SUBMITTED
     record_initial_submit(state, order, timestamp)
     attempt = OrderAttempt(
         attempt_id=f"{order.order_id}:attempt:{sequence}",
@@ -37,3 +39,11 @@ def create_order_attempt(
     )
     state.order_store.register_attempt(attempt)
     return attempt
+
+
+def order_status_event(order: Any, *, timestamp: Any) -> EventDraft:
+    """Snapshot one order transition without sharing mutable order state."""
+
+    snapshot = copy.copy(order)
+    snapshot.fields = dict(getattr(order, "fields", {}) or {})
+    return EventDraft(EventKind.ORDER_STATUS, timestamp, order.strategy, snapshot)

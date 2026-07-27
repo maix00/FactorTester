@@ -83,7 +83,7 @@ def test_chained_event_production_is_consumed_not_dropped():
 
     order = Order(
         instrument="P1", timestamp=pd.Timestamp("2024-01-01"),
-        quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.SCHEDULED,
+        quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.SUBMITTED,
     )
 
     def emit_signal(account, ctx) -> None:
@@ -132,7 +132,7 @@ def test_stale_order_attempt_is_skipped_before_order_flows_run():
         quantity=1.0,
         intent_quantity=1.0,
         strategy=s,
-        status=OrderStatus.SCHEDULED,
+        status=OrderStatus.SUBMITTED,
         order_id="O1",
     )
     attempt = OrderAttempt(

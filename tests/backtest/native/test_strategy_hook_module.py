@@ -132,7 +132,7 @@ def test_hook_cancel_command_closes_only_the_strategy_order():
         intent_quantity=2.0,
         strategy=strategy,
         order_id="cancel-me",
-        status=OrderStatus.SCHEDULED,
+        status=OrderStatus.SUBMITTED,
     )
     state = SimpleNamespace(order_store=OrderStore())
     state.order_store.register_order(order)
@@ -153,7 +153,7 @@ def test_hook_cancel_command_closes_only_the_strategy_order():
     assert state.order_store.actions_by_order[order.order_id][0].reason == "risk"
     pending = ctx._event_queue.snapshot_head()
     assert len(pending) == 1
-    assert pending[0].kind is EventKind.ORDER
+    assert pending[0].kind is EventKind.ORDER_STATUS
     assert pending[0].payload is order
 
 
@@ -169,6 +169,25 @@ def test_custom_strategy_mode_selects_hooks_without_group_flows():
 
 def test_strategy_runtime_is_the_registered_strategy_module():
     assert StrategyRuntime.key == "strategy_runtime"
+
+
+def test_order_status_event_is_an_isolated_lifecycle_snapshot():
+    from tools.testers.backtest.modules.order_lifecycle import order_status_event
+
+    strategy = Strategy(alias="status-snapshot")
+    order = Order(
+        instrument="P1",
+        timestamp=pd.Timestamp("2025-01-01"),
+        quantity=1.0,
+        intent_quantity=1.0,
+        strategy=strategy,
+        status=OrderStatus.SUBMITTED,
+    )
+    event = order_status_event(order, timestamp=order.timestamp)
+    order.status = OrderStatus.ACCEPTED
+
+    assert event.kind is EventKind.ORDER_STATUS
+    assert event.payload.status is OrderStatus.SUBMITTED
 
 
 def test_partial_fill_uses_specific_order_hook():

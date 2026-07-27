@@ -6,7 +6,7 @@ from .dependencies import activate_ready_dependents
 from .audit_store import OrderFlowStore
 from .finalize import record_order_lifecycle_state
 from .pending import default_pending_order_conflict_policy
-from .schedule import create_order_attempt
+from .schedule import create_order_attempt, order_status_event
 from .retry import finalize_and_retry_orders
 from .reconcile import reconcile_target_delta
 from .settlement import record_fill_settlement
@@ -19,6 +19,7 @@ __all__ = [
     "order_stores_for",
     "default_pending_order_conflict_policy",
     "create_order_attempt",
+    "order_status_event",
     "finalize_and_retry_orders",
     "reconcile_target_delta",
     "record_fill_settlement",

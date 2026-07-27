@@ -92,7 +92,7 @@ def _call_order_event(state: Any, ctx: Any) -> None:
 def _specific_order_hook(strategy: Any, context: StrategyContext, order: Any) -> Any:
     hook_name = {
         OrderStatus.BLOCKED: "on_order_blocked",
-        OrderStatus.SCHEDULED: "on_order_scheduled",
+        OrderStatus.SUBMITTED: "on_order_submitted",
         OrderStatus.ACCEPTED: "on_order_accepted",
         OrderStatus.PARTIALLY_FILLED: "on_order_partially_filled",
         OrderStatus.CANCEL_PENDING: "on_order_cancel_pending",

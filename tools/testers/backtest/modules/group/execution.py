@@ -12,6 +12,7 @@ from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_lifecycle import (
     create_order_attempt,
+    order_status_event,
     record_order_action,
 )
 from tools.testers.backtest.modules.order_lifecycle.offsets import (
@@ -80,6 +81,14 @@ def schedule_order_execution(state, ctx) -> None:
                 state, order, timestamp=execution_ts,
                 market_timestamp=price_ts,
             )
+            emit_status_events = config.uses_flow(
+                "strategy_runtime_on_order_status_event"
+            )
+            if emit_status_events:
+                drafts.append(order_status_event(order, timestamp=ctx.timestamp))
+            order.status = OrderStatus.ACCEPTED
+            if emit_status_events:
+                drafts.append(order_status_event(order, timestamp=execution_ts))
             pending[(strategy, order.instrument)] = order
             drafts.append(EventDraft(
                 EventKind.ORDER, execution_ts, strategy, attempt,
@@ -104,7 +113,7 @@ def apply_pending_conflict(
     stale = pending.get((strategy, order.instrument))
     if (
         stale is not None
-        and stale.status == OrderStatus.SCHEDULED
+        and stale.status in {OrderStatus.SUBMITTED, OrderStatus.ACCEPTED}
         and stale.get("price_timestamp", stale.timestamp) > timestamp
     ):
         stale.revision += 1

@@ -33,6 +33,7 @@ class EventKind(IntEnum):
     MARKET_FEED = -1  # one raw quote/trade/book observation; payload kind carries
                       # L1/L2/L3 semantics and feed sequence preserves same-time order
     BAR = 0       # an aggregate market bar has arrived; live factors may update state
+    ORDER_STATUS = 4  # an order lifecycle transition; never enters matching Flows
     ORDER = 5     # an existing Order has reached one matching opportunity
     SIGNAL = 10   # a strategy signal/rebalance decision point has arrived
     LIFECYCLE_NOTICE = 14  # contract rollover / force-close notice; handlers
@@ -50,7 +51,7 @@ class EventDraft:
     kind: EventKind
     timestamp: pd.Timestamp
     strategy: "Strategy | None" = None
-        # Strategy-scoped events: BAR/SIGNAL/LIFECYCLE_NOTICE/TRADE_INTENT/ORDER. LEDGER
+        # Strategy-scoped events: BAR/SIGNAL/ORDER_STATUS/ORDER/LIFECYCLE_NOTICE/TRADE_INTENT. LEDGER
         # can set this to None and route by ledger instead.
     payload: Any = None
     index_key: Any = None

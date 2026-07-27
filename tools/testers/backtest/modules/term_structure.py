@@ -521,7 +521,7 @@ def _handle_rollover_notice(state, ctx) -> None:
                 quantity=-quantity,
                 intent_quantity=-quantity,
                 strategy=strategy,
-                status=OrderStatus.SCHEDULED,
+                status=OrderStatus.SUBMITTED,
                 fields={
                     "reason": "term_structure_rollover_close",
                     "source": payload,
@@ -534,7 +534,7 @@ def _handle_rollover_notice(state, ctx) -> None:
                 quantity=quantity,
                 intent_quantity=quantity,
                 strategy=strategy,
-                status=OrderStatus.SCHEDULED,
+                status=OrderStatus.SUBMITTED,
                 fields={
                     "reason": "term_structure_rollover_open",
                     "source": payload,
@@ -583,7 +583,7 @@ def _handle_delivery_force_close_notice(state, ctx) -> None:
                 quantity=-quantity,
                 intent_quantity=-quantity,
                 strategy=strategy,
-                status=OrderStatus.SCHEDULED,
+                status=OrderStatus.SUBMITTED,
                 fields={
                     "reason": "term_structure_force_close",
                     "source": payload,

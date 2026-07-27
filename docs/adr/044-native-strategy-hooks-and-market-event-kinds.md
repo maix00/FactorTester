@@ -110,7 +110,7 @@ timestamp and therefore goes through the existing order pipeline.
 - Simple strategies need only subclass `BarStrategy` or `EventStrategy` and
   return target/order intents.
 - Order-aware strategies can override a status-specific callback for the
-  native order vocabulary (`blocked`, `scheduled`, `accepted`,
+  native order vocabulary (`blocked`, `submitted`, `accepted`,
   `partially_filled`, `cancel_pending`, `replace_pending`, `filled`,
   `cancelled`, `rejected`, `expired`); each falls back to `on_order_event`.
 - L2/L3 events are first-class and cannot be confused with aggregate bars.

@@ -8,7 +8,7 @@ from enum import Enum
 class OrderStatus(str, Enum):
     DRAFT = "draft"
     BLOCKED = "blocked"
-    SCHEDULED = "scheduled"
+    SUBMITTED = "submitted"
     ACCEPTED = "accepted"
     PARTIALLY_FILLED = "partially_filled"
     CANCEL_PENDING = "cancel_pending"

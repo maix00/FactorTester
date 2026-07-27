@@ -63,5 +63,5 @@ def _emit_command_lifecycle_event(
     ctx.set_for(
         emitted_signal,
         strategy,
-        EventDraft(EventKind.ORDER, ctx.timestamp, strategy, order),
+        EventDraft(EventKind.ORDER_STATUS, ctx.timestamp, strategy, order),
     )

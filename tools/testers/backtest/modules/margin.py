@@ -18,6 +18,7 @@ from tools.data.types.data_money import DataMoney
 from tools.data.types.time_index import DataIndex
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.engines.native.order import OrderStatus
 
 _CUSTOM_MARGIN_FIELDS = (
     {
@@ -460,6 +461,7 @@ def _handle_margin_liquidation_notice(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.ledger_module import LedgerModule
     from tools.testers.backtest.modules.order_lifecycle import (
         create_order_attempt,
+        order_status_event,
     )
 
     for ledger, payload in _ledger_payloads(state, ctx, kind="margin_liquidation"):
@@ -491,6 +493,14 @@ def _handle_margin_liquidation_notice(state: Any, ctx: Any) -> None:
                     timestamp=event_ts,
                     market_timestamp=market_ts,
                 )
+                emit_status_events = state.config_for(owner).uses_flow(
+                    "strategy_runtime_on_order_status_event"
+                )
+                if emit_status_events:
+                    drafts.append(order_status_event(order, timestamp=ctx.timestamp))
+                order.status = OrderStatus.ACCEPTED
+                if emit_status_events:
+                    drafts.append(order_status_event(order, timestamp=event_ts))
                 drafts.append(EventDraft(
                     EventKind.ORDER,
                     event_ts,
