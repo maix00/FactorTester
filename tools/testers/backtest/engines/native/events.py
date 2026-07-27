@@ -27,10 +27,12 @@ class EventKind(IntEnum):
     emitted same-time events remain causal
     because they enter the queue only after their producer runs. Values are spaced so a future
     EventKind can be inserted without renumbering everything after it."""
-    BAR = 0       # a market bar has arrived; live factors may update state
     FIELD_CHANGE = -5  # historical market-rule field change event; processed before any
                        # BAR so the field snapshot is already current for the
                        # entire timestamp
+    MARKET_DATA = -1  # one raw quote/trade/book observation; payload kind carries
+                      # L1/L2/L3 semantics and feed sequence preserves same-time order
+    BAR = 0       # an aggregate market bar has arrived; live factors may update state
     ORDER = 5     # an existing Order has reached one matching opportunity
     SIGNAL = 10   # a strategy signal/rebalance decision point has arrived
     LIFECYCLE_NOTICE = 14  # contract rollover / force-close notice; handlers
@@ -54,3 +56,8 @@ class EventDraft:
     index_key: Any = None
     index_names: tuple[Any, ...] = ()
     ledger: "Ledger | None" = None
+    sequence: int = 0
+
+    def __post_init__(self) -> None:
+        if self.sequence < 0:
+            raise ValueError("EventDraft.sequence must be non-negative")

@@ -361,6 +361,7 @@ def _audit_event_draft_value(value: EventDraft, *, key_labels: Mapping[str, str]
         "type": "EventDraft",
         "kind": value.kind.name.lower(),
         "timestamp": _audit_value(value.timestamp, key_labels=key_labels),
+        "sequence": value.sequence,
         "strategy": key_labels.get(str(strategy), str(strategy)) if strategy is not None and key_labels is not None else (str(strategy) if strategy is not None else ""),
         "ledger": str(ledger) if ledger is not None else "",
         "payload": _audit_value(value.payload, key_labels=key_labels),
@@ -833,14 +834,14 @@ class FlowContext:
 
 
 class EventQueue:
-    """Single global priority queue keyed (timestamp, kind, counter).
+    """Single global priority queue keyed (timestamp, kind, sequence, counter).
     `kind` (an IntEnum) participates directly in sort ordering — no-
     lookahead is guaranteed structurally by causal_valuation's precomputed
     ffill-only series, not by queue mechanics, so there's no separate
     "bucket"/"tick" concept here."""
 
     def __init__(self) -> None:
-        self._heap: list[tuple[pd.Timestamp, EventKind, int, EventDraft]] = []
+        self._heap: list[tuple[pd.Timestamp, EventKind, int, int, EventDraft]] = []
         self._counter = itertools.count()
         self._dispatchers: dict[EventKind, Callable[[list[EventDraft]], None]] = {}
 
@@ -848,16 +849,16 @@ class EventQueue:
         self._dispatchers[kind] = dispatcher
 
     def push_event(self, draft: EventDraft) -> None:
-        heapq.heappush(self._heap, (draft.timestamp, draft.kind, next(self._counter), draft))
+        heapq.heappush(self._heap, (draft.timestamp, draft.kind, draft.sequence, next(self._counter), draft))
 
     def push_events(self, drafts: list[EventDraft]) -> None:
         if not drafts:
             return
         if len(drafts) < 64 or len(drafts) * 4 < len(self._heap):
             for draft in drafts:
-                heapq.heappush(self._heap, (draft.timestamp, draft.kind, next(self._counter), draft))
+                heapq.heappush(self._heap, (draft.timestamp, draft.kind, draft.sequence, next(self._counter), draft))
             return
-        self._heap.extend((draft.timestamp, draft.kind, next(self._counter), draft) for draft in drafts)
+        self._heap.extend((draft.timestamp, draft.kind, draft.sequence, next(self._counter), draft) for draft in drafts)
         heapq.heapify(self._heap)
 
     def pending_count(self) -> int:
@@ -865,13 +866,13 @@ class EventQueue:
         return len(self._heap)
 
     def pending_count_by_kind(self, kind: EventKind) -> int:
-        return sum(1 for _, draft_kind, _, _ in self._heap if draft_kind is kind)
+        return sum(1 for _, draft_kind, _, _, _ in self._heap if draft_kind is kind)
 
     def snapshot_head(self, limit: int = 50) -> list[EventDraft]:
         """Return the next pending events in dispatch order without mutating the heap."""
         if limit <= 0:
             return []
-        return [draft for _timestamp, _kind, _counter, draft in sorted(self._heap)[:limit]]
+        return [draft for _timestamp, _kind, _sequence, _counter, draft in sorted(self._heap)[:limit]]
 
     def run_until_drained(self) -> None:
         """Progress reporting lives in `make_dispatcher` (Flow-level), not
@@ -879,14 +880,14 @@ class EventQueue:
         that inner loop is where real work (and real wall-clock time) is
         spent, not the batching loop itself."""
         while self._heap:
-            first_ts, first_kind, _, first = heapq.heappop(self._heap)
+            first_ts, first_kind, _, _, first = heapq.heappop(self._heap)
             batch = [first]
             while (
                 self._heap
                 and self._heap[0][0] == first_ts
                 and self._heap[0][1] == first_kind
             ):
-                batch.append(heapq.heappop(self._heap)[3])
+                batch.append(heapq.heappop(self._heap)[4])
             dispatcher = self._dispatchers.get(first.kind)
             if dispatcher is not None:
                 dispatcher(batch)
@@ -1280,6 +1281,7 @@ def _audit_event_queue_head(state: "BacktestRunState", event_queue: EventQueue, 
         rows.append({
             "index": index,
             "timestamp": str(draft.timestamp),
+            "sequence": draft.sequence,
             "event_kind": draft.kind.name,
             "strategy": _strategy_alias(state, draft.strategy) if draft.strategy is not None else "",
             "ledger": str(draft.ledger) if draft.ledger is not None else "",
@@ -1335,6 +1337,7 @@ def _audit_event_subject_row(
     )
     return {
         "timestamp": str(draft.timestamp),
+        "sequence": draft.sequence,
         "event_kind": draft.kind.name,
         "strategy": strategy,
         "ledger": ledger,
