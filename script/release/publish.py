@@ -24,6 +24,7 @@ from script.release.build import (
     REPO,
     _sign_embedded_app,
     _validate_source_checkout,
+    xcodebuild_environment,
     validate_embedded_sparkle_key,
 )
 from script.release.sparkle import (
@@ -121,6 +122,7 @@ def release_client(
                 "CODE_SIGNING_ALLOWED=NO",
                 "build",
             ],
+            env=xcodebuild_environment(),
             check=True,
         )
         source = REPO / "apple/build/Build/Products/Release/FTClient.app"

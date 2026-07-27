@@ -16,6 +16,7 @@ from uuid import uuid4
 from script.release.assets import build_installer_dmg, embed_client_runtime
 from script.release.build import (
     REPO, _sign_embedded_app, _validate_source_checkout,
+    xcodebuild_environment,
 )
 from script.release.update_manifest import (
     create_update_manifest, verify_installer, write_update_manifest,
@@ -85,6 +86,7 @@ def release_beta(
          "-scheme", "FactorTester-Client-macOS", "-configuration", "Release",
          "-derivedDataPath", str(REPO / "apple/build"),
          "CODE_SIGNING_ALLOWED=NO", "build"],
+        env=xcodebuild_environment(),
         check=True,
     )
     source = REPO / "apple/build/Build/Products/Release/FTClient.app"

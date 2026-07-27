@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import plistlib
 import re
@@ -18,6 +19,63 @@ from script.release.assets import (
 
 REPO = Path(__file__).resolve().parents[2]
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
+
+
+def xcodebuild_environment() -> dict[str, str]:
+    """Select a complete Xcode installation for release builds.
+
+    ``xcode-select`` is often pointed at CommandLineTools even when Xcode is
+    installed. Release builds need the full SDK and project builder, so the
+    normal Xcode locations are discovered automatically instead of requiring
+    a manual ``DEVELOPER_DIR`` export for every invocation.
+    """
+    environment = os.environ.copy()
+    configured = environment.get("DEVELOPER_DIR", "").strip()
+    candidates: list[str] = []
+    if configured:
+        candidates.append(configured)
+    try:
+        selected = subprocess.check_output(
+            ["xcode-select", "-p"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        selected = ""
+    if selected:
+        candidates.append(selected)
+    candidates.extend([
+        "/Applications/Xcode.app/Contents/Developer",
+        "/Applications/Xcode-beta.app/Contents/Developer",
+    ])
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        resolved = str(Path(candidate).expanduser())
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        xcodebuild = Path(resolved) / "usr/bin/xcodebuild"
+        if not xcodebuild.is_file():
+            continue
+        selected_environment = {
+            **environment,
+            "DEVELOPER_DIR": resolved,
+        }
+        try:
+            subprocess.run(
+                [str(xcodebuild), "-version"],
+                env=selected_environment,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        return selected_environment
+
+    raise ValueError(
+        "a complete Xcode installation is required for release builds; "
+        "install Xcode or set DEVELOPER_DIR to its Contents/Developer path"
+    )
 
 
 def build_release(

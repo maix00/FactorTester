@@ -60,6 +60,43 @@ def test_release_builder_requires_public_source_revision() -> None:
     assert "source_revision" in build_release.__annotations__
 
 
+def test_release_builder_discovers_full_xcode_when_select_points_to_tools(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    developer = tmp_path / "Xcode.app/Contents/Developer"
+    (developer / "usr/bin").mkdir(parents=True)
+    (developer / "usr/bin/xcodebuild").write_text("", encoding="utf-8")
+    monkeypatch.delenv("DEVELOPER_DIR", raising=False)
+    monkeypatch.setattr(
+        release_build.subprocess,
+        "check_output",
+        lambda *_args, **_kwargs: "/Library/Developer/CommandLineTools\n",
+    )
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(release_build.subprocess, "run", run)
+    real_path = Path
+    monkeypatch.setattr(
+        release_build,
+        "Path",
+        lambda value: (
+            developer
+            if value == "/Applications/Xcode.app/Contents/Developer"
+            else real_path(value)
+        ),
+    )
+
+    result = release_build.xcodebuild_environment()
+
+    assert result["DEVELOPER_DIR"] == str(developer)
+    assert calls[0][0][-1] == "-version"
+
+
 def test_release_builder_rejects_missing_sparkle_public_key(tmp_path: Path) -> None:
     app = tmp_path / "FTClient.app"
     info = app / "Contents"
