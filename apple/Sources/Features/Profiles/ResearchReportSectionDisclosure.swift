@@ -79,12 +79,7 @@ struct ResearchReportSectionDisclosureHeader: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                (specialKind?.tint ?? Color.secondary).opacity(0.07),
-                in: RoundedRectangle(cornerRadius: 9)
-            )
+            .padding(.vertical, 8)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(

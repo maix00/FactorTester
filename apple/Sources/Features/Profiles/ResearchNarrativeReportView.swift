@@ -355,17 +355,10 @@ struct ResearchNarrativeReportView: View {
             Divider().padding(.top, firstInChapter ? 18 : 8)
             }
         }
-        .padding(12)
-        .background(
-            specialKind == nil ? Color.secondary.opacity(0.025) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 9)
-        )
-        .overlay {
-            if specialKind == nil {
-                RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(Color.secondary.opacity(0.10), lineWidth: 1)
-            }
-        }
+        // Sections remain content inside the chapter surface. Do not wrap an
+        // ordinary or special subsection in another card: the disclosure
+        // header and the chapter indentation already provide the hierarchy.
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .onTapGesture {
             selectedCheckpointRef = section.checkpointRef

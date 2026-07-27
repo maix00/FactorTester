@@ -35,18 +35,43 @@ extension ResearchJournalPresentation {
                 transitions: transitions,
                 checkpointNodeAnchors: checkpointNodeAnchors
             ) ?? physicalDisplayRef
+            let displayChapterRef = chapterRef(
+                for: section,
+                semanticCheckpointRef: displayCheckpointRef,
+                transitions: transitions
+            )
             let projected = sectionWithReadableTitle(
                 section,
                 checkpointRef: displayCheckpointRef,
                 displayKind: pureMigrationRefs.contains(section.checkpointRef)
                     ? "graph_continuation" : "research",
-                chapterRef: section.chapterRef ?? transitions.first {
-                    $0.stepRef == section.checkpointRef
-                }.map { "node:\($0.toNode)" }
+                chapterRef: displayChapterRef
             )
             result.append(projected)
         }
         return result
+    }
+
+    private static func chapterRef(
+        for section: ResearchJournalSection,
+        semanticCheckpointRef: String,
+        transitions: [ResearchTransitionStep]
+    ) -> String? {
+        let semantic = ResearchJournalPresentation.chapterRef(for: section)
+        if !semantic.hasPrefix("checkpoint:") {
+            return semantic
+        }
+        // Report-only checkpoints do not carry graph data in the journal.
+        // Once their report bindings have been resolved, attach them to the
+        // graph transition that was current when the content was submitted.
+        if let transition = transitions.first(where: {
+            $0.stepRef == semanticCheckpointRef
+        }) ?? transitions.first(where: {
+            $0.stepRef == section.checkpointRef
+        }) {
+            return "node:\(transition.toNode)"
+        }
+        return section.chapterRef ?? semantic
     }
 
     private static func semanticCheckpointRef(

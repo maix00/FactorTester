@@ -268,7 +268,11 @@ private let legacyRequirementHomeNodes = [
     "factor_semantics": "factor_semantics",
     "trial_design_validity": "validation_design",
     "statistical_validity": "result_audit",
-    "strategy_design": "validation_design",
+    // Strategy and market-execution requirements are admitted by the
+    // trial_execution packet. They belong to that chapter even when an older
+    // report carrier was created while the graph still displayed
+    // validation_design.
+    "strategy_design": "trial_execution",
     "market_execution_accounting": "trial_execution",
     "other": "research_decision",
 ]

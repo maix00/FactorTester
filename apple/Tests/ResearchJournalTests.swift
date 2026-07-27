@@ -246,6 +246,27 @@ final class ResearchJournalTests: XCTestCase {
         )
     }
 
+    func testStrategyDesignRequirementsBelongToTrialExecutionChapter() throws {
+        let section = try JSONDecoder().decode(
+            ResearchJournalSection.self,
+            from: Data(
+                """
+                {"section_id":"strategy","title":"调度策略",
+                 "blocks":[{"kind":"paragraph","text":"策略",
+                   "report_binding":{
+                     "report_requirement_id":"report.requirement.strategy_design.signal_schedule",
+                     "subject_ref":"requirement:strategy_design.signal_schedule"
+                   }}],"links":[]}
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            ResearchJournalPresentation.chapterRef(for: section),
+            "node:trial_execution"
+        )
+    }
+
     func testAuditChipUsesChineseLabelInsteadOfStableReference() throws {
         let link = try JSONDecoder().decode(
             ResearchJournalLink.self,
