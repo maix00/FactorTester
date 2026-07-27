@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import MappingProxyType
 from typing import Any
 
@@ -29,7 +30,9 @@ def _context_for(state: Any, ctx: Any, strategy: Any) -> StrategyContext:
         ledger = state.ledger_for_strategy(strategy)
         stored = ledger.get(LedgerModule.positions, {})
         if isinstance(stored, dict):
-            positions = dict(stored)
+            # MappingProxyType protects the mapping only.  Copy position
+            # records as well so a hook cannot mutate ledger-owned objects.
+            positions = deepcopy(stored)
     except (AttributeError, KeyError):
         # Lightweight unit/scheduler tests may intentionally omit a ledger.
         pass

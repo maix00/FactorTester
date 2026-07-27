@@ -10,6 +10,8 @@ from tools.testers.backtest.engines.native.position_events import (
     PositionEventKind,
     position_events_for_fill,
 )
+from tools.testers.backtest.engines.native.position import ProductPosition
+from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.strategy_hooks import StrategyRuntime
 from tools.testers.backtest.modules.target import TargetStrategyModule, OrderDeltaIntent
 from tools.testers.backtest.engines.native.orders import Order, OrderStatus
@@ -320,3 +322,25 @@ def test_position_sign_flip_is_close_then_open():
         (2.0, 0.0),
         (0.0, -1.0),
     ]
+
+
+def test_strategy_context_positions_are_detached_snapshots():
+    strategy = PositionStrategy(alias="position-snapshot")
+    product = "P1"
+    source = ProductPosition(quantity=3.0)
+    ledger = type("LedgerView", (), {
+        "get": lambda self, ref, default=None: {
+            LedgerModule.positions: {product: source},
+        }.get(ref, default),
+    })()
+    state = type("StateView", (), {
+        "ledger_for_strategy": lambda self, _strategy: ledger,
+    })()
+    ctx = _context(strategy, EventKind.POSITION, [])
+
+    from tools.testers.backtest.modules.strategy_hooks.dispatch import _context_for
+
+    view = _context_for(state, ctx, strategy)
+    view.positions[product].quantity = 99.0
+
+    assert source.quantity == 3.0
