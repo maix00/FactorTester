@@ -15,6 +15,7 @@ from .schedule import (
     create_order_attempt,
     order_status_event,
     order_status_event_if_enabled,
+    order_transition_events_if_enabled,
 )
 
 
@@ -84,9 +85,8 @@ def activate_ready_dependents(state: Any, ctx: Any) -> list[EventDraft]:
                 order.status = OrderStatus.CANCELLED
                 order.reject_reason = "prerequisite close order did not fill"
                 state.order_store.remove_from_live_indexes(order)
-                cancelled_event = order_status_event_if_enabled(
+                drafts.extend(order_transition_events_if_enabled(
                     state, order, timestamp=ctx.timestamp,
-                )
-                if cancelled_event is not None:
-                    drafts.append(cancelled_event)
+                    pending_status=OrderStatus.PENDING_CANCEL,
+                ))
     return drafts

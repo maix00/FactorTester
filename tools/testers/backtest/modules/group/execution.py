@@ -14,6 +14,7 @@ from tools.testers.backtest.modules.order_lifecycle import (
     create_order_attempt,
     order_status_event,
     order_status_event_if_enabled,
+    order_transition_events_if_enabled,
     record_order_action,
 )
 from tools.testers.backtest.modules.order_lifecycle.offsets import (
@@ -82,11 +83,10 @@ def schedule_order_execution(state, ctx) -> None:
                 market_timestamp=price_ts,
                 trading_day_resolver=state.market_data_store.trading_day_resolver,
             )
-            pending_status_event = apply_pending_conflict(
+            pending_status_events = apply_pending_conflict(
                 state, strategy, order, ctx.timestamp, pending, conflict,
             )
-            if pending_status_event is not None:
-                drafts.append(pending_status_event)
+            drafts.extend(pending_status_events)
             attempt = create_order_attempt(
                 state, order, timestamp=execution_ts,
                 market_timestamp=price_ts,
@@ -116,10 +116,10 @@ def should_skip_order(order) -> bool:
 
 def apply_pending_conflict(
     state, strategy, order, timestamp, pending, conflict,
-) -> EventDraft | None:
+) -> tuple[EventDraft, ...]:
     if conflict is not None:
         result = conflict(state, strategy, order, timestamp)
-        return result if isinstance(result, EventDraft) else None
+        return (result,) if isinstance(result, EventDraft) else ()
     stale = pending.get((strategy, order.instrument))
     if (
         stale is not None
@@ -132,7 +132,8 @@ def apply_pending_conflict(
             timestamp=timestamp, reason="pending order conflict",
         )
         stale.status = OrderStatus.CANCELLED
-        return order_status_event_if_enabled(
+        return order_transition_events_if_enabled(
             state, stale, timestamp=timestamp,
+            pending_status=OrderStatus.PENDING_CANCEL,
         )
-    return None
+    return ()

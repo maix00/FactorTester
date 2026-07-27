@@ -93,6 +93,9 @@ def test_changed_target_can_publish_cancel_status_snapshot():
         timestamp=pd.Timestamp("2024-01-02"), status_event_sink=events.append,
     )
 
-    assert len(events) == 1
-    assert events[0].kind is EventKind.ORDER_STATUS
-    assert events[0].payload.status is OrderStatus.CANCELLED
+    assert len(events) == 2
+    assert [event.kind for event in events] == [EventKind.ORDER_STATUS, EventKind.ORDER_STATUS]
+    assert [event.payload.status for event in events] == [
+        OrderStatus.PENDING_UPDATE,
+        OrderStatus.CANCELLED,
+    ]

@@ -72,3 +72,23 @@ def order_status_event_if_enabled(
     if not config.uses_flow("strategy_runtime_on_order_status_event"):
         return None
     return order_status_event(order, timestamp=timestamp, status=status)
+
+
+def order_transition_events_if_enabled(
+    state: Any,
+    order: Any,
+    *,
+    timestamp: Any,
+    pending_status: OrderStatus,
+) -> tuple[EventDraft, ...]:
+    """Return pending-request and terminal snapshots for an internal action."""
+
+    pending = order_status_event_if_enabled(
+        state, order, timestamp=timestamp, status=pending_status,
+    )
+    terminal = order_status_event_if_enabled(
+        state, order, timestamp=timestamp,
+    )
+    if pending is None or terminal is None:
+        return ()
+    return pending, terminal

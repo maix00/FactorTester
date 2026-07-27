@@ -342,9 +342,12 @@ def test_internal_pending_conflict_cancel_emits_status_snapshot():
         pending, conflict=None,
     )
 
-    assert event is not None
-    assert event.kind is EventKind.ORDER_STATUS
-    assert event.payload.status is OrderStatus.CANCELLED
+    assert event
+    assert [item.kind for item in event] == [EventKind.ORDER_STATUS, EventKind.ORDER_STATUS]
+    assert [item.payload.status for item in event] == [
+        OrderStatus.PENDING_CANCEL,
+        OrderStatus.CANCELLED,
+    ]
 
 
 def test_blocked_order_status_is_emitted_once_by_execution_scheduler():
