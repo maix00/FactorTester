@@ -49,6 +49,11 @@ class FilledStrategy(Strategy):
         self.seen.append("on_order_filled")
 
 
+class MutatingOrderStrategy(Strategy):
+    def on_order_filled(self, ctx, order):
+        order.status = OrderStatus.CANCELLED
+
+
 class PositionStrategy(Strategy):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -453,3 +458,22 @@ def test_strategy_context_positions_are_detached_snapshots():
     view.positions[product].quantity = 99.0
 
     assert source.quantity == 3.0
+
+
+def test_order_callbacks_receive_detached_order_snapshots():
+    strategy = MutatingOrderStrategy(alias="order-snapshot")
+    order = Order(
+        instrument="P1", timestamp=pd.Timestamp("2025-01-01"),
+        quantity=1.0, intent_quantity=1.0, strategy=strategy,
+        status=OrderStatus.FILLED,
+    )
+    ctx = _context(
+        strategy, EventKind.ORDER,
+        [EventDraft(EventKind.ORDER, pd.Timestamp("2025-01-01"), strategy, order)],
+    )
+
+    from tools.testers.backtest.modules.strategy_hooks import _call_order_event
+
+    _call_order_event(object(), ctx)
+
+    assert order.status is OrderStatus.FILLED

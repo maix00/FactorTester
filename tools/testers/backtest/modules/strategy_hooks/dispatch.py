@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from copy import deepcopy
 from types import MappingProxyType
 from typing import Any
@@ -99,7 +100,9 @@ def _call_order_event_impl(state: Any, ctx: Any, *, status_axis: bool) -> None:
         if not status_axis and _uses_order_status_axis(state, strategy):
             continue
         for order in ctx.payloads_for(strategy):
-            result = _specific_order_hook(strategy, _context_for(state, ctx, strategy), order)
+            result = _specific_order_hook(
+                strategy, _context_for(state, ctx, strategy), _order_snapshot(order),
+            )
             _emit_intents(ctx, strategy, result)
 
 
@@ -108,6 +111,15 @@ def _uses_order_status_axis(state: Any, strategy: Any) -> bool:
     if not callable(config_for):
         return False
     return config_for(strategy).uses_flow("strategy_runtime_on_order_status_event")
+
+
+def _order_snapshot(order: Any) -> Any:
+    """Detach an order callback from the authoritative lifecycle object."""
+
+    snapshot = copy.copy(order)
+    if hasattr(order, "fields"):
+        snapshot.fields = dict(getattr(order, "fields", {}) or {})
+    return snapshot
 
 
 def _call_position_event(state: Any, ctx: Any) -> None:
