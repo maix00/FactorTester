@@ -24,3 +24,29 @@ struct ProfileWorkspaceView: View {
         }
     }
 }
+
+/// Detail view for a report already indexed locally. It does not require a
+/// server projection request to open.
+struct LocalResearchDetailView: View {
+    let item: LocalResearchDirectoryItem
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "doc.text")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title).font(.title2.weight(.semibold))
+                    Text("本地报告 · \(item.profileName)")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(18)
+            Divider()
+            ResearchStructuredDetailView(record: item.record)
+        }
+    }
+}

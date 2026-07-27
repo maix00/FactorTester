@@ -40,6 +40,7 @@ enum ProfileResearchEmptyState: Equatable {
     case profileLoadFailed
     case noProfiles
     case noWorkPackages
+    case serverAccessUnavailable
 
     var message: String {
         switch self {
@@ -53,6 +54,8 @@ enum ProfileResearchEmptyState: Equatable {
             return "尚未注册 Profile，因此没有可展示的研究。"
         case .noWorkPackages:
             return "已读取本地 Profile，但其绑定的工作区尚无 Work Package。"
+        case .serverAccessUnavailable:
+            return "本地研究可直接查看；登录后才读取服务器研究索引。"
         }
     }
 
@@ -64,6 +67,8 @@ enum ProfileResearchEmptyState: Equatable {
             return "person.crop.circle"
         case .loadingResearch, .noWorkPackages:
             return "chart.xyaxis.line"
+        case .serverAccessUnavailable:
+            return "person.crop.circle.badge.exclamationmark"
         }
     }
 }
@@ -86,6 +91,7 @@ final class ResearchDirectoryController: ObservableObject {
     ) async throws -> Void
 
     @Published private(set) var items: [ResearchDirectoryItem] = []
+    @Published private(set) var localItems: [LocalResearchDirectoryItem] = []
     @Published private(set) var isLoading = false
     @Published private(set) var error: String?
     @Published private(set) var lifecycle: ResearchLifecycleFilter = .active
@@ -125,10 +131,12 @@ final class ResearchDirectoryController: ObservableObject {
                 reason: reason
             )
         }
+        localItems = Self.localItems(from: profiles)
     }
 
     func replaceProfiles(_ profiles: [LocalProfileModel]) {
         self.profiles = profiles
+        localItems = Self.localItems(from: profiles)
     }
 
     func refresh(lifecycle: ResearchLifecycleFilter = .active) async {
@@ -273,6 +281,30 @@ final class ResearchDirectoryController: ObservableObject {
         }
     }
 
+    private static func localItems(
+        from profiles: [LocalProfileModel]
+    ) -> [LocalResearchDirectoryItem] {
+        profiles
+            .flatMap { profile in
+                let workspaceRef = profile.workspaces.first {
+                    !$0.serverWorkspaceRef.isEmpty
+                }?.serverWorkspaceRef ?? ""
+                return profile.researchRecords.map {
+                    LocalResearchDirectoryItem(
+                        profileID: profile.id,
+                        profileName: profile.displayName,
+                        workspaceRef: workspaceRef,
+                        record: $0
+                    )
+                }
+            }
+            .filter { !$0.record.id.isEmpty }
+            .sorted {
+                if $0.title != $1.title { return $0.title < $1.title }
+                return $0.id < $1.id
+            }
+    }
+
     private func normalized(_ value: String) -> String {
         value.hasPrefix("workspace:") ? value : "workspace:\(value)"
     }
@@ -302,7 +334,9 @@ struct ProfileResearchOverview: View {
     let profiles: [LocalProfileModel]
     let profileLoadState: LocalProfileLoadState
     let isActive: Bool
+    let serverAccessAvailable: Bool
     let openWorkPackage: (ResearchDirectoryItem) -> Void
+    let openLocalResearch: (LocalResearchDirectoryItem) -> Void
     @StateObject private var controller: ResearchDirectoryController
     @State private var lifecycle: ResearchLifecycleFilter = .active
 
@@ -310,12 +344,16 @@ struct ProfileResearchOverview: View {
         profiles: [LocalProfileModel],
         profileLoadState: LocalProfileLoadState = .loaded,
         isActive: Bool = true,
-        openWorkPackage: @escaping (ResearchDirectoryItem) -> Void
+        serverAccessAvailable: Bool = true,
+        openWorkPackage: @escaping (ResearchDirectoryItem) -> Void,
+        openLocalResearch: @escaping (LocalResearchDirectoryItem) -> Void
     ) {
         self.profiles = profiles
         self.profileLoadState = profileLoadState
         self.isActive = isActive
+        self.serverAccessAvailable = serverAccessAvailable
         self.openWorkPackage = openWorkPackage
+        self.openLocalResearch = openLocalResearch
         _controller = StateObject(
             wrappedValue: ResearchDirectoryController(profiles: profiles)
         )
@@ -338,26 +376,99 @@ struct ProfileResearchOverview: View {
                     .font(.callout)
                     .foregroundStyle(.orange)
             }
-            if controller.items.isEmpty {
-                emptyContent
-            } else {
+            if !visibleLocalItems.isEmpty {
+                localResearchList
+            }
+            if controller.isLoading && controller.items.isEmpty {
+                serverLoading
+            } else if !controller.items.isEmpty {
                 researchList
                 Button("刷新") {
                     Task { await controller.refresh(lifecycle: lifecycle) }
                 }
                 .buttonStyle(.bordered)
+            } else if controller.localItems.isEmpty {
+                emptyContent
+            } else {
+                serverUnavailableState
             }
         }
         .padding(24)
-        .task(id: "\(isActive)|\(bindingSignature)|\(profileLoadState)|\(lifecycle.rawValue)") {
+        .task(id: "\(isActive)|\(bindingSignature)|\(profileLoadState)|\(lifecycle.rawValue)|\(serverAccessAvailable)") {
             controller.replaceProfiles(profiles)
             // The overview is mounted in HomeView even while hidden. Do not
             // consume the first task run with an empty profile snapshot; wait
             // for the shared profile controller and refresh again whenever
             // this tab becomes active.
-            guard isActive, profileLoadState == .loaded else { return }
+            guard isActive, profileLoadState == .loaded,
+                  serverAccessAvailable else { return }
             await controller.refresh(lifecycle: lifecycle)
         }
+    }
+
+    private var visibleLocalItems: [LocalResearchDirectoryItem] {
+        let serverRefs = Set(controller.items.map { $0.summary.workPackageRef })
+        return controller.localItems.filter {
+            !serverRefs.contains($0.record.graphInstanceRef)
+        }
+    }
+
+    private var localResearchList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("本地研究").font(.headline)
+                Text("立即可用").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+            List(visibleLocalItems) { item in
+                Button { openLocalResearch(item) } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "doc.text")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.title).font(.headline)
+                            Text(item.scopeSummary)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(item.profileName)
+                            Text("本地报告")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 4)
+            }
+            .listStyle(.inset)
+            .frame(minHeight: 120)
+        }
+    }
+
+    private var serverLoading: some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text("正在读取服务器研究索引…")
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.vertical, 18)
+    }
+
+    private var serverUnavailableState: some View {
+        Label(
+            "本地研究已显示；服务器研究索引稍后加载",
+            systemImage: "arrow.triangle.2.circlepath"
+        )
+        .foregroundStyle(.secondary)
+        .padding(.vertical, 18)
     }
 
     private var researchList: some View {
@@ -494,6 +605,7 @@ struct ProfileResearchOverview: View {
     private var emptyState: ProfileResearchEmptyState? {
         guard controller.items.isEmpty else { return nil }
         if controller.isLoading { return .loadingResearch }
+        if !serverAccessAvailable { return .serverAccessUnavailable }
         switch profileLoadState {
         case .loading, .idle:
             return .loadingProfiles

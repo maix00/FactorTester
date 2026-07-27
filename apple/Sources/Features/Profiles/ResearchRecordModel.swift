@@ -111,3 +111,16 @@ struct ResearchRecordModel: Identifiable {
         return normalized.isEmpty || generic ? researchScopeTitle : normalized
     }
 }
+
+/// A local report index entry. It is independent from the server Work
+/// Package projection so the Research page can render immediately.
+struct LocalResearchDirectoryItem: Identifiable {
+    let profileID: String
+    let profileName: String
+    let workspaceRef: String
+    let record: ResearchRecordModel
+
+    var id: String { "\(profileID)|\(record.id)" }
+    var title: String { record.preferredResearchTitle }
+    var scopeSummary: String { record.researchScopeTitle }
+}

@@ -38,16 +38,16 @@ struct ClientTabView: View {
         case .web(let path):
             WebPageView(path: path)
         case .research:
-            if ResearchSessionAccess.canLoad(user: session.user) {
-                ProfileResearchOverview(
-                    profiles: profiles.profiles,
-                    profileLoadState: profiles.loadState,
-                    isActive: isActive,
-                    openWorkPackage: { open(.workPackage($0)) }
-                )
-            } else {
-                researchLoginPrompt
-            }
+            ProfileResearchOverview(
+                profiles: profiles.profiles,
+                profileLoadState: profiles.loadState,
+                isActive: isActive,
+                serverAccessAvailable: ResearchSessionAccess.canLoad(
+                    user: session.user
+                ),
+                openWorkPackage: { open(.workPackage($0)) },
+                openLocalResearch: { open(.localResearch($0)) }
+            )
         case .jobs:
             TestJobsView(openJob: { open(.testJob($0)) })
         case .testJob(let job):
@@ -58,6 +58,8 @@ struct ClientTabView: View {
             } else {
                 researchLoginPrompt
             }
+        case .localResearch(let item):
+            LocalResearchDetailView(item: item)
         case .profiles:
             ProfilesDirectoryView(
                 controller: profiles,

@@ -104,6 +104,27 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testResearchDirectoryPublishesLocalRecordsBeforeServerRefresh() {
+        let profile = LocalProfileModel(json: [
+            "profile_id": "maxa",
+            "display_name": "MaxA",
+            "research_records": [[
+                "record_id": "local-research",
+                "title": "本地研究",
+                "graph_instance_ref": "work-package:local",
+            ]],
+        ])
+
+        let controller = ResearchDirectoryController(profiles: [profile])
+
+        XCTAssertEqual(controller.localItems.map(\.record.id), [
+            "local-research",
+        ])
+        XCTAssertEqual(controller.localItems.first?.profileName, "MaxA")
+        XCTAssertTrue(controller.items.isEmpty)
+    }
+
     func testResearchTreeLanesStayInsideFixedNavigatorWidth() {
         let maximumGraphWidth = ResearchTreeLayout.graphColumnWidth(
             laneCount: ResearchTreeLayout.maximumVisibleBranches
