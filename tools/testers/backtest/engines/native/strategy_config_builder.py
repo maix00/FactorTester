@@ -138,6 +138,11 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
             | _TERM_CARRY_STRATEGY_FLOWS
             | {"precompute_strategy_intents"}
         )
+        # Custom strategies may consume aggregate BAR events directly.  The
+        # scheduler normally registers BAR events only for live factors, so
+        # retain the producer here; BarEventModule filters strategies that do
+        # not actually override Strategy.on_bar.
+        excluded.discard("schedule_bar_events")
     elif strategy_kind == "long_short":
         excluded |= (
             _GROUP_STRATEGY_FLOWS

@@ -105,6 +105,7 @@ def test_custom_strategy_mode_selects_hooks_without_group_flows():
 
     assert "strategy_hook_on_bar" in active
     assert "strategy_hook_on_order_event" in config.active_flow_names
+    assert "schedule_bar_events" in active
     assert "group_quantile_membership" not in active
 
 
