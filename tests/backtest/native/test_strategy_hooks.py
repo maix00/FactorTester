@@ -1,7 +1,8 @@
 import pandas as pd
 import pytest
 
-from tools.testers.backtest.engines.native.events import EventKind
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import (
     Strategy,
     overridden_strategy_callbacks,
@@ -15,6 +16,7 @@ from tools.testers.backtest.engines.native.strategy_hooks import (
     validate_strategy_capabilities,
 )
 from tools.testers.backtest.engines.native.strategy_commands import SubmitOrderCommand
+from tools.testers.backtest.engines.native.timer_events import TimerEvent, TimerSchedule
 from tools.testers.backtest.engines.native.market_events import MarketFeedEventKind
 
 
@@ -100,6 +102,58 @@ def test_context_order_helpers_return_serializable_commands():
     }
 
 
+def test_context_timer_helpers_create_clock_controls():
+    strategy = Strategy(alias="timer-context")
+    context = StrategyContext(
+        strategy,
+        None,
+        None,
+        {},
+        {},
+        pd.Timestamp("2025-01-01 09:00"),
+        pd.Timestamp("2025-01-01 10:00"),
+    )
+
+    timer = context.set_timer("rebalance", pd.Timedelta(minutes=5))
+    alert = context.set_time_alert("close", pd.Timestamp("2025-01-01 09:55"))
+
+    assert isinstance(timer, TimerSchedule)
+    assert timer.first_timestamp == pd.Timestamp("2025-01-01 09:00")
+    assert timer.end_timestamp == pd.Timestamp("2025-01-01 10:00")
+    assert alert.interval is None
+
+
+def test_timer_hook_returns_existing_strategy_intent():
+    class TimerStrategy(Strategy):
+        def on_timer(self, ctx, event):
+            assert event.name == "rebalance"
+            return ctx.order_deltas({"P1": 1.0}, reason="timer")
+
+    strategy = TimerStrategy(alias="timer-hook")
+    timestamp = pd.Timestamp("2025-01-01 09:00")
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={strategy: [EventDraft(
+            EventKind.TIMER,
+            timestamp,
+            strategy,
+            TimerEvent("rebalance", timestamp, generation=1),
+        )]},
+        event_kind=EventKind.TIMER,
+    )
+
+    from tools.testers.backtest.modules.strategy_hooks import _call_timer
+
+    _call_timer(object(), ctx)
+
+    pending = ctx._event_queue.snapshot_head()
+    assert len(pending) == 1
+    assert pending[0].kind is EventKind.SIGNAL
+    assert pending[0].payload["deltas"] == {"P1": 1.0}
+
+
 def test_context_market_views_are_read_only():
     strategy = Strategy(alias="readonly-context")
     context = StrategyContext(strategy, None, None, {"P1": 1.0}, {"P1": 10.0})
@@ -152,3 +206,13 @@ def test_capability_validation_reports_missing_order_status_and_position_axes():
         "strategy requires order status events",
         "strategy requires position lifecycle events",
     ]
+
+
+def test_capability_validation_reports_missing_timer_axis():
+    report = validate_strategy_capabilities(
+        StrategyRequirements(needs_timer_events=True),
+        ExecutionCapabilities(),
+    )
+
+    assert report["ok"] is False
+    assert report["errors"] == ["strategy requires timer events"]

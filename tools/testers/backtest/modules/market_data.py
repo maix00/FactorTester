@@ -451,6 +451,11 @@ class MarketDataModule(ExecutableModule):
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=1,
         description="读取行情时点市场快照",
     )
+    lookup_current_prices_on_timer: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_timer",
+        phase=Phase.PER_EVENT, event_kind=EventKind.TIMER, order=1,
+        description="读取定时时点市场快照",
+    )
     lookup_current_prices_on_order: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
         name="lookup_current_prices_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
@@ -512,7 +517,8 @@ class MarketDataModule(ExecutableModule):
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
         causal_valuation,
         initialize_field_state, handle_field_changes,
-        lookup_current_prices_on_bar, lookup_current_prices_on_signal,
+        lookup_current_prices_on_bar, lookup_current_prices_on_timer,
+        lookup_current_prices_on_signal,
         lookup_current_prices_on_order, lookup_current_prices_on_trade_intent,
         lookup_current_prices_on_ledger,
         lookup_historical_fields_on_signal, lookup_historical_fields_on_order,

@@ -1,0 +1,130 @@
+"""Ephemeral Profile Strategy Actor source bundles for one research Run."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import time
+import uuid
+from typing import Any, Iterable
+
+import settings as Settings
+
+
+MAX_FILES = 200
+MAX_SOURCE_BYTES = 20 * 1024 * 1024
+_SCOPE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _root() -> Path:
+    path = Path(Settings.CACHE_DB_PATH).expanduser().resolve().parent / "transient_strategy_sources"
+    path.mkdir(parents=True, mode=0o700, exist_ok=True)
+    return path
+
+
+def _path(scope_id: str) -> Path:
+    if not _SCOPE.fullmatch(str(scope_id or "")):
+        raise ValueError("invalid transient strategy source scope")
+    return _root() / scope_id
+
+
+def validate_entries(raw: Any) -> list[dict[str, str]]:
+    if raw in (None, []):
+        return []
+    if not isinstance(raw, list) or len(raw) > MAX_FILES:
+        raise ValueError("transient_strategy_sources must be a bounded array")
+    result, seen, total = [], set(), 0
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("transient strategy source must be an object")
+        name = str(item.get("path") or "").replace("\\", "/").strip()
+        parts = name.split("/")
+        if len(parts) < 2 or parts[0] != "strategies" or not name.endswith(".py") or ".." in parts:
+            raise ValueError("transient strategy source path must be strategies/<name>.py")
+        if name in seen:
+            raise ValueError(f"duplicate transient strategy source: {name}")
+        source = item.get("source_code")
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError(f"transient strategy source is empty: {name}")
+        encoded = source.encode("utf-8")
+        total += len(encoded)
+        if total > MAX_SOURCE_BYTES:
+            raise ValueError("transient strategy source bundle exceeds size limit")
+        seen.add(name)
+        result.append({"path": name, "source_code": source})
+    return result
+
+
+def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    validated = validate_entries(list(entries))
+    if not validated:
+        return {"scope_id": "", "files": [], "mode": "metadata_only"}
+    scope_id = uuid.uuid4().hex
+    root = _path(scope_id)
+    try:
+        files = []
+        for entry in validated:
+            target = root / entry["path"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            fd = os.open(target, flags, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(entry["source_code"].encode("utf-8"))
+            files.append({
+                "path": entry["path"],
+                "source_sha256": hashlib.sha256(entry["source_code"].encode()).hexdigest(),
+                "source_bytes": len(entry["source_code"].encode()),
+            })
+        (root / "manifest.json").write_text(json.dumps({"owner": owner, "created_at": time.time(), "files": files}), encoding="utf-8")
+    except Exception:
+        shutil.rmtree(root, ignore_errors=True)
+        raise
+    return {"scope_id": scope_id, "mode": "transient_run_source", "files": files}
+
+
+def load_source(scope_id: str, source_path: str, *, owner: str) -> str | None:
+    try:
+        root = _path(scope_id)
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        if str(manifest.get("owner") or "") != str(owner or ""):
+            return None
+        item = next((value for value in manifest.get("files", []) if value.get("path") == source_path), None)
+        if not item:
+            return None
+        source = (root / source_path).read_text(encoding="utf-8")
+        return source if hashlib.sha256(source.encode()).hexdigest() == item.get("source_sha256") else None
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def cleanup_scope(scope_id: str) -> bool:
+    try:
+        root = _path(scope_id)
+        if root.exists():
+            shutil.rmtree(root)
+            return True
+    except (OSError, ValueError):
+        return False
+    return False
+
+
+def cleanup_stale_scopes(*, max_age_seconds: float = 3600.0) -> int:
+    now = time.time()
+    removed = 0
+    for candidate in _root().iterdir():
+        if not candidate.is_dir() or not _SCOPE.fullmatch(candidate.name):
+            continue
+        try:
+            manifest = json.loads((candidate / "manifest.json").read_text(encoding="utf-8"))
+            created = float(manifest.get("created_at") or 0.0)
+            if created and now - created < max_age_seconds:
+                continue
+            shutil.rmtree(candidate)
+            removed += 1
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return removed

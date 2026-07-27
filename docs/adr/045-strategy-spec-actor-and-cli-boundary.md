@@ -25,15 +25,37 @@ native 回测曾把用户策略、策略回调、账本拓扑、策略簿 policy
 3. **Strategy Actor**：用户实现的一个对象实例，而不是一份回调函数表。
    每次回测只创建/绑定一次，回放期间由 scheduler 按因果事件顺序反复调用；
    它可以在实例字段中保存上一次事件的状态，通过 `on_start`、`on_bar`、
-   `on_market_feed`、`on_order_event`、`on_position_event` 等回调返回 typed intent 或
+   `on_market_feed`、`on_timer`、`on_order_event`、`on_position_event` 等回调返回 typed intent 或
    `StrategyCommand`。它不直接改变持仓、订单或现金，因此不能绕过执行层。
 4. **StrategyContext**：只读市场/持仓视图和命令工厂。Actor 不拿到 scheduler、
    Flow、ledger、broker 或任意可变运行时 store 的引用。
+
+策略源码与因子源码分属不同的工作区，不能把 Actor 放进
+`custom_factors/`：
+
+```text
+personal-workspace/
+├── factor-library/              # canonical factor Git repo
+└── strategy-library/            # canonical Strategy Actor Git repo
+profiles/<profile-id>/
+├── factor-worktree/             # Profile factor source
+└── strategy-worktree/           # Profile Strategy source
+```
+
+`strategy-library` 使用 `.strategy_workspace/manifest.json`，Profile 的
+`strategy_workspace_binding` 使用 `local-strategy-git`，与因子绑定、同步和
+回滚凭据完全分离。个人 canonical 库不会因创建 Profile 自动合并；Profile
+源码只在显式提交 Run 时以 `transient_run_source` 上传，Job 终止后清理。
 
 `Strategy` 本身就是用户实现的长期存活 Actor；不再提供另一个同义构造名称。
 所有可选的 `on_xxx` 回调都属于同一个 Actor 表面，
 运行时通过统一的 callback registry 判断用户实际覆写了哪些回调，不再让 BAR
 注册器和订单事件调度器各自维护一套判断逻辑。
+
+`on_bar` 和 `on_timer` 的触发来源不同：前者由行情 BAR 事件驱动，后者由时钟
+产生 `TimerEvent`。两者都只能返回 typed intent 或定时器控制请求；它们都不会
+直接调用下游 Flow。`StrategyRuntime` 是把 Actor 回调绑定到 scheduler 的适配模块，
+而 sizing、risk、execution、fee、ledger 等 Flow 仍是这些意图的唯一执行者。
 
 订单生命周期的通用入口采用行业通用的 `on_order_event`；
 `on_order_filled`、`on_order_pending_cancel`、`on_order_canceled` 等具体状态回调优先级更高，未匹配时再
@@ -59,6 +81,10 @@ native 回测曾把用户策略、策略回调、账本拓扑、策略簿 policy
 - `cancel_order(order_id)`
 - `replace_order(order_id, quantity)`
 - `close_position(product, quantity=None)`
+
+定时器控制是另一类 scheduler 请求：`set_timer`、`set_time_alert` 和
+`cancel_timer` 只管理 `TimerEvent` 的产生，不属于订单命令，也不会进入
+SIGNAL 的订单意图解码器。
 
 命令是不可变请求，不执行交易。Strategy hook adapter 在 SIGNAL Flow 中将
 提交/平仓/改单转换为现有 `OrderDeltaIntent`，撤单由订单生命周期模块验证
@@ -105,7 +131,11 @@ factortester strategy list
 factortester strategy template list
 factortester strategy template show group_quantile
 factortester strategy validate --spec strategy.yaml
-factortester backtest run --strategy strategy.yaml
+factortester strategy actor inspect profiles/demo/strategy-worktree/strategies/demo/actor.py
+factortester strategy actor scaffold Demo --output profiles/demo/strategy-worktree/strategies/demo
+factortester profile strategy-worktree canonical-register --owner-ref <principal>
+factortester run preview --strategy-spec strategy.yaml
+factortester run submit --strategy-spec strategy.yaml --profile-strategy-worktree <path>
 ```
 
 `strategy.yaml` 的最小形状为：
@@ -116,11 +146,18 @@ parameters: {groups: 5, rebalance: 1d}
 data: {fields: [close, volume]}
 account: {ledger: default}
 execution: {liquidity: infinite}
+workspace: profile:demo
+strategy_id: group-1
+entrypoint: Demo
 ```
 
-自定义 Actor 仅替换 `source`，例如 `profile:my-profile/strategy.py`；其余
+自定义 Actor 仅替换 `source`，例如 `profile:strategies/demo/actor.py`；其余
 配置形状不变。`validate` 输出规范化 `StrategySpec` 和缺失能力，不输出 Flow
 或 StrategyBook 的内部 repr。
+
+`profile:` 和 `personal:` 后面的路径必须是相应工作区内的相对路径，不能包含
+绝对路径或 `..`。`entrypoint` 是源码中继承 native `Strategy` 的类名；CLI 在
+静态检查阶段只解析 AST，Run 执行阶段才在私有临时源码 scope 中实例化它。
 
 ## 迁移与兼容
 
@@ -133,5 +170,5 @@ execution: {liquidity: infinite}
 
 1. 增加 `StrategySpec` schema、模板注册表和 CLI 命令
 2. 将 routing/sizing/pending decision 冻结为统一 decision envelope
-3. 审计并决定是否需要账户状态/定时器事件，不在没有明确归属前伪造公开 hook
+3. 审计账户状态事件；定时器事件已通过独立 `TimerEvent` 和 `on_timer` 公开
 4. 为 custom Actor 增加命令、订单生命周期和多账户路由的端到端验收

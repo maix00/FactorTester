@@ -42,6 +42,9 @@ def list_templates(as_json: bool) -> None:
             "label": item.label,
             "description": item.description,
             "parameters": list(item.parameters),
+            "required_fields": list(item.required_fields),
+            "required_data": list(item.required_data),
+            "actor_callbacks": list(item.actor_callbacks),
         }
         for item in BUILTIN_TEMPLATES
     ]
@@ -63,6 +66,9 @@ def show_template(key: str, as_json: bool) -> None:
             "label": item.label,
             "description": item.description,
             "parameters": list(item.parameters),
+            "required_fields": list(item.required_fields),
+            "required_data": list(item.required_data),
+            "actor_callbacks": list(item.actor_callbacks),
         },
         as_json,
     )
@@ -84,7 +90,12 @@ def validate_strategy(spec_path: Path, as_json: bool) -> None:
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     _emit(
-        {"valid": True, "path": str(spec_path.resolve()), "strategy": spec.normalized()},
+        {
+            "valid": True,
+            "path": str(spec_path.resolve()),
+            "strategy": spec.normalized(),
+            "dependencies": spec.dependencies(),
+        },
         as_json,
     )
 

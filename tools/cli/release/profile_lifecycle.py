@@ -78,6 +78,10 @@ class ProfileLifecycle:
                 "branch": f"agent/{profile_id}",
                 "worktree_path": str(workspace / "factor-worktree"),
             },
+            "recommended_strategy_worktree": {
+                "branch": f"strategy/{profile_id}",
+                "worktree_path": str(workspace / "strategy-worktree"),
+            },
         })
 
     def deactivate(self, profile_id: str) -> dict[str, Any]:

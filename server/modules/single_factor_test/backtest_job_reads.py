@@ -107,6 +107,7 @@ def _submission_context(job) -> dict[str, object]:
 _PRIVATE_JOB_KEYS = frozenset({
     "run_token", "_owner", "password", "secret", "api_key",
     "source_code", "transient_factor_source_scope_id",
+    "transient_strategy_source_scope_id",
 })
 
 

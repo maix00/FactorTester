@@ -48,3 +48,13 @@ def test_strategy_validate_rejects_unknown_template(tmp_path):
 
     assert result.exit_code != 0
     assert "unknown strategy template" in result.output
+
+
+def test_custom_strategy_source_stays_relative_to_its_workspace():
+    spec = StrategySpec.from_mapping({
+        "source": "profile:strategies/demo/actor.py",
+        "workspace": "profile:demo",
+        "entrypoint": "Demo",
+    })
+    assert spec.normalized()["entrypoint"] == "Demo"
+    assert spec.dependencies()["source_kind"] == "profile"

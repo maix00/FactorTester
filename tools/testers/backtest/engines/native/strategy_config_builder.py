@@ -55,6 +55,7 @@ _STRATEGY_RUNTIME_FLOWS = {
     "strategy_runtime_on_start",
     "strategy_runtime_on_market_feed",
     "strategy_runtime_on_bar",
+    "strategy_runtime_on_timer",
     "strategy_runtime_on_signal_intent",
     "strategy_runtime_on_order_event",
     "strategy_runtime_on_order_status_event",

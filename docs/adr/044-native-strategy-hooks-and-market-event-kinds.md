@@ -78,12 +78,14 @@ factor state that was updated by a BAR. Its timestamp therefore means
 Signals can be sparse, session-aligned, or derived from a data source; they
 must not be emitted when the relevant market input is unavailable.
 
-A future timer API must introduce a separate clock-owned event payload and
-event kind. The clock/timer service will own registration, cancellation,
-repeat policy, timezone/DST handling, and deterministic same-timestamp
-ordering. A timer callback must not be implemented by reusing SIGNAL or by
-creating a synthetic BAR. Until that ownership contract exists, native keeps
-clock/timer events internal and does not expose `on_timer`.
+Native now exposes this boundary as `TimerEvent` and `EventKind.TIMER`.
+`StrategyContext.set_timer()` returns a typed recurring schedule, while
+`set_time_alert()` returns a one-shot schedule and `cancel_timer()` returns a
+cancel request. The scheduler owns registration, cancellation, repeat policy,
+and deterministic same-timestamp ordering. A timer callback must not be
+implemented by reusing SIGNAL or by creating a synthetic BAR. Recurring
+timers are bounded by the strategy run window or an explicit end timestamp so
+backtests cannot create an unbounded queue.
 
 `BarStrategy` consumes aggregate BAR events only. When a user has only L2/L3
 data but wants a bar strategy, a separate `MarketDataAggregator` actor must
@@ -118,7 +120,8 @@ FIELD_CHANGE
 → BAR
 → ORDER (existing orders consume the observation)
 → POSITION (a successful fill updates a position)
-→ SIGNAL (strategy decisions)
+→ TIMER (clock-driven strategy callback)
+→ SIGNAL (factor/strategy decision)
 → LEDGER
 ```
 
@@ -140,7 +143,8 @@ timestamp and therefore goes through the existing order pipeline.
   fees, margin, DMTM, cancellation, replacement, and residual orders.
 - Position events are emitted only after a fill is posted to the ledger. They
   carry immutable snapshots and never grant a strategy a mutable ledger handle.
-- Account/ledger and clock/timer events remain internal native infrastructure;
-  exposing them later requires an explicit payload and ownership contract.
+- Account/ledger events remain internal native infrastructure. Timer events are
+  public only through `StrategyContext` controls and `on_timer`; they do not
+  expose the queue or ledger.
 - Adding a new market-data format only adds a payload type and a hook adapter;
   it does not multiply scheduler phases or rewrite Strategy authors' code.

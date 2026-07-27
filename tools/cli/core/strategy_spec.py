@@ -13,23 +13,51 @@ class StrategyTemplate:
     label: str
     description: str
     parameters: tuple[str, ...] = ()
+    required_fields: tuple[str, ...] = ()
+    required_data: tuple[str, ...] = ()
+    actor_callbacks: tuple[str, ...] = ()
 
 
 BUILTIN_TEMPLATES: tuple[StrategyTemplate, ...] = (
-    StrategyTemplate("group_quantile", "分组多空", "按横截面信号分组并生成目标仓位", ("groups", "rebalance")),
-    StrategyTemplate("threshold", "阈值策略", "按信号阈值产生目标仓位", ("entry", "exit")),
-    StrategyTemplate("long_short", "多空组合", "将多个信号角色组合成多空目标", ("long", "short")),
-    StrategyTemplate("term_carry", "Carry 策略", "按期限结构生成 Carry 交易意图", ("near", "far")),
+    StrategyTemplate(
+        "group_quantile", "分组多空", "按横截面信号分组并生成目标仓位",
+        ("groups", "rebalance"),
+        ("factor", "products", "split_count", "group_index", "position_policy"),
+        ("factor_value", "current_prices", "tradable_status"),
+        ("on_start", "on_bar", "on_stop"),
+    ),
+    StrategyTemplate(
+        "threshold", "阈值策略", "按信号阈值产生目标仓位", ("entry", "exit"),
+        ("factor", "products", "entry_threshold", "exit_threshold"),
+        ("factor_value", "current_prices", "tradable_status"),
+        ("on_start", "on_bar", "on_stop"),
+    ),
+    StrategyTemplate(
+        "long_short", "多空组合", "将多个信号角色组合成多空目标", ("long", "short"),
+        ("long_strategy", "short_strategy", "gross_weight"),
+        ("target_weights", "current_prices"),
+        ("on_start", "on_bar", "on_stop"),
+    ),
+    StrategyTemplate(
+        "term_carry", "Carry 策略", "按期限结构生成 Carry 交易意图", ("near", "far"),
+        ("factor", "products", "near_rank", "far_rank"),
+        ("term_structure", "current_prices", "tradable_status"),
+        ("on_start", "on_bar", "on_stop"),
+    ),
 )
 
 
 @dataclass(frozen=True)
 class StrategySpec:
     source: str
+    workspace: str = "profile"
+    strategy_id: str = ""
+    entrypoint: str = ""
     parameters: Mapping[str, Any] = field(default_factory=dict)
     data: Mapping[str, Any] = field(default_factory=dict)
     account: Mapping[str, Any] = field(default_factory=dict)
     execution: Mapping[str, Any] = field(default_factory=dict)
+    requirements: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "StrategySpec":
@@ -38,15 +66,27 @@ class StrategySpec:
         source = str(value.get("source") or "").strip()
         if not source:
             raise ValueError("strategy spec requires source")
-        if not (source.startswith("builtin:") or source.startswith("profile:")):
-            raise ValueError("strategy source must use builtin:<name> or profile:<path>")
+        if not any(source.startswith(prefix) for prefix in ("builtin:", "profile:", "personal:")):
+            raise ValueError("strategy source must use builtin:<name>, profile:<path>, or personal:<path>")
+        workspace = str(value.get("workspace") or "profile").strip()
+        if workspace not in {"profile", "personal"} and not workspace.startswith("profile:"):
+            raise ValueError("strategy workspace must be profile, personal, or profile:<id>")
+        strategy_id = str(value.get("strategy_id") or "").strip()
+        entrypoint = str(value.get("entrypoint") or "Strategy").strip()
         sections = {}
-        for name in ("parameters", "data", "account", "execution"):
+        for name in ("parameters", "data", "account", "execution", "requirements"):
             section = value.get(name) or {}
             if not isinstance(section, Mapping):
                 raise ValueError(f"strategy spec {name} must be an object")
             sections[name] = dict(section)
-        return cls(source=source, **sections)
+        _validate_source_path(source)
+        return cls(
+            source=source,
+            workspace=workspace,
+            strategy_id=strategy_id,
+            entrypoint=entrypoint,
+            **sections,
+        )
 
     @property
     def source_kind(self) -> str:
@@ -61,10 +101,32 @@ class StrategySpec:
             "source": self.source,
             "source_kind": self.source_kind,
             "source_name": self.source_name,
+            "workspace": self.workspace,
+            "strategy_id": self.strategy_id,
+            "entrypoint": self.entrypoint,
             "parameters": dict(self.parameters),
             "data": dict(self.data),
             "account": dict(self.account),
             "execution": dict(self.execution),
+            "requirements": dict(self.requirements),
+        }
+
+    def dependencies(self) -> dict[str, Any]:
+        """Return semantic requirements without exposing internal Flows."""
+        if self.source_kind != "builtin":
+            return {
+                "source_kind": self.source_kind,
+                "source_name": self.source_name,
+                "required_fields": sorted(self.requirements.get("fields", [])),
+                "required_data": sorted(self.requirements.get("data", [])),
+            }
+        template = template_for(self.source_name)
+        return {
+            "source_kind": "builtin",
+            "source_name": template.key,
+            "required_fields": list(template.required_fields),
+            "required_data": list(template.required_data),
+            "actor_callbacks": list(template.actor_callbacks),
         }
 
 
@@ -94,3 +156,11 @@ def load_spec(path: Path) -> StrategySpec:
         except json.JSONDecodeError as exc:
             raise ValueError("strategy spec must be JSON or YAML") from exc
     return StrategySpec.from_mapping(value)
+
+
+def _validate_source_path(source: str) -> None:
+    kind, name = source.split(":", 1)
+    if kind in {"profile", "personal"}:
+        path = Path(name)
+        if path.is_absolute() or ".." in path.parts or not name.strip():
+            raise ValueError("strategy source path must be relative and stay in its workspace")

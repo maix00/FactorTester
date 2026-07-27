@@ -6,3 +6,5 @@ from tools.testers.backtest.engines.native.fields import FieldRef
 
 
 emitted_signal: FieldRef[Any] = FieldRef("hook_emitted_signal")
+
+emitted_timer: FieldRef[Any] = FieldRef("hook_timer_command")

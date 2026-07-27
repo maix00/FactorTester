@@ -12,10 +12,10 @@ from tools.testers.backtest.modules.target import TargetStrategyModule
 
 from .dispatch import (
     _call_bar, _call_market_feed, _call_order_event, _call_order_status_event,
-    _call_position_event,
+    _call_position_event, _call_timer,
     _call_start, _call_stop,
 )
-from .fields import emitted_signal
+from .fields import emitted_signal, emitted_timer
 from .intent import _apply_signal_intent
 
 
@@ -28,22 +28,23 @@ class StrategyRuntime(ExecutableModule):
     emitted_signal: ClassVar = emitted_signal
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "hook_emitted_signal": FieldDefinition(public=False, display_value_kind="event_draft"),
+        "hook_timer_command": FieldDefinition(public=False, display_value_kind="timer_command"),
     }
 
     on_start: ClassVar[Flow] = Flow(
-        "strategy_runtime_on_start", inputs=(), outputs=(), phase=Phase.PRE_REPLAY,
+        "strategy_runtime_on_start", inputs=(), outputs=(emitted_timer,), phase=Phase.PRE_REPLAY,
         order=1000, strategy_scoped=True, description="初始化自定义策略",
         compute=lambda state, ctx: _call_start(state, ctx),
     )
     on_market_feed: ClassVar[Flow] = Flow(
         "strategy_runtime_on_market_feed", inputs=(MarketDataModule.current_prices,),
-        outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.MARKET_FEED,
+        outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.MARKET_FEED,
         order=1000, strategy_scoped=True, event_payload_inputs=("market_feed",),
         description="处理原始行情源事件", compute=lambda state, ctx: _call_market_feed(state, ctx),
     )
     on_bar: ClassVar[Flow] = Flow(
         "strategy_runtime_on_bar", inputs=(MarketDataModule.current_prices,),
-        outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.BAR,
+        outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.BAR,
         order=50, strategy_scoped=True, event_payload_inputs=("bar",),
         description="处理 BAR 策略事件", compute=lambda state, ctx: _call_bar(state, ctx),
     )
@@ -62,24 +63,32 @@ class StrategyRuntime(ExecutableModule):
     )
     on_order_event: ClassVar[Flow] = Flow(
         "strategy_runtime_on_order_event", inputs=(MarketDataModule.current_prices,),
-        outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
+        outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
         order=950, strategy_scoped=True, event_payload_inputs=("order",),
         description="处理订单生命周期事件",
         compute=lambda state, ctx: _call_order_event(state, ctx),
     )
     on_order_status_event: ClassVar[Flow] = Flow(
         "strategy_runtime_on_order_status_event", inputs=(MarketDataModule.current_prices,),
-        outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER_STATUS,
+        outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER_STATUS,
         order=950, strategy_scoped=True, event_payload_inputs=("order_status",),
         description="处理订单状态变化事件",
         compute=lambda state, ctx: _call_order_status_event(state, ctx),
     )
     on_position_event: ClassVar[Flow] = Flow(
         "strategy_runtime_on_position_event", inputs=(MarketDataModule.current_prices,),
-        outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.POSITION,
+        outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.POSITION,
         order=950, strategy_scoped=True, event_payload_inputs=("position",),
         description="处理持仓生命周期事件",
         compute=lambda state, ctx: _call_position_event(state, ctx),
+    )
+    on_timer: ClassVar[Flow] = Flow(
+        "strategy_runtime_on_timer", inputs=(MarketDataModule.current_prices,),
+        outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.TIMER,
+        order=2, after=(MarketDataModule.lookup_current_prices_on_timer,),
+        strategy_scoped=True, event_payload_inputs=("timer",),
+        description="处理时钟定时器事件",
+        compute=lambda state, ctx: _call_timer(state, ctx),
     )
     on_stop: ClassVar[Flow] = Flow(
         "strategy_runtime_on_stop", inputs=(), outputs=(), phase=Phase.POST_REPLAY,
@@ -89,6 +98,5 @@ class StrategyRuntime(ExecutableModule):
 
     flows: ClassVar[tuple[Flow, ...]] = (
         on_start, on_market_feed, on_bar, on_signal_intent,
-        on_order_event, on_order_status_event, on_stop,
-        on_position_event,
+        on_order_event, on_order_status_event, on_position_event, on_timer, on_stop,
     )

@@ -7,6 +7,7 @@ from typing import Any
 from .output import emit_group_run_outputs
 from .preparation import prepare_group_run_spec
 from .step_control import build_step_callback
+from .strategy_loader import strategy_objects_from_payload
 
 
 def execute_group_run_spec(
@@ -24,6 +25,7 @@ def execute_group_run_spec(
     payload = prepared["payload"]
     account = BacktestRunState()
     strategy_book = strategy_book_from_payload(payload.get("strategy_book"))
+    strategy_objects = strategy_objects_from_payload(payload)
     ledger_configs = payload.get("ledger_configs")
     if ledger_configs is not None and not isinstance(ledger_configs, dict):
         raise ValueError("ledger_configs 必须是对象")
@@ -32,6 +34,7 @@ def execute_group_run_spec(
         prepared["resolved_settings_by_alias"],
         strategy_book=strategy_book,
         ledger_configs=ledger_configs,
+        strategies_by_alias=strategy_objects,
     )
     account.runtime_info_sink = sink
     account.market_data_request = {

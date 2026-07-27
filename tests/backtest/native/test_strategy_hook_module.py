@@ -275,6 +275,7 @@ def test_custom_strategy_mode_selects_hooks_without_group_flows():
     config = next(iter(build_strategy_configs({"custom": {"strategy_kind": "custom"}}).values()))
 
     assert "strategy_runtime_on_bar" in active
+    assert "strategy_runtime_on_timer" in active
     assert "strategy_runtime_on_order_event" in config.active_flow_names
     assert "schedule_bar_events" in active
     assert "group_quantile_membership" not in active

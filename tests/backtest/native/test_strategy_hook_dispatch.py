@@ -10,6 +10,7 @@ from tools.testers.backtest.engines.native.orders.enums import OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.strategy_hooks import StrategyContext
+from tools.testers.backtest.engines.native.timer_events import TimerEvent
 
 
 def _context(strategy, kind, payload):
@@ -79,3 +80,28 @@ def test_book_snapshot_dispatches_to_specific_hook():
     _call_market_feed(object(), _context(strategy, EventKind.MARKET_FEED, event))
 
     assert strategy.seen == ["on_book_snapshot"]
+
+
+def test_on_start_timer_control_enters_clock_queue():
+    class TimerStrategy(Strategy):
+        def on_start(self, ctx: StrategyContext):
+            return ctx.set_time_alert("open", pd.Timestamp("2025-01-01 09:30"))
+
+    strategy = TimerStrategy(alias="timer-start")
+    queue = EventQueue()
+    ctx = FlowContext(
+        timestamp=None,
+        event_queue=queue,
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={strategy: []},
+    )
+
+    from tools.testers.backtest.modules.strategy_hooks import _call_start
+
+    _call_start(object(), ctx)
+
+    pending = queue.snapshot_head()
+    assert len(pending) == 1
+    assert pending[0].kind is EventKind.TIMER
+    assert isinstance(pending[0].payload, TimerEvent)
+    assert pending[0].payload.name == "open"

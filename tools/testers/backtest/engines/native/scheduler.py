@@ -654,7 +654,7 @@ class FlowContext:
     def set_for(self, ref: "FieldRef", strategy: "Strategy", value: Any) -> None:
         self._record_contract_access("write", ref)
         self._values_by_strategy.setdefault(ref, {})[strategy] = value
-        self._push_if_event(value)
+        self._push_if_event(value, strategy)
 
     def enter_flow(self, flow: ResolvedFlow) -> None:
         self._active_flow = flow
@@ -754,7 +754,14 @@ class FlowContext:
             return self.event_kind.name.lower()
         return "unknown"
 
-    def _push_if_event(self, value: Any) -> None:
+    def _push_if_event(self, value: Any, strategy: "Strategy | None" = None) -> None:
+        from .timer_events import TimerCancel, TimerSchedule
+
+        if isinstance(value, (TimerSchedule, TimerCancel)):
+            if strategy is None:
+                raise SchedulerError("timer control requires a strategy-scoped output")
+            self._event_queue.apply_timer_control(strategy, value)
+            return
         if isinstance(value, EventDraft):
             self._event_queue.push_event(value)
         elif isinstance(value, list) and value and isinstance(value[0], EventDraft):
@@ -844,6 +851,66 @@ class EventQueue:
         self._heap: list[tuple[pd.Timestamp, EventKind, int, int, EventDraft]] = []
         self._counter = itertools.count()
         self._dispatchers: dict[EventKind, Callable[[list[EventDraft]], None]] = {}
+        self._timer_generations = itertools.count(1)
+        self._timers: dict[tuple[Any, str], tuple[int, Any]] = {}
+
+    def apply_timer_control(self, strategy: "Strategy", control: Any) -> None:
+        """Apply a strategy timer request without exposing queue internals."""
+
+        from .timer_events import TimerCancel, TimerEvent, TimerSchedule
+
+        key = (strategy, getattr(control, "name", ""))
+        if isinstance(control, TimerCancel):
+            self._timers.pop(key, None)
+            return
+        if not isinstance(control, TimerSchedule):
+            raise TypeError(f"unsupported timer control: {type(control).__name__}")
+        generation = next(self._timer_generations)
+        self._timers[key] = (generation, control)
+        self.push_event(EventDraft(
+            EventKind.TIMER,
+            control.first_timestamp,
+            strategy,
+            payload=TimerEvent(control.name, control.first_timestamp, generation=generation),
+        ))
+
+    def _timer_event_active(self, draft: EventDraft) -> bool:
+        from .timer_events import TimerEvent
+
+        event = draft.payload
+        if not isinstance(event, TimerEvent):
+            return True
+        registration = self._timers.get((draft.strategy, event.name))
+        return registration is not None and registration[0] == event.generation
+
+    def _advance_timer(self, draft: EventDraft) -> None:
+        from .timer_events import TimerEvent
+
+        event = draft.payload
+        if not isinstance(event, TimerEvent):
+            return
+        registration = self._timers.get((draft.strategy, event.name))
+        if registration is None or registration[0] != event.generation:
+            return
+        generation, schedule = registration
+        if schedule.interval is None:
+            self._timers.pop((draft.strategy, event.name), None)
+            return
+        next_timestamp = event.timestamp + schedule.interval
+        if schedule.end_timestamp is not None and next_timestamp > schedule.end_timestamp:
+            self._timers.pop((draft.strategy, event.name), None)
+            return
+        self.push_event(EventDraft(
+            EventKind.TIMER,
+            next_timestamp,
+            draft.strategy,
+            payload=TimerEvent(
+                event.name,
+                next_timestamp,
+                occurrence=event.occurrence + 1,
+                generation=generation,
+            ),
+        ))
 
     def set_dispatcher(self, kind: EventKind, dispatcher: Callable[[list[EventDraft]], None]) -> None:
         self._dispatchers[kind] = dispatcher
@@ -888,9 +955,16 @@ class EventQueue:
                 and self._heap[0][1] == first_kind
             ):
                 batch.append(heapq.heappop(self._heap)[4])
+            if first.kind is EventKind.TIMER:
+                batch = [draft for draft in batch if self._timer_event_active(draft)]
+                if not batch:
+                    continue
             dispatcher = self._dispatchers.get(first.kind)
             if dispatcher is not None:
                 dispatcher(batch)
+            if first.kind is EventKind.TIMER:
+                for draft in batch:
+                    self._advance_timer(draft)
 
 
 class _ProgressTracker:

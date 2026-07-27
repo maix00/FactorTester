@@ -14,6 +14,7 @@ from tools.cli.core.context import client_from_config, requested_ports
 from tools.cli.core.errors import friendly_errors
 from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
+from tools.cli.core.strategy_spec import load_spec
 
 
 def _json(value: Any) -> str:
@@ -59,6 +60,40 @@ def _load_profile_factor_sources(root: Path | None) -> list[dict[str, str]]:
     if not sources:
         raise click.ClickException("Profile worktree 没有可上传的 custom_factors/*.py")
     return sources
+
+
+def _load_strategy_bundle(root: Path | None) -> list[dict[str, str]]:
+    """Upload only actor source files from a Profile strategy worktree."""
+    if root is None:
+        return []
+    target = root.expanduser().resolve()
+    manifest = target / ".strategy_workspace" / "manifest.json"
+    source_dir = target / "strategies"
+    if not manifest.is_file() or not source_dir.is_dir():
+        raise click.ClickException(
+            "--profile-strategy-worktree 必须指向带 .strategy_workspace/manifest.json 的 Profile strategy-worktree"
+        )
+    sources: list[dict[str, str]] = []
+    for path in sorted(source_dir.rglob("*.py")):
+        if not path.is_file() or ".." in path.relative_to(target).parts:
+            continue
+        sources.append({
+            "path": path.relative_to(target).as_posix(),
+            "source_code": path.read_text(encoding="utf-8"),
+        })
+    if not sources:
+        raise click.ClickException("Profile strategy-worktree 没有可上传的 strategies/*.py")
+    return sources
+
+
+def _load_strategy_specs(paths: tuple[Path, ...]) -> list[dict[str, Any]]:
+    values = []
+    for path in paths:
+        try:
+            values.append(load_spec(path).normalized())
+        except ValueError as exc:
+            raise click.ClickException(f"strategy spec 无效: {path}: {exc}") from exc
+    return values
 
 
 @click.group("workspace")
@@ -309,6 +344,18 @@ def run(run_ports: tuple[int, ...]) -> None:
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     help="本次预览临时上传的 Profile factor-worktree；只上传 custom_factors/*.py。",
 )
+@click.option(
+    "--strategy-spec",
+    "strategy_spec_paths",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="本次预览使用的 StrategySpec JSON/YAML，可重复。",
+)
+@click.option(
+    "--profile-strategy-worktree",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="本次预览临时上传的 Profile strategy-worktree。",
+)
 @friendly_errors
 def run_preview(
     analyses: tuple[str, ...],
@@ -318,6 +365,8 @@ def run_preview(
     configuration_snapshot_revision: int | None,
     step_mode: bool,
     profile_factor_worktree: Path | None,
+    strategy_spec_paths: tuple[Path, ...],
+    profile_strategy_worktree: Path | None,
 ) -> None:
     """Preview the exact frozen RunSpec identity without creating state."""
     state = _require_workspace()
@@ -340,6 +389,13 @@ def run_preview(
     if profile_factor_worktree is not None:
         preview_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
             profile_factor_worktree
+        )
+    specs = _load_strategy_specs(strategy_spec_paths)
+    if specs:
+        preview_kwargs["strategy_specs"] = specs
+    if profile_strategy_worktree is not None:
+        preview_kwargs["transient_strategy_sources"] = _load_strategy_bundle(
+            profile_strategy_worktree
         )
     if output_requests:
         preview_kwargs["output_requests"] = list(output_requests)
@@ -369,6 +425,18 @@ def run_preview(
     help="本次 Run 临时上传的 Profile factor-worktree；任务终止后自动清理。",
 )
 @click.option(
+    "--strategy-spec",
+    "strategy_spec_paths",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="本次 Run 使用的 StrategySpec JSON/YAML，可重复。",
+)
+@click.option(
+    "--profile-strategy-worktree",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="本次 Run 临时上传的 Profile strategy-worktree；任务终止后自动清理。",
+)
+@click.option(
     "--trial-binding-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="绑定当前 Hypothesis Branch 已冻结 TrialPlan 的 JSON 文件。",
@@ -389,6 +457,8 @@ def run_submit(
     step_mode: bool,
     trial_binding_file: Path | None,
     profile_factor_worktree: Path | None,
+    strategy_spec_paths: tuple[Path, ...],
+    profile_strategy_worktree: Path | None,
     as_json: bool,
 ) -> None:
     state = _require_workspace()
@@ -421,6 +491,13 @@ def run_submit(
     if profile_factor_worktree is not None:
         submit_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
             profile_factor_worktree
+        )
+    specs = _load_strategy_specs(strategy_spec_paths)
+    if specs:
+        submit_kwargs["strategy_specs"] = specs
+    if profile_strategy_worktree is not None:
+        submit_kwargs["transient_strategy_sources"] = _load_strategy_bundle(
+            profile_strategy_worktree
         )
     if output_requests:
         submit_kwargs["output_requests"] = list(output_requests)

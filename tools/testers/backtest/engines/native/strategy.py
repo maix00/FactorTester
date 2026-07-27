@@ -38,6 +38,9 @@ class Strategy(UniqueNameObject):
     def on_bar(self, ctx: Any, bar: Any) -> Any:
         return self.on_event(ctx, bar)
 
+    def on_timer(self, ctx: Any, timer: Any) -> Any:
+        return self.on_event(ctx, timer)
+
     def on_quote(self, ctx: Any, quote: Any) -> Any:
         return None
 
@@ -105,6 +108,7 @@ STRATEGY_CALLBACKS: Final[tuple[str, ...]] = (
     "on_event",
     "on_market_feed",
     "on_bar",
+    "on_timer",
     "on_quote",
     "on_trade",
     "on_book_delta",

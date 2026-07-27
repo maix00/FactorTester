@@ -36,6 +36,19 @@ def default_user_factor_library(principal_ref: str) -> Path:
     )
 
 
+def default_user_strategy_library(principal_ref: str) -> Path:
+    """Return the personal strategy source repository path.
+
+    Strategies are executable actors, not factor source, so they have an
+    independent repository and manifest namespace.
+    """
+    return (
+        default_user_root(principal_ref)
+        / "personal-workspace"
+        / "strategy-library"
+    )
+
+
 def default_user_profile_root(
     principal_ref: str,
     profile_id: str,
@@ -52,6 +65,7 @@ def user_layout_status(
     root = validate_client_root(client_root)
     user_root = default_user_root(principal_ref).resolve()
     factor_library = default_user_factor_library(principal_ref).resolve()
+    strategy_library = default_user_strategy_library(principal_ref).resolve()
     profiles_root = (user_root / "profiles").resolve()
     settings = CanonicalFactorRepoStore(root).load()
     canonical = Path(str(settings["path"])).resolve()
@@ -66,6 +80,7 @@ def user_layout_status(
     for profile in LocalProfileStore(root).list():
         session = profile.get("session_binding") or {}
         binding = profile.get("factor_workspace_binding") or {}
+        strategy_binding = profile.get("strategy_workspace_binding") or {}
         if session.get("principal_ref") != principal_ref:
             continue
         expected = default_user_profile_root(
@@ -80,9 +95,17 @@ def user_layout_status(
         worktree = str(binding.get("worktree_path") or "")
         if worktree and Path(worktree).resolve() != (
             expected / "factor-worktree"
-        ):
+            ):
             raise ValueError(
                 f"profile {profile['profile_id']} factor worktree is "
+                "outside its unified profile root"
+            )
+        strategy_worktree = str(strategy_binding.get("worktree_path") or "")
+        if strategy_worktree and Path(strategy_worktree).resolve() != (
+            expected / "strategy-worktree"
+        ):
+            raise ValueError(
+                f"profile {profile['profile_id']} strategy worktree is "
                 "outside its unified profile root"
             )
         profiles.append({
@@ -96,6 +119,11 @@ def user_layout_status(
             "branch": str(binding.get("branch") or ""),
             "worktree_path": worktree,
             "research_root": str(binding.get("research_root") or ""),
+            "strategy_branch": str(strategy_binding.get("branch") or ""),
+            "strategy_worktree_path": strategy_worktree,
+            "strategy_research_root": str(
+                strategy_binding.get("research_root") or ""
+            ),
         })
 
     status = _git(canonical, "status", "--porcelain=v1", "-z")
@@ -105,6 +133,7 @@ def user_layout_status(
         "user_root": str(user_root),
         "personal_workspace": str(user_root / "personal-workspace"),
         "factor_library": str(factor_library),
+        "strategy_library": str(strategy_library),
         "profiles_root": str(profiles_root),
         "canonical": {
             "path": str(canonical),

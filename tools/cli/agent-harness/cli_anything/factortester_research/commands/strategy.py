@@ -49,6 +49,33 @@ def validate_strategy(spec_path: str, as_json: bool) -> None:
     _delegate(args)
 
 
+@strategy.group("actor")
+def actor() -> None:
+    """Inspect or scaffold a source-only Strategy Actor."""
+
+
+@actor.command("inspect")
+@click.argument("source", type=click.Path(exists=True, dir_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def inspect_actor(source: str, as_json: bool) -> None:
+    args = ["strategy", "actor", "inspect", source]
+    if as_json:
+        args.append("--json")
+    _delegate(args)
+
+
+@actor.command("scaffold")
+@click.argument("name")
+@click.option("--output", required=True, type=click.Path(file_okay=False))
+@click.option("--event", type=click.Choice(["bar", "market_feed"]), default="bar")
+@click.option("--json", "as_json", is_flag=True)
+def scaffold_actor(name: str, output: str, event: str, as_json: bool) -> None:
+    args = ["strategy", "actor", "scaffold", name, "--output", output, "--event", event]
+    if as_json:
+        args.append("--json")
+    _delegate(args)
+
+
 def _delegate(args: list[str]) -> None:
     result = run_factortester(args)
     if result.returncode != 0:
