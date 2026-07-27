@@ -98,8 +98,8 @@ def normalize_hook_result(result: Any) -> tuple[StrategyIntent, ...]:
             raise TypeError("strategy hook iterable must contain typed intents")
         return values
     raise TypeError(
-        "strategy hook must return TargetWeightIntent, OrderDeltaIntent, "
-        "an iterable of those, or None"
+        "strategy hook must return typed intents: TargetWeightIntent, "
+        "OrderDeltaIntent, an iterable of those, or None"
     )
 
 
