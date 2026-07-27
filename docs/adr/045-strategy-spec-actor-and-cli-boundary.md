@@ -22,14 +22,20 @@ CLI 接口必须只有一条清晰路径。
    某次回测的状态。
 2. **StrategySpec**：一次任务选择的策略声明。它包含 `source`（内置模板或
    Profile 中的自定义 Actor）、参数、数据需求和账户/执行配置。
-3. **Strategy Actor**：长期存活的用户对象。它通过 `on_start`、`on_bar`、
-   `on_market_feed`、`on_order_event` 等回调维护自己的状态，并返回 typed
-   intent 或 `StrategyCommand`。
+3. **Strategy Actor**：用户实现的一个对象实例，而不是一份回调函数表。
+   每次回测只创建/绑定一次，回放期间由 scheduler 按因果事件顺序反复调用；
+   它可以在实例字段中保存上一次事件的状态，通过 `on_start`、`on_bar`、
+   `on_market_feed`、`on_order_event` 等回调返回 typed intent 或
+   `StrategyCommand`。它不直接改变持仓、订单或现金，因此不能绕过执行层。
 4. **StrategyContext**：只读市场/持仓视图和命令工厂。Actor 不拿到 scheduler、
    Flow、ledger、broker 或任意可变运行时 store 的引用。
 
 `StrategyPlan` 是服务端将 `StrategySpec` 校验、补默认值、解析数据需求并
 冻结后的内部计划。它不是用户要编写的策略模板，也不是另一个 hook 对象。
+
+因此，Actor 与模板的区别是：模板是可复用的声明式算法入口，Actor 是一次
+任务中真正持有运行状态的对象；模板可以生成或装配 Actor，但不会替代 Actor
+的生命周期。Plan 则是把该选择冻结成执行输入，不保存策略状态。
 
 ### 命令与执行边界
 

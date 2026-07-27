@@ -23,7 +23,9 @@ def round_to_lot_sizes(state, ctx, module) -> None:
         rounded = {
             product: default_round_order_quantity(
                 quantity,
-                effective_lot_size(state, strategy, product, lot_sizes),
+                effective_lot_size(
+                    state, strategy, product, lot_sizes, timestamp=ctx.timestamp,
+                ),
                 policy,
             )
             for product, quantity in deltas.items()
@@ -53,12 +55,16 @@ def default_round_order_quantity(
     return sign * rounded_lots * lot_size
 
 
-def effective_lot_size(state, strategy, product, lot_sizes: dict) -> float | None:
+def effective_lot_size(
+    state, strategy, product, lot_sizes: dict, *, timestamp=None,
+) -> float | None:
     lot_size = lot_sizes.get(product)
     if lot_size:
         return float(lot_size)
     config = state.config_for(strategy)
-    ledger = ledger_for_strategy_product(state, strategy, product)
+    ledger = ledger_for_strategy_product(
+        state, strategy, product, timestamp=timestamp,
+    )
     if _resolve_use_int_position(config, state.ledger_config_for(ledger)):
         return 1.0
     return None

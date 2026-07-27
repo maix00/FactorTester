@@ -44,6 +44,7 @@ def prepare_order_fill(state, ctx, strategy, order, audit_store) -> bool:
     before = float(order.quantity)
     after = normalise_fill_quantity(
         state, strategy, order.instrument, before,
+        order=order, timestamp=ctx.timestamp,
     )
     if after != before:
         order.quantity = after

@@ -15,7 +15,9 @@ def margin_reserved_major(ledger) -> float:
     return float(ledger.get(MarginModule.margin_reserved, 0.0) or 0.0)
 
 
-def normalise_fill_quantity(state, strategy, product, quantity: float) -> float:
+def normalise_fill_quantity(
+    state, strategy, product, quantity: float, *, order=None, timestamp=None,
+) -> float:
     from tools.testers.backtest.modules.market_data import market_data_store_for
     from tools.testers.backtest.modules.order_construct import (
         OrderConstructModule,
@@ -23,7 +25,9 @@ def normalise_fill_quantity(state, strategy, product, quantity: float) -> float:
     )
     from tools.testers.backtest.modules.strategy_book import ledger_for_strategy_product
 
-    ledger = ledger_for_strategy_product(state, strategy, product)
+    ledger = ledger_for_strategy_product(
+        state, strategy, product, timestamp=timestamp, order=order,
+    )
     if not _resolve_use_int_position(
         state.config_for(strategy), state.ledger_config_for(ledger),
     ):

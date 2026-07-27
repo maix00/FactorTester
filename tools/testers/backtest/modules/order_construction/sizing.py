@@ -27,6 +27,13 @@ def basic_size_order(state, ctx, module) -> None:
     for strategy in ctx.active_strategies:
         intent = strategy_trade_intent(ctx, strategy)
         if isinstance(intent, OrderDeltaIntent):
+            if hasattr(state, "ledger_for_strategy") or isinstance(
+                getattr(state, "ledgers", None), dict,
+            ):
+                for product in intent.deltas:
+                    ledger_for_strategy_product(
+                        state, strategy, product, timestamp=ctx.timestamp,
+                    )
             deltas = apply_order_sizing_policy(
                 state, ctx, strategy, dict(intent.deltas),
             )
@@ -49,7 +56,9 @@ def basic_size_order(state, ctx, module) -> None:
                     state, strategy, product, ctx.timestamp,
                 )
                 continue
-            ledger = ledger_for_strategy_product(state, strategy, product)
+            ledger = ledger_for_strategy_product(
+                state, strategy, product, timestamp=ctx.timestamp,
+            )
             ledger_positions = ledger.get(LedgerModule.positions, {})
             multiplier = contract_multiplier_from_fields(
                 fields, product, state=state, timestamp=ctx.timestamp,

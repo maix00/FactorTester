@@ -10,10 +10,15 @@ from tools.data.types.base import UniqueNameObject
 
 
 class Strategy(UniqueNameObject):
-    """name is "<shortAlias>:<32-hex-uuid>". The frontend passes alias=
-    shortAlias (not name); UniqueNameObject.__new__ auto-generates the
-    uuid-suffixed name. Constructing again with the same name returns the
-    same (deduplicated) instance."""
+    """A user-owned actor instance for one backtest run.
+
+    ``Strategy`` is not a Flow, broker, ledger, or policy container. The
+    scheduler keeps one instance alive for the run and invokes its callbacks
+    in event order. The instance may keep private state between callbacks and
+    returns typed intents/commands; the owning Flow validates and executes
+    those requests. ``name`` remains ``<shortAlias>:<32-hex-uuid>`` for
+    stable runtime identity while ``alias`` is the user-facing name.
+    """
 
     # These methods deliberately do nothing.  The native scheduler invokes
     # them only through the strategy-hook adapter, so legacy declarative
