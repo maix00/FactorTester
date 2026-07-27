@@ -115,7 +115,7 @@ def ensure_schema() -> None:
             ),
             "research_graph_trace": ("acting_profile_ref",),
             "research_work_packages": (
-                "lifecycle", "revision", "lifecycle_history_json",
+                "title", "lifecycle", "revision", "lifecycle_history_json",
             ),
         }
         if any(
