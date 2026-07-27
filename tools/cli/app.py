@@ -13,6 +13,7 @@ from tools.cli.commands.navigation import list_modules
 from tools.cli.commands.protocol import protocol
 from tools.cli.commands.settings import describe, edit
 from tools.cli.commands.strategy_intent import strategy_intent
+from tools.cli.commands.strategy import strategy
 from tools.cli.commands.margin_budget import margin_budget
 from tools.cli.commands.job_orders import register_job_order_commands
 from tools.cli.commands.research import external_factor, job, run, workspace
@@ -59,6 +60,7 @@ cli.add_command(protocol)
 cli.add_command(describe)
 cli.add_command(edit)
 cli.add_command(strategy_intent)
+cli.add_command(strategy)
 cli.add_command(margin_budget)
 cli.add_command(workspace)
 cli.add_command(external_factor)

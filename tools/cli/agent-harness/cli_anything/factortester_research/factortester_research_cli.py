@@ -19,6 +19,7 @@ from .commands.operations import operator, operator_set, service, service_list, 
 from .commands.report import report
 from .commands.research import checklist, doctor, plan, run_step, slice_plan
 from .commands.strategy_intent import strategy_intent
+from .commands.strategy import strategy
 from .commands.margin_budget import margin_budget
 from .core.session import DEFAULT_SESSION, load_session
 from .utils.repl_skin import ReplSkin
@@ -56,6 +57,7 @@ for command in (
     evidence,
     report,
     strategy_intent,
+    strategy,
     margin_budget,
 ):
     cli.add_command(command)
