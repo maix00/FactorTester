@@ -6,7 +6,7 @@ from types import MappingProxyType
 from typing import Any
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.market_events import MarketDataEvent, MarketDataEventKind
+from tools.testers.backtest.engines.native.market_events import MarketFeedEvent, MarketFeedEventKind
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.orders.enums import OrderStatus
 from tools.testers.backtest.engines.native.strategy_hooks import (
@@ -55,25 +55,25 @@ def _call_stop(state: Any, ctx: Any) -> None:
             raise ValueError("on_stop cannot emit a new trading intent")
 
 
-def _call_market_data(state: Any, ctx: Any) -> None:
+def _call_market_feed(state: Any, ctx: Any) -> None:
     for strategy in ctx.active_strategies:
         for event in ctx.payloads_for(strategy):
-            if not isinstance(event, MarketDataEvent):
-                raise TypeError("MARKET_DATA hook requires MarketDataEvent payload")
-            result = _specific_market_hook(state, strategy, ctx, event)
+            if not isinstance(event, MarketFeedEvent):
+                raise TypeError("MARKET_FEED hook requires MarketFeedEvent payload")
+            result = _specific_feed_hook(state, strategy, ctx, event)
             _emit_intents(ctx, strategy, result)
 
 
-def _specific_market_hook(state: Any, strategy: Any, ctx: Any, event: MarketDataEvent) -> Any:
+def _specific_feed_hook(state: Any, strategy: Any, ctx: Any, event: MarketFeedEvent) -> Any:
     hook_name = {
-        MarketDataEventKind.QUOTE: "on_quote",
-        MarketDataEventKind.TRADE: "on_trade",
-        MarketDataEventKind.BOOK_DELTA: "on_book_delta",
+        MarketFeedEventKind.QUOTE: "on_quote",
+        MarketFeedEventKind.TRADE: "on_trade",
+        MarketFeedEventKind.BOOK_DELTA: "on_book_delta",
     }.get(event.kind)
     hook = getattr(type(strategy), hook_name, None) if hook_name else None
     if callable(hook) and hook is not getattr(Strategy, hook_name, None):
         return getattr(strategy, hook_name)(_context_for(state, ctx, strategy), event.payload)
-    return strategy.on_market_data(_context_for(state, ctx, strategy), event)
+    return strategy.on_market_feed(_context_for(state, ctx, strategy), event)
 
 
 def _call_bar(state: Any, ctx: Any) -> None:

@@ -29,9 +29,16 @@ def test_shared_cash_pool_gets_one_combined_eighty_percent_budget() -> None:
     pa, pb = _product(), _product()
     ledger_a = LedgerState(strategy=a, base_currency="CNY", ledger_id="book-a")
     ledger_b = LedgerState(strategy=b, base_currency="CNY", ledger_id="book-b")
+    legacy_budget_settings = {
+        MarginBudgetModule.target_margin_utilization: 0.80,
+        MarginBudgetModule.max_margin_utilization: 0.85,
+    }
     state = BacktestRunState(
         ledgers={"book-a": ledger_a, "book-b": ledger_b},
-        strategy_configs={a: StrategyConfig(strategy=a), b: StrategyConfig(strategy=b)},
+        strategy_configs={
+            a: StrategyConfig(strategy=a, field_values=dict(legacy_budget_settings)),
+            b: StrategyConfig(strategy=b, field_values=dict(legacy_budget_settings)),
+        },
     )
     store = strategy_book_store_for(state)
     store.register_strategy_ledgers(

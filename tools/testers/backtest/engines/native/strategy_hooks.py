@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Iterable
 import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventKind
-from tools.testers.backtest.engines.native.market_events import MarketDataEventKind
+from tools.testers.backtest.engines.native.market_events import MarketFeedEventKind
 if TYPE_CHECKING:
     from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetWeightIntent
 
@@ -20,14 +20,14 @@ StrategyIntent = Any
 
 @dataclass(frozen=True)
 class StrategyRequirements:
-    market_events: frozenset[MarketDataEventKind] = frozenset()
+    feed_events: frozenset[MarketFeedEventKind] = frozenset()
     needs_partial_fills: bool = False
     needs_order_events: bool = False
 
 
 @dataclass(frozen=True)
 class ExecutionCapabilities:
-    market_events: frozenset[MarketDataEventKind] = frozenset()
+    feed_events: frozenset[MarketFeedEventKind] = frozenset()
     partial_fills: bool = False
     order_events: bool = False
 
@@ -37,7 +37,7 @@ def validate_strategy_capabilities(
     capabilities: ExecutionCapabilities,
 ) -> dict[str, Any]:
     missing_events = sorted(
-        event.value for event in requirements.market_events - capabilities.market_events
+        event.value for event in requirements.feed_events - capabilities.feed_events
     )
     errors: list[str] = []
     if missing_events:
@@ -48,7 +48,7 @@ def validate_strategy_capabilities(
         errors.append("strategy requires order lifecycle events")
     return {
         "ok": not errors,
-        "missing_market_events": missing_events,
+        "missing_feed_events": missing_events,
         "errors": errors,
     }
 

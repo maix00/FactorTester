@@ -2,7 +2,7 @@
 
 from .dispatch import (
     _call_bar,
-    _call_market_data,
+    _call_market_feed,
     _call_order_event,
     _call_start,
     _call_stop,
@@ -14,7 +14,7 @@ __all__ = [
     "StrategyHookModule",
     "_apply_signal_intent",
     "_call_bar",
-    "_call_market_data",
+    "_call_market_feed",
     "_call_order_event",
     "_call_start",
     "_call_stop",

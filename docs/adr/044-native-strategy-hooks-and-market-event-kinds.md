@@ -34,7 +34,7 @@ on_book_delta(ctx, delta)
 on_order_event(ctx, order)
 ```
 
-`on_market_data(ctx, event)` is the generic fallback for market-data types
+`on_market_feed(ctx, event)` is the generic fallback for market-feed types
 without a dedicated method. The adapter calls the dedicated method when it is
 overridden, otherwise the generic method. A strategy does not need to
 implement every hook.
@@ -50,15 +50,15 @@ This prevents a first public API from bypassing the issue-144 order lineage.
 
 ### 2. BAR is not the L2/L3 event kind
 
-`EventKind.MARKET_DATA` is a coarse scheduler priority for raw market-data
-events. Its payload carries a typed `MarketDataEventKind`:
+`EventKind.MARKET_FEED` is a coarse scheduler priority for raw feed events.
+Its payload carries a typed `MarketFeedEventKind`:
 
 | payload kind | data level | author hook |
 |---|---|---|
 | `QUOTE` | L1 BBO | `on_quote` |
 | `TRADE` | trade tick | `on_trade` |
 | `BOOK_DELTA` | L2 MBP or L3 MBO delta | `on_book_delta` |
-| `BOOK_SNAPSHOT` | L2/L3 snapshot | `on_market_data` initially |
+| `BOOK_SNAPSHOT` | L2/L3 snapshot | `on_market_feed` initially |
 
 `EventKind.BAR` remains the aggregate-bar event. Raw market events are ordered
 before BAR and ORDER at the same timestamp; equal timestamp events retain the
@@ -90,7 +90,7 @@ The preflight report must distinguish:
 
 ```text
 FIELD_CHANGE
-→ MARKET_DATA (quote/trade/book delta)
+→ MARKET_FEED (quote/trade/book delta)
 → BAR
 → ORDER (existing orders consume the observation)
 → SIGNAL (strategy decisions)

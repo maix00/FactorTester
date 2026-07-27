@@ -1,7 +1,7 @@
 import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.market_events import MarketDataEvent, Quote
+from tools.testers.backtest.engines.native.market_events import MarketFeedEvent, Quote
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.orders.enums import OrderStatus
@@ -43,20 +43,20 @@ def _context(strategy, event_kind, payloads):
     )
 
 
-def test_market_data_hook_emits_causal_signal():
+def test_market_feed_hook_emits_causal_signal():
     strategy = QuoteStrategy(alias="quote-hook")
-    market_event = MarketDataEvent(
+    market_event = MarketFeedEvent(
         pd.Timestamp("2025-01-01 09:00"), "P1", "quote", Quote(10.0, 10.1),
     )
     ctx = _context(
         strategy,
-        EventKind.MARKET_DATA,
-        [EventDraft(EventKind.MARKET_DATA, market_event.timestamp, strategy, market_event)],
+        EventKind.MARKET_FEED,
+        [EventDraft(EventKind.MARKET_FEED, market_event.timestamp, strategy, market_event)],
     )
 
-    from tools.testers.backtest.modules.strategy_hooks import _call_market_data
+    from tools.testers.backtest.modules.strategy_hooks import _call_market_feed
 
-    _call_market_data(object(), ctx)
+    _call_market_feed(object(), ctx)
     pending = ctx._event_queue.snapshot_head()
 
     assert strategy.seen == ["quote:10.0"]

@@ -31,8 +31,8 @@ model. These are boundary references, not imported defaults.
 When effective `margin_mode` is `auto`, `exact`, `custom`, or `fixed`:
 
 - allocation defaults to `equal_notional` (shown to users as 等名义敞口);
-- `target_margin_utilization` defaults to `0.40`;
-- `max_margin_utilization` defaults to `0.50`;
+- `target_margin_utilization` defaults to `0.30`;
+- `max_margin_utilization` defaults to `0.40`;
 - the target margin budget is always converted into and reported as total
   gross notional leverage.
 

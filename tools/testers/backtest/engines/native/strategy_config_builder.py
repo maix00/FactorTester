@@ -53,7 +53,7 @@ _LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
 _TERM_CARRY_STRATEGY_FLOWS = {"term_carry_target"}
 _STRATEGY_HOOK_FLOWS = {
     "strategy_hook_on_start",
-    "strategy_hook_on_market_data",
+    "strategy_hook_on_market_feed",
     "strategy_hook_on_bar",
     "strategy_hook_on_signal_intent",
     "strategy_hook_on_order_event",
@@ -399,8 +399,8 @@ def build_strategy_configs(
 def _validate_margin_budget_config(alias: str, config: StrategyConfig) -> None:
     from tools.testers.backtest.modules.margin_budget import MarginBudgetModule
 
-    target = float(config.get(MarginBudgetModule.target_margin_utilization, 0.40))
-    maximum = float(config.get(MarginBudgetModule.max_margin_utilization, 0.50))
+    target = float(config.get(MarginBudgetModule.target_margin_utilization, 0.30))
+    maximum = float(config.get(MarginBudgetModule.max_margin_utilization, 0.40))
     tolerance = float(config.get(MarginBudgetModule.margin_utilization_tolerance, 0.01))
     if not 0 < target <= maximum < 1:
         raise ValueError(

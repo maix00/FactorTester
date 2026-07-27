@@ -30,7 +30,7 @@ class EventKind(IntEnum):
     FIELD_CHANGE = -5  # historical market-rule field change event; processed before any
                        # BAR so the field snapshot is already current for the
                        # entire timestamp
-    MARKET_DATA = -1  # one raw quote/trade/book observation; payload kind carries
+    MARKET_FEED = -1  # one raw quote/trade/book observation; payload kind carries
                       # L1/L2/L3 semantics and feed sequence preserves same-time order
     BAR = 0       # an aggregate market bar has arrived; live factors may update state
     ORDER = 5     # an existing Order has reached one matching opportunity

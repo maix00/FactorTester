@@ -24,7 +24,7 @@ class Strategy(UniqueNameObject):
     def on_stop(self, ctx: Any) -> Any:
         return None
 
-    def on_market_data(self, ctx: Any, event: Any) -> Any:
+    def on_market_feed(self, ctx: Any, event: Any) -> Any:
         return None
 
     def on_bar(self, ctx: Any, bar: Any) -> Any:

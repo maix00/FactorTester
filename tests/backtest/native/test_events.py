@@ -9,7 +9,7 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 def test_event_kind_values_and_ordering():
     assert list(EventKind) == [
         EventKind.FIELD_CHANGE,
-        EventKind.MARKET_DATA,
+        EventKind.MARKET_FEED,
         EventKind.BAR,
         EventKind.ORDER,
         EventKind.SIGNAL,
@@ -18,12 +18,12 @@ def test_event_kind_values_and_ordering():
         EventKind.LEDGER,
     ]
     assert EventKind.BAR == 0
-    assert EventKind.MARKET_DATA == -1
+    assert EventKind.MARKET_FEED == -1
     assert EventKind.SIGNAL == 10
     assert EventKind.LIFECYCLE_NOTICE == 14
     assert EventKind.TRADE_INTENT == 15
     assert EventKind.ORDER == 5
-    assert EventKind.MARKET_DATA < EventKind.BAR < EventKind.ORDER
+    assert EventKind.MARKET_FEED < EventKind.BAR < EventKind.ORDER
     assert EventKind.ORDER < EventKind.SIGNAL
     assert EventKind.SIGNAL < EventKind.LIFECYCLE_NOTICE
     assert EventKind.LIFECYCLE_NOTICE < EventKind.TRADE_INTENT

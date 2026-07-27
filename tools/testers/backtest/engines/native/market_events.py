@@ -9,8 +9,8 @@ from typing import Any
 import pandas as pd
 
 
-class MarketDataEventKind(str, Enum):
-    """Payload kind carried by ``EventKind.MARKET_DATA``."""
+class MarketFeedEventKind(str, Enum):
+    """Payload kind carried by ``EventKind.MARKET_FEED``."""
 
     QUOTE = "quote"
     TRADE = "trade"
@@ -49,28 +49,28 @@ class BookDelta:
 
 
 @dataclass(frozen=True)
-class MarketDataEvent:
-    """One atomic raw observation; sequence is the feed order at a timestamp."""
+class MarketFeedEvent:
+    """One atomic feed observation; sequence is its order at a timestamp."""
 
     timestamp: pd.Timestamp
     instrument: Any
-    kind: MarketDataEventKind
+    kind: MarketFeedEventKind
     payload: Quote | Trade | BookDelta | Any
     sequence: int = 0
     source: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", pd.Timestamp(self.timestamp))
-        object.__setattr__(self, "kind", MarketDataEventKind(self.kind))
+        object.__setattr__(self, "kind", MarketFeedEventKind(self.kind))
         if self.sequence < 0:
-            raise ValueError("MarketDataEvent.sequence must be non-negative")
+            raise ValueError("MarketFeedEvent.sequence must be non-negative")
         self._validate_payload()
 
     def _validate_payload(self) -> None:
         expected = {
-            MarketDataEventKind.QUOTE: Quote,
-            MarketDataEventKind.TRADE: Trade,
-            MarketDataEventKind.BOOK_DELTA: BookDelta,
+            MarketFeedEventKind.QUOTE: Quote,
+            MarketFeedEventKind.TRADE: Trade,
+            MarketFeedEventKind.BOOK_DELTA: BookDelta,
         }.get(self.kind)
         if expected is not None and not isinstance(self.payload, expected):
             raise TypeError(
@@ -84,7 +84,7 @@ class MarketDataEvent:
         from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 
         return EventDraft(
-            EventKind.MARKET_DATA,
+            EventKind.MARKET_FEED,
             self.timestamp,
             strategy,
             payload=self,

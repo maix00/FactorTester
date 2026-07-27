@@ -10,7 +10,7 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.target import TargetStrategyModule
 
-from .dispatch import _call_bar, _call_market_data, _call_order_event, _call_start, _call_stop
+from .dispatch import _call_bar, _call_market_feed, _call_order_event, _call_start, _call_stop
 from .fields import emitted_signal
 from .intent import _apply_signal_intent
 
@@ -31,11 +31,11 @@ class StrategyHookModule(ExecutableModule):
         order=1000, strategy_scoped=True, description="初始化自定义策略",
         compute=lambda state, ctx: _call_start(state, ctx),
     )
-    on_market_data: ClassVar[Flow] = Flow(
-        "strategy_hook_on_market_data", inputs=(MarketDataModule.current_prices,),
-        outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.MARKET_DATA,
-        order=1000, strategy_scoped=True, event_payload_inputs=("market_data",),
-        description="处理原始行情事件", compute=lambda state, ctx: _call_market_data(state, ctx),
+    on_market_feed: ClassVar[Flow] = Flow(
+        "strategy_hook_on_market_feed", inputs=(MarketDataModule.current_prices,),
+        outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.MARKET_FEED,
+        order=1000, strategy_scoped=True, event_payload_inputs=("market_feed",),
+        description="处理原始行情源事件", compute=lambda state, ctx: _call_market_feed(state, ctx),
     )
     on_bar: ClassVar[Flow] = Flow(
         "strategy_hook_on_bar", inputs=(MarketDataModule.current_prices,),
@@ -65,5 +65,5 @@ class StrategyHookModule(ExecutableModule):
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (
-        on_start, on_market_data, on_bar, on_signal_intent, on_order_event, on_stop,
+        on_start, on_market_feed, on_bar, on_signal_intent, on_order_event, on_stop,
     )

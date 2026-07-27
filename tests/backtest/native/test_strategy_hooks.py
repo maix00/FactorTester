@@ -11,7 +11,7 @@ from tools.testers.backtest.engines.native.strategy_hooks import (
     normalize_hook_result,
     validate_strategy_capabilities,
 )
-from tools.testers.backtest.engines.native.market_events import MarketDataEventKind
+from tools.testers.backtest.engines.native.market_events import MarketFeedEventKind
 
 
 def test_legacy_strategy_has_noop_hooks():
@@ -66,7 +66,7 @@ def test_hook_result_rejects_untyped_commands():
 def test_capability_validation_reports_missing_data_and_execution_features():
     report = validate_strategy_capabilities(
         StrategyRequirements(
-            market_events=frozenset({MarketDataEventKind.BOOK_DELTA}),
+            feed_events=frozenset({MarketFeedEventKind.BOOK_DELTA}),
             needs_partial_fills=True,
             needs_order_events=True,
         ),
@@ -74,5 +74,5 @@ def test_capability_validation_reports_missing_data_and_execution_features():
     )
 
     assert report["ok"] is False
-    assert report["missing_market_events"] == ["book_delta"]
+    assert report["missing_feed_events"] == ["book_delta"]
     assert len(report["errors"]) == 3
