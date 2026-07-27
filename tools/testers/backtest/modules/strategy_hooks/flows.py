@@ -68,3 +68,8 @@ class StrategyHookModule(ExecutableModule):
     flows: ClassVar[tuple[Flow, ...]] = (
         on_start, on_market_feed, on_bar, on_signal_intent, on_order_event, on_stop,
     )
+
+
+# Public architecture name for new code. The legacy class name remains stable
+# because flow manifests and saved configurations still contain it.
+StrategyRuntime = StrategyHookModule

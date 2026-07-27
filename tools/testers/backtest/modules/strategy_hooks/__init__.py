@@ -7,12 +7,13 @@ from .dispatch import (
     _call_start,
     _call_stop,
 )
-from .flows import StrategyHookModule
+from .flows import StrategyHookModule, StrategyRuntime
 from .intent import _apply_signal_intent
 from .commands import apply_strategy_command
 
 __all__ = [
     "StrategyHookModule",
+    "StrategyRuntime",
     "_apply_signal_intent",
     "apply_strategy_command",
     "_call_bar",

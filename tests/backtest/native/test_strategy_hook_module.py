@@ -6,7 +6,7 @@ from tools.testers.backtest.engines.native.market_events import MarketFeedEvent,
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.strategy_hooks import StrategyContext
-from tools.testers.backtest.modules.strategy_hooks import StrategyHookModule
+from tools.testers.backtest.modules.strategy_hooks import StrategyHookModule, StrategyRuntime
 from tools.testers.backtest.modules.target import TargetStrategyModule, OrderDeltaIntent
 from tools.testers.backtest.engines.native.orders import Order, OrderStatus
 from tools.testers.backtest.modules.order_lifecycle.store import OrderStore
@@ -161,6 +161,10 @@ def test_custom_strategy_mode_selects_hooks_without_group_flows():
     assert "strategy_hook_on_order_event" in config.active_flow_names
     assert "schedule_bar_events" in active
     assert "group_quantile_membership" not in active
+
+
+def test_strategy_runtime_is_the_new_name_for_the_legacy_adapter():
+    assert StrategyRuntime is StrategyHookModule
 
 
 def test_partial_fill_uses_specific_order_hook():

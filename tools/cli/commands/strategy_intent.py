@@ -20,7 +20,7 @@ from tools.cli.state import load_state, save_state
 
 @click.group("strategy-intent")
 def strategy_intent() -> None:
-    """Inspect policy roles and configure an active research workspace."""
+    """Legacy workspace-role compatibility command; use ``strategy`` for new runs."""
 
 
 @strategy_intent.command("describe")
