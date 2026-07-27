@@ -56,6 +56,10 @@ CLI 接口必须只有一条清晰路径。
 策略归属、记录 `OrderAction`、提升 revision、更新 live/pending 索引。风险、
 保证金、手续费、offset 分解、撮合和账本仍由原有 Flow 负责。
 
+撤单或改单产生的终态不会只停留在 SIGNAL 内部：适配器会为受影响订单补发
+同一时间戳的 ORDER 生命周期事件，因此 `on_order_canceled` 等 Actor 回调仍能
+观察到由命令直接触发的状态变化。
+
 第一阶段的 replace 语义是“撤销旧余量再提交新余量”，不承诺交易所级原子
 replace。后续若需要限价、TIF、offset 或账户路由，将扩展命令字段而不是新增
 一套 hook 类。

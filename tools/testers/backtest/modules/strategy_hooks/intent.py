@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.strategy_commands import command_from_payload
 from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetStrategyModule, TargetWeightIntent
 
 from .commands import apply_strategy_command
+from .fields import emitted_signal
 
 
 def _apply_signal_intent(state: Any, ctx: Any) -> None:
@@ -20,6 +22,7 @@ def _apply_signal_intent(state: Any, ctx: Any) -> None:
                 intent = apply_strategy_command(state, strategy, command, ctx.timestamp)
                 if intent is not None:
                     ctx.set_for(TargetStrategyModule.trade_intent, strategy, intent)
+                _emit_command_lifecycle_event(state, ctx, strategy, command)
                 continue
             if payload.get("kind") != "strategy_hook_intent":
                 continue
@@ -33,3 +36,32 @@ def _apply_signal_intent(state: Any, ctx: Any) -> None:
             else:
                 raise ValueError(f"unknown strategy hook intent kind: {intent_kind!r}")
             ctx.set_for(TargetStrategyModule.trade_intent, strategy, intent)
+
+
+def _emit_command_lifecycle_event(
+    state: Any,
+    ctx: Any,
+    strategy: Any,
+    command: Any,
+) -> None:
+    """Make direct cancel/replace commands observable to order hooks.
+
+    Commands are decoded in a SIGNAL flow, while the order hook surface is
+    intentionally driven by ORDER events.  Queueing the affected terminal
+    order here keeps that distinction explicit and prevents a cancel callback
+    from being silently skipped.
+    """
+
+    kind = getattr(command, "kind", None)
+    if getattr(kind, "value", kind) not in {"cancel_order", "replace_order"}:
+        return
+    order_id = str(getattr(command, "order_id", "") or "")
+    order_store = getattr(state, "order_store", None)
+    order = getattr(order_store, "orders_by_id", {}).get(order_id)
+    if order is None or not getattr(order.status, "terminal", False):
+        return
+    ctx.set_for(
+        emitted_signal,
+        strategy,
+        EventDraft(EventKind.ORDER, ctx.timestamp, strategy, order),
+    )

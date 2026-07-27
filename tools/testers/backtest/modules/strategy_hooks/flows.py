@@ -45,7 +45,11 @@ class StrategyHookModule(ExecutableModule):
     )
     on_signal_intent: ClassVar[Flow] = Flow(
         "strategy_hook_on_signal_intent", inputs=(),
-        outputs=(TargetStrategyModule.trade_intent, TargetStrategyModule.target_weights),
+        outputs=(
+            TargetStrategyModule.trade_intent,
+            TargetStrategyModule.target_weights,
+            emitted_signal,
+        ),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
         strategy_scoped=True,
         event_payload_inputs=("strategy_hook_intent", "strategy_hook_command"),

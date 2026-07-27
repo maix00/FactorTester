@@ -151,6 +151,10 @@ def test_hook_cancel_command_closes_only_the_strategy_order():
 
     assert order.status is OrderStatus.CANCELLED
     assert state.order_store.actions_by_order[order.order_id][0].reason == "risk"
+    pending = ctx._event_queue.snapshot_head()
+    assert len(pending) == 1
+    assert pending[0].kind is EventKind.ORDER
+    assert pending[0].payload is order
 
 
 def test_custom_strategy_mode_selects_hooks_without_group_flows():
