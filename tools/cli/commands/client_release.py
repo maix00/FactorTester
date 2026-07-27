@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 
 import click
 
@@ -161,6 +162,15 @@ def app_update_restart(as_json: bool) -> None:
 @friendly_errors
 def publish_release(**options) -> None:
     """Build, sign, notarize, publish, and read back Main or Beta."""
+    # Release authoring lives beside the source checkout rather than inside
+    # the public client package.  The editable CLI entrypoint still needs to
+    # resolve that namespace when launched from Conda (console scripts do not
+    # add the current working directory to ``sys.path``).
+    source_root = Path(__file__).resolve().parents[3]
+    if (source_root / "script" / "release" / "publish.py").is_file():
+        source_root_text = str(source_root)
+        if source_root_text not in sys.path:
+            sys.path.insert(0, source_root_text)
     from script.release.publish import publish_release as run_release
 
     service_port = options.pop("service_port")
