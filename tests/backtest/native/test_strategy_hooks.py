@@ -23,6 +23,19 @@ def test_legacy_strategy_has_noop_hooks():
     assert strategy.on_order_event(context, {}) is None
 
 
+def test_generic_on_event_is_used_by_default_adapters():
+    class GenericStrategy(Strategy):
+        def on_event(self, ctx, event):
+            return event
+
+    strategy = GenericStrategy(alias="generic-event")
+    context = StrategyContext(strategy, None, EventKind.BAR, {}, {})
+
+    assert strategy.on_bar(context, {"bar": 1}) == {"bar": 1}
+    assert strategy.on_market_feed(context, {"quote": 1}) == {"quote": 1}
+    assert strategy.on_order_event(context, {"order": 1}) == {"order": 1}
+
+
 def test_context_returns_typed_intents_without_mutating_inputs():
     strategy = Strategy(alias="custom")
     context = StrategyContext(strategy, pd.Timestamp("2025-01-01"), EventKind.BAR, {}, {})

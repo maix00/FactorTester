@@ -18,6 +18,9 @@ class Strategy(UniqueNameObject):
     # These methods deliberately do nothing.  The native scheduler invokes
     # them only through the strategy-hook adapter, so legacy declarative
     # strategies remain pure identities and pay no callback cost.
+    def on_event(self, ctx: Any, event: Any) -> Any:
+        return None
+
     def on_start(self, ctx: Any) -> Any:
         return None
 
@@ -25,10 +28,10 @@ class Strategy(UniqueNameObject):
         return None
 
     def on_market_feed(self, ctx: Any, event: Any) -> Any:
-        return None
+        return self.on_event(ctx, event)
 
     def on_bar(self, ctx: Any, bar: Any) -> Any:
-        return None
+        return self.on_event(ctx, bar)
 
     def on_quote(self, ctx: Any, quote: Any) -> Any:
         return None
@@ -43,7 +46,7 @@ class Strategy(UniqueNameObject):
         return None
 
     def on_order_event(self, ctx: Any, order: Any) -> Any:
-        return None
+        return self.on_event(ctx, order)
 
     def on_order_blocked(self, ctx: Any, order: Any) -> Any:
         return self.on_order_event(ctx, order)

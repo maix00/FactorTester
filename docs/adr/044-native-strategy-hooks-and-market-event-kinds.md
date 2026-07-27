@@ -27,6 +27,7 @@ The public author API has optional no-op methods:
 ```text
 on_start(ctx)
 on_stop(ctx)
+on_event(ctx, event)  # generic fallback
 on_bar(ctx, bar)
 on_quote(ctx, quote)
 on_trade(ctx, trade)
@@ -37,9 +38,9 @@ on_order_<status>(ctx, order)  # e.g. on_order_canceled
 ```
 
 `on_market_feed(ctx, event)` is the generic fallback for market-feed types
-without a dedicated method. The adapter calls the dedicated method when it is
-overridden, otherwise the generic method. A strategy does not need to
-implement every hook.
+without a dedicated method, and `on_event(ctx, event)` is the final fallback
+across feed, BAR, and order events. The adapter calls the most specific
+overridden method first. A strategy does not need to implement every hook.
 
 Order callbacks are observational. A callback returns a typed target or order
 delta intent; it never mutates `Ledger`, `MarketDataStore`, `Order`, or the
