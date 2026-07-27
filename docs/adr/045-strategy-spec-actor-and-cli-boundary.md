@@ -30,6 +30,11 @@ CLI 接口必须只有一条清晰路径。
 4. **StrategyContext**：只读市场/持仓视图和命令工厂。Actor 不拿到 scheduler、
    Flow、ledger、broker 或任意可变运行时 store 的引用。
 
+`StrategyActor` 是 `Strategy` 的新公共名称；`Strategy` 仍作为兼容构造入口。
+两者不是两个运行时对象。所有可选的 `on_xxx` 回调都属于同一个 Actor 表面，
+运行时通过统一的 callback registry 判断用户实际覆写了哪些回调，不再让 BAR
+注册器和订单事件调度器各自维护一套判断逻辑。
+
 `StrategyPlan` 是服务端将 `StrategySpec` 校验、补默认值、解析数据需求并
 冻结后的内部计划。它不是用户要编写的策略模板，也不是另一个 hook 对象。
 

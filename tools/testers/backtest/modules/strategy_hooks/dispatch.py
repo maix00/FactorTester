@@ -7,7 +7,7 @@ from typing import Any
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.market_events import MarketFeedEvent, MarketFeedEventKind
-from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.engines.native.strategy import overridden_strategy_callbacks
 from tools.testers.backtest.engines.native.orders.enums import OrderStatus
 from tools.testers.backtest.engines.native.strategy_hooks import (
     StrategyContext,
@@ -71,8 +71,7 @@ def _specific_feed_hook(state: Any, strategy: Any, ctx: Any, event: MarketFeedEv
         MarketFeedEventKind.BOOK_DELTA: "on_book_delta",
         MarketFeedEventKind.BOOK_SNAPSHOT: "on_book_snapshot",
     }.get(event.kind)
-    hook = getattr(type(strategy), hook_name, None) if hook_name else None
-    if callable(hook) and hook is not getattr(Strategy, hook_name, None):
+    if hook_name in overridden_strategy_callbacks(strategy):
         return getattr(strategy, hook_name)(_context_for(state, ctx, strategy), event.payload)
     return strategy.on_market_feed(_context_for(state, ctx, strategy), event)
 
@@ -103,8 +102,7 @@ def _specific_order_hook(strategy: Any, context: StrategyContext, order: Any) ->
         OrderStatus.REJECTED: "on_order_rejected",
         OrderStatus.EXPIRED: "on_order_expired",
     }.get(getattr(order, "status", None))
-    hook = getattr(type(strategy), hook_name, None) if hook_name else None
-    if callable(hook) and hook is not getattr(Strategy, hook_name, None):
+    if hook_name in overridden_strategy_callbacks(strategy):
         return getattr(strategy, hook_name)(context, order)
     return strategy.on_order_event(context, order)
 

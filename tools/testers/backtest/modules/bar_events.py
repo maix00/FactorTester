@@ -91,14 +91,14 @@ def _schedule_bar_events(state, ctx) -> None:
     if table is None:
         return
     representative_by_calculation: dict[Any, Any] = {}
-    from tools.testers.backtest.engines.native.strategy import Strategy
+    from tools.testers.backtest.engines.native.strategy import overridden_strategy_callbacks
 
     for strategy in state.strategy_configs:
         config = state.config_for(strategy)
         live_factor = config.uses_flow("signal_live")
         custom_bar = (
             config.uses_flow("strategy_hook_on_bar")
-            and getattr(type(strategy), "on_bar", None) is not Strategy.on_bar
+            and "on_bar" in overridden_strategy_callbacks(strategy)
         )
         if not (live_factor or custom_bar):
             continue

@@ -4,7 +4,7 @@ implements __eq__/__hash__)."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 from tools.data.types.base import UniqueNameObject
 
@@ -82,6 +82,50 @@ class Strategy(UniqueNameObject):
 
     def on_order_expired(self, ctx: Any, order: Any) -> Any:
         return self.on_order_event(ctx, order)
+
+
+# One authoritative list is used by runtime capability discovery and event
+# dispatch.  Keeping it next to the Actor base class prevents a new callback
+# from being silently omitted by one of those paths.
+STRATEGY_CALLBACKS: Final[tuple[str, ...]] = (
+    "on_start",
+    "on_stop",
+    "on_event",
+    "on_market_feed",
+    "on_bar",
+    "on_quote",
+    "on_trade",
+    "on_book_delta",
+    "on_book_snapshot",
+    "on_order_event",
+    "on_order_blocked",
+    "on_order_scheduled",
+    "on_order_accepted",
+    "on_order_partially_filled",
+    "on_order_cancel_pending",
+    "on_order_replace_pending",
+    "on_order_filled",
+    "on_order_canceled",
+    "on_order_rejected",
+    "on_order_expired",
+)
+
+
+def overridden_strategy_callbacks(strategy: Any) -> frozenset[str]:
+    """Return callbacks implemented by this Actor, excluding base no-ops."""
+
+    actor_type = type(strategy)
+    return frozenset(
+        name
+        for name in STRATEGY_CALLBACKS
+        if callable(getattr(actor_type, name, None))
+        and getattr(actor_type, name) is not getattr(Strategy, name)
+    )
+
+
+# New public vocabulary.  ``Strategy`` remains the compatibility constructor
+# used by existing configurations and tests; both names create the same Actor.
+StrategyActor = Strategy
 
 
 class BarStrategy(Strategy):

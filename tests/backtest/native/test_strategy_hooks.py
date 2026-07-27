@@ -2,7 +2,11 @@ import pandas as pd
 import pytest
 
 from tools.testers.backtest.engines.native.events import EventKind
-from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.engines.native.strategy import (
+    Strategy,
+    StrategyActor,
+    overridden_strategy_callbacks,
+)
 from tools.testers.backtest.engines.native.strategy_hooks import (
     ExecutionCapabilities,
     StrategyContext,
@@ -22,6 +26,20 @@ def test_legacy_strategy_has_noop_hooks():
     assert strategy.on_start(context) is None
     assert strategy.on_bar(context, {}) is None
     assert strategy.on_order_event(context, {}) is None
+
+
+def test_strategy_actor_is_the_single_user_hook_surface():
+    class Actor(StrategyActor):
+        def on_bar(self, ctx, bar):
+            return None
+
+        def on_order_filled(self, ctx, order):
+            return None
+
+    actor = Actor(alias="actor")
+
+    assert isinstance(actor, Strategy)
+    assert overridden_strategy_callbacks(actor) == frozenset({"on_bar", "on_order_filled"})
 
 
 def test_generic_on_event_is_used_by_default_adapters():
