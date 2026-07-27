@@ -20,7 +20,7 @@ from server import create_app
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
-from server.services import research_runs
+from server.services import research_graphs, research_runs
 from server.services.agent_flow.verified_usage import (
     VerifiedProviderUsage,
     clear_usage_receipt_verifiers,
@@ -31,7 +31,15 @@ from server.services.research_graph.packet_calibration import (
     clear_packet_calibration_receipt_verifiers,
     register_packet_calibration_receipt_verifier,
 )
+from server.services.research_graph.packet_budget import graph_packet_budget
+from server.services.research_graph.branch.report_coverage import (
+    expected_report_bindings,
+)
+from server.services.research_graph.research_cycle.replay import (
+    validate_research_cycle_checkpoint,
+)
 from server.services.research_graph.shadow_tokens import shadow_token_contract
+from tools.cli.release.research_reporting.report_items import report_fragment_hash
 
 
 class _E2EUsageVerifier:
@@ -500,7 +508,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             env=env,
         )
         assert "keep_login=true" in login.stdout
-        assert (cli_home / "cookies.lwp").is_file()
+        cookie_key = hashlib.sha256(base_url.rstrip("/").encode()).hexdigest()[:20]
+        assert (cli_home / "cookies" / f"{cookie_key}.lwp").is_file()
         assert _run_json(
             factortester,
             ["research-graph", "versions", "factor-research"],
@@ -509,9 +518,32 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
 
         graph = _run_json(
             harness,
+            ["graph", "successor", "--json"],
+            env=env,
+        )
+        # Shadow execution is only valid for a draft that directly descends
+        # from an existing Active Graph.  Seed the already-governed historical
+        # predecessor as a server fixture; the workflow under test starts at
+        # publishing and governing this candidate through the installed CLI.
+        baseline_graph = _run_json(
+            harness,
             ["graph", "draft", "--json"],
             env=env,
         )
+        research_graphs.register_graph(
+            baseline_graph,
+            actor="history-fixture",
+        )
+        with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            conn.execute(
+                """
+                INSERT INTO active_research_graphs (
+                    graph_id, version, activated_by, activated_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (baseline_graph["graph_id"], baseline_graph["version"],
+                 "history-fixture", 1.0),
+            )
         graph_file = tmp_path / "draft-graph.json"
         graph_file.write_text(json.dumps(graph), encoding="utf-8")
         published = _run_json(
@@ -633,6 +665,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 str(graph["version"]),
                 "--shadow-run-id",
                 graph_run["run_id"],
+                "--shadow-proposal-id",
+                proposal["proposal_id"],
                 "--capability-resolution-file",
                 str(shadow_resolution_file),
             ],
@@ -707,7 +741,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             verified=True,
         )
 
-        budget_coverage = graph["agent_packet_budget"]["coverage"]
+        runtime_packet_budget = graph_packet_budget(graph)
+        budget_coverage = runtime_packet_budget["coverage"]
         packet_case_count = (
             len(budget_coverage["required_anchor_refs"])
             * len(budget_coverage["required_packet_kinds"])
@@ -957,9 +992,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             ],
             env=env,
         )
-        packet_ceiling = (
-            graph.get("agent_packet_budget") or {"ceiling_bytes": 6000}
-        )["ceiling_bytes"]
+        packet_ceiling = runtime_packet_budget["ceiling_bytes"]
         assert context["context_bytes"] <= packet_ceiling
         assert "candidate_edges" not in context
         assert next_packet["next_bytes"] <= packet_ceiling
@@ -993,10 +1026,90 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             json.dumps(target_resolution),
             encoding="utf-8",
         )
+        initial_checkpoint = validate_research_cycle_checkpoint({
+            "schema_version": 1,
+            "contract_hash": "0" * 64,
+            "methodology_hash": "1" * 64,
+            "trial_plan_hash": "",
+            "claims": [],
+            "obligations": [],
+            "pending_adjudications": [],
+            "pending_closure": None,
+            "closure": None,
+        })
         evidence = {
             **(edge.get("guard") or {}),
             "evidence_refs": ["e2e:transition"],
             "agent_invocation_ids": [transition_invocation_id],
+            "entry_requirement_assessments": [
+                {
+                    "requirement_id": requirement_id,
+                    "applicability": {
+                        "status": "not_applicable",
+                        "reason_zh": "此端到端迁移仅验证图工作流。",
+                        "fact_refs": [
+                            f"e2e:entry-requirement:{requirement_id}"
+                        ],
+                    },
+                    "coverage": {
+                        "decision": "no_material_issue",
+                        "obligation_refs": [],
+                    },
+                    "resolution": {
+                        "route": "bounded_unknown",
+                        "reuse_status": "none",
+                        "validation_refs": [],
+                    },
+                    "entry_effect": {
+                        "status": "pass",
+                        "limitation_refs": [],
+                    },
+                }
+                for requirement_id in next(
+                    item for item in graph["nodes"]
+                    if item["node_id"] == entry_node
+                ).get("entry_requirement_refs") or []
+            ],
+            "research_cycle": {
+                "schema_version": 1,
+                "parent_trace_ref": "",
+                "initial_checkpoint": initial_checkpoint,
+                "expected_base_hash": initial_checkpoint["projection_hash"],
+                "events": [],
+            },
+        }
+        source_node = next(
+            item for item in graph["nodes"] if item["node_id"] == entry_node
+        )
+        target_node = next(
+            item for item in graph["nodes"]
+            if item["node_id"] == edge["to_node"]
+        )
+        report_items = [
+            {
+                "report_requirement_id": item["report_requirement_id"],
+                "subject_ref": item["subject_ref"],
+                "content_kind": item["allowed_content"][0],
+                "item_hash": hashlib.sha256(
+                    f"e2e:{item['report_requirement_id']}:{item['subject_ref']}"
+                    .encode()
+                ).hexdigest(),
+            }
+            for item in expected_report_bindings(
+                graph=graph,
+                source_node=source_node,
+                edge=edge,
+                target_node=target_node,
+                entry_assessments=evidence[
+                    "entry_requirement_assessments"
+                ],
+                transition_evidence=evidence,
+            )
+        ]
+        evidence["report_submission"] = {
+            "schema_version": 1,
+            "fragment_hash": report_fragment_hash(report_items),
+            "items": report_items,
         }
         evidence_file = tmp_path / "transition-evidence.json"
         evidence_file.write_text(json.dumps(evidence), encoding="utf-8")

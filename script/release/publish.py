@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from typing import Any
 from uuid import uuid4
 
@@ -143,6 +144,7 @@ def release_client(
     signing_identity = _shared_signing_certificate()
     if channel == "beta" and (server_origin is None or release_root is None):
         raise ValueError("Beta requires server origin and release root")
+    _validate_cli_anything_skill_copy(REPO)
     _validate_source_checkout(REPO, source_revision)
     build_environment = xcodebuild_environment()
     if output.exists():
@@ -569,6 +571,23 @@ def _stage_copy(source: Path, pointer: Path) -> Path:
 def _fsync(path: Path) -> None:
     with path.open("rb") as stream:
         os.fsync(stream.fileno())
+
+
+def _validate_cli_anything_skill_copy(repo: Path) -> None:
+    """Fail before packaging a harness with a stale bundled Skill."""
+    synchronizer = repo / "tools/cli/agent-harness/scripts/sync_skill.py"
+    result = subprocess.run(
+        [sys.executable, str(synchronizer), "--repo", str(repo), "--check"],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise ValueError(
+            "CLI-Anything Skill copies are out of sync; run "
+            "tools/cli/agent-harness/scripts/sync_skill.py --write"
+            + (f": {detail}" if detail else "")
+        )
 
 
 def _shared_signing_certificate() -> str:

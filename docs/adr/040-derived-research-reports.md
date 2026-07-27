@@ -82,10 +82,14 @@ Sync and rendering are separate:
    files are staged first and published in that order, with `INDEX.json` last.
 5. A failed publication restores the previous complete three-file generation.
 
-Workspace regeneration must preserve `research/`. Reports never contain factor
-source, private formulas, expression trees, credentials, raw stdout/stderr, or
-unbounded result payloads. Access policy and artifact availability are checked
-before a reference is rendered.
+Workspace regeneration must preserve `research/`. Local reports may contain
+explicit, bounded code and math blocks. Arbitrary `factor_source`, `formula`,
+and `expression_tree` fields remain rejected so content is never silently
+dropped by the legacy snapshot projection. Credentials, raw stdout/stderr, and
+unbounded result payloads remain outside the report content contract. Only content-free manifests, stable
+references, and hashes may cross the Active Graph/server boundary; the report
+body and source code stay in the Profile-local research root. Access policy
+and artifact availability are checked before a reference is rendered.
 
 ## Consequences
 

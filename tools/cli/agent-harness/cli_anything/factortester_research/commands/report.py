@@ -160,16 +160,38 @@ def report_fork(source_file: Path, output_file: Path, as_json: bool) -> None:
 @click.option("--body", default="")
 @click.option("--display-kind", default="", help="Special-section presentation kind.")
 @click.option("--content-file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--code-file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--language", default="text", show_default=True)
+@click.option("--latex", default=None)
+@click.option("--fallback", default="")
 @click.option("--json", "as_json", is_flag=True)
 def report_add(
     file: Path, component_id: str, kind: str, title: str,
     parent_id: str | None, body: str, display_kind: str,
-    content_file: Path | None,
+    content_file: Path | None, code_file: Path | None, language: str,
+    latex: str | None, fallback: str,
     as_json: bool,
 ) -> None:
     from tools.cli.release.research_reporting.document import add_component, load_document, save_document
 
-    content = _read_json(content_file) if content_file else None
+    if sum(item is not None for item in (content_file, code_file, latex)) > 1:
+        raise click.ClickException("--content-file, --code-file and --latex are mutually exclusive")
+    if code_file is not None and kind != "code":
+        raise click.ClickException("--code-file requires --kind code")
+    if kind == "code" and content_file is None and code_file is None:
+        raise click.ClickException("--kind code requires --code-file or --content-file")
+    if latex is not None and kind != "math":
+        raise click.ClickException("--latex requires --kind math")
+    if fallback and kind != "math":
+        raise click.ClickException("--fallback requires --kind math")
+    if kind == "math" and content_file is None and latex is None:
+        raise click.ClickException("--kind math requires --latex or --content-file")
+    content = (
+        {"language": language, "code": code_file.read_text(encoding="utf-8")}
+        if code_file is not None
+        else {"latex": latex, "fallback": fallback} if latex is not None
+        else _read_json(content_file) if content_file else None
+    )
     value = add_component(
         load_document(file), component_id=component_id, kind=kind,
         title=title, parent_id=parent_id, body=body, content=content,

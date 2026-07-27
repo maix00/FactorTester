@@ -3,7 +3,9 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 
 from click.testing import CliRunner
 import pytest
@@ -11,6 +13,48 @@ import pytest
 from script.release import publish
 from tools.cli.commands.client_release import client_release
 from tools.cli.release import app_update_control
+
+
+def test_release_rejects_a_drifted_cli_anything_skill_copy(
+    tmp_path: Path,
+) -> None:
+    source_root = Path(__file__).resolve().parents[2]
+    script = (
+        source_root / "tools/cli/agent-harness/scripts/sync_skill.py"
+    )
+    canonical = (
+        tmp_path / "skills/cli-anything-factortester-research/SKILL.md"
+    )
+    packaged = (
+        tmp_path
+        / "tools/cli/agent-harness/cli_anything/factortester_research/skills/SKILL.md"
+    )
+    target_script = tmp_path / "tools/cli/agent-harness/scripts/sync_skill.py"
+    resources = tmp_path / "tools/cli/agent-harness/cli_anything/factortester_research/resources"
+    canonical.parent.mkdir(parents=True)
+    packaged.parent.mkdir(parents=True)
+    target_script.parent.mkdir(parents=True)
+    resources.mkdir(parents=True)
+    canonical.write_text("canonical", encoding="utf-8")
+    packaged.write_text("stale", encoding="utf-8")
+    (resources / "capabilities.v1.json").write_text(
+        '{"capabilities": []}', encoding="utf-8",
+    )
+    (resources / "provider-locks.v1.json").write_text(
+        '{"implementations": {}}', encoding="utf-8",
+    )
+    shutil.copy2(script, target_script)
+
+    with pytest.raises(ValueError, match="Skill copies are out of sync"):
+        publish._validate_cli_anything_skill_copy(tmp_path)
+
+    subprocess.run(
+        [
+            sys.executable, str(target_script), "--repo", str(tmp_path), "--write",
+        ],
+        check=True,
+    )
+    publish._validate_cli_anything_skill_copy(tmp_path)
 
 
 def _appcast(

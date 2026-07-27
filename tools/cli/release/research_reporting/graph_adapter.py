@@ -30,7 +30,7 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "document_commands": [
             "cycle next <instance> <branch> --report-file <file>",
             "report fork --source-file <file> --output-file <file>",
-            "report add --kind chapter|section|subsection|entry|special|table|image",
+            "report add --kind chapter|section|subsection|entry|special|table|image|code|math|result",
             "report asset --asset-file <json>",
             "report chip --kind evidence|obligation|task|job|artifact|report_requirement",
             "report manifest --file <file>",
@@ -92,7 +92,9 @@ def _task(ref: str, node: str, edge: str, *, required: bool) -> dict[str, Any]:
         "chapter_ref": chapter_ref,
         "chapter_title_zh": _chapter_title(node),
         "required": required,
-        "suggested_component_kinds": ["entry", "table", "image"],
+        "suggested_component_kinds": [
+            "entry", "table", "image", "code", "math", "result",
+        ],
         "submission": "attach a report_requirement chip to the completed component",
     }
 

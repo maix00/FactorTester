@@ -447,8 +447,11 @@ def _backend_json(
     stderr: str,
 ) -> dict[str, Any]:
     if returncode != 0:
+        message = stderr or stdout or "FactorTester command failed"
         raise click.ClickException(
-            (stderr or stdout or "FactorTester command failed")[:1000]
+            # Python client tracebacks put the HTTP response at the end. Keep
+            # that actionable portion instead of truncating it away.
+            message[-2000:]
         )
     try:
         value = json.loads(stdout)

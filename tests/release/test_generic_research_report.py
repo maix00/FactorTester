@@ -133,3 +133,41 @@ def test_report_cli_authors_content_and_sidecar_bindings(tmp_path) -> None:
     )
     assert "bindings" not in content
     assert sidecar["bindings"][0]["target_ref"] == "job:1"
+
+
+def test_report_cli_authors_math_and_result_components(tmp_path) -> None:
+    runner = CliRunner()
+    document = tmp_path / "report.json"
+    result_content = tmp_path / "result.json"
+    code_file = tmp_path / "factor.py"
+    result_content.write_text(json.dumps({"sharpe": 1.25}), encoding="utf-8")
+    code_file.write_text("def signal(price):\n    return price\n", encoding="utf-8")
+    assert runner.invoke(report_cli, [
+        "create", str(document), "--document-id", "cli-math",
+        "--title", "CLI report", "--json",
+    ]).exit_code == 0
+    added_math = runner.invoke(report_cli, [
+        "add", str(document), "--component-id", "equation", "--kind", "math",
+        "--title", "Signal", "--latex", r"s_t = z_t / \sigma_t",
+        "--fallback", "normalized signal", "--json",
+    ])
+    assert added_math.exit_code == 0, added_math.output
+    added_code = runner.invoke(report_cli, [
+        "add", str(document), "--component-id", "source", "--kind", "code",
+        "--title", "Implementation", "--language", "python",
+        "--code-file", str(code_file), "--json",
+    ])
+    assert added_code.exit_code == 0, added_code.output
+    added_result = runner.invoke(report_cli, [
+        "add", str(document), "--component-id", "summary", "--kind", "result",
+        "--title", "Backtest", "--content-file", str(result_content), "--json",
+    ])
+    assert added_result.exit_code == 0, added_result.output
+    rendered = runner.invoke(report_cli, [
+        "render", str(document), "--output", str(tmp_path / "report.md"), "--json",
+    ])
+    assert rendered.exit_code == 0, rendered.output
+    markdown = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "$$\ns_t = z_t / \\sigma_t\n$$" in markdown
+    assert "```python\ndef signal(price):" in markdown
+    assert '"sharpe": 1.25' in markdown

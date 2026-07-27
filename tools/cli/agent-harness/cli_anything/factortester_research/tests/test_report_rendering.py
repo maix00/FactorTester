@@ -530,14 +530,29 @@ def test_failed_generation_publish_restores_all_three_old_files(
         {"credentials": {"token": "secret"}},
     ],
 )
-def test_snapshot_rejects_prohibited_source_and_heavy_payloads(
-    prohibited,
-) -> None:
+def test_snapshot_rejects_free_source_fields_and_heavy_payloads(prohibited) -> None:
     snapshot = _snapshot()
     snapshot["sections"][0].update(prohibited)
 
     with pytest.raises(ValueError, match="prohibited report field"):
         canonical_report_snapshot(snapshot)
+
+
+def test_snapshot_keeps_authored_code_block_without_server_payload() -> None:
+    snapshot = _snapshot()
+    snapshot["sections"][0]["blocks"] = [{
+        "kind": "code",
+        "language": "python",
+        "code": "return '/Users/private/data'",
+        "link_ids": ["trial-plan-design"],
+    }]
+    value = canonical_report_snapshot(snapshot)
+    assert value["sections"][0]["blocks"][0]["code"] == (
+        "return '/Users/private/data'"
+    )
+    rendered = MarkdownReportTarget().render(value).decode()
+    assert "```python" in rendered
+    assert "/Users/private/data" in rendered
 
 
 def test_renderer_interface_does_not_require_pdf_or_chart_dependency() -> None:

@@ -9,6 +9,78 @@ from typing import Any
 import orjson
 
 from server.services.research_graph.branch.context import _build_local_state
+from server.services.research_graph.branch import server_actions
+
+
+COMPACT_NEXT_TARGET_BYTES = 6000
+
+
+def _with_next_bytes(packet: dict[str, Any]) -> int:
+    packet["next_bytes"] = 0
+    for _ in range(3):
+        packet["next_bytes"] = len(orjson.dumps(packet))
+    return len(orjson.dumps(packet))
+
+
+def _compact_next_for_budget(packet: dict[str, Any]) -> dict[str, Any]:
+    """Preserve routable choices while moving verbose contracts to detail reads."""
+    value = deepcopy(packet)
+    value["capabilities"] = [
+        {
+            "capability_id": str(item.get("capability_id") or ""),
+            "status": str(item.get("status") or ""),
+            "detail_ref": (
+                "capability-resolution:"
+                f"{item.get('capability_id') or ''}"
+            ),
+        }
+        for item in value.get("capabilities") or []
+        if isinstance(item, dict)
+    ]
+    value["candidate_edges"] = [
+        {
+            key: deepcopy(item.get(key))
+            for key in (
+                "edge_id",
+                "to_node",
+                "edge_type",
+                "risk_level",
+                "readiness",
+                "blockers",
+            )
+            if key in item
+        } | {
+            "detail_ref": (
+                "graph-edge:"
+                f"{item.get('edge_id') or ''}"
+            ),
+            **({"requires_server_action": True}
+               if item.get("action_contract") else {}),
+        }
+        for item in value.get("candidate_edges") or []
+        if isinstance(item, dict)
+    ]
+    frontier = value.get("candidate_trial_frontier") or {}
+    value["candidate_trial_frontier"] = {
+        "current_trial_plan_hash": frontier.get("current_trial_plan_hash"),
+        "unassessed_obligation_count": frontier.get(
+            "unassessed_obligation_count", 0
+        ),
+    }
+    value.pop("entry_resolution", None)
+    value.pop("node_report_requirement_refs", None)
+    if "entry_requirement_policy" in value:
+        value["entry_requirement_policy"] = {
+            "detail_ref": "graph-entry-requirements",
+        }
+    value["packet_compaction"] = {
+        "mode": "lazy_edge_contracts",
+        "detail_command": (
+            "factortester research step inspect "
+            "<instance-id> <branch-id> --output <file>"
+        ),
+    }
+    return value
 
 
 def build_graph_branch_next(
@@ -123,9 +195,10 @@ def build_graph_branch_next(
         packet["node_report_requirement_refs"] = list(
             context.get("node_report_requirement_refs") or []
         )
-    for _ in range(3):
-        packet["next_bytes"] = len(orjson.dumps(packet))
-    serialized_bytes = len(orjson.dumps(packet))
+    serialized_bytes = _with_next_bytes(packet)
+    if serialized_bytes > min(ceiling_bytes, COMPACT_NEXT_TARGET_BYTES):
+        packet = _compact_next_for_budget(packet)
+        serialized_bytes = _with_next_bytes(packet)
     if serialized_bytes > ceiling_bytes:
         raise ValueError(
             "bounded next packet exceeds "
@@ -244,4 +317,7 @@ def _edge_candidate(
         value["report_requirement_refs"] = list(
             edge.get("report_requirement_refs") or []
         )
+    action_contract = server_actions.contract_for_edge(edge)
+    if action_contract is not None:
+        value["action_contract"] = action_contract
     return value

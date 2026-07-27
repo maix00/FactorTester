@@ -38,6 +38,7 @@ from tools.data.sqlite.db import connect_sqlite
 
 MAX_CONTEXT_EVIDENCE_REFS = 6
 MAX_CONTEXT_OBLIGATION_SUMMARY_BYTES = 72
+COMPACT_CONTEXT_TARGET_BYTES = 6000
 
 
 def _bounded_text(value: Any, *, max_bytes: int) -> str:
@@ -67,6 +68,79 @@ def _compact_research_cycle(value: dict[str, Any]) -> dict[str, Any]:
     result["open_obligations"] = obligations
     result["open_obligation_count"] = len(obligations)
     return result
+
+
+def _compact_context_for_budget(context: dict[str, Any]) -> dict[str, Any]:
+    """Keep routing identities when a schema-v2 packet needs lazy details.
+
+    The full capability and requirement contracts remain available through
+    their detail reads.  This path is deliberately conditional: ordinary,
+    already-small packets retain their richer explanatory projection.
+    """
+    value = deepcopy(context)
+    for field in ("required_capabilities", "triggered_capabilities"):
+        value[field] = [
+            {
+                "capability_id": str(item.get("capability_id") or ""),
+                "status": "gap" if item.get("gap") else "bound",
+                "detail_ref": (
+                    "capability-resolution:"
+                    f"{item.get('capability_id') or ''}"
+                ),
+            }
+            for item in value.get(field) or []
+            if isinstance(item, dict)
+        ]
+    value["open_gaps"] = [
+        {
+            "capability_id": str(item.get("capability_id") or ""),
+            "detail_ref": (
+                "capability-resolution:"
+                f"{item.get('capability_id') or ''}"
+            ),
+        }
+        for item in value.get("open_gaps") or []
+        if isinstance(item, dict)
+    ]
+    value["undetermined_conditions"] = [
+        {
+            "capability_id": str(item.get("capability_id") or ""),
+            "explanation": _bounded_text(
+                item.get("explanation"), max_bytes=96
+            ),
+        }
+        for item in value.get("undetermined_conditions") or []
+        if isinstance(item, dict)
+    ]
+    value["entry_requirements"] = [
+        {
+            key: deepcopy(item.get(key))
+            for key in (
+                "requirement_id",
+                "gate_policy",
+                "mapped_obligation_refs",
+                "mapped_statuses",
+                "detail_ref",
+            )
+        }
+        for item in value.get("entry_requirements") or []
+        if isinstance(item, dict)
+    ]
+    value["packet_compaction"] = {
+        "mode": "lazy_contract_details",
+        "detail_command": (
+            "factortester research step inspect "
+            "<instance-id> <branch-id> --output <file>"
+        ),
+    }
+    return value
+
+
+def _with_context_bytes(context: dict[str, Any]) -> int:
+    context["context_bytes"] = 0
+    for _ in range(3):
+        context["context_bytes"] = len(orjson.dumps(context))
+    return len(orjson.dumps(context))
 
 
 def _build_local_state(
@@ -291,11 +365,14 @@ def _build_local_state(
     if packet_budget.get("budget_scope") == "runtime_profile":
         context["budget_profile_ref"] = packet_budget["profile_ref"]
         context["budget_profile_hash"] = packet_budget["profile_hash"]
-    context["context_bytes"] = 0
-    for _ in range(3):
-        context["context_bytes"] = len(orjson.dumps(context))
-    serialized_bytes = len(orjson.dumps(context))
     ceiling_bytes = int(packet_budget["ceiling_bytes"])
+    serialized_bytes = _with_context_bytes(context)
+    if (
+        schema_version >= 2
+        and serialized_bytes > min(ceiling_bytes, COMPACT_CONTEXT_TARGET_BYTES)
+    ):
+        context = _compact_context_for_budget(context)
+        serialized_bytes = _with_context_bytes(context)
     if serialized_bytes > ceiling_bytes:
         raise ValueError(
             "bounded context exceeds "

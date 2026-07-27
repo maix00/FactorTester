@@ -11,7 +11,10 @@ from .validation_limits import MAX_COMPONENTS, MAX_TEXT
 
 _ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 SCHEMA_VERSION = 2
-KINDS = {"chapter", "section", "subsection", "entry", "special", "table", "image"}
+KINDS = {
+    "chapter", "section", "subsection", "entry", "special", "table",
+    "image", "code", "math", "result",
+}
 _TOP_LEVEL_FIELDS = {
     "schema_version", "document_id", "title", "language", "revision",
     "components", "assets",

@@ -1,4 +1,8 @@
-"""Bounded, source-free research report snapshot validation."""
+"""Bounded research report snapshot validation.
+
+Only explicit report blocks are preserved. Source code and equations therefore
+use the ``code`` and ``math`` block kinds rather than free-form fields.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +45,7 @@ _PROHIBITED_KEYS = {
 
 
 def canonical_report_snapshot(snapshot: Any) -> dict[str, Any]:
-    """Validate and hash a bounded, source-free report snapshot."""
+    """Validate and hash a bounded report snapshot."""
     if not isinstance(snapshot, dict):
         raise ValueError("report snapshot must be an object")
     _reject_prohibited(snapshot)
@@ -272,6 +276,35 @@ def _canonical_blocks(
                     or any(ref not in link_ids for ref in refs)
                 ):
                     raise ValueError("section paragraph links are invalid")
+                projected["link_ids"] = list(refs)
+                used_link_ids.update(refs)
+            blocks.append(_with_report_binding(
+                projected, report_binding, report_timing, recorded_at,
+            ))
+            continue
+        if kind == "code" and set(block) in (
+            {"kind", "language", "code"},
+            {"kind", "language", "code", "link_ids"},
+        ):
+            projected = {
+                "kind": kind,
+                "language": _bounded_text(
+                    block["language"], field="section.code.language",
+                    maximum=64,
+                ),
+                "code": _bounded_text(
+                    block["code"], field="section.code.code",
+                    maximum=16000, allow_empty=True, reject_local_paths=False,
+                ),
+            }
+            if "link_ids" in block:
+                refs = block["link_ids"]
+                if (
+                    not isinstance(refs, list) or not refs
+                    or len(refs) > 16
+                    or any(ref not in link_ids for ref in refs)
+                ):
+                    raise ValueError("section code links are invalid")
                 projected["link_ids"] = list(refs)
                 used_link_ids.update(refs)
             blocks.append(_with_report_binding(

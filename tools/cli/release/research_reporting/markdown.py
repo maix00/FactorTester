@@ -67,6 +67,13 @@ def _block_lines(blocks: list[dict[str, Any]]) -> list[str]:
             ])
         elif block["kind"] == "paragraph":
             lines.extend([block["text"], ""])
+        elif block["kind"] == "code":
+            fence = "```"
+            while fence in block["code"]:
+                fence += "`"
+            lines.extend([
+                f"{fence}{block['language']}", block["code"], fence, "",
+            ])
         elif block["kind"] == "list":
             lines.extend(f"- {row['text']}" for row in block["rows"])
             lines.append("")

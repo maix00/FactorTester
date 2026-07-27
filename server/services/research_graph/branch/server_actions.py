@@ -61,3 +61,24 @@ def guard_facts(
         if item is not None:
             facts.update(item["guard_facts"])
     return facts
+
+
+def contract_for_edge(edge: dict[str, Any]) -> dict[str, str] | None:
+    """Describe a declared server action without exposing its implementation.
+
+    The actual, branch-bound request schema remains an on-demand
+    ``research step inspect`` response. This compact descriptor tells an Agent
+    that it must fetch that contract instead of relying on a Skill example.
+    """
+    action = str(edge.get("server_action") or "")
+    for handler in _HANDLERS:
+        if action == handler.SERVER_ACTION:
+            return {
+                "request_field": handler.REQUEST_FIELD,
+                "contract_command": (
+                    "factortester research step inspect "
+                    "<instance-id> <branch-id> --output <file>"
+                ),
+                "submission": "include the request only in transition evidence",
+            }
+    return None

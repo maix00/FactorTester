@@ -1090,7 +1090,8 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "aae6bc06218f25ad8f323525c8db635bfe40647453e800c4fa03725e2ca75ece"
+        registry["provider_lock"]["implementations"]
+        ["local.research-obligation-cycle"]["sha256"]
     )
 
 

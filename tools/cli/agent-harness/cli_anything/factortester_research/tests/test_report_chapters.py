@@ -147,3 +147,40 @@ def test_report_fork_clones_content_and_sidecar_with_new_opaque_document_id(
     assert cloned["document_id"] != document["document_id"]
     assert payload["component_count"] == 1
     assert target.with_suffix(".json.bindings.json").exists()
+
+
+def test_report_cli_writes_and_renders_local_code_component(tmp_path: Path) -> None:
+    report_file = tmp_path / "report.json"
+    source_file = tmp_path / "factor.py"
+    source_file.write_text(
+        "class DemoFactor:\n    return '/Users/private/data'\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    created = runner.invoke(cli, [
+        "report", "create", "--file", str(report_file),
+        "--document-id", "research", "--title", "研究报告", "--json",
+    ])
+    assert created.exit_code == 0, created.output
+    added = runner.invoke(cli, [
+        "report", "add", "--file", str(report_file),
+        "--component-id", "source", "--kind", "code", "--title", "因子源码",
+        "--language", "python", "--code-file", str(source_file), "--json",
+    ])
+    assert added.exit_code == 0, added.output
+    output = tmp_path / "report.md"
+    rendered = runner.invoke(cli, [
+        "report", "render-document", "--file", str(report_file),
+        "--output", str(output), "--json",
+    ])
+    assert rendered.exit_code == 0, rendered.output
+    text = output.read_text(encoding="utf-8")
+    assert "```python" in text
+    assert "class DemoFactor:" in text
+    assert "/Users/private/data" in text
+    manifest = runner.invoke(cli, [
+        "report", "manifest", "--file", str(report_file), "--json",
+    ])
+    assert manifest.exit_code == 0, manifest.output
+    assert "/Users/private/data" not in manifest.output
+    assert "class DemoFactor:" not in manifest.output

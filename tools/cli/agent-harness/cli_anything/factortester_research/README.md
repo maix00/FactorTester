@@ -282,11 +282,12 @@ old generation. Unchanged content writes none of those report files.
 The JSON result separates stable `artifact:research/...` references from a
 `local_artifact_descriptor`. Only that explicitly local descriptor contains
 `file://` references for FTClient; Graph/server projections must use the stable
-references. Reports reject local paths, factor source, formula/expression
-trees, credentials, and raw stdout/stderr. Markdown is the only implemented
-rendition. The renderer protocol and `assets/` boundary can support later PDF
-or chart components, but the current command neither generates nor coexists
-with a PDF rendition.
+references. Local reports may contain explicit bounded `code` and `math`
+blocks. Arbitrary source/formula/expression-tree fields remain rejected instead
+of being silently discarded by the legacy snapshot projection. Credentials and
+unbounded process output remain rejected. Markdown is the only implemented rendition. The renderer
+protocol and `assets/` boundary can support later PDF or chart components, but
+the current command neither generates nor coexists with a PDF rendition.
 
 ### Graph-independent report authoring
 
@@ -311,6 +312,16 @@ cli-anything-factortester-research report add \
   --file research-report.json --component-id result-table \
   --kind table --parent-id findings --title '结果表' \
   --content-file result-table.json --json
+cli-anything-factortester-research report add \
+  --file research-report.json --component-id source-code \
+  --kind code --title '因子实现' --language python \
+  --code-file factor.py --json
+cli-anything-factortester-research report add \
+  --file research-report.json --component-id signal-equation \
+  --kind math --title '信号公式' --latex 's_t = z_t / \\sigma_t' --json
+cli-anything-factortester-research report add \
+  --file research-report.json --component-id backtest-summary \
+  --kind result --title '回测结果' --content-file backtest-summary.json --json
 cli-anything-factortester-research report chip \
   --file research-report.json --component-id result-table \
   --chip-id result-job --kind job \
@@ -327,8 +338,9 @@ Use `cycle next --json` to receive the current node's bounded report packet.
 Before advancing, pass the document with `cycle advance --report-file`; the
 Harness loads the adjacent `.bindings.json` and checks that every Graph-
 declared report requirement has a binding. This option is a local checklist
-and manifest receipt only; it does not upload the report body or replace the
-separate `report_submission`/Profile publisher path. Historical Graph-bound
+and manifest receipt only; it does not upload the report body or source code,
+and does not replace the separate `report_submission`/Profile publisher path.
+Historical Graph-bound
 journals are migrated once into two files:
 
 ```bash

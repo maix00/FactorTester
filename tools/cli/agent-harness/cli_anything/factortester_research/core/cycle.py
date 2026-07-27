@@ -100,9 +100,22 @@ def validate_next_packet(packet: dict[str, Any]) -> dict[str, Any]:
     _reject_fields(packet, _FORBIDDEN_PACKET_FIELDS, "routine packet field")
     if not isinstance(packet.get("graph"), str):
         raise ValueError("FactorTester next packet graph must be a reference")
+    compacted = (
+        isinstance(packet.get("packet_compaction"), dict)
+        and packet["packet_compaction"].get("mode")
+        == "lazy_edge_contracts"
+    )
     for edge in packet.get("candidate_edges") or []:
         if not isinstance(edge, dict):
             raise ValueError("candidate_edges must contain objects")
+        if compacted:
+            if not isinstance(edge.get("detail_ref"), str) or not edge[
+                "detail_ref"
+            ].strip():
+                raise ValueError(
+                    "compacted candidate edge requires a detail_ref"
+                )
+            continue
         for field in (
             "required_research_evidence",
             "required_transition_facts",

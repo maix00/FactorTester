@@ -21,7 +21,11 @@ _EXTERNAL_KEYS = {
 
 def component_content(kind: str, value: Any) -> Any:
     _reject_external_keys(value)
-    if kind == "table":
+    if kind == "code":
+        _validate_code(value)
+    elif kind == "math":
+        _validate_math(value)
+    elif kind == "table":
         if not isinstance(value, dict) or set(value) != {"columns", "rows"}:
             raise ValueError("table content must contain columns and rows")
         columns, rows = value["columns"], value["rows"]
@@ -46,6 +50,27 @@ def component_content(kind: str, value: Any) -> Any:
     return value
 
 
+def _validate_code(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != {"language", "code"}:
+        raise ValueError("code content must contain language and code")
+    language = value["language"]
+    if (
+        not isinstance(language, str)
+        or not language.strip()
+        or any(character.isspace() for character in language)
+        or len(language.encode()) > 64
+    ):
+        raise ValueError("code.language must be a single bounded token")
+    _text(value["code"], "code.body", maximum=MAX_TEXT, allow_empty=True)
+
+
+def _validate_math(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != {"latex", "fallback"}:
+        raise ValueError("math content must contain latex and fallback")
+    _text(value["latex"], "math.latex", maximum=MAX_TEXT)
+    _text(value["fallback"], "math.fallback", maximum=MAX_TEXT, allow_empty=True)
+
+
 def _reject_external_keys(value: Any) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -59,7 +84,13 @@ def _reject_external_keys(value: Any) -> None:
             _reject_external_keys(item)
 
 
-def _text(value: Any, field: str, *, maximum: int) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value.encode()) > maximum:
+def _text(
+    value: Any, field: str, *, maximum: int, allow_empty: bool = False,
+) -> str:
+    if (
+        not isinstance(value, str)
+        or (not allow_empty and not value.strip())
+        or len(value.encode()) > maximum
+    ):
         raise ValueError(f"{field} must be bounded text")
     return value

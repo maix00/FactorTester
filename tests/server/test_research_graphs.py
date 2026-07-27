@@ -22,6 +22,7 @@ from server.services.research_graph import versions as graph_versions
 from server.services.research_graph import active_pointer
 from server.services.research_graph.branch import (
     context as branch_context,
+    next_packet as branch_next_packet,
     runtime as branch_runtime,
     transition as branch_transition,
 )
@@ -50,6 +51,28 @@ def _initialize_graph_db(tmp_path, monkeypatch) -> None:
         "test-human-activation-secret",
     )
     agent_flow.clear_store_cache()
+
+
+def test_next_packet_describes_server_action_contract_on_demand() -> None:
+    candidate = branch_next_packet._edge_candidate(
+        {
+            "edge_id": "semantics",
+            "to_node": "validation_design",
+            "edge_type": "conditional",
+            "server_action": "bind_factor_semantics",
+        },
+        open_gap_ids=[],
+        undetermined_ids=[],
+    )
+
+    assert candidate["action_contract"] == {
+        "request_field": "factor_semantics_request",
+        "contract_command": (
+            "factortester research step inspect "
+            "<instance-id> <branch-id> --output <file>"
+        ),
+        "submission": "include the request only in transition evidence",
+    }
 
 
 def _hash(graph: dict) -> str:
