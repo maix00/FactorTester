@@ -61,7 +61,7 @@ class ResearchJobScheduler:
         )
 
         cleanup_stale_scopes(self.repository)
-        cleanup_strategy_scopes()
+        cleanup_strategy_scopes(self.repository)
         self._recover_interrupted_jobs()
 
     def _recover_interrupted_jobs(self) -> None:

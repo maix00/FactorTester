@@ -38,6 +38,7 @@ from server.services.transient_strategy_sources import (
     create_scope as create_strategy_scope,
     validate_entries as validate_strategy_entries,
 )
+from server.services.strategy_plans import normalize_strategy_plan
 from server.services.research_graph.trial_plan.sample_identity import (
     derive_sample_identity,
 )
@@ -100,23 +101,25 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
             str(exc), details={"code": "invalid_transient_strategy_sources"}
         ) from exc
     strategy_specs = data.get("strategy_specs") or []
-    if not isinstance(strategy_specs, list):
-        raise _RunRequestError("strategy_specs must be an array")
-    for spec in strategy_specs:
-        if not isinstance(spec, dict) or not str(spec.get("source") or ""):
-            raise _RunRequestError("each strategy spec requires source")
-        source = str(spec.get("source") or "")
-        if source.startswith(("profile:", "personal:")):
-            relative = source.split(":", 1)[1]
-            uploaded = {
-                str(item.get("path") or "")
-                for item in transient_strategy_sources
-            }
-            if relative not in uploaded:
-                raise _RunRequestError(
-                    f"custom strategy source is not uploaded: {relative}",
-                    details={"code": "strategy_source_unavailable"},
-                )
+    uploaded_strategy_paths = {
+        str(item.get("path") or "") for item in transient_strategy_sources
+    }
+    try:
+        strategy_plan = normalize_strategy_plan(
+            strategy_specs, uploaded_paths=uploaded_strategy_paths,
+        )
+    except ValueError as exc:
+        code = (
+            "strategy_source_unavailable"
+            if "source is not uploaded" in str(exc)
+            else "invalid_strategy_plan"
+        )
+        raise _RunRequestError(str(exc), details={"code": code}) from exc
+    if transient_strategy_sources and not strategy_plan:
+        raise _RunRequestError(
+            "transient strategy sources require a matching strategy_specs entry",
+            details={"code": "orphan_transient_strategy_sources"},
+        )
     source_overrides = {
         str(item["factor_id"]): str(item["source_code"])
         for item in transient_sources
@@ -222,8 +225,9 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
-    if strategy_specs:
-        run_spec["strategy_specs"] = deepcopy(strategy_specs)
+    if strategy_plan:
+        run_spec["strategy_specs"] = deepcopy(strategy_plan)
+        run_spec["strategy_plan"] = deepcopy(strategy_plan)
     run_spec["strategy_source_policy"] = (
         {
             "mode": "transient_run_source",
@@ -286,7 +290,8 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "run_spec": run_spec,
         "transient_sources": transient_sources,
         "transient_strategy_sources": transient_strategy_sources,
-        "strategy_specs": strategy_specs,
+        "strategy_specs": strategy_plan,
+        "strategy_plan": strategy_plan,
     }
 
 
@@ -700,6 +705,7 @@ def submit_research_run():
                 "output_requests": list(prepared["output_requests"]),
                 "run_spec": run_spec,
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
+                "strategy_plan": list(prepared.get("strategy_plan") or []),
                 "transient_factor_source_scope_id": str(
                     transient_scope.get("scope_id") or ""
                 ),
@@ -789,6 +795,7 @@ def preview_research_run():
         "step_mode": prepared["step_mode"],
         "output_requests": list(prepared["output_requests"]),
         "strategy_specs": deepcopy(prepared.get("strategy_specs") or []),
+        "strategy_plan": deepcopy(prepared.get("strategy_plan") or []),
         "strategy_source_policy": deepcopy(
             run_spec.get("strategy_source_policy") or {}
         ),

@@ -13,9 +13,15 @@ def strategy() -> None:
 
 
 @strategy.command("list")
+@click.option("--workspace-root", type=click.Path(exists=True, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
-def list_strategies(as_json: bool) -> None:
-    _delegate(["strategy", "list", *( ["--json"] if as_json else [] )])
+def list_strategies(workspace_root: str | None, as_json: bool) -> None:
+    args = ["strategy", "list"]
+    if workspace_root:
+        args.extend(["--workspace-root", workspace_root])
+    if as_json:
+        args.append("--json")
+    _delegate(args)
 
 
 @strategy.group("template")
@@ -68,9 +74,14 @@ def inspect_actor(source: str, as_json: bool) -> None:
 @click.argument("name")
 @click.option("--output", required=True, type=click.Path(file_okay=False))
 @click.option("--event", type=click.Choice(["bar", "market_feed"]), default="bar")
+@click.option("--strategy-id", default=None)
+@click.option("--workspace", type=click.Choice(["profile", "personal"]), default="profile")
 @click.option("--json", "as_json", is_flag=True)
-def scaffold_actor(name: str, output: str, event: str, as_json: bool) -> None:
+def scaffold_actor(name: str, output: str, event: str, strategy_id: str | None, workspace: str, as_json: bool) -> None:
     args = ["strategy", "actor", "scaffold", name, "--output", output, "--event", event]
+    if strategy_id:
+        args.extend(["--strategy-id", strategy_id])
+    args.extend(["--workspace", workspace])
     if as_json:
         args.append("--json")
     _delegate(args)

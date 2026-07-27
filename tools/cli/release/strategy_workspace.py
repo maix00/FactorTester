@@ -7,7 +7,6 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-from .local_profile import LocalProfileStore
 from .local_profile_contracts import validate_local_identifier
 from .locations import validate_client_root
 from .storage import json_hash, read_json, utc_now, write_json
@@ -32,6 +31,9 @@ def _owner(repo: Path) -> str:
     value = read_json(repo / ".strategy_workspace" / "manifest.json")
     if not isinstance(value, dict) or value.get("kind") != "strategy-source":
         raise ValueError("strategy repository manifest is missing")
+    body = {key: item for key, item in value.items() if key != "manifest_hash"}
+    if value.get("manifest_hash") != json_hash(body):
+        raise ValueError("strategy repository manifest is corrupt")
     return str(value.get("owner_ref") or "")
 
 
@@ -74,8 +76,15 @@ class CanonicalStrategyRepoStore:
         if not isinstance(value, dict) or set(value) != required:
             raise ValueError("canonical strategy repo is not registered")
         repo = _repo(Path(str(value["path"])))
+        expected = default_user_strategy_library(str(value["owner_ref"])).resolve()
+        if repo != expected:
+            raise ValueError("canonical strategy repo path changed")
+        if value["canonical_repo_ref"] != f"local-strategy-git://{sha256(str(repo).encode()).hexdigest()[:16]}":
+            raise ValueError("canonical strategy repo identity changed")
         if _owner(repo) != value["owner_ref"]:
             raise ValueError("canonical strategy repo owner changed")
+        if not _git(repo, "rev-parse", "HEAD"):
+            raise ValueError("canonical strategy repo has no commit")
         return value
 
 
@@ -101,7 +110,29 @@ def initialize_strategy_repo(path: Path, *, owner_ref: str) -> dict[str, Any]:
         subprocess.run(["git", "-C", str(path), "init"], check=True, capture_output=True)
     manifest_path = path / ".strategy_workspace" / "manifest.json"
     if manifest_path.exists():
-        return read_json(manifest_path) or {}
+        try:
+            _git(path, "rev-parse", "HEAD")
+        except subprocess.CalledProcessError:
+            subprocess.run(["git", "-C", str(path), "add", ".strategy_workspace/manifest.json"], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(path), "-c", "user.name=FactorTester", "-c",
+                 "user.email=factortester@local", "commit", "-m", "Initialize strategy workspace"],
+                check=True, capture_output=True,
+            )
+        value = read_json(manifest_path) or {}
+        if value.get("owner_ref") != owner_ref:
+            raise ValueError("existing strategy repository owner does not match")
+        _owner(path)
+        return value
     value = strategy_manifest(path, owner_ref=owner_ref)
     write_json(manifest_path, value)
+    subprocess.run(
+        ["git", "-C", str(path), "add", ".strategy_workspace/manifest.json"],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=FactorTester", "-c",
+         "user.email=factortester@local", "commit", "-m", "Initialize strategy workspace"],
+        check=True, capture_output=True,
+    )
     return value

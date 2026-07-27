@@ -93,6 +93,18 @@ class JobRecord:
             factor_source_policy["scope_status"] = scope_status(
                 str(self.job_spec.get("transient_factor_source_scope_id") or "")
             )
+        strategy_source_policy = (
+            dict(run_spec.get("strategy_source_policy") or {})
+            if isinstance(run_spec, dict)
+            and isinstance(run_spec.get("strategy_source_policy"), dict)
+            else {"mode": "metadata_only"}
+        )
+        if strategy_source_policy.get("mode") == "transient_run_source":
+            from server.services.transient_strategy_sources import scope_status
+
+            strategy_source_policy["scope_status"] = scope_status(
+                str(self.job_spec.get("transient_strategy_source_scope_id") or "")
+            )
         return {
             "job_id": self.job_id,
             "run_id": self.run_id,
@@ -111,6 +123,8 @@ class JobRecord:
             "job_spec_hash": self.job_spec_hash,
             "run_spec_hash": self.run_spec_hash,
             "factor_source_policy": factor_source_policy,
+            "strategy_specs": list(run_spec.get("strategy_plan") or run_spec.get("strategy_specs") or ()) if isinstance(run_spec, dict) else [],
+            "strategy_source_policy": strategy_source_policy,
             "worker_pid": self.worker_pid,
             "worker_exitcode": self.worker_exitcode,
             "cancel_requested": self.cancel_requested_at is not None,

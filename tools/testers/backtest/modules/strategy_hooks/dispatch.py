@@ -36,6 +36,7 @@ def _context_for(
     # read the field for them: the contract audit must distinguish a lifecycle
     # context from an event-time market context.
     prices = ctx.get(MarketDataModule.current_prices, {}) if include_current_prices else {}
+    tradable = ctx.get(MarketDataModule.current_tradable_status, {}) if include_current_prices else {}
     positions: dict[Any, Any] = {}
     try:
         ledger = state.ledger_for_strategy(strategy)
@@ -47,6 +48,13 @@ def _context_for(
     except (AttributeError, KeyError):
         # Lightweight unit/scheduler tests may intentionally omit a ledger.
         pass
+    data = {
+        "current_prices": dict(prices) if isinstance(prices, dict) else {},
+        "tradable_status": dict(tradable) if isinstance(tradable, dict) else {},
+    }
+    for name, source in getattr(strategy, "_factortester_strategy_data", {}).items():
+        if str(source) in data:
+            data[str(name)] = data[str(source)]
     return StrategyContext(
         strategy=strategy,
         timestamp=ctx.timestamp,
@@ -55,6 +63,8 @@ def _context_for(
         current_prices=MappingProxyType(dict(prices) if isinstance(prices, dict) else {}),
         run_start=_run_window_timestamp(state, strategy, "start_dt"),
         run_end=_run_window_timestamp(state, strategy, "end_dt"),
+        parameters=getattr(strategy, "_factortester_strategy_parameters", {}),
+        data=data,
     )
 
 

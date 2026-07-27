@@ -8,6 +8,12 @@ from .output import emit_group_run_outputs
 from .preparation import prepare_group_run_spec
 from .step_control import build_step_callback
 from .strategy_loader import strategy_objects_from_payload
+from .strategy_plan_runtime import (
+    activate_strategy_plan,
+    strategy_aliases_for_plan,
+    strategy_plan_from_payload,
+    validate_strategy_plan_capabilities,
+)
 
 
 def execute_group_run_spec(
@@ -25,13 +31,22 @@ def execute_group_run_spec(
     payload = prepared["payload"]
     account = BacktestRunState()
     strategy_book = strategy_book_from_payload(payload.get("strategy_book"))
-    strategy_objects = strategy_objects_from_payload(payload)
+    strategy_plan = strategy_plan_from_payload(payload)
+    available_aliases = list(prepared["resolved_settings_by_alias"])
+    aliases = strategy_aliases_for_plan(strategy_plan, available_aliases)
+    strategy_objects = strategy_objects_from_payload(
+        payload, aliases_by_index=aliases,
+    )
+    resolved_settings = activate_strategy_plan(
+        prepared["resolved_settings_by_alias"], strategy_plan, aliases,
+    )
+    validate_strategy_plan_capabilities(payload, strategy_plan, strategy_objects)
     ledger_configs = payload.get("ledger_configs")
     if ledger_configs is not None and not isinstance(ledger_configs, dict):
         raise ValueError("ledger_configs 必须是对象")
     apply_strategy_configs(
         account,
-        prepared["resolved_settings_by_alias"],
+        resolved_settings,
         strategy_book=strategy_book,
         ledger_configs=ledger_configs,
         strategies_by_alias=strategy_objects,
@@ -56,7 +71,7 @@ def execute_group_run_spec(
             "backtest",
             run_state=account,
             group_owner=prepared["group_owner"],
-            settings_by_strategy=prepared["resolved_settings_by_alias"],
+            settings_by_strategy=resolved_settings,
             run_id=prepared["run_id"],
             progress=on_progress,
             activity_sink=sink,

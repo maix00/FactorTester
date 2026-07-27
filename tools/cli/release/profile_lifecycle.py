@@ -9,7 +9,8 @@ from .local_profile import LocalProfileStore, new_local_profile
 from .local_profile_contracts import validate_local_identifier
 from .locations import validate_client_root
 from .storage import json_hash, read_json, utc_now, write_json
-from .user_layout import default_user_profile_root
+from .user_layout import default_user_profile_root, default_user_strategy_library
+from .strategy_workspace import initialize_strategy_repo
 
 
 class ProfileLifecycle:
@@ -73,6 +74,8 @@ class ProfileLifecycle:
                 raise ValueError("existing profile differs from create request")
             profile = existing
         workspace = self.store.ensure_workspace_root(profile_id)
+        strategy_library = default_user_strategy_library(principal_ref)
+        initialize_strategy_repo(strategy_library, owner_ref=principal_ref)
         return self._receipt("create", "active", profile_id, profile=profile, extra={
             "recommended_factor_worktree": {
                 "branch": f"agent/{profile_id}",
@@ -82,6 +85,7 @@ class ProfileLifecycle:
                 "branch": f"strategy/{profile_id}",
                 "worktree_path": str(workspace / "strategy-worktree"),
             },
+            "strategy_library": str(strategy_library),
         })
 
     def deactivate(self, profile_id: str) -> dict[str, Any]:

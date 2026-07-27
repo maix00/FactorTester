@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import shutil
 import time
@@ -23,6 +24,10 @@ _SCOPE = re.compile(r"^[0-9a-f]{32}$")
 def _root() -> Path:
     path = Path(Settings.CACHE_DB_PATH).expanduser().resolve().parent / "transient_strategy_sources"
     path.mkdir(parents=True, mode=0o700, exist_ok=True)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        pass
     return path
 
 
@@ -60,6 +65,9 @@ def validate_entries(raw: Any) -> list[dict[str, str]]:
 
 
 def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    owner = str(owner or "").strip()
+    if not owner:
+        raise ValueError("transient strategy source owner is required")
     validated = validate_entries(list(entries))
     if not validated:
         return {"scope_id": "", "files": [], "mode": "metadata_only"}
@@ -69,7 +77,9 @@ def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, 
         files = []
         for entry in validated:
             target = root / entry["path"]
-            target.parent.mkdir(parents=True, exist_ok=True)
+            target.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+            root.chmod(0o700)
+            target.parent.chmod(0o700)
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
             fd = os.open(target, flags, 0o600)
             with os.fdopen(fd, "wb") as stream:
@@ -79,7 +89,19 @@ def create_scope(*, owner: str, entries: Iterable[dict[str, Any]]) -> dict[str, 
                 "source_sha256": hashlib.sha256(entry["source_code"].encode()).hexdigest(),
                 "source_bytes": len(entry["source_code"].encode()),
             })
-        (root / "manifest.json").write_text(json.dumps({"owner": owner, "created_at": time.time(), "files": files}), encoding="utf-8")
+        manifest = {
+            "schema_version": 1,
+            "scope_id": scope_id,
+            "owner": owner,
+            "created_at": time.time(),
+            "files": files,
+        }
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        manifest_path.chmod(0o600)
     except Exception:
         shutil.rmtree(root, ignore_errors=True)
         raise
@@ -90,12 +112,20 @@ def load_source(scope_id: str, source_path: str, *, owner: str) -> str | None:
     try:
         root = _path(scope_id)
         manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        if str(manifest.get("scope_id") or "") != str(scope_id):
+            return None
         if str(manifest.get("owner") or "") != str(owner or ""):
             return None
         item = next((value for value in manifest.get("files", []) if value.get("path") == source_path), None)
         if not item:
             return None
-        source = (root / source_path).read_text(encoding="utf-8")
+        relative = PurePosixPath(str(source_path).replace("\\", "/"))
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts or relative.parts[0] != "strategies":
+            return None
+        target = root.joinpath(*relative.parts)
+        if not target.resolve().is_relative_to(root.resolve()):
+            return None
+        source = target.read_text(encoding="utf-8")
         return source if hashlib.sha256(source.encode()).hexdigest() == item.get("source_sha256") else None
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return None
@@ -112,7 +142,33 @@ def cleanup_scope(scope_id: str) -> bool:
     return False
 
 
-def cleanup_stale_scopes(*, max_age_seconds: float = 3600.0) -> int:
+def scope_status(scope_id: str) -> str:
+    if not scope_id:
+        return "not_applicable"
+    try:
+        root = _path(scope_id)
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("scope_id") != scope_id or not manifest.get("owner"):
+            return "corrupt"
+        files = manifest.get("files")
+        if not isinstance(files, list) or not files:
+            return "corrupt"
+        for item in files:
+            path = root / str(item.get("path") or "")
+            if path.stat().st_size != int(item.get("source_bytes") or -1):
+                return "corrupt"
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest != str(item.get("source_sha256") or ""):
+                return "corrupt"
+        return "available"
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        try:
+            return "cleaned" if not _path(scope_id).exists() else "corrupt"
+        except ValueError:
+            return "invalid"
+
+
+def cleanup_stale_scopes(repository: Any, *, max_age_seconds: float = 3600.0) -> int:
     now = time.time()
     removed = 0
     for candidate in _root().iterdir():
@@ -122,6 +178,8 @@ def cleanup_stale_scopes(*, max_age_seconds: float = 3600.0) -> int:
             manifest = json.loads((candidate / "manifest.json").read_text(encoding="utf-8"))
             created = float(manifest.get("created_at") or 0.0)
             if created and now - created < max_age_seconds:
+                continue
+            if repository.has_active_transient_scope(scope_id=candidate.name):
                 continue
             shutil.rmtree(candidate)
             removed += 1

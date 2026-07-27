@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Iterable
@@ -24,6 +24,16 @@ if TYPE_CHECKING:
 
 
 StrategyIntent = Any
+
+
+def _readonly(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _readonly(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_readonly(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_readonly(item) for item in value)
+    return value
 
 
 @dataclass(frozen=True)
@@ -90,10 +100,16 @@ class StrategyContext:
     current_prices: Mapping[Any, Any]
     run_start: pd.Timestamp | None = None
     run_end: pd.Timestamp | None = None
+    # Frozen spec parameters and the small causal data view are read-only;
+    # execution, risk, fee, margin and ledger mutation remain Flow-owned.
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+    data: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "positions", MappingProxyType(dict(self.positions)))
         object.__setattr__(self, "current_prices", MappingProxyType(dict(self.current_prices)))
+        object.__setattr__(self, "parameters", _readonly(self.parameters))
+        object.__setattr__(self, "data", _readonly(self.data))
 
     def target_weights(self, weights: dict[Any, float], *, reason: str = "hook") -> Any:
         from tools.testers.backtest.modules.target import TargetWeightIntent

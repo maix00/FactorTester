@@ -29,3 +29,16 @@ def test_strategy_scope_rejects_factor_or_escape_paths() -> None:
     with pytest.raises(ValueError, match="strategies"):
         sources.validate_entries([{"path": "strategies/../secret.py", "source_code": "x"}])
 
+
+def test_strategy_scope_requires_owner_and_reports_corruption(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sources.Settings, "CACHE_DB_PATH", str(tmp_path / "cache.sqlite"))
+    with pytest.raises(ValueError, match="owner"):
+        sources.create_scope(owner="", entries=[{"path": "strategies/demo.py", "source_code": "x"}])
+    scope = sources.create_scope(
+        owner="alice",
+        entries=[{"path": "strategies/demo/actor.py", "source_code": "print(1)"}],
+    )
+    assert sources.scope_status(scope["scope_id"]) == "available"
+    target = tmp_path / "transient_strategy_sources" / scope["scope_id"] / "strategies/demo/actor.py"
+    target.write_text("print(2)", encoding="utf-8")
+    assert sources.scope_status(scope["scope_id"]) == "corrupt"

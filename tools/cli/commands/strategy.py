@@ -17,13 +17,37 @@ def strategy() -> None:
 
 
 @strategy.command("list")
+@click.option("--workspace-root", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON")
-def list_strategies(as_json: bool) -> None:
+def list_strategies(workspace_root: Path | None, as_json: bool) -> None:
     rows = [
-        {"source": f"builtin:{item.key}", "label": item.label, "description": item.description}
+        {
+            "source": f"builtin:{item.key}", "label": item.label,
+            "description": item.description, "strategy_kind": item.key,
+            "required_fields": list(item.required_fields),
+            "required_data": list(item.required_data),
+            "actor_callbacks": list(item.actor_callbacks),
+        }
         for item in BUILTIN_TEMPLATES
     ]
-    rows.append({"source": "profile:<path>", "label": "自定义 Actor", "description": "加载 Profile 中的 Strategy Actor"})
+    if workspace_root is not None:
+        for manifest_path in sorted(workspace_root.glob("strategies/**/strategy.json")):
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(manifest, dict) and manifest.get("source"):
+                rows.append({
+                    "source": manifest["source"],
+                    "label": str(manifest.get("name") or manifest_path.parent.name),
+                    "description": "Profile Strategy Actor",
+                    "strategy_kind": "custom",
+                    "strategy_id": str(manifest.get("strategy_id") or ""),
+                    "entrypoint": str(manifest.get("entrypoint") or "Strategy"),
+                    "path": str(manifest_path),
+                })
+    else:
+        rows.append({"source": "profile:<path>", "label": "自定义 Actor", "description": "加载 Profile 中的 Strategy Actor", "strategy_kind": "custom"})
     _emit(rows, as_json)
 
 

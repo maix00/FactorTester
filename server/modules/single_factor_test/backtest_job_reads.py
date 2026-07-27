@@ -223,6 +223,8 @@ def _task_detail(
             "server_context": _server_context(job),
         },
         "factor_source_policy": summary.get("factor_source_policy"),
+        "strategy_specs": summary.get("strategy_specs") or [],
+        "strategy_source_policy": summary.get("strategy_source_policy"),
         "research_binding": binding,
         "caller": caller,
         "configuration": configuration,

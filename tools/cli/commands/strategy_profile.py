@@ -17,6 +17,10 @@ from tools.cli.release.strategy_worktree import (
     apply_strategy_worktree_binding,
     plan_strategy_worktree_binding,
 )
+from tools.cli.release.strategy_worktree_audit import (
+    rollback_strategy_worktree_binding,
+    verify_strategy_worktree_binding,
+)
 from tools.cli.release.user_layout import default_user_strategy_library
 from tools.cli.release.storage import read_json, write_json
 
@@ -59,7 +63,18 @@ def register_strategy_profile_commands(profile_group) -> None:
             raise click.ClickException("strategy worktree plan must be an object")
         click.echo(_json(apply_strategy_worktree_binding(load_profile_root(release_profile), value)))
 
+    @group.command("verify")
+    @click.argument("profile_id")
+    @click.option("--release-profile", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+    def verify(profile_id: str, release_profile: Path | None) -> None:
+        click.echo(_json(verify_strategy_worktree_binding(load_profile_root(release_profile), profile_id)))
+
+    @group.command("rollback")
+    @click.argument("profile_id")
+    @click.option("--release-profile", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+    def rollback(profile_id: str, release_profile: Path | None) -> None:
+        click.echo(_json(rollback_strategy_worktree_binding(load_profile_root(release_profile), profile_id)))
+
 
 def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
-

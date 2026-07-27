@@ -111,6 +111,7 @@ def apply_strategy_worktree_binding(client_root: Path, plan: dict[str, Any]) -> 
         "base_commit": str(plan["base_commit"]),
         "created_at": utc_now(),
     }
+    manifest = {**manifest, "manifest_hash": json_hash(manifest)}
     write_json(target / ".strategy_workspace" / "manifest.json", manifest)
     receipt = {**plan, "applied_at": utc_now(), "receipt_id": str(uuid.uuid4())}
     receipt["receipt_hash"] = json_hash(receipt)

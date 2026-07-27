@@ -37,13 +37,13 @@ class StrategyRuntime(ExecutableModule):
         compute=lambda state, ctx: _call_start(state, ctx),
     )
     on_market_feed: ClassVar[Flow] = Flow(
-        "strategy_runtime_on_market_feed", inputs=(MarketDataModule.current_prices,),
+        "strategy_runtime_on_market_feed", inputs=(MarketDataModule.current_prices, MarketDataModule.current_tradable_status),
         outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.MARKET_FEED,
         order=1000, strategy_scoped=True, event_payload_inputs=("market_feed",),
         description="处理原始行情源事件", compute=lambda state, ctx: _call_market_feed(state, ctx),
     )
     on_bar: ClassVar[Flow] = Flow(
-        "strategy_runtime_on_bar", inputs=(MarketDataModule.current_prices,),
+        "strategy_runtime_on_bar", inputs=(MarketDataModule.current_prices, MarketDataModule.current_tradable_status),
         outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.BAR,
         order=50, strategy_scoped=True, event_payload_inputs=("bar",),
         description="处理 BAR 策略事件", compute=lambda state, ctx: _call_bar(state, ctx),
@@ -62,28 +62,28 @@ class StrategyRuntime(ExecutableModule):
         compute=lambda state, ctx: _apply_signal_intent(state, ctx),
     )
     on_order_event: ClassVar[Flow] = Flow(
-        "strategy_runtime_on_order_event", inputs=(MarketDataModule.current_prices,),
+        "strategy_runtime_on_order_event", inputs=(MarketDataModule.current_prices, MarketDataModule.current_tradable_status),
         outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
         order=950, strategy_scoped=True, event_payload_inputs=("order",),
         description="处理订单生命周期事件",
         compute=lambda state, ctx: _call_order_event(state, ctx),
     )
     on_order_status_event: ClassVar[Flow] = Flow(
-        "strategy_runtime_on_order_status_event", inputs=(MarketDataModule.current_prices,),
+        "strategy_runtime_on_order_status_event", inputs=(MarketDataModule.current_prices, MarketDataModule.current_tradable_status),
         outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER_STATUS,
         order=950, strategy_scoped=True, event_payload_inputs=("order_status",),
         description="处理订单状态变化事件",
         compute=lambda state, ctx: _call_order_status_event(state, ctx),
     )
     on_position_event: ClassVar[Flow] = Flow(
-        "strategy_runtime_on_position_event", inputs=(MarketDataModule.current_prices,),
+        "strategy_runtime_on_position_event", inputs=(MarketDataModule.current_prices, MarketDataModule.current_tradable_status),
         outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.POSITION,
         order=950, strategy_scoped=True, event_payload_inputs=("position",),
         description="处理持仓生命周期事件",
         compute=lambda state, ctx: _call_position_event(state, ctx),
     )
     on_timer: ClassVar[Flow] = Flow(
-        "strategy_runtime_on_timer", inputs=(MarketDataModule.current_prices,),
+        "strategy_runtime_on_timer", inputs=(MarketDataModule.current_prices, MarketDataModule.current_tradable_status),
         outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.TIMER,
         order=2, after=(MarketDataModule.lookup_current_prices_on_timer,),
         strategy_scoped=True, event_payload_inputs=("timer",),
