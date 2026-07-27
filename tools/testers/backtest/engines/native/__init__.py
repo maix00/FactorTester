@@ -14,6 +14,7 @@ from .strategy import (
     Strategy,
     overridden_strategy_callbacks,
 )
+from .position_events import PositionEvent, PositionEventKind
 
 __all__ = [
     "CancelOrderCommand",
@@ -26,4 +27,6 @@ __all__ = [
     "EventStrategy",
     "OrderAwareStrategy",
     "overridden_strategy_callbacks",
+    "PositionEvent",
+    "PositionEventKind",
 ]

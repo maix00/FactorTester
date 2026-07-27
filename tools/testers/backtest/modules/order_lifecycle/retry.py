@@ -17,7 +17,11 @@ from tools.testers.backtest.modules.market_data import (
 from .finalize import record_order_lifecycle_state
 from .dependencies import activate_ready_dependents
 from .offsets import reclassify_deferred_close_today
-from .schedule import create_order_attempt, order_status_event
+from .schedule import (
+    create_order_attempt,
+    order_status_event,
+    order_status_event_if_enabled,
+)
 
 
 def finalize_and_retry_orders(state: Any, ctx: Any, retry_ref: Any) -> None:
@@ -29,6 +33,11 @@ def finalize_and_retry_orders(state: Any, ctx: Any, retry_ref: Any) -> None:
                 if schedule is None:
                     order.status = OrderStatus.EXPIRED
                     state.order_store.remove_from_live_indexes(order)
+                    expired_event = order_status_event_if_enabled(
+                        state, order, timestamp=ctx.timestamp,
+                    )
+                    if expired_event is not None:
+                        drafts.append(expired_event)
                 else:
                     event_ts, market_ts = schedule
                     # A volume-limited order can carry an unfilled remainder

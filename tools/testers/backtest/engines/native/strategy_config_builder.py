@@ -58,6 +58,7 @@ _STRATEGY_RUNTIME_FLOWS = {
     "strategy_runtime_on_signal_intent",
     "strategy_runtime_on_order_event",
     "strategy_runtime_on_order_status_event",
+    "strategy_runtime_on_position_event",
     "strategy_runtime_on_stop",
 }
 _DAILY_MARK_TO_MARKET_FLOWS = {

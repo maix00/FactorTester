@@ -10,7 +10,10 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.target import TargetStrategyModule
 
-from .dispatch import _call_bar, _call_market_feed, _call_order_event, _call_start, _call_stop
+from .dispatch import (
+    _call_bar, _call_market_feed, _call_order_event, _call_position_event,
+    _call_start, _call_stop,
+)
 from .fields import emitted_signal
 from .intent import _apply_signal_intent
 
@@ -70,6 +73,13 @@ class StrategyRuntime(ExecutableModule):
         description="处理订单状态变化事件",
         compute=lambda state, ctx: _call_order_event(state, ctx),
     )
+    on_position_event: ClassVar[Flow] = Flow(
+        "strategy_runtime_on_position_event", inputs=(MarketDataModule.current_prices,),
+        outputs=(emitted_signal,), phase=Phase.PER_EVENT, event_kind=EventKind.POSITION,
+        order=950, strategy_scoped=True, event_payload_inputs=("position",),
+        description="处理持仓生命周期事件",
+        compute=lambda state, ctx: _call_position_event(state, ctx),
+    )
     on_stop: ClassVar[Flow] = Flow(
         "strategy_runtime_on_stop", inputs=(), outputs=(), phase=Phase.POST_REPLAY,
         order=1000, strategy_scoped=True, description="结束自定义策略",
@@ -79,4 +89,5 @@ class StrategyRuntime(ExecutableModule):
     flows: ClassVar[tuple[Flow, ...]] = (
         on_start, on_market_feed, on_bar, on_signal_intent,
         on_order_event, on_order_status_event, on_stop,
+        on_position_event,
     )

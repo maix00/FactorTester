@@ -4,6 +4,7 @@ from .dispatch import (
     _call_bar,
     _call_market_feed,
     _call_order_event,
+    _call_position_event,
     _call_start,
     _call_stop,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "_call_bar",
     "_call_market_feed",
     "_call_order_event",
+    "_call_position_event",
     "_call_start",
     "_call_stop",
 ]

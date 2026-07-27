@@ -6,6 +6,10 @@ from tools.testers.backtest.engines.native.market_events import MarketFeedEvent,
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.strategy_hooks import StrategyContext
+from tools.testers.backtest.engines.native.position_events import (
+    PositionEventKind,
+    position_events_for_fill,
+)
 from tools.testers.backtest.modules.strategy_hooks import StrategyRuntime
 from tools.testers.backtest.modules.target import TargetStrategyModule, OrderDeltaIntent
 from tools.testers.backtest.engines.native.orders import Order, OrderStatus
@@ -32,6 +36,18 @@ class QuoteStrategy(Strategy):
 class PartialStrategy(QuoteStrategy):
     def on_order_partially_filled(self, ctx, order):
         self.seen.append("partial")
+
+
+class PositionStrategy(Strategy):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.position_kinds: list[PositionEventKind] = []
+
+    def on_position_opened(self, ctx, position_event):
+        self.position_kinds.append(position_event.kind)
+
+    def on_position_closed(self, ctx, position_event):
+        self.position_kinds.append(position_event.kind)
 
 
 def _context(strategy, event_kind, payloads):
@@ -158,7 +174,7 @@ def test_hook_cancel_command_closes_only_the_strategy_order():
         EventKind.ORDER_STATUS,
     ]
     assert [event.payload.status for event in pending] == [
-        OrderStatus.CANCEL_PENDING,
+        OrderStatus.PENDING_CANCEL,
         OrderStatus.CANCELLED,
     ]
     assert all(event.payload is not order for event in pending)
@@ -194,9 +210,38 @@ def test_hook_replace_command_exposes_pending_replace_before_cancel():
     assert order.status is OrderStatus.CANCELLED
     pending = ctx._event_queue.snapshot_head()
     assert [event.payload.status for event in pending] == [
-        OrderStatus.REPLACE_PENDING,
+        OrderStatus.PENDING_UPDATE,
         OrderStatus.CANCELLED,
     ]
+
+
+def test_terminal_order_cancel_is_a_noop_without_pending_status_event():
+    strategy = QuoteStrategy(alias="terminal-cancel")
+    order = Order(
+        instrument="P1",
+        timestamp=pd.Timestamp("2025-01-01"),
+        quantity=2.0,
+        intent_quantity=2.0,
+        strategy=strategy,
+        order_id="already-cancelled",
+        status=OrderStatus.CANCELLED,
+    )
+    state = SimpleNamespace(order_store=OrderStore())
+    state.order_store.register_order(order)
+    payload = {
+        "kind": "strategy_runtime_command",
+        "command_kind": "cancel_order",
+        "order_id": order.order_id,
+        "reason": "repeat",
+    }
+    event = EventDraft(EventKind.SIGNAL, pd.Timestamp("2025-01-01"), strategy, payload)
+    ctx = _context(strategy, EventKind.SIGNAL, [event])
+
+    from tools.testers.backtest.modules.strategy_hooks import _apply_signal_intent
+
+    _apply_signal_intent(state, ctx)
+
+    assert ctx._event_queue.snapshot_head() == []
 
 
 def test_custom_strategy_mode_selects_hooks_without_group_flows():
@@ -241,3 +286,37 @@ def test_partial_fill_uses_specific_order_hook():
     _specific_order_hook(strategy, StrategyContext(strategy, None, EventKind.ORDER, {}, {}), order)
 
     assert strategy.seen == ["partial"]
+
+
+def test_position_event_dispatch_uses_specific_hook_after_fill():
+    strategy = PositionStrategy(alias="position-hook")
+    event = position_events_for_fill(
+        product="P1", previous_quantity=0.0, quantity=2.0,
+        price=10.0, order_id="o1", fill_id="f1", ledger_id="l1",
+    )[0]
+    ctx = _context(
+        strategy, EventKind.POSITION,
+        [EventDraft(EventKind.POSITION, pd.Timestamp("2025-01-01"), strategy, event)],
+    )
+
+    from tools.testers.backtest.modules.strategy_hooks import _call_position_event
+
+    _call_position_event(object(), ctx)
+
+    assert strategy.position_kinds == [PositionEventKind.OPENED]
+
+
+def test_position_sign_flip_is_close_then_open():
+    events = position_events_for_fill(
+        product="P1", previous_quantity=2.0, quantity=-1.0,
+        price=10.0, order_id="o1", fill_id="f1", ledger_id="l1",
+    )
+
+    assert [event.kind for event in events] == [
+        PositionEventKind.CLOSED,
+        PositionEventKind.OPENED,
+    ]
+    assert [(event.previous_quantity, event.quantity) for event in events] == [
+        (2.0, 0.0),
+        (0.0, -1.0),
+    ]

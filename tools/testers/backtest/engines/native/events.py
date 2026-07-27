@@ -35,6 +35,7 @@ class EventKind(IntEnum):
     BAR = 0       # an aggregate market bar has arrived; live factors may update state
     ORDER_STATUS = 4  # an order lifecycle transition; never enters matching Flows
     ORDER = 5     # an existing Order has reached one matching opportunity
+    POSITION = 6  # a fill has changed a strategy-owned position; ledger is already updated
     SIGNAL = 10   # a strategy signal/rebalance decision point has arrived
     LIFECYCLE_NOTICE = 14  # contract rollover / force-close notice; handlers
                            # inspect positions and emit ORDER only when needed

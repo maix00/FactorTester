@@ -67,14 +67,21 @@ def _emit_command_lifecycle_event(
     latest = actions[-1]
     if getattr(getattr(latest, "action", None), "value", None) != "cancel":
         return
+    # A terminal-order cancel/replace is a no-op.  Require the action to have
+    # been recorded by this exact command dispatch; otherwise a later command
+    # could replay an older cancel action as a fresh pending transition.
+    if getattr(latest, "submitted_at", None) != ctx.timestamp:
+        return
+    if getattr(latest, "revision", None) != getattr(order, "revision", None):
+        return
     if str(getattr(latest, "reason", "") or "") != str(
         getattr(command, "reason", "") or ""
     ):
         return
     pending_status = (
-        OrderStatus.REPLACE_PENDING
+        OrderStatus.PENDING_UPDATE
         if kind == "replace_order"
-        else OrderStatus.CANCEL_PENDING
+        else OrderStatus.PENDING_CANCEL
     )
     ctx.set_for(emitted_signal, strategy, [
         order_status_event(order, timestamp=ctx.timestamp, status=pending_status),

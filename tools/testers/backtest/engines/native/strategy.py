@@ -65,10 +65,10 @@ class Strategy(UniqueNameObject):
     def on_order_partially_filled(self, ctx: Any, order: Any) -> Any:
         return self.on_order_event(ctx, order)
 
-    def on_order_cancel_pending(self, ctx: Any, order: Any) -> Any:
+    def on_order_pending_cancel(self, ctx: Any, order: Any) -> Any:
         return self.on_order_event(ctx, order)
 
-    def on_order_replace_pending(self, ctx: Any, order: Any) -> Any:
+    def on_order_pending_update(self, ctx: Any, order: Any) -> Any:
         return self.on_order_event(ctx, order)
 
     def on_order_filled(self, ctx: Any, order: Any) -> Any:
@@ -82,6 +82,18 @@ class Strategy(UniqueNameObject):
 
     def on_order_expired(self, ctx: Any, order: Any) -> Any:
         return self.on_order_event(ctx, order)
+
+    def on_position_event(self, ctx: Any, position_event: Any) -> Any:
+        return self.on_event(ctx, position_event)
+
+    def on_position_opened(self, ctx: Any, position_event: Any) -> Any:
+        return self.on_position_event(ctx, position_event)
+
+    def on_position_changed(self, ctx: Any, position_event: Any) -> Any:
+        return self.on_position_event(ctx, position_event)
+
+    def on_position_closed(self, ctx: Any, position_event: Any) -> Any:
+        return self.on_position_event(ctx, position_event)
 
 
 # One authoritative list is used by runtime capability discovery and event
@@ -102,12 +114,16 @@ STRATEGY_CALLBACKS: Final[tuple[str, ...]] = (
     "on_order_submitted",
     "on_order_accepted",
     "on_order_partially_filled",
-    "on_order_cancel_pending",
-    "on_order_replace_pending",
+    "on_order_pending_cancel",
+    "on_order_pending_update",
     "on_order_filled",
     "on_order_canceled",
     "on_order_rejected",
     "on_order_expired",
+    "on_position_event",
+    "on_position_opened",
+    "on_position_changed",
+    "on_position_closed",
 )
 
 

@@ -9,7 +9,12 @@ from tools.testers.backtest.modules.market_data import (
     contract_multiplier_from_fields,
 )
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
-from tools.testers.backtest.modules.order_lifecycle import record_fill_settlement
+from tools.testers.backtest.modules.order_lifecycle import (
+    order_status_event_if_enabled,
+    record_fill_settlement,
+)
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.position_events import position_events_for_fill
 from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger
 
 from .balances import (
@@ -41,12 +46,22 @@ def apply_order_fill(state, ctx) -> None:
         for strategy in ctx.active_strategies
     }
     fill_prices_by_ledger: dict[str, dict[object, float]] = {}
+    position_event_drafts: list[EventDraft] = []
+    status_event_drafts: list[EventDraft] = []
     for strategy, order in settlement_order(state, ctx):
         if not prepare_order_fill(state, ctx, strategy, order, audit_store):
+            status_event = order_status_event_if_enabled(
+                state, order, timestamp=ctx.timestamp,
+            )
+            if status_event is not None and order.status.terminal:
+                status_event_drafts.append(status_event)
             continue
         ledger = state.ledger_for(order)
         ledger_config = state.ledger_config_for(ledger)
         positions = ledger.get(LedgerModule.positions, {})
+        previous_quantity = float(
+            getattr(positions.get(order.instrument), "quantity", 0.0) or 0.0
+        )
         cash = required_cash_for_ledger(state, ledger)
         effective_price = order.get("effective_price")
         price = float(
@@ -103,6 +118,24 @@ def apply_order_fill(state, ctx) -> None:
             cash_before=float(cash_before), cash_after=float(cash.to_major()),
             margin_before=margin_before, margin_after=margin_after,
         )
+        current_quantity = float(
+            getattr(positions.get(order.instrument), "quantity", 0.0) or 0.0
+        )
+        if state.config_for(strategy).uses_flow("strategy_runtime_on_position_event"):
+            position_event_drafts.extend(
+                EventDraft(
+                    EventKind.POSITION, ctx.timestamp, strategy, event,
+                )
+                for event in position_events_for_fill(
+                    product=order.instrument,
+                    previous_quantity=previous_quantity,
+                    quantity=current_quantity,
+                    price=price,
+                    order_id=order.order_id,
+                    fill_id=fill.fill_id,
+                    ledger_id=ledger.ledger_id,
+                )
+            )
         fill_prices_by_ledger.setdefault(ledger.ledger_id, {})[
             order.instrument
         ] = fill.price
@@ -125,3 +158,5 @@ def apply_order_fill(state, ctx) -> None:
         LedgerModule._order_fill_valuation_prices_ref,
         fill_prices_by_ledger,
     )
+    ctx.set(LedgerModule.position_events, position_event_drafts)
+    ctx.set(LedgerModule.order_status_events, status_event_drafts)
