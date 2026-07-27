@@ -161,12 +161,13 @@ def app_update_restart(as_json: bool) -> None:
 @friendly_errors
 def publish_release(**options) -> None:
     """Build, sign, notarize, publish, and read back Main or Beta."""
-    from script.release.publish import release_client
-    from tools.cli.release.service_activation import restart_release_service
+    from script.release.publish import publish_release as run_release
 
     service_port = options.pop("service_port")
-    restart = restart_release_service(port=service_port)
-    receipt = release_client(**options)
+    receipt, restart = run_release(
+        service_port=service_port,
+        **options,
+    )
     payload = {
         **receipt.__dict__,
         "service_restart": restart.__dict__,

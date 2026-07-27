@@ -20,6 +20,14 @@ import sys
 from typing import Any
 from uuid import uuid4
 
+# Keep the public script entry point usable when invoked as
+# ``python script/release/publish.py``.  In that mode Python initially puts
+# ``script/release`` on sys.path, which would otherwise make both the release
+# package and the Manager gate unavailable before argparse can run.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from script.release.assets import build_installer_dmg, embed_client_runtime
 from script.release.build import (
     REPO,
@@ -321,6 +329,17 @@ def release_client(
         raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def publish_release(*, service_port: int, **options: Any) -> tuple[
+    PublishedRelease, Any
+]:
+    """Run the authenticated Manager gate before any release build work."""
+    from tools.cli.release.service_activation import restart_release_service
+
+    service_restart = restart_release_service(port=service_port)
+    receipt = release_client(**options)
+    return receipt, service_restart
 
 
 def publish_beta_directory(
@@ -656,6 +675,12 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--build", type=int, required=True)
     parser.add_argument("--source-revision", required=True)
+    parser.add_argument(
+        "--service-port",
+        type=int,
+        required=True,
+        help="Manager 7998 必须受控重启的服务端口",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--signing-identity",
@@ -698,8 +723,20 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
-    receipt = release_client(**vars(args))
-    print(json.dumps(asdict(receipt), ensure_ascii=False, indent=2))
+    options = vars(args)
+    service_port = options.pop("service_port")
+    receipt, service_restart = publish_release(
+        service_port=service_port,
+        **options,
+    )
+    print(json.dumps(
+        {
+            **asdict(receipt),
+            "service_restart": asdict(service_restart),
+        },
+        ensure_ascii=False,
+        indent=2,
+    ))
 
 
 if __name__ == "__main__":
