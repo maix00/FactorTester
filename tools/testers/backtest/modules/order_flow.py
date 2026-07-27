@@ -11,12 +11,14 @@ from tools.testers.backtest.modules.order_lifecycle import (
     default_pending_order_conflict_policy,
     record_order_lifecycle_state,
 )
+from tools.testers.backtest.engines.native.fields import FieldRef
 
 
 class OrderFlowModule(ExecutableModule):
     key: ClassVar[str] = "order_flow"
     label: ClassVar[str] = "订单流水"
     fields: ClassVar[dict[str, Any]] = {}
+    status_events = FieldRef("status_events")
     flows: ClassVar[tuple[Any, ...]] = ()
 
 

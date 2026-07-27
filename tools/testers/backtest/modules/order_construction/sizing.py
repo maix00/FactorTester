@@ -9,6 +9,7 @@ from tools.testers.backtest.modules.market_data import (
     is_product_tradable,
 )
 from tools.testers.backtest.modules.order_lifecycle import reconcile_target_delta
+from tools.testers.backtest.modules.order_flow import OrderFlowModule
 from tools.testers.backtest.modules.strategy_book import (
     apply_order_sizing_policy,
     ledger_for_strategy_product,
@@ -73,6 +74,9 @@ def basic_size_order(state, ctx, module) -> None:
             deltas[product] = reconcile_target_delta(
                 state, strategy, product, actual_quantity=actual,
                 target_quantity=target, timestamp=ctx.timestamp,
+                status_event_sink=lambda event: ctx.set(
+                    OrderFlowModule.status_events, event,
+                ),
             )
         ctx.set_for(
             module.raw_deltas, strategy,

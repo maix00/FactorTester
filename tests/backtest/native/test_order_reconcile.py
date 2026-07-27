@@ -5,6 +5,8 @@ import pandas as pd
 from tools.testers.backtest.engines.native.order import Order, OrderGroup, OrderStatus
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.engines.native.config import StrategyConfig
+from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.modules.order_lifecycle import reconcile_target_delta
 
 
@@ -73,3 +75,24 @@ def test_changed_target_cancels_remainder_and_rebuilds_from_actual():
     assert state.order_store.superseded_group_id_by_scope[
         (strategy, "P1")
     ] == "G1"
+
+
+def test_changed_target_can_publish_cancel_status_snapshot():
+    strategy = Strategy(alias="status-reconcile")
+    state = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"strategy_runtime_on_order_status_event"}),
+        ),
+    })
+    order = _live_order(state, strategy)
+    events = []
+
+    reconcile_target_delta(
+        state, strategy, "P1", actual_quantity=3.0, target_quantity=8.0,
+        timestamp=pd.Timestamp("2024-01-02"), status_event_sink=events.append,
+    )
+
+    assert len(events) == 1
+    assert events[0].kind is EventKind.ORDER_STATUS
+    assert events[0].payload.status is OrderStatus.CANCELLED

@@ -7,6 +7,7 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.order_flow import OrderFlowModule
 from tools.testers.backtest.modules.target import TargetStrategyModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
@@ -27,7 +28,7 @@ def build_order_construct_flows(module):
             VolumeCapacityMode.liquidity_mode, VolumeCapacityMode.participation_rate,
             LedgerModule.positions,
         ),
-        outputs=(module.raw_deltas,),
+        outputs=(module.raw_deltas, OrderFlowModule.status_events),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=20,
         after=(LedgerModule.equity_on_signal,), description="计算原始目标下单量",
         owner=module.__name__,
