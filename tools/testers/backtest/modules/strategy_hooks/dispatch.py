@@ -92,7 +92,10 @@ def _feed_payload_snapshot(payload: Any) -> Any:
 def _call_bar(state: Any, ctx: Any) -> None:
     for strategy in ctx.active_strategies:
         for bar in ctx.payloads_for(strategy):
-            _emit_intents(ctx, strategy, strategy.on_bar(_context_for(state, ctx, strategy), bar))
+            _emit_intents(
+                ctx, strategy,
+                strategy.on_bar(_context_for(state, ctx, strategy), copy.deepcopy(bar)),
+            )
 
 
 def _call_order_event(state: Any, ctx: Any) -> None:

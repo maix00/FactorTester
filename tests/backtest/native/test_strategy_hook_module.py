@@ -59,6 +59,11 @@ class MutatingFeedStrategy(Strategy):
         snapshot["bids"].append((1.0, 1.0))
 
 
+class MutatingBarStrategy(Strategy):
+    def on_bar(self, ctx, bar):
+        bar["bar_basis"] = "mutated"
+
+
 class PositionStrategy(Strategy):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -500,3 +505,18 @@ def test_feed_callbacks_receive_detached_mutable_payload_snapshots():
     _call_market_feed(object(), ctx)
 
     assert payload["bids"] == []
+
+
+def test_bar_callbacks_receive_detached_payload_snapshots():
+    strategy = MutatingBarStrategy(alias="bar-snapshot")
+    payload = {"bar_basis": "close"}
+    ctx = _context(
+        strategy, EventKind.BAR,
+        [EventDraft(EventKind.BAR, pd.Timestamp("2025-01-01"), strategy, payload)],
+    )
+
+    from tools.testers.backtest.modules.strategy_hooks import _call_bar
+
+    _call_bar(object(), ctx)
+
+    assert payload == {"bar_basis": "close"}
