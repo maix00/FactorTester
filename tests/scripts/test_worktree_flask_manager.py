@@ -132,6 +132,35 @@ def test_manager_login_issues_ui_session_for_api_access(
     assert session["role"] == "super_admin"
 
 
+def test_manager_login_returns_json_when_authentication_crashes(
+    tmp_path, monkeypatch
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    monkeypatch.setattr(
+        manager,
+        "_authenticate_manager_user",
+        lambda _username, _password: (_ for _ in ()).throw(
+            RuntimeError("authentication dependency unavailable")
+        ),
+    )
+
+    with _running_manager(state) as base_url:
+        login = Request(
+            f"{base_url}/auth/login",
+            data=b'{"username":"root","password":"secret"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as failed:
+            urlopen(login)
+
+    assert failed.value.code == 500
+    assert json.loads(failed.value.read()) == {
+        "success": False,
+        "error": "manager login failed",
+    }
+
+
 def test_remote_browser_page_is_rejected_even_before_login(
     tmp_path, monkeypatch
 ) -> None:

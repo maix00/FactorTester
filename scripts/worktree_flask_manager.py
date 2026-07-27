@@ -26,6 +26,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 
 MAIN_PORT = 8000
 FEAT_PORT = 7999
@@ -881,6 +885,13 @@ class Handler(BaseHTTPRequestHandler):
                 "success": False,
                 "error": str(exc),
             }, 403)
+            return
+        except Exception as exc:
+            sys.stderr.write(f"[manager] login failed: {exc}\n")
+            json_response(self, {
+                "success": False,
+                "error": "manager login failed",
+            }, 500)
             return
         json_response(self, {
             "success": True,
