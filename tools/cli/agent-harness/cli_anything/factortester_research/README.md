@@ -279,6 +279,55 @@ rendition. The renderer protocol and `assets/` boundary can support later PDF
 or chart components, but the current command neither generates nor coexists
 with a PDF rendition.
 
+### Graph-independent report authoring
+
+All report mutations are CLI operations. The macOS client is a read-only
+viewer: it loads the content document, its bindings sidecar, and navigation
+metadata, but it never creates components, edits prose, or attaches chips.
+
+The report document is content-only and independent of Active Graph. Its
+adjacent `.bindings.json` file carries evidence, Job, obligation, checkpoint,
+and Graph references; Graph packets carry only node/edge contracts and report
+task references. Evidence bodies, Job results, and report prose remain in
+their own stores.
+
+```bash
+cli-anything-factortester-research report create \
+  --file research-report.json --document-id sgccs-review \
+  --title 'SgCCS 研究报告' --json
+cli-anything-factortester-research report add \
+  --file research-report.json --component-id findings \
+  --kind chapter --title '研究发现' --json
+cli-anything-factortester-research report add \
+  --file research-report.json --component-id result-table \
+  --kind table --parent-id findings --title '结果表' \
+  --content-file result-table.json --json
+cli-anything-factortester-research report chip \
+  --file research-report.json --component-id result-table \
+  --chip-id result-job --kind job \
+  --target-ref job:job-1 --json
+cli-anything-factortester-research report validate-document \
+  --file research-report.json --json
+cli-anything-factortester-research report manifest \
+  --file research-report.json --json
+cli-anything-factortester-research report render-document \
+  --file research-report.json --output research-report.md --json
+```
+
+Use `cycle next --json` to receive the current node's bounded report packet.
+Before advancing, pass the document with `cycle advance --report-file`; the
+Harness loads the adjacent `.bindings.json` and checks that every Graph-
+declared report requirement has a binding. This option is a local checklist
+and manifest receipt only; it does not upload the report body or replace the
+separate `report_submission`/Profile publisher path. Historical Graph-bound
+journals are migrated once into two files:
+
+```bash
+factortester report migrate-legacy <profile-root> \
+  --document-output report.json \
+  --bindings-output report.json.bindings.json --json
+```
+
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its
 observations were sealed after the factor, selection boundary, and TrialPlan

@@ -20,6 +20,16 @@ from ..core.submission_contract import (
     validate_contract_for_current_packet,
 )
 from ..utils.factortester_backend import run_factortester
+from tools.cli.release.research_reporting.document import (
+    bindings_path_for,
+    document_manifest,
+    load_bindings,
+    load_document,
+)
+from tools.cli.release.research_reporting.graph_adapter import (
+    enrich_graph_packet,
+    validate_report_tasks,
+)
 from .common import echo_json
 
 
@@ -45,9 +55,9 @@ def cycle_next(
         branch_id,
     ], timeout=60)
     try:
-        packet = validate_next_packet(
+        packet = enrich_graph_packet(validate_next_packet(
             _backend_json(result.returncode, result.stdout, result.stderr)
-        )
+        ))
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     if as_json:
@@ -327,9 +337,9 @@ def cycle_prepare(
 ) -> None:
     """Generate the exact local wire contract for one current candidate edge."""
     try:
-        packet = validate_next_packet(_backend_json_result([
+        packet = enrich_graph_packet(validate_next_packet(_backend_json_result([
             "research-graph", "next", instance_id, branch_id,
-        ]))
+        ])))
         evidence = (
             _load_evidence(evidence_file)
             if evidence_file is not None else None
@@ -358,6 +368,10 @@ def cycle_prepare(
         "required_reviewer_task_refs": (
             contract.get("derived_requirements") or {}
         ).get("required_reviewer_task_refs", []),
+        "required_report_tasks": [
+            item["task_ref"]
+            for item in (packet.get("report_packet") or {}).get("required_tasks") or []
+        ],
     }
     if as_json:
         echo_json(payload)
@@ -388,6 +402,14 @@ def cycle_prepare(
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option("--acting-profile-ref", default="")
+@click.option(
+    "--report-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help=(
+        "可选：提交前校验通用报告文档；仅生成本地 manifest，"
+        "不会把正文写入 Active Graph"
+    ),
+)
 @click.option("--timeout", default=120, show_default=True, type=int)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 @click.pass_context
@@ -400,6 +422,7 @@ def cycle_advance(
     contract_file: Path | None,
     target_capability_resolution_file: Path | None,
     acting_profile_ref: str,
+    report_file: Path | None,
     timeout: int,
     as_json: bool,
 ) -> None:
@@ -421,12 +444,37 @@ def cycle_advance(
                     evidence, contract,
                 )
             )
-            current_packet = validate_next_packet(_backend_json_result([
+            current_packet = enrich_graph_packet(validate_next_packet(_backend_json_result([
                 "research-graph", "next", instance_id, branch_id,
-            ]))
+            ])))
             validation.update(validate_contract_for_current_packet(
                 contract, current_packet, edge_id=edge_id,
             ))
+        if report_file is not None:
+            report_document = load_document(report_file)
+            bindings_file = bindings_path_for(report_file)
+            report_bindings = load_bindings(bindings_file, report_document)
+            report_status = validate_report_tasks(
+                enrich_graph_packet(validate_next_packet(_backend_json_result([
+                    "research-graph", "next", instance_id, branch_id,
+                ]))),
+                report_bindings,
+            )
+            if not report_status["valid"]:
+                raise ValueError(
+                    "report checklist is incomplete: "
+                    + ", ".join(report_status["missing"])
+                )
+            validation["report_checklist"] = report_status
+            validation["report_document"] = {
+                "mode": "local_manifest_only",
+                "submission_note": (
+                    "正文不会写入 Active Graph；需要由 report publisher "
+                    "或 Profile 本地报告同步链路持久化。"
+                ),
+                "manifest": document_manifest(report_document),
+                "bindings_file": str(bindings_file),
+            }
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     args = [

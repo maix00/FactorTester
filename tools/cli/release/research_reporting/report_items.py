@@ -1,4 +1,9 @@
-"""Canonical hashes shared by report preparation and local publication."""
+"""Legacy Graph report coverage hashes.
+
+Generic report documents use ``document_hash`` and chip references. These
+helpers remain only for replaying historical Graph checkpoint submissions and
+must not be used by the generic report CLI.
+"""
 
 from __future__ import annotations
 

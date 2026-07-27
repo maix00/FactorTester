@@ -33,6 +33,7 @@ packages = [
   "tools.cli.release",
   "tools.cli.release.adapters",
   "tools.cli.release.research_reporting",
+  "tools.cli.release.research_reporting.document",
   "tools.cli.release.research_reporting.publisher",
   "tools.cli.release.research_reporting.writer",
 ]
@@ -50,6 +51,7 @@ packages = [
 "tools.cli.release" = "release"
 "tools.cli.release.adapters" = "release/adapters"
 "tools.cli.release.research_reporting" = "release/research_reporting"
+"tools.cli.release.research_reporting.document" = "release/research_reporting/document"
 "tools.cli.release.research_reporting.publisher" = "release/research_reporting/publisher"
 "tools.cli.release.research_reporting.writer" = "release/research_reporting/writer"
 

@@ -49,7 +49,13 @@ MAX_TIMELINE_LIMIT = 50
 
 
 class ProfileResearchProjection:
-    """Project profile-facing research with one bounded read per operation."""
+    """Serve the bounded Profile research navigation read model.
+
+    This is not the report store and should not be called a report projection:
+    it owns Work Package/branch topology, lineage, lifecycle, timeline cursors,
+    and stable report lookup refs. Report bodies and assets remain in the local
+    Profile report document/journal and are loaded through their own verifier.
+    """
 
     def list_research(
         self,

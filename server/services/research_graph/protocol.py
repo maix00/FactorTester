@@ -44,6 +44,10 @@ _SERVER_FORBIDDEN_SKILL_FIELDS = {
     "loaded_skill_ids",
     "loaded_skill_receipts",
 }
+_GRAPH_DATA_FIELDS = {
+    "evidence_payload", "result_payload", "raw_data", "market_rows",
+    "stdout", "stderr", "factor_source", "job_results", "artifacts",
+}
 
 
 class GraphVersionConflict(ValueError):
@@ -88,6 +92,7 @@ def assert_no_skill_identity(value: Any, *, location: str) -> None:
 
 
 def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
+    assert_graph_metadata_only(graph)
     protocol_value = validate_protocol_graph(graph)
     if not str(protocol_value.get("graph_id") or "").strip():
         raise ValueError("graph_id is required")
@@ -111,6 +116,22 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
     value = deepcopy(protocol_value)
     value["content_hash"] = actual_hash
     return value
+
+
+def assert_graph_metadata_only(value: Any) -> None:
+    """Reject research payloads accidentally embedded in an Active Graph."""
+    if isinstance(value, dict):
+        forbidden = sorted(set(str(key) for key in value) & _GRAPH_DATA_FIELDS)
+        if forbidden:
+            raise ValueError(
+                "Active Graph stores references/contracts only; data fields are forbidden: "
+                + ", ".join(forbidden)
+            )
+        for item in value.values():
+            assert_graph_metadata_only(item)
+    elif isinstance(value, list):
+        for item in value:
+            assert_graph_metadata_only(item)
 
 
 def merge_bounded_evidence_refs(

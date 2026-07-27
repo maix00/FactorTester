@@ -20,6 +20,7 @@ from tools.cli.release.research_reporting.publisher import (
 from tools.cli.release.research_reporting.continuation_narrative import (
     continuation_narrative,
 )
+from tools.cli.release.research_reporting.graph_adapter import enrich_graph_packet
 
 
 def _json(value) -> str:
@@ -461,12 +462,11 @@ def graph_branch_context(instance_id: str, branch_id: str) -> None:
 @click.argument("branch_id")
 def next_graph_step(instance_id: str, branch_id: str) -> None:
     """确定性计算候选边 readiness、缺失证据与 Agent 判断需求。"""
-    click.echo(_json(
-        client_from_config().get_research_graph_branch_next(
-            instance_id,
-            branch_id,
-        )
-    ))
+    packet = client_from_config().get_research_graph_branch_next(
+        instance_id,
+        branch_id,
+    )
+    click.echo(_json(enrich_graph_packet(packet)))
 
 
 @research_graph.command("cycle-object")

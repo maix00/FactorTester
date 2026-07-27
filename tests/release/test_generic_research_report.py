@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+from click.testing import CliRunner
+
+from tools.cli.release.research_reporting.document import (
+    add_binding,
+    add_component,
+    document_manifest,
+    new_bindings,
+    new_document,
+    render_markdown,
+    validate_document,
+)
+from tools.cli.release.research_reporting.graph_adapter import (
+    enrich_graph_packet,
+    validate_report_tasks,
+)
+from tools.cli.commands.research_report import report as report_cli
+
+
+def test_report_components_are_content_only() -> None:
+    value = new_document("doc-1", "Research", language="en")
+    value = add_component(
+        value, component_id="chapter", kind="chapter", title="Findings",
+    )
+    value = add_component(
+        value, component_id="table", kind="table", parent_id="chapter",
+        title="Results", content={"columns": ["A", "B"], "rows": [["1", "2"]]},
+    )
+    assert set(value) == {
+        "schema_version", "document_id", "title", "language", "revision",
+        "components", "assets",
+    }
+    assert "graph" not in json.dumps(value, ensure_ascii=False).lower()
+    text = render_markdown(value).decode()
+    assert "# Findings" in text
+    assert "| A | B |" in text
+
+
+def test_graph_packet_contains_references_not_evidence_payload() -> None:
+    packet = enrich_graph_packet({
+        "graph": "factor-research@v1",
+        "node": {"node_id": "validation"},
+        "candidate_edges": [{
+            "edge_id": "validation__trial",
+            "to_node": "trial",
+            "report_requirement_refs": ["report.edge.validation__trial"],
+        }],
+    })
+    report = packet["report_packet"]
+    assert report["required_tasks"][0]["task_ref"] == "report.edge.validation__trial"
+    assert "evidence_payload" not in json.dumps(report, ensure_ascii=False).lower()
+    assert "data_policy" in report
+
+
+def test_graph_report_completion_uses_external_bindings() -> None:
+    packet = enrich_graph_packet({
+        "graph": "factor-research@v1",
+        "node": {"node_id": "validation"},
+        "candidate_edges": [{
+            "edge_id": "e",
+            "report_requirement_refs": ["report.edge.e"],
+        }],
+    })
+    document = add_component(
+        new_document("doc", "R"), component_id="s", kind="section", title="S",
+    )
+    bindings = new_bindings(document)
+    assert validate_report_tasks(packet, bindings)["valid"] is False
+    bindings = add_binding(
+        bindings, document, component_id="s", binding_id="req",
+        kind="report_requirement", target_ref="report.edge.e",
+    )
+    assert validate_report_tasks(packet, bindings)["valid"] is True
+
+
+def test_content_document_rejects_old_graph_bound_shape() -> None:
+    with pytest.raises(ValueError, match="content-only v2"):
+        validate_document({
+            "schema_version": 1, "document_id": "old", "title": "Old",
+            "language": "en", "revision": 0, "metadata": {},
+            "components": [], "chips": [], "assets": [],
+        })
+
+
+def test_new_content_rejects_graph_binding_fields() -> None:
+    with pytest.raises(ValueError, match="external binding field"):
+        add_component(
+            new_document("doc-bound", "R"), component_id="s",
+            kind="entry", title="S", content={"graph_ref": "graph:v1"},
+        )
+
+
+def test_report_manifest_is_content_free_and_stable() -> None:
+    value = add_component(
+        new_document("doc-manifest", "R"),
+        component_id="s", kind="section", title="S", body="private body",
+    )
+    manifest = document_manifest(value)
+    serialized = json.dumps(manifest, ensure_ascii=False)
+    assert manifest["document_hash"]
+    assert "private body" not in serialized
+    assert "component_refs" in manifest
+    assert document_manifest(value) == manifest
+
+
+def test_report_cli_authors_content_and_sidecar_bindings(tmp_path) -> None:
+    runner = CliRunner()
+    document = tmp_path / "report.json"
+    created = runner.invoke(report_cli, [
+        "create", str(document), "--document-id", "cli-doc", "--title", "CLI report", "--json",
+    ])
+    assert created.exit_code == 0, created.output
+    added = runner.invoke(report_cli, [
+        "add", str(document), "--component-id", "findings", "--kind", "chapter",
+        "--title", "Findings", "--json",
+    ])
+    assert added.exit_code == 0, added.output
+    bound = runner.invoke(report_cli, [
+        "chip", str(document), "findings", "--chip-id", "job-1", "--kind", "job",
+        "--target-ref", "job:1", "--json",
+    ])
+    assert bound.exit_code == 0, bound.output
+    checked = runner.invoke(report_cli, ["validate", str(document), "--json"])
+    assert checked.exit_code == 0, checked.output
+    assert json.loads(checked.output)["bindings"] == 1
+    content = json.loads(document.read_text(encoding="utf-8"))
+    sidecar = json.loads(
+        document.with_name("report.json.bindings.json").read_text(encoding="utf-8")
+    )
+    assert "bindings" not in content
+    assert sidecar["bindings"][0]["target_ref"] == "job:1"
