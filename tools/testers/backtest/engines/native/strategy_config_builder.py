@@ -51,13 +51,13 @@ _GROUP_STRATEGY_FLOWS = {"group_quantile_membership"}
 _THRESHOLD_STRATEGY_FLOWS = {"threshold_signal_target"}
 _LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
 _TERM_CARRY_STRATEGY_FLOWS = {"term_carry_target"}
-_STRATEGY_HOOK_FLOWS = {
-    "strategy_hook_on_start",
-    "strategy_hook_on_market_feed",
-    "strategy_hook_on_bar",
-    "strategy_hook_on_signal_intent",
-    "strategy_hook_on_order_event",
-    "strategy_hook_on_stop",
+_STRATEGY_RUNTIME_FLOWS = {
+    "strategy_runtime_on_start",
+    "strategy_runtime_on_market_feed",
+    "strategy_runtime_on_bar",
+    "strategy_runtime_on_signal_intent",
+    "strategy_runtime_on_order_event",
+    "strategy_runtime_on_stop",
 }
 _DAILY_MARK_TO_MARKET_FLOWS = {
     "register_daily_mark_to_market_notices",
@@ -168,7 +168,7 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
             | _TERM_CARRY_STRATEGY_FLOWS
         )
     if strategy_kind != "custom":
-        excluded |= _STRATEGY_HOOK_FLOWS
+        excluded |= _STRATEGY_RUNTIME_FLOWS
     return frozenset(names - excluded)
 
 

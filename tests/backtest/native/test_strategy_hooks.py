@@ -4,7 +4,6 @@ import pytest
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.strategy import (
     Strategy,
-    StrategyActor,
     overridden_strategy_callbacks,
 )
 from tools.testers.backtest.engines.native.strategy_hooks import (
@@ -29,7 +28,7 @@ def test_legacy_strategy_has_noop_hooks():
 
 
 def test_strategy_actor_is_the_single_user_hook_surface():
-    class Actor(StrategyActor):
+    class Actor(Strategy):
         def on_bar(self, ctx, bar):
             return None
 
@@ -55,16 +54,16 @@ def test_generic_on_event_is_used_by_default_adapters():
     assert strategy.on_order_event(context, {"order": 1}) == {"order": 1}
 
 
-def test_on_order_is_the_public_generic_order_callback():
-    class OrderStrategy(StrategyActor):
-        def on_order(self, ctx, order):
+def test_on_order_event_is_the_public_generic_order_callback():
+    class OrderStrategy(Strategy):
+        def on_order_event(self, ctx, order):
             return order
 
     strategy = OrderStrategy(alias="generic-order")
     context = StrategyContext(strategy, None, EventKind.ORDER, {}, {})
 
     assert strategy.on_order_event(context, {"order": 1}) == {"order": 1}
-    assert "on_order" in overridden_strategy_callbacks(strategy)
+    assert "on_order_event" in overridden_strategy_callbacks(strategy)
 
 
 def test_context_returns_typed_intents_without_mutating_inputs():
@@ -77,7 +76,7 @@ def test_context_returns_typed_intents_without_mutating_inputs():
 
     assert intent.weights == {"P1": 0.5}
     assert intent_payload(intent) == {
-        "kind": "strategy_hook_intent",
+        "kind": "strategy_runtime_intent",
         "intent_kind": "target_weights",
         "weights": {"P1": 0.5},
         "reason": "entry",
@@ -92,7 +91,7 @@ def test_context_order_helpers_return_serializable_commands():
 
     assert isinstance(command, SubmitOrderCommand)
     assert intent_payload(command) == {
-        "kind": "strategy_hook_command",
+        "kind": "strategy_runtime_command",
         "command_kind": "submit_order",
         "product": "P1",
         "quantity": 2.0,

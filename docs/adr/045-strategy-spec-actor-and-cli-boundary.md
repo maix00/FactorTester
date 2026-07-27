@@ -30,13 +30,14 @@ CLI 接口必须只有一条清晰路径。
 4. **StrategyContext**：只读市场/持仓视图和命令工厂。Actor 不拿到 scheduler、
    Flow、ledger、broker 或任意可变运行时 store 的引用。
 
-`StrategyActor` 是 `Strategy` 的新公共名称；`Strategy` 仍作为兼容构造入口。
-两者不是两个运行时对象。所有可选的 `on_xxx` 回调都属于同一个 Actor 表面，
+`Strategy` 本身就是用户实现的长期存活 Actor；不再提供另一个同义构造名称。
+所有可选的 `on_xxx` 回调都属于同一个 Actor 表面，
 运行时通过统一的 callback registry 判断用户实际覆写了哪些回调，不再让 BAR
 注册器和订单事件调度器各自维护一套判断逻辑。
 
-订单生命周期的通用入口采用 `on_order`；旧的 `on_order_event` 继续作为兼容别名，
-而 `on_order_filled`、`on_order_canceled` 等具体状态回调优先级更高。
+订单生命周期的通用入口采用行业通用的 `on_order_event`；
+`on_order_filled`、`on_order_canceled` 等具体状态回调优先级更高，未匹配时再
+回落到 `on_event`。
 
 `StrategyPlan` 是服务端将 `StrategySpec` 校验、补默认值、解析数据需求并
 冻结后的内部计划。它不是用户要编写的策略模板，也不是另一个 hook 对象。
@@ -69,8 +70,7 @@ replace。后续若需要限价、TIF、offset 或账户路由，将扩展命令
 
 ### 内部名称收敛
 
-- `StrategyHookModule` 的正式内部概念为 `StrategyRuntime`，保留旧名作为
-  兼容别名
+- `StrategyRuntime` 是策略回调的唯一运行时模块名称
 - `StrategyBook` 的正式内部概念为 portfolio topology/account router，负责
   strategy 到 ledger/cash pool 的解析；不再作为用户 Actor 的父类
 - `StrategyBookPolicies` 拆为内部 routing、sizing、pending-order 和 intent
@@ -109,11 +109,9 @@ execution: {liquidity: infinite}
 
 ## 迁移与兼容
 
-当前 `strategy_kind`、旧 target intents、`StrategyHookModule` 和
-`StrategyBookPolicies` 在迁移期仍可被旧配置解析。规范化器把旧配置转换为
-`StrategySpec`，运行时继续使用现有 Flow。新测试优先验证新名称和命令，旧测试
-验证兼容别名。历史 ADR 保留原语义和实施记录，本 ADR 作为新的用户/CLI 入口
-说明。
+当前 `strategy_kind` 和旧 target intents 仍属于配置语义，但运行时只接受
+`StrategyRuntime` 的新 Flow 名称与 `StrategySpec` 入口。历史 ADR 保留原语义和
+实施记录，本 ADR 作为新的用户/CLI 入口说明；不再提供旧运行时名称的解析别名。
 
 ## 后续工作
 

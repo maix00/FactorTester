@@ -90,7 +90,7 @@ def command_payload(command: StrategyCommand) -> dict[str, Any]:
 
     if isinstance(command, SubmitOrderCommand):
         return {
-            "kind": "strategy_hook_command",
+            "kind": "strategy_runtime_command",
             "command_kind": command.kind.value,
             "product": command.product,
             "quantity": float(command.quantity),
@@ -99,21 +99,21 @@ def command_payload(command: StrategyCommand) -> dict[str, Any]:
         }
     if isinstance(command, CancelOrderCommand):
         return {
-            "kind": "strategy_hook_command",
+            "kind": "strategy_runtime_command",
             "command_kind": command.kind.value,
             "order_id": command.order_id,
             "reason": command.reason,
         }
     if isinstance(command, ReplaceOrderCommand):
         return {
-            "kind": "strategy_hook_command",
+            "kind": "strategy_runtime_command",
             "command_kind": command.kind.value,
             "order_id": command.order_id,
             "quantity": float(command.quantity),
             "reason": command.reason,
         }
     return {
-        "kind": "strategy_hook_command",
+        "kind": "strategy_runtime_command",
         "command_kind": command.kind.value,
         "product": command.product,
         "quantity": None if command.quantity is None else float(command.quantity),

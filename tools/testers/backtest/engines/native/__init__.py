@@ -12,7 +12,6 @@ from .strategy import (
     EventStrategy,
     OrderAwareStrategy,
     Strategy,
-    StrategyActor,
     overridden_strategy_callbacks,
 )
 
@@ -23,7 +22,6 @@ __all__ = [
     "SubmitOrderCommand",
     "StrategyCommandKind",
     "Strategy",
-    "StrategyActor",
     "BarStrategy",
     "EventStrategy",
     "OrderAwareStrategy",

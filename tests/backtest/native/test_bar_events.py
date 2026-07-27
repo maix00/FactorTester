@@ -68,7 +68,7 @@ def test_custom_strategy_bar_hook_registers_bar_events():
     account = BacktestRunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
-            active_flow_names=frozenset({"schedule_bar_events", "strategy_hook_on_bar"}),
+            active_flow_names=frozenset({"schedule_bar_events", "strategy_runtime_on_bar"}),
         ),
     })
     account.market_data_store.current_prices_table = pd.DataFrame(

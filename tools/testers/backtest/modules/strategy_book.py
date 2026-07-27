@@ -206,13 +206,6 @@ class StrategyBookStore:
             if str(pool_id) == target
         }
 
-
-# New internal vocabulary. These aliases deliberately do not create another
-# runtime object; they describe the existing account-topology implementation.
-PortfolioTopology = StrategyBookStore
-AccountRouter = StrategyBookStore
-
-
 def strategy_book_store_for(state: object) -> StrategyBookStore:
     store = getattr(state, "strategy_book_store", None)
     if store is None:

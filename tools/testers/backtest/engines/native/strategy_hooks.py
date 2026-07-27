@@ -134,13 +134,13 @@ def intent_payload(intent: StrategyIntent) -> dict[str, Any]:
 
     if isinstance(intent, TargetWeightIntent):
         return {
-            "kind": "strategy_hook_intent",
+            "kind": "strategy_runtime_intent",
             "intent_kind": "target_weights",
             "weights": dict(intent.weights),
             "reason": intent.reason,
         }
     return {
-        "kind": "strategy_hook_intent",
+        "kind": "strategy_runtime_intent",
         "intent_kind": "order_deltas",
         "deltas": dict(intent.deltas),
         "reason": intent.reason,

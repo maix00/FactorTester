@@ -97,7 +97,7 @@ def _schedule_bar_events(state, ctx) -> None:
         config = state.config_for(strategy)
         live_factor = config.uses_flow("signal_live")
         custom_bar = (
-            config.uses_flow("strategy_hook_on_bar")
+            config.uses_flow("strategy_runtime_on_bar")
             and "on_bar" in overridden_strategy_callbacks(strategy)
         )
         if not (live_factor or custom_bar):

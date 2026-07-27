@@ -17,14 +17,14 @@ def _apply_signal_intent(state: Any, ctx: Any) -> None:
         for payload in ctx.payloads_for(strategy):
             if not isinstance(payload, dict):
                 continue
-            if payload.get("kind") == "strategy_hook_command":
+            if payload.get("kind") == "strategy_runtime_command":
                 command = command_from_payload(payload)
                 intent = apply_strategy_command(state, strategy, command, ctx.timestamp)
                 if intent is not None:
                     ctx.set_for(TargetStrategyModule.trade_intent, strategy, intent)
                 _emit_command_lifecycle_event(state, ctx, strategy, command)
                 continue
-            if payload.get("kind") != "strategy_hook_intent":
+            if payload.get("kind") != "strategy_runtime_intent":
                 continue
             reason = str(payload.get("reason") or "hook")
             intent_kind = payload.get("intent_kind")

@@ -6,7 +6,7 @@ from tools.testers.backtest.engines.native.market_events import MarketFeedEvent,
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.strategy_hooks import StrategyContext
-from tools.testers.backtest.modules.strategy_hooks import StrategyHookModule, StrategyRuntime
+from tools.testers.backtest.modules.strategy_hooks import StrategyRuntime
 from tools.testers.backtest.modules.target import TargetStrategyModule, OrderDeltaIntent
 from tools.testers.backtest.engines.native.orders import Order, OrderStatus
 from tools.testers.backtest.modules.order_lifecycle.store import OrderStore
@@ -84,7 +84,7 @@ def test_start_and_stop_are_lifecycle_only():
 def test_hook_signal_intent_enters_existing_target_pipeline():
     strategy = QuoteStrategy(alias="intent-adapter")
     payload = {
-        "kind": "strategy_hook_intent",
+        "kind": "strategy_runtime_intent",
         "intent_kind": "order_deltas",
         "deltas": {"P1": 2.0},
         "reason": "test",
@@ -104,7 +104,7 @@ def test_hook_signal_intent_enters_existing_target_pipeline():
 def test_hook_submit_command_enters_existing_target_pipeline():
     strategy = QuoteStrategy(alias="command-adapter")
     payload = {
-        "kind": "strategy_hook_command",
+        "kind": "strategy_runtime_command",
         "command_kind": "submit_order",
         "product": "P1",
         "quantity": 2.0,
@@ -137,7 +137,7 @@ def test_hook_cancel_command_closes_only_the_strategy_order():
     state = SimpleNamespace(order_store=OrderStore())
     state.order_store.register_order(order)
     payload = {
-        "kind": "strategy_hook_command",
+        "kind": "strategy_runtime_command",
         "command_kind": "cancel_order",
         "order_id": "cancel-me",
         "reason": "risk",
@@ -161,14 +161,14 @@ def test_custom_strategy_mode_selects_hooks_without_group_flows():
     active = _resolve_active_flow_names({"strategy_kind": "custom"})
     config = next(iter(build_strategy_configs({"custom": {"strategy_kind": "custom"}}).values()))
 
-    assert "strategy_hook_on_bar" in active
-    assert "strategy_hook_on_order_event" in config.active_flow_names
+    assert "strategy_runtime_on_bar" in active
+    assert "strategy_runtime_on_order_event" in config.active_flow_names
     assert "schedule_bar_events" in active
     assert "group_quantile_membership" not in active
 
 
-def test_strategy_runtime_is_the_new_name_for_the_legacy_adapter():
-    assert StrategyRuntime is StrategyHookModule
+def test_strategy_runtime_is_the_registered_strategy_module():
+    assert StrategyRuntime.key == "strategy_runtime"
 
 
 def test_partial_fill_uses_specific_order_hook():
