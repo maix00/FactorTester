@@ -136,3 +136,19 @@ def test_capability_validation_reports_missing_data_and_execution_features():
     assert report["ok"] is False
     assert report["missing_feed_events"] == ["book_delta"]
     assert len(report["errors"]) == 3
+
+
+def test_capability_validation_reports_missing_order_status_and_position_axes():
+    report = validate_strategy_capabilities(
+        StrategyRequirements(
+            needs_order_status_events=True,
+            needs_position_events=True,
+        ),
+        ExecutionCapabilities(),
+    )
+
+    assert report["ok"] is False
+    assert report["errors"] == [
+        "strategy requires order status events",
+        "strategy requires position lifecycle events",
+    ]

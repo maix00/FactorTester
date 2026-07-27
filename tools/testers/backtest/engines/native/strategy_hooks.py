@@ -30,6 +30,8 @@ class StrategyRequirements:
     feed_events: frozenset[MarketFeedEventKind] = frozenset()
     needs_partial_fills: bool = False
     needs_order_events: bool = False
+    needs_order_status_events: bool = False
+    needs_position_events: bool = False
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,8 @@ class ExecutionCapabilities:
     feed_events: frozenset[MarketFeedEventKind] = frozenset()
     partial_fills: bool = False
     order_events: bool = False
+    order_status_events: bool = False
+    position_events: bool = False
 
 
 def validate_strategy_capabilities(
@@ -53,6 +57,10 @@ def validate_strategy_capabilities(
         errors.append("strategy requires partial fills")
     if requirements.needs_order_events and not capabilities.order_events:
         errors.append("strategy requires order lifecycle events")
+    if requirements.needs_order_status_events and not capabilities.order_status_events:
+        errors.append("strategy requires order status events")
+    if requirements.needs_position_events and not capabilities.position_events:
+        errors.append("strategy requires position lifecycle events")
     return {
         "ok": not errors,
         "missing_feed_events": missing_events,
