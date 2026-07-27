@@ -42,6 +42,7 @@ struct ClientTabView: View {
                 ProfileResearchOverview(
                     profiles: profiles.profiles,
                     profileLoadState: profiles.loadState,
+                    isActive: isActive,
                     openWorkPackage: { open(.workPackage($0)) }
                 )
             } else {

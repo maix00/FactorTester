@@ -24,13 +24,18 @@ def create_profile_research(
     *,
     title: str,
     graph_id: str = "factor-research",
-    product_group: str = "china_futures",
+    product_group: str | None = None,
     capability_resolution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create one Profile-owned Work Package and its initial Branch."""
     title = title.strip()
     if not title:
         raise ValueError("title is required")
+    product_group = (product_group or "").strip()
+    if not product_group:
+        raise ValueError(
+            "product_group is required; exact product universe belongs to the TrialPlan"
+        )
     client = FactorTesterClient(
         HttpSession(context.profile["server"]["base_url"])
     )
@@ -58,6 +63,8 @@ def create_profile_research(
         "scope": {
             "profile_id": context.profile_id,
             "product_group": product_group,
+            "product_scope_kind": "implementation_product_group",
+            "product_universe_defined_in": "trial_plan",
             "graph_id": graph_id,
             "agent_id": context.agent_id,
         },

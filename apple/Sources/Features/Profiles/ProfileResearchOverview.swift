@@ -301,6 +301,7 @@ private struct ResearchWorkspaceBinding {
 struct ProfileResearchOverview: View {
     let profiles: [LocalProfileModel]
     let profileLoadState: LocalProfileLoadState
+    let isActive: Bool
     let openWorkPackage: (ResearchDirectoryItem) -> Void
     @StateObject private var controller: ResearchDirectoryController
     @State private var lifecycle: ResearchLifecycleFilter = .active
@@ -308,10 +309,12 @@ struct ProfileResearchOverview: View {
     init(
         profiles: [LocalProfileModel],
         profileLoadState: LocalProfileLoadState = .loaded,
+        isActive: Bool = true,
         openWorkPackage: @escaping (ResearchDirectoryItem) -> Void
     ) {
         self.profiles = profiles
         self.profileLoadState = profileLoadState
+        self.isActive = isActive
         self.openWorkPackage = openWorkPackage
         _controller = StateObject(
             wrappedValue: ResearchDirectoryController(profiles: profiles)
@@ -346,8 +349,13 @@ struct ProfileResearchOverview: View {
             }
         }
         .padding(24)
-        .task(id: "\(bindingSignature)|\(lifecycle.rawValue)") {
+        .task(id: "\(isActive)|\(bindingSignature)|\(profileLoadState)|\(lifecycle.rawValue)") {
             controller.replaceProfiles(profiles)
+            // The overview is mounted in HomeView even while hidden. Do not
+            // consume the first task run with an empty profile snapshot; wait
+            // for the shared profile controller and refresh again whenever
+            // this tab becomes active.
+            guard isActive, profileLoadState == .loaded else { return }
             await controller.refresh(lifecycle: lifecycle)
         }
     }
@@ -379,7 +387,8 @@ struct ProfileResearchOverview: View {
                     statusBadge(item.summary)
                 }
                 Text(verbatim: L10n.format(
-                    "%@ · %lld 个分支 · %lld 个进行中",
+                    "%@：%@ · %lld 个分支 · %lld 个进行中",
+                    L10n.text("实现产品组"),
                     ResearchDisplayText.productGroup(item.summary.productGroup),
                     item.summary.branchCount,
                     item.summary.runningBranchCount

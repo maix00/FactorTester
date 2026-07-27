@@ -49,7 +49,16 @@ cli-anything-factortester-research workspace prepare --build --sync --json
 cli-anything-factortester-research workspace inspect \
   --factor-family SgCCS --json
 factortester client research create \
-  --profile maxa --title "SgCCS research"
+  --profile maxa --title "SgCCS research" \
+  --product-group china_futures
+# product-group is the implementation group; exact products and masks are
+# frozen later in the TrialPlan/RunSpec.
+factortester client research fork \
+  graph-branch:<instance>:<branch> --profile maxa \
+  --label "alternative hypothesis"
+# A separate content-only report can be cloned before continuing the new path:
+cli-anything-factortester-research report fork \
+  --source-file report.json --output-file report-branch-b.json
 cli-anything-factortester-research run-step -- \
   run submit --analysis ic --analysis factor_evaluation \
   --analysis factor_type_analysis --analysis backtest

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import uuid
+from copy import deepcopy
 from pathlib import Path
 
 import click
@@ -89,6 +91,64 @@ def report_create(file: Path, document_id: str, title: str, language: str, as_js
     bindings_file = bindings_path_for(file)
     save_bindings(bindings_file, new_bindings(value), value)
     _document_receipt(file, value, as_json, bindings_file=str(bindings_file))
+
+
+@report.command("fork")
+@click.option(
+    "--source-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--output-file",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True)
+def report_fork(source_file: Path, output_file: Path, as_json: bool) -> None:
+    """Clone content and sidecar bindings for a new research branch.
+
+    Graph ownership stays in the sidecar bindings; the content document never
+    receives branch metadata. Existing historical bindings are retained and
+    new branch-scoped chapters can be appended by ``cycle next``.
+    """
+    from tools.cli.release.research_reporting.document import (
+        bindings_path_for, load_bindings, load_document, new_bindings,
+        save_bindings, save_document,
+    )
+
+    output_bindings = bindings_path_for(output_file)
+    if output_file.exists() or output_bindings.exists():
+        raise click.ClickException(
+            "output report or its bindings sidecar already exists"
+        )
+    source = load_document(source_file)
+    source_bindings = load_bindings(
+        bindings_path_for(source_file), source,
+    )
+    cloned = deepcopy(source)
+    cloned["document_id"] = f"report-{uuid.uuid4().hex}"
+    # The sidecar is revalidated against the new opaque document identity.
+    cloned_bindings = new_bindings(cloned)
+    cloned_bindings["bindings"] = deepcopy(source_bindings["bindings"])
+    cloned_bindings["migration"] = deepcopy(source_bindings.get("migration"))
+    value = save_document(output_file, cloned)
+    save_bindings(output_bindings, cloned_bindings, value)
+    payload = {
+        "source_file": str(source_file),
+        "output_file": str(output_file),
+        "bindings_file": str(output_bindings),
+        "source_document_id": source["document_id"],
+        "document_id": value["document_id"],
+        "component_count": len(value["components"]),
+        "binding_count": len(cloned_bindings["bindings"]),
+    }
+    if as_json:
+        echo_json(payload)
+    else:
+        click.echo(f"report fork: {output_file}")
+        click.echo(f"components: {payload['component_count']}")
+        click.echo(f"bindings: {payload['binding_count']}")
 
 
 @report.command("add")

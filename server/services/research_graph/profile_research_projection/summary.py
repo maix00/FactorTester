@@ -10,6 +10,9 @@ from server.services.research_graph.report_checkpoint import (
     safe_hash as _safe_hash,
     safe_identifier as _safe_identifier,
 )
+from server.services.research_graph.product_scope import (
+    implementation_product_scope,
+)
 
 from .refs import research_ref_for, work_package_ref_for, workspace_ref_for
 
@@ -31,6 +34,9 @@ def _work_package_summary(row: sqlite3.Row) -> dict[str, Any]:
             f"{str(row['graph_id'])}@v{int(row['graph_version'])}"
         ),
         "product_group": str(row["product_group"]),
+        "product_scope": implementation_product_scope(
+            str(row["product_group"])
+        ),
         "mode": str(row["mode"]),
         "lifecycle": str(row["lifecycle"]),
         "lifecycle_revision": int(row["lifecycle_revision"]),
@@ -64,6 +70,9 @@ def _branch_summary(row: sqlite3.Row) -> dict[str, Any]:
             f"{str(row['graph_id'])}@v{int(row['graph_version'])}"
         ),
         "product_group": str(row["product_group"]),
+        "product_scope": implementation_product_scope(
+            str(row["product_group"])
+        ),
         "mode": str(row["mode"]),
         "label": str(row["label"]),
         "current_node": str(row["current_node"]),

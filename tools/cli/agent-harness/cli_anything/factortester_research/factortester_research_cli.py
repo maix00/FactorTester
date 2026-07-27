@@ -11,12 +11,17 @@ from .commands.audit import (
 )
 from .commands.common import echo_json as _echo_json
 from .commands.cycle import cycle
+from .commands.cycle_continuation import (
+    cycle_continue,
+    cycle_continuation_preview,
+)
 from .commands.evidence import evidence
 from .commands.entry import entry_prepare, entry_validate
 from .commands.external import external_factor, external_factor_plan, external_factor_validate
 from .commands.graph import graph, graph_capabilities, graph_draft, graph_observed, graph_replay
 from .commands.operations import operator, operator_set, service, service_list, service_restart, workspace, workspace_inspect, workspace_prepare
 from .commands.report import report
+from .commands.report_chapters import report_sync_chapters
 from .commands.research import checklist, doctor, plan, run_step, slice_plan
 from .commands.strategy_intent import strategy_intent
 from .commands.margin_budget import margin_budget
@@ -26,6 +31,9 @@ from .utils.repl_skin import ReplSkin
 
 cycle.add_command(entry_prepare)
 cycle.add_command(entry_validate)
+cycle.add_command(cycle_continuation_preview)
+cycle.add_command(cycle_continue)
+report.add_command(report_sync_chapters)
 
 
 @click.group(invoke_without_command=True)

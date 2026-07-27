@@ -28,6 +28,8 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
     deduped = {item["task_ref"]: item for item in tasks}
     value["report_packet"] = {
         "document_commands": [
+            "cycle next <instance> <branch> --report-file <file>",
+            "report fork --source-file <file> --output-file <file>",
             "report add --kind chapter|section|subsection|entry|special|table|image",
             "report asset --asset-file <json>",
             "report chip --kind evidence|obligation|task|job|artifact|report_requirement",
@@ -38,6 +40,17 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "required_tasks": list(deduped.values()),
         "data_policy": "Graph carries references and contracts only; load evidence separately",
         "completion_rule": "Every required report task must have a report_requirement chip",
+        "chapter_policy": {
+            "mode": "automatic_on_cycle_next",
+            "anchor": "current Graph node",
+            "command": "cycle next --report-file <content-only-report.json>",
+            "idempotent": True,
+            "data_policy": "chapter ownership stays in the bindings sidecar",
+            "branch_policy": (
+                "cycle next records branch_ref in sidecar data; content-only "
+                "reports may be cloned with report fork"
+            ),
+        },
         "manifest_contract": {
             "command": "report manifest --file <file>",
             "purpose": "content-free receipt for local report identity",
@@ -71,11 +84,26 @@ def validate_report_tasks(packet: dict[str, Any], bindings: dict[str, Any]) -> d
 
 
 def _task(ref: str, node: str, edge: str, *, required: bool) -> dict[str, Any]:
+    chapter_ref = f"node:{node}" if node else f"edge:{edge}"
     return {
         "task_ref": ref,
         "node_id": node,
         "edge_id": edge,
+        "chapter_ref": chapter_ref,
+        "chapter_title_zh": _chapter_title(node),
         "required": required,
         "suggested_component_kinds": ["entry", "table", "image"],
         "submission": "attach a report_requirement chip to the completed component",
     }
+
+
+def _chapter_title(node: str) -> str:
+    return {
+        "hypothesis_preregistration": "假设登记",
+        "data_contract": "数据契约",
+        "factor_semantics": "因子语义",
+        "validation_design": "验证设计",
+        "trial_execution": "试验执行",
+        "result_audit": "结果审计",
+        "research_decision": "研究决策",
+    }.get(node, "研究阶段")

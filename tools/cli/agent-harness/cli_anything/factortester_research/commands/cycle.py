@@ -23,8 +23,11 @@ from ..utils.factortester_backend import run_factortester
 from tools.cli.release.research_reporting.document import (
     bindings_path_for,
     document_manifest,
+    ensure_report_chapters,
     load_bindings,
     load_document,
+    save_bindings,
+    save_document,
 )
 from tools.cli.release.research_reporting.graph_adapter import (
     enrich_graph_packet,
@@ -42,12 +45,20 @@ def cycle() -> None:
 @click.argument("instance_id")
 @click.argument("branch_id")
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
+@click.option(
+    "--report-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help=(
+        "可选：同步当前 Graph 节点的报告章节；正文仍由 Agent 后续编辑。"
+    ),
+)
 def cycle_next(
     instance_id: str,
     branch_id: str,
     as_json: bool,
+    report_file: Path | None,
 ) -> None:
-    """Read the server's compact current-node packet without local writes."""
+    """Read the packet and optionally ensure its report chapter locally."""
     result = run_factortester([
         "research-graph",
         "next",
@@ -58,8 +69,34 @@ def cycle_next(
         packet = enrich_graph_packet(validate_next_packet(
             _backend_json(result.returncode, result.stdout, result.stderr)
         ))
+        packet["research_scope"] = {
+            "instance_id": instance_id,
+            "branch_id": branch_id,
+            "branch_ref": f"graph-branch:{instance_id}:{branch_id}",
+        }
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
+    if report_file is not None:
+        try:
+            document = load_document(report_file)
+            bindings_file = bindings_path_for(report_file)
+            bindings = load_bindings(bindings_file, document)
+            document, bindings, receipt = ensure_report_chapters(
+                document, bindings, packet,
+            )
+            save_document(report_file, document)
+            save_bindings(bindings_file, bindings, document)
+            packet.setdefault("report_packet", {})[
+                "chapter_sync"
+            ] = {
+                **receipt,
+                "report_file": str(report_file),
+                "bindings_file": str(bindings_file),
+            }
+        except (OSError, ValueError) as exc:
+            raise click.ClickException(
+                f"无法同步研究报告章节：{exc}"
+            ) from exc
     if as_json:
         echo_json(packet)
         return
@@ -133,144 +170,6 @@ def cycle_requirement(
     click.echo(
         f"requirement: {requirement.get('requirement_id', requirement_id)}"
     )
-
-
-@cycle.command("continuation-preview")
-@click.argument("instance_id")
-@click.argument("branch_id")
-@click.option("--target-version", required=True, type=click.IntRange(min=1))
-@click.option(
-    "--job-id",
-    default="",
-    help="Bound Job; omit only for a paused pre-TrialPlan branch.",
-)
-@click.option(
-    "--mode",
-    "execution_mode",
-    type=click.Choice(["live", "shadow"]),
-    default="live",
-    show_default=True,
-)
-@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
-def cycle_continuation_preview(
-    instance_id: str,
-    branch_id: str,
-    target_version: int,
-    job_id: str,
-    execution_mode: str,
-    as_json: bool,
-) -> None:
-    """Read the exact continuation hash without changing any state."""
-    arguments = [
-        "research-graph",
-        "continuation-preview",
-        instance_id,
-        branch_id,
-        "--target-version",
-        str(target_version),
-        "--mode",
-        execution_mode,
-    ]
-    if job_id:
-        arguments.extend(["--job-id", job_id])
-    result = run_factortester(arguments, timeout=60)
-    payload = _backend_json(
-        result.returncode,
-        result.stdout,
-        result.stderr,
-    )
-    if as_json:
-        echo_json(payload)
-        return
-    click.echo(f"target_hash: {payload.get('target_hash', '')}")
-
-
-@cycle.command("continue")
-@click.argument("instance_id")
-@click.argument("branch_id")
-@click.option("--target-version", required=True, type=click.IntRange(min=1))
-@click.option(
-    "--job-id",
-    default="",
-    help="Bound Job; omit only for a paused pre-TrialPlan branch.",
-)
-@click.option(
-    "--mode",
-    "execution_mode",
-    type=click.Choice(["live", "shadow"]),
-    default="live",
-    show_default=True,
-)
-@click.option("--expected-target-hash", required=True)
-@click.option("--timeout", default=120, show_default=True, type=int)
-@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
-@click.pass_context
-def cycle_continue(
-    ctx: click.Context,
-    instance_id: str,
-    branch_id: str,
-    target_version: int,
-    job_id: str,
-    execution_mode: str,
-    expected_target_hash: str,
-    timeout: int,
-    as_json: bool,
-) -> None:
-    """Consume one exact Gate and retain a bounded local command receipt."""
-    arguments = [
-        "research-graph",
-        "continue",
-        instance_id,
-        branch_id,
-        "--target-version",
-        str(target_version),
-        "--expected-target-hash",
-        expected_target_hash,
-        "--mode",
-        execution_mode,
-    ]
-    if job_id:
-        arguments.extend(["--job-id", job_id])
-    result = run_factortester(arguments, timeout=timeout)
-    backend = _backend_json(
-        result.returncode,
-        result.stdout,
-        result.stderr,
-    )
-    session_path = str(ctx.obj["session_path"])
-    session = load_session(session_path)
-    envelope = persist_command_evidence(
-        session_path=session_path,
-        envelope_id=(
-            f"continuation-{len(session.evidence_envelopes) + 1}"
-        ),
-        argv=result.argv,
-        returncode=result.returncode,
-        stdout=result.stdout,
-        stderr=result.stderr,
-        hypotheses_tested=session.hypotheses_tested,
-        stop_condition=None,
-    )
-    session.evidence_envelopes.append(envelope)
-    record_event(
-        session,
-        "graph_continuation_created",
-        source_instance_id=instance_id,
-        source_branch_id=branch_id,
-        target_graph_version=target_version,
-        target_hash=expected_target_hash,
-        evidence_envelope_hash=envelope["envelope_hash"],
-    )
-    save_session(session, session_path)
-    payload = {
-        "backend": backend,
-        "evidence_envelope_hash": envelope["envelope_hash"],
-    }
-    if as_json:
-        echo_json(payload)
-        return
-    click.echo(f"graph_version: {target_version}")
-    click.echo(f"evidence: {envelope['envelope_hash']}")
 
 
 @cycle.command("validate")

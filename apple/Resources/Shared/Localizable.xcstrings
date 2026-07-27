@@ -247,19 +247,19 @@
         }
       }
     },
-    "%@ · %lld 个分支 · %lld 个进行中" : {
+    "%@：%@ · %lld 个分支 · %lld 个进行中" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ · %lld branches · %lld running"
+            "value" : "%@: %@ · %lld branches · %lld running"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ · %lld 个分支 · %lld 个进行中"
+            "value" : "%@：%@ · %lld 个分支 · %lld 个进行中"
           }
         }
       }
@@ -1584,6 +1584,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "个人工作区"
+          }
+        }
+      }
+    },
+    "实现产品组" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Implementation product group"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实现产品组"
           }
         }
       }

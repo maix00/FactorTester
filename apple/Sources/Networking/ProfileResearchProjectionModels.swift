@@ -16,11 +16,28 @@ struct ProfileResearchListResponse: Decodable {
     }
 }
 
+struct ProfileResearchProductScope: Decodable {
+    let kind: String
+    let productGroup: String
+    let universe: [String]?
+    let productMask: [String]?
+    let universeDefinedIn: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case productGroup = "product_group"
+        case universe
+        case productMask = "product_mask"
+        case universeDefinedIn = "universe_defined_in"
+    }
+}
+
 struct ProfileResearchSummary: Decodable, Identifiable {
     let researchRef: String
     let workPackageRef: String
     let workspaceRef: String
     let productGroup: String
+    let productScope: ProfileResearchProductScope?
     let status: String
     let branchCount: Int
     let runningBranchCount: Int
@@ -38,6 +55,7 @@ struct ProfileResearchSummary: Decodable, Identifiable {
         case workPackageRef = "work_package_ref"
         case workspaceRef = "workspace_ref"
         case productGroup = "product_group"
+        case productScope = "product_scope"
         case status
         case branchCount = "branch_count"
         case runningBranchCount = "running_branch_count"
@@ -55,6 +73,7 @@ struct ProfileResearchWorkPackageDetail: Decodable {
     let researchRef: String
     let workPackageRef: String
     let productGroup: String
+    let productScope: ProfileResearchProductScope?
     let mode: String
     let branchCount: Int
     let omittedBranchCount: Int
@@ -69,6 +88,7 @@ struct ProfileResearchWorkPackageDetail: Decodable {
         case researchRef = "research_ref"
         case workPackageRef = "work_package_ref"
         case productGroup = "product_group"
+        case productScope = "product_scope"
         case mode
         case branchCount = "branch_count"
         case omittedBranchCount = "omitted_branch_count"

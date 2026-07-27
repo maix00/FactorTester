@@ -9,6 +9,7 @@ from .bindings import (
     rebind_document,
     validate_bindings,
 )
+from .chapter_sync import ensure_report_chapters
 from .chips import chip_descriptor, chip_kinds, register_chip_kind
 from .model import (
     add_asset,
@@ -43,4 +44,5 @@ __all__ = [
     "save_bindings",
     "validate_bindings",
     "validate_document",
+    "ensure_report_chapters",
 ]
