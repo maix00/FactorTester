@@ -316,6 +316,37 @@ def test_order_matching_axis_does_not_duplicate_status_axis_callback():
     assert strategy.seen == ["on_order_filled"]
 
 
+def test_internal_pending_conflict_cancel_emits_status_snapshot():
+    from tools.testers.backtest.modules.group.execution import apply_pending_conflict
+
+    strategy = Strategy(alias="pending-conflict")
+    stale = Order(
+        instrument="P1", timestamp=pd.Timestamp("2025-01-01"),
+        quantity=1.0, intent_quantity=1.0, strategy=strategy,
+        order_id="stale", status=OrderStatus.ACCEPTED,
+    )
+    stale.set("price_timestamp", pd.Timestamp("2025-01-01 09:01"))
+    state = SimpleNamespace(
+        order_store=OrderStore(),
+        config_for=lambda _strategy: type(
+            "ConfigView", (), {
+                "uses_flow": lambda self, name: name == "strategy_runtime_on_order_status_event",
+            },
+        )(),
+    )
+    state.order_store.register_order(stale)
+    pending = {(strategy, "P1"): stale}
+
+    event = apply_pending_conflict(
+        state, strategy, stale, pd.Timestamp("2025-01-01 09:00"),
+        pending, conflict=None,
+    )
+
+    assert event is not None
+    assert event.kind is EventKind.ORDER_STATUS
+    assert event.payload.status is OrderStatus.CANCELLED
+
+
 def test_partial_fill_uses_specific_order_hook():
     strategy = PartialStrategy(alias="partial-hook")
     order = type("OrderView", (), {"status": OrderStatus.PARTIALLY_FILLED})()

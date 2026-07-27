@@ -11,7 +11,11 @@ from tools.testers.backtest.engines.native.order import (
 )
 
 from .actions import record_order_action
-from .schedule import create_order_attempt, order_status_event
+from .schedule import (
+    create_order_attempt,
+    order_status_event,
+    order_status_event_if_enabled,
+)
 
 
 def activate_ready_dependents(state: Any, ctx: Any) -> list[EventDraft]:
@@ -80,4 +84,9 @@ def activate_ready_dependents(state: Any, ctx: Any) -> list[EventDraft]:
                 order.status = OrderStatus.CANCELLED
                 order.reject_reason = "prerequisite close order did not fill"
                 state.order_store.remove_from_live_indexes(order)
+                cancelled_event = order_status_event_if_enabled(
+                    state, order, timestamp=ctx.timestamp,
+                )
+                if cancelled_event is not None:
+                    drafts.append(cancelled_event)
     return drafts
