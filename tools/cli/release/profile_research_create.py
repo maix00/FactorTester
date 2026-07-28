@@ -17,7 +17,7 @@ from tools.cli.http import HttpSession
 
 from .local_profile import LocalProfileStore
 from .profile_research_context import ProfileResearchContext
-from .research_reporting.document import ensure_profile_report_chapter
+from .research_reporting.workspace import initialize_work_package
 
 
 def create_profile_research(
@@ -103,12 +103,14 @@ def create_profile_research(
         },
         "timeline_refs": [],
     }
-    report = ensure_profile_report_chapter(
+    report = initialize_work_package(
         workspace_root=Path(context.profile["workspace_root"]),
         work_package_id=work_package_id,
+        branch_id=branch_id,
+        workspace_id=context.workspace_id,
         title=title,
-        node_id=str(resolution.get("node_id") or ""),
         branch_ref=record["graph_branch_ref"],
+        factor_family_versions=record["factor_family_versions"],
     )
     record["artifacts"] = [report["descriptor"]]
     store.upsert_research_record(context.profile_id, record)
@@ -121,8 +123,8 @@ def create_profile_research(
         "research": instance,
         "local_record": record,
         "local_report": {
-            "path": str(report["report_path"]),
-            "chapter_sync": report["chapter_sync"],
+            "path": str(report["branch_report_path"]),
+            "git": report["git"],
         },
     }
 
