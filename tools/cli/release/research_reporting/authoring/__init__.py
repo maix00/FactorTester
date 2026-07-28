@@ -5,7 +5,6 @@ from .service import (
     ensure_branch_authoring, load_branch_authoring, register_branch_asset,
 )
 from .profile_sync import ensure_branch_report_chapter
-from .migration import migrate_profile_work_packages
 
 __all__ = [
     "add_branch_component",
@@ -16,5 +15,4 @@ __all__ = [
     "load_branch_authoring",
     "register_branch_asset",
     "ensure_branch_report_chapter",
-    "migrate_profile_work_packages",
 ]

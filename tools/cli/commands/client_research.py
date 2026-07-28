@@ -21,7 +21,6 @@ from tools.cli.release.research_reporting.publisher import (
     publish_research_checkpoint,
 )
 from tools.cli.release.research_reporting.assets import stage_report_asset
-from tools.cli.commands.client_research_migration import migrate_work_packages
 from tools.cli.commands.client_research_fork import register_research_fork
 
 
@@ -39,7 +38,6 @@ def client_research() -> None:
     """Inspect Work Packages and their Hypothesis Branches."""
 
 
-client_research.add_command(migrate_work_packages)
 register_research_fork(client_research)
 
 
