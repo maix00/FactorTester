@@ -39,6 +39,9 @@ from server.services.research_graph.branch.profile_identity import (
 from server.services.research_graph.branch.report_coverage import (
     validate_report_submission,
 )
+from server.services.research_graph.evidence_admission import (
+    resolve_graph_evidence_admissions,
+)
 from server.services.research_graph.branch.trace_compaction import (
     compact_transition_trace,
 )
@@ -116,6 +119,7 @@ def advance_graph_branch(
     ):
         raise ValueError("research_cycle cold-event fields are server-owned")
     evidence = validate_agent_evidence_payload(evidence)
+    submitted_admitted_evidence = evidence.pop("admitted_evidence", None)
     submitted_resolution = evidence.get("target_capability_resolution")
     if submitted_resolution is not None:
         serialize_capability_resolution_submission(submitted_resolution)
@@ -289,6 +293,33 @@ def advance_graph_branch(
             if isinstance(cycle_update, dict)
             else []
         )
+        admitted_evidence = resolve_graph_evidence_admissions(
+            conn,
+            owner=owner,
+            workspace_id=str(branch_row["workspace_id"]),
+            instance_id=instance_id,
+            branch_id=branch_id,
+            branch_row=branch_row,
+            cycle_checkpoint=previous_cycle_checkpoint,
+            submitted=submitted_admitted_evidence,
+        )
+        if admitted_evidence["bindings"]:
+            admitted_refs = admitted_evidence["evidence_refs"]
+            existing_refs = prepared_evidence.get("evidence_refs") or []
+            if not isinstance(existing_refs, list):
+                raise ValueError("evidence_refs must be an array")
+            prepared_evidence["evidence_refs"] = list(dict.fromkeys(
+                [*existing_refs, *admitted_refs]
+            ))
+            prepared_evidence["admitted_evidence"] = admitted_evidence[
+                "bindings"
+            ]
+            persisted_evidence["evidence_refs"] = prepared_evidence[
+                "evidence_refs"
+            ]
+            persisted_evidence["admitted_evidence"] = admitted_evidence[
+                "bindings"
+            ]
         prepared_server_guard_facts = server_actions.guard_facts(
             prepared_server_actions
         )
@@ -300,6 +331,8 @@ def advance_graph_branch(
                 adjudication_action=route_action,
             ),
             "research_cycle_delta_applied": bool(cycle_events),
+            "admitted_evidence_bound": bool(admitted_evidence["bindings"]),
+            "admitted_evidence_eligible": admitted_evidence["eligible"],
             **system_transition_guard_facts(
                 branch_row=branch_row,
                 cycle_checkpoint=cycle_checkpoint,
@@ -326,6 +359,11 @@ def advance_graph_branch(
             not isinstance(evidence_refs, list) or not evidence_refs
         ):
             raise ValueError("transition requires evidence_refs")
+        if (
+            "admitted_evidence" in required_evidence
+            and not admitted_evidence["eligible"]
+        ):
+            raise ValueError("transition requires eligible admitted_evidence")
         target = next(
             (
                 item

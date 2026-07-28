@@ -47,6 +47,24 @@ def admit(evidence_ref: str, environment_ref: str, subject_ref: str, qualificati
     ), as_json)
 
 
+@research_evidence.command("admit-graph")
+@click.argument("evidence_ref")
+@click.option("--instance-id", required=True)
+@click.option("--branch-id", required=True)
+@click.option("--qualification", type=click.Choice(["unreviewed", "eligible", "limited", "rejected"]), required=True)
+@click.option("--note", default="")
+@click.option("--json", "as_json", is_flag=True)
+def admit_graph(
+    evidence_ref: str, instance_id: str, branch_id: str,
+    qualification: str, note: str, as_json: bool,
+) -> None:
+    """Admit Evidence for one Graph branch using server-derived scope."""
+    _emit(client_from_config().admit_research_evidence_for_graph(
+        evidence_ref, instance_id=instance_id, branch_id=branch_id,
+        qualification=qualification, note=note,
+    ), as_json)
+
+
 def _read_object(path: Path) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))

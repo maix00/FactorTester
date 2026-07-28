@@ -87,6 +87,43 @@ def get_evidence(*, owner: str, evidence_ref: str) -> dict[str, Any]:
 
 def admit_evidence(*, owner: str, evidence_ref: str, environment_ref: str,
                    subject_ref: str, qualification: str, note: str = "") -> dict[str, Any]:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_schema(conn)
+        return _admit_evidence(
+            conn, owner=owner, evidence_ref=evidence_ref,
+            environment_ref=environment_ref, subject_ref=subject_ref,
+            qualification=qualification, note=note,
+        )
+
+
+def admit_evidence_for_graph(
+    *, owner: str, evidence_ref: str, instance_id: str, branch_id: str,
+    qualification: str, note: str = "",
+) -> dict[str, Any]:
+    """Admit Evidence for a Graph branch without client-derived scope text."""
+    from server.services.research_graph.branch.repository import (
+        load_instance_branch_with_latest_trace,
+    )
+
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_schema(conn)
+        branch = load_instance_branch_with_latest_trace(
+            conn, instance_id=instance_id, branch_id=branch_id, owner=owner,
+        )
+        if branch is None:
+            raise KeyError("graph branch not found")
+        return _admit_evidence(
+            conn, owner=owner, evidence_ref=evidence_ref,
+            environment_ref=f"workspace:{branch['workspace_id']}",
+            subject_ref=f"graph-branch:{instance_id}:{branch_id}",
+            qualification=qualification, note=note,
+        )
+
+
+def _admit_evidence(
+    conn, *, owner: str, evidence_ref: str, environment_ref: str,
+    subject_ref: str, qualification: str, note: str,
+) -> dict[str, Any]:
     if qualification not in {"unreviewed", "eligible", "limited", "rejected"}:
         raise ValueError("invalid evidence qualification")
     reference(evidence_ref)
@@ -96,22 +133,20 @@ def admit_evidence(*, owner: str, evidence_ref: str, environment_ref: str,
     values = {"evidence_ref": evidence_ref, "environment_ref": environment_ref,
               "subject_ref": subject_ref, "qualification": qualification, "note": note}
     admission_ref = "admission:" + hashlib.sha256(canonical(values).encode()).hexdigest()
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_schema(conn)
-        exists = conn.execute(
-            "SELECT 1 FROM research_evidence_objects WHERE evidence_ref=? AND owner=?",
-            (evidence_ref, owner),
-        ).fetchone()
-        if exists is None:
-            raise KeyError("research evidence not found")
-        now = time.time()
-        conn.execute(
-            """INSERT INTO research_evidence_admissions
+    exists = conn.execute(
+        "SELECT 1 FROM research_evidence_objects WHERE evidence_ref=? AND owner=?",
+        (evidence_ref, owner),
+    ).fetchone()
+    if exists is None:
+        raise KeyError("research evidence not found")
+    now = time.time()
+    conn.execute(
+        """INSERT INTO research_evidence_admissions
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(evidence_ref, environment_ref, subject_ref) DO UPDATE SET
               admission_ref=excluded.admission_ref, qualification=excluded.qualification,
               note=excluded.note, owner=excluded.owner, created_at=excluded.created_at""",
-            (admission_ref, evidence_ref, environment_ref, subject_ref,
-             qualification, note, owner, now),
-        )
+        (admission_ref, evidence_ref, environment_ref, subject_ref,
+         qualification, note, owner, now),
+    )
     return {"admission_ref": admission_ref, **values}

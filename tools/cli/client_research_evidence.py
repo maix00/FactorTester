@@ -37,3 +37,16 @@ class ResearchEvidenceClientMixin(ClientMixinBase):
             },
         ))
         return dict(data.get("admission") or {})
+
+    def admit_research_evidence_for_graph(
+        self, evidence_ref: str, *, instance_id: str, branch_id: str,
+        qualification: str, note: str = "",
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-evidence/{evidence_ref}/graph-admissions",
+            {
+                "instance_id": instance_id, "branch_id": branch_id,
+                "qualification": qualification, "note": note,
+            },
+        ))
+        return dict(data.get("admission") or {})

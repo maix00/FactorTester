@@ -588,3 +588,23 @@ selection occurs before ranking and excludes missing/warm-up values.
   under the chapter bound to the Job's immutable execution node.
 - A missing execution node is rejected; the collector never silently attaches
   an old job to the branch's current node.
+
+## Evidence Registry to Graph admission refinement (Issue #141)
+
+## Test inventory plan
+
+- `tests/server/test_research_evidence_graph_admission.py`: direct transition
+  coverage for persistent Evidence admission bindings.
+- `tests/server/test_research_evidence_registry.py`: retain ownership and
+  admission replacement coverage.
+
+## Unit test plan
+
+- The Agent supplies only an evidence/admission reference pair; the Graph
+  resolves owner, workspace, branch scope, qualification, identity scope and
+  immutable envelope metadata inside the transition transaction.
+- An eligible admission satisfies an Active Graph edge that explicitly
+  requires admitted evidence and carries only a server-derived binding into
+  the trace and bounded evidence context.
+- A stale admission, an admission for another branch, and a limited
+  qualification cannot satisfy that guard.
