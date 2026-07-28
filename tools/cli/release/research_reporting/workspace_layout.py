@@ -20,5 +20,4 @@ def ensure_work_package_layout(
     branch_root = ensure_branch_report_tree(package_root, branch_id)
     return {
         "package_root": package_root, "branch_root": branch_root,
-        "branch_report_path": branch_root / "REPORT.md",
     }

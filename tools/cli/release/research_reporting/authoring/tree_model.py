@@ -51,9 +51,9 @@ def add_component(
     items = [validate_binding(item) for item in bindings or []]
     head = mutate(
         paths,
-        lambda current, head, root, pending, displaced: append_component(
+        lambda current, head, root, pending, pending_bindings, displaced: append_component(
             current, head, root, component_id, kind, title, parent_id, body,
-            content, display_kind, items, pending, displaced,
+            content, display_kind, items, pending, pending_bindings, displaced,
         ),
     )
     return _result(paths, head, package_root, branch_id, include_snapshot)
@@ -67,8 +67,8 @@ def add_binding(
     item = validate_binding(binding)
     head = mutate(
         paths,
-        lambda current, head, root, _pending, displaced: append_binding(
-            current, head, root, component_id, item, displaced,
+        lambda current, head, root, _pending, pending_bindings, displaced: append_binding(
+            current, head, root, component_id, item, pending_bindings, displaced,
         ),
     )
     return _result(paths, head, package_root, branch_id, include_snapshot)
@@ -81,7 +81,7 @@ def add_asset(
     paths = report_tree_paths(package_root, branch_id)
     head = mutate(
         paths,
-        lambda _current, head, root, _pending, _displaced: (
+        lambda _current, head, root, _pending, _pending_bindings, _displaced: (
             replace_assets(head, asset), root, ["root"],
         ),
     )

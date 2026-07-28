@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .service import ensure_branch_authoring
+from .service import commit_branch_authoring, ensure_branch_authoring
 
 
 def ensure_branch_report_chapter(
@@ -25,13 +25,8 @@ def ensure_branch_report_chapter(
         node_id=node_id,
         commit=False,
     )
-    # A graph node chapter must be visible immediately in the branch report,
-    # rather than waiting for a later report-specific command to render it.
-    from .export import export_branch_report
-
-    rendered = export_branch_report(
-        package_root=package_root,
-        work_package_id=work_package_id,
-        branch_id=branch_id,
+    git = commit_branch_authoring(
+        package_root,
+        message="Synchronize graph node report chapter",
     )
-    return {**result, "rendered": rendered}
+    return {**result, "git": git}

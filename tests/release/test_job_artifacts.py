@@ -120,7 +120,8 @@ def test_collect_job_report_mounts_to_immutable_execution_node(
     }
     chapter = next(item for item in snapshot["components"] if item["kind"] == "chapter")
     assert {item["parent_id"] for item in special} == {chapter["component_id"]}
-    assert (scope.package_root / "branches" / "branch-1" / "REPORT.md").is_file()
+    assert value["report_head"].endswith("/authoring/HEAD.json")
+    assert not (scope.package_root / "branches" / "branch-1" / "REPORT.md").exists()
     image = next(item for item in snapshot["head"]["assets"] if item["media_type"] == "image/svg+xml")
     assert image["external_ref"] == "factortester-artifact://jobs/job-1/equity_curve_report"
     assert image["content_hash"] == hashlib.sha256(image_raw).hexdigest()

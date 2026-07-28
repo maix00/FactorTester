@@ -23,7 +23,7 @@ def test_initialize_matches_work_package_skeleton(tmp_path: Path) -> None:
     package = tmp_path / "research" / "wp-1"
     assert result["descriptor"]["format"] == "report_tree"
     assert (package / "branches" / "branch-1" / "authoring" / "HEAD.json").exists()
-    assert (package / "branches" / "branch-1" / "REPORT.md").exists()
+    assert not (package / "branches" / "branch-1" / "REPORT.md").exists()
     for name in ("assets", "artifacts", "migrations", "proposals", "protocol"):
         assert (package / name).is_dir()
     assert not (package / "protocol" / "chapters.json").exists()

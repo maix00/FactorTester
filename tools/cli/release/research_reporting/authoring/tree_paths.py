@@ -17,6 +17,8 @@ def report_tree_paths(package_root: Path, branch_id: str) -> dict[str, Path]:
         "head": root / "HEAD.json",
         "nodes": root / "nodes",
         "locators": root / "locators",
+        "binding_locators": root / "binding-locators",
+        "binding_index": root / "binding-index.json",
         "lock": root / ".write.lock",
     }
 

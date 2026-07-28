@@ -28,6 +28,7 @@ def test_report_reader_loads_current_node_and_prefetches_neighbors() -> None:
     loader = (PROFILE_UI / "ResearchReportTreeNodeLoader.swift").read_text()
     view = (PROFILE_UI / "ResearchDocumentReportView.swift").read_text()
     navigation = (PROFILE_UI / "ResearchReportTreeNavigation.swift").read_text()
+    observer = (PROFILE_UI / "ResearchReportTreeFileObserver.swift").read_text()
 
     assert "focusedComponentID" in source
     assert "prefetch" in source
@@ -35,6 +36,9 @@ def test_report_reader_loads_current_node_and_prefetches_neighbors() -> None:
     assert "focusedComponentID" in view
     assert "ResearchReportTreeNavigation.neighbors" in view
     assert "static func neighbors" in navigation
+    assert "Task.checkCancellation" in view
+    assert "catch is CancellationError" in view
+    assert "presentedItemURL = URL(string: localRef)" in observer
     assert "Task.sleep" not in view
 
 

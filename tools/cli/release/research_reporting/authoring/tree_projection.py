@@ -15,9 +15,10 @@ def load_snapshot(*, package_root: Path, branch_id: str) -> dict[str, Any]:
         head = load_head(paths)
         components: list[dict[str, Any]] = []
         bindings: list[dict[str, Any]] = []
+        binding_ids: set[str] = set()
         flatten(
             paths, load_node(paths, head["root_ref"]), None,
-            components, bindings,
+            components, bindings, binding_ids,
         )
     return {
         "paths": paths,
@@ -30,6 +31,7 @@ def load_snapshot(*, package_root: Path, branch_id: str) -> dict[str, Any]:
 def flatten(
     paths: dict[str, Path], node: dict[str, Any], parent_id: str | None,
     components: list[dict[str, Any]], bindings: list[dict[str, Any]],
+    binding_ids: set[str],
 ) -> None:
     if node["kind"] != "root":
         components.append({
@@ -39,7 +41,11 @@ def flatten(
             "display_kind": node["display_kind"],
             "created_at": node["created_at"],
         })
-        bindings.extend({**item, "component_id": node["node_id"]} for item in node["bindings"])
+        for item in node["bindings"]:
+            if item["binding_id"] in binding_ids:
+                raise ValueError("report tree has duplicate binding_id")
+            binding_ids.add(item["binding_id"])
+            bindings.append({**item, "component_id": node["node_id"]})
     for child in node["children"]:
         flatten(
             paths,
@@ -47,4 +53,5 @@ def flatten(
             None if node["kind"] == "root" else node["node_id"],
             components,
             bindings,
+            binding_ids,
         )

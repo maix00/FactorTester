@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .binding_index import binding_exists
 from .tree_locators import locator_exists
 from .tree_navigation import contains_node, rewrite
 from .tree_assets import validate_asset
@@ -22,7 +23,7 @@ from .tree_store import store_node
 def apply_operation(
     paths: dict[str, Path], head: dict[str, Any], root: dict[str, Any],
     operation: dict[str, Any], pending_locators: list[tuple[str, str]],
-    displaced: set[str],
+    pending_bindings: set[str], displaced: set[str],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     if not isinstance(operation, dict):
         raise ValueError("report batch operation must be an object")
@@ -34,12 +35,12 @@ def apply_operation(
             str(operation.get("kind") or ""), str(operation.get("title") or ""),
             operation.get("parent_id"), str(operation.get("body") or ""),
             operation.get("content"), str(operation.get("display_kind") or ""),
-            bindings, pending_locators, displaced,
+            bindings, pending_locators, pending_bindings, displaced,
         )
     if op == "chip":
         return append_binding(
             paths, head, root, str(operation.get("component_id") or ""),
-            validate_binding(operation.get("binding")), displaced,
+            validate_binding(operation.get("binding")), pending_bindings, displaced,
         )
     if op == "asset":
         return replace_assets(head, operation.get("asset")), root, ["root"]
@@ -50,7 +51,8 @@ def append_component(
     paths: dict[str, Path], head: dict[str, Any], root: dict[str, Any],
     component_id: str, kind: str, title: str, parent_id: str | None,
     body: str, content: Any, display_kind: str, bindings: list[dict[str, Any]],
-    pending_locators: list[tuple[str, str]], displaced: set[str],
+    pending_locators: list[tuple[str, str]], pending_bindings: set[str],
+    displaced: set[str],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     identifier(component_id, "component_id")
     if kind not in {
@@ -65,6 +67,7 @@ def append_component(
         and contains_node(paths, root, component_id)
     ):
         raise ValueError("component_id already exists")
+    _reserve_binding_ids(paths, bindings, head["generation"], pending_bindings)
     node = new_node(component_id, kind, title, body, content, display_kind, bindings)
     ref, _ = store_node(paths, node)
     parent = "root" if parent_id is None else parent_id
@@ -82,8 +85,11 @@ def append_component(
 
 def append_binding(
     paths: dict[str, Path], head: dict[str, Any], root: dict[str, Any],
-    component_id: str, binding: dict[str, Any], displaced: set[str],
+    component_id: str, binding: dict[str, Any], pending_bindings: set[str],
+    displaced: set[str],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    _reserve_binding_ids(paths, [binding], head["generation"], pending_bindings)
+
     def mutate(value: dict[str, Any]) -> dict[str, Any]:
         if any(item["binding_id"] == binding["binding_id"] for item in value["bindings"]):
             raise ValueError("binding_id already exists")
@@ -103,6 +109,17 @@ def replace_assets(head: dict[str, Any], asset: Any) -> dict[str, Any]:
         raise ValueError("asset_ref already exists")
     head["assets"].append(value)
     return head
+
+
+def _reserve_binding_ids(
+    paths: dict[str, Path], bindings: list[dict[str, Any]], generation: int,
+    pending: set[str],
+) -> None:
+    for binding in bindings:
+        binding_id = binding["binding_id"]
+        if binding_id in pending or binding_exists(paths, binding_id, generation):
+            raise ValueError("binding_id already exists")
+        pending.add(binding_id)
 
 
 def new_node(

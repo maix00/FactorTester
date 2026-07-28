@@ -10,7 +10,7 @@ final class ResearchReportTreeFileObserver: NSObject, ObservableObject,
 
     init(localRef: String) {
         presentedItemURL = URL(string: localRef)?.isFileURL == true
-            ? URL(string: localRef)?.deletingLastPathComponent() : nil
+            ? URL(string: localRef) : nil
     }
 
     func start() {

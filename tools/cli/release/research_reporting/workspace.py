@@ -8,7 +8,7 @@ from typing import Any
 from .package_layout import PACKAGE_DIRECTORIES, ensure_branch_report_tree
 from .authoring.tree_descriptor import report_tree_descriptor
 from .authoring.tree_model import initialize_tree, load_snapshot
-from .authoring.export import export_branch_report
+from .authoring.service import commit_branch_authoring
 
 
 def initialize_work_package(
@@ -39,16 +39,15 @@ def initialize_work_package(
         package_root=package_root, work_package_id=work_package_id,
         branch_id=branch_id, snapshot=snapshot,
     )
-    rendered = export_branch_report(
-        package_root=package_root, work_package_id=work_package_id,
-        branch_id=branch_id,
+    git = commit_branch_authoring(
+        package_root,
+        message="Initialize Work Package report tree",
     )
     return {
         "package_root": package_root,
         "branch_root": branch_root,
-        "branch_report_path": rendered["path"],
         "head_path": initialized["paths"]["head"],
         "descriptor": descriptor,
-        "git": rendered["git"],
+        "git": git,
         "initialized": initialized["created"],
     }

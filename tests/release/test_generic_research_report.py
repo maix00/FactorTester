@@ -12,6 +12,8 @@ from tools.cli.commands import research_report_authoring
 from tools.cli.commands import research_report_component
 from tools.cli.commands import research_report_inspection
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
+from tools.cli.release.research_reporting.authoring.tree_render import render_tree_markdown
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
 
@@ -61,12 +63,13 @@ def test_profile_report_chapters_follow_node_entry_without_checkpoint(
     assert second["chapter_sync"]["created_count"] == 1
     assert repeated["chapter_sync"]["created_count"] == 0
     assert repeated["descriptor"]["format"] == "report_tree"
-    report = (
-        tmp_path / "research" / "wp-1" / "branches" / "branch-1"
-        / "REPORT.md"
-    ).read_text(encoding="utf-8")
-    assert "# 假设登记" in report
-    assert "# 数据契约" in report
+    package = tmp_path / "research" / "wp-1"
+    rendered = render_tree_markdown(load_snapshot(
+        package_root=package, branch_id="branch-1",
+    )).decode()
+    assert "# 假设登记" in rendered
+    assert "# 数据契约" in rendered
+    assert not (package / "branches" / "branch-1" / "REPORT.md").exists()
 
 
 def _scoped_report(tmp_path):

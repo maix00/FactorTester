@@ -18,8 +18,10 @@ from tools.cli.http import HttpSession
 from .local_profile import LocalProfileStore
 from .profile_research_context import ProfileResearchContext
 from .research_reporting.workspace import initialize_work_package
-from .research_reporting.authoring import ensure_branch_authoring
-from .research_reporting.authoring.export import export_branch_report
+from .research_reporting.authoring import (
+    commit_branch_authoring,
+    ensure_branch_authoring,
+)
 
 
 def create_profile_research(
@@ -123,10 +125,9 @@ def create_profile_research(
         node_id=str(graph.get("entry_node") or ""),
         commit=False,
     )
-    rendered_authoring = export_branch_report(
-        package_root=report["package_root"],
-        work_package_id=work_package_id,
-        branch_id=branch_id,
+    authoring_git = commit_branch_authoring(
+        report["package_root"],
+        message="Create initial research report chapter",
     )
     record["artifacts"] = [report["descriptor"], authoring["descriptor"]]
     store.upsert_research_record(context.profile_id, record)
@@ -139,8 +140,8 @@ def create_profile_research(
         "research": instance,
         "local_record": record,
         "local_report": {
-            "path": str(report["branch_report_path"]),
-            "git": rendered_authoring["git"],
+            "path": str(report["head_path"]),
+            "git": authoring_git,
             "authoring_path": str(authoring["paths"]["head"]),
         },
     }

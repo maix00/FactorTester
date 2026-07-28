@@ -24,13 +24,6 @@ def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_
         package_root=package_root, branch_id=branch_id,
         report_id=_report_id(work_package_id, branch_id), title=title,
     )
-    snapshot = (
-        load_snapshot(package_root=package_root, branch_id=branch_id)
-        if materialize else {
-            "paths": initialized["paths"], "head": initialized["head"],
-            "components": [], "bindings": [],
-        }
-    )
     chapter_sync = _unchanged()
     if node_id:
         chapter = ensure_node_chapter(
@@ -43,6 +36,14 @@ def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_
             "existing": [] if chapter["changed"] else [chapter["component_id"]],
             "created_count": int(chapter["changed"]), "existing_count": int(not chapter["changed"]),
         }
+    else:
+        snapshot = (
+            load_snapshot(package_root=package_root, branch_id=branch_id)
+            if materialize else {
+                "paths": initialized["paths"], "head": initialized["head"],
+                "components": [], "bindings": [],
+            }
+        )
     git = commit_work_package(package_root, message="Initialize report tree") if commit and initialized["created"] else None
     return _result(package_root, work_package_id, branch_id, snapshot, chapter_sync, git)
 

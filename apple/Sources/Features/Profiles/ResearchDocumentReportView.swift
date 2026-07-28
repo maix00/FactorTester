@@ -90,6 +90,7 @@ struct ResearchDocumentReportView: View {
                 localRef: artifact.localRef,
                 focusedComponentID: focusedComponentID.isEmpty ? nil : focusedComponentID
             )
+            try Task.checkCancellation()
             title = payload.title
             components = payload.components
             assets = payload.assets
@@ -110,6 +111,8 @@ struct ResearchDocumentReportView: View {
                     focused: focusedComponentID, outline: payload.outlineIDs
                 )
             )
+        } catch is CancellationError {
+            return
         } catch {
             self.error = L10n.text("本地研究报告无法读取")
         }

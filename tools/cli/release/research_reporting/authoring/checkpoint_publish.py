@@ -7,10 +7,9 @@ import hashlib
 from typing import Any
 
 from .checkpoint_operations import checkpoint_operations
-from .service import apply_branch_batch, ensure_branch_authoring
+from .service import apply_branch_batch, commit_branch_authoring, ensure_branch_authoring
 from .tree_descriptor import report_tree_descriptor
 from .tree_schema import digest
-from .export import export_branch_report
 
 
 def publish_checkpoint_snapshot(
@@ -38,18 +37,18 @@ def publish_checkpoint_snapshot(
         )
         if operations else authoring
     )
-    rendered = export_branch_report(
-        package_root=package_root, work_package_id=work_package_id,
-        branch_id=branch_id,
+    git = commit_branch_authoring(
+        package_root,
+        message="Publish checkpoint report tree",
     )
     descriptor = report_tree_descriptor(
         package_root=package_root, work_package_id=work_package_id,
         branch_id=branch_id, snapshot=saved,
     )
     return {
-        "changed": bool(operations or authoring["chapter_sync"]["created"] or rendered["changed"]),
+        "changed": bool(operations or authoring["chapter_sync"]["created"]),
         "operations": len(operations), "descriptor": descriptor,
-        "generation": saved["head"]["generation"], "rendered": rendered,
+        "generation": saved["head"]["generation"], "git": git,
     }
 
 

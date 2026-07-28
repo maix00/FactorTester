@@ -76,6 +76,62 @@ def test_binding_is_coherent_with_the_component_revision(tmp_path: Path) -> None
     }]
 
 
+def test_batch_rejects_duplicate_identifiers_before_writing_nodes(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    created = initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    before = created["paths"]["head"].read_bytes()
+    operation = {
+        "op": "add", "component_id": "same", "kind": "entry",
+        "title": "正文", "parent_id": None, "body": "内容",
+        "content": None, "display_kind": "", "bindings": [],
+    }
+
+    with pytest.raises(ValueError, match="duplicates component_id"):
+        apply_batch(
+            package_root=package, branch_id="main",
+            operations=[operation, dict(operation)],
+        )
+
+    assert created["paths"]["head"].read_bytes() == before
+    assert not (created["paths"]["nodes"] / "same").exists()
+
+
+def test_binding_identifier_is_global_and_indexed_incrementally(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    binding = {
+        "binding_id": "shared-evidence", "kind": "evidence",
+        "target_ref": "evidence:one", "label": "证据", "data": {},
+    }
+    first = add_component(
+        package_root=package, branch_id="main", component_id="first",
+        kind="entry", title="第一项", parent_id=None, body="正文", content=None,
+        display_kind="", bindings=[binding],
+    )
+
+    with pytest.raises(ValueError, match="binding_id already exists"):
+        add_component(
+            package_root=package, branch_id="main", component_id="second",
+            kind="entry", title="第二项", parent_id=None, body="正文", content=None,
+            display_kind="", bindings=[binding],
+        )
+
+    assert first["head"]["generation"] == 1
+    assert [item["component_id"] for item in load_snapshot(
+        package_root=package, branch_id="main",
+    )["components"]] == ["first"]
+
+
 def test_current_head_keeps_no_superseded_copy_on_write_nodes(tmp_path: Path) -> None:
     package = tmp_path / "research" / "wp"
     initialize_tree(

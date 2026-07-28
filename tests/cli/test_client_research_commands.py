@@ -284,7 +284,8 @@ def test_client_research_create_is_profile_scoped_and_records_local_state(
     package = tmp_path / "research" / "research" / "instance-new"
     assert not (package / "INDEX.json").exists()
     assert not (package / "REPORT.md").exists()
-    assert (package / "branches" / "branch-new" / "REPORT.md").exists()
+    assert (package / "branches" / "branch-new" / "authoring" / "HEAD.json").exists()
+    assert not (package / "branches" / "branch-new" / "REPORT.md").exists()
     assert (package / "branches" / "branch-new" / "authoring" / "HEAD.json").is_file()
     assert not (package / "branches" / "branch-new" / "sections").exists()
     assert not (package / "branches" / "branch-new" / "JOURNAL.json").exists()

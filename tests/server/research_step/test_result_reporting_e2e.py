@@ -37,6 +37,9 @@ from tools.cli.release.research_reporting.audit_objects import (
     stage_run_spec_preview,
 )
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
+from tools.cli.release.research_reporting.authoring.tree_render import (
+    render_tree_markdown,
+)
 
 
 @contextmanager
@@ -212,11 +215,10 @@ def test_result_route_cli_local_publish_and_server_append(
         link["kind"] == "run" and "冻结" in link["label"]
         for link in report_tree["bindings"]
     )
-    report = (
-        package / "branches" / "branch-1" / "REPORT.md"
-    ).read_text(encoding="utf-8")
-    assert "试验结果 · 样本内 IC 检验" in report
-    assert "IC 均值 · SgCPS" in report
+    rendered = render_tree_markdown(report_tree).decode()
+    assert "试验结果 · 样本内 IC 检验" in rendered
+    assert "IC 均值 · SgCPS" in rendered
+    assert not (package / "branches" / "branch-1" / "REPORT.md").exists()
     with sqlite3.connect(database) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM research_report_item_checkpoints"
