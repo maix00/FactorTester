@@ -73,6 +73,62 @@ class Category(FinRangeParam):
 
     def _whether_is_in_category(self, catname: str, obj: Any, *args, **kwargs) -> bool:
         raise NotImplementedError
+
+    @classmethod
+    def from_members(
+        cls,
+        *,
+        alias: str,
+        type: Type[Any],
+        labels: Dict[str, List[Any]],
+    ) -> 'Category':
+        """Build a static, product-membership category from declarative labels.
+
+        ``Others`` is reserved and is derived automatically as the complement
+        of all explicitly declared labels.
+        """
+        if not labels:
+            raise ValueError("Category.from_members requires at least one explicit label")
+        if 'Others' in labels:
+            raise ValueError("'Others' is derived automatically and cannot be declared")
+
+        normalized: Dict[str, frozenset[str]] = {}
+        owners: Dict[str, str] = {}
+        for label, members in labels.items():
+            if not isinstance(label, str) or not label:
+                raise ValueError("category labels must be non-empty strings")
+            identities = frozenset(cls._member_identity(member) for member in members)
+            for identity in identities:
+                previous = owners.setdefault(identity, label)
+                if previous != label:
+                    raise ValueError(
+                        f"product {identity!r} is declared in both {previous!r} and {label!r}"
+                    )
+            normalized[label] = identities
+
+        category = cls(alias=alias, type=type, categories=list(normalized))
+        category._member_labels = normalized
+        category._definition_key = tuple(
+            (label, tuple(sorted(members))) for label, members in normalized.items()
+        )
+        category.whether_is_in_category = lambda catname, obj, *args, **kwargs: (
+            cls._member_identity(obj) not in owners
+            if catname == 'Others'
+            else cls._member_identity(obj) in category._member_labels.get(catname, frozenset())
+        )
+        return category
+
+    @staticmethod
+    def _member_identity(member: Any) -> str:
+        if isinstance(member, str):
+            return member
+        return str(getattr(member, 'alias', getattr(member, 'name', member)))
+
+    def __getitem__(self, catname: str):
+        """Return the selected category as a boolean FactorExpr leaf."""
+        from tools.factors.expr.leaf import CategoryBoolRef
+
+        return CategoryBoolRef(self, catname)
     
     def is_in_category(self, catname: str, obj: Any, *args, **kwargs) -> bool:
         assert catname in self.categories, f"Category name '{catname}' is not in the categories of this Category."

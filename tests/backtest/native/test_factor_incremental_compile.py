@@ -23,6 +23,7 @@ from tools.factors.expr import (
     term_slope_segment,
     term_spread,
 )
+from tools.products.categories.Category import Category
 from tools.products.AdjustableTermStructure import (
     AdjustableProductMixin,
     TERM_CONTRACT_COL,
@@ -48,6 +49,28 @@ def test_factor_expr_compile_incremental_returns_run_scoped_executor():
 
     executor.on_bar("2024-01-02", {"P1": {"CLOSE": 12.0}})
     assert executor.on_signal("2024-01-02") == {"P1": 13.0}
+
+
+def test_incremental_factor_supports_category_boolean_mask_leaf():
+    sector = Category.from_members(
+        alias="IncrementalCategory",
+        type=str,
+        labels={"eligible": ["P1"]},
+    )
+    expr = CLOSE.cs_rank(mask=sector["eligible"])
+
+    executor = expr.compile_incremental(
+        factor_alias="category_masked_rank",
+        products=("P1", "P2"),
+    )
+    executor.on_bar("2024-01-01", {
+        "P1": {"CLOSE_ADJUSTED": 10.0},
+        "P2": {"CLOSE_ADJUSTED": 30.0},
+    })
+
+    result = executor.on_signal("2024-01-01")
+    assert result["P1"] == 0.5
+    assert np.isnan(result["P2"])
 
 
 def test_factor_expr_incremental_executor_ignores_extra_snapshot_products():

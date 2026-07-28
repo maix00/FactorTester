@@ -11,6 +11,7 @@ import pandas as pd
 
 from tools.data.types import DataFreq
 from tools.factors.expr import (
+    CategoryBoolRef,
     ColumnRef,
     CompositeExpr,
     ConstExpr,
@@ -67,6 +68,19 @@ class ColumnNode:
             ], dtype=float)
         except KeyError as exc:
             raise KeyError(f"market slice is missing factor column {self.column_name!r}") from exc
+
+
+@dataclass(slots=True)
+class CategoryBoolNode:
+    category: Any
+    category_name: str
+    products: tuple[Any, ...]
+
+    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        return np.asarray([
+            self.category.is_in_category(self.category_name, product)
+            for product in self.products
+        ], dtype=bool)
 
 
 @dataclass(slots=True)
@@ -366,6 +380,8 @@ def compile_streaming_factor(
             node: StreamingNode = ConstantNode(float(expr.value), len(products))
         elif isinstance(expr, ColumnRef):
             node = ColumnNode(expr.column.name, products)
+        elif isinstance(expr, CategoryBoolRef):
+            node = CategoryBoolNode(expr.category, expr.category_name, products)
         elif isinstance(expr, CompositeExpr):
             if expr.op not in _COMPOSITE_OPS:
                 raise UnsupportedStreamingFactor(f"unsupported composite op: {expr.op}")

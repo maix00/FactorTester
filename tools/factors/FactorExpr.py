@@ -28,6 +28,7 @@ if FACTOR_WORKSPACE:
         # operands
         OperandExpr,
         # leaf
+        CategoryBoolRef,
         ColumnRef,
         ParamRef,
         ConstExpr,
@@ -100,6 +101,7 @@ __all__ = [
     "compact_observed",
     "scatter_observed",
     "OperandExpr",
+    "CategoryBoolRef",
     "ColumnRef",
     "ParamRef",
     "ConstExpr",
