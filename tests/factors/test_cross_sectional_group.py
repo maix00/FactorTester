@@ -82,3 +82,17 @@ def test_cs_group_zscore_and_demean_respect_category_membership_and_mask():
     assert demean.iloc[0, 0] == -1.0
     assert demean.iloc[0, 1] == 1.0
     assert pd.isna(demean.iloc[0, 2])
+
+
+def test_cs_residualize_returns_cross_sectional_ols_residuals():
+    products = [_Product(name=name) for name in ("A", "B", "C")]
+    exposure = pd.DataFrame({products[0]: [1.0], products[1]: [2.0], products[2]: [3.0]})
+    signal = pd.DataFrame({products[0]: [3.0], products[1]: [5.0], products[2]: [8.0]})
+
+    result = _FrameExpr(signal).cs_residualize(_FrameExpr(exposure)).evaluate(
+        ctx=EvaluateContext(products=products, freq=DataFreq.MIN1, cache={})
+    )
+
+    assert result.iloc[0, 0] == pytest.approx(1 / 6)
+    assert result.iloc[0, 1] == pytest.approx(-1 / 3)
+    assert result.iloc[0, 2] == pytest.approx(1 / 6)

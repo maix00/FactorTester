@@ -719,6 +719,14 @@ class FactorExpr:
         return self._cs_group('cs_group_demean', category, mask)
 
     @factor_workspace
+    def cs_residualize(self, *exposures: 'FactorExpr', mask: Any = None) -> 'CrossSectionalOp':
+        """Return residuals from per-timestamp OLS with an intercept."""
+        if not exposures:
+            raise ValueError("cs_residualize requires at least one exposure")
+        operands = [self, *(_lazy()['_to_expr'](item) for item in exposures), _lazy()['_to_expr'](True if mask is None else mask)]
+        return _lazy()['CrossSectionalOp']('cs_residualize', *operands, exposure_count=len(exposures))
+
+    @factor_workspace
     def cs_spearman(self, other: 'FactorExpr') -> 'CrossSectionalOp':
         """截面 Spearman 秩相关系数：self 与 other 逐时间点计算。"""
         return _lazy()['CrossSectionalOp']('cs_spearman', self, other)

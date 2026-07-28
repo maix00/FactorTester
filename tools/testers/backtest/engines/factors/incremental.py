@@ -26,6 +26,7 @@ from tools.factors.expr.term_structure_math import evaluate_term_curve, normaliz
 from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
 from tools.factors.expr.conditional import apply_where
 from .group_cross_sectional import GroupCrossSectionalNode
+from .cross_sectional_residual import ResidualizeNode
 from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
 )
@@ -423,6 +424,11 @@ def compile_streaming_factor(
                 raise UnsupportedStreamingFactor(
                     f"{expr.op} produces an IC time series, not product-level live signal values"
                 )
+            if expr.op == "cs_residualize":
+                children = tuple(compile_node(item) for item in expr.operands)
+                node = ResidualizeNode(children, expr.exposure_count or 0)
+                memo[key] = node
+                return node
             if expr.op not in {"cs_rank", "cs_rank_masked", "cs_zscore", "cs_ordinal_rank_asc", "cs_ordinal_rank_desc", "cs_group_rank", "cs_group_zscore", "cs_group_demean"}:
                 raise UnsupportedStreamingFactor(
                     f"unsupported cross-sectional op: {expr.op}"

@@ -13,6 +13,7 @@ from .operands import OperandExpr
 from .leaf import ConstExpr
 from .cross_sectional_group import apply_group_transform, eligibility_mask, ordinal_rank, zscore
 from .cross_sectional_statistics import correlation
+from .cross_sectional_residual import residualize
 
 class CrossSectionalOp(OperandExpr):
     """
@@ -21,17 +22,21 @@ class CrossSectionalOp(OperandExpr):
     在每个时间点对横截面（所有品种）进行聚合计算。
     """
 
-    def __init__(self, op: str, *operands: FactorExpr, category: Any = None):
+    def __init__(self, op: str, *operands: FactorExpr, category: Any = None, exposure_count: int | None = None):
         super().__init__(op, *operands)
         self.category = category
+        self.exposure_count = exposure_count
 
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
-        return CrossSectionalOp(self.op, *(operand.resolve(*args, **kwargs) for operand in self.operands), category=self.category)
+        return CrossSectionalOp(self.op, *(operand.resolve(*args, **kwargs) for operand in self.operands), category=self.category, exposure_count=self.exposure_count)
 
     def _structural_extra(self) -> tuple:
-        if self.category is None:
-            return ()
-        return (self.category.alias, getattr(self.category, '_definition_key', None))
+        extra = []
+        if self.category is not None:
+            extra.append((self.category.alias, getattr(self.category, '_definition_key', None)))
+        if self.exposure_count is not None:
+            extra.append(self.exposure_count)
+        return tuple(extra)
 
     @property
     def operand(self) -> FactorExpr:
@@ -59,6 +64,9 @@ class CrossSectionalOp(OperandExpr):
                     f"{type(left_df).__name__} 与 {type(right_df).__name__}"
                 )
             return correlation(left_df, right_df, spearman=self.op == 'cs_spearman')
+        if self.op == 'cs_residualize':
+            count = self.exposure_count or 0
+            return residualize(vals[0], vals[1:1 + count], vals[1 + count])
 
         x = vals[0]
         if self.op == 'cs_zscore':
