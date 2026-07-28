@@ -671,8 +671,20 @@ class FactorExpr:
 
     @factor_workspace
     def cs_rank(self) -> 'CrossSectionalOp':
-        """横截面排名（从小到大，0~1 归一化）。"""
+        """横截面百分位排名（从小到大，输出约为 -0.5~0.5）。"""
         return _lazy()['CrossSectionalOp']('cs_rank', self)
+
+    @factor_workspace
+    def cs_ordinal_rank(self, mask: Any = None, *, ascending: bool = True) -> 'CrossSectionalOp':
+        """掩码内的确定性横截面整数排名。
+
+        输出从 1 开始；``ascending=True`` 时最小值为 1，反之最大值为 1。
+        掩码外或原始值缺失的产品返回 ``NaN``。同分按稳定产品键打破，因而每个
+        可用产品都有唯一名次，适合精确 top-k / bottom-k 筛选。
+        """
+        mask_expr = _lazy()['_to_expr'](True if mask is None else mask)
+        op = 'cs_ordinal_rank_asc' if ascending else 'cs_ordinal_rank_desc'
+        return _lazy()['CrossSectionalOp'](op, self, mask_expr)
 
     @factor_workspace
     def cs_spearman(self, other: 'FactorExpr') -> 'CrossSectionalOp':

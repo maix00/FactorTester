@@ -62,6 +62,7 @@ VISUAL_OPERATOR_GROUPS = [
         'collapsed': False,
         'operators': [
             {'key': 'cs_rank', 'label': '截面排名', 'symbol': 'Rank', 'desc': 'X.cs_rank()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'cs_ordinal_rank', 'label': '截面整数排名', 'symbol': 'ORank', 'desc': 'X.cs_ordinal_rank(mask, ascending=True)', 'arity': 2, 'slots': ['序列 X', '资格条件 mask']},
             {'key': 'cs_zscore', 'label': '截面标准化', 'symbol': 'Z', 'desc': 'X.cs_zscore()', 'arity': 1, 'slots': ['序列 X']},
         ],
         'more_label': '更多横截算子',

@@ -48,6 +48,35 @@ class CrossSectionalOp(OperandExpr):
     def right(self) -> FactorExpr:
         return self.operands[1]
 
+    @staticmethod
+    def _eligibility_mask(mask: Any, template: pd.DataFrame) -> pd.DataFrame:
+        if isinstance(mask, pd.DataFrame):
+            aligned = mask.reindex(index=template.index, columns=template.columns)
+        elif isinstance(mask, pd.Series):
+            aligned = pd.DataFrame(
+                np.broadcast_to(mask.reindex(template.index).to_numpy()[:, None], template.shape),
+                index=template.index,
+                columns=template.columns,
+            )
+        else:
+            aligned = pd.DataFrame(bool(mask), index=template.index, columns=template.columns)
+        return aligned.fillna(False).astype(bool)
+
+    @staticmethod
+    def _ordinal_rank(x: pd.DataFrame, mask: Any, *, ascending: bool) -> pd.DataFrame:
+        eligible = x.where(CrossSectionalOp._eligibility_mask(mask, x))
+        # ``method='first'`` turns ties into unique ordinal ranks.  Sort by the
+        # stable product representation first so ranks do not depend on how a
+        # caller happened to order DataFrame columns.
+        stable_columns = sorted(eligible.columns, key=lambda column: str(column))
+        ranked = eligible.loc[:, stable_columns].rank(
+            axis=1,
+            method='first',
+            ascending=ascending,
+            na_option='keep',
+        )
+        return ranked.reindex(columns=x.columns)
+
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
         vals: List[Any] = []
         for i, val in enumerate(values):
@@ -75,6 +104,14 @@ class CrossSectionalOp(OperandExpr):
             return result
         if self.op == 'cs_rank':
             return x.rank(axis=1, pct=True) - 0.5
+        if self.op in ('cs_ordinal_rank_asc', 'cs_ordinal_rank_desc'):
+            if len(vals) != 2:
+                raise TypeError(f"{self.op} 需要值和 eligibility mask 两个输入")
+            return self._ordinal_rank(
+                x,
+                vals[1],
+                ascending=self.op == 'cs_ordinal_rank_asc',
+            )
         raise ValueError(f"Unknown cross-sectional op: {self.op}")
 
     @staticmethod
@@ -200,12 +237,16 @@ class CrossSectionalOp(OperandExpr):
         _LATEX_MAP = {
             'cs_zscore': f'Z({operand_latex})',
             'cs_rank': f'\\text{{Rank}}({operand_latex})',
+            'cs_ordinal_rank_asc': f'\\text{{OrdinalRank}}_\\uparrow({operand_latex})',
+            'cs_ordinal_rank_desc': f'\\text{{OrdinalRank}}_\\downarrow({operand_latex})',
         }
         return _LATEX_MAP.get(self.op, f'\\text{{{self.op}}}({operand_latex})')
 
     def _get_alias(self) -> str:
         if self.op in ('cs_spearman', 'cs_corr'):
             return f"{self.op}_{self.left._get_alias()}_{self.right._get_alias()}"
+        if self.op in ('cs_ordinal_rank_asc', 'cs_ordinal_rank_desc'):
+            return f"{self.op}_{self.operand._get_alias()}_mask_{self.right._get_alias()}"
         return f"{self.op}_{self.operand._get_alias()}"
 
 

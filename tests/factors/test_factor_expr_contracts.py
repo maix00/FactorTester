@@ -242,6 +242,30 @@ def test_cs_zscore_maps_constant_cross_section_to_neutral_values():
     assert result.loc[2].isna().all()
 
 
+def test_cs_ordinal_rank_masks_ineligible_products_and_breaks_ties_by_product_key():
+    values = pd.DataFrame({"B": [10.0], "A": [10.0], "C": [5.0], "D": [8.0]})
+    eligible = pd.DataFrame({"B": [True], "A": [True], "C": [False], "D": [True]})
+
+    result = _FrameExpr(values).cs_ordinal_rank(mask=_FrameExpr(eligible), ascending=False).evaluate(
+        ctx=EvaluateContext(products=["B", "A", "C", "D"], freq=DataFreq.MIN1, cache={}),
+    )
+
+    expected = pd.DataFrame({"B": [2.0], "A": [1.0], "C": [float("nan")], "D": [3.0]})
+    pd.testing.assert_frame_equal(result, expected)
+
+
+def test_cs_ordinal_rank_ascending_orders_lowest_eligible_product_first():
+    values = pd.DataFrame({"B": [10.0], "A": [10.0], "C": [5.0], "D": [8.0]})
+    eligible = pd.DataFrame({"B": [True], "A": [True], "C": [False], "D": [True]})
+
+    result = _FrameExpr(values).cs_ordinal_rank(mask=_FrameExpr(eligible)).evaluate(
+        ctx=EvaluateContext(products=["B", "A", "C", "D"], freq=DataFreq.MIN1, cache={}),
+    )
+
+    expected = pd.DataFrame({"B": [3.0], "A": [2.0], "C": [float("nan")], "D": [1.0]})
+    pd.testing.assert_frame_equal(result, expected)
+
+
 def test_one_bar_normalized_time_center_is_neutral_on_observed_values():
     values = pd.DataFrame({"A": [4.0, float("nan")], "B": [2.0, 3.0]})
 

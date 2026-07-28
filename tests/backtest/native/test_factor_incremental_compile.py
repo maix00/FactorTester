@@ -230,6 +230,10 @@ def _live_term_eval(expr, products: tuple[_TermProduct, ...], index: pd.Index) -
         RollingOp("rolling_cov", ConstExpr(3), ColumnRef(DataColumn.CLOSE), ColumnRef(DataColumn.OPEN)),
         ColumnRef(DataColumn.CLOSE).cs_rank(),
         ColumnRef(DataColumn.CLOSE).cs_zscore(),
+        ColumnRef(DataColumn.CLOSE).cs_ordinal_rank(
+            mask=ColumnRef(DataColumn.OPEN) > ConstExpr(15.0),
+            ascending=False,
+        ),
         ColumnRef(DataColumn.CLOSE).tanh(),
         ColumnRef(DataColumn.CLOSE).where(
             ColumnRef(DataColumn.CLOSE) > ConstExpr(15.0),
