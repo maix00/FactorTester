@@ -11,10 +11,9 @@ from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.document import (
     bindings_manifest,
     document_manifest,
-    render_markdown,
     validate_document,
 )
-from tools.cli.release.research_reporting.git import commit_work_package
+from tools.cli.release.research_reporting.writer import render_branch_authoring_report
 
 from .research_report_scope import (
     load_authoring,
@@ -100,15 +99,15 @@ def render_report(
     profile_id: str, work_package_id: str, branch_id: str,
     release_profile: Path | None, as_json: bool,
 ) -> None:
-    """Render the structured source to branch-owned authoring/REPORT.md."""
+    """Refresh the single branch REPORT.md from the structured source."""
     scope = _scope(profile_id, work_package_id, branch_id, release_profile)
-    loaded = load_authoring(scope)
-    output = loaded["paths"]["root"] / "REPORT.md"
-    output.write_bytes(render_markdown(loaded["document"]))
-    git = commit_work_package(
-        scope.package_root, message="Render branch report authoring",
+    load_authoring(scope)
+    value = render_branch_authoring_report(
+        package_root=scope.package_root,
+        work_package_id=scope.work_package_id,
+        branch_id=scope.branch_id,
     )
-    _output({"output": str(output), "git": git}, as_json)
+    _output({"output": str(value["path"]), "git": value["git"]}, as_json)
 
 
 def _scope(

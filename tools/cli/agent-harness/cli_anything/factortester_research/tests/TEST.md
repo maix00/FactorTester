@@ -548,3 +548,22 @@ factor, freezes its source-free SHA-256 manifest, and exposes the
 `transient_run_source` policy without returning source text. Revision checks
 also cover role aliases, while the group-membership suite verifies that screen
 selection occurs before ranking and excludes missing/warm-up values.
+
+## Branch report projection refinement (Issue #141)
+
+## Test inventory plan
+
+- `tests/release/test_generic_research_report.py`: extend with one focused
+  projection case.
+- `tests/release/test_report_rendering.py`: retain the existing journal replay
+  coverage while checking that a structured authoring source is appended to
+  the same branch `REPORT.md` rather than creating a second Markdown report.
+
+## Unit test plan
+
+- A branch with a graph-journal snapshot and `authoring/DOCUMENT.json` has one
+  readable `branches/<branch>/REPORT.md` containing both projections.
+- Re-rendering replaces the bounded authoring projection block, so it is
+  idempotent and never duplicates report sections.
+- `research report render` targets that branch report; it must not create
+  `authoring/REPORT.md`.

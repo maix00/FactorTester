@@ -9,8 +9,6 @@ import json
 from pathlib import Path
 import threading
 import time
-from urllib.parse import unquote, urlparse
-
 from click.testing import CliRunner
 import pytest
 
@@ -21,8 +19,6 @@ from cli_anything.factortester_research.core.reporting import (
     render_branch_report,
 )
 from cli_anything.factortester_research.core.reporting import generation, writer
-from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
-from tools.cli.release.local_profile_contracts import _research_artifact
 
 
 def _snapshot() -> dict:
@@ -564,74 +560,14 @@ def test_renderer_interface_does_not_require_pdf_or_chart_dependency() -> None:
     assert not hasattr(target, "client")
 
 
-def test_report_cli_renders_snapshot_without_server_access(tmp_path) -> None:
-    snapshot_path = tmp_path / "snapshot.json"
-    snapshot_path.write_text(json.dumps(_snapshot()))
-    workspace_root = tmp_path / "workspace"
-
+def test_report_cli_rejects_removed_root_snapshot_surface(tmp_path) -> None:
+    """The harness exposes the same branch-scoped report CLI as production."""
     result = CliRunner().invoke(cli, [
         "report",
         "render",
         "--snapshot-file",
-        str(snapshot_path),
-        "--workspace-root",
-        str(workspace_root),
+        str(tmp_path / "snapshot.json"),
         "--json",
     ])
-
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["changed"] is True
-    assert payload["path"].endswith(
-        "research/sgccs-review/branches/branch-sgccs/REPORT.md"
-    )
-    assert payload["artifact_refs"]["index"] == (
-        "artifact:research/sgccs-review/INDEX.json"
-    )
-    descriptor = payload["local_artifact_descriptor"]
-    assert _research_artifact(descriptor) == descriptor
-    assert descriptor["artifact_ref"] == (
-        payload["artifact_refs"]["branch_report"]
-    )
-    assert descriptor["local_ref"].startswith("file://")
-    assert descriptor["index_ref"].startswith("file://")
-    assert str(workspace_root) not in json.dumps(payload["artifact_refs"])
-    index_url = urlparse(descriptor["index_ref"])
-    index = json.loads(Path(unquote(index_url.path)).read_text())
-    assert set(index["sections"][0]) == {
-        "section_ref", "section_id", "checkpoint_ref", "branch_ref",
-        "title", "summary", "links", "created_at",
-    }
-    assert set(index["sections"][0]["links"][0]) == {
-        "link_id", "kind", "target_ref", "section_ref",
-    }
-    store = LocalProfileStore(tmp_path / "client-support")
-    profile = new_local_profile(
-        profile_id="maxa",
-        display_name="MaxA",
-        server_url="http://127.0.0.1:8000",
-        workspace_root=workspace_root,
-    )
-    profile["research_records"] = [{
-        "record_id": "sgccs-review",
-        "title": "SgCCS review",
-        "status": "ready",
-        "scope": {"factor_families": ["SgCCS"]},
-        "factor_family_versions": ["MaxA:SgCCS@7"],
-        "agent_id": "research-maxa",
-        "created_at": 1.0,
-        "updated_at": 1.0,
-        "workspace_ref": "workspace:maxa",
-        "run_ref": "run:1",
-        "graph_instance_ref": "instance:1",
-        "graph_branch_ref": "branch:sgccs",
-        "checkpoint_ref": "checkpoint:1",
-        "evidence_refs": ["evidence:job-attempt-1"],
-        "timeline_refs": descriptor["section_refs"][:1],
-        "artifacts": [descriptor],
-        "provenance": {"kind": "owned_research", "owner_ref": "maxa"},
-    }]
-
-    saved = store.save(profile)
-
-    assert saved["research_records"][0]["artifacts"] == [descriptor]
+    assert result.exit_code == 2
+    assert "--snapshot-file" in result.output

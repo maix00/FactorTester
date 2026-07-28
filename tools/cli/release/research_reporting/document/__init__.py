@@ -19,7 +19,7 @@ from .model import (
     validate_document,
 )
 from .manifest import document_manifest
-from .render import render_markdown
+from .render import render_markdown, render_markdown_fragment
 from .store import load_bindings, load_document, save_bindings, save_document
 
 __all__ = [
@@ -39,7 +39,7 @@ __all__ = [
     "new_bindings",
     "rebind_document",
     "new_document",
-    "render_markdown",
+    "render_markdown", "render_markdown_fragment",
     "save_document",
     "save_bindings",
     "validate_bindings",

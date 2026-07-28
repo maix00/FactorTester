@@ -10,6 +10,8 @@ from ..generation import publish_generation
 from ..generation import work_package_lock
 from ..git import commit_work_package
 from ..package_layout import ensure_branch_report_tree
+from ..authoring import load_branch_authoring
+from ..document import render_markdown_fragment
 from ..journal import (
     assemble_snapshot,
     fragment_payload,
@@ -23,6 +25,10 @@ from ..schema import canonical_report_snapshot
 from .aggregate import render_work_package_report
 from . import index as report_index
 from .index import ReportTarget
+
+
+_AUTHORING_BEGIN = "<!-- FACTORTESTER AUTHORING BEGIN -->"
+_AUTHORING_END = "<!-- FACTORTESTER AUTHORING END -->"
 
 
 def render_branch_report(
@@ -93,7 +99,11 @@ def render_branch_report(
             rendered_snapshot = canonical
             physical_journal_bytes = None
             logical_journal_bytes = None
-        branch_payload = renderer.render(rendered_snapshot)
+        branch_payload = _compose_authoring_projection(
+            renderer.render(rendered_snapshot),
+            package_root=package_root,
+            branch_id=canonical["branch_id"],
+        )
         content_hash = hashlib.sha256(branch_payload).hexdigest()
         existing_index = report_index.load_index(index_path, canonical)
         branch_section_prefix = f"report-section:{canonical['branch_id']}:"
@@ -169,6 +179,9 @@ def render_branch_report(
         "journal_fragment_changed": (
             fragment_changed if journal_fragment is not None else False
         ),
+        "authoring_included": _has_authoring_source(
+            package_root, canonical["branch_id"],
+        ),
         "git": git,
     }
 
@@ -197,6 +210,81 @@ def _index_requires_reprojection(
             for item in indexed
         )
         or not expected.issubset(indexed)
+    )
+
+
+def render_branch_authoring_report(
+    *, package_root: Path, work_package_id: str, branch_id: str,
+) -> dict[str, Any]:
+    """Refresh the one branch Markdown report from its structured source.
+
+    This intentionally never writes ``authoring/REPORT.md``.  When a journal
+    projection already exists it is retained and only the bounded authored
+    block is replaced; a newly initialized branch receives a document-only
+    readable projection until its first checkpoint arrives.
+    """
+    branch_root = ensure_branch_report_tree(package_root, branch_id)
+    branch_path = branch_root / "REPORT.md"
+    with work_package_lock(package_root):
+        document, _, _ = load_branch_authoring(
+            package_root=package_root, branch_id=branch_id,
+        )
+        base = branch_path.read_bytes() if branch_path.exists() else b""
+        if not base:
+            base = f"# {document['title']}\n".encode("utf-8")
+        payload = _replace_authoring_projection(base, document)
+        changed = publish_generation([("branch", branch_path, payload)])
+        git = commit_work_package(
+            package_root, message="Render branch research report",
+        )
+    return {
+        "path": branch_path,
+        "changed": bool(changed["branch"]),
+        "content_hash": hashlib.sha256(payload).hexdigest(),
+        "git": git,
+        "work_package_id": work_package_id,
+        "branch_id": branch_id,
+    }
+
+
+def _compose_authoring_projection(
+    journal_payload: bytes, *, package_root: Path, branch_id: str,
+) -> bytes:
+    if not _has_authoring_source(package_root, branch_id):
+        return journal_payload
+    document, _, _ = load_branch_authoring(
+        package_root=package_root, branch_id=branch_id,
+    )
+    return _replace_authoring_projection(journal_payload, document)
+
+
+def _replace_authoring_projection(
+    payload: bytes, document: dict[str, Any],
+) -> bytes:
+    text = payload.decode("utf-8")
+    begin = text.find(_AUTHORING_BEGIN)
+    if begin >= 0:
+        end = text.find(_AUTHORING_END, begin)
+        if end < 0:
+            raise ValueError("branch report authoring projection is truncated")
+        text = text[:begin].rstrip() + "\n"
+    fragment = render_markdown_fragment(
+        document, image_prefix="authoring/assets/",
+    ).decode("utf-8").strip()
+    if not fragment:
+        return (text.rstrip() + "\n").encode("utf-8")
+    block = "\n".join([
+        _AUTHORING_BEGIN,
+        "", "## 研究补充", "", fragment, "", _AUTHORING_END, "",
+    ])
+    return (text.rstrip() + "\n\n" + block).encode("utf-8")
+
+
+def _has_authoring_source(package_root: Path, branch_id: str) -> bool:
+    branch_root = Path(package_root) / "branches" / branch_id / "authoring"
+    return (
+        (branch_root / "DOCUMENT.json").is_file()
+        and (branch_root / "BINDINGS.json").is_file()
     )
 
 

@@ -2,8 +2,11 @@
 
 from . import index
 from .index import ReportTarget
-from .service import render_branch_report, stage_branch_fragment
+from .service import (
+    render_branch_authoring_report, render_branch_report, stage_branch_fragment,
+)
 
 __all__ = [
-    "ReportTarget", "index", "render_branch_report", "stage_branch_fragment",
+    "ReportTarget", "index", "render_branch_authoring_report",
+    "render_branch_report", "stage_branch_fragment",
 ]

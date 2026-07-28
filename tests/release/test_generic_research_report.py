@@ -295,10 +295,12 @@ def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) ->
         "render", *_scope_args(), "--json",
     ])
     assert rendered.exit_code == 0, rendered.output
-    markdown = (
+    branch_root = (
         workspace_root / "research" / "package-1" / "branches" / "branch-1"
-        / "authoring" / "REPORT.md"
-    ).read_text(encoding="utf-8")
+    )
+    markdown = (branch_root / "REPORT.md").read_text(encoding="utf-8")
     assert "$$\ns_t = z_t / \\sigma_t\n$$" in markdown
     assert "```python\ndef signal(price):" in markdown
     assert '"sharpe": 1.25' in markdown
+    assert "<!-- FACTORTESTER AUTHORING BEGIN -->" in markdown
+    assert not (branch_root / "authoring" / "REPORT.md").exists()
