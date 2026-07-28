@@ -82,12 +82,24 @@ struct ResearchDocumentReportView: View {
                 windowRadius: 1
             )
             try Task.checkCancellation()
+            let nextHead = ResearchReportHeadFollow.nextChapter(
+                previousOutline: outlineIDs,
+                selectedID: selectedComponentID,
+                centeredID: windowCenterID,
+                newOutline: payload.outlineIDs
+            )
             title = payload.title
             components = payload.components
             assets = payload.assets
             bindings = payload.bindings
             outlineIDs = payload.outlineIDs
             error = nil
+            if let nextHead {
+                selectedComponentID = nextHead
+                windowCenterID = nextHead
+                scrollRequestID = nextHead
+                return
+            }
             selectedComponentID = payload.focusedComponentID ?? ""
             if windowCenterID != (payload.focusedComponentID ?? "") {
                 windowCenterID = payload.focusedComponentID ?? ""

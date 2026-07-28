@@ -29,6 +29,22 @@ final class ResearchReportNodeTimelineTests: XCTestCase {
         )
     }
 
+    func testFollowsAnAppendedChapterOnlyFromPreviousHead() {
+        XCTAssertEqual(
+            ResearchReportHeadFollow.nextChapter(
+                previousOutline: ["one", "two"], selectedID: "two",
+                centeredID: "two", newOutline: ["one", "two", "three"]
+            ),
+            "three"
+        )
+        XCTAssertNil(
+            ResearchReportHeadFollow.nextChapter(
+                previousOutline: ["one", "two"], selectedID: "one",
+                centeredID: "one", newOutline: ["one", "two", "three"]
+            )
+        )
+    }
+
     private func detail() throws -> ProfileResearchDetail {
         try decode("""
         {"research_ref":"research:r","work_package_ref":"work-package:r",

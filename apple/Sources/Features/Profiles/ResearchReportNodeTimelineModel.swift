@@ -80,6 +80,22 @@ enum ResearchReportNodeTimelineBuilder {
     }
 }
 
+enum ResearchReportHeadFollow {
+    /// Follows a newly appended chapter only while the reader is already at
+    /// the previous tail. A reader inspecting an earlier node keeps context.
+    static func nextChapter(
+        previousOutline: [String], selectedID: String, centeredID: String,
+        newOutline: [String]
+    ) -> String? {
+        guard let previousTail = previousOutline.last,
+              let newTail = newOutline.last,
+              previousTail != newTail,
+              selectedID == previousTail || centeredID == previousTail
+        else { return nil }
+        return newTail
+    }
+}
+
 enum ResearchReportNodeTimelineText {
     static func timestamp(_ value: Double) -> String {
         guard value > 0 else { return "" }
