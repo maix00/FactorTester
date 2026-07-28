@@ -26,7 +26,11 @@ final class RenderedMathFormulaViewTests: XCTestCase {
             fallback: "收益率定义"
         )
         XCTAssertTrue(html?.contains("window.MathJax") == true)
+        XCTAssertTrue(html?.contains(
+            #"<script src="mathjax-tex-svg.js"></script>"#
+        ) == true)
         XCTAssertTrue(html?.contains("<script src=\"http") == false)
+        XCTAssertLessThan(html?.utf8.count ?? .max, 8_000)
     }
 
     func testFormulaDenseTableUsesOneLocalMathJaxDocument() {
@@ -39,7 +43,11 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         XCTAssertTrue(html?.contains("<table id=\"table\"></table>") == true)
         XCTAssertTrue(html?.contains("appendRichText(root,value)") == true)
         XCTAssertTrue(html?.contains("th code,td code") == true)
+        XCTAssertTrue(html?.contains(
+            #"<script src="mathjax-tex-svg.js"></script>"#
+        ) == true)
         XCTAssertTrue(html?.contains("<script src=\"http") == false)
+        XCTAssertLessThan(html?.utf8.count ?? .max, 8_000)
     }
 
 }

@@ -24,7 +24,7 @@ struct ResearchDocumentMathTableView: View {
 
 enum MathTableDocument {
     static func makeHTML(columns: [String], rows: [[String]]) -> String? {
-        guard let runtime = BundledMathJaxRuntime.source,
+        guard BundledMathJaxRuntime.baseURL != nil,
               let data = try? JSONSerialization.data(
                 withJSONObject: ["columns": columns, "rows": rows], options: []
               ),
@@ -42,7 +42,7 @@ enum MathTableDocument {
         window.ftTable=\(payload);
         function ftHeight(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.tableHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});}
         window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]'],['$$','$$']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(ftHeight).catch(ftHeight);}}};
-        </script><script>\(runtime)</script></head><body><table id="table"></table><script>
+        </script><script src="\(BundledMathJaxRuntime.scriptFilename)"></script></head><body><table id="table"></table><script>
         (function(){function appendRichText(root,value){var parts=String(value).split('`');for(var i=0;i<parts.length;i++){var paired=(i%2===1)&&(i<parts.length-1),node=paired?document.createElement('code'):document.createTextNode('');if(paired){node.textContent=parts[i];}else{node.nodeValue=(i%2===1?'`':'')+parts[i];}root.appendChild(node);}}var data=window.ftTable,table=document.getElementById('table'),head=document.createElement('thead'),header=document.createElement('tr'),body=document.createElement('tbody');data.columns.forEach(function(value){var cell=document.createElement('th');appendRichText(cell,value);header.appendChild(cell);});head.appendChild(header);data.rows.forEach(function(row){var line=document.createElement('tr');row.forEach(function(value){var cell=document.createElement('td');appendRichText(cell,value);line.appendChild(cell);});body.appendChild(line);});table.appendChild(head);table.appendChild(body);})();
         </script></body></html>
         """
@@ -104,7 +104,10 @@ private struct MathTableWebView: NSViewRepresentable {
         let key = "\(columns)\u{1f}\(rows)"
         guard coordinator.loadedKey != key else { return }
         coordinator.loadedKey = key
-        view.loadHTMLString(MathTableDocument.makeHTML(columns: columns, rows: rows) ?? "", baseURL: nil)
+        view.loadHTMLString(
+            MathTableDocument.makeHTML(columns: columns, rows: rows) ?? "",
+            baseURL: BundledMathJaxRuntime.baseURL
+        )
     }
 }
 #else
@@ -141,7 +144,10 @@ private struct MathTableWebView: UIViewRepresentable {
         let key = "\(columns)\u{1f}\(rows)"
         guard coordinator.loadedKey != key else { return }
         coordinator.loadedKey = key
-        view.loadHTMLString(MathTableDocument.makeHTML(columns: columns, rows: rows) ?? "", baseURL: nil)
+        view.loadHTMLString(
+            MathTableDocument.makeHTML(columns: columns, rows: rows) ?? "",
+            baseURL: BundledMathJaxRuntime.baseURL
+        )
     }
 }
 #endif

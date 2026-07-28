@@ -52,7 +52,7 @@ enum MathFormulaDocument {
     }
 
     static func makeHTML(latex: String, fallback: String) -> String? {
-        guard let runtime = BundledMathJaxRuntime.source else { return nil }
+        guard BundledMathJaxRuntime.baseURL != nil else { return nil }
         let payload = bootstrapScript(latex: latex, fallback: fallback)
         return """
         <!doctype html><html><head><meta charset="utf-8">
@@ -68,7 +68,7 @@ enum MathFormulaDocument {
         function ftReportHeight(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.formulaHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});}
         function ftShowFallback(){document.getElementById('formula').style.display='none';document.getElementById('fallback').style.display='block';ftReportHeight();}
         window.MathJax={tex:{processEscapes:true},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('formula').style.visibility='visible';ftReportHeight();}).catch(ftShowFallback);}}};
-        </script><script>\(runtime)</script></head><body>
+        </script><script src="\(BundledMathJaxRuntime.scriptFilename)"></script></head><body>
         <div id="formula"></div><div id="fallback"></div><script>
         document.getElementById('formula').textContent='\\\\['+window.ftFormulaPayload[0]+'\\\\]';
         document.getElementById('fallback').textContent=window.ftFormulaPayload[1];
@@ -78,12 +78,13 @@ enum MathFormulaDocument {
 }
 
 enum BundledMathJaxRuntime {
-    static let source: String? = {
-        guard let url = Bundle.main.url(
+    static let scriptFilename = "\(MathFormulaDocument.resourceName).js"
+
+    static let baseURL: URL? = {
+        Bundle.main.url(
             forResource: MathFormulaDocument.resourceName,
             withExtension: "js"
-        ) else { return nil }
-        return try? String(contentsOf: url, encoding: .utf8)
+        )?.deletingLastPathComponent()
     }()
 }
 
@@ -238,12 +239,12 @@ private func loadDocument(
     }
     let controller = webView.configuration.userContentController
     controller.removeAllUserScripts()
-    webView.loadHTMLString(html, baseURL: nil)
+    webView.loadHTMLString(html, baseURL: BundledMathJaxRuntime.baseURL)
 }
 
 enum MathRichTextDocument {
     static func makeHTML(_ text: String) -> String? {
-        guard let runtime = BundledMathJaxRuntime.source else { return nil }
+        guard BundledMathJaxRuntime.baseURL != nil else { return nil }
         let data = try? JSONSerialization.data(
             withJSONObject: [text],
             options: []
@@ -265,7 +266,7 @@ enum MathRichTextDocument {
         function ftHeight(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.formulaHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});}
         function ftFallback(){document.getElementById('content').style.display='none';document.getElementById('fallback').style.display='block';ftHeight();}
         window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]'],['$$','$$']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('content').style.visibility='visible';ftHeight();}).catch(ftFallback);}}};
-        </script><script>\(runtime)</script></head><body>
+        </script><script src="\(BundledMathJaxRuntime.scriptFilename)"></script></head><body>
         <div id="content"></div><div id="fallback"></div><script>
         (function(){
           var root=document.getElementById('content'),parts=window.ftRichText.split('`');
