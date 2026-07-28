@@ -37,7 +37,9 @@ enum ResearchReportTreeSource {
         let root = try ResearchReportTreeNodeLoader.readNode(
             reference: metadata.rootRef, root: metadata.authoringRoot
         )
-        let outline = try ResearchReportTreeNodeLoader.outline(from: root)
+        let outline = try ResearchReportTreeNodeLoader.outline(
+            from: root, root: metadata.authoringRoot
+        )
         let focused = focusedComponentID.flatMap { wanted in
             outline.first(where: { $0.id == wanted })
         } ?? outline.first
@@ -63,7 +65,9 @@ enum ResearchReportTreeSource {
                 reference: metadata.rootRef, root: metadata.authoringRoot
             )
             let wanted = Set(componentIDs)
-            for item in try ResearchReportTreeNodeLoader.outline(from: root)
+            for item in try ResearchReportTreeNodeLoader.outline(
+                from: root, root: metadata.authoringRoot
+            )
             where wanted.contains(item.id) {
                 _ = try ResearchReportTreeNodeLoader.loadSubtree(
                     reference: item.reference, parentID: nil,

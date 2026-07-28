@@ -19,7 +19,9 @@ enum ResearchReportTreeNodeLoader {
         return try readObject(at: url, cacheable: true)
     }
 
-    static func outline(from root: [String: Any]) throws -> [OutlineItem] {
+    static func outline(
+        from root: [String: Any], root authoringRoot: URL
+    ) throws -> [OutlineItem] {
         guard root["schema_version"] as? Int == 1,
               root["kind"] as? String == "root",
               let children = root["children"] as? [[String: Any]] else {
@@ -28,6 +30,11 @@ enum ResearchReportTreeNodeLoader {
         return try children.map { child in
             guard let id = child["node_id"] as? String,
                   let reference = child["ref"] as? String else {
+                throw ResearchReportTreeSourceError.invalidNode
+            }
+            let node = try readNode(reference: reference, root: authoringRoot)
+            guard node["node_id"] as? String == id,
+                  node["kind"] as? String == "chapter" else {
                 throw ResearchReportTreeSourceError.invalidNode
             }
             return OutlineItem(id: id, reference: reference)
@@ -114,7 +121,7 @@ enum ResearchReportTreeNodeLoader {
         guard parts.count == 3, parts[0] == "nodes",
               parts[1].range(of: #"^[A-Za-z0-9._-]{1,128}$"#,
                              options: .regularExpression) != nil,
-              parts[2].range(of: #"^[0-9a-f]{64}\\.json$"#,
+              parts[2].range(of: #"^[0-9a-f]{64}\.json$"#,
                              options: .regularExpression) != nil else {
             return nil
         }

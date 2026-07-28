@@ -53,9 +53,7 @@ struct ResearchReportTreePage: View {
     }
 
     private var rootComponents: [ResearchDocumentComponent] {
-        let roots = components.filter { $0.parentID == nil }
-        let chapters = roots.filter { $0.kind == "chapter" }
-        return chapters.isEmpty ? roots : chapters
+        components.filter { $0.parentID == nil }
     }
 
     private var childrenByParent: [String: [ResearchDocumentComponent]] {
