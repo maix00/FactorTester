@@ -16,13 +16,20 @@ from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.publisher import (
     publish_research_checkpoint,
 )
-from tools.cli.release.research_reporting.document import (
-    ensure_profile_report_chapter,
+from tools.cli.release.research_reporting.authoring import (
+    ensure_branch_report_chapter,
+)
+from tools.cli.release.research_reporting.document.submission import (
+    build_report_submission,
 )
 from tools.cli.commands.research_graph_node_advance import (
     doctor,
     prepare_evidence,
     read_object,
+)
+from tools.cli.commands.research_report_scope import (
+    load_authoring,
+    resolve_branch_report_scope,
 )
 
 
@@ -147,11 +154,12 @@ def _sync_current_node_chapter(
         }
     record = records[0]
     try:
-        report = ensure_profile_report_chapter(
+        report = ensure_branch_report_chapter(
             workspace_root=Path(profile["workspace_root"]),
             work_package_id=record["record_id"],
             title=record["title"],
             node_id=current_node,
+            branch_id=branch_id,
             branch_ref=branch_ref,
         )
     except (OSError, ValueError) as exc:
@@ -171,8 +179,49 @@ def _sync_current_node_chapter(
         "status": "synchronized",
         "node_id": current_node,
         **report["chapter_sync"],
-        "report_file": str(report["report_path"]),
+        "report_file": str(report["paths"]["document"]),
     }
+
+
+def _current_branch_report_submission(
+    *, client_root: Path, profile_id: str, agent_id: str,
+    instance_id: str, branch_id: str,
+) -> dict[str, Any]:
+    """Build the only admissible report submission from the local package.
+
+    The agent never points graph navigation at an arbitrary ``report.json``.
+    It first declares the report requirement while adding a component/chip to
+    its branch Work Package, then ``node advance`` reads that exact source.
+    """
+    store = LocalProfileStore(client_root)
+    profile = store.load(profile_id)
+    branch_ref = f"graph-branch:{instance_id}:{branch_id}"
+    records = [
+        item for item in profile["research_records"]
+        if item["agent_id"] == agent_id
+        and item["graph_branch_ref"] == branch_ref
+    ]
+    if len(records) != 1:
+        raise click.ClickException(
+            "local research record for the selected Graph branch was not found"
+        )
+    record = records[0]
+    try:
+        scope = resolve_branch_report_scope(
+            client_root=client_root,
+            profile_id=profile_id,
+            work_package_id=str(record["record_id"]),
+            branch_id=branch_id,
+        )
+        authoring = load_authoring(scope)
+        return build_report_submission(
+            authoring["document"], authoring["bindings"],
+        )
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(
+            "branch Work Package report is unavailable; migrate or initialize "
+            "the report before advancing this node: " + str(exc)
+        ) from exc
 
 
 def register_navigation_commands(parent: click.Group) -> None:
@@ -211,15 +260,6 @@ def register_navigation_commands(parent: click.Group) -> None:
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         help="目标节点能力解析投影",
     )
-    @click.option(
-        "--report-submission-file",
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    )
-    @click.option(
-        "--report-file",
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        help="本地 report.json；其 report_requirement chip 会被严格转换",
-    )
     @click.option("--acting-profile-ref", default="")
     @click.option("--profile-id")
     @click.option("--agent-id")
@@ -239,8 +279,6 @@ def register_navigation_commands(parent: click.Group) -> None:
         evidence_file: Path,
         entry_assessment_file: Path | None,
         target_capability_resolution_file: Path | None,
-        report_submission_file: Path | None,
-        report_file: Path | None,
         acting_profile_ref: str,
         profile_id: str | None,
         agent_id: str | None,
@@ -256,16 +294,26 @@ def register_navigation_commands(parent: click.Group) -> None:
             raise click.ClickException(
                 "--narrative-file requires --profile-id and --agent-id"
             )
+        client_root = load_profile_root(release_profile) if profile_id else None
+        report_submission = (
+            _current_branch_report_submission(
+                client_root=client_root,
+                profile_id=profile_id,
+                agent_id=agent_id,
+                instance_id=instance_id,
+                branch_id=branch_id,
+            )
+            if client_root is not None and agent_id is not None
+            else None
+        )
         evidence = prepare_evidence(
             evidence_file=evidence_file,
             entry_assessment_file=entry_assessment_file,
             target_capability_resolution_file=(
                 target_capability_resolution_file
             ),
-            report_submission_file=report_submission_file,
-            report_file=report_file,
+            report_submission=report_submission,
         )
-        client_root = load_profile_root(release_profile) if profile_id else None
         client = (
             _client_for_profile(client_root, profile_id)
             if client_root is not None and profile_id is not None

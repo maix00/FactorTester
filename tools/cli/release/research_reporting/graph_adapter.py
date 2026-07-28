@@ -45,12 +45,12 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "document_commands": [
             "factortester node info <instance> <branch>",
             "factortester edge info <instance> <branch> <edge-id>",
-            "report add --kind chapter|section|subsection|entry|special|table|image|code|math|result",
-            "report asset --asset-file <json>",
-            "report chip <report-file> <component-id> --chip-id <chip-id> --kind evidence|obligation|task|job|artifact|report_requirement",
-            "report manifest --file <file>",
-            "report validate <file>",
-            "factortester node advance <instance> <branch> --edge-id <edge-id> --evidence-file <file>",
+            "factortester report add --profile <profile> --work-package-id <package> --branch-id <branch> --kind chapter|section|subsection|entry|special|table|image|code|math|result",
+            "factortester report asset --profile <profile> --work-package-id <package> --branch-id <branch> --asset-file <json>",
+            "factortester report chip --profile <profile> --work-package-id <package> --branch-id <branch> <component-id> --chip-id <chip-id> --kind evidence|obligation|task|job|artifact|report_requirement",
+            "factortester report manifest --profile <profile> --work-package-id <package> --branch-id <branch>",
+            "factortester report validate --profile <profile> --work-package-id <package> --branch-id <branch>",
+            "factortester node advance <instance> <branch> --profile-id <profile> --agent-id <agent> --edge-id <edge-id> --evidence-file <file>",
         ],
         "current_node": str(node),
         "required_tasks": list(deduped.values()),
@@ -61,14 +61,17 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "anchor": "current Graph node",
             "command": "factortester client research create|node advance",
             "idempotent": True,
-            "data_policy": "chapter ownership stays in the bindings sidecar",
+            "data_policy": "chapter ownership stays in the current branch Work Package source",
             "branch_policy": (
                 "entering a node creates its empty local chapter; Agent prose, "
                 "evidence and checkpoint bindings remain explicit"
             ),
         },
         "manifest_contract": {
-            "command": "report manifest --file <file>",
+            "command": (
+                "factortester report manifest --profile <profile> "
+                "--work-package-id <package> --branch-id <branch>"
+            ),
             "purpose": "content-free receipt for local report identity",
             "fields": [
                 "document_id", "revision", "document_hash",
@@ -134,12 +137,14 @@ def _requirement_task(
         "status": str(item.get("status") or "missing"),
         "allowed_content": list(item.get("allowed_content") or []),
         "next_command": (
-            "factortester report add <report-file> "
+            "factortester report add --profile <profile> "
+            "--work-package-id <package> --branch-id <branch> "
             "--component-id <component-id> --kind <kind> --title <title>"
         ),
         "bind_command": (
-            "factortester report chip <report-file> <component-id> "
-            "--chip-id <chip-id> --kind report_requirement "
+            "factortester report chip --profile <profile> "
+            "--work-package-id <package> --branch-id <branch> "
+            "<component-id> --chip-id <chip-id> --kind report_requirement "
             "--target-ref " + ref + " --data-file <subject-data-file>"
         ),
     })
