@@ -132,7 +132,8 @@ def create_run(
                 methodology_hash, trial_plan_id, trial_plan_hash,
                 trial_plan_schema_version, trial_plan_version,
                 trial_role, trial_stage, trial_stage_id, comparison_id,
-                graph_instance_id, graph_branch_id, sample_ref, sample_hash,
+                graph_instance_id, graph_branch_id, graph_execution_node,
+                sample_ref, sample_hash,
                 sample_identity_hash, sample_start, sample_end,
                 sample_universe_hash, sample_design_context_hash,
                 sample_identity_assurance,
@@ -141,7 +142,7 @@ def create_run(
                 created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, 'factor_research',
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?
             )
@@ -164,6 +165,7 @@ def create_run(
                 str((binding or {}).get("comparison_id") or ""),
                 str((binding or {}).get("instance_id") or ""),
                 str((binding or {}).get("branch_id") or ""),
+                str((binding or {}).get("execution_node") or ""),
                 str((binding or {}).get("sample_ref") or ""),
                 str((binding or {}).get("sample_hash") or ""),
                 persisted_sample["sample_identity_hash"],
@@ -224,6 +226,9 @@ def create_run(
         ),
         "graph_branch_id": str(
             persisted_binding.get("branch_id") or ""
+        ),
+        "graph_execution_node": str(
+            persisted_binding.get("execution_node") or ""
         ),
         "sample_ref": str(persisted_binding.get("sample_ref") or ""),
         "sample_hash": str(persisted_binding.get("sample_hash") or ""),

@@ -83,7 +83,12 @@ def _graph_binding(
         "instance_id": str(row["run_graph_instance_id"] or ""),
         "branch_id": str(row["run_graph_branch_id"] or ""),
     }
-    return value if all(value.values()) else None
+    if not value["instance_id"] or not value["branch_id"]:
+        return None
+    execution_node = str(row["run_graph_execution_node"] or "")
+    if execution_node:
+        value["execution_node"] = execution_node
+    return value
 
 
 def _identity_refs(
@@ -117,6 +122,7 @@ _DETAIL_COLUMNS = """
     runs.sample_identity_assurance AS run_sample_identity_assurance,
     runs.graph_instance_id AS run_graph_instance_id,
     runs.graph_branch_id AS run_graph_branch_id,
+    runs.graph_execution_node AS run_graph_execution_node,
     runs.run_spec_hash AS run_run_spec_hash,
     COALESCE((
         SELECT json_group_array(json_object(
@@ -166,6 +172,7 @@ _LEGACY_DETAIL_QUERY = """
            NULL AS run_sample_identity_assurance,
            NULL AS run_graph_instance_id,
            NULL AS run_graph_branch_id,
+           NULL AS run_graph_execution_node,
            NULL AS run_run_spec_hash,
            '[]' AS detail_artifacts_json
     FROM research_jobs AS jobs

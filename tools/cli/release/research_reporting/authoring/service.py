@@ -90,13 +90,17 @@ def save_branch_authoring(
     *, package_root: Path, work_package_id: str, branch_id: str,
     document: dict[str, Any], bindings: dict[str, Any],
     message: str = "Update branch report authoring",
+    commit: bool = True,
 ) -> dict[str, Any]:
     """Atomically save structured authoring data and commit the Work Package."""
     paths = authoring_paths(package_root, branch_id)
     paths["root"].mkdir(parents=True, exist_ok=True)
     saved = save_document(paths["document"], document)
     saved_bindings = save_bindings(paths["bindings"], bindings, saved)
-    git = commit_work_package(package_root, message=message)
+    git = (
+        commit_work_package(package_root, message=message)
+        if commit else None
+    )
     return {
         "paths": paths,
         "document": saved,

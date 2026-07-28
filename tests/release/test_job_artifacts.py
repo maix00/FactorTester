@@ -3,16 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tools.cli.release.research_reporting.document import (
-    bindings_path_for,
-    load_bindings,
-    load_document,
-    new_bindings,
-    new_document,
-    save_bindings,
-    save_document,
+import pytest
+
+from tools.cli.commands.research_report_scope import (
+    ensure_authoring,
+    resolve_branch_report_scope,
 )
+from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+from tools.cli.release.research_reporting.document import load_document
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
+from tools.cli.release.research_reporting.workspace import initialize_work_package
 
 
 class _Response:
@@ -21,21 +21,24 @@ class _Response:
 
 
 class _Client:
-    def __init__(self, artifacts: list[dict], content: dict[str, bytes]) -> None:
+    def __init__(
+        self, artifacts: list[dict], content: dict[str, bytes], *,
+        execution_node: str = "trial_execution",
+    ) -> None:
         self.artifacts = artifacts
         self.content = content
+        self.execution_node = execution_node
 
     def get_job(self, job_id: str) -> dict:
         return {
             "job_id": job_id,
             "status": "succeeded",
-            "workspace_id": "workspace-1",
             "research_binding": {
+                "work_package_ref": "work-package:package-1",
                 "instance_id": "instance-1", "branch_id": "branch-1",
+                "execution_node": self.execution_node,
             },
-            "evidence": {
-                "job_attempt": {"envelope_hash": "a" * 64},
-            },
+            "evidence": {"job_attempt": {"envelope_hash": "a" * 64}},
         }
 
     def list_job_artifacts(self, job_id: str) -> list[dict]:
@@ -45,21 +48,41 @@ class _Client:
         return _Response(self.content[name])
 
 
-def _report(path: Path) -> None:
-    document = new_document("report-1", "因子研究")
-    document = __import__(
-        "tools.cli.release.research_reporting.document",
-        fromlist=["add_component"],
-    ).add_component(
-        document, component_id="chapter-1", kind="chapter", title="研究结果",
+def _scope(tmp_path: Path):
+    client_root = tmp_path / "client-root"
+    workspace_root = tmp_path / "workspace-root"
+    store = LocalProfileStore(client_root)
+    profile = new_local_profile(
+        profile_id="maxa", display_name="MaxA",
+        server_url="http://127.0.0.1:8141", workspace_root=workspace_root,
     )
-    save_document(path, document)
-    save_bindings(bindings_path_for(path), new_bindings(document), document)
+    profile["research_records"] = [{
+        "record_id": "package-1", "title": "CLI 报告", "status": "pending",
+        "scope": {"factor_families": ["SgCCS"]},
+        "factor_family_versions": ["MaxA:SgCCS@1"],
+        "agent_id": "research-maxa", "created_at": 1.0, "updated_at": 1.0,
+        "workspace_ref": "workspace:workspace-1", "run_ref": "",
+        "graph_instance_ref": "work-package:package-1",
+        "graph_branch_ref": "graph-branch:instance-1:branch-1",
+        "checkpoint_ref": "", "evidence_refs": [], "timeline_refs": [],
+        "artifacts": [], "provenance": {"kind": "owned_research"},
+    }]
+    store.save(profile)
+    initialize_work_package(
+        workspace_root=workspace_root, work_package_id="package-1",
+        branch_id="branch-1", workspace_id="workspace-1", title="CLI 报告",
+        branch_ref="graph-branch:instance-1:branch-1",
+    )
+    scope = resolve_branch_report_scope(
+        client_root=client_root, profile_id="maxa", work_package_id="package-1",
+        branch_id="branch-1",
+    )
+    ensure_authoring(scope, node_id="trial_execution")
+    return scope
 
 
-def test_collect_job_report_downloads_all_and_mounts_only_tables_images(tmp_path: Path) -> None:
-    report = tmp_path / "report.json"
-    _report(report)
+def test_collect_job_report_mounts_to_immutable_execution_node(tmp_path: Path) -> None:
+    scope = _scope(tmp_path)
     csv_raw = b"metric,value\nsharpe,1.2\n"
     image_raw = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
     client = _Client(
@@ -71,33 +94,45 @@ def test_collect_job_report_downloads_all_and_mounts_only_tables_images(tmp_path
         {"fee_detail_csv": csv_raw, "equity_curve_report": image_raw, "debug_log": b"debug"},
     )
 
-    value = collect_job_report(
-        client, job_id="job-1", report_file=report,
-        output_dir=tmp_path / "jobs" / "job-1",
-    )
+    value = collect_job_report(client, job_id="job-1", scope=scope)
 
     assert len(value["downloaded"]) == 3
     assert {item["kind"] for item in value["mounted"]} == {"table", "image"}
-    assert (tmp_path / "jobs" / "job-1" / "debug_log.log").read_bytes() == b"debug"
-    document = load_document(report)
+    assert value["execution_node"] == "trial_execution"
+    output = scope.package_root / "artifacts" / "jobs" / "job-1"
+    assert (output / "debug_log.log").read_bytes() == b"debug"
+    document = load_document(
+        scope.package_root / "branches" / "branch-1" / "authoring" / "DOCUMENT.json"
+    )
     special = [item for item in document["components"] if item["kind"] == "special"]
     assert len(special) == 2
-    assert {item["display_kind"] for item in special} == {"job-artifact-table", "job-artifact-image"}
-    bindings = load_bindings(bindings_path_for(report), document)
-    assert {item["kind"] for item in bindings["bindings"]} == {"evidence", "job"}
-    assert (tmp_path / "assets").is_dir()
+    assert {item["display_kind"] for item in special} == {
+        "job-artifact-table", "job-artifact-image",
+    }
+    chapter = next(item for item in document["components"] if item["kind"] == "chapter")
+    assert {item["parent_id"] for item in special} == {chapter["component_id"]}
+    assert (scope.package_root / "branches" / "branch-1" / "REPORT.md").is_file()
+    assert (scope.package_root / "branches" / "branch-1" / "authoring" / "assets").is_dir()
 
 
 def test_collect_job_report_is_idempotent(tmp_path: Path) -> None:
-    report = tmp_path / "report.json"
-    _report(report)
+    scope = _scope(tmp_path)
     raw = json.dumps({"sharpe": 1.2}).encode()
     client = _Client(
         [{"name": "metrics_over_time_data", "file_name": "metrics.json", "content_type": "application/json", "description": "指标"}],
         {"metrics_over_time_data": raw},
     )
-    first = collect_job_report(client, job_id="job-2", report_file=report)
-    second = collect_job_report(client, job_id="job-2", report_file=report)
-    assert len(first["mounted"]) == 1
-    assert len(second["mounted"]) == 1
-    assert len(load_document(report)["components"]) == 2
+    first = collect_job_report(client, job_id="job-2", scope=scope)
+    second = collect_job_report(client, job_id="job-2", scope=scope)
+    assert len(first["mounted"]) == len(second["mounted"]) == 1
+    document = load_document(
+        scope.package_root / "branches" / "branch-1" / "authoring" / "DOCUMENT.json"
+    )
+    assert len(document["components"]) == 2
+
+
+def test_collect_job_report_rejects_missing_execution_node(tmp_path: Path) -> None:
+    scope = _scope(tmp_path)
+    client = _Client([], {}, execution_node="")
+    with pytest.raises(ValueError, match="未冻结执行节点"):
+        collect_job_report(client, job_id="job-legacy", scope=scope)

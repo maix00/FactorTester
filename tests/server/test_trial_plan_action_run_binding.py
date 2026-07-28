@@ -114,6 +114,9 @@ def test_released_action_binds_all_declared_runs_without_advancing_cursor(
 
     assert {item["evidence_action_id"] for item in created} == {"action:ic"}
     assert {item["trial_stage_id"] for item in created} == {"validation-1"}
+    assert {item["graph_execution_node"] for item in created} == {
+        "trial_execution"
+    }
     assert all(item["evidence_action_binding"] for item in created)
     job = JobRepository(path).create(
         job_record(created[0]["run_id"], specs["baseline"])

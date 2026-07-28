@@ -276,6 +276,11 @@ def validate_branch_binding(
         raise ValueError("RunSpec was already opened under another stage")
     if evidence_action_id and int(row["duplicate_action_run"] or 0):
         raise ValueError("Evidence Action already has this ResearchRun")
+    # The branch can advance after a Job is submitted.  Preserve the node that
+    # authorized this Run inside the same transaction that validates the
+    # TrialPlan, rather than inferring a later attachment target from a moving
+    # branch head.
+    action_snapshot["execution_node"] = str(row["current_node"])
     return action_snapshot
 
 

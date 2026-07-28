@@ -567,3 +567,21 @@ selection occurs before ranking and excludes missing/warm-up values.
   idempotent and never duplicates report sections.
 - `research report render` targets that branch report; it must not create
   `authoring/REPORT.md`.
+
+## Job-to-report collection refinement (Issue #141)
+
+## Test inventory plan
+
+- `tests/release/test_job_artifacts.py`: replace arbitrary report-file tests
+  with Work Package branch scope fixtures.
+- `tests/server/test_research_job_lifecycle.py`: cover immutable execution-node
+  projection from the ResearchRun into Job detail.
+
+## Unit test plan
+
+- A completed job downloads all files into
+  `research/<work-package>/artifacts/jobs/<job-id>/`.
+- Only declared tables and passive images are mounted as special components,
+  under the chapter bound to the Job's immutable execution node.
+- A missing execution node is rejected; the collector never silently attaches
+  an old job to the branch's current node.

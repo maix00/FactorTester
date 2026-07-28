@@ -63,7 +63,9 @@ def resolve_branch_report_scope(
     )
 
 
-def ensure_authoring(scope: BranchReportScope) -> dict[str, Any]:
+def ensure_authoring(
+    scope: BranchReportScope, *, node_id: str = "",
+) -> dict[str, Any]:
     """Create the exact branch source, then persist its descriptor locally."""
     result = ensure_branch_authoring(
         package_root=scope.package_root,
@@ -71,6 +73,7 @@ def ensure_authoring(scope: BranchReportScope) -> dict[str, Any]:
         branch_id=scope.branch_id,
         title=scope.record["title"],
         branch_ref=scope.branch_ref,
+        node_id=node_id,
         commit=False,
     )
     _replace_descriptor(scope, result["descriptor"])

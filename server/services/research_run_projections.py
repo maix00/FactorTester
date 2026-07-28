@@ -31,6 +31,7 @@ def project_run(row: sqlite3.Row) -> dict[str, Any]:
         "comparison_id": str(row["comparison_id"]),
         "graph_instance_id": str(row["graph_instance_id"]),
         "graph_branch_id": str(row["graph_branch_id"]),
+        "graph_execution_node": str(row["graph_execution_node"]),
         "sample_ref": str(row["sample_ref"]),
         "sample_hash": str(row["sample_hash"]),
         "evidence_action_id": str(row["evidence_action_id"]),
@@ -110,6 +111,7 @@ _JOB_EVIDENCE_QUERY = """
            runs.trial_role, runs.trial_stage, runs.trial_stage_id,
            runs.comparison_id, runs.sample_ref, runs.sample_hash,
            runs.sample_identity_hash, runs.sample_identity_assurance,
+           runs.graph_execution_node,
            runs.decision_contract_hash, runs.methodology_hash,
            runs.run_spec_hash, runs.evidence_action_id,
            runs.evidence_action_binding_hash, runs.evidence_action_binding_json
