@@ -695,6 +695,30 @@ class FactorExpr:
         return _lazy()['CrossSectionalOp'](op, self, mask_expr)
 
     @factor_workspace
+    def _cs_group(self, op: str, category: Any, mask: Any = None) -> 'CrossSectionalOp':
+        from tools.products.categories.Category import Category
+        if not isinstance(category, Category):
+            raise TypeError(f"{op} requires a Category")
+        return _lazy()['CrossSectionalOp'](
+            op, self, _lazy()['_to_expr'](True if mask is None else mask), category=category,
+        )
+
+    @factor_workspace
+    def cs_group_rank(self, category: Any, mask: Any = None) -> 'CrossSectionalOp':
+        """Rank each Category label independently, then restore product order."""
+        return self._cs_group('cs_group_rank', category, mask)
+
+    @factor_workspace
+    def cs_group_zscore(self, category: Any, mask: Any = None) -> 'CrossSectionalOp':
+        """Z-score each Category label independently."""
+        return self._cs_group('cs_group_zscore', category, mask)
+
+    @factor_workspace
+    def cs_group_demean(self, category: Any, mask: Any = None) -> 'CrossSectionalOp':
+        """Subtract each product's Category-label cross-sectional mean."""
+        return self._cs_group('cs_group_demean', category, mask)
+
+    @factor_workspace
     def cs_spearman(self, other: 'FactorExpr') -> 'CrossSectionalOp':
         """截面 Spearman 秩相关系数：self 与 other 逐时间点计算。"""
         return _lazy()['CrossSectionalOp']('cs_spearman', self, other)

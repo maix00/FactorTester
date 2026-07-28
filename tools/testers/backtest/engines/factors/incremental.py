@@ -25,6 +25,7 @@ from tools.factors.expr import (
 from tools.factors.expr.term_structure_math import evaluate_term_curve, normalize_term_curve
 from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
 from tools.factors.expr.conditional import apply_where
+from .group_cross_sectional import GroupCrossSectionalNode
 from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
 )
@@ -422,19 +423,24 @@ def compile_streaming_factor(
                 raise UnsupportedStreamingFactor(
                     f"{expr.op} produces an IC time series, not product-level live signal values"
                 )
-            if expr.op not in {"cs_rank", "cs_rank_masked", "cs_zscore", "cs_ordinal_rank_asc", "cs_ordinal_rank_desc"}:
+            if expr.op not in {"cs_rank", "cs_rank_masked", "cs_zscore", "cs_ordinal_rank_asc", "cs_ordinal_rank_desc", "cs_group_rank", "cs_group_zscore", "cs_group_demean"}:
                 raise UnsupportedStreamingFactor(
                     f"unsupported cross-sectional op: {expr.op}"
                 )
-            if expr.op in {"cs_rank_masked", "cs_ordinal_rank_asc", "cs_ordinal_rank_desc"}:
+            if expr.op in {"cs_group_rank", "cs_group_zscore", "cs_group_demean"}:
+                node = GroupCrossSectionalNode(
+                    expr.op, (compile_node(expr.operand), compile_node(expr.right)), expr.category, products,
+                )
+            elif expr.op in {"cs_rank_masked", "cs_ordinal_rank_asc", "cs_ordinal_rank_desc"}:
                 children = (compile_node(expr.operand), compile_node(expr.right))
+                node = CrossSectionalNode(
+                    expr.op, children, tuple(str(getattr(product, "name", product)) for product in products),
+                )
             else:
                 children = (compile_node(expr.operand),)
-            node = CrossSectionalNode(
-                expr.op,
-                children,
-                tuple(str(getattr(product, "name", product)) for product in products),
-            )
+                node = CrossSectionalNode(
+                    expr.op, children, tuple(str(getattr(product, "name", product)) for product in products),
+                )
         elif isinstance(expr, TermStructureOp):
             near_rank, far_rank, depth, column_name = _term_structure_params(expr)
             node = TermStructureNode(
