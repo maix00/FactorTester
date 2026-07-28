@@ -670,9 +670,17 @@ class FactorExpr:
         return _lazy()['CrossSectionalOp']('cs_zscore', self)
 
     @factor_workspace
-    def cs_rank(self) -> 'CrossSectionalOp':
-        """横截面百分位排名（从小到大，输出约为 -0.5~0.5）。"""
-        return _lazy()['CrossSectionalOp']('cs_rank', self)
+    def cs_rank(self, mask: Any = None) -> 'CrossSectionalOp':
+        """横截面百分位排名（从小到大，输出约为 -0.5~0.5）。
+
+        ``mask`` 给定时，仅在 True 的产品池内计算百分位；掩码外与原始值缺失
+        的产品返回 ``NaN``。省略 ``mask`` 时保持历史全横截面语义。
+        """
+        if mask is None:
+            return _lazy()['CrossSectionalOp']('cs_rank', self)
+        return _lazy()['CrossSectionalOp'](
+            'cs_rank_masked', self, _lazy()['_to_expr'](mask),
+        )
 
     @factor_workspace
     def cs_ordinal_rank(self, mask: Any = None, *, ascending: bool = True) -> 'CrossSectionalOp':

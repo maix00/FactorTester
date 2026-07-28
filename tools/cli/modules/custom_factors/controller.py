@@ -1043,7 +1043,7 @@ _SOURCE_TOKEN_TO_TREE_KEYS = {
     "rolling_argmin": {"rolling_argmin"},
     "shift": {"shift"},
     "delta": {"delta", "sub"},
-    "cs_rank": {"cs_rank"},
+    "cs_rank": {"cs_rank", "cs_rank_masked"},
     "cs_ordinal_rank": {"cs_ordinal_rank_asc", "cs_ordinal_rank_desc"},
     "cs_zscore": {"cs_zscore"},
     "cs_spearman": {"cs_spearman"},

@@ -104,6 +104,10 @@ class CrossSectionalOp(OperandExpr):
             return result
         if self.op == 'cs_rank':
             return x.rank(axis=1, pct=True) - 0.5
+        if self.op == 'cs_rank_masked':
+            if len(vals) != 2:
+                raise TypeError("cs_rank_masked 需要值和 eligibility mask 两个输入")
+            return x.where(self._eligibility_mask(vals[1], x)).rank(axis=1, pct=True) - 0.5
         if self.op in ('cs_ordinal_rank_asc', 'cs_ordinal_rank_desc'):
             if len(vals) != 2:
                 raise TypeError(f"{self.op} 需要值和 eligibility mask 两个输入")
@@ -237,6 +241,7 @@ class CrossSectionalOp(OperandExpr):
         _LATEX_MAP = {
             'cs_zscore': f'Z({operand_latex})',
             'cs_rank': f'\\text{{Rank}}({operand_latex})',
+            'cs_rank_masked': f'\\text{{Rank}}_{{mask}}({operand_latex})',
             'cs_ordinal_rank_asc': f'\\text{{OrdinalRank}}_\\uparrow({operand_latex})',
             'cs_ordinal_rank_desc': f'\\text{{OrdinalRank}}_\\downarrow({operand_latex})',
         }
@@ -246,6 +251,8 @@ class CrossSectionalOp(OperandExpr):
         if self.op in ('cs_spearman', 'cs_corr'):
             return f"{self.op}_{self.left._get_alias()}_{self.right._get_alias()}"
         if self.op in ('cs_ordinal_rank_asc', 'cs_ordinal_rank_desc'):
+            return f"{self.op}_{self.operand._get_alias()}_mask_{self.right._get_alias()}"
+        if self.op == 'cs_rank_masked':
             return f"{self.op}_{self.operand._get_alias()}_mask_{self.right._get_alias()}"
         return f"{self.op}_{self.operand._get_alias()}"
 

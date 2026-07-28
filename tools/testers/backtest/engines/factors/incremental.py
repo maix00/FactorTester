@@ -197,13 +197,15 @@ class CrossSectionalNode:
     tie_break_keys: tuple[str, ...]
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
-        if self.op in {"cs_ordinal_rank_asc", "cs_ordinal_rank_desc"}:
+        if self.op in {"cs_ordinal_rank_asc", "cs_ordinal_rank_desc", "cs_rank_masked"}:
             if len(self.children) != 2:
                 raise UnsupportedStreamingFactor(f"{self.op} requires value and eligibility mask")
             values = self.children[0].update(market, cache)
             mask = self.children[1].update(market, cache)
             series = pd.Series(values, index=self.tie_break_keys, dtype=float)
             eligible = series.where(pd.Series(mask, index=self.tie_break_keys).fillna(False).astype(bool))
+            if self.op == "cs_rank_masked":
+                return (eligible.rank(pct=True) - 0.5).to_numpy(dtype=float)
             ranked = eligible.sort_index().rank(
                 method="first",
                 ascending=self.op == "cs_ordinal_rank_asc",
@@ -404,11 +406,11 @@ def compile_streaming_factor(
                 raise UnsupportedStreamingFactor(
                     f"{expr.op} produces an IC time series, not product-level live signal values"
                 )
-            if expr.op not in {"cs_rank", "cs_zscore", "cs_ordinal_rank_asc", "cs_ordinal_rank_desc"}:
+            if expr.op not in {"cs_rank", "cs_rank_masked", "cs_zscore", "cs_ordinal_rank_asc", "cs_ordinal_rank_desc"}:
                 raise UnsupportedStreamingFactor(
                     f"unsupported cross-sectional op: {expr.op}"
                 )
-            if expr.op in {"cs_ordinal_rank_asc", "cs_ordinal_rank_desc"}:
+            if expr.op in {"cs_rank_masked", "cs_ordinal_rank_asc", "cs_ordinal_rank_desc"}:
                 children = (compile_node(expr.operand), compile_node(expr.right))
             else:
                 children = (compile_node(expr.operand),)

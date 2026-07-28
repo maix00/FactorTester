@@ -254,6 +254,18 @@ def test_cs_ordinal_rank_masks_ineligible_products_and_breaks_ties_by_product_ke
     pd.testing.assert_frame_equal(result, expected)
 
 
+def test_cs_rank_can_rank_only_within_the_eligible_cross_section():
+    values = pd.DataFrame({"B": [10.0], "A": [10.0], "C": [5.0], "D": [8.0]})
+    eligible = pd.DataFrame({"B": [True], "A": [True], "C": [False], "D": [True]})
+
+    result = _FrameExpr(values).cs_rank(mask=_FrameExpr(eligible)).evaluate(
+        ctx=EvaluateContext(products=["B", "A", "C", "D"], freq=DataFreq.MIN1, cache={}),
+    )
+
+    expected = pd.DataFrame({"B": [1.0 / 3.0], "A": [1.0 / 3.0], "C": [float("nan")], "D": [-1.0 / 6.0]})
+    pd.testing.assert_frame_equal(result, expected)
+
+
 def test_cs_ordinal_rank_ascending_orders_lowest_eligible_product_first():
     values = pd.DataFrame({"B": [10.0], "A": [10.0], "C": [5.0], "D": [8.0]})
     eligible = pd.DataFrame({"B": [True], "A": [True], "C": [False], "D": [True]})
