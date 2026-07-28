@@ -8,6 +8,7 @@ from typing import Any
 
 from ..generation import publish_generation
 from ..generation import work_package_lock
+from ..git import commit_work_package
 from ..journal import (
     assemble_snapshot,
     fragment_payload,
@@ -128,6 +129,10 @@ def render_branch_report(
             ])
         targets.extend(fragment_targets)
         changed = publish_generation(targets)
+        git = commit_work_package(
+            package_root,
+            message="Update research report checkpoint",
+        )
 
     descriptor = _local_artifact_descriptor(
         refs=refs,
@@ -163,6 +168,7 @@ def render_branch_report(
         "journal_fragment_changed": (
             fragment_changed if journal_fragment is not None else False
         ),
+        "git": git,
     }
 
 
@@ -220,9 +226,14 @@ def stage_branch_fragment(
         writes = publish_generation([
             ("journal_fragment", fragment_path, fragment_payload(fragment)),
         ]) if changed else {"journal_fragment": False}
+        git = commit_work_package(
+            package_root,
+            message="Stage research report checkpoint",
+        )
     return {
         "changed": bool(writes["journal_fragment"]),
         "fragment_path": fragment_path,
+        "git": git,
     }
 
 
