@@ -46,22 +46,6 @@ struct TestJobFieldTable: View {
     }
 }
 
-struct TestJobCodeBlock: View {
-    let text: String
-
-    var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            Text(text)
-                .font(.system(size: 11, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-        }
-        .frame(maxHeight: 180)
-        .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
-    }
-}
-
 struct TestJobArtifactGrid: View {
     let artifacts: [TestJobArtifact]
     let onOpen: (TestJobArtifact) -> Void
@@ -139,7 +123,9 @@ struct TestJobResultSectionView: View {
                 }
             }
         case .json:
-            TestJobCodeBlock(text: section.jsonText)
+            ClientCodeBlock(
+                source: section.jsonText, language: "json", maximumHeight: 180
+            )
         }
     }
 }

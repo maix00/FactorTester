@@ -70,19 +70,25 @@ struct TestJobDetailView: View {
     private func configuration(_ detail: TestJobDetail) -> some View {
         TestJobFieldTable(title: "测试配置", rows: detail.configurationFields)
         if !detail.configurationJSON.isEmpty {
-            TestJobCodeBlock(text: detail.configurationJSON)
+            ClientCodeBlock(
+                source: detail.configurationJSON, language: "json", maximumHeight: 180
+            )
         }
         if !detail.researchBindingFields.isEmpty {
             TestJobFieldTable(title: "研究绑定", rows: detail.researchBindingFields)
         }
         if !detail.researchBindingJSON.isEmpty {
-            TestJobCodeBlock(text: detail.researchBindingJSON)
+            ClientCodeBlock(
+                source: detail.researchBindingJSON, language: "json", maximumHeight: 180
+            )
         }
         if !detail.submissionContextFields.isEmpty {
             TestJobFieldTable(title: "调用方", rows: detail.submissionContextFields)
         }
         if !detail.submissionContextJSON.isEmpty {
-            TestJobCodeBlock(text: detail.submissionContextJSON)
+            ClientCodeBlock(
+                source: detail.submissionContextJSON, language: "json", maximumHeight: 180
+            )
         }
     }
 

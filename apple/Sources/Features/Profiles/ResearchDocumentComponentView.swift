@@ -73,7 +73,7 @@ struct ResearchDocumentComponentView: View {
         case let .text(value):
             ResearchDocumentRichTextView(text: value)
         case let .code(language, source):
-            ResearchDocumentCodeView(language: language, source: source)
+            ClientCodeBlock(source: source, language: language)
         case let .math(latex, fallback):
             VStack(alignment: .leading, spacing: 6) {
                 RenderedMathFormulaView(latex: latex, fallback: fallback)
@@ -92,7 +92,7 @@ struct ResearchDocumentComponentView: View {
                     .foregroundStyle(.secondary)
             }
         case let .json(value):
-            ResearchDocumentCodeView(language: "json", source: value)
+            ClientCodeBlock(source: value, language: "json")
         }
     }
 
