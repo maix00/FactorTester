@@ -50,7 +50,7 @@ def resolve_branch_report_scope(
         Path(profile["workspace_root"]).expanduser()
         / "research" / work_package_id
     )
-    if not (package_root / "INDEX.json").is_file():
+    if not package_root.is_dir():
         raise ValueError("Work Package is not initialized locally")
     return BranchReportScope(
         client_root=client_root,
@@ -64,7 +64,7 @@ def resolve_branch_report_scope(
 
 
 def ensure_authoring(
-    scope: BranchReportScope, *, node_id: str = "",
+    scope: BranchReportScope, *, node_id: str = "", materialize: bool = True,
 ) -> dict[str, Any]:
     """Create the exact branch source, then persist its descriptor locally."""
     result = ensure_branch_authoring(
@@ -75,6 +75,7 @@ def ensure_authoring(
         branch_ref=scope.branch_ref,
         node_id=node_id,
         commit=False,
+        materialize=materialize,
     )
     _replace_descriptor(scope, result["descriptor"])
     return result
@@ -93,6 +94,12 @@ def persist_descriptor(scope: BranchReportScope, descriptor: dict[str, Any]) -> 
 
 def _replace_descriptor(scope: BranchReportScope, descriptor: dict[str, Any]) -> None:
     record = dict(scope.record)
+    existing = next((
+        item for item in record["artifacts"]
+        if item.get("artifact_ref") == descriptor["artifact_ref"]
+    ), None)
+    if not descriptor["section_refs"] and isinstance(existing, dict):
+        descriptor = {**descriptor, "section_refs": existing.get("section_refs") or []}
     record["artifacts"] = [
         item for item in record["artifacts"]
         if item["artifact_ref"] != descriptor["artifact_ref"]

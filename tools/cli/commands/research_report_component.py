@@ -8,7 +8,7 @@ import click
 
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.authoring import add_branch_component
-from tools.cli.release.research_reporting.writer import render_branch_authoring_report
+from tools.cli.release.research_reporting.authoring import commit_branch_authoring
 
 from .research_report_common import component_content, output, scope_options
 from .research_report_scope import ensure_authoring, persist_descriptor, resolve_branch_report_scope
@@ -43,7 +43,7 @@ def add_report_component(
         client_root=load_profile_root(release_profile), profile_id=profile_id,
         work_package_id=work_package_id, branch_id=branch_id,
     )
-    ensure_authoring(scope)
+    ensure_authoring(scope, materialize=False)
     saved = add_branch_component(
         package_root=scope.package_root, work_package_id=work_package_id,
         branch_id=branch_id, component_id=component_id, kind=kind, title=title,
@@ -51,14 +51,13 @@ def add_report_component(
         content=component_content(
             kind=kind, content_file=content_file, code_file=code_file,
             language=language, latex=latex, fallback=fallback,
-        ), display_kind=display_kind,
+        ), display_kind=display_kind, materialize=False,
     )
     persist_descriptor(scope, saved["descriptor"])
-    rendered = render_branch_authoring_report(
-        package_root=scope.package_root, work_package_id=work_package_id,
-        branch_id=branch_id,
+    git = commit_branch_authoring(
+        scope.package_root, message="Add report component",
     )
     output({
         "component_id": component_id,
-        "revision": saved["head"]["revision"], "git": rendered["git"],
+        "generation": saved["head"]["generation"], "git": git,
     }, as_json)

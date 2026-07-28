@@ -13,12 +13,14 @@ from .tree_store import load_node, store_node
 
 def rewrite(
     paths: dict[str, Path], root: dict[str, Any], target: str,
-    visible_revision: int, transform: Callable[[dict[str, Any]], dict[str, Any]],
-) -> tuple[dict[str, Any], list[str]]:
-    nodes, edges = node_path(paths, root, target, visible_revision)
+    visible_generation: int, transform: Callable[[dict[str, Any]], dict[str, Any]],
+) -> tuple[dict[str, Any], list[str], set[str]]:
+    nodes, edges = node_path(paths, root, target, visible_generation)
     value = validate_node(transform(deepcopy(nodes[-1])))
     changed = [target]
+    displaced: set[str] = set()
     for parent, child_index in reversed(edges):
+        displaced.add(parent["children"][child_index]["ref"])
         child_ref, _ = store_node(paths, value)
         updated = deepcopy(parent)
         updated["children"][child_index] = {
@@ -26,7 +28,7 @@ def rewrite(
         }
         value = validate_node(updated)
         changed.insert(0, value["node_id"])
-    return value, changed
+    return value, changed, displaced
 
 
 def contains_node(
@@ -42,9 +44,9 @@ def contains_node(
 
 def node_path(
     paths: dict[str, Path], root: dict[str, Any], target: str,
-    visible_revision: int,
+    visible_generation: int,
 ) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], int]]]:
-    indexed = indexed_path(paths, root, target, visible_revision)
+    indexed = indexed_path(paths, root, target, visible_generation)
     if indexed is not None:
         return indexed
     scanned = scan_path(paths, root, target)
@@ -55,14 +57,14 @@ def node_path(
 
 def indexed_path(
     paths: dict[str, Path], root: dict[str, Any], target: str,
-    visible_revision: int,
+    visible_generation: int,
 ) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], int]]] | None:
     if target == "root":
         return [root], []
     ids = [target]
     while ids[-1] != "root":
         locator = load_locator(paths, ids[-1])
-        if locator is None or locator["revision"] > visible_revision:
+        if locator is None or locator["generation"] > visible_generation:
             return None
         parent_id = locator["parent_id"]
         if parent_id in ids or len(ids) > 256:

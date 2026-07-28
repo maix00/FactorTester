@@ -18,13 +18,19 @@ from .tree_model import (
 )
 
 
-def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_id: str, title: str, branch_ref: str, node_id: str = "", commit: bool = True) -> dict[str, Any]:
+def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_id: str, title: str, branch_ref: str, node_id: str = "", commit: bool = True, materialize: bool = True) -> dict[str, Any]:
     """Initialize one report tree and create the current node chapter once."""
     initialized = initialize_tree(
         package_root=package_root, branch_id=branch_id,
         report_id=_report_id(work_package_id, branch_id), title=title,
     )
-    snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
+    snapshot = (
+        load_snapshot(package_root=package_root, branch_id=branch_id)
+        if materialize else {
+            "paths": initialized["paths"], "head": initialized["head"],
+            "components": [], "bindings": [],
+        }
+    )
     chapter_sync = _unchanged()
     if node_id:
         chapter = ensure_node_chapter(
@@ -41,31 +47,32 @@ def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_
     return _result(package_root, work_package_id, branch_id, snapshot, chapter_sync, git)
 
 
-def add_branch_component(*, package_root: Path, work_package_id: str, branch_id: str, component_id: str, kind: str, title: str, parent_id: str | None, body: str, content: Any, display_kind: str) -> dict[str, Any]:
+def add_branch_component(*, package_root: Path, work_package_id: str, branch_id: str, component_id: str, kind: str, title: str, parent_id: str | None, body: str, content: Any, display_kind: str, materialize: bool = True) -> dict[str, Any]:
     snapshot = _add_component(
         package_root=package_root, branch_id=branch_id, component_id=component_id,
         kind=kind, title=title, parent_id=parent_id, body=body, content=content,
-        display_kind=display_kind,
+        display_kind=display_kind, include_snapshot=materialize,
     )
     return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None)
 
 
-def attach_branch_binding(*, package_root: Path, work_package_id: str, branch_id: str, component_id: str, binding: dict[str, Any]) -> dict[str, Any]:
+def attach_branch_binding(*, package_root: Path, work_package_id: str, branch_id: str, component_id: str, binding: dict[str, Any], materialize: bool = True) -> dict[str, Any]:
     snapshot = _add_binding(
         package_root=package_root, branch_id=branch_id, component_id=component_id,
-        binding=binding,
+        binding=binding, include_snapshot=materialize,
     )
     return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None)
 
 
-def register_branch_asset(*, package_root: Path, work_package_id: str, branch_id: str, asset: dict[str, Any]) -> dict[str, Any]:
-    snapshot = _add_asset(package_root=package_root, branch_id=branch_id, asset=asset)
+def register_branch_asset(*, package_root: Path, work_package_id: str, branch_id: str, asset: dict[str, Any], materialize: bool = True) -> dict[str, Any]:
+    snapshot = _add_asset(package_root=package_root, branch_id=branch_id, asset=asset, include_snapshot=materialize)
     return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None)
 
 
-def apply_branch_batch(*, package_root: Path, work_package_id: str, branch_id: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+def apply_branch_batch(*, package_root: Path, work_package_id: str, branch_id: str, operations: list[dict[str, Any]], materialize: bool = True) -> dict[str, Any]:
     snapshot = _apply_batch(
         package_root=package_root, branch_id=branch_id, operations=operations,
+        include_snapshot=materialize,
     )
     return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None)
 

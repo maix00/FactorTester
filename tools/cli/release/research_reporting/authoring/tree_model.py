@@ -11,7 +11,7 @@ from .tree_locators import locator_exists
 from .tree_projection import load_snapshot
 from .tree_paths import report_tree_paths
 from .tree_schema import validate_binding
-from .tree_store import load_head, store_node, tree_lock, write_head, write_revision
+from .tree_store import load_head, store_node, tree_lock, write_head
 from .tree_transactions import mutate, mutate_batch
 
 
@@ -21,76 +21,82 @@ def initialize_tree(
     paths = report_tree_paths(package_root, branch_id)
     with tree_lock(paths):
         if paths["head"].is_file():
-            return {"paths": paths, "head": load_head(paths), "created": False}
+            return {
+                "paths": paths, "head": load_head(paths),
+                "created": False, "upgraded": False,
+            }
         root = {
             "schema_version": 1, "node_id": "root", "kind": "root",
             "title": "", "body": "", "content": None, "display_kind": "",
             "created_at": 0.0, "children": [], "bindings": [],
         }
-        root_ref, root_hash = store_node(paths, root)
+        root_ref, _ = store_node(paths, root)
         head = {
-            "schema_version": 1, "report_id": report_id, "title": title,
-            "language": "zh-Hans", "revision": 0, "parent_revision": -1,
-            "root_ref": root_ref, "root_hash": root_hash, "assets": [],
-            "changed_node_ids": ["root"], "locator_revision": 0,
+            "schema_version": 2, "report_id": report_id, "title": title,
+            "language": "zh-Hans", "generation": 0, "root_ref": root_ref,
+            "assets": [], "changed_node_ids": ["root"],
+            "locator_generation": 0,
         }
-        write_revision(paths, head)
         write_head(paths, head)
-    return {"paths": paths, "head": head, "created": True}
+    return {"paths": paths, "head": head, "created": True, "upgraded": False}
 
 
 def add_component(
     *, package_root: Path, branch_id: str, component_id: str, kind: str,
     title: str, parent_id: str | None, body: str, content: Any,
     display_kind: str, bindings: list[dict[str, Any]] | None = None,
+    include_snapshot: bool = True,
 ) -> dict[str, Any]:
     paths = report_tree_paths(package_root, branch_id)
     items = [validate_binding(item) for item in bindings or []]
-    mutate(
+    head = mutate(
         paths,
-        lambda current, head, root, pending: append_component(
+        lambda current, head, root, pending, displaced: append_component(
             current, head, root, component_id, kind, title, parent_id, body,
-            content, display_kind, items, pending,
+            content, display_kind, items, pending, displaced,
         ),
     )
-    return load_snapshot(package_root=package_root, branch_id=branch_id)
+    return _result(paths, head, package_root, branch_id, include_snapshot)
 
 
 def add_binding(
     *, package_root: Path, branch_id: str, component_id: str,
-    binding: dict[str, Any],
+    binding: dict[str, Any], include_snapshot: bool = True,
 ) -> dict[str, Any]:
     paths = report_tree_paths(package_root, branch_id)
     item = validate_binding(binding)
-    mutate(
+    head = mutate(
         paths,
-        lambda current, head, root, _pending: append_binding(
-            current, head, root, component_id, item,
+        lambda current, head, root, _pending, displaced: append_binding(
+            current, head, root, component_id, item, displaced,
         ),
     )
-    return load_snapshot(package_root=package_root, branch_id=branch_id)
+    return _result(paths, head, package_root, branch_id, include_snapshot)
 
 
 def add_asset(
     *, package_root: Path, branch_id: str, asset: dict[str, Any],
+    include_snapshot: bool = True,
 ) -> dict[str, Any]:
     paths = report_tree_paths(package_root, branch_id)
-    mutate(
+    head = mutate(
         paths,
-        lambda _current, head, root, _pending: (
+        lambda _current, head, root, _pending, _displaced: (
             replace_assets(head, asset), root, ["root"],
         ),
     )
-    return load_snapshot(package_root=package_root, branch_id=branch_id)
+    return _result(paths, head, package_root, branch_id, include_snapshot)
 
 
 def apply_batch(
     *, package_root: Path, branch_id: str, operations: list[dict[str, Any]],
+    include_snapshot: bool = True,
 ) -> dict[str, Any]:
     if not isinstance(operations, list) or not operations or len(operations) > 128:
         raise ValueError("report batch must contain 1 to 128 operations")
-    mutate_batch(report_tree_paths(package_root, branch_id), operations, apply_operation)
-    return load_snapshot(package_root=package_root, branch_id=branch_id)
+    paths = report_tree_paths(package_root, branch_id)
+    head = mutate_batch(paths, operations, apply_operation)
+    return _result(paths, head, package_root, branch_id, include_snapshot)
 
 
 def ensure_node_chapter(
@@ -98,7 +104,7 @@ def ensure_node_chapter(
 ) -> dict[str, Any]:
     chapter_id = "chapter-" + _short_id(node_id)
     snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
-    if locator_exists(snapshot["paths"], chapter_id, snapshot["head"]["revision"]):
+    if locator_exists(snapshot["paths"], chapter_id, snapshot["head"]["generation"]):
         return {"changed": False, "component_id": chapter_id, **snapshot}
     added = add_component(
         package_root=package_root, branch_id=branch_id, component_id=chapter_id,
@@ -115,3 +121,12 @@ def ensure_node_chapter(
 
 def _short_id(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:16]
+
+
+def _result(
+    paths: dict[str, Path], head: dict[str, Any], package_root: Path,
+    branch_id: str, include_snapshot: bool,
+) -> dict[str, Any]:
+    if include_snapshot:
+        return load_snapshot(package_root=package_root, branch_id=branch_id)
+    return {"paths": paths, "head": head, "components": [], "bindings": []}

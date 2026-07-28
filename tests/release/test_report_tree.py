@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from tools.cli.release.research_reporting.authoring import tree_navigation
+from tools.cli.release.research_reporting.authoring import (
+    tree_model,
+    tree_navigation,
+)
 from tools.cli.release.research_reporting.authoring.tree_model import (
     add_binding,
     add_component,
@@ -36,14 +39,11 @@ def test_head_switches_only_after_complete_tree_write(tmp_path: Path) -> None:
     )
 
     second_head = json.loads(created["paths"]["head"].read_text(encoding="utf-8"))
-    assert first_head["revision"] == 0
-    assert second_head["revision"] == 1
-    assert second_head["parent_revision"] == first_head["revision"]
+    assert first_head["generation"] == 0
+    assert second_head["generation"] == 1
     assert second_head["root_ref"] != first_head["root_ref"]
-    assert (created["paths"]["revisions"] / "0.json").read_bytes() == first_bytes
-    assert (created["paths"]["revisions"] / "1.json").read_bytes() == (
-        created["paths"]["head"].read_bytes()
-    )
+    assert "revisions" not in created["paths"]
+    assert first_bytes != created["paths"]["head"].read_bytes()
     assert [item["component_id"] for item in added["components"]] == ["chapter-a"]
 
 
@@ -68,12 +68,59 @@ def test_binding_is_coherent_with_the_component_revision(tmp_path: Path) -> None
     )
 
     snapshot = load_snapshot(package_root=package, branch_id="main")
-    assert updated["head"]["revision"] == snapshot["head"]["revision"] == 2
+    assert updated["head"]["generation"] == snapshot["head"]["generation"] == 2
     assert snapshot["bindings"] == [{
         "binding_id": "evidence-1", "kind": "evidence",
         "target_ref": "evidence:job-1", "label": "回测证据", "data": {},
         "component_id": "finding",
     }]
+
+
+def test_current_head_keeps_no_superseded_copy_on_write_nodes(tmp_path: Path) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    for index in range(4):
+        add_component(
+            package_root=package, branch_id="main", component_id=f"entry-{index}",
+            kind="entry", title=str(index), parent_id=None, body="", content=None,
+            display_kind="",
+        )
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    paths = snapshot["paths"]
+    reachable = {snapshot["head"]["root_ref"]}
+    root = json.loads((paths["root"] / snapshot["head"]["root_ref"]).read_text())
+    reachable.update(child["ref"] for child in root["children"])
+    stored = {
+        str(path.relative_to(paths["root"]))
+        for path in paths["nodes"].glob("*/*.json")
+    }
+    assert stored == reachable
+
+
+def test_fast_append_never_materializes_the_complete_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+
+    def fail_snapshot(**_kwargs):
+        raise AssertionError("fast append unexpectedly scanned the report")
+
+    monkeypatch.setattr(tree_model, "load_snapshot", fail_snapshot)
+    value = add_component(
+        package_root=package, branch_id="main", component_id="entry",
+        kind="entry", title="结果", parent_id=None, body="", content=None,
+        display_kind="", include_snapshot=False,
+    )
+
+    assert value["head"]["generation"] == 1
+    assert value["components"] == []
 
 
 def test_batch_adds_related_content_under_one_revision(tmp_path: Path) -> None:
@@ -102,7 +149,7 @@ def test_batch_adds_related_content_under_one_revision(tmp_path: Path) -> None:
         ],
     )
 
-    assert value["head"]["revision"] == 1
+    assert value["head"]["generation"] == 1
     assert [item["component_id"] for item in value["components"]] == ["chapter", "result"]
     assert value["bindings"][0]["component_id"] == "result"
 
