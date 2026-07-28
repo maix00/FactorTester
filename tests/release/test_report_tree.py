@@ -11,6 +11,7 @@ from tools.cli.release.research_reporting.authoring import (
     tree_changes,
     tree_model,
     tree_navigation,
+    tree_transactions,
 )
 from tools.cli.release.research_reporting.authoring.tree_model import (
     add_binding,
@@ -56,7 +57,7 @@ def test_binding_is_coherent_with_the_component_revision(tmp_path: Path) -> None
     )
     add_component(
         package_root=package, branch_id="main", component_id="finding",
-        kind="entry", title="发现", parent_id=None, body="", content=None,
+        kind="chapter", title="发现", parent_id=None, body="", content=None,
         display_kind="",
     )
 
@@ -87,7 +88,7 @@ def test_batch_rejects_duplicate_identifiers_before_writing_nodes(
     )
     before = created["paths"]["head"].read_bytes()
     operation = {
-        "op": "add", "component_id": "same", "kind": "entry",
+        "op": "add", "component_id": "same", "kind": "chapter",
         "title": "正文", "parent_id": None, "body": "内容",
         "content": None, "display_kind": "", "bindings": [],
     }
@@ -100,6 +101,34 @@ def test_batch_rejects_duplicate_identifiers_before_writing_nodes(
 
     assert created["paths"]["head"].read_bytes() == before
     assert not (created["paths"]["nodes"] / "same").exists()
+
+
+def test_root_rejects_non_chapter_content_before_writing(tmp_path: Path) -> None:
+    package = tmp_path / "research" / "wp"
+    created = initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    before = created["paths"]["head"].read_bytes()
+
+    with pytest.raises(ValueError, match="root-level report components"):
+        add_component(
+            package_root=package, branch_id="main", component_id="entry",
+            kind="entry", title="正文", parent_id=None, body="", content=None,
+            display_kind="",
+        )
+    with pytest.raises(ValueError, match="root-level report components"):
+        apply_batch(
+            package_root=package, branch_id="main", operations=[{
+                "op": "add", "component_id": "table", "kind": "table",
+                "title": "表格", "parent_id": None, "body": "",
+                "content": {"columns": ["指标"], "rows": []},
+                "display_kind": "", "bindings": [],
+            }],
+        )
+
+    assert created["paths"]["head"].read_bytes() == before
+    assert load_snapshot(package_root=package, branch_id="main")["components"] == []
 
 
 def test_failed_add_never_leaves_an_unpublished_leaf(tmp_path: Path) -> None:
@@ -135,7 +164,7 @@ def test_post_write_failure_discards_new_leaf(
     with pytest.raises(OSError, match="simulated rewrite failure"):
         add_component(
             package_root=package, branch_id="main", component_id="orphan",
-            kind="entry", title="孤儿", parent_id=None, body="", content=None,
+            kind="chapter", title="孤儿", parent_id=None, body="", content=None,
             display_kind="",
         )
 
@@ -156,14 +185,14 @@ def test_binding_identifier_is_global_and_indexed_incrementally(
     }
     first = add_component(
         package_root=package, branch_id="main", component_id="first",
-        kind="entry", title="第一项", parent_id=None, body="正文", content=None,
+        kind="chapter", title="第一项", parent_id=None, body="正文", content=None,
         display_kind="", bindings=[binding],
     )
 
     with pytest.raises(ValueError, match="binding_id already exists"):
         add_component(
             package_root=package, branch_id="main", component_id="second",
-            kind="entry", title="第二项", parent_id=None, body="正文", content=None,
+            kind="chapter", title="第二项", parent_id=None, body="正文", content=None,
             display_kind="", bindings=[binding],
         )
 
@@ -182,7 +211,7 @@ def test_current_head_keeps_no_superseded_copy_on_write_nodes(tmp_path: Path) ->
     for index in range(4):
         add_component(
             package_root=package, branch_id="main", component_id=f"entry-{index}",
-            kind="entry", title=str(index), parent_id=None, body="", content=None,
+            kind="chapter", title=str(index), parent_id=None, body="", content=None,
             display_kind="",
         )
     snapshot = load_snapshot(package_root=package, branch_id="main")
@@ -212,12 +241,53 @@ def test_fast_append_never_materializes_the_complete_report(
     monkeypatch.setattr(tree_model, "load_snapshot", fail_snapshot)
     value = add_component(
         package_root=package, branch_id="main", component_id="entry",
-        kind="entry", title="结果", parent_id=None, body="", content=None,
+        kind="chapter", title="结果", parent_id=None, body="", content=None,
         display_kind="", include_snapshot=False,
     )
 
     assert value["head"]["generation"] == 1
     assert value["components"] == []
+
+
+def test_node_chapter_lookup_never_materializes_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    apply_batch(
+        package_root=package, branch_id="main", include_snapshot=False,
+        operations=[{
+            "op": "add", "component_id": f"entry-{index}", "kind": "chapter",
+            "title": "正文", "parent_id": None, "body": "", "content": None,
+            "display_kind": "", "bindings": [],
+        } for index in range(128)],
+    )
+
+    def fail_snapshot(**_kwargs):
+        raise AssertionError("node chapter unexpectedly scanned the report")
+
+    monkeypatch.setattr(tree_model, "load_snapshot", fail_snapshot)
+    reads = 0
+    load_node = tree_transactions.load_node
+
+    def count_load_node(*args, **kwargs):
+        nonlocal reads
+        reads += 1
+        return load_node(*args, **kwargs)
+
+    monkeypatch.setattr(tree_transactions, "load_node", count_load_node)
+    chapter = tree_model.ensure_node_chapter(
+        package_root=package, branch_id="main", node_id="trial_execution",
+        title="试验执行",
+    )
+
+    assert chapter["changed"] is True
+    assert chapter["head"]["generation"] == 2
+    assert chapter["components"] == []
+    assert reads == 1
 
 
 def test_batch_adds_related_content_under_one_revision(tmp_path: Path) -> None:
@@ -268,7 +338,7 @@ def test_failed_batch_keeps_head_and_component_identity_unchanged(
             operations=[
                 {
                     "op": "add", "component_id": "recoverable",
-                    "kind": "entry", "title": "可重试", "body": "",
+                    "kind": "chapter", "title": "可重试", "body": "",
                     "content": None, "display_kind": "", "bindings": [],
                 },
                 {"op": "unsupported"},
@@ -281,7 +351,7 @@ def test_failed_batch_keeps_head_and_component_identity_unchanged(
         package_root=package,
         branch_id="main",
         operations=[{
-            "op": "add", "component_id": "recoverable", "kind": "entry",
+            "op": "add", "component_id": "recoverable", "kind": "chapter",
             "title": "可重试", "body": "", "content": None,
             "display_kind": "", "bindings": [],
         }],
@@ -336,14 +406,36 @@ def test_special_job_outputs_project_as_table_and_remote_image(tmp_path: Path) -
                 "external_ref": "factortester-artifact://jobs/job-1/equity",
                 "content_hash": "a" * 64,
             }},
+            {"op": "add", "component_id": "chapter", "kind": "chapter",
+             "title": "结果", "body": "", "content": None,
+             "display_kind": "", "bindings": []},
             {"op": "add", "component_id": "table", "kind": "special",
-             "title": "统计表", "body": "", "display_kind": "job-artifact-table",
+             "title": "统计表", "parent_id": "chapter", "body": "", "display_kind": "job-artifact-table",
              "content": {"columns": ["指标", "值"], "rows": [["Sharpe", "1.2"]]}, "bindings": []},
             {"op": "add", "component_id": "image", "kind": "special",
-             "title": "净值图", "body": "", "display_kind": "job-artifact-image",
+             "title": "净值图", "parent_id": "chapter", "body": "", "display_kind": "job-artifact-image",
              "content": {"asset_ref": "job-artifact:job-1:equity"}, "bindings": []},
         ],
     )
     rendered = render_tree_markdown(load_snapshot(package_root=package, branch_id="main")).decode()
     assert "| 指标 | 值 |" in rendered
     assert "![净值图](factortester-artifact://jobs/job-1/equity)" in rendered
+
+
+def test_report_tree_rejects_large_inline_table_before_writing(tmp_path: Path) -> None:
+    package = tmp_path / "research" / "wp"
+    created = initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    operation = {
+        "op": "add", "component_id": "chapter", "kind": "chapter",
+        "title": "结果", "parent_id": None, "body": "", "display_kind": "",
+        "content": {"columns": ["时间"], "rows": [[str(index)] for index in range(201)]},
+        "bindings": [],
+    }
+
+    with pytest.raises(ValueError, match="inline preview limit"):
+        apply_batch(package_root=package, branch_id="main", operations=[operation])
+
+    assert not (created["paths"]["nodes"] / "chapter").exists()

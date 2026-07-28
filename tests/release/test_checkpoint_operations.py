@@ -46,9 +46,9 @@ def test_checkpoint_operations_preserve_report_content_and_chips(tmp_path: Path)
     snapshot = load_snapshot(package_root=package, branch_id="main")
     operations = checkpoint_operations(
         source, parent_id=chapter["component_id"],
-        existing_ids={item["component_id"] for item in snapshot["components"]},
-        existing_bindings={item["binding_id"] for item in snapshot["bindings"]},
-        existing_assets={item["asset_ref"] for item in snapshot["head"]["assets"]},
+        component_exists={item["component_id"] for item in snapshot["components"]}.__contains__,
+        binding_exists={item["binding_id"] for item in snapshot["bindings"]}.__contains__,
+        asset_exists={item["asset_ref"] for item in snapshot["head"]["assets"]}.__contains__,
     )
     apply_batch(package_root=package, branch_id="main", operations=operations)
     saved = load_snapshot(package_root=package, branch_id="main")
@@ -58,8 +58,8 @@ def test_checkpoint_operations_preserve_report_content_and_chips(tmp_path: Path)
 
     repeated = checkpoint_operations(
         source, parent_id=chapter["component_id"],
-        existing_ids={item["component_id"] for item in saved["components"]},
-        existing_bindings={item["binding_id"] for item in saved["bindings"]},
-        existing_assets={item["asset_ref"] for item in saved["head"]["assets"]},
+        component_exists={item["component_id"] for item in saved["components"]}.__contains__,
+        binding_exists={item["binding_id"] for item in saved["bindings"]}.__contains__,
+        asset_exists={item["asset_ref"] for item in saved["head"]["assets"]}.__contains__,
     )
     assert repeated == []

@@ -1,4 +1,8 @@
-"""Safe bounded table decoding for Job report artifacts."""
+"""Safe preview decoding for Job report artifacts.
+
+The report tree owns a small, immediately readable preview. The complete
+artifact remains in the global Job cache and is opened on demand by clients.
+"""
 
 from __future__ import annotations
 
@@ -8,30 +12,55 @@ import json
 from typing import Any
 
 
-MAX_TABLE_ROWS = 4096
-MAX_TABLE_COLUMNS = 32
+MAX_PREVIEW_ROWS = 200
+MAX_PREVIEW_COLUMNS = 20
+MAX_CELL_CHARACTERS = 2048
 
 
-def table_content(raw: bytes, content_type: str) -> dict[str, Any]:
+def table_content(
+    raw: bytes, content_type: str, *, source: dict[str, str],
+) -> dict[str, Any]:
+    """Return a bounded preview and an immutable pointer to its full artifact."""
     if content_type == "text/csv":
-        rows = list(csv.reader(io.StringIO(raw.decode("utf-8-sig"))))
-        if not rows:
+        reader = csv.reader(io.StringIO(raw.decode("utf-8-sig")))
+        try:
+            original_columns = next(reader)
+        except StopIteration:
             raise ValueError("CSV 为空")
-        columns, values = rows[0], rows[1:]
+        values: Any = reader
     else:
-        columns, values = json_rows(json.loads(raw.decode("utf-8")))
-    if not isinstance(columns, list) or not columns:
+        original_columns, values = json_rows(json.loads(raw.decode("utf-8")))
+    if not isinstance(original_columns, list) or not original_columns:
         raise ValueError("统计表缺少列")
-    columns = [str(item)[:256] for item in columns[:MAX_TABLE_COLUMNS]]
+    columns = [str(item)[:256] for item in original_columns[:MAX_PREVIEW_COLUMNS]]
     width = len(columns)
-    normalized = []
-    for row in values[:MAX_TABLE_ROWS]:
+    iterator = iter(values)
+    normalized: list[list[str]] = []
+    for _ in range(MAX_PREVIEW_ROWS):
+        try:
+            row = next(iterator)
+        except StopIteration:
+            break
         if isinstance(row, dict):
             row = [row.get(column, "") for column in columns]
         if not isinstance(row, list):
             raise ValueError("统计表行格式无效")
-        normalized.append([str(item)[:2048] for item in row[:width]] + [""] * max(0, width - len(row)))
-    return {"columns": columns, "rows": normalized}
+        normalized.append(
+            [str(item)[:MAX_CELL_CHARACTERS] for item in row[:width]]
+            + [""] * max(0, width - len(row))
+        )
+    has_more_rows = next(iterator, None) is not None
+    return {
+        "columns": columns,
+        "rows": normalized,
+        "preview": {
+            "max_rows": MAX_PREVIEW_ROWS,
+            "max_columns": MAX_PREVIEW_COLUMNS,
+            "is_truncated": has_more_rows
+            or len(original_columns) > MAX_PREVIEW_COLUMNS,
+        },
+        "source": source,
+    }
 
 
 def json_rows(value: Any) -> tuple[list[str], list[list[Any]]]:

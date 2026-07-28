@@ -5,14 +5,11 @@ enum ResearchDocumentContent {
     case text(String)
     case code(language: String, source: String)
     case math(latex: String, fallback: String)
-    case table(columns: [String], rows: [[String]])
+    case table(
+        columns: [String], rows: [[String]], source: ResearchDocumentTableSource?
+    )
     case image(assetRef: String)
     case json(String)
-}
-
-enum ResearchDocumentTextBlock {
-    case text(String)
-    case table(columns: [String], rows: [[String]])
 }
 
 struct ResearchDocumentAsset: Identifiable {
@@ -100,17 +97,13 @@ enum ResearchDocumentParser {
     ) -> ResearchDocumentContent {
         guard let raw else { return .none }
         if let text = raw as? String {
-            if let table = markdownTable(text) { return .table(columns: table.0, rows: table.1) }
-            if let object = jsonObject(text), let table = tableContent(object) {
-                return .table(columns: table.0, rows: table.1)
-            }
             return text.isEmpty ? .none : .text(text)
         }
         guard let object = raw as? [String: Any] else {
             return .json(stringify(raw))
         }
-        if let table = tableContent(object) {
-            return .table(columns: table.0, rows: table.1)
+        if let table = ResearchDocumentTableParser.parse(object) {
+            return .table(columns: table.columns, rows: table.rows, source: table.source)
         }
         if let assetRef = object["asset_ref"] as? String {
             return .image(assetRef: assetRef)
@@ -126,87 +119,6 @@ enum ResearchDocumentParser {
             return .math(latex: formula, fallback: object["fallback"] as? String ?? "")
         }
         return .json(stringify(object))
-    }
-
-    static func textBlocks(_ value: String) -> [ResearchDocumentTextBlock] {
-        let lines = value.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-            .map(String.init)
-        guard lines.count > 1 else { return [.text(value)] }
-        var blocks: [ResearchDocumentTextBlock] = []
-        var prose: [String] = []
-        var index = 0
-        func flushProse() {
-            let text = prose.joined(separator: "\n")
-            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                blocks.append(.text(text))
-            }
-            prose.removeAll(keepingCapacity: true)
-        }
-        func splitLine(_ line: String) -> [String] {
-            line.trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "|"))
-                .split(separator: "|", omittingEmptySubsequences: false)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        }
-        while index < lines.count {
-            let columns = splitLine(lines[index])
-            let separators = index + 1 < lines.count ? splitLine(lines[index + 1]) : []
-            let validSeparator = separators.count == columns.count
-                && columns.count > 1
-                && separators.allSatisfy {
-                    $0.replacingOccurrences(of: "-", with: "")
-                        .replacingOccurrences(of: ":", with: "").isEmpty
-                }
-            if validSeparator {
-                var end = index + 2
-                while end < lines.count && splitLine(lines[end]).count == columns.count {
-                    end += 1
-                }
-                flushProse()
-                let rows = (index + 2..<end).map { splitLine(lines[$0]) }
-                blocks.append(.table(columns: columns, rows: rows))
-                index = end
-            } else {
-                prose.append(lines[index])
-                index += 1
-            }
-        }
-        flushProse()
-        return blocks.isEmpty ? [.text(value)] : blocks
-    }
-
-    private static func tableContent(_ object: [String: Any]) -> ([String], [[String]])? {
-        guard let columns = object["columns"] as? [Any],
-              let rows = object["rows"] as? [[Any]], !columns.isEmpty else { return nil }
-        let labels = columns.map { String(describing: $0) }
-        let values = rows.map { row in
-            row.prefix(labels.count).map { String(describing: $0) }
-        }
-        guard values.allSatisfy({ $0.count == labels.count }) else { return nil }
-        return (labels, values)
-    }
-
-    static func markdownTable(_ value: String) -> ([String], [[String]])? {
-        let lines = value.split(whereSeparator: \.isNewline).map(String.init)
-        guard lines.count >= 2 else { return nil }
-        let split: (String) -> [String] = { line in
-            line.trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "|"))
-                .split(separator: "|", omittingEmptySubsequences: false)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        }
-        let columns = split(lines[0])
-        let separator = split(lines[1])
-        guard columns.count > 1,
-              separator.count == columns.count,
-              separator.allSatisfy({ $0.replacingOccurrences(of: "-", with: "").replacingOccurrences(of: ":", with: "").isEmpty }) else { return nil }
-        let rows = lines.dropFirst(2).map(split).filter { $0.count == columns.count }
-        return (columns, rows)
-    }
-
-    private static func jsonObject(_ value: String) -> [String: Any]? {
-        guard let data = value.data(using: .utf8) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     private static func stringify(_ value: Any) -> String {

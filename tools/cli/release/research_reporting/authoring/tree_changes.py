@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .binding_index import binding_exists
+from .tree_hierarchy import validate_root_child
 from .tree_locators import locator_exists
 from .tree_navigation import contains_node, node_path, rewrite
 from .tree_assets import validate_asset
@@ -73,6 +74,7 @@ def append_component(
         raise ValueError("component_id already exists")
     _reserve_binding_ids(paths, bindings, head["generation"], pending_bindings)
     parent = "root" if parent_id is None else parent_id
+    validate_root_child(kind=kind, parent_id=parent)
     node_path(paths, root, parent, head["generation"])
     node = new_node(component_id, kind, title, body, content, display_kind, bindings)
     ref, _ = store_node(paths, node, created=created)

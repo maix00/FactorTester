@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 import re
 from typing import Any
 
@@ -16,6 +17,7 @@ from tools.cli.release.job_cache import cache_job_artifact, cached_job_artifact
 
 from .authoring import apply_branch_batch, commit_branch_authoring
 from .job_artifact_mounts import artifact_ref, mount_kind, mount_operations
+from .authoring.tree_presence import ReportTreePresence
 
 
 _SAFE_NODE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -29,11 +31,12 @@ def collect_job_report(
     detail = client.get_job(job_id)
     status = _terminal_status(detail)
     node = _validate_scope(detail, scope)["execution_node"]
-    authoring = ensure_authoring(scope, node_id=node)
-    parent_id = _chapter_component_id(authoring["bindings"], node)
-    if parent_id is None:
-        raise ValueError("任务执行节点没有可用的本地报告章节")
-    existing_ids = {item["component_id"] for item in authoring["components"]}
+    authoring = ensure_authoring(scope, node_id=node, materialize=False)
+    parent_id = str(authoring["chapter_sync"]["component_id"])
+    presence = ReportTreePresence.load(
+        package_root=scope.package_root, branch_id=scope.branch_id,
+    )
+    new_component_ids: set[str] = set()
     mounted: list[dict[str, Any]] = []
     downloaded: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
@@ -49,19 +52,23 @@ def collect_job_report(
         try:
             raw, cache = _artifact_bytes(client, job_id, name, metadata, scope)
             item, batch = mount_operations(
-                existing_ids=existing_ids, parent_id=parent_id, job_id=str(job_id),
+                component_exists=lambda value: value in new_component_ids
+                or presence.component_exists(value),
+                parent_id=parent_id, job_id=str(job_id),
                 detail=detail, metadata=metadata, raw=raw, kind=kind,
+                cached_filename=str(cache.get("filename") or ""),
             )
         except (TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
             skipped.append({"name": name, "reason": f"无法挂载: {exc}"})
             continue
         downloaded.append({"name": name, "artifact_ref": artifact_ref(job_id, name), **cache})
         mounted.append(item)
+        new_component_ids.add(item["component_id"])
         operations.extend(batch)
     if operations:
         saved = apply_branch_batch(
             package_root=scope.package_root, work_package_id=scope.work_package_id,
-            branch_id=scope.branch_id, operations=operations,
+            branch_id=scope.branch_id, operations=operations, materialize=False,
         )
         persist_descriptor(scope, saved["descriptor"])
     git = commit_branch_authoring(
@@ -105,7 +112,7 @@ def _cache_summary(value: dict[str, Any], *, hit: bool) -> dict[str, Any]:
     return {
         "content_hash": str(value["content_hash"]),
         "size_bytes": int(value["size_bytes"]), "cache_path": str(value["path"]),
-        "cache_hit": hit,
+        "filename": Path(str(value["path"])).name, "cache_hit": hit,
     }
 
 
@@ -132,11 +139,3 @@ def _validate_scope(detail: dict[str, Any], scope: BranchReportScope) -> dict[st
     if not _SAFE_NODE.fullmatch(node):
         raise ValueError("历史 Job 未冻结执行节点，不能猜测报告挂载位置")
     return {"execution_node": node}
-
-
-def _chapter_component_id(bindings: list[dict[str, Any]], node_id: str) -> str | None:
-    for item in bindings:
-        data = item.get("data") or {}
-        if item.get("kind") == "graph_reference" and data.get("role") == "report_chapter" and data.get("chapter_ref") == f"node:{node_id}":
-            return str(item.get("component_id") or "") or None
-    return None

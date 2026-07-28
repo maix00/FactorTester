@@ -7,18 +7,16 @@ struct ResearchDocumentBindingChipsView: View {
         if !bindings.isEmpty {
             ResearchDocumentChipFlowLayout(spacing: 6, lineSpacing: 6) {
                 ForEach(bindings.sorted { $0.id < $1.id }) { binding in
-                    Label(label(for: binding), systemImage: icon(for: binding.kind))
+                    Text(label(for: binding))
                         .font(.caption.weight(.medium))
+                        .underline()
+                        .foregroundStyle(Color.accentColor)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(tint(for: binding.kind).opacity(0.12),
-                                    in: Capsule())
-                        .foregroundStyle(tint(for: binding.kind))
+                        .help(binding.targetRef)
                         .accessibilityIdentifier(
-                            "research.document.chip.\(binding.kind).\(binding.id)"
+                            "research.document.link.\(binding.kind).\(binding.id)"
                         )
                 }
             }
@@ -38,26 +36,6 @@ struct ResearchDocumentBindingChipsView: View {
         }
     }
 
-    private func icon(for kind: String) -> String {
-        switch kind {
-        case "evidence": return "checkmark.seal"
-        case "job": return "chart.xyaxis.line"
-        case "obligation": return "checklist"
-        case "claim": return "quote.bubble"
-        case "task": return "checkmark.circle"
-        default: return "link"
-        }
-    }
-
-    private func tint(for kind: String) -> Color {
-        switch kind {
-        case "evidence": return .green
-        case "job": return .blue
-        case "obligation": return .orange
-        case "claim": return .purple
-        default: return .secondary
-        }
-    }
 }
 
 private struct ResearchDocumentChipFlowLayout: Layout {

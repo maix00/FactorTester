@@ -12,6 +12,7 @@ from tools.cli.commands.research_report_scope import (
 )
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
+from tools.cli.release.research_reporting.job_artifact_tables import table_content
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
@@ -158,3 +159,27 @@ def test_collect_job_report_rejects_missing_execution_node(
     client = _Client([], {}, execution_node="")
     with pytest.raises(ValueError, match="未冻结执行节点"):
         collect_job_report(client, job_id="job-legacy", scope=scope)
+
+
+def test_job_table_mount_keeps_only_preview_and_global_source() -> None:
+    raw = ("time,value\n" + "".join(f"{index},{index / 10}\n" for index in range(201))).encode()
+
+    value = table_content(raw, "text/csv", source={
+        "job_id": "job-1", "artifact_ref": "job-artifact:job-1:fee_detail_csv",
+        "filename": "fee_detail.csv", "content_type": "text/csv",
+        "content_hash": "a" * 64,
+    })
+
+    assert len(value["rows"]) == 200
+    assert value["preview"]["is_truncated"] is True
+    assert value["source"]["filename"] == "fee_detail.csv"
+
+
+def test_job_table_mount_marks_wide_preview_as_truncated() -> None:
+    raw = (",".join(f"c{index}" for index in range(21)) + "\n"
+           + ",".join("1" for _ in range(21)) + "\n").encode()
+
+    value = table_content(raw, "text/csv", source={})
+
+    assert len(value["columns"]) == 20
+    assert value["preview"]["is_truncated"] is True

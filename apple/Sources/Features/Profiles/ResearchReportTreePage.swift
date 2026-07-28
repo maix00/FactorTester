@@ -13,7 +13,8 @@ struct ResearchReportTreePage: View {
     let visibleChapter: (String) -> Void
 
     var body: some View {
-        ScrollViewReader { proxy in
+        let bindingIndex = Dictionary(grouping: bindings, by: \.componentID)
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     header
@@ -28,8 +29,9 @@ struct ResearchReportTreePage: View {
                                 component: component,
                                 children: childrenByParent[component.id] ?? [],
                                 childrenByParent: childrenByParent,
+                                componentBindings: bindingIndex[component.id] ?? [],
+                                bindingsByComponent: bindingIndex,
                                 assets: assets,
-                                bindings: bindings,
                                 reportRef: reportRef
                             )
                             .id(component.id)

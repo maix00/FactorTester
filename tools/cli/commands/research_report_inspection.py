@@ -38,6 +38,7 @@ def validate_report(
     _output({
         "valid": True,
         "report_id": head["report_id"], "generation": head["generation"],
+        "body_format": "restricted_markdown",
         "components": len(loaded["components"]),
         "bindings": len(loaded["bindings"]),
     }, as_json)

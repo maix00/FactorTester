@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +12,7 @@ from .tree_paths import report_tree_paths
 from .tree_schema import validate_binding
 from .tree_store import load_head, store_node, tree_lock, write_head
 from .tree_transactions import mutate, mutate_batch
+from .tree_chapters import ensure_node_chapter
 
 
 def initialize_tree(
@@ -99,30 +99,6 @@ def apply_batch(
     paths = report_tree_paths(package_root, branch_id)
     head = mutate_batch(paths, operations, apply_operation)
     return _result(paths, head, package_root, branch_id, include_snapshot)
-
-
-def ensure_node_chapter(
-    *, package_root: Path, branch_id: str, node_id: str, title: str,
-) -> dict[str, Any]:
-    chapter_id = "chapter-" + _short_id(node_id)
-    snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
-    if locator_exists(snapshot["paths"], chapter_id, snapshot["head"]["generation"]):
-        return {"changed": False, "component_id": chapter_id, **snapshot}
-    added = add_component(
-        package_root=package_root, branch_id=branch_id, component_id=chapter_id,
-        kind="chapter", title=title, parent_id=None, body="", content=None,
-        display_kind="", bindings=[{
-            "binding_id": "chapter-node-" + _short_id(node_id),
-            "kind": "graph_reference", "target_ref": f"node:{node_id}",
-            "label": title,
-            "data": {"role": "report_chapter", "chapter_ref": f"node:{node_id}"},
-        }],
-    )
-    return {"changed": True, "component_id": chapter_id, **added}
-
-
-def _short_id(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()[:16]
 
 
 def _result(

@@ -11,6 +11,9 @@ from tools.cli.release.research_reporting.authoring import (
     ensure_branch_authoring,
     load_branch_authoring,
 )
+from tools.cli.release.research_reporting.authoring.tree_descriptor import (
+    merge_section_refs,
+)
 
 
 @dataclass(frozen=True)
@@ -98,8 +101,13 @@ def _replace_descriptor(scope: BranchReportScope, descriptor: dict[str, Any]) ->
         item for item in record["artifacts"]
         if item.get("artifact_ref") == descriptor["artifact_ref"]
     ), None)
-    if not descriptor["section_refs"] and isinstance(existing, dict):
-        descriptor = {**descriptor, "section_refs": existing.get("section_refs") or []}
+    if isinstance(existing, dict):
+        descriptor = {
+            **descriptor,
+            "section_refs": merge_section_refs(
+                existing.get("section_refs") or [], descriptor["section_refs"],
+            ),
+        }
     record["artifacts"] = [
         item for item in record["artifacts"]
         if item["artifact_ref"] != descriptor["artifact_ref"]

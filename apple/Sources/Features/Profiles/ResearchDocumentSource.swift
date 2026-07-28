@@ -21,6 +21,9 @@ enum ResearchReportTreeSource {
         return try await Task.detached {
             let head = try ResearchReportTreeNodeLoader.readHead(at: headURL)
             let first = try Metadata(head: head, headURL: headURL)
+            ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
+                reportPath: headURL.path, generation: first.generation
+            )
             do {
                 return try loadPayload(
                     first, focusedComponentID: focusedComponentID,
@@ -30,6 +33,9 @@ enum ResearchReportTreeSource {
                 let retryHead = try ResearchReportTreeNodeLoader.readHead(at: headURL)
                 let retry = try Metadata(head: retryHead, headURL: headURL)
                 guard retry.generation != first.generation else { throw error }
+                ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
+                    reportPath: headURL.path, generation: retry.generation
+                )
                 return try loadPayload(
                     retry, focusedComponentID: focusedComponentID,
                     windowRadius: windowRadius
@@ -58,8 +64,8 @@ enum ResearchReportTreeSource {
         var state = ResearchReportTreeNodeLoader.TreeState()
         for item in outline where loadedIDs.contains(item.id) {
             state.merge(try ResearchReportTreeNodeLoader.loadSubtree(
-                reference: item.reference, parentID: nil,
-                root: metadata.authoringRoot
+                reference: item.reference, parentID: nil, root: metadata.authoringRoot,
+                cachedAt: metadata
             ))
         }
         return ResearchReportTreePayload(
@@ -77,6 +83,9 @@ enum ResearchReportTreeSource {
         _ = try? await Task.detached {
             let head = try ResearchReportTreeNodeLoader.readHead(at: headURL)
             let metadata = try Metadata(head: head, headURL: headURL)
+            ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
+                reportPath: headURL.path, generation: metadata.generation
+            )
             let root = try ResearchReportTreeNodeLoader.readNode(
                 reference: metadata.rootRef, root: metadata.authoringRoot
             )
@@ -86,11 +95,33 @@ enum ResearchReportTreeSource {
             )
             where wanted.contains(item.id) {
                 _ = try ResearchReportTreeNodeLoader.loadSubtree(
-                    reference: item.reference, parentID: nil,
-                    root: metadata.authoringRoot
+                    reference: item.reference, parentID: nil, root: metadata.authoringRoot,
+                    cachedAt: metadata
                 )
             }
         }.value
+    }
+}
+
+private extension ResearchReportTreeNodeLoader {
+    static func loadSubtree(
+        reference: String, parentID: String?, root: URL, cachedAt metadata: Metadata
+    ) throws -> TreeState {
+        guard parentID == nil else {
+            return try loadSubtree(reference: reference, parentID: parentID, root: root)
+        }
+        if let cached = ResearchReportTreeNodeCache.shared.value(
+            reportPath: metadata.headURL.path,
+            generation: metadata.generation, reference: reference
+        ) {
+            return cached
+        }
+        let state = try loadSubtree(reference: reference, parentID: nil, root: root)
+        ResearchReportTreeNodeCache.shared.insert(
+            state, reportPath: metadata.headURL.path,
+            generation: metadata.generation, reference: reference
+        )
+        return state
     }
 }
 
@@ -100,6 +131,7 @@ private struct Metadata {
     let rootRef: String
     let assets: [ResearchDocumentAsset]
     let authoringRoot: URL
+    let headURL: URL
 
     init(head: [String: Any], headURL: URL) throws {
         guard head["schema_version"] as? Int == 2,
@@ -114,6 +146,7 @@ private struct Metadata {
         self.assets = (head["assets"] as? [[String: Any]] ?? [])
             .compactMap(ResearchDocumentParser.parseAsset)
         self.authoringRoot = headURL.deletingLastPathComponent()
+        self.headURL = headURL
     }
 }
 

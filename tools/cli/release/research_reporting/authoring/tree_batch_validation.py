@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .tree_assets import validate_asset
+from .tree_hierarchy import validate_root_child
 from .tree_locators import locator_exists
 from .tree_navigation import contains_node
 from .tree_schema import NODE_KINDS, identifier, validate_binding, validate_node
@@ -55,6 +56,7 @@ def _validate_add(operation: dict[str, Any]) -> tuple[str, str, list[dict[str, A
         raise ValueError("unsupported report component kind")
     parent = operation.get("parent_id")
     parent_id = "root" if parent is None else identifier(parent, "parent_id")
+    validate_root_child(kind=kind, parent_id=parent_id)
     raw_bindings = operation.get("bindings") or []
     if not isinstance(raw_bindings, list):
         raise ValueError("report component bindings must be an array")

@@ -7,7 +7,7 @@ from typing import Any
 
 from .package_layout import PACKAGE_DIRECTORIES, ensure_branch_report_tree
 from .authoring.tree_descriptor import report_tree_descriptor
-from .authoring.tree_model import initialize_tree, load_snapshot
+from .authoring.tree_model import initialize_tree
 from .authoring.service import commit_branch_authoring
 
 
@@ -34,10 +34,9 @@ def initialize_work_package(
         package_root=package_root, branch_id=branch_id,
         report_id=f"report-{work_package_id}-{branch_id}", title=title,
     )
-    snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
     descriptor = report_tree_descriptor(
         package_root=package_root, work_package_id=work_package_id,
-        branch_id=branch_id, snapshot=snapshot,
+        branch_id=branch_id, head=initialized["head"],
     )
     git = commit_branch_authoring(
         package_root,

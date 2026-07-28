@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 import re
+from collections.abc import Callable
 from typing import Any
 
 from .job_artifact_tables import table_content
@@ -31,13 +32,14 @@ def mount_kind(name: str, metadata: dict[str, Any]) -> str | None:
 
 
 def mount_operations(
-    *, existing_ids: set[str], parent_id: str, job_id: str,
+    *, component_exists: Callable[[str], bool], parent_id: str, job_id: str,
     detail: dict[str, Any], metadata: dict[str, Any], raw: bytes, kind: str,
+    cached_filename: str = "",
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     name = str(metadata.get("name") or "artifact")
     digest = hashlib.sha256(raw).hexdigest()
     component_id = _component_id(job_id, name, digest)
-    if component_id in existing_ids:
+    if component_exists(component_id):
         return _mounted(name, component_id, kind, digest), []
     if kind == "image":
         asset = _image_asset(job_id, name, raw, metadata, digest)
@@ -45,7 +47,11 @@ def mount_operations(
         content, display_kind = {"asset_ref": asset["asset_ref"]}, "job-artifact-image"
     else:
         operations = []
-        content, display_kind = table_content(raw, _mime(metadata)), "job-artifact-table"
+        content, display_kind = table_content(
+            raw, _mime(metadata), source=_table_source(
+                job_id, name, metadata, digest, cached_filename,
+            ),
+        ), "job-artifact-table"
     operations.append({
         "op": "add", "component_id": component_id, "kind": "special",
         "title": str(metadata.get("description") or name), "parent_id": parent_id,
@@ -53,7 +59,6 @@ def mount_operations(
         "display_kind": display_kind,
         "bindings": provenance_bindings(job_id, detail, digest),
     })
-    existing_ids.add(component_id)
     return _mounted(name, component_id, kind, digest), operations
 
 
@@ -79,6 +84,19 @@ def _image_asset(job_id: str, name: str, raw: bytes, metadata: dict[str, Any], d
         "filename": _filename(name, metadata), "caption": description,
         "alt_text": str(metadata.get("description") or "Job image"),
         "external_ref": artifact_url(job_id, name), "content_hash": digest,
+    }
+
+
+def _table_source(
+    job_id: str, name: str, metadata: dict[str, Any], digest: str,
+    cached_filename: str,
+) -> dict[str, str]:
+    return {
+        "job_id": job_id,
+        "artifact_ref": artifact_ref(job_id, name),
+        "filename": cached_filename or _filename(name, metadata),
+        "content_type": _mime(metadata),
+        "content_hash": digest,
     }
 
 

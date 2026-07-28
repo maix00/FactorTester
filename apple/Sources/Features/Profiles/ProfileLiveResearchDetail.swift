@@ -60,23 +60,25 @@ struct ProfileLiveResearchDetail: View {
                 detail: detail,
                 workPackage: workPackage,
                 steps: controller.timeline,
-                nextCursor: controller.nextTimelineCursor,
                 profileName: context?.profile.displayName
                     ?? L10n.text("未知 Profile"),
                 reportTitle: ResearchDisplayText.reportTitle(
                     context?.record.title ?? ""
                 ),
-                artifact: reportArtifact,
-                selectBranch: { controller.selectedBranchID = $0 },
-                loadEarlier: { await controller.loadEarlierTimeline() }
+                artifact: reportArtifact
             )
             .id(reportArtifact.localRef)
         } else {
-            ContentUnavailableView(
-                L10n.text("当前分支尚无报告"),
-                systemImage: "doc.badge.ellipsis",
-                description: Text(L10n.text("报告会在研究节点进入时自动建立章节"))
-            )
+            VStack(spacing: 8) {
+                Image(systemName: "doc.badge.ellipsis")
+                    .font(.title2)
+                Text(L10n.text("当前分支尚无报告"))
+                    .font(.headline)
+                Text(L10n.text("报告会在研究节点进入时自动建立章节"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 

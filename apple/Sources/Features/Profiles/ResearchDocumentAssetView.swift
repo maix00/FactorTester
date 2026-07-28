@@ -2,30 +2,33 @@ import CryptoKit
 import Darwin
 import SwiftUI
 import WebKit
-#if os(macOS)
-import AppKit
-#else
-import UIKit
-#endif
 
 struct ResearchDocumentAssetView: View {
     let asset: ResearchDocumentAsset
     let reportRef: String
 
-    @State private var data: Data?
+    @State private var svgData: Data?
+    @State private var rasterImage: CGImage?
     @State private var error: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             Group {
-                if let data {
-                    image(data)
+                if let svgData {
+                    DocumentPassiveSVGWebView(data: svgData)
+                        .aspectRatio(16 / 9, contentMode: .fit)
+                        .frame(maxWidth: 760, maxHeight: 430)
+                } else if let rasterImage {
+                    Image(decorative: rasterImage, scale: 1)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 760, maxHeight: 520)
                 } else if let error {
                     Label(error, systemImage: "photo.badge.exclamationmark")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 120)
                 } else {
-                    ProgressView("正在读取研究图像…")
+                    ProgressView(L10n.text("正在读取研究图像…"))
                         .frame(maxWidth: .infinity, minHeight: 120)
                 }
             }
@@ -39,28 +42,23 @@ struct ResearchDocumentAssetView: View {
         .accessibilityLabel(asset.altText.isEmpty ? asset.caption : asset.altText)
     }
 
-    @ViewBuilder
-    private func image(_ data: Data) -> some View {
-        if asset.mediaType == "image/svg+xml" {
-            DocumentPassiveSVGWebView(data: data)
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .frame(maxWidth: 760, maxHeight: 430)
-        } else {
-            documentPlatformImage(data)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 760, maxHeight: 520)
-        }
-    }
-
+    @MainActor
     private func load() async {
         do {
-            data = try await ResearchDocumentAssetLoader.load(
+            let data = try await ResearchDocumentAssetLoader.load(
                 asset: asset, reportRef: reportRef
             )
+            if asset.mediaType == "image/svg+xml" {
+                svgData = data
+                rasterImage = nil
+            } else {
+                rasterImage = try await ResearchDocumentRasterImageDecoder.decode(data)
+                svgData = nil
+            }
             error = nil
         } catch {
-            data = nil
+            svgData = nil
+            rasterImage = nil
             self.error = error.localizedDescription
         }
     }
@@ -179,19 +177,17 @@ enum ResearchDocumentAssetError: LocalizedError {
     }
 }
 
-private func documentPlatformImage(_ data: Data) -> Image {
-#if os(macOS)
-    Image(nsImage: NSImage(data: data) ?? NSImage())
-#else
-    Image(uiImage: UIImage(data: data) ?? UIImage())
-#endif
-}
-
 #if os(macOS)
 private struct DocumentPassiveSVGWebView: NSViewRepresentable {
     let data: Data
+    func makeCoordinator() -> SVGLoadCoordinator { .init() }
     func makeNSView(context: Context) -> WKWebView { makeView() }
-    func updateNSView(_ view: WKWebView, context: Context) { view.load(data, mimeType: "image/svg+xml", characterEncodingName: "utf-8", baseURL: URL(fileURLWithPath: "/")) }
+    func updateNSView(_ view: WKWebView, context: Context) {
+        guard !context.coordinator.loaded else { return }
+        context.coordinator.loaded = true
+        view.load(data, mimeType: "image/svg+xml", characterEncodingName: "utf-8",
+                  baseURL: URL(fileURLWithPath: "/"))
+    }
     private func makeView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -199,15 +195,20 @@ private struct DocumentPassiveSVGWebView: NSViewRepresentable {
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.underPageBackgroundColor = .clear
         view.setValue(false, forKey: "drawsBackground")
-        view.load(data, mimeType: "image/svg+xml", characterEncodingName: "utf-8", baseURL: URL(fileURLWithPath: "/"))
         return view
     }
 }
 #else
 private struct DocumentPassiveSVGWebView: UIViewRepresentable {
     let data: Data
+    func makeCoordinator() -> SVGLoadCoordinator { .init() }
     func makeUIView(context: Context) -> WKWebView { makeView() }
-    func updateUIView(_ view: WKWebView, context: Context) { view.load(data, mimeType: "image/svg+xml", characterEncodingName: "utf-8", baseURL: URL(fileURLWithPath: "/")) }
+    func updateUIView(_ view: WKWebView, context: Context) {
+        guard !context.coordinator.loaded else { return }
+        context.coordinator.loaded = true
+        view.load(data, mimeType: "image/svg+xml", characterEncodingName: "utf-8",
+                  baseURL: URL(fileURLWithPath: "/"))
+    }
     private func makeView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -216,3 +217,7 @@ private struct DocumentPassiveSVGWebView: UIViewRepresentable {
     }
 }
 #endif
+
+private final class SVGLoadCoordinator {
+    var loaded = false
+}

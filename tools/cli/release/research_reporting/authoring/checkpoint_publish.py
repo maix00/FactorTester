@@ -9,6 +9,7 @@ from typing import Any
 from .checkpoint_operations import checkpoint_operations
 from .service import apply_branch_batch, commit_branch_authoring, ensure_branch_authoring
 from .tree_descriptor import report_tree_descriptor
+from .tree_presence import ReportTreePresence
 from .tree_schema import digest
 
 
@@ -22,18 +23,23 @@ def publish_checkpoint_snapshot(
         branch_id=branch_id, title=title, branch_ref=branch_ref,
         node_id=node_id, commit=False,
     )
-    parent_id = _node_chapter(authoring, node_id)
-    operations = _checkpoint_receipt(authoring, parent_id, snapshot)
+    parent_id = str(authoring["chapter_sync"]["component_id"])
+    presence = ReportTreePresence.load(
+        package_root=package_root, branch_id=branch_id,
+    )
+    operations = _checkpoint_receipt(
+        presence.bindings_for(parent_id), parent_id, snapshot,
+    )
     operations.extend(checkpoint_operations(
         snapshot, parent_id=parent_id,
-        existing_ids={item["component_id"] for item in authoring["components"]},
-        existing_bindings={item["binding_id"] for item in authoring["bindings"]},
-        existing_assets={item["asset_ref"] for item in authoring["head"]["assets"]},
+        component_exists=presence.component_exists,
+        binding_exists=presence.binding_exists,
+        asset_exists=presence.asset_exists,
     ))
     saved = (
         apply_branch_batch(
             package_root=package_root, work_package_id=work_package_id,
-            branch_id=branch_id, operations=operations,
+            branch_id=branch_id, operations=operations, materialize=False,
         )
         if operations else authoring
     )
@@ -43,7 +49,8 @@ def publish_checkpoint_snapshot(
     )
     descriptor = report_tree_descriptor(
         package_root=package_root, work_package_id=work_package_id,
-        branch_id=branch_id, snapshot=saved,
+        branch_id=branch_id, head=saved["head"],
+        section_refs=authoring["descriptor"]["section_refs"],
     )
     return {
         "changed": bool(operations or authoring["chapter_sync"]["created"]),
@@ -52,17 +59,8 @@ def publish_checkpoint_snapshot(
     }
 
 
-def _node_chapter(authoring: dict[str, Any], node_id: str) -> str:
-    expected = f"node:{node_id}"
-    for binding in authoring["bindings"]:
-        data = binding.get("data") or {}
-        if data.get("role") == "report_chapter" and data.get("chapter_ref") == expected:
-            return str(binding["component_id"])
-    raise ValueError("checkpoint report node chapter is unavailable")
-
-
 def _checkpoint_receipt(
-    authoring: dict[str, Any], chapter_id: str, snapshot: dict[str, Any],
+    bindings: list[dict[str, Any]], chapter_id: str, snapshot: dict[str, Any],
 ) -> list[dict[str, Any]]:
     refs = {
         str(link.get("target_ref") or "")
@@ -75,7 +73,7 @@ def _checkpoint_receipt(
     checkpoint_ref = refs.pop()
     snapshot_hash = digest(snapshot)
     existing = [
-        item for item in authoring["bindings"]
+        item for item in bindings
         if item.get("kind") == "checkpoint"
         and item.get("target_ref") == checkpoint_ref
         and (item.get("data") or {}).get("role") == "checkpoint_receipt"

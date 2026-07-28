@@ -17,9 +17,10 @@ enum ResearchReportTextProjection {
 
     static func containsMath(_ value: String) -> Bool {
         let normalized = mathJaxSource(value)
-        if normalized.range(of: #"\\\(.+?\\\)"#, options: .regularExpression)
-            != nil {
-            return true
+        for pattern in [#"\\\(.+?\\\)"#, #"\\\[.+?\\\]"#, #"\$\$.+?\$\$"#] {
+            if normalized.range(of: pattern, options: .regularExpression) != nil {
+                return true
+            }
         }
         return false
     }

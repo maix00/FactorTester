@@ -7,10 +7,14 @@ final class ResearchReportTreeFileObserver: NSObject, ObservableObject,
 
     @Published private(set) var revision = 0
     private var observing = false
+    private var pendingNotification: DispatchWorkItem?
 
     init(localRef: String) {
-        presentedItemURL = URL(string: localRef)?.isFileURL == true
-            ? URL(string: localRef) : nil
+        if let url = URL(string: localRef), url.isFileURL {
+            presentedItemURL = url.deletingLastPathComponent()
+        } else {
+            presentedItemURL = nil
+        }
     }
 
     func start() {
@@ -27,9 +31,17 @@ final class ResearchReportTreeFileObserver: NSObject, ObservableObject,
 
     func presentedItemDidChange() { notify() }
     func presentedSubitemDidChange(at _: URL) { notify() }
-    deinit { stop() }
+    func presentedSubitemDidAppear(at _: URL) { notify() }
+    func presentedSubitem(at _: URL, didMoveTo _: URL) { notify() }
+    deinit {
+        pendingNotification?.cancel()
+        stop()
+    }
 
     private func notify() {
-        DispatchQueue.main.async { [weak self] in self?.revision &+= 1 }
+        pendingNotification?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.revision &+= 1 }
+        pendingNotification = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(120), execute: work)
     }
 }

@@ -18,6 +18,7 @@ from .identity import (
 )
 from .narrative import canonical_narrative
 from .snapshot import report_snapshot
+from ..authoring.tree_descriptor import merge_section_refs
 
 
 
@@ -140,6 +141,13 @@ def publish_research_checkpoint(
                 "report_generation": report["generation"],
             }
     descriptor = deepcopy(report["descriptor"])
+    prior_artifact = next((
+        item for item in record["artifacts"]
+        if item.get("artifact_ref") == descriptor["artifact_ref"]
+    ), {})
+    descriptor["section_refs"] = merge_section_refs(
+        prior_artifact.get("section_refs") or [], descriptor["section_refs"],
+    )
     updated = deepcopy(record)
     updated.update({
         "status": "ready",

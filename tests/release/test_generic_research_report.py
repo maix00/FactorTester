@@ -53,16 +53,13 @@ def test_profile_report_chapters_follow_node_entry_without_checkpoint(
         branch_ref="graph-branch:physical-1:branch-1",
     )
 
-    assert [item["kind"] for item in repeated["components"]] == [
-        "chapter", "chapter",
-    ]
-    assert [item["title"] for item in repeated["components"]] == [
-        "假设登记", "数据契约",
-    ]
+    assert repeated["components"] == []
+    assert repeated["bindings"] == []
     assert first["chapter_sync"]["created_count"] == 1
     assert second["chapter_sync"]["created_count"] == 1
     assert repeated["chapter_sync"]["created_count"] == 0
     assert repeated["descriptor"]["format"] == "report_tree"
+    assert repeated["descriptor"]["section_refs"][-1]["label"] == "数据契约"
     package = tmp_path / "research" / "wp-1"
     rendered = render_tree_markdown(load_snapshot(
         package_root=package, branch_id="branch-1",
@@ -183,21 +180,27 @@ def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) ->
     assert runner.invoke(report_cli, [
         "create", *_scope_args(), "--json",
     ]).exit_code == 0
+    chapter = runner.invoke(report_cli, [
+        "add", *_scope_args(), "--component-id", "findings", "--kind", "chapter",
+        "--title", "Findings", "--json",
+    ])
+    assert chapter.exit_code == 0, chapter.output
     added_math = runner.invoke(report_cli, [
         "add", *_scope_args(), "--component-id", "equation", "--kind", "math",
         "--title", "Signal", "--latex", r"s_t = z_t / \sigma_t",
-        "--fallback", "normalized signal", "--json",
+        "--fallback", "normalized signal", "--parent-id", "findings", "--json",
     ])
     assert added_math.exit_code == 0, added_math.output
     added_code = runner.invoke(report_cli, [
         "add", *_scope_args(), "--component-id", "source", "--kind", "code",
         "--title", "Implementation", "--language", "python",
-        "--code-file", str(code_file), "--json",
+        "--code-file", str(code_file), "--parent-id", "findings", "--json",
     ])
     assert added_code.exit_code == 0, added_code.output
     added_result = runner.invoke(report_cli, [
         "add", *_scope_args(), "--component-id", "summary", "--kind", "result",
-        "--title", "Backtest", "--content-file", str(result_content), "--json",
+        "--title", "Backtest", "--content-file", str(result_content),
+        "--parent-id", "findings", "--json",
     ])
     assert added_result.exit_code == 0, added_result.output
     rendered = runner.invoke(report_cli, [

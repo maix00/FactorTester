@@ -42,6 +42,18 @@ def component_content(
     return read_json(content_file) if content_file else None
 
 
+def rich_body(*, body: str | None, body_file: Path | None) -> str:
+    """Read the portable rich-text source without treating it as JSON."""
+    if body is not None and body_file is not None:
+        raise click.ClickException("--body and --body-file are mutually exclusive")
+    if body_file is None:
+        return body or ""
+    try:
+        return body_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise click.ClickException(f"unable to read rich-text file: {body_file}") from exc
+
+
 def read_json(path: Path) -> object:
     try:
         return json.loads(path.read_text(encoding="utf-8"))

@@ -31,6 +31,28 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         XCTAssertEqual(payload.components.map(\.id), ["second"])
     }
 
+    func testPrefetchRetainsAdjacentChapterForCurrentHeadGeneration() async throws {
+        let head = try makeReportTree()
+        let second = nodeReference("second", hash: "c")
+
+        await ResearchReportTreeSource.prefetch(
+            localRef: head.absoluteString, componentIDs: ["second"]
+        )
+
+        XCTAssertEqual(
+            ResearchReportTreeNodeCache.shared.value(
+                reportPath: head.path, generation: 0, reference: second
+            )?.components.map(\.id),
+            ["second"]
+        )
+        ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
+            reportPath: head.path, generation: 1
+        )
+        XCTAssertNil(ResearchReportTreeNodeCache.shared.value(
+            reportPath: head.path, generation: 0, reference: second
+        ))
+    }
+
     private func makeReportTree() throws -> URL {
         let authoring = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

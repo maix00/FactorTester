@@ -264,7 +264,7 @@ enum MathRichTextDocument {
         window.ftRichText=\(payload)[0];
         function ftHeight(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.formulaHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});}
         function ftFallback(){document.getElementById('content').style.display='none';document.getElementById('fallback').style.display='block';ftHeight();}
-        window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('content').style.visibility='visible';ftHeight();}).catch(ftFallback);}}};
+        window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]'],['$$','$$']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('content').style.visibility='visible';ftHeight();}).catch(ftFallback);}}};
         </script><script>\(runtime)</script></head><body>
         <div id="content"></div><div id="fallback"></div><script>
         (function(){

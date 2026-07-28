@@ -8,6 +8,8 @@ import re
 from copy import deepcopy
 from typing import Any
 
+from .tree_rich_text import validate_rich_text
+
 
 NODE_KINDS = {
     "chapter", "section", "subsection", "entry", "special", "table",
@@ -24,6 +26,7 @@ _NODE_FIELDS = {
     "display_kind", "created_at", "children", "bindings",
 }
 _BINDING_FIELDS = {"binding_id", "kind", "target_ref", "label", "data"}
+_TABLE_LIMITS = {"rows": 200, "columns": 20, "cells": 5000}
 
 def canonical_bytes(value: Any) -> bytes:
     return json.dumps(
@@ -71,10 +74,10 @@ def validate_content(kind: str, value: Any) -> Any:
     if kind == "table":
         if not isinstance(value, dict) or set(value) != {"columns", "rows"}:
             raise ValueError("table content must contain columns and rows")
-        if not isinstance(value["columns"], list) or not value["columns"]:
-            raise ValueError("table columns are invalid")
-        if not isinstance(value["rows"], list):
-            raise ValueError("table rows are invalid")
+        _validate_table_preview(value)
+    elif isinstance(value, dict) and {"columns", "rows"}.issubset(value):
+        _validate_table_preview(value)
+        _validate_table_source(value)
     elif kind == "image":
         if not isinstance(value, dict) or not value.get("asset_ref"):
             raise ValueError("image content requires asset_ref")
@@ -89,6 +92,44 @@ def validate_content(kind: str, value: Any) -> Any:
     except (TypeError, ValueError) as exc:
         raise ValueError("component content must be JSON-compatible") from exc
     return deepcopy(value)
+
+
+def _validate_table_preview(value: dict[str, Any]) -> None:
+    columns, rows = value["columns"], value["rows"]
+    if not isinstance(columns, list) or not 1 <= len(columns) <= _TABLE_LIMITS["columns"]:
+        raise ValueError("table columns are invalid")
+    if not isinstance(rows, list) or len(rows) > _TABLE_LIMITS["rows"]:
+        raise ValueError("table rows exceed inline preview limit")
+    if len(columns) * len(rows) > _TABLE_LIMITS["cells"]:
+        raise ValueError("table cells exceed inline preview limit")
+    for column in columns:
+        bounded_text(column, "table.column", limit=256)
+    for row in rows:
+        if not isinstance(row, list) or len(row) != len(columns):
+            raise ValueError("table row width is invalid")
+        for cell in row:
+            bounded_text(cell, "table.cell", empty=True, limit=2048)
+
+
+def _validate_table_source(value: dict[str, Any]) -> None:
+    source, preview = value.get("source"), value.get("preview")
+    if source is None and preview is None:
+        return
+    if not isinstance(source, dict) or set(source) != {
+        "job_id", "artifact_ref", "filename", "content_type", "content_hash",
+    }:
+        raise ValueError("table source is invalid")
+    identifier(source["job_id"], "table.source.job_id")
+    reference(source["artifact_ref"], "table.source.artifact_ref")
+    filename = source["filename"]
+    if not isinstance(filename, str) or "/" in filename or "\\" in filename:
+        raise ValueError("table source filename is invalid")
+    if not isinstance(source["content_type"], str) or not isinstance(source["content_hash"], str):
+        raise ValueError("table source metadata is invalid")
+    if not isinstance(preview, dict) or set(preview) != {
+        "max_rows", "max_columns", "is_truncated",
+    } or not isinstance(preview["is_truncated"], bool):
+        raise ValueError("table preview metadata is invalid")
 
 
 def validate_binding(value: Any) -> dict[str, Any]:
@@ -118,7 +159,8 @@ def validate_node(value: Any) -> dict[str, Any]:
     if kind != "root" and kind not in NODE_KINDS:
         raise ValueError("report tree node kind is invalid")
     bounded_text(result.get("title"), "node.title", empty=kind == "root")
-    bounded_text(result.get("body"), "node.body", empty=True)
+    body = bounded_text(result.get("body"), "node.body", empty=True)
+    validate_rich_text(body, field="node.body")
     validate_content("entry" if kind == "root" else kind, result.get("content"))
     bounded_text(result.get("display_kind"), "node.display_kind", empty=True, limit=128)
     if kind == "special" and not result["display_kind"].strip():

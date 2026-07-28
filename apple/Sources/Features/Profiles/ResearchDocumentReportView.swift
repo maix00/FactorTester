@@ -16,7 +16,8 @@ struct ResearchDocumentReportView: View {
     @State private var bindings: [ResearchDocumentBinding] = []
     @State private var error: String?
     @State private var selectedComponentID = ""
-    @State private var focusedComponentID = ""
+    @State private var windowCenterID = ""
+    @State private var scrollRequestID = ""
     @State private var outlineIDs: [String] = []
 
     init(
@@ -57,11 +58,11 @@ struct ResearchDocumentReportView: View {
                 assets: assets,
                 bindings: bindings,
                 reportRef: artifact.localRef,
-                scrollTarget: focusedComponentID,
+                scrollTarget: scrollRequestID,
                 visibleChapter: selectVisibleChapter
             )
         }
-        .task(id: "\(artifact.localRef)|\(observer.revision)|\(focusedComponentID)") {
+        .task(id: "\(artifact.localRef)|\(observer.revision)|\(windowCenterID)") {
             await loadFocusedReport()
         }
         .onAppear { observer.start() }
@@ -70,13 +71,14 @@ struct ResearchDocumentReportView: View {
 
     private func loadFocusedReport() async {
         do {
-            if focusedComponentID.isEmpty, let initial = initialComponentID {
-                focusedComponentID = initial
+            if windowCenterID.isEmpty, let initial = initialComponentID {
+                windowCenterID = initial
+                scrollRequestID = initial
                 return
             }
             let payload = try await ResearchReportTreeSource.load(
                 localRef: artifact.localRef,
-                focusedComponentID: focusedComponentID.isEmpty ? nil : focusedComponentID,
+                focusedComponentID: windowCenterID.isEmpty ? nil : windowCenterID,
                 windowRadius: 1
             )
             try Task.checkCancellation()
@@ -87,8 +89,11 @@ struct ResearchDocumentReportView: View {
             outlineIDs = payload.outlineIDs
             error = nil
             selectedComponentID = payload.focusedComponentID ?? ""
-            if focusedComponentID != (payload.focusedComponentID ?? "") {
-                focusedComponentID = payload.focusedComponentID ?? ""
+            if windowCenterID != (payload.focusedComponentID ?? "") {
+                windowCenterID = payload.focusedComponentID ?? ""
+                if scrollRequestID.isEmpty {
+                    scrollRequestID = windowCenterID
+                }
                 return
             }
             await ResearchReportTreeSource.prefetch(
@@ -107,14 +112,14 @@ struct ResearchDocumentReportView: View {
 
     private func selectTimelineItem(_ item: ResearchReportNodeTimelineItem) {
         selectedComponentID = item.componentID
-        withAnimation(.easeInOut(duration: 0.24)) {
-            focusedComponentID = item.componentID
-        }
+        windowCenterID = item.componentID
+        scrollRequestID = item.componentID
     }
 
     private func selectVisibleChapter(_ componentID: String) {
         guard !componentID.isEmpty, componentID != selectedComponentID else { return }
         selectedComponentID = componentID
+        windowCenterID = componentID
         Task {
             await ResearchReportTreeSource.prefetch(
                 localRef: artifact.localRef,

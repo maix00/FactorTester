@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .tree_hierarchy import validate_root_child
 from .tree_paths import report_tree_paths
 from .tree_store import load_head, load_node, tree_lock
 
@@ -34,6 +35,8 @@ def flatten(
     binding_ids: set[str],
 ) -> None:
     if node["kind"] != "root":
+        if parent_id is None:
+            validate_root_child(kind=node["kind"], parent_id="root")
         components.append({
             "component_id": node["node_id"], "kind": node["kind"],
             "parent_id": parent_id, "title": node["title"],

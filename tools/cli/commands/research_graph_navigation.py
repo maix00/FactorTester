@@ -19,6 +19,9 @@ from tools.cli.release.research_reporting.publisher import (
 from tools.cli.release.research_reporting.authoring import (
     ensure_branch_report_chapter,
 )
+from tools.cli.release.research_reporting.authoring.tree_descriptor import (
+    merge_section_refs,
+)
 from tools.cli.release.research_reporting.authoring.submission import (
     build_report_submission,
 )
@@ -169,11 +172,19 @@ def _sync_current_node_chapter(
             "message": str(exc),
             "node_id": current_node,
         }
+    descriptor = dict(report["descriptor"])
+    previous = next((
+        item for item in record["artifacts"]
+        if item.get("artifact_ref") == descriptor["artifact_ref"]
+    ), {})
+    descriptor["section_refs"] = merge_section_refs(
+        previous.get("section_refs") or [], descriptor["section_refs"],
+    )
     updated = dict(record)
     updated["artifacts"] = [
         item for item in record["artifacts"]
-        if item["artifact_ref"] != report["descriptor"]["artifact_ref"]
-    ] + [report["descriptor"]]
+        if item["artifact_ref"] != descriptor["artifact_ref"]
+    ] + [descriptor]
     store.upsert_research_record(profile_id, updated)
     return {
         "status": "synchronized",

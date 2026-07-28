@@ -11880,7 +11880,22 @@
           }
         }
       }
-    }
+    },
+    "完整统计表" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Complete statistics table"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"完整统计表"}}}},
+    "无法读取完整统计表" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unable to read the complete statistics table"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"无法读取完整统计表"}}}},
+    "正在按页读取统计表…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Reading statistics table by page…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在按页读取统计表…"}}}},
+    "打开完整表格" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open complete table"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"打开完整表格"}}}},
+    "报告中仅显示前 %lld 行、%lld 列" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The report shows only the first %lld rows and %lld columns"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"报告中仅显示前 %lld 行、%lld 列"}}}},
+    "正在读取研究图像…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading research image…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取研究图像…"}}}},
+    "研究图像生成物缺失" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research image artifact is missing"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究图像生成物缺失"}}}},
+    "点击查看内容" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Click to view content"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"点击查看内容"}}}},
+    "正在读取本地研究报告…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading local research report…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取本地研究报告…"}}}},
+    "研究节点进入后自动建立章节，正文和证据可在本地报告中继续补充。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"A chapter is created when the research enters a node; its narrative and evidence can then be extended in the local report."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究节点进入后自动建立章节，正文和证据可在本地报告中继续补充。"}}}},
+    "第 %lld 页" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Page %lld"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"第 %lld 页"}}}},
+    "每页 %lld 行" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"%lld rows per page"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"每页 %lld 行"}}}},
+    "报告图片格式无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Invalid report image format"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"报告图片格式无效"}}}},
+    "完整 JSON 表格过大，请使用 CSV 生成物" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The complete JSON table is too large; use a CSV artifact instead"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"完整 JSON 表格过大，请使用 CSV 生成物"}}}},
+    "CSV 单元格超过本地读取上限" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"A CSV cell exceeds the local read limit"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"CSV 单元格超过本地读取上限"}}}}
   },
   "version" : "1.0"
 }

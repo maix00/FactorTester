@@ -3,23 +3,55 @@ import SwiftUI
 struct ResearchDocumentTableView: View {
     let columns: [String]
     let rows: [[String]]
+    let source: ResearchDocumentTableSource?
+    var maximumHeight: CGFloat = 420
+
+    @State private var showingFullTable = false
 
     var body: some View {
-        ScrollView([.horizontal, .vertical], showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 0) {
-                row(columns, header: true)
-                ForEach(Array(rows.enumerated()), id: \.offset) { index, values in
-                    row(values, header: false)
-                        .background(index.isMultiple(of: 2)
-                            ? Color.clear : Color.secondary.opacity(0.035))
+        VStack(alignment: .leading, spacing: 7) {
+            toolbar
+            ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    Section {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { index, values in
+                            row(values, header: false)
+                                .background(index.isMultiple(of: 2)
+                                    ? Color.clear : Color.secondary.opacity(0.035))
+                        }
+                    } header: {
+                        row(columns, header: true)
+                            .background(.background)
+                    }
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
                 }
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            .frame(maxWidth: .infinity, maxHeight: maximumHeight, alignment: .leading)
+        }
+        .sheet(isPresented: $showingFullTable) {
+            if let source { ResearchDocumentFullTableView(source: source) }
+        }
+    }
+
+    @ViewBuilder
+    private var toolbar: some View {
+        if let source {
+            HStack(spacing: 9) {
+                if source.isTruncated {
+                    Text(L10n.format(
+                        "报告中仅显示前 %lld 行、%lld 列",
+                        Int64(rows.count), Int64(columns.count)
+                    ))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(L10n.text("打开完整表格")) { showingFullTable = true }
+                    .controlSize(.small)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: 420, alignment: .leading)
     }
 
     @ViewBuilder
@@ -43,11 +75,14 @@ private struct ResearchDocumentTableCell: View {
             if ResearchReportTextProjection.containsMath(text) {
                 RenderedInlineMathTextView(text: text)
             } else {
-                Text(text)
-                    .textSelection(.enabled)
+                Text(text).textSelection(.enabled)
             }
         }
-        .font(header ? .caption.weight(.semibold) : .callout)
+        .font(font)
         .frame(minHeight: 24, alignment: .topLeading)
+    }
+
+    private var font: Font {
+        header ? .caption.weight(.semibold) : .callout
     }
 }
