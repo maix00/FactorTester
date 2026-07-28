@@ -8,8 +8,6 @@ from pathlib import Path
 import click
 
 from tools.cli.core.context import client_from_config
-from tools.cli.client import FactorTesterClient
-from tools.cli.http import HttpSession
 from tools.cli.core.errors import friendly_errors
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
@@ -28,6 +26,7 @@ from tools.cli.release.research_reporting.assets import stage_report_asset
 from tools.cli.commands.client_research_migration import (
     migrate_result_subjects,
 )
+from tools.cli.commands.client_research_fork import register_research_fork
 
 
 def _echo_json(value: dict) -> None:
@@ -45,6 +44,7 @@ def client_research() -> None:
 
 
 client_research.add_command(migrate_result_subjects)
+register_research_fork(client_research)
 
 
 @client_research.command("create")
@@ -109,53 +109,6 @@ def create_profile_scoped_research(
         graph_id=graph_id,
         product_group=product_group,
         capability_resolution=resolution,
-    ))
-
-
-@client_research.command("fork")
-@click.argument("research_ref")
-@click.option("--profile", "profile_id", required=True)
-@click.option(
-    "--release-profile",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@click.option("--label", required=True)
-@click.option("--acting-profile-ref", default="")
-@friendly_errors
-def fork_profile_scoped_research(
-    research_ref: str,
-    profile_id: str,
-    release_profile: Path | None,
-    label: str,
-    acting_profile_ref: str,
-) -> None:
-    """从一个 graph-branch 引用创建独立的 Hypothesis Branch。
-
-    研究列表的 work-package 引用只代表研究容器；必须从详情中的
-    graph-branch:<instance>:<branch> 引用选择实际分叉源。
-    """
-    parts = research_ref.split(":")
-    if len(parts) != 3 or parts[0] != "graph-branch" or not all(parts[1:]):
-        raise click.ClickException(
-            "research_ref must use graph-branch:<instance>:<branch>"
-        )
-    instance_id, branch_id = parts[1], parts[2]
-    profile = LocalProfileStore(load_profile_root(release_profile)).load(
-        profile_id
-    )
-    server_url = str((profile.get("server") or {}).get("base_url") or "")
-    if not server_url:
-        raise click.ClickException(
-            f"profile has no server URL: {profile_id}"
-        )
-    client = FactorTesterClient(HttpSession(server_url))
-    _echo_json(client.fork_research_graph_branch(
-        instance_id,
-        branch_id,
-        label=label,
-        acting_profile_ref=(
-            acting_profile_ref or f"profile:{profile_id}"
-        ),
     ))
 
 

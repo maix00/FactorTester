@@ -8,18 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from .git import commit_work_package
+from .package_layout import PACKAGE_DIRECTORIES, ensure_branch_report_tree
 from .writer import index as report_index
 from .writer.aggregate import render_work_package_report
-
-
-PACKAGE_DIRECTORIES = (
-    "assets",
-    "artifacts",
-    "branches",
-    "migrations",
-    "proposals",
-    "protocol",
-)
 
 
 def initialize_work_package(
@@ -37,11 +28,9 @@ def initialize_work_package(
     package_root = (
         Path(workspace_root).expanduser() / "research" / work_package_id
     )
-    branch_root = package_root / "branches" / branch_id
-    sections_root = branch_root / "sections"
     for relative in PACKAGE_DIRECTORIES:
         (package_root / relative).mkdir(parents=True, exist_ok=True)
-    sections_root.mkdir(parents=True, exist_ok=True)
+    branch_root = ensure_branch_report_tree(package_root, branch_id)
 
     index = _initial_index(
         work_package_id=work_package_id,

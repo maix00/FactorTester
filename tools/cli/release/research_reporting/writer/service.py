@@ -9,6 +9,7 @@ from typing import Any
 from ..generation import publish_generation
 from ..generation import work_package_lock
 from ..git import commit_work_package
+from ..package_layout import ensure_branch_report_tree
 from ..journal import (
     assemble_snapshot,
     fragment_payload,
@@ -38,16 +39,16 @@ def render_branch_report(
     package_root = (
         Path(workspace_root) / "research" / canonical["work_package_id"]
     )
-    branch_path = (
-        package_root / "branches" / canonical["branch_id"]
-        / f"REPORT{renderer.extension}"
-    )
     aggregate_path = package_root / "REPORT.md"
     index_path = package_root / "INDEX.json"
     assets_path = package_root / "assets"
     refs = report_index.artifact_refs(canonical, renderer.extension)
 
     with work_package_lock(package_root):
+        branch_root = ensure_branch_report_tree(
+            package_root, canonical["branch_id"],
+        )
+        branch_path = branch_root / f"REPORT{renderer.extension}"
         fragment_targets = []
         physical_journal_path = branch_path.parent / "JOURNAL.json"
         logical_journal_path = branch_path.parent / "LOGICAL_JOURNAL.json"
@@ -209,8 +210,10 @@ def stage_branch_fragment(
         raise ValueError("research journal branch identity is invalid")
     branch_id = branch_parts[2]
     package_root = Path(workspace_root) / "research" / work_package_id
-    sections_root = package_root / "branches" / branch_id / "sections"
     with work_package_lock(package_root):
+        sections_root = ensure_branch_report_tree(
+            package_root, branch_id,
+        ) / "sections"
         existing = load_fragments(sections_root)
         merged, changed = merge_fragment(existing, fragment)
         all_fragments = _work_package_fragments(

@@ -56,9 +56,9 @@ factortester client research create \
 factortester client research fork \
   graph-branch:<instance>:<branch> --profile maxa \
   --label "alternative hypothesis"
-# A separate content-only report can be cloned before continuing the new path:
-cli-anything-factortester-research report fork \
-  --source-file report.json --output-file report-branch-b.json
+# The command materializes branches/<new-branch>/sections locally.  It does
+# not clone source prose or create a synthetic checkpoint; the first genuine
+# checkpoint writes the branch report and its journal.
 cli-anything-factortester-research run-step -- \
   run submit --analysis ic --analysis factor_evaluation \
   --analysis factor_type_analysis --analysis backtest

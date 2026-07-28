@@ -7,6 +7,10 @@ import subprocess
 from tools.cli.release.research_reporting.workspace import (
     initialize_work_package,
 )
+from tools.cli.release.research_reporting.journal import load_fragments
+from tools.cli.release.research_reporting.package_layout import (
+    ensure_branch_report_tree,
+)
 
 
 def test_initialize_matches_work_package_skeleton(tmp_path: Path) -> None:
@@ -39,3 +43,12 @@ def test_initialize_matches_work_package_skeleton(tmp_path: Path) -> None:
         ["git", "-C", str(package), "status", "--short"], text=True,
     ) == ""
 
+
+def test_empty_materialized_branch_has_no_journal_until_checkpoint(
+    tmp_path: Path,
+) -> None:
+    branch_root = ensure_branch_report_tree(tmp_path / "package", "fork-a")
+
+    assert load_fragments(branch_root / "sections") == []
+    assert not (branch_root / "REPORT.md").exists()
+    assert not (branch_root / "JOURNAL.json").exists()

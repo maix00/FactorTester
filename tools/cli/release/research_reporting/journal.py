@@ -94,6 +94,11 @@ def load_fragments(path: Path) -> list[dict[str, Any]]:
         entries,
         key=lambda item: (item["created_at"], item["checkpoint_ref"]),
     )
+    # A Graph fork can materialize its report tree before the first genuine
+    # checkpoint.  An empty sections directory therefore represents no journal
+    # yet, rather than a malformed journal with an untrusted root.
+    if not ordered:
+        return []
     validate_fragment_sequence(ordered)
     return ordered
 
