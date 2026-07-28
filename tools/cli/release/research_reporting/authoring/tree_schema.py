@@ -16,6 +16,7 @@ NODE_KINDS = {
 BINDING_KINDS = {
     "evidence", "obligation", "task", "job", "claim", "artifact",
     "report_requirement", "graph_reference", "checkpoint", "run",
+    "run_spec", "trial_plan", "delta",
 }
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _NODE_FIELDS = {
@@ -23,7 +24,6 @@ _NODE_FIELDS = {
     "display_kind", "created_at", "children", "bindings",
 }
 _BINDING_FIELDS = {"binding_id", "kind", "target_ref", "label", "data"}
-
 
 def canonical_bytes(value: Any) -> bytes:
     return json.dumps(
