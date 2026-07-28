@@ -95,6 +95,17 @@ def test_report_tree_rejects_oversized_markdown_table() -> None:
         validate_rich_text(body, field="node.body")
 
 
+def test_rich_body_accepts_table_formulas_and_code_with_vertical_bars() -> None:
+    body = (
+        "| 指标 | 定义 |\n"
+        "| --- | --- |\n"
+        "| 范数 | \\(\\lVert r_t \\mid r_{t-1}\\rVert\\) |\n"
+        "| 掩码 | `left | right` |\n"
+    )
+
+    assert validate_rich_text(body, field="node.body") == body
+
+
 def test_report_add_reads_rich_body_file_and_reports_format(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

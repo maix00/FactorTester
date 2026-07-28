@@ -60,12 +60,20 @@ def _render_content(lines: list[str], item: dict[str, Any], assets: dict[str, di
 
 
 def _render_table(lines: list[str], content: dict[str, Any]) -> None:
-    columns = [str(value) for value in content.get("columns") or []]
+    columns = [_table_cell(value) for value in content.get("columns") or []]
     rows = content.get("rows") or []
     if columns:
         lines.extend(["| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"])
-        lines.extend("| " + " | ".join(str(value) for value in row) + " |" for row in rows)
+        lines.extend(
+            "| " + " | ".join(_table_cell(value) for value in row) + " |"
+            for row in rows
+        )
         lines.append("")
+
+
+def _table_cell(value: Any) -> str:
+    """Keep one typed cell in one Markdown column in the derived view."""
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", "<br>")
 
 
 def _render_image(

@@ -78,6 +78,21 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertNil(source)
     }
 
+    func testKeepsFormulaAndCodeVerticalBarsInsideMarkdownTableCells() {
+        let blocks = ResearchDocumentParser.textBlocks("""
+        | 指标 | 定义 |
+        | --- | --- |
+        | 范数 | \\(a|b\\) |
+        | 掩码 | `left | right` |
+        """)
+
+        guard case let .table(columns, rows) = blocks.first else {
+            return XCTFail("formula table must remain a typed table")
+        }
+        XCTAssertEqual(columns, ["指标", "定义"])
+        XCTAssertEqual(rows, [["范数", #"\(a|b\)"#], ["掩码", "`left | right`"]])
+    }
+
     func testUnknownGraphNodeKeepsItsRegisteredName() {
         XCTAssertEqual(ResearchDisplayText.node("custom_review"), "custom review")
     }

@@ -422,6 +422,31 @@ def test_special_job_outputs_project_as_table_and_remote_image(tmp_path: Path) -
     assert "![净值图](factortester-artifact://jobs/job-1/equity)" in rendered
 
 
+def test_markdown_export_escapes_table_cell_delimiters(tmp_path: Path) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    apply_batch(
+        package_root=package, branch_id="main", operations=[
+            {"op": "add", "component_id": "chapter", "kind": "chapter",
+             "title": "结果", "body": "", "content": None,
+             "display_kind": "", "bindings": []},
+            {"op": "add", "component_id": "table", "kind": "table",
+             "title": "公式", "parent_id": "chapter", "body": "",
+             "content": {"columns": ["表达式"],
+                         "rows": [[r"\(a|b\)" + "\n第二行"]]},
+             "display_kind": "", "bindings": []},
+        ],
+    )
+
+    rendered = render_tree_markdown(
+        load_snapshot(package_root=package, branch_id="main")
+    ).decode()
+    assert r"\\(a\|b\\)<br>第二行" in rendered
+
+
 def test_report_tree_rejects_large_inline_table_before_writing(tmp_path: Path) -> None:
     package = tmp_path / "research" / "wp"
     created = initialize_tree(

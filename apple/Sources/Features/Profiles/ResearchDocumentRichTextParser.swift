@@ -86,10 +86,59 @@ extension ResearchDocumentParser {
     }
 
     private static func tableCells(_ line: String) -> [String] {
-        line.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "|"))
-            .split(separator: "|", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        var characters = Array(line.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ))
+        if characters.first == "|" { characters.removeFirst() }
+        if characters.last == "|" { characters.removeLast() }
+        var values: [String] = []
+        var current = ""
+        var code = false
+        var math: String?
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            let following = index + 1 < characters.count
+                ? characters[index + 1] : nil
+            if math == nil, character == "`" {
+                code.toggle()
+                current.append(character)
+                index += 1
+                continue
+            }
+            if !code, character == "\\", let following {
+                let pair = String([character, following])
+                switch (math, pair) {
+                case (nil, "\\("), (nil, "\\["):
+                    math = pair
+                case ("\\(", "\\)"), ("\\[", "\\]"):
+                    math = nil
+                default:
+                    break
+                }
+                current.append(contentsOf: pair)
+                index += 2
+                continue
+            }
+            if !code, character == "$", following == "$" {
+                math = math == "$$" ? nil : "$$"
+                current.append("$")
+                current.append("$")
+                index += 2
+                continue
+            }
+            if character == "|", !code, math == nil {
+                values.append(current.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ))
+                current = ""
+            } else {
+                current.append(character)
+            }
+            index += 1
+        }
+        values.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+        return values
     }
 
     private static func isTableDivider(_ divider: [String], columns: [String]) -> Bool {

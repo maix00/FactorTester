@@ -99,9 +99,47 @@ def _table_cells(line: str) -> list[str] | None:
     stripped = line.strip()
     if "|" not in stripped:
         return None
-    return [
-        cell.strip() for cell in stripped.strip("|").split("|")
-    ]
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+    cells: list[str] = []
+    current: list[str] = []
+    code = False
+    math: str | None = None
+    index = 0
+    while index < len(stripped):
+        char = stripped[index]
+        following = stripped[index + 1] if index + 1 < len(stripped) else ""
+        if math is None and char == "`":
+            code = not code
+            current.append(char)
+            index += 1
+            continue
+        if not code and char == "\\":
+            pair = char + following
+            if math is None and pair in {r"\(", r"\["}:
+                math = pair
+            elif math == r"\(" and pair == r"\)":
+                math = None
+            elif math == r"\[" and pair == r"\]":
+                math = None
+            current.append(pair)
+            index += 2 if following else 1
+            continue
+        if not code and char == "$" and following == "$":
+            math = None if math == "$$" else "$$"
+            current.append("$$")
+            index += 2
+            continue
+        if char == "|" and not code and math is None:
+            cells.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+        index += 1
+    cells.append("".join(current).strip())
+    return cells
 
 
 def _validate_math_delimiters(value: str, *, field: str) -> None:
