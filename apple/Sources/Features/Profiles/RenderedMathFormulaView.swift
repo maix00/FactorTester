@@ -77,7 +77,7 @@ enum MathFormulaDocument {
     }
 }
 
-private enum BundledMathJaxRuntime {
+enum BundledMathJaxRuntime {
     static let source: String? = {
         guard let url = Bundle.main.url(
             forResource: MathFormulaDocument.resourceName,

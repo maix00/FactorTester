@@ -29,4 +29,15 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         XCTAssertTrue(html?.contains("<script src=\"http") == false)
     }
 
+    func testFormulaDenseTableUsesOneLocalMathJaxDocument() {
+        let html = MathTableDocument.makeHTML(
+            columns: ["指标", "定义"],
+            rows: [["IR", #"\\(\\frac{\\mu}{\\sigma}\\)"#]]
+        )
+
+        XCTAssertTrue(html?.contains("window.MathJax") == true)
+        XCTAssertTrue(html?.contains("<table id=\"table\"></table>") == true)
+        XCTAssertTrue(html?.contains("<script src=\"http") == false)
+    }
+
 }

@@ -11,6 +11,22 @@ struct ResearchDocumentTableView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             toolbar
+            table
+        }
+        .sheet(isPresented: $showingFullTable) {
+            if let source { ResearchDocumentFullTableView(source: source) }
+        }
+    }
+
+    @ViewBuilder
+    private var table: some View {
+        if usesBatchedMathRenderer {
+            ResearchDocumentMathTableView(
+                columns: columns,
+                rows: rows,
+                maximumHeight: maximumHeight
+            )
+        } else {
             ScrollView([.horizontal, .vertical], showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     Section {
@@ -30,9 +46,6 @@ struct ResearchDocumentTableView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: maximumHeight, alignment: .leading)
-        }
-        .sheet(isPresented: $showingFullTable) {
-            if let source { ResearchDocumentFullTableView(source: source) }
         }
     }
 
@@ -63,6 +76,13 @@ struct ResearchDocumentTableView: View {
                     .padding(8)
             }
         }
+    }
+
+    private var usesBatchedMathRenderer: Bool {
+        (columns + rows.flatMap { $0 }).lazy
+            .filter(ResearchReportTextProjection.containsMath)
+            .prefix(6)
+            .count == 6
     }
 }
 
