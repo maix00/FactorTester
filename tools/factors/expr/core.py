@@ -606,6 +606,68 @@ class FactorExpr:
         return _lazy()['RollingOp']('rolling_skew', _lazy()['_to_expr'](window), self)
 
     @factor_workspace
+    def rolling_median(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """N 期滚动中位数。"""
+        return _lazy()['RollingOp']('rolling_median', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_quantile(
+        self,
+        q: Any,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """N 期滚动 q 分位数，q 必须位于 [0, 1]。"""
+        if isinstance(q, (int, float)) and not 0.0 <= float(q) <= 1.0:
+            raise ValueError("rolling quantile q must be between 0 and 1")
+        return _lazy()['RollingOp'](
+            'rolling_quantile', _lazy()['_to_expr'](window),
+            self, _lazy()['_to_expr'](q),
+        )
+
+    @factor_workspace
+    def rolling_mad(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """N 期未缩放中位绝对偏差。"""
+        return _lazy()['RollingOp']('rolling_mad', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_linreg_slope(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """带截距的滚动线性时间趋势斜率。"""
+        return _lazy()['RollingOp']('rolling_linreg_slope', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_linreg_r2(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """带截距的滚动线性时间趋势 R²。"""
+        return _lazy()['RollingOp']('rolling_linreg_r2', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_linreg_tstat(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """滚动线性时间趋势斜率的 t 统计量。"""
+        return _lazy()['RollingOp']('rolling_linreg_tstat', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_linreg_resid_std(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """滚动线性时间趋势回归的残差标准差。"""
+        return _lazy()['RollingOp']('rolling_linreg_resid_std', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
     def rolling_argmax(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期内最大值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
         return _lazy()['RollingOp']('rolling_argmax', _lazy()['_to_expr'](window), self)

@@ -27,6 +27,7 @@ from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
 from tools.factors.expr.conditional import apply_where
 from .group_cross_sectional import GroupCrossSectionalNode
 from .cross_sectional_residual import ResidualizeNode
+from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
 from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
 )
@@ -398,7 +399,19 @@ def compile_streaming_factor(
                 compile_node(item)
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
             )
-            if expr.op == "rolling_ema":
+            if expr.op in ROLLING_STATISTICS:
+                if len(children) != 1:
+                    raise UnsupportedStreamingFactor(
+                        f"{expr.op} expects one streaming operand"
+                    )
+                node = RollingStatisticsNode(
+                    expr.op,
+                    children[0],
+                    window,
+                    len(products),
+                    quantile=expr.quantile,
+                )
+            elif expr.op == "rolling_ema":
                 if len(children) != 1:
                     raise UnsupportedStreamingFactor("rolling_ema expects one streaming operand")
                 node = ExpandingEwmNode(children[0], window, len(products))
