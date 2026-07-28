@@ -1,15 +1,6 @@
 import Foundation
 import SwiftUI
 
-private struct LocalReportComponent: Identifiable {
-    let id: String
-    let kind: String
-    let parentID: String?
-    let title: String
-    let body: String
-    let content: String
-}
-
 struct ResearchDocumentReportView: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
@@ -22,8 +13,10 @@ struct ResearchDocumentReportView: View {
     let loadEarlier: () async -> Void
 
     @State private var title = ""
-    @State private var components: [LocalReportComponent] = []
+    @State private var components: [ResearchDocumentComponent] = []
+    @State private var assets: [ResearchDocumentAsset] = []
     @State private var error: String?
+    @State private var sourceSignature = ""
     @State private var selectedCheckpointRef = ""
 
     var body: some View {
@@ -45,14 +38,14 @@ struct ResearchDocumentReportView: View {
             report
         }
         .task(id: artifact.localRef) {
-            await load()
+            await watchReport()
         }
     }
 
     private var report: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     header
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -60,9 +53,15 @@ struct ResearchDocumentReportView: View {
                     } else if components.isEmpty {
                         ProgressView(L10n.text("正在读取本地研究报告…"))
                     } else {
-                        ForEach(components.filter { $0.kind == "chapter" }) {
-                            chapter in
-                            chapterView(chapter)
+                        ForEach(rootComponents) { component in
+                            ResearchDocumentComponentView(
+                                component: component,
+                                children: children(of: component.id),
+                                childrenByParent: childrenByParent,
+                                assets: assets,
+                                reportRef: artifact.localRef
+                            )
+                            .id(component.id)
                         }
                     }
                 }
@@ -72,9 +71,7 @@ struct ResearchDocumentReportView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .onChange(of: selectedCheckpointRef) { checkpointRef in
-                guard let componentID = componentID(for: checkpointRef) else {
-                    return
-                }
+                guard let componentID = componentID(for: checkpointRef) else { return }
                 withAnimation(.easeInOut(duration: 0.22)) {
                     proxy.scrollTo(componentID, anchor: .top)
                 }
@@ -96,119 +93,105 @@ struct ResearchDocumentReportView: View {
         }
     }
 
-    @ViewBuilder
-    private func chapterView(_ chapter: LocalReportComponent) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(chapter.title).font(.title2.weight(.semibold))
-            if !chapter.body.isEmpty { Text(chapter.body) }
-            ForEach(components.filter { $0.parentID == chapter.id }) { item in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(item.title).font(.headline)
-                    if !item.body.isEmpty { Text(item.body) }
-                    if !item.content.isEmpty {
-                        Text(item.content).font(.system(.body, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.leading, 14)
-            }
+    private var rootComponents: [ResearchDocumentComponent] {
+        let roots = components.filter { $0.parentID == nil }
+        let chapters = roots.filter { $0.kind == "chapter" }
+        return chapters.isEmpty ? roots : chapters
+    }
+
+    private var childrenByParent: [String: [ResearchDocumentComponent]] {
+        Dictionary(grouping: components.compactMap { component in
+            component.parentID.map { ($0, component) }
+        }, by: \.0).mapValues { $0.map(\.1) }
+    }
+
+    private func children(of id: String) -> [ResearchDocumentComponent] {
+        childrenByParent[id] ?? []
+    }
+
+    private func watchReport() async {
+        await load()
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled,
+                  let url = reportURL,
+                  let signature = await Task.detached(operation: { Self.signature(for: url) }).value,
+                  signature != sourceSignature else { continue }
+            // Report writers may replace REPORT.json through several short
+            // filesystem operations; wait for the final write before parsing.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            await load()
         }
-        .id(chapter.id)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.045),
-                    in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func load() async {
-        guard let url = URL(string: artifact.localRef), url.isFileURL else {
+        guard let url = reportURL else {
             error = L10n.text("本地报告路径无效")
             return
         }
         do {
-            let (loadedTitle, loadedComponents) = try await Task.detached {
+            let result = try await Task.detached {
                 let data = try PersonalWorkspaceAccessStore.withAccess(to: url) {
                     try Data(contentsOf: url)
                 }
-                guard let root = try JSONSerialization.jsonObject(
-                    with: data
-                ) as? [String: Any] else { throw ReportDocumentError.invalid }
-                let values = (root["components"] as? [[String: Any]] ?? []).compactMap {
-                    Self.component($0)
-                }
-                return (root["title"] as? String ?? "", values)
+                guard let root = try JSONSerialization.jsonObject(with: data)
+                    as? [String: Any] else { throw ReportDocumentError.invalid }
+                let values = (root["components"] as? [[String: Any]] ?? [])
+                    .compactMap(ResearchDocumentParser.parseComponent)
+                let assets = (root["assets"] as? [[String: Any]] ?? [])
+                    .compactMap(ResearchDocumentParser.parseAsset)
+                return (root["title"] as? String ?? "", values, assets,
+                        Self.signature(for: url))
             }.value
-            title = loadedTitle
-            components = loadedComponents
+            title = result.0
+            components = result.1
+            assets = result.2
+            sourceSignature = result.3 ?? sourceSignature
             error = nil
             if selectedCheckpointRef.isEmpty {
                 selectedCheckpointRef = detail.latestTraceRef
                     ?? navigationSectionRefs.keys.sorted().first
-                    ?? (detail.currentNode.isEmpty
-                        ? "" : "node:\(detail.currentNode)")
+                    ?? (detail.currentNode.isEmpty ? "" : "node:\(detail.currentNode)")
             }
         } catch {
             self.error = L10n.text("本地研究报告无法读取")
         }
     }
 
-    private var navigationSectionRefs: [String: String] {
-        Dictionary(
-            artifact.sectionRefs.map { ($0.targetRef, $0.sectionRef) },
-            uniquingKeysWith: { first, _ in first }
-        )
+    private var reportURL: URL? {
+        guard let url = URL(string: artifact.localRef), url.isFileURL else { return nil }
+        return url
     }
 
-    private func selectCheckpoint(
-        _ checkpointRef: String,
-        _ branchID: String
-    ) {
-        if ResearchBranchNavigation.requiresReload(
-            currentBranchRef: detail.branchRef,
-            targetBranchID: branchID
-        ) {
+    private nonisolated static func signature(for url: URL) -> String? {
+        guard let values = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = values[.size] as? NSNumber,
+              let date = values[.modificationDate] as? Date else { return nil }
+        return "\(size.int64Value):\(date.timeIntervalSince1970)"
+    }
+
+    private var navigationSectionRefs: [String: String] {
+        Dictionary(artifact.sectionRefs.map { ($0.targetRef, $0.sectionRef) },
+                   uniquingKeysWith: { first, _ in first })
+    }
+
+    private func selectCheckpoint(_ checkpointRef: String, _ branchID: String) {
+        if ResearchBranchNavigation.requiresReload(currentBranchRef: detail.branchRef,
+                                                     targetBranchID: branchID) {
             selectBranch(branchID)
         }
         selectedCheckpointRef = checkpointRef
     }
 
     private func componentID(for checkpointRef: String) -> String? {
-        if let componentID = navigationSectionRefs[checkpointRef] {
-            return componentID
-        }
+        if let id = navigationSectionRefs[checkpointRef] { return id }
         if let step = steps.first(where: { $0.stepRef == checkpointRef }) {
             return navigationSectionRefs["node:\(step.toNode)"]
         }
-        if let node = workPackage.tree?.nodes.first(where: {
-            $0.checkpointRef == checkpointRef
-        }) {
+        if let node = workPackage.tree?.nodes.first(where: { $0.checkpointRef == checkpointRef }) {
             return navigationSectionRefs["node:\(node.toNode)"]
         }
         return nil
-    }
-
-    private static func component(
-        _ value: [String: Any]
-    ) -> LocalReportComponent? {
-        guard let id = value["component_id"] as? String,
-              let kind = value["kind"] as? String,
-              let title = value["title"] as? String else { return nil }
-        var content = ""
-        if let object = value["content"] {
-            if let dict = object as? [String: Any], let code = dict["code"] as? String {
-                content = code
-            } else if let dict = object as? [String: Any], let latex = dict["latex"] as? String {
-                content = latex
-            } else if JSONSerialization.isValidJSONObject(object),
-                      let data = try? JSONSerialization.data(withJSONObject: object),
-                      let text = String(data: data, encoding: .utf8) {
-                content = text
-            }
-        }
-        return LocalReportComponent(
-            id: id, kind: kind, parentID: value["parent_id"] as? String,
-            title: title, body: value["body"] as? String ?? "", content: content
-        )
     }
 }
 
